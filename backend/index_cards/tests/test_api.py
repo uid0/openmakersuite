@@ -1,4 +1,5 @@
 """API tests for index card generation endpoints."""
+
 from __future__ import annotations
 
 import base64

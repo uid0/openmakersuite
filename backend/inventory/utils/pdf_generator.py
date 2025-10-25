@@ -1,6 +1,7 @@
 """
 PDF generation utilities for 3x5 inch index cards.
 """
+
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
@@ -96,8 +97,15 @@ def generate_item_card(item):
         try:
             # Try to load and draw the image
             img = ImageReader(item.image.path)
-            c.drawImage(img, image_x, image_y, width=image_size, height=image_size,
-                       preserveAspectRatio=True, mask='auto')
+            c.drawImage(
+                img,
+                image_x,
+                image_y,
+                width=image_size,
+                height=image_size,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
         except Exception as e:
             # If image fails, draw a placeholder
             c.setStrokeColor(colors.grey)
@@ -112,8 +120,9 @@ def generate_item_card(item):
     if item.qr_code:
         try:
             qr_img = ImageReader(item.qr_code.path)
-            c.drawImage(qr_img, image_x, qr_y, width=qr_size, height=qr_size,
-                       preserveAspectRatio=True)
+            c.drawImage(
+                qr_img, image_x, qr_y, width=qr_size, height=qr_size, preserveAspectRatio=True
+            )
         except Exception as e:
             # Draw placeholder for QR
             c.setStrokeColor(colors.grey)

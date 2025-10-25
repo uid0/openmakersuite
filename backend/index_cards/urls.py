@@ -1,4 +1,5 @@
 """URL routes for the index cards application."""
+
 from django.urls import path
 
 from .views import IndexCardBatchGenerateView, IndexCardPreviewView

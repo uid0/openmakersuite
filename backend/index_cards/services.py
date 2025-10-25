@@ -1,4 +1,5 @@
 """Utilities for rendering inventory index cards."""
+
 from __future__ import annotations
 
 import base64
@@ -145,8 +146,11 @@ class IndexCardRenderer:
 
     def _draw_page(self, pdf_canvas: canvas.Canvas, items: Sequence[InventoryItem]) -> None:
         for index, item in enumerate(items):
-            y_offset = self.PAGE_HEIGHT - self.TOP_MARGIN - self.CARD_HEIGHT - index * (
-                self.CARD_HEIGHT + self.VERTICAL_GAP
+            y_offset = (
+                self.PAGE_HEIGHT
+                - self.TOP_MARGIN
+                - self.CARD_HEIGHT
+                - index * (self.CARD_HEIGHT + self.VERTICAL_GAP)
             )
             self._draw_card(pdf_canvas, item, self.LEFT_MARGIN, y_offset)
 
@@ -267,7 +271,9 @@ class IndexCardRenderer:
         for line in lines:
             if not line:
                 continue
-            wrapped = self._wrap_text(line, max_width, self._highlight_style.fontName, self._highlight_style.fontSize)
+            wrapped = self._wrap_text(
+                line, max_width, self._highlight_style.fontName, self._highlight_style.fontSize
+            )
             for fragment in wrapped:
                 text_object.textLine(fragment)
         pdf_canvas.drawText(text_object)

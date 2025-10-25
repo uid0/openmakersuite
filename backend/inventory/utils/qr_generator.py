@@ -1,6 +1,7 @@
 """
 QR code generation utilities.
 """
+
 import qrcode
 from io import BytesIO
 from django.core.files import File
@@ -20,7 +21,7 @@ def generate_qr_code_image(item_id, base_url=None):
     """
     if base_url is None:
         # Use environment variable or default
-        base_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
+        base_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
 
     # Create URL that will be encoded in QR code
     scan_url = f"{base_url}/scan/{item_id}"
@@ -40,7 +41,7 @@ def generate_qr_code_image(item_id, base_url=None):
 
     # Save to BytesIO
     buffer = BytesIO()
-    img.save(buffer, format='PNG')
+    img.save(buffer, format="PNG")
     buffer.seek(0)
 
     return buffer

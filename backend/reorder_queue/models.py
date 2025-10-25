@@ -1,6 +1,7 @@
 """
 Models for reorder queue management.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -25,68 +26,50 @@ class ReorderRequest(models.Model):
     """
 
     # Status choices
-    PENDING = 'pending'
-    APPROVED = 'approved'
-    ORDERED = 'ordered'
-    RECEIVED = 'received'
-    CANCELLED = 'cancelled'
+    PENDING = "pending"
+    APPROVED = "approved"
+    ORDERED = "ordered"
+    RECEIVED = "received"
+    CANCELLED = "cancelled"
 
     STATUS_CHOICES = [
-        (PENDING, 'Pending'),
-        (APPROVED, 'Approved'),
-        (ORDERED, 'Ordered'),
-        (RECEIVED, 'Received'),
-        (CANCELLED, 'Cancelled'),
+        (PENDING, "Pending"),
+        (APPROVED, "Approved"),
+        (ORDERED, "Ordered"),
+        (RECEIVED, "Received"),
+        (CANCELLED, "Cancelled"),
     ]
 
     # Priority choices
-    LOW = 'low'
-    NORMAL = 'normal'
-    HIGH = 'high'
-    URGENT = 'urgent'
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"
 
     PRIORITY_CHOICES = [
-        (LOW, 'Low'),
-        (NORMAL, 'Normal'),
-        (HIGH, 'High'),
-        (URGENT, 'Urgent'),
+        (LOW, "Low"),
+        (NORMAL, "Normal"),
+        (HIGH, "High"),
+        (URGENT, "Urgent"),
     ]
 
     item = models.ForeignKey(
-        InventoryItem,
-        on_delete=models.CASCADE,
-        related_name='reorder_requests'
+        InventoryItem, on_delete=models.CASCADE, related_name="reorder_requests"
     )
-    quantity = models.PositiveIntegerField(
-        help_text="Quantity requested to reorder"
-    )
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default='pending'
-    )
-    priority = models.CharField(
-        max_length=20,
-        choices=PRIORITY_CHOICES,
-        default='normal'
-    )
+    quantity = models.PositiveIntegerField(help_text="Quantity requested to reorder")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="normal")
 
     # Request information
     requested_by = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="Name or ID of person requesting reorder"
+        max_length=100, blank=True, help_text="Name or ID of person requesting reorder"
     )
     request_notes = models.TextField(blank=True)
     requested_at = models.DateTimeField(auto_now_add=True)
 
     # Admin handling
     reviewed_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='reviewed_reorders'
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_reorders"
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
     admin_notes = models.TextField(blank=True)
@@ -96,21 +79,16 @@ class ReorderRequest(models.Model):
     estimated_delivery = models.DateField(null=True, blank=True)
     actual_delivery = models.DateField(null=True, blank=True)
     order_number = models.CharField(max_length=100, blank=True)
-    actual_cost = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        null=True,
-        blank=True
-    )
+    actual_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['-requested_at']
+        ordering = ["-requested_at"]
         indexes = [
-            models.Index(fields=['status', '-requested_at']),
-            models.Index(fields=['item', 'status']),
+            models.Index(fields=["status", "-requested_at"]),
+            models.Index(fields=["item", "status"]),
         ]
 
     def __str__(self) -> str:
@@ -127,6 +105,7 @@ class ReorderRequest(models.Model):
     def days_pending(self) -> int:
         """Calculate how many days the request has been pending."""
         from django.utils import timezone
+
         if self.status == self.PENDING:
             return (timezone.now() - self.requested_at).days
         return 0

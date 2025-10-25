@@ -1,4 +1,5 @@
 """Tests for index card rendering services."""
+
 from __future__ import annotations
 
 import os

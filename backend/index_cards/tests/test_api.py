@@ -8,10 +8,11 @@ import shutil
 import tempfile
 from typing import Dict
 
-from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+
 from rest_framework.test import APIClient
 
 from inventory.models import InventoryItem

@@ -3,11 +3,12 @@ Django settings for makerspace inventory management system.
 """
 
 from pathlib import Path
-from decouple import config
+
 import dj_database_url
 import sentry_sdk
-from sentry_sdk.integrations.django import DjangoIntegration
+from decouple import config
 from sentry_sdk.integrations.celery import CeleryIntegration
+from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.redis import RedisIntegration
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.

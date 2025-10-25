@@ -2,13 +2,15 @@
 Pytest configuration and fixtures for the entire test suite.
 """
 
-import pytest
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.contrib.auth.models import User
-from django.utils.crypto import get_random_string
-from rest_framework.test import APIClient
-from PIL import Image
 from io import BytesIO
+
+from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils.crypto import get_random_string
+
+import pytest
+from PIL import Image
+from rest_framework.test import APIClient
 
 
 @pytest.fixture

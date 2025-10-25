@@ -2,26 +2,26 @@
 Views for inventory API.
 """
 
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
-from django.http import HttpResponse
-from django.shortcuts import get_object_or_404
-
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 
-from .models import Supplier, Category, InventoryItem, UsageLog, Location, ItemSupplier
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.response import Response
+
+from .models import Category, InventoryItem, ItemSupplier, Location, Supplier, UsageLog
 from .serializers import (
-    SupplierSerializer,
     CategorySerializer,
-    InventoryItemSerializer,
     InventoryItemDetailSerializer,
+    InventoryItemSerializer,
+    SupplierSerializer,
     UsageLogSerializer,
 )
-from .tasks import generate_qr_code, generate_index_card
+from .tasks import generate_index_card, generate_qr_code
 
 
 class SupplierViewSet(viewsets.ModelViewSet):

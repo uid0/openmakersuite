@@ -2,16 +2,17 @@
 PDF generation utilities for 3x5 inch index cards.
 """
 
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
-from reportlab.lib import colors
-from reportlab.platypus import Paragraph
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from io import BytesIO
-from PIL import Image as PILImage
 import textwrap
+from io import BytesIO
+
+from PIL import Image as PILImage
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph
 
 
 def generate_item_card(item):

@@ -2,24 +2,18 @@
 Factory classes for generating test data for inventory models.
 """
 
-import factory
-from factory.django import DjangoModelFactory
-from factory import Faker, SubFactory
-from django.core.files.uploadedfile import SimpleUploadedFile
-from PIL import Image
+import itertools
 from io import BytesIO
 
-import itertools
+from django.core.files.uploadedfile import SimpleUploadedFile
 
-from inventory.models import (
-    Location,
-    Supplier,
-    Category,
-    InventoryItem,
-    ItemSupplier,
-    UsageLog,
-)
+import factory
+from factory import Faker, SubFactory
+from factory.django import DjangoModelFactory
 from faker import Faker as FakerGenerator
+from PIL import Image
+
+from inventory.models import Category, InventoryItem, ItemSupplier, Location, Supplier, UsageLog
 
 
 class LocationFactory(DjangoModelFactory):

@@ -1,4 +1,4 @@
-Django==4.2.17
+Django==4.2.25
 djangorestframework==3.15.2
 django-cors-headers==4.6.0
 psycopg2-binary==2.9.9
@@ -29,7 +29,7 @@ python-slugify==8.0.4
 requests==2.32.4
 
 # Error Tracking
-sentry-sdk[django]==1.45.1
+sentry-sdk[django]==2.42.1
 
 # Testing and Code Coverage
 coverage==7.6.4

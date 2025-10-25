@@ -47,6 +47,7 @@ class ItemSupplierInline(admin.TabularInline):
     ]
     readonly_fields = ["package_cost_display"]
 
+    @admin.display(description="Total package cost")
     def package_cost_display(self, obj):
         """Readable representation of the total cost for one supplier package."""
 
@@ -56,8 +57,6 @@ class ItemSupplierInline(admin.TabularInline):
         if package_cost is None:
             return "—"
         return f"${package_cost:.2f}"
-
-    package_cost_display.short_description = "Total package cost"
 
 
 @admin.register(InventoryItem)

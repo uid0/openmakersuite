@@ -2,14 +2,16 @@
 API tests for inventory endpoints.
 """
 
-import pytest
 from django.urls import reverse
+
+import pytest
 from rest_framework import status
+
 from inventory.models import InventoryItem, UsageLog
 from inventory.tests.factories import (
-    SupplierFactory,
     CategoryFactory,
     InventoryItemFactory,
+    SupplierFactory,
     UsageLogFactory,
 )
 

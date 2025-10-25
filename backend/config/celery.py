@@ -3,6 +3,7 @@ Celery configuration for makerspace inventory management system.
 """
 
 import os
+
 from celery import Celery
 
 # Set the default Django settings module for the 'celery' program.

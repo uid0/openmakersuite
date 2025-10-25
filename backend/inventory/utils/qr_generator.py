@@ -2,10 +2,12 @@
 QR code generation utilities.
 """
 
-import qrcode
 from io import BytesIO
-from django.core.files import File
+
 from django.conf import settings
+from django.core.files import File
+
+import qrcode
 
 
 def generate_qr_code_image(item_id, base_url=None):

@@ -2,10 +2,12 @@
 Tests for Celery tasks.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
+from inventory.tasks import generate_index_card, generate_qr_code, update_average_lead_times
 from inventory.tests.factories import InventoryItemFactory
-from inventory.tasks import generate_qr_code, generate_index_card, update_average_lead_times
 from reorder_queue.tests.factories import ReorderRequestFactory
 
 
@@ -63,6 +65,7 @@ class TestInventoryTasks:
     def test_update_average_lead_times_task(self):
         """Test updating average lead times based on historical data."""
         from datetime import timedelta
+
         from django.utils import timezone
 
         # Create item

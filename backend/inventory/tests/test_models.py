@@ -2,13 +2,15 @@
 Unit tests for inventory models.
 """
 
-import pytest
 from decimal import Decimal
-from inventory.models import Supplier, Category, InventoryItem, UsageLog, ItemSupplier
+
+import pytest
+
+from inventory.models import Category, InventoryItem, ItemSupplier, Supplier, UsageLog
 from inventory.tests.factories import (
-    SupplierFactory,
     CategoryFactory,
     InventoryItemFactory,
+    SupplierFactory,
     UsageLogFactory,
 )
 

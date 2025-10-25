@@ -3,8 +3,10 @@ Serializers for reorder queue API.
 """
 
 from rest_framework import serializers
-from .models import ReorderRequest
+
 from inventory.serializers import InventoryItemSerializer
+
+from .models import ReorderRequest
 
 
 class ReorderRequestSerializer(serializers.ModelSerializer):

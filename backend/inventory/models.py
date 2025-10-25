@@ -1,18 +1,53 @@
 """
 Models for inventory management.
 """
+
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
-from django.db import models
 from django.core.validators import MinValueValidator
+from django.db import models
 from django.utils.text import slugify
-from imagekit.models import ProcessedImageField
+
+from imagekit.models import ImageSpecField
 from imagekit.processors import ResizeToFit
-import uuid
+
+
+def generate_sku() -> str:
+    """Generate a unique SKU using UUID7 (time-ordered UUID)."""
+    try:
+        # UUID7 available in Python 3.11+
+        return str(uuid.uuid7())
+    except AttributeError:
+        # Fallback to UUID4 for older Python versions
+        return str(uuid.uuid4())
+
+
+class Location(models.Model):
+    """
+    Physical storage locations in the makerspace.
+
+    Examples: "Main Workshop", "Electronics Lab", "Wood Shop",
+              "Storage Room A", "Shelf 3B"
+    """
+
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, help_text="Details about this location")
+    is_active = models.BooleanField(
+        default=True, help_text="Inactive locations are hidden from selection"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class Supplier(models.Model):
@@ -26,21 +61,21 @@ class Supplier(models.Model):
     """
 
     # Supplier type choices
-    LOCAL = 'local'
-    ONLINE = 'online'
-    NATIONAL = 'national'
+    LOCAL = "local"
+    ONLINE = "online"
+    NATIONAL = "national"
 
     SUPPLIER_TYPE_CHOICES = [
-        (LOCAL, 'Local'),
-        (ONLINE, 'Online'),
-        (NATIONAL, 'National'),
+        (LOCAL, "Local"),
+        (ONLINE, "Online"),
+        (NATIONAL, "National"),
     ]
 
     name = models.CharField(max_length=200)
     supplier_type = models.CharField(
         max_length=20,
         choices=SUPPLIER_TYPE_CHOICES,
-        help_text="Classification of supplier by distribution type"
+        help_text="Classification of supplier by distribution type",
     )
     website = models.URLField(blank=True)
     notes = models.TextField(blank=True)
@@ -48,7 +83,7 @@ class Supplier(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['name']
+        ordering = ["name"]
 
     def __str__(self) -> str:
         return self.name
@@ -66,16 +101,12 @@ class Category(models.Model):
     slug = models.SlugField(max_length=100, unique=True, blank=True)
     description = models.TextField(blank=True)
     parent = models.ForeignKey(
-        'self',
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name='children'
+        "self", on_delete=models.CASCADE, null=True, blank=True, related_name="children"
     )
 
     class Meta:
-        verbose_name_plural = 'Categories'
-        ordering = ['name']
+        verbose_name_plural = "Categories"
+        ordering = ["name"]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Auto-generate slug from name if not provided."""
@@ -102,87 +133,56 @@ class InventoryItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
     description = models.TextField()
-    sku = models.CharField(max_length=100, blank=True, help_text="Internal SKU")
+    sku = models.CharField(
+        max_length=100,
+        blank=True,
+        unique=True,
+        help_text="Internal SKU - auto-generated if not provided",
+    )
 
     # Image handling with automatic thumbnailing
-    image = ProcessedImageField(
-        upload_to='inventory/images/',
-        processors=[ResizeToFit(800, 800)],
-        format='JPEG',
-        options={'quality': 90},
+    image = models.ImageField(
+        upload_to="inventory/images/",
         null=True,
-        blank=True
+        blank=True,
+        help_text="Upload image (supports JPEG, PNG, WebP)",
     )
-    thumbnail = ProcessedImageField(
-        upload_to='inventory/thumbnails/',
-        processors=[ResizeToFit(300, 300)],
-        format='JPEG',
-        options={'quality': 80},
-        null=True,
-        blank=True
+    image_url = models.URLField(blank=True, help_text="URL to download image from (optional)")
+
+    # Auto-generated thumbnail using ImageSpecField
+    thumbnail = ImageSpecField(
+        source="image", processors=[ResizeToFit(300, 300)], format="WEBP", options={"quality": 85}
     )
 
     # Organization
     category = models.ForeignKey(
-        Category,
+        Category, on_delete=models.SET_NULL, null=True, blank=True, related_name="items"
+    )
+    location = models.ForeignKey(
+        Location,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='items'
+        related_name="items",
+        help_text="Physical storage location",
     )
-    location = models.CharField(max_length=200, help_text="Physical location in makerspace")
+
+    # Suppliers - now many-to-many through ItemSupplier
+    suppliers = models.ManyToManyField(
+        Supplier, through="ItemSupplier", related_name="supplied_items", blank=True
+    )
 
     # Reordering information
     reorder_quantity = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)],
-        help_text="Quantity to reorder when stock is low"
+        validators=[MinValueValidator(1)], help_text="Quantity to reorder when stock is low"
     )
-    current_stock = models.PositiveIntegerField(
-        default=0,
-        help_text="Current quantity in stock"
-    )
+    current_stock = models.PositiveIntegerField(default=0, help_text="Current quantity in stock")
     minimum_stock = models.PositiveIntegerField(
-        default=0,
-        help_text="Minimum quantity before reordering"
-    )
-
-    # Supplier information
-    supplier = models.ForeignKey(
-        Supplier,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='items'
-    )
-    supplier_sku = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="Supplier's product SKU/ID"
-    )
-    supplier_url = models.URLField(
-        blank=True,
-        help_text="Direct link to product on supplier's website"
-    )
-    unit_cost = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        help_text="Cost per unit"
-    )
-
-    # Lead time tracking (in days)
-    average_lead_time = models.PositiveIntegerField(
-        default=7,
-        help_text="Average lead time in days"
+        default=0, help_text="Minimum quantity before reordering"
     )
 
     # QR code data
-    qr_code = models.ImageField(
-        upload_to='inventory/qrcodes/',
-        blank=True,
-        null=True
-    )
+    qr_code = models.ImageField(upload_to="inventory/qrcodes/", blank=True, null=True)
 
     # Metadata
     is_active = models.BooleanField(default=True)
@@ -191,15 +191,34 @@ class InventoryItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['name']
+        ordering = ["name"]
         indexes = [
-            models.Index(fields=['name']),
-            models.Index(fields=['sku']),
-            models.Index(fields=['category']),
+            models.Index(fields=["name"]),
+            models.Index(fields=["sku"]),
+            models.Index(fields=["category"]),
         ]
 
     def __str__(self) -> str:
         return self.name
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Auto-generate SKU and trigger async image download if needed."""
+        # Auto-generate SKU if not provided
+        if not self.sku:
+            self.sku = generate_sku()
+
+        # Track if we need to download image (before save)
+        should_download_image = self.image_url and not self.image
+
+        # Save first to get an ID
+        super().save(*args, **kwargs)
+
+        # Trigger async image download after save
+        if should_download_image:
+            # Import here to avoid circular imports
+            from .tasks import download_image_from_url
+
+            download_image_from_url.delay(str(self.id), self.image_url)
 
     @property
     def needs_reorder(self) -> bool:
@@ -207,11 +226,92 @@ class InventoryItem(models.Model):
         return self.current_stock <= self.minimum_stock
 
     @property
+    def lowest_unit_cost(self) -> Optional[Decimal]:
+        """Get the lowest unit cost from all suppliers."""
+        costs = [
+            item_supplier.unit_cost
+            for item_supplier in self.item_suppliers.filter(unit_cost__isnull=False)
+        ]
+        return min(costs) if costs else None
+
+    @property
     def total_value(self) -> Decimal:
-        """Calculate total value of current stock."""
-        if self.unit_cost:
-            return self.current_stock * self.unit_cost
-        return Decimal('0')
+        """Calculate total value of current stock using lowest unit cost."""
+        cost = self.lowest_unit_cost
+        if cost:
+            return self.current_stock * cost
+        return Decimal("0")
+
+    @property
+    def primary_supplier(self) -> Optional[Supplier]:
+        """Get the primary (preferred) supplier."""
+        item_supplier = self.item_suppliers.filter(is_primary=True).first()
+        return item_supplier.supplier if item_supplier else None
+
+
+class ItemSupplier(models.Model):
+    """
+    Through model for Item-Supplier many-to-many relationship.
+
+    Allows each item to have multiple suppliers with different:
+    - SKUs
+    - Prices
+    - Lead times
+    - URLs
+    """
+
+    item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name="item_suppliers")
+    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name="supplier_items")
+
+    # Supplier-specific information
+    supplier_sku = models.CharField(max_length=100, help_text="Supplier's product SKU/ID")
+    supplier_url = models.URLField(
+        blank=True, help_text="Direct link to product on supplier's website"
+    )
+    unit_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Cost per unit from this supplier",
+    )
+    average_lead_time = models.PositiveIntegerField(
+        default=7, help_text="Average lead time in days from this supplier"
+    )
+
+    # Preferences
+    is_primary = models.BooleanField(
+        default=False, help_text="Preferred/primary supplier for this item"
+    )
+    is_active = models.BooleanField(
+        default=True, help_text="Whether this supplier option is currently active"
+    )
+
+    # Metadata
+    notes = models.TextField(blank=True, help_text="Notes about this supplier for this item")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-is_primary", "unit_cost"]
+        unique_together = [["item", "supplier"]]
+        indexes = [
+            models.Index(fields=["item", "is_primary"]),
+            models.Index(fields=["item", "unit_cost"]),
+        ]
+
+    def __str__(self) -> str:
+        primary = " (Primary)" if self.is_primary else ""
+        return f"{self.item.name} - {self.supplier.name}{primary}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Ensure only one primary supplier per item."""
+        if self.is_primary:
+            # Remove primary flag from other suppliers for this item
+            ItemSupplier.objects.filter(item=self.item, is_primary=True).exclude(pk=self.pk).update(
+                is_primary=False
+            )
+        super().save(*args, **kwargs)
 
 
 class UsageLog(models.Model):
@@ -224,19 +324,15 @@ class UsageLog(models.Model):
     - Track item usage history
     """
 
-    item = models.ForeignKey(
-        InventoryItem,
-        on_delete=models.CASCADE,
-        related_name='usage_logs'
-    )
+    item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name="usage_logs")
     quantity_used = models.PositiveIntegerField(validators=[MinValueValidator(1)])
     usage_date = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)
 
     class Meta:
-        ordering = ['-usage_date']
+        ordering = ["-usage_date"]
         indexes = [
-            models.Index(fields=['item', '-usage_date']),
+            models.Index(fields=["item", "-usage_date"]),
         ]
 
     def __str__(self) -> str:

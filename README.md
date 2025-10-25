@@ -323,7 +323,15 @@ Before committing:
 make pre-commit  # Runs formatting, linting, and tests
 ```
 
-See [CI_CD.md](CI_CD.md) for detailed documentation.
+**Pre-commit Hooks Available:**
+- Automatic code formatting (black, isort)
+- Linting (flake8)
+- Security scanning (bandit)
+- File cleanups (trailing whitespace, line endings)
+- Django best practices (django-upgrade)
+
+See [PRE_COMMIT_GUIDE.md](PRE_COMMIT_GUIDE.md) for detailed setup and usage.
+See [CI_CD.md](CI_CD.md) for CI/CD documentation.
 
 ## Contributing
 

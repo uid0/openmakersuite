@@ -1,10 +1,18 @@
 # Development and Testing Dependencies
 -r requirements.txt
 
+# Pre-commit Hooks
+pre-commit==3.6.0
+
 # Code Quality
 flake8==7.0.0
+flake8-docstrings==1.7.0
+flake8-bugbear==24.1.17
 black==24.1.1
 isort==5.13.2
+
+# Django Tools
+django-upgrade==1.16.0
 
 # Security Scanning
 bandit==1.7.6

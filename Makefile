@@ -153,6 +153,26 @@ ps:  ## Show running containers
 stats:  ## Show container resource usage
 	docker stats $$(docker-compose ps -q)
 
+# Pre-commit hooks
+install-hooks:  ## Install pre-commit hooks
+	@echo "Installing pre-commit hooks..."
+	docker-compose exec backend pip install pre-commit
+	docker-compose exec backend pre-commit install
+	@echo "✅ Pre-commit hooks installed!"
+	@echo "Hooks will run automatically on git commit"
+
+install-dev:  ## Install development dependencies
+	@echo "Installing development dependencies..."
+	docker-compose exec backend pip install -r requirements-dev.txt
+	@echo "✅ Development dependencies installed!"
+
+run-hooks:  ## Run pre-commit hooks on all files
+	@echo "Running pre-commit hooks on all files..."
+	docker-compose exec backend pre-commit run --all-files
+
+update-hooks:  ## Update pre-commit hooks to latest versions
+	docker-compose exec backend pre-commit autoupdate
+
 # CI/CD targets
 ci-test:  ## Run CI tests locally (mimics GitHub Actions)
 	@echo "Running CI tests locally..."
@@ -166,7 +186,7 @@ ci-test:  ## Run CI tests locally (mimics GitHub Actions)
 	@make test-frontend
 	@echo "\n✅ All CI checks passed!"
 
-pre-commit:  ## Run pre-commit checks
+pre-commit:  ## Run pre-commit checks (format, lint, test)
 	@echo "Running pre-commit checks..."
 	@make format-backend
 	@make isort-backend

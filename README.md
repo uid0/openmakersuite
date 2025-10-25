@@ -369,13 +369,17 @@ This project is licensed under the AGPL - see the [LICENSE](LICENSE) file for de
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/yourusername/makerspace-inventory/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/yourusername/makerspace-inventory/discussions)
-- **Email:** support@yourdomain.com
+- **Issues:** [GitHub Issues](https://github.com/uid0/openmakersuite/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/uid0/openmakersuite/discussions)
+- **Email:** ianwilson@dallasmakerspace.org
 
 ## Acknowledgments
 
-Built with love for the maker community. Special thanks to all contributors and makerspaces who provided feedback.
+Built with love for the maker, by the maker community. 
+
+Special thanks to all contributors and to all makerspaces, hackerspaces, and clubs who provided feedback. and to   I'd also like to personally thank the Dallasmakerspace (Dallas, TX) and Hive13 (Cincinnati, Ohio) for putting up with me for all those years.  
+
+
 
 ---
 

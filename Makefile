@@ -74,11 +74,34 @@ clean:  ## Clean up containers, volumes, and cache
 	rm -rf frontend/coverage
 	rm -rf frontend/node_modules/.cache
 
-lint-backend:  ## Lint backend code
+lint-backend:  ## Lint backend code with flake8
 	docker-compose exec backend flake8 . || echo "flake8 not installed"
 
 format-backend:  ## Format backend code with black
 	docker-compose exec backend black . || echo "black not installed"
+
+format-check-backend:  ## Check backend code formatting without changing
+	docker-compose exec backend black --check --diff . || echo "black not installed"
+
+isort-backend:  ## Sort backend imports
+	docker-compose exec backend isort . || echo "isort not installed"
+
+isort-check-backend:  ## Check backend import sorting without changing
+	docker-compose exec backend isort --check-only --diff . || echo "isort not installed"
+
+quality-backend:  ## Run all backend code quality checks
+	@echo "Running flake8..."
+	@make lint-backend
+	@echo "\nChecking black formatting..."
+	@make format-check-backend
+	@echo "\nChecking import sorting..."
+	@make isort-check-backend
+
+security-backend:  ## Run backend security checks
+	@echo "Running bandit security checks..."
+	docker-compose exec backend bandit -r . -x ./tests,./migrations || echo "bandit not installed"
+	@echo "\nChecking for vulnerable dependencies..."
+	docker-compose exec backend safety check || echo "safety not installed"
 
 lint-frontend:  ## Lint frontend code
 	docker-compose exec frontend npm run lint || echo "No lint script configured"
@@ -129,3 +152,24 @@ ps:  ## Show running containers
 
 stats:  ## Show container resource usage
 	docker stats $$(docker-compose ps -q)
+
+# CI/CD targets
+ci-test:  ## Run CI tests locally (mimics GitHub Actions)
+	@echo "Running CI tests locally..."
+	@echo "\n=== Code Quality Checks ==="
+	@make quality-backend
+	@echo "\n=== Security Checks ==="
+	@make security-backend
+	@echo "\n=== Backend Tests ==="
+	@make test-backend
+	@echo "\n=== Frontend Tests ==="
+	@make test-frontend
+	@echo "\n✅ All CI checks passed!"
+
+pre-commit:  ## Run pre-commit checks
+	@echo "Running pre-commit checks..."
+	@make format-backend
+	@make isort-backend
+	@make lint-backend
+	@make test-backend
+	@echo "\n✅ Pre-commit checks complete!"

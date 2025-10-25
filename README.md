@@ -6,6 +6,8 @@ An open-source inventory management system designed specifically for makerspaces
 ![Python](https://img.shields.io/badge/python-3.11-blue.svg)
 ![Django](https://img.shields.io/badge/django-4.2-green.svg)
 ![React](https://img.shields.io/badge/react-18.2-blue.svg)
+![CI](https://github.com/[username]/dms-inventory-management-system/workflows/CI/badge.svg)
+![Coverage](https://img.shields.io/badge/coverage-95%25-brightgreen.svg)
 
 ## Features
 
@@ -263,15 +265,84 @@ For production deployment:
 
 Example nginx configuration is provided in `nginx.conf.example` (to be created).
 
+## CI/CD & Code Quality
+
+This project uses GitHub Actions for continuous integration and deployment.
+
+### Automated Testing
+
+Every push and pull request triggers:
+- **Backend Tests**: pytest with 95% coverage requirement
+- **Frontend Tests**: Jest with 70% coverage requirement
+- **Code Quality**: flake8, black, isort checks
+- **Security Scans**: bandit, safety, gitleaks
+- **Docker Build**: Full integration test
+
+### Running Tests Locally
+
+```bash
+# Run all tests
+make test
+
+# Run backend tests only
+make test-backend
+
+# Run frontend tests only
+make test-frontend
+
+# Run code quality checks
+make quality-backend
+
+# Run security checks
+make security-backend
+
+# Run full CI suite locally
+make ci-test
+```
+
+### Code Quality Tools
+
+**Backend:**
+- `flake8`: Linting and style checks
+- `black`: Code formatting
+- `isort`: Import sorting
+- `bandit`: Security scanning
+- `safety`: Dependency vulnerability checks
+
+**Run all quality checks:**
+```bash
+make format-backend  # Auto-format code
+make isort-backend   # Sort imports
+make lint-backend    # Check for issues
+```
+
+### Pre-commit Workflow
+
+Before committing:
+```bash
+make pre-commit  # Runs formatting, linting, and tests
+```
+
+See [CI_CD.md](CI_CD.md) for detailed documentation.
+
 ## Contributing
 
 Contributions are welcome! Please follow these steps:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+3. Write tests for your changes (TDD encouraged)
+4. Run `make pre-commit` to ensure code quality
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+**Contribution Guidelines:**
+- All tests must pass
+- Coverage must not decrease
+- Follow PEP 8 style guide (enforced by flake8)
+- Use type hints in Python code
+- Write comprehensive docstrings
 
 ## License
 

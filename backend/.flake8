@@ -11,10 +11,9 @@ exclude =
     staticfiles,
     media
 
-# Ignore specific error codes
-ignore =
-    E203,  # Whitespace before ':' (conflicts with black)
-    W503,  # Line break before binary operator (conflicts with black)
-    E501,  # Line too long (handled by black)
+ignore = E203,W503,E501
+# E203: Whitespace before ':' (conflicts with black)
+# W503: Line break before binary operator (conflicts with black)
+# E501: Line too long (handled by black)
 
 max-complexity = 10

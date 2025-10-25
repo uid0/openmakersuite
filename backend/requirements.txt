@@ -26,10 +26,10 @@ drf-spectacular==0.27.2
 
 # Utilities
 python-slugify==8.0.4
-requests==2.32.3
+requests==2.32.4
 
 # Error Tracking
-sentry-sdk[django]==1.45.0
+sentry-sdk[django]==1.45.1
 
 # Testing and Code Coverage
 coverage==7.6.4

@@ -150,4 +150,4 @@ def update_average_lead_times():
                 item_supplier.save(update_fields=["average_lead_time"])
                 updated_count += 1
 
-    return f"Updated lead times for {updated_count} item-supplier relationships"
+    return f"Updated lead times for {updated_count} items"

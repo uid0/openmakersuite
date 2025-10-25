@@ -78,7 +78,9 @@ def generate_item_card(item):
     info_items = []
 
     if item.location:
-        info_items.append(f"Location: {item.location[:20]}")
+        location_name = getattr(item.location, "name", str(item.location))
+        if location_name:
+            info_items.append(f"Location: {location_name[:20]}")
     if item.sku:
         info_items.append(f"SKU: {item.sku}")
     if item.supplier:

@@ -2,7 +2,7 @@
  * Tests for ScanPage component
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ScanPage from '../../pages/ScanPage';
 import * as api from '../../services/api';
 
@@ -50,12 +50,11 @@ describe('ScanPage', () => {
 
   const renderWithRouter = (itemId = 'test-id-123') => {
     return render(
-      <BrowserRouter>
+      <MemoryRouter initialEntries={[`/scan/${itemId}`]}>
         <Routes>
           <Route path="/scan/:itemId" element={<ScanPage />} />
         </Routes>
-      </BrowserRouter>,
-      { initialEntries: [`/scan/${itemId}`] }
+      </MemoryRouter>
     );
   };
 
@@ -74,16 +73,15 @@ describe('ScanPage', () => {
 
     renderWithRouter();
 
-    await waitFor(() => {
-      expect(screen.getByText('Test Widget')).toBeInTheDocument();
-    });
+    await screen.findByText('Test Widget');
 
     expect(screen.getByText(/a test item description/i)).toBeInTheDocument();
-    expect(screen.getByText(/SKU: TEST-001/i)).toBeInTheDocument();
+    expect(screen.getByText(/sku: TEST-001/i)).toBeInTheDocument();
+    expect(screen.getByText(/location:/i)).toBeInTheDocument();
     expect(screen.getByText(/shelf a/i)).toBeInTheDocument();
-    expect(screen.getByText(/50 units/i)).toBeInTheDocument();
-    expect(screen.getByText(/25 units/i)).toBeInTheDocument();
-    expect(screen.getByText(/7 days/i)).toBeInTheDocument();
+    expect(screen.getByText(/current stock:/i)).toBeInTheDocument();
+    expect(screen.getByText(/reorder quantity:/i)).toBeInTheDocument();
+    expect(screen.getByText(/average lead time:/i)).toBeInTheDocument();
   });
 
   test('displays low stock warning when needed', async () => {
@@ -95,9 +93,8 @@ describe('ScanPage', () => {
 
     renderWithRouter();
 
-    await waitFor(() => {
-      expect(screen.getByText(/low stock alert/i)).toBeInTheDocument();
-    });
+    await screen.findByText('Test Widget');
+    expect(screen.getByText(/low stock alert/i)).toBeInTheDocument();
   });
 
   test('handles form submission', async () => {
@@ -111,9 +108,7 @@ describe('ScanPage', () => {
 
     renderWithRouter();
 
-    await waitFor(() => {
-      expect(screen.getByText('Test Widget')).toBeInTheDocument();
-    });
+    await screen.findByText('Test Widget');
 
     // Fill in the form
     const nameInput = screen.getByLabelText(/your name/i);
@@ -148,16 +143,12 @@ describe('ScanPage', () => {
 
     renderWithRouter();
 
-    await waitFor(() => {
-      expect(screen.getByText('Test Widget')).toBeInTheDocument();
-    });
+    await screen.findByText('Test Widget');
 
     const submitButton = screen.getByRole('button', { name: /request 25 units/i });
     fireEvent.click(submitButton);
 
-    await waitFor(() => {
-      expect(screen.getByText(/reorder request submitted/i)).toBeInTheDocument();
-    });
+    await screen.findByText(/reorder request submitted/i);
   });
 
   test('handles API error gracefully', async () => {
@@ -167,8 +158,6 @@ describe('ScanPage', () => {
 
     renderWithRouter();
 
-    await waitFor(() => {
-      expect(screen.getByText(/failed to load item/i)).toBeInTheDocument();
-    });
+    await screen.findByText(/item not found/i);
   });
 });

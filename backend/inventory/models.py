@@ -88,6 +88,12 @@ class Supplier(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @property
+    def items(self):
+        """Backwards-compatible access to supplied items."""
+
+        return self.supplied_items
+
 
 class Category(models.Model):
     """
@@ -245,8 +251,55 @@ class InventoryItem(models.Model):
     @property
     def primary_supplier(self) -> Optional[Supplier]:
         """Get the primary (preferred) supplier."""
-        item_supplier = self.item_suppliers.filter(is_primary=True).first()
-        return item_supplier.supplier if item_supplier else None
+        link = self.primary_item_supplier
+        return link.supplier if link else None
+
+    @property
+    def primary_item_supplier(self) -> Optional["ItemSupplier"]:
+        """Return the preferred ItemSupplier relationship if available."""
+
+        item_supplier = (
+            self.item_suppliers.select_related("supplier")
+            .filter(is_primary=True)
+            .first()
+        )
+        if item_supplier:
+            return item_supplier
+        return self.item_suppliers.select_related("supplier").first()
+
+    @property
+    def supplier(self) -> Optional[Supplier]:
+        """Backwards-compatible access to the primary supplier."""
+
+        return self.primary_supplier
+
+    @property
+    def supplier_sku(self) -> Optional[str]:
+        """Expose the primary supplier SKU for compatibility with legacy code."""
+
+        link = self.primary_item_supplier
+        return link.supplier_sku if link else None
+
+    @property
+    def supplier_url(self) -> Optional[str]:
+        """Expose the primary supplier URL for compatibility."""
+
+        link = self.primary_item_supplier
+        return link.supplier_url if link else None
+
+    @property
+    def unit_cost(self) -> Optional[Decimal]:
+        """Provide the primary supplier's unit cost when available."""
+
+        link = self.primary_item_supplier
+        return link.unit_cost if link else None
+
+    @property
+    def average_lead_time(self) -> Optional[int]:
+        """Expose the primary supplier's lead time for compatibility."""
+
+        link = self.primary_item_supplier
+        return link.average_lead_time if link else None
 
 
 class ItemSupplier(models.Model):

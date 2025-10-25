@@ -9,7 +9,28 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
 from io import BytesIO
 
-from inventory.models import Supplier, Category, InventoryItem, UsageLog
+import itertools
+
+from inventory.models import (
+    Location,
+    Supplier,
+    Category,
+    InventoryItem,
+    ItemSupplier,
+    UsageLog,
+)
+from faker import Faker as FakerGenerator
+
+
+class LocationFactory(DjangoModelFactory):
+    """Factory for creating Location instances."""
+
+    class Meta:
+        model = Location
+
+    name = factory.Sequence(lambda n: f"Location {n}")
+    description = Faker("sentence")
+    is_active = True
 
 
 class SupplierFactory(DjangoModelFactory):
@@ -45,17 +66,15 @@ class InventoryItemFactory(DjangoModelFactory):
     name = Faker("word")
     description = Faker("text", max_nb_chars=200)
     sku = factory.Sequence(lambda n: f"SKU-{n:05d}")
-    location = Faker("city")
+    location = SubFactory(LocationFactory)
     reorder_quantity = Faker("random_int", min=1, max=50)
     current_stock = Faker("random_int", min=0, max=100)
     minimum_stock = Faker("random_int", min=1, max=20)
-    supplier = SubFactory(SupplierFactory)
-    supplier_sku = factory.Sequence(lambda n: f"SUP-SKU-{n:05d}")
-    supplier_url = Faker("url")
-    unit_cost = Faker("pydecimal", left_digits=3, right_digits=2, positive=True)
-    average_lead_time = Faker("random_int", min=1, max=30)
     is_active = True
     notes = Faker("text", max_nb_chars=100)
+
+    _supplier_sku_sequence = itertools.count()
+    _faker = FakerGenerator()
 
     @factory.lazy_attribute
     def image(self):
@@ -75,6 +94,67 @@ class InventoryItemFactory(DjangoModelFactory):
             return
         if extracted:
             self.category = extracted
+
+    @classmethod
+    def _create(cls, model_class, *args, **kwargs):
+        location_provided = "location" in kwargs
+        location_value = kwargs.pop("location", None)
+        supplier = kwargs.pop("supplier", None)
+        supplier_sku = kwargs.pop("supplier_sku", None)
+        supplier_url = kwargs.pop("supplier_url", None)
+        unit_cost_specified = "unit_cost" in kwargs
+        unit_cost = kwargs.pop("unit_cost", None)
+        average_lead_time = kwargs.pop("average_lead_time", None)
+        quantity_per_package = kwargs.pop("quantity_per_package", 1)
+        package_upc = kwargs.pop("package_upc", "")
+        unit_upc = kwargs.pop("unit_upc", "")
+        is_primary = kwargs.pop("is_primary", True)
+        item_supplier_kwargs = kwargs.pop("item_supplier_kwargs", {})
+
+        if location_value is None:
+            location = None if location_provided else LocationFactory()
+        elif isinstance(location_value, Location):
+            location = location_value
+        else:
+            try:
+                location = Location.objects.get(pk=location_value)
+            except (Location.DoesNotExist, ValueError, TypeError):
+                location, _ = Location.objects.get_or_create(name=str(location_value))
+
+        kwargs["location"] = location
+
+        item = super()._create(model_class, *args, **kwargs)
+
+        if supplier is None:
+            supplier = SupplierFactory()
+
+        if supplier_sku is None:
+            supplier_sku = f"SUP-SKU-{next(cls._supplier_sku_sequence):05d}"
+
+        if supplier_url is None:
+            supplier_url = cls._faker.url()
+
+        if not unit_cost_specified:
+            unit_cost = cls._faker.pydecimal(left_digits=3, right_digits=2, positive=True)
+
+        if average_lead_time is None:
+            average_lead_time = cls._faker.random_int(min=1, max=30)
+
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=supplier,
+            supplier_sku=supplier_sku,
+            supplier_url=supplier_url,
+            unit_cost=unit_cost,
+            average_lead_time=average_lead_time,
+            quantity_per_package=quantity_per_package,
+            package_upc=package_upc,
+            unit_upc=unit_upc,
+            is_primary=is_primary,
+            **item_supplier_kwargs,
+        )
+
+        return item
 
 
 class UsageLogFactory(DjangoModelFactory):

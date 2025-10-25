@@ -30,6 +30,9 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
     needs_reorder = serializers.BooleanField(read_only=True)
     total_value = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    image = serializers.ImageField(read_only=True)
+    thumbnail = serializers.SerializerMethodField()
+    supplier = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
@@ -61,6 +64,20 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["qr_code", "created_at", "updated_at"]
+
+    def get_thumbnail(self, obj):
+        """Return the thumbnail URL when available."""
+
+        try:
+            return obj.thumbnail.url if obj.thumbnail else None
+        except Exception:
+            return None
+
+    def get_supplier(self, obj):
+        """Return the primary supplier identifier for backward compatibility."""
+
+        supplier = obj.supplier
+        return str(supplier.pk) if supplier else None
 
 
 class InventoryItemDetailSerializer(InventoryItemSerializer):

@@ -17,7 +17,11 @@ from inventory.models import InventoryItem
 class ReorderRequestViewSet(viewsets.ModelViewSet):
     """API endpoint for reorder requests."""
 
-    queryset = ReorderRequest.objects.select_related("item", "item__supplier", "reviewed_by").all()
+    queryset = (
+        ReorderRequest.objects.select_related("item", "reviewed_by")
+        .prefetch_related("item__item_suppliers__supplier")
+        .all()
+    )
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -56,7 +60,11 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
     def by_supplier(self, request):
         """Group pending requests by supplier for easier bulk ordering."""
-        pending = ReorderRequest.objects.filter(status="pending").select_related("item__supplier")
+        pending = (
+            ReorderRequest.objects.filter(status="pending")
+            .select_related("item")
+            .prefetch_related("item__item_suppliers__supplier")
+        )
 
         # Group by supplier
         suppliers = {}
@@ -144,7 +152,11 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
     def generate_cart_links(self, request):
         """Generate shopping cart links for approved items by supplier."""
-        approved = ReorderRequest.objects.filter(status="approved").select_related("item__supplier")
+        approved = (
+            ReorderRequest.objects.filter(status="approved")
+            .select_related("item")
+            .prefetch_related("item__item_suppliers__supplier")
+        )
 
         supplier_items = {}
         for req in approved:

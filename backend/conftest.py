@@ -53,6 +53,18 @@ def enable_db_access_for_all_tests(db):
     pass
 
 
+@pytest.fixture(autouse=True)
+def use_locmem_cache(settings):
+    """Route cache operations to local memory to avoid Redis during tests."""
+
+    settings.CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "test-cache",
+        }
+    }
+
+
 @pytest.fixture
 def mock_celery_task(mocker):
     """Mock Celery tasks to run synchronously in tests."""

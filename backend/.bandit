@@ -1,0 +1,2 @@
+[bandit]
+exclude_dirs = tests,inventory/tests,index_cards/tests,reorder_queue/tests

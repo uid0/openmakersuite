@@ -232,8 +232,8 @@ jobs:
     - name: Run security checks (bandit)
       working-directory: ./backend
       run: |
-        bandit -r . -x ./tests,./migrations,./venv -f json -o bandit-report.json || true
-        bandit -r . -x ./tests,./migrations,./venv
+        bandit -r . -x ./tests,./migrations,./venv,./inventory/tests,./reorder_queue/tests,./index_cards/tests -f json -o bandit-report.json || true
+        bandit -r . -x ./tests,./migrations,./venv,./inventory/tests,./reorder_queue/tests,./index_cards/tests
 
     - name: Check dependencies for known vulnerabilities (safety)
       working-directory: ./backend

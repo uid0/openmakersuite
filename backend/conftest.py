@@ -5,6 +5,7 @@ Pytest configuration and fixtures for the entire test suite.
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth.models import User
+from django.utils.crypto import get_random_string
 from rest_framework.test import APIClient
 from PIL import Image
 from io import BytesIO
@@ -20,8 +21,9 @@ def api_client():
 def authenticated_client(db):
     """Fixture to provide an authenticated API client."""
     client = APIClient()
+    random_password = get_random_string(24)
     user = User.objects.create_user(
-        username="testuser", email="test@example.com", password="testpass123"
+        username="testuser", email="test@example.com", password=random_password
     )
     client.force_authenticate(user=user)
     return client, user
@@ -31,7 +33,9 @@ def authenticated_client(db):
 def admin_user(db):
     """Fixture to create an admin user."""
     return User.objects.create_superuser(
-        username="admin", email="admin@example.com", password="admin123"
+        username="admin",
+        email="admin@example.com",
+        password=get_random_string(24),
     )
 
 

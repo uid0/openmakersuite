@@ -259,9 +259,7 @@ class InventoryItem(models.Model):
         """Return the preferred ItemSupplier relationship if available."""
 
         item_supplier = (
-            self.item_suppliers.select_related("supplier")
-            .filter(is_primary=True)
-            .first()
+            self.item_suppliers.select_related("supplier").filter(is_primary=True).first()
         )
         if item_supplier:
             return item_supplier

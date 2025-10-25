@@ -203,3 +203,30 @@ class TestItemSupplierModel:
         )
 
         assert item_supplier.package_cost is None
+
+    def test_supplier_upc_fields_capture_package_and_unit_codes(self):
+        """Each supplier relationship should store UPCs for package and individual units."""
+
+        supplier = Supplier.objects.create(name="Warehouse Supplier", supplier_type=Supplier.NATIONAL)
+        item = InventoryItem.objects.create(
+            name="Nitrile Gloves",
+            description="Disposable nitrile gloves",
+            reorder_quantity=4,
+            current_stock=80,
+            minimum_stock=20,
+        )
+
+        item_supplier = ItemSupplier.objects.create(
+            item=item,
+            supplier=supplier,
+            supplier_sku="GLV-200",
+            package_upc="012345678905",
+            unit_upc="00012345678905",
+            quantity_per_package=200,
+            unit_cost=Decimal("0.08"),
+        )
+
+        assert item_supplier.package_upc == "012345678905"
+        assert item_supplier.unit_upc == "00012345678905"
+        # sanity check that package cost remains accurate with UPC metadata present
+        assert item_supplier.package_cost == Decimal("16.00")

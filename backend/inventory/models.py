@@ -268,6 +268,16 @@ class ItemSupplier(models.Model):
     supplier_url = models.URLField(
         blank=True, help_text="Direct link to product on supplier's website"
     )
+    package_upc = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text="UPC/EAN printed on the packaged quantity received from this supplier",
+    )
+    unit_upc = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text="UPC/EAN for individual units when different from the package barcode",
+    )
     quantity_per_package = models.PositiveIntegerField(
         default=1,
         validators=[MinValueValidator(1)],

@@ -36,6 +36,8 @@ class ItemSupplierInline(admin.TabularInline):
         "supplier",
         "supplier_sku",
         "supplier_url",
+        "package_upc",
+        "unit_upc",
         "quantity_per_package",
         "unit_cost",
         "package_cost_display",

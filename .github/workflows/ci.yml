@@ -175,39 +175,39 @@ jobs:
         EOF
 
     - name: Build Docker images
-      run: docker-compose build
+      run: docker compose build
 
     - name: Start services
-      run: docker-compose up -d
+      run: docker compose up -d
 
     - name: Wait for services to be healthy
       run: |
         echo "Waiting for database..."
-        timeout 60 bash -c 'until docker-compose exec -T db pg_isready -U makerspace; do sleep 2; done'
+        timeout 60 bash -c 'until docker compose exec -T db pg_isready -U makerspace; do sleep 2; done'
         echo "Waiting for Redis..."
-        timeout 60 bash -c 'until docker-compose exec -T redis redis-cli ping; do sleep 2; done'
+        timeout 60 bash -c 'until docker compose exec -T redis redis-cli ping; do sleep 2; done'
         echo "Waiting for backend..."
         sleep 10
 
     - name: Run migrations in Docker
-      run: docker-compose exec -T backend python manage.py migrate
+      run: docker compose exec -T backend python manage.py migrate
 
     - name: Run backend tests in Docker
-      run: docker-compose exec -T backend pytest --no-cov -v
+      run: docker compose exec -T backend pytest --no-cov -v
 
     - name: Check service logs on failure
       if: failure()
       run: |
         echo "=== Backend logs ==="
-        docker-compose logs backend
+        docker compose logs backend
         echo "=== Database logs ==="
-        docker-compose logs db
+        docker compose logs db
         echo "=== Redis logs ==="
-        docker-compose logs redis
+        docker compose logs redis
 
     - name: Cleanup
       if: always()
-      run: docker-compose down -v
+      run: docker compose down -v
 
   code-quality:
     name: Code Quality & Security

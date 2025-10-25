@@ -30,10 +30,11 @@ We are committed to providing a welcoming and inclusive environment. Please be r
 1. Fork the repository
 2. Create a new branch: `git checkout -b feature/your-feature-name`
 3. Make your changes following our coding standards
-4. Write or update tests as needed
-5. Update documentation if required
-6. Commit with clear, descriptive messages
-7. Push to your fork and submit a pull request
+4. Make sure that new data fields have sane defaults.
+5. Write or update tests as needed
+6. Update documentation if required
+7. Commit with clear, descriptive messages
+8. Push to your fork and submit a pull request
 
 ## Development Setup
 

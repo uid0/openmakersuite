@@ -174,40 +174,51 @@ jobs:
         SENTRY_ENVIRONMENT=ci
         EOF
 
+    - name: Resolve Docker Compose command
+      run: |
+        if docker compose version >/dev/null 2>&1; then
+          echo "COMPOSE_COMMAND=docker compose" >> "$GITHUB_ENV"
+        elif docker-compose --version >/dev/null 2>&1; then
+          echo "COMPOSE_COMMAND=docker-compose" >> "$GITHUB_ENV"
+        else
+          echo "Unable to locate docker compose" >&2
+          exit 1
+        fi
+
     - name: Build Docker images
-      run: docker compose build
+      run: ${COMPOSE_COMMAND} build
 
     - name: Start services
-      run: docker compose up -d
+      run: ${COMPOSE_COMMAND} up -d
 
     - name: Wait for services to be healthy
       run: |
         echo "Waiting for database..."
-        timeout 60 bash -c 'until docker compose exec -T db pg_isready -U makerspace; do sleep 2; done'
+        timeout 60 bash -c "until ${COMPOSE_COMMAND} exec -T db pg_isready -U makerspace; do sleep 2; done"
         echo "Waiting for Redis..."
-        timeout 60 bash -c 'until docker compose exec -T redis redis-cli ping; do sleep 2; done'
+        timeout 60 bash -c "until ${COMPOSE_COMMAND} exec -T redis redis-cli ping; do sleep 2; done"
         echo "Waiting for backend..."
         sleep 10
 
     - name: Run migrations in Docker
-      run: docker compose exec -T backend python manage.py migrate
+      run: ${COMPOSE_COMMAND} exec -T backend python manage.py migrate
 
     - name: Run backend tests in Docker
-      run: docker compose exec -T backend pytest --no-cov -v
+      run: ${COMPOSE_COMMAND} exec -T backend pytest --no-cov -v
 
     - name: Check service logs on failure
       if: failure()
       run: |
         echo "=== Backend logs ==="
-        docker compose logs backend
+        ${COMPOSE_COMMAND} logs backend
         echo "=== Database logs ==="
-        docker compose logs db
+        ${COMPOSE_COMMAND} logs db
         echo "=== Redis logs ==="
-        docker compose logs redis
+        ${COMPOSE_COMMAND} logs redis
 
     - name: Cleanup
       if: always()
-      run: docker compose down -v
+      run: ${COMPOSE_COMMAND} down -v
 
   code-quality:
     name: Code Quality & Security

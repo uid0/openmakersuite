@@ -3,7 +3,7 @@ Unit tests for inventory models.
 """
 import pytest
 from decimal import Decimal
-from inventory.models import Supplier, Category, InventoryItem, UsageLog
+from inventory.models import Supplier, Category, InventoryItem, UsageLog, ItemSupplier
 from inventory.tests.factories import (
     SupplierFactory, CategoryFactory, InventoryItemFactory, UsageLogFactory
 )
@@ -154,3 +154,52 @@ class TestUsageLogModel:
         logs = UsageLog.objects.all()
         assert logs[0] == log2  # Most recent first
         assert logs[1] == log1
+
+
+@pytest.mark.django_db
+class TestItemSupplierModel:
+    """Tests for the ItemSupplier through model."""
+
+    def test_package_cost_calculation(self):
+        """Total package cost should multiply unit cost by quantity per package."""
+
+        supplier = Supplier.objects.create(name="Bulk Supplies", supplier_type=Supplier.LOCAL)
+        item = InventoryItem.objects.create(
+            name="Zip Ties",
+            description="Standard 4-inch zip ties",
+            reorder_quantity=10,
+            current_stock=100,
+            minimum_stock=20,
+        )
+
+        item_supplier = ItemSupplier.objects.create(
+            item=item,
+            supplier=supplier,
+            supplier_sku="ZT-100",
+            quantity_per_package=200,
+            unit_cost=Decimal("0.05"),
+        )
+
+        assert item_supplier.package_cost == Decimal("10.00")
+
+    def test_package_cost_none_without_unit_cost(self):
+        """When pricing is absent we should not report a package cost."""
+
+        supplier = Supplier.objects.create(name="Local Shop", supplier_type=Supplier.LOCAL)
+        item = InventoryItem.objects.create(
+            name="Painter's Tape",
+            description="Blue painter's tape roll",
+            reorder_quantity=5,
+            current_stock=20,
+            minimum_stock=5,
+        )
+
+        item_supplier = ItemSupplier.objects.create(
+            item=item,
+            supplier=supplier,
+            supplier_sku="PT-50",
+            quantity_per_package=50,
+            unit_cost=None,
+        )
+
+        assert item_supplier.package_cost is None

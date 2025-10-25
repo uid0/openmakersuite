@@ -22,6 +22,7 @@ urlpatterns = [
     # App URLs
     path('api/inventory/', include('inventory.urls')),
     path('api/reorders/', include('reorder_queue.urls')),
+    path('api/index-cards/', include('index_cards.urls')),
 ]
 
 # Serve media files in development

@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     # Local apps
     'inventory',
     'reorder_queue',
+    'index_cards',
 ]
 
 MIDDLEWARE = [
@@ -75,7 +76,10 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 DATABASES = {
     'default': dj_database_url.config(
-        default=config('DATABASE_URL', default='postgresql://makerspace:changeme@localhost:5432/makerspace_inventory'),
+        default=config(
+            'DATABASE_URL',
+            default=f'sqlite:///{BASE_DIR / "db.sqlite3"}'
+        ),
         conn_max_age=600
     )
 }
@@ -132,6 +136,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 
 # Redis configuration
 REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')

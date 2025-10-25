@@ -268,12 +268,17 @@ class ItemSupplier(models.Model):
     supplier_url = models.URLField(
         blank=True, help_text="Direct link to product on supplier's website"
     )
+    quantity_per_package = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Number of individual units included in one package from this supplier",
+    )
     unit_cost = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Cost per unit from this supplier",
+        help_text="Cost per individual unit from this supplier",
     )
     average_lead_time = models.PositiveIntegerField(
         default=7, help_text="Average lead time in days from this supplier"
@@ -312,6 +317,14 @@ class ItemSupplier(models.Model):
                 is_primary=False
             )
         super().save(*args, **kwargs)
+
+    @property
+    def package_cost(self) -> Optional[Decimal]:
+        """Return the total cost for one supplier package when pricing is available."""
+
+        if self.unit_cost is None:
+            return None
+        return (self.unit_cost or Decimal("0")) * self.quantity_per_package
 
 
 class UsageLog(models.Model):

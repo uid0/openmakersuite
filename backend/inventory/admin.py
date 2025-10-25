@@ -36,11 +36,26 @@ class ItemSupplierInline(admin.TabularInline):
         "supplier",
         "supplier_sku",
         "supplier_url",
+        "quantity_per_package",
         "unit_cost",
+        "package_cost_display",
         "average_lead_time",
         "is_primary",
         "is_active",
     ]
+    readonly_fields = ["package_cost_display"]
+
+    def package_cost_display(self, obj):
+        """Readable representation of the total cost for one supplier package."""
+
+        if not obj or obj.unit_cost is None:
+            return "—"
+        package_cost = obj.package_cost
+        if package_cost is None:
+            return "—"
+        return f"${package_cost:.2f}"
+
+    package_cost_display.short_description = "Total package cost"
 
 
 @admin.register(InventoryItem)

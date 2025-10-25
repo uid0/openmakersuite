@@ -1,0 +1,21 @@
+# Development and Testing Dependencies
+-r requirements.txt
+
+# Code Quality
+flake8==7.0.0
+black==24.1.1
+isort==5.13.2
+
+# Security Scanning
+bandit==1.7.6
+safety==3.0.1
+
+# Type Checking
+mypy==1.8.0
+django-stubs==4.2.7
+djangorestframework-stubs==3.14.5
+
+# Enhanced Testing
+pytest-xdist==3.5.0  # Parallel test execution
+pytest-timeout==2.2.0  # Test timeouts
+freezegun==1.4.0  # Already in main requirements but worth noting

@@ -1,0 +1,20 @@
+[flake8]
+max-line-length = 127
+exclude =
+    */migrations/*,
+    __pycache__,
+    */venv/*,
+    */env/*,
+    .git,
+    .pytest_cache,
+    htmlcov,
+    staticfiles,
+    media
+
+# Ignore specific error codes
+ignore =
+    E203,  # Whitespace before ':' (conflicts with black)
+    W503,  # Line break before binary operator (conflicts with black)
+    E501,  # Line too long (handled by black)
+
+max-complexity = 10

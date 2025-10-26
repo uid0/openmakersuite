@@ -225,7 +225,8 @@ describe('API Service', () => {
 
       mock.onGet('/api/reorders/requests/by_supplier/').reply(200, mockResponse);
 
-      const response = reorderAPI.getBySupplier();
+      // eslint-disable-next-line testing-library/no-await-sync-query
+      const response = await reorderAPI.getBySupplier();
 
       expect(response.data).toEqual(mockResponse);
     });

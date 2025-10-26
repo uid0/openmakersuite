@@ -2,7 +2,6 @@
  * Tests for App component
  */
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
 import App from '../App';
 
 // Mock child components to simplify testing
@@ -12,11 +11,7 @@ jest.mock('../pages/AdminDashboard', () => () => <div>Admin Dashboard</div>);
 
 describe('App Component', () => {
   test('renders without crashing', () => {
-    render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>
-    );
+    render(<App />);
     expect(screen.getByText('Home Page')).toBeInTheDocument();
   });
 });

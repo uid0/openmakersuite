@@ -123,6 +123,7 @@ describe('ScanPage', () => {
     
     fireEvent.click(submitButton);
 
+    // Wait for the async operations to complete
     await waitFor(() => {
       expect(api.reorderAPI.createRequest).toHaveBeenCalledWith({
         item: mockItem.id,
@@ -132,6 +133,9 @@ describe('ScanPage', () => {
         priority: 'normal',
       });
     });
+
+    // Wait for the success message to appear
+    await screen.findByText(/reorder request submitted/i);
   });
 
   test('displays success message after submission', async () => {
@@ -151,7 +155,10 @@ describe('ScanPage', () => {
     
     fireEvent.click(submitButton);
 
-    await screen.findByText(/reorder request submitted/i);
+    // Wait for the success message to appear after async operations
+    await waitFor(() => {
+      expect(screen.getByText(/reorder request submitted/i)).toBeInTheDocument();
+    });
   });
 
   test('handles API error gracefully', async () => {

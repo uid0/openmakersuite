@@ -7,7 +7,6 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 from typing import Any, Optional
-from uuid import UUID
 
 from django.core.validators import MinValueValidator
 from django.db import models

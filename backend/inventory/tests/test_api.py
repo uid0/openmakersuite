@@ -7,7 +7,7 @@ from django.urls import reverse
 import pytest
 from rest_framework import status
 
-from inventory.models import InventoryItem, UsageLog
+from inventory.models import UsageLog
 from inventory.tests.factories import (
     CategoryFactory,
     InventoryItemFactory,
@@ -69,12 +69,12 @@ class TestCategoryAPI:
 
     def test_retrieve_category(self, api_client):
         """Test retrieving a single category."""
-        category = CategoryFactory(name="Test Category")
+        category = CategoryFactory()
         url = reverse("category-detail", kwargs={"pk": category.pk})
         response = api_client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["name"] == "Test Category"
+        assert response.data["name"] == category.name
 
 
 @pytest.mark.integration
@@ -92,12 +92,12 @@ class TestInventoryItemAPI:
 
     def test_retrieve_item(self, api_client):
         """Test retrieving a single item with details."""
-        item = InventoryItemFactory(name="Test Item")
+        item = InventoryItemFactory()
         url = reverse("inventoryitem-detail", kwargs={"pk": str(item.id)})
         response = api_client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["name"] == "Test Item"
+        assert response.data["name"] == item.name
         assert "supplier_details" in response.data
         assert "category_details" in response.data
 

@@ -2,15 +2,12 @@
 Views for reorder queue API.
 """
 
-from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-
-from inventory.models import InventoryItem
 
 from .models import ReorderRequest
 from .serializers import ReorderRequestCreateSerializer, ReorderRequestSerializer

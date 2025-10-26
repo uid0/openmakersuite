@@ -6,7 +6,6 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -21,7 +20,7 @@ from .serializers import (
     SupplierSerializer,
     UsageLogSerializer,
 )
-from .tasks import generate_index_card, generate_qr_code
+from .tasks import generate_qr_code
 
 
 class SupplierViewSet(viewsets.ModelViewSet):

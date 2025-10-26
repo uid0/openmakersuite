@@ -11,8 +11,7 @@ import pytest
 from rest_framework import status
 
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
-from reorder_queue.models import ReorderRequest
-from reorder_queue.tests.factories import ReorderRequestFactory, UserFactory
+from reorder_queue.tests.factories import ReorderRequestFactory
 
 
 @pytest.mark.integration
@@ -104,8 +103,8 @@ class TestReorderRequestAPI:
         """Test grouping requests by supplier."""
         client, user = authenticated_client
 
-        supplier1 = SupplierFactory(name="Supplier A", supplier_type="amazon")
-        supplier2 = SupplierFactory(name="Supplier B", supplier_type="grainger")
+        supplier1 = SupplierFactory(supplier_type="online")
+        supplier2 = SupplierFactory(supplier_type="national")
 
         item1 = InventoryItemFactory(supplier=supplier1)
         item2 = InventoryItemFactory(supplier=supplier1)
@@ -123,8 +122,8 @@ class TestReorderRequestAPI:
 
         # Check grouping
         supplier_names = [group["supplier"] for group in response.data]
-        assert "Supplier A" in supplier_names
-        assert "Supplier B" in supplier_names
+        assert supplier1.name in supplier_names
+        assert supplier2.name in supplier_names
 
     def test_approve_request(self, authenticated_client):
         """Test approving a reorder request."""

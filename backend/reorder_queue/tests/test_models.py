@@ -21,14 +21,14 @@ class TestReorderRequestModel:
 
     def test_reorder_request_creation(self):
         """Test creating a reorder request."""
-        item = InventoryItemFactory(name="Test Item")
+        item = InventoryItemFactory()
         request = ReorderRequestFactory(item=item, quantity=25, requested_by="John Doe")
 
         assert request.item == item
         assert request.quantity == 25
         assert request.requested_by == "John Doe"
         assert request.status == "pending"
-        assert str(request).startswith("Test Item")
+        assert str(request).startswith(item.name)
 
     def test_estimated_cost_calculation(self):
         """Test estimated_cost property calculates correctly."""

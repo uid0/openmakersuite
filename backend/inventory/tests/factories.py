@@ -33,7 +33,7 @@ class SupplierFactory(DjangoModelFactory):
     class Meta:
         model = Supplier
 
-    name = Faker("company")
+    name = factory.Sequence(lambda n: f"supplier-{n}")
     supplier_type = factory.Iterator([Supplier.LOCAL, Supplier.ONLINE, Supplier.NATIONAL])
     website = Faker("url")
     notes = Faker("text", max_nb_chars=200)
@@ -45,7 +45,7 @@ class CategoryFactory(DjangoModelFactory):
     class Meta:
         model = Category
 
-    name = Faker("word")
+    name = factory.Sequence(lambda n: f"category-{n}")
     slug = factory.LazyAttribute(lambda obj: obj.name.lower().replace(" ", "-"))
     description = Faker("text", max_nb_chars=200)
     parent = None
@@ -57,7 +57,7 @@ class InventoryItemFactory(DjangoModelFactory):
     class Meta:
         model = InventoryItem
 
-    name = Faker("word")
+    name = factory.Sequence(lambda n: f"item-{n}")
     description = Faker("text", max_nb_chars=200)
     sku = factory.Sequence(lambda n: f"SKU-{n:05d}")
     location = SubFactory(LocationFactory)

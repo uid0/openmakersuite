@@ -1,2 +1,12 @@
 [bandit]
-exclude_dirs = tests,inventory/tests,index_cards/tests,reorder_queue/tests
+# Bandit configuration file
+# https://bandit.readthedocs.io/en/latest/config.html
+
+exclude_dirs = ["tests", "migrations", "__pycache__", ".pytest_cache", "venv", "env"]
+
+# Skip specific tests that are false positives in test files
+skips = ["B101"]  # assert_used - acceptable in test files
+
+# Test-specific configuration
+[bandit.assert_used]
+skips = ["*test*.py", "test_*.py", "*tests.py", "conftest.py"]

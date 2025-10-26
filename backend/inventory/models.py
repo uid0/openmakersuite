@@ -299,6 +299,20 @@ class InventoryItem(models.Model):
         link = self.primary_item_supplier
         return link.average_lead_time if link else None
 
+    @property
+    def package_cost(self) -> Optional[Decimal]:
+        """Expose the primary supplier's package cost when available."""
+
+        link = self.primary_item_supplier
+        return link.package_cost if link else None
+
+    @property
+    def quantity_per_package(self) -> Optional[int]:
+        """Expose the primary supplier's quantity per package when available."""
+
+        link = self.primary_item_supplier
+        return link.quantity_per_package if link else None
+
 
 class ItemSupplier(models.Model):
     """
@@ -339,7 +353,14 @@ class ItemSupplier(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Cost per individual unit from this supplier",
+        help_text="Cost per individual unit from this supplier (auto-calculated from package cost)",
+    )
+    package_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Total cost for one package from this supplier (what you actually pay)",
     )
     average_lead_time = models.PositiveIntegerField(
         default=7, help_text="Average lead time in days from this supplier"
@@ -371,7 +392,19 @@ class ItemSupplier(models.Model):
         return f"{self.item.name} - {self.supplier.name}{primary}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Ensure only one primary supplier per item."""
+        """
+        Ensure only one primary supplier per item and auto-calculate unit cost.
+        
+        If package_cost is provided, calculate unit_cost automatically.
+        If only unit_cost is provided (backward compatibility), calculate package_cost.
+        """
+        # Auto-calculate unit cost from package cost
+        if self.package_cost is not None and self.quantity_per_package > 0:
+            self.unit_cost = self.package_cost / self.quantity_per_package
+        # Backward compatibility: if only unit_cost is provided, calculate package_cost
+        elif self.unit_cost is not None and self.package_cost is None and self.quantity_per_package > 0:
+            self.package_cost = self.unit_cost * self.quantity_per_package
+        
         if self.is_primary:
             # Remove primary flag from other suppliers for this item
             ItemSupplier.objects.filter(item=self.item, is_primary=True).exclude(pk=self.pk).update(
@@ -379,13 +412,6 @@ class ItemSupplier(models.Model):
             )
         super().save(*args, **kwargs)
 
-    @property
-    def package_cost(self) -> Optional[Decimal]:
-        """Return the total cost for one supplier package when pricing is available."""
-
-        if self.unit_cost is None:
-            return None
-        return (self.unit_cost or Decimal("0")) * self.quantity_per_package
 
 
 class UsageLog(models.Model):

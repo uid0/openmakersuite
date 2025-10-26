@@ -144,8 +144,8 @@ class TestUsageLogModel:
 class TestItemSupplierModel:
     """Tests for the ItemSupplier through model."""
 
-    def test_package_cost_calculation(self):
-        """Total package cost should multiply unit cost by quantity per package."""
+    def test_package_cost_auto_calculation(self):
+        """Unit cost should be auto-calculated from package cost and quantity."""
 
         supplier = Supplier.objects.create(name="Bulk Supplies", supplier_type=Supplier.LOCAL)
         item = InventoryItem.objects.create(
@@ -156,18 +156,44 @@ class TestItemSupplierModel:
             minimum_stock=20,
         )
 
+        # Test new preferred workflow: enter package cost, unit cost is calculated
         item_supplier = ItemSupplier.objects.create(
             item=item,
             supplier=supplier,
             supplier_sku="ZT-100",
             quantity_per_package=200,
-            unit_cost=Decimal("0.05"),
+            package_cost=Decimal("10.00"),
         )
 
-        assert item_supplier.package_cost == Decimal("10.00")
+        # Unit cost should be auto-calculated: $10.00 / 200 = $0.05
+        assert item_supplier.unit_cost == Decimal("0.05")
 
-    def test_package_cost_none_without_unit_cost(self):
-        """When pricing is absent we should not report a package cost."""
+    def test_backward_compatibility_unit_cost_entry(self):
+        """Legacy unit cost entry should still work and calculate package cost."""
+
+        supplier = Supplier.objects.create(name="Local Shop", supplier_type=Supplier.LOCAL)
+        item = InventoryItem.objects.create(
+            name="Painter's Tape",
+            description="Blue painter's tape roll",
+            reorder_quantity=5,
+            current_stock=20,
+            minimum_stock=5,
+        )
+
+        # Test backward compatibility: enter unit cost, package cost is calculated
+        item_supplier = ItemSupplier.objects.create(
+            item=item,
+            supplier=supplier,
+            supplier_sku="PT-50",
+            quantity_per_package=50,
+            unit_cost=Decimal("0.16"),
+        )
+
+        # Package cost should be auto-calculated: $0.16 * 50 = $8.00
+        assert item_supplier.package_cost == Decimal("8.00")
+
+    def test_no_pricing_data(self):
+        """When no pricing is provided, both fields should be None."""
 
         supplier = Supplier.objects.create(name="Local Shop", supplier_type=Supplier.LOCAL)
         item = InventoryItem.objects.create(
@@ -184,9 +210,11 @@ class TestItemSupplierModel:
             supplier_sku="PT-50",
             quantity_per_package=50,
             unit_cost=None,
+            package_cost=None,
         )
 
         assert item_supplier.package_cost is None
+        assert item_supplier.unit_cost is None
 
     def test_supplier_upc_fields_capture_package_and_unit_codes(self):
         """Each supplier relationship should store UPCs for package and individual units."""

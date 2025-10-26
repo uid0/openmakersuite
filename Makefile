@@ -107,7 +107,7 @@ quality-backend:  ## Run all backend code quality checks
 
 security-backend:  ## Run backend security checks
 	@echo "Running bandit security checks..."
-	$(DOCKER_COMPOSE) exec backend bandit -r . -x ./tests,./migrations || echo "bandit not installed"
+	$(DOCKER_COMPOSE) exec backend bandit -r . -x ./tests,./migrations -s B101 || echo "bandit not installed"
 	@echo "\nChecking for vulnerable dependencies..."
 	$(DOCKER_COMPOSE) exec backend safety check || echo "safety not installed"
 

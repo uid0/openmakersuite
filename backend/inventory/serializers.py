@@ -55,6 +55,8 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "supplier_sku",
             "supplier_url",
             "unit_cost",
+            "package_cost",
+            "quantity_per_package",
             "average_lead_time",
             "qr_code",
             "is_active",

@@ -39,24 +39,21 @@ class ItemSupplierInline(admin.TabularInline):
         "package_upc",
         "unit_upc",
         "quantity_per_package",
-        "unit_cost",
-        "package_cost_display",
+        "package_cost",
+        "unit_cost_display",
         "average_lead_time",
         "is_primary",
         "is_active",
     ]
-    readonly_fields = ["package_cost_display"]
+    readonly_fields = ["unit_cost_display"]
 
-    @admin.display(description="Total package cost")
-    def package_cost_display(self, obj):
-        """Readable representation of the total cost for one supplier package."""
+    @admin.display(description="Unit cost (calculated)")
+    def unit_cost_display(self, obj):
+        """Readable representation of the cost per individual unit."""
 
         if not obj or obj.unit_cost is None:
             return "—"
-        package_cost = obj.package_cost
-        if package_cost is None:
-            return "—"
-        return f"${package_cost:.2f}"
+        return f"${obj.unit_cost:.4f}"
 
 
 @admin.register(InventoryItem)

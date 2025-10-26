@@ -153,9 +153,21 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         except Supplier.DoesNotExist:
             return
 
+        # Handle both unit_cost (legacy) and package_cost (preferred)
         unit_cost = data.get("unit_cost")
+        package_cost = data.get("package_cost")
+        
         unit_cost_value = None
-        if unit_cost not in (None, "", "null"):
+        package_cost_value = None
+        
+        # Prefer package_cost if provided
+        if package_cost not in (None, "", "null"):
+            try:
+                package_cost_value = Decimal(str(package_cost))
+            except (InvalidOperation, TypeError):
+                package_cost_value = None
+        # Fallback to unit_cost for backward compatibility
+        elif unit_cost not in (None, "", "null"):
             try:
                 unit_cost_value = Decimal(str(unit_cost))
             except (InvalidOperation, TypeError):
@@ -188,6 +200,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 "supplier_sku": data.get("supplier_sku") or item.sku or str(item.id),
                 "supplier_url": data.get("supplier_url", ""),
                 "unit_cost": unit_cost_value,
+                "package_cost": package_cost_value,
                 "average_lead_time": average_lead_time_value,
                 "quantity_per_package": quantity_value,
                 "package_upc": data.get("package_upc", ""),

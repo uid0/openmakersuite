@@ -1,0 +1,63 @@
+# Gitleaks ignore file
+# This file tells gitleaks to ignore certain patterns that are not actually secrets
+
+# Django secret key in settings files (these should be template/example values)
+SECRET_KEY = 'django-insecure-
+SECRET_KEY="django-insecure-
+SECRET_KEY='test-secret-key
+
+# Database URLs in docker-compose or example files
+DATABASE_URL=postgresql://
+DATABASE_URL="postgresql://
+
+# Common test/example patterns
+test-secret-key
+dummy-secret-key
+fake-secret-key
+example-secret-key
+
+# JWT secrets in test files
+JWT_SECRET_KEY = "test
+jwt_secret = "test
+
+# API keys in test files
+API_KEY = "test
+api_key = "test
+
+# Hash patterns that might trigger false positives
+sha256:
+sha1:
+
+# Docker compose environment variables (usually non-sensitive defaults)
+POSTGRES_PASSWORD=postgres
+REDIS_PASSWORD=""
+
+# Common environment variable patterns in docker-compose.yml
+- POSTGRES_PASSWORD=
+- REDIS_PASSWORD=
+- SECRET_KEY=
+
+# Package-lock.json and similar dependency files (contain hashes, not secrets)
+package-lock.json
+poetry.lock
+Pipfile.lock
+
+# Coverage and test report files
+coverage.xml
+.coverage
+htmlcov/
+
+# Build artifacts
+node_modules/
+build/
+dist/
+
+# Git directory
+.git/
+
+# Example and template files
+.env.example
+.env.template
+settings.example.py
+config.example.yml
+

@@ -58,7 +58,7 @@ class TestPDFGeneration:
     """Tests for PDF generation utilities."""
 
     def test_generate_item_card(self):
-        """Test generating a 3x5 index card PDF."""
+        """Test generating a 5x3 horizontal index card PDF."""
         item = InventoryItemFactory(
             name="Test Widget",
             description="A test item for PDF generation",

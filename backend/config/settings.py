@@ -198,9 +198,47 @@ CELERY_TIMEZONE = TIME_ZONE
 # Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {
     "TITLE": "Makerspace Inventory Management API",
-    "DESCRIPTION": "Open source inventory management system for makerspaces",
+    "DESCRIPTION": """
+    Open source inventory management system for makerspaces.
+
+    ## Features
+
+    - **Inventory Management**: Track items, categories, suppliers, and locations
+    - **QR Code Integration**: Generate and scan QR codes for easy item identification
+    - **Index Card Generation**: Create printable 3x5" or 5x3" index cards with item details
+    - **Reorder Management**: Automated reorder requests and supplier integration
+    - **Usage Tracking**: Log item usage and calculate reorder timing
+
+    ## Authentication
+
+    This API supports both JWT and session authentication:
+    - Use `DEVELOPMENT_MODE=1` for development (no auth required)
+    - Use JWT tokens for production authentication
+    - Session authentication via Django admin login
+
+    ## Getting Started
+
+    1. Browse available endpoints in the interactive documentation
+    2. Click on any UUID to navigate to related objects
+    3. Generate index cards and QR codes for your inventory
+    4. Set up automated reorder workflows
+
+    ## Support
+
+    For questions or issues, please refer to the project documentation.
+    """,
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "displayRequestDuration": True,
+        "docExpansion": "list",
+        "filter": True,
+        "showExtensions": True,
+        "showCommonExtensions": True,
+        "url": "/api/schema/",
+    },
 }
 
 # Sentry Configuration

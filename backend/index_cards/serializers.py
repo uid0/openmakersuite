@@ -11,6 +11,10 @@ class IndexCardPreviewSerializer(serializers.Serializer):
     """Validate data for generating a preview card."""
 
     item_id = serializers.UUIDField(help_text="Inventory item identifier")
+    blank_card = serializers.BooleanField(
+        default=False,
+        help_text="If True, generate blank card with only QR code for creative customization"
+    )
 
 
 class IndexCardBatchSerializer(serializers.Serializer):
@@ -25,6 +29,10 @@ class IndexCardBatchSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
         help_text="Optional file name for the generated PDF",
+    )
+    blank_cards = serializers.BooleanField(
+        default=False,
+        help_text="If True, generate blank cards with only QR codes for creative customization"
     )
 
     def validate_item_ids(self, value: List[str]) -> List[str]:

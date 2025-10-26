@@ -51,7 +51,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         """Allow public access for reading and common actions, require auth for admin operations."""
         # Public/common actions
-        if self.action in ["list", "retrieve", "low_stock", "download_card", "log_usage", "generate_qr"]:
+        if self.action in ["list", "retrieve", "low_stock", "download_card", "log_usage", "generate_qr", "qr_code"]:
             return [AllowAny()]
         # Admin actions (create, update, delete)
         return [IsAuthenticated()]
@@ -107,7 +107,13 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
-    @action(detail=True, methods=["get"])
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="qr_code",
+        url_name="qr_code",
+        name="QR Code"
+    )
     def qr_code(self, request, pk=None):
         """Get QR code image for an item."""
         item = self.get_object()
@@ -120,18 +126,52 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         response["Content-Disposition"] = f'inline; filename="qr_{item.sku or item.id}.png"'
         return response
 
-    @action(detail=True, methods=["get"])
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="download_card",
+        url_name="download_card",
+        name="Download Card"
+    )
     def download_card(self, request, pk=None):
-        """Generate and download 3x5 index card PDF."""
+        """Generate and download 5x3 horizontal index card PDF."""
         item = self.get_object()
 
-        # Generate PDF synchronously for immediate download
-        from .utils.pdf_generator import generate_item_card
+        # Check if blank card is requested
+        blank_card = request.GET.get('blank', 'false').lower() == 'true'
 
-        pdf_buffer = generate_item_card(item)
+        # Generate PDF using the index cards system
+        from index_cards.services import IndexCardRenderer
 
-        response = HttpResponse(pdf_buffer.getvalue(), content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="card_{item.sku or item.id}.pdf"'
+        renderer = IndexCardRenderer(blank_cards=blank_card)
+        pdf_bytes = renderer.render_preview(item, blank_card=blank_card)
+
+        card_type = "blank" if blank_card else "detailed"
+        filename = f"card_{item.sku or item.id}_{card_type}.pdf"
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="download_blank_card",
+        url_name="download_blank_card",
+        name="Download Blank Card"
+    )
+    def download_blank_card(self, request, pk=None):
+        """Generate and download blank card with only QR code for creative customization."""
+        item = self.get_object()
+
+        # Generate blank card PDF using the index cards system
+        from index_cards.services import IndexCardRenderer
+
+        renderer = IndexCardRenderer(blank_cards=True)
+        pdf_bytes = renderer.render_preview(item, blank_card=True)
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="blank_card_{item.sku or item.id}.pdf"'
         return response
 
     @action(detail=False, methods=["get"])

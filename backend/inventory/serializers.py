@@ -7,6 +7,8 @@ from rest_framework import serializers
 from .models import Category, InventoryItem, Supplier, UsageLog
 
 
+
+
 class SupplierSerializer(serializers.ModelSerializer):
     class Meta:
         model = Supplier
@@ -34,7 +36,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     image = serializers.ImageField(read_only=True)
     thumbnail = serializers.SerializerMethodField()
     qr_code_url = serializers.SerializerMethodField()
-    supplier = serializers.SerializerMethodField()
+    location = serializers.CharField(source="location.name", read_only=True)
 
     class Meta:
         model = InventoryItem
@@ -52,7 +54,6 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "reorder_quantity",
             "current_stock",
             "minimum_stock",
-            "supplier",
             "supplier_name",
             "supplier_sku",
             "supplier_url",
@@ -78,11 +79,6 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
-    def get_supplier(self, obj):
-        """Return the primary supplier identifier for backward compatibility."""
-
-        supplier = obj.supplier
-        return str(supplier.pk) if supplier else None
 
     def get_qr_code_url(self, obj):
         """Return the QR code URL when available."""

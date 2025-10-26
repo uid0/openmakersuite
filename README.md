@@ -104,6 +104,39 @@ An open-source inventory management system designed specifically for makerspaces
    - Django Admin: http://localhost:8000/admin
    - API Documentation: http://localhost:8000/api/docs/
 
+## Development Setup
+
+### Option 1: DevContainer (Recommended)
+
+For the most consistent development experience that matches CI exactly:
+
+1. **Prerequisites:**
+   - Docker Desktop
+   - VS Code with Dev Containers extension
+
+2. **Setup:**
+   ```bash
+   git clone https://github.com/yourusername/makerspace-inventory.git
+   code makerspace-inventory
+   # VS Code will prompt to reopen in container
+   ```
+
+3. **Benefits:**
+   - Matches CI environment exactly (Ubuntu 22.04, Python 3.11, Node.js 18)
+   - Pre-configured VS Code extensions and settings
+   - Eliminates platform-specific issues between macOS/Windows/Linux
+   - See [DevContainer Setup Guide](.devcontainer/README.md) for details
+
+### Option 2: Local Development
+
+If you prefer local development, ensure you have:
+- Python 3.11
+- Node.js 18
+- PostgreSQL 15
+- Redis 7
+
+Follow the Quick Start guide above, then install dependencies locally.
+
 ## Usage Guide
 
 ### Adding Inventory Items

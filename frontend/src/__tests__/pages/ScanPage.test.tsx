@@ -1,7 +1,7 @@
 /**
  * Tests for ScanPage component
  */
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ScanPage from '../../pages/ScanPage';
 import * as api from '../../services/api';
@@ -49,14 +49,14 @@ describe('ScanPage', () => {
   });
 
   const renderWithRouter = async (itemId = 'test-id-123') => {
-    const component = render(
+    const view = render(
       <MemoryRouter initialEntries={[`/scan/${itemId}`]}>
         <Routes>
           <Route path="/scan/:itemId" element={<ScanPage />} />
         </Routes>
       </MemoryRouter>
     );
-    return component;
+    return view;
   };
 
   test('displays loading state initially', async () => {

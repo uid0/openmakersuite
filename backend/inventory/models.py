@@ -105,6 +105,12 @@ class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(max_length=100, unique=True, blank=True)
     description = models.TextField(blank=True)
+    color = models.CharField(
+        max_length=7,
+        blank=True,
+        default="",
+        help_text="Hex color code for category (e.g., #FF5733) - used for index card styling",
+    )
     parent = models.ForeignKey(
         "self", on_delete=models.CASCADE, null=True, blank=True, related_name="children"
     )

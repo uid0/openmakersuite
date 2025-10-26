@@ -38,24 +38,34 @@ class GeneratedCardFile:
 
 
 class IndexCardRenderer:
-    """Render inventory items into 5x3" horizontal index cards for Avery 5388 sheets."""
+    """Render inventory items into 3x5" vertical index cards, printed 3 across horizontally."""
 
     PAGE_WIDTH, PAGE_HEIGHT = letter
-    CARD_WIDTH = 3 * inch  # 3" wide for horizontal layout
-    CARD_HEIGHT = 5 * inch  # 5" tall for horizontal layout
-    TOP_MARGIN = 0.5 * inch  # Reduced for more cards per page
-    LEFT_MARGIN = 0.5 * inch  # Left margin for first card
-    VERTICAL_GAP = 0.25 * inch  # Space between cards
+    CARD_WIDTH = 3 * inch  # 3" wide for vertical layout
+    CARD_HEIGHT = 5 * inch  # 5" tall for vertical layout
+    TOP_MARGIN = 0.5 * inch
+    LEFT_MARGIN = 0.75 * inch  # Left margin for first card
+    HORIZONTAL_GAP = 0.25 * inch  # Space between cards when printing horizontally
     CARD_PADDING = 0.25 * inch
-    IMAGE_MAX_WIDTH = 1.5 * inch  # Smaller for horizontal layout
-    IMAGE_MAX_HEIGHT = 1.5 * inch  # Smaller for horizontal layout
-    QR_CODE_SIZE = 1.4 * inch  # Slightly smaller for horizontal layout
+    IMAGE_MAX_WIDTH = 2.0 * inch  # Larger for vertical layout
+    IMAGE_MAX_HEIGHT = 1.5 * inch  # Max height for vertical layout
+    QR_CODE_SIZE = 1.2 * inch  # Sized for vertical layout
 
-    CALL_TO_ACTION = "Need to Re-Order? Scan this code to let Logistics know!"
+    CALL_TO_ACTION = "Need to Re-Order?\nScan the QR code above to notify Logistics!"
 
-    def __init__(self, base_url: str | None = None, blank_cards: bool = False) -> None:
-        self.base_url = base_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
-        self.blank_cards = blank_cards  # For blank cards with just QR codes
+    def __init__(
+        self, base_url: str | None = None, blank_cards: bool = False
+    ) -> None:
+        """Initialize the renderer with base URL and card type.
+
+        Args:
+            base_url: Base URL for QR codes (defaults to FRONTEND_URL setting)
+            blank_cards: If True, render blank cards with only QR codes
+        """
+        self.base_url = base_url or getattr(
+            settings, "FRONTEND_URL", "http://localhost:3000"
+        )
+        self.blank_cards = blank_cards
         self._title_style = ParagraphStyle(
             name="CardTitle",
             fontName="Helvetica-Bold",
@@ -97,10 +107,12 @@ class IndexCardRenderer:
         return buffer.getvalue()
 
     def render_batch_to_storage(
-        self, items: Sequence[InventoryItem], filename: str | None = None, blank_cards: bool = False
+        self,
+        items: Sequence[InventoryItem],
+        filename: str | None = None,
+        blank_cards: bool = False,
     ) -> GeneratedCardFile:
         """Render cards for a sequence of items and persist the PDF."""
-
         if not items:
             raise ValueError("At least one item is required to render index cards.")
 
@@ -131,56 +143,65 @@ class IndexCardRenderer:
             absolute_path=absolute_path,
         )
 
-    def render_to_bytes(self, items: Sequence[InventoryItem], blank_cards: bool = False) -> bytes:
+    def render_to_bytes(
+        self, items: Sequence[InventoryItem], blank_cards: bool = False
+    ) -> bytes:
         """Render cards to PDF bytes without saving to storage."""
-
         self.blank_cards = blank_cards
         buffer = BytesIO()
         self._render_to_canvas(items, buffer)
         return buffer.getvalue()
 
-    def encode_preview(self, item: InventoryItem, blank_card: bool = False) -> str:
+    def encode_preview(
+        self, item: InventoryItem, blank_card: bool = False
+    ) -> str:
         """Return a base64 encoded preview PDF for quick display."""
-
         pdf_bytes = self.render_preview(item, blank_card)
         return base64.b64encode(pdf_bytes).decode("ascii")
 
     # ------------------------------------------------------------------
     # Internal rendering helpers
     # ------------------------------------------------------------------
-    def _render_to_canvas(self, items: Sequence[InventoryItem], buffer: BytesIO) -> None:
+    def _render_to_canvas(
+        self, items: Sequence[InventoryItem], buffer: BytesIO
+    ) -> None:
         pdf_canvas = canvas.Canvas(buffer, pagesize=letter)
 
-        for page_items in self._chunk(items, 3):  # 3 horizontal cards per page
+        for page_items in self._chunk(items, 3):  # 3 vertical cards per page
             self._draw_page(pdf_canvas, page_items)
             pdf_canvas.showPage()
 
         pdf_canvas.save()
         buffer.seek(0)
 
-    def _draw_page(self, pdf_canvas: canvas.Canvas, items: Sequence[InventoryItem]) -> None:
-        # Draw 3 horizontal cards per page with proper spacing and cutting marks
+    def _draw_page(
+        self, pdf_canvas: canvas.Canvas, items: Sequence[InventoryItem]
+    ) -> None:
+        # Draw 3 vertical cards horizontally across the page
         cards_per_page = 3
 
-        # Calculate spacing to fit 3 cards with margins
-        available_height = self.PAGE_HEIGHT - 2 * self.TOP_MARGIN
-        card_spacing = (available_height - 3 * self.CARD_HEIGHT) / 2
+        # Calculate horizontal spacing to fit 3 cards across
+        available_width = self.PAGE_WIDTH - 2 * self.LEFT_MARGIN
+        card_spacing = (available_width - 3 * self.CARD_WIDTH) / 2
 
         for index, item in enumerate(items):
-            # Calculate vertical position - cards stack vertically with even spacing
-            y_offset = (
-                self.PAGE_HEIGHT
-                - self.TOP_MARGIN
-                - self.CARD_HEIGHT
-                - index * (self.CARD_HEIGHT + card_spacing)
+            # Calculate horizontal position - cards placed side by side
+            x_offset = (
+                self.LEFT_MARGIN + index * (self.CARD_WIDTH + card_spacing)
             )
-            self._draw_card(pdf_canvas, item, self.LEFT_MARGIN, y_offset)
+            # Center cards vertically on page
+            y_offset = (self.PAGE_HEIGHT - self.CARD_HEIGHT) / 2
+            self._draw_card(pdf_canvas, item, x_offset, y_offset)
 
         # Add cutting marks for plain cardstock
         self._draw_cutting_marks(pdf_canvas, cards_per_page, card_spacing)
 
     def _draw_card(
-        self, pdf_canvas: canvas.Canvas, item: InventoryItem, origin_x: float, origin_y: float
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        origin_x: float,
+        origin_y: float,
     ) -> None:
         pdf_canvas.roundRect(
             origin_x,
@@ -214,94 +235,137 @@ class IndexCardRenderer:
                 preserveAspectRatio=True,
             )
         else:
-            # Detailed cards with full information
-            # Title - centered at top for horizontal layout
+            # Detailed cards with full information - vertical layout
+            current_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING
+
+            # Title - centered at top for vertical layout
             title_para = Paragraph(item.name, self._title_style)
-            title_width, title_height = title_para.wrap(available_width, self.CARD_HEIGHT / 4)
-            # Ensure title doesn't exceed card bounds
-            title_width = min(title_width, available_width - 20)
-            title_top = origin_y + self.CARD_HEIGHT - self.CARD_PADDING - title_height
-            title_x = origin_x + self.CARD_WIDTH / 2  # Center horizontally
-            title_para.drawOn(pdf_canvas, title_x - title_width / 2, title_top)
+            title_width, title_height = title_para.wrap(
+                available_width, self.CARD_HEIGHT / 4
+            )
+            title_width = min(title_width, available_width)
+            title_x = origin_x + (self.CARD_WIDTH - title_width) / 2
+            title_para.drawOn(pdf_canvas, title_x, current_y - title_height)
+            current_y -= title_height + 12
 
-            # Image placement - left side for horizontal layout
-            image_top = origin_y + self.CARD_HEIGHT - self.CARD_PADDING - title_height - 18
+            # Image placement - centered below title for vertical layout
             image_drawn_height = 0
-            image_drawn_width = 0
-            if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
-                image_reader = ImageReader(item.image.path)
-                image_width, image_height = image_reader.getSize()
-                scale = min(
-                    self.IMAGE_MAX_WIDTH / image_width,
-                    self.IMAGE_MAX_HEIGHT / image_height,
-                    1,
-                )
-                image_drawn_width = image_width * scale
-                image_drawn_height = image_height * scale
-                image_x = inner_x
-                image_y = image_top - image_drawn_height
-                pdf_canvas.drawImage(
-                    image_reader,
-                    image_x,
-                    image_y,
-                    width=image_drawn_width,
-                    height=image_drawn_height,
-                    preserveAspectRatio=True,
-                    mask="auto",
-                )
-            else:
-                image_drawn_width = self.IMAGE_MAX_WIDTH
-                image_drawn_height = 0
+            if item.image and hasattr(item.image, "path"):
+                if os.path.exists(item.image.path):
+                    image_reader = ImageReader(item.image.path)
+                    image_width, image_height = image_reader.getSize()
+                    scale = min(
+                        self.IMAGE_MAX_WIDTH / image_width,
+                        self.IMAGE_MAX_HEIGHT / image_height,
+                        1,
+                    )
+                    image_drawn_width = image_width * scale
+                    image_drawn_height = image_height * scale
+                    image_x = origin_x + (self.CARD_WIDTH - image_drawn_width) / 2
+                    image_y = current_y - image_drawn_height
+                    pdf_canvas.drawImage(
+                        image_reader,
+                        image_x,
+                        image_y,
+                        width=image_drawn_width,
+                        height=image_drawn_height,
+                        preserveAspectRatio=True,
+                        mask="auto",
+                    )
+                    current_y -= image_drawn_height + 12
 
-            # Text area - right side of image, QR code on far right
-            text_x = inner_x + image_drawn_width + 12
-            qr_x = origin_x + self.CARD_WIDTH - self.CARD_PADDING - self.QR_CODE_SIZE
-            text_area_width = max(qr_x - 12 - text_x, 80)
-
-            # Description - adjusted for horizontal layout and bounds checking
+            # Description - full width for vertical layout
             description_para = Paragraph(item.description, self._body_style)
-            max_desc_height = self.CARD_HEIGHT / 3  # Limit description height
-            _, description_height = description_para.wrap(text_area_width, max_desc_height)
-            description_height = min(description_height, max_desc_height)  # Don't exceed max height
-            description_top = image_top - 12
-            description_para.drawOn(pdf_canvas, text_x, description_top - description_height)
+            max_desc_height = 0.8 * inch  # Limit description height
+            _, description_height = description_para.wrap(
+                available_width, max_desc_height
+            )
+            description_height = min(description_height, max_desc_height)
+            description_para.drawOn(
+                pdf_canvas, inner_x, current_y - description_height
+            )
+            current_y -= description_height + 15
 
-            # Stock information - positioned below description for horizontal layout
-            stats_y_start = description_top - description_height - 15
-            # Ensure stats don't go below card bottom
-            stats_y_start = max(stats_y_start, inner_y + 20)
-
-            desired_stock = self._calculate_desired_stock(item)
-            reorder_threshold = item.minimum_stock
+            # Stock information - full width for vertical layout
+            # Focus on static info suitable for laminated cards
+            target_stock = self._calculate_desired_stock(item)
             info_lines = [
-                f"Stock: {item.current_stock} units",
-                f"Min: {reorder_threshold} | Reorder: {item.reorder_quantity}",
-                f"Target: {desired_stock} units",
+                f"Stock: {target_stock} units (Target)",
+                f"Reorder Qty: {item.reorder_quantity}",
             ]
 
-            self._draw_info_lines(pdf_canvas, info_lines, text_x, stats_y_start, text_area_width)
+            # Add lead time if available
+            if item.average_lead_time:
+                info_lines.append(f"Lead Time: {item.average_lead_time} days")
 
-        # QR code placement (for detailed cards)
-        if not self.blank_cards:
+            self._draw_info_lines(
+                pdf_canvas, info_lines, inner_x, current_y, available_width
+            )
+            # Calculate actual height used by info lines
+            info_lines_height = len(info_lines) * self._highlight_style.leading
+            current_y -= info_lines_height + 20  # Extra spacing after info lines
+
+            # QR code placement - centered for vertical layout, below info lines
+            qr_x = origin_x + (self.CARD_WIDTH - self.QR_CODE_SIZE) / 2
+            qr_y = max(
+                current_y - self.QR_CODE_SIZE - 10, inner_y + 50
+            )  # Reserve space for CTA with more buffer
+
             qr_buffer = self._generate_qr_code(item)
             qr_reader = ImageReader(qr_buffer)
             pdf_canvas.drawImage(
                 qr_reader,
                 qr_x,
-                inner_y,
+                qr_y,
                 width=self.QR_CODE_SIZE,
                 height=self.QR_CODE_SIZE,
                 preserveAspectRatio=True,
             )
 
-            # Call to action - bottom center of card for horizontal layout
-            pdf_canvas.setFont("Helvetica-Bold", 10)
-            call_to_action_y = inner_y + 8
-            pdf_canvas.drawCentredString(
-                origin_x + self.CARD_WIDTH / 2,
-                call_to_action_y,
-                self.CALL_TO_ACTION,
+            # Call to action - below QR code, centered with inverse text
+            # Use category color if available, otherwise use default black
+            if item.category and item.category.color:
+                try:
+                    bg_color = colors.HexColor(item.category.color)
+                except (ValueError, AttributeError):
+                    bg_color = colors.black
+            else:
+                bg_color = colors.black
+
+            # Calculate dimensions for background box
+            cta_lines = self.CALL_TO_ACTION.split("\n")
+            line_height = 14  # Increased for better spacing
+            padding_vertical = 8  # More vertical padding
+            padding_horizontal = 6  # Horizontal padding
+            box_height = len(cta_lines) * line_height + 2 * padding_vertical
+            box_width = available_width - 0.1 * inch  # Wider box
+            box_x = inner_x + 0.05 * inch
+            box_y = qr_y - 14 - box_height + padding_vertical
+
+            # Draw colored background box with rounded corners
+            pdf_canvas.setFillColor(bg_color)
+            pdf_canvas.roundRect(
+                box_x,
+                box_y,
+                box_width,
+                box_height,
+                radius=6,  # Slightly larger radius
+                stroke=0,
+                fill=1,
             )
+
+            # Draw white text on colored background
+            pdf_canvas.setFillColor(colors.white)
+            pdf_canvas.setFont("Helvetica-Bold", 9)
+            cta_y = box_y + box_height - padding_vertical - 10  # Start from top of box
+            for line in cta_lines:
+                pdf_canvas.drawCentredString(
+                    origin_x + self.CARD_WIDTH / 2, cta_y, line
+                )
+                cta_y -= line_height
+
+            # Reset fill color to black for any subsequent drawing
+            pdf_canvas.setFillColor(colors.black)
 
     def _draw_info_lines(
         self,
@@ -340,47 +404,46 @@ class IndexCardRenderer:
 
         pdf_canvas.drawText(text_object)
 
-    def _draw_cutting_marks(self, pdf_canvas: canvas.Canvas, cards_per_page: int, card_spacing: float) -> None:
+    def _draw_cutting_marks(
+        self, pdf_canvas: canvas.Canvas, cards_per_page: int, card_spacing: float
+    ) -> None:
         """Draw cutting marks for plain cardstock."""
-        # Cutting marks for 3 horizontal cards
+        # Cutting marks for 3 vertical cards placed horizontally
         pdf_canvas.setStrokeColor(colors.gray)
         pdf_canvas.setLineWidth(0.5)
 
-        for i in range(cards_per_page + 1):  # Cutting lines between and around cards
-            y_pos = (
-                self.PAGE_HEIGHT
-                - self.TOP_MARGIN
-                - i * (self.CARD_HEIGHT + card_spacing)
-            )
+        # Vertical position for cards (centered on page)
+        y_center = (self.PAGE_HEIGHT - self.CARD_HEIGHT) / 2
 
-            # Left cutting marks
-            pdf_canvas.line(
-                self.LEFT_MARGIN - 0.25 * inch,
-                y_pos,
-                self.LEFT_MARGIN - 0.125 * inch,
-                y_pos
-            )
-            pdf_canvas.line(
-                self.LEFT_MARGIN - 0.25 * inch,
-                y_pos + self.CARD_HEIGHT,
-                self.LEFT_MARGIN - 0.125 * inch,
-                y_pos + self.CARD_HEIGHT
-            )
+        for i in range(cards_per_page + 1):  # Marks between and around cards
+            x_pos = self.LEFT_MARGIN + i * (self.CARD_WIDTH + card_spacing)
 
-            # Right cutting marks
-            right_x = self.LEFT_MARGIN + self.CARD_WIDTH
+            # Top cutting marks
             pdf_canvas.line(
-                right_x + 0.125 * inch,
-                y_pos,
-                right_x + 0.25 * inch,
-                y_pos
+                x_pos,
+                y_center + self.CARD_HEIGHT + 0.125 * inch,
+                x_pos,
+                y_center + self.CARD_HEIGHT + 0.25 * inch,
             )
+            if i < cards_per_page:
+                pdf_canvas.line(
+                    x_pos + self.CARD_WIDTH,
+                    y_center + self.CARD_HEIGHT + 0.125 * inch,
+                    x_pos + self.CARD_WIDTH,
+                    y_center + self.CARD_HEIGHT + 0.25 * inch,
+                )
+
+            # Bottom cutting marks
             pdf_canvas.line(
-                right_x + 0.125 * inch,
-                y_pos + self.CARD_HEIGHT,
-                right_x + 0.25 * inch,
-                y_pos + self.CARD_HEIGHT
+                x_pos, y_center - 0.25 * inch, x_pos, y_center - 0.125 * inch
             )
+            if i < cards_per_page:
+                pdf_canvas.line(
+                    x_pos + self.CARD_WIDTH,
+                    y_center - 0.25 * inch,
+                    x_pos + self.CARD_WIDTH,
+                    y_center - 0.125 * inch,
+                )
 
     def _wrap_text(
         self,
@@ -442,8 +505,12 @@ class IndexCardRenderer:
         return f"index_cards_{timestamp}.pdf"
 
 
-def build_preview_payload(item: InventoryItem, renderer: IndexCardRenderer | None = None, blank_card: bool = False) -> dict:
-    """Helper to build a preview response payload.
+def build_preview_payload(
+    item: InventoryItem,
+    renderer: IndexCardRenderer | None = None,
+    blank_card: bool = False,
+) -> dict:
+    """Build a preview response payload.
 
     Args:
         item: Item to render

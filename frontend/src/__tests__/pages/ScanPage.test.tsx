@@ -49,16 +49,13 @@ describe('ScanPage', () => {
   });
 
   const renderWithRouter = async (itemId = 'test-id-123') => {
-    let component;
-    await act(async () => {
-      component = render(
-        <MemoryRouter initialEntries={[`/scan/${itemId}`]}>
-          <Routes>
-            <Route path="/scan/:itemId" element={<ScanPage />} />
-          </Routes>
-        </MemoryRouter>
-      );
-    });
+    const component = render(
+      <MemoryRouter initialEntries={[`/scan/${itemId}`]}>
+        <Routes>
+          <Route path="/scan/:itemId" element={<ScanPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
     return component;
   };
 
@@ -118,17 +115,13 @@ describe('ScanPage', () => {
     const nameInput = screen.getByLabelText(/your name/i);
     const notesInput = screen.getByLabelText(/notes/i);
 
-    await act(async () => {
-      fireEvent.change(nameInput, { target: { value: 'John Doe' } });
-      fireEvent.change(notesInput, { target: { value: 'Need more stock' } });
-    });
+    fireEvent.change(nameInput, { target: { value: 'John Doe' } });
+    fireEvent.change(notesInput, { target: { value: 'Need more stock' } });
 
     // Submit the form
     const submitButton = screen.getByRole('button', { name: /request 25 units/i });
     
-    await act(async () => {
-      fireEvent.click(submitButton);
-    });
+    fireEvent.click(submitButton);
 
     await waitFor(() => {
       expect(api.reorderAPI.createRequest).toHaveBeenCalledWith({
@@ -156,9 +149,7 @@ describe('ScanPage', () => {
 
     const submitButton = screen.getByRole('button', { name: /request 25 units/i });
     
-    await act(async () => {
-      fireEvent.click(submitButton);
-    });
+    fireEvent.click(submitButton);
 
     await screen.findByText(/reorder request submitted/i);
   });

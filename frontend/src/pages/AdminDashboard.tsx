@@ -2,7 +2,7 @@
  * Admin Dashboard
  * Manage reorder queue, view pending requests, and access supplier cart links
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { reorderAPI } from '../services/api';
 import { ReorderRequest } from '../types';
 import '../styles/AdminDashboard.css';
@@ -13,11 +13,7 @@ const AdminDashboard: React.FC = () => {
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
   const [supplierGroups, setSupplierGroups] = useState<any>(null);
 
-  useEffect(() => {
-    loadRequests();
-  }, [filter]);
-
-  const loadRequests = async () => {
+  const loadRequests = useCallback(async () => {
     try {
       setLoading(true);
       if (filter === 'pending') {
@@ -33,7 +29,11 @@ const AdminDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
+
+  useEffect(() => {
+    loadRequests();
+  }, [loadRequests]);
 
   const loadSupplierGroups = async () => {
     try {

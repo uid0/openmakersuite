@@ -15,7 +15,7 @@ User = get_user_model()
 
 username = "admin"
 email = "admin@localhost"
-password = "admin"
+password = "admin"  # nosec B105 - Hardcoded password is intentional for dev environment only
 
 if User.objects.filter(username=username).exists():
     print(f"✅ User '{username}' already exists!")

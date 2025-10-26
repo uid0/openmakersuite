@@ -1,10 +1,13 @@
 """
 Tests for Celery tasks.
 """
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
+from inventory.tasks import generate_index_card, generate_qr_code, update_average_lead_times
 from inventory.tests.factories import InventoryItemFactory
-from inventory.tasks import generate_qr_code, generate_index_card, update_average_lead_times
 from reorder_queue.tests.factories import ReorderRequestFactory
 
 
@@ -12,7 +15,7 @@ from reorder_queue.tests.factories import ReorderRequestFactory
 class TestInventoryTasks:
     """Tests for inventory Celery tasks."""
 
-    @patch('inventory.utils.qr_generator.save_qr_code_to_item')
+    @patch("inventory.utils.qr_generator.save_qr_code_to_item")
     def test_generate_qr_code_task(self, mock_save_qr):
         """Test QR code generation task."""
         item = InventoryItemFactory()
@@ -22,10 +25,11 @@ class TestInventoryTasks:
         assert f"QR code generated for {item.name}" in result
         mock_save_qr.assert_called_once_with(item)
 
-    @patch('inventory.utils.qr_generator.save_qr_code_to_item')
+    @patch("inventory.utils.qr_generator.save_qr_code_to_item")
     def test_generate_qr_code_task_item_not_found(self, mock_save_qr):
         """Test QR code generation task with non-existent item."""
         import uuid
+
         fake_id = str(uuid.uuid4())  # Valid UUID format but doesn't exist in DB
 
         result = generate_qr_code(fake_id)
@@ -33,22 +37,24 @@ class TestInventoryTasks:
         assert f"Item {fake_id} not found" in result
         mock_save_qr.assert_not_called()
 
-    @patch('inventory.utils.pdf_generator.generate_item_card')
+    @patch("inventory.utils.pdf_generator.generate_item_card")
     def test_generate_index_card_task(self, mock_generate_pdf):
         """Test index card generation task."""
         item = InventoryItemFactory()
         from io import BytesIO
-        mock_generate_pdf.return_value = BytesIO(b'fake pdf')
+
+        mock_generate_pdf.return_value = BytesIO(b"fake pdf")
 
         result = generate_index_card(str(item.id))
 
         assert f"Index card generated for {item.name}" in result
         mock_generate_pdf.assert_called_once_with(item)
 
-    @patch('inventory.utils.pdf_generator.generate_item_card')
+    @patch("inventory.utils.pdf_generator.generate_item_card")
     def test_generate_index_card_task_item_not_found(self, mock_generate_pdf):
         """Test index card generation task with non-existent item."""
         import uuid
+
         fake_id = str(uuid.uuid4())  # Valid UUID format but doesn't exist in DB
 
         result = generate_index_card(fake_id)
@@ -59,6 +65,7 @@ class TestInventoryTasks:
     def test_update_average_lead_times_task(self):
         """Test updating average lead times based on historical data."""
         from datetime import timedelta
+
         from django.utils import timezone
 
         # Create item
@@ -69,10 +76,7 @@ class TestInventoryTasks:
         delivery_date = (ordered_date + timedelta(days=10)).date()
 
         ReorderRequestFactory(
-            item=item,
-            status='received',
-            ordered_at=ordered_date,
-            actual_delivery=delivery_date
+            item=item, status="received", ordered_at=ordered_date, actual_delivery=delivery_date
         )
 
         # Second request with different lead time
@@ -80,10 +84,7 @@ class TestInventoryTasks:
         delivery_date2 = (ordered_date2 + timedelta(days=8)).date()
 
         ReorderRequestFactory(
-            item=item,
-            status='received',
-            ordered_at=ordered_date2,
-            actual_delivery=delivery_date2
+            item=item, status="received", ordered_at=ordered_date2, actual_delivery=delivery_date2
         )
 
         result = update_average_lead_times()
@@ -107,10 +108,10 @@ class TestInventoryTasks:
         item = InventoryItemFactory(average_lead_time=7)
 
         # Pending request should be ignored
-        ReorderRequestFactory(item=item, status='pending')
+        ReorderRequestFactory(item=item, status="pending")
 
         # Approved request should be ignored
-        ReorderRequestFactory(item=item, status='approved')
+        ReorderRequestFactory(item=item, status="approved")
 
         result = update_average_lead_times()
 

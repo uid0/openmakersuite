@@ -62,6 +62,11 @@ repos:
       - id: django-upgrade
         args: ["--target-version", "4.2"]
 
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.2
+    hooks:
+      - id: gitleaks
+
 # CI configuration
 ci:
   autofix_commit_msg: |

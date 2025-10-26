@@ -1,0 +1,32 @@
+name: Publish Sentry Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  create-release:
+    name: Create Sentry Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Sentry CLI
+        run: |
+          curl -sL https://sentry.io/get-cli/ | bash
+          echo "$HOME/.sentrycli/bin" >> "$GITHUB_PATH"
+
+      - name: Create release in Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: openmakersuite
+          SENTRY_PROJECT: oms-backend
+        run: |
+          VERSION=$(sentry-cli releases propose-version)
+          echo "Using version $VERSION"
+          sentry-cli releases new "$VERSION"
+          sentry-cli releases set-commits "$VERSION" --auto
+          sentry-cli releases finalize "$VERSION"

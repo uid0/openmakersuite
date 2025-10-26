@@ -2,7 +2,7 @@
  * QR Code Scan Page
  * Shows item details and allows users to submit reorder requests
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { inventoryAPI, reorderAPI } from '../services/api';
 import { InventoryItem } from '../types';
@@ -21,13 +21,7 @@ const ScanPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  useEffect(() => {
-    if (itemId) {
-      loadItem();
-    }
-  }, [itemId]);
-
-  const loadItem = async () => {
+  const loadItem = useCallback(async () => {
     try {
       setLoading(true);
       const response = await inventoryAPI.getItem(itemId!);
@@ -39,7 +33,13 @@ const ScanPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [itemId]);
+
+  useEffect(() => {
+    if (itemId) {
+      loadItem();
+    }
+  }, [itemId, loadItem]);
 
   const handleSubmitReorder = async (e: React.FormEvent) => {
     e.preventDefault();

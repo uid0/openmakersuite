@@ -7,7 +7,6 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 from typing import Any, Optional
-from uuid import UUID
 
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -87,6 +86,12 @@ class Supplier(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    @property
+    def items(self):
+        """Backwards-compatible access to supplied items."""
+
+        return self.supplied_items
 
 
 class Category(models.Model):
@@ -245,8 +250,67 @@ class InventoryItem(models.Model):
     @property
     def primary_supplier(self) -> Optional[Supplier]:
         """Get the primary (preferred) supplier."""
-        item_supplier = self.item_suppliers.filter(is_primary=True).first()
-        return item_supplier.supplier if item_supplier else None
+        link = self.primary_item_supplier
+        return link.supplier if link else None
+
+    @property
+    def primary_item_supplier(self) -> Optional["ItemSupplier"]:
+        """Return the preferred ItemSupplier relationship if available."""
+
+        item_supplier = (
+            self.item_suppliers.select_related("supplier").filter(is_primary=True).first()
+        )
+        if item_supplier:
+            return item_supplier
+        return self.item_suppliers.select_related("supplier").first()
+
+    @property
+    def supplier(self) -> Optional[Supplier]:
+        """Backwards-compatible access to the primary supplier."""
+
+        return self.primary_supplier
+
+    @property
+    def supplier_sku(self) -> Optional[str]:
+        """Expose the primary supplier SKU for compatibility with legacy code."""
+
+        link = self.primary_item_supplier
+        return link.supplier_sku if link else None
+
+    @property
+    def supplier_url(self) -> Optional[str]:
+        """Expose the primary supplier URL for compatibility."""
+
+        link = self.primary_item_supplier
+        return link.supplier_url if link else None
+
+    @property
+    def unit_cost(self) -> Optional[Decimal]:
+        """Provide the primary supplier's unit cost when available."""
+
+        link = self.primary_item_supplier
+        return link.unit_cost if link else None
+
+    @property
+    def average_lead_time(self) -> Optional[int]:
+        """Expose the primary supplier's lead time for compatibility."""
+
+        link = self.primary_item_supplier
+        return link.average_lead_time if link else None
+
+    @property
+    def package_cost(self) -> Optional[Decimal]:
+        """Expose the primary supplier's package cost when available."""
+
+        link = self.primary_item_supplier
+        return link.package_cost if link else None
+
+    @property
+    def quantity_per_package(self) -> Optional[int]:
+        """Expose the primary supplier's quantity per package when available."""
+
+        link = self.primary_item_supplier
+        return link.quantity_per_package if link else None
 
 
 class ItemSupplier(models.Model):
@@ -268,12 +332,34 @@ class ItemSupplier(models.Model):
     supplier_url = models.URLField(
         blank=True, help_text="Direct link to product on supplier's website"
     )
+    package_upc = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text="UPC/EAN printed on the packaged quantity received from this supplier",
+    )
+    unit_upc = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text="UPC/EAN for individual units when different from the package barcode",
+    )
+    quantity_per_package = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Number of individual units included in one package from this supplier",
+    )
     unit_cost = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Cost per unit from this supplier",
+        help_text="Cost per individual unit from this supplier (auto-calculated from package cost)",
+    )
+    package_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Total cost for one package from this supplier (what you actually pay)",
     )
     average_lead_time = models.PositiveIntegerField(
         default=7, help_text="Average lead time in days from this supplier"
@@ -305,7 +391,23 @@ class ItemSupplier(models.Model):
         return f"{self.item.name} - {self.supplier.name}{primary}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Ensure only one primary supplier per item."""
+        """
+        Ensure only one primary supplier per item and auto-calculate unit cost.
+
+        If package_cost is provided, calculate unit_cost automatically.
+        If only unit_cost is provided (backward compatibility), calculate package_cost.
+        """
+        # Auto-calculate unit cost from package cost
+        if self.package_cost is not None and self.quantity_per_package > 0:
+            self.unit_cost = self.package_cost / self.quantity_per_package
+        # Backward compatibility: if only unit_cost is provided, calculate package_cost
+        elif (
+            self.unit_cost is not None
+            and self.package_cost is None
+            and self.quantity_per_package > 0
+        ):
+            self.package_cost = self.unit_cost * self.quantity_per_package
+
         if self.is_primary:
             # Remove primary flag from other suppliers for this item
             ItemSupplier.objects.filter(item=self.item, is_primary=True).exclude(pk=self.pk).update(

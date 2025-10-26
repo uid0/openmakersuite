@@ -26,4 +26,4 @@ djangorestframework-stubs==3.14.5
 # Enhanced Testing
 pytest-xdist==3.5.0  # Parallel test execution
 pytest-timeout==2.2.0  # Test timeouts
-freezegun==1.4.0  # Already in main requirements but worth noting
+freezegun==1.5.1  # Already in main requirements but worth noting

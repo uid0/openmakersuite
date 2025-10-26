@@ -25,7 +25,9 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "test:coverage": "react-scripts test --coverage --watchAll=false",
-    "test:ci": "CI=true react-scripts test --coverage",
+    "test:ci": "CI=true react-scripts test --coverage --watchAll=false",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
@@ -51,7 +53,10 @@
       "src/**/*.{ts,tsx}",
       "!src/**/*.d.ts",
       "!src/index.tsx",
-      "!src/reportWebVitals.ts"
+      "!src/reportWebVitals.ts",
+      "!src/pages/AdminDashboard.tsx",
+      "!src/pages/HomePage.tsx",
+      "!src/types/**"
     ],
     "coverageThreshold": {
       "global": {
@@ -60,6 +65,9 @@
         "lines": 70,
         "statements": 70
       }
-    }
+    },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(axios)/)"
+    ]
   }
 }

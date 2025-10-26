@@ -1,16 +1,18 @@
 """
 PDF generation utilities for 3x5 inch index cards.
 """
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
-from reportlab.lib import colors
-from reportlab.platypus import Paragraph
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from io import BytesIO
-from PIL import Image as PILImage
+
 import textwrap
+from io import BytesIO
+
+from PIL import Image as PILImage
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph
 
 
 def generate_item_card(item):
@@ -77,7 +79,9 @@ def generate_item_card(item):
     info_items = []
 
     if item.location:
-        info_items.append(f"Location: {item.location[:20]}")
+        location_name = getattr(item.location, "name", str(item.location))
+        if location_name:
+            info_items.append(f"Location: {location_name[:20]}")
     if item.sku:
         info_items.append(f"SKU: {item.sku}")
     if item.supplier:
@@ -96,8 +100,15 @@ def generate_item_card(item):
         try:
             # Try to load and draw the image
             img = ImageReader(item.image.path)
-            c.drawImage(img, image_x, image_y, width=image_size, height=image_size,
-                       preserveAspectRatio=True, mask='auto')
+            c.drawImage(
+                img,
+                image_x,
+                image_y,
+                width=image_size,
+                height=image_size,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
         except Exception as e:
             # If image fails, draw a placeholder
             c.setStrokeColor(colors.grey)
@@ -112,8 +123,9 @@ def generate_item_card(item):
     if item.qr_code:
         try:
             qr_img = ImageReader(item.qr_code.path)
-            c.drawImage(qr_img, image_x, qr_y, width=qr_size, height=qr_size,
-                       preserveAspectRatio=True)
+            c.drawImage(
+                qr_img, image_x, qr_y, width=qr_size, height=qr_size, preserveAspectRatio=True
+            )
         except Exception as e:
             # Draw placeholder for QR
             c.setStrokeColor(colors.grey)

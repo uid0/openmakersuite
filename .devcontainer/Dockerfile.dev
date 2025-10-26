@@ -1,0 +1,68 @@
+# Use Ubuntu 22.04 to match GitHub Actions ubuntu-latest
+FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV NODE_VERSION=18
+ENV PYTHON_VERSION=3.11
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    # Python dependencies
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-dev \
+    python${PYTHON_VERSION}-venv \
+    python3-pip \
+    # Build tools
+    build-essential \
+    git \
+    curl \
+    wget \
+    # PostgreSQL client
+    postgresql-client \
+    # Redis client
+    redis-tools \
+    # Additional utilities
+    vim \
+    nano \
+    htop \
+    tree \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symlinks for python3 and pip3 to match CI
+RUN ln -sf /usr/bin/python${PYTHON_VERSION} /usr/bin/python3 && \
+    ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python
+
+# Install Node.js 18 (matching CI)
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+    apt-get install -y nodejs
+
+# Verify versions match CI
+RUN python3 --version && \
+    node --version && \
+    npm --version
+
+# Install global npm packages for development
+RUN npm install -g npm@latest
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Install Python development tools (matching CI requirements)
+COPY requirements.dev.txt /tmp/
+RUN pip3 install --no-cache-dir -r /tmp/requirements.dev.txt
+
+# Set up non-root user (vscode user is created by base image)
+USER vscode
+
+# Create common directories
+RUN mkdir -p /home/vscode/.local/bin && \
+    mkdir -p /home/vscode/.vscode-server
+
+# Set PATH
+ENV PATH="/home/vscode/.local/bin:$PATH"
+
+# Default command (will be overridden by devcontainer)
+CMD ["/bin/bash"]

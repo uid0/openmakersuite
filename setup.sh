@@ -16,8 +16,12 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Check if Docker Compose is installed
-if ! command -v docker-compose &> /dev/null; then
+# Determine Docker Compose command (Compose V2 plugin preferred)
+if docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker compose)
+elif command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE=(docker-compose)
+else
     echo "Error: Docker Compose is not installed. Please install Docker Compose first."
     exit 1
 fi
@@ -42,11 +46,11 @@ fi
 
 # Build and start containers
 echo "Building Docker containers..."
-docker-compose build
+"${DOCKER_COMPOSE[@]}" build
 
 echo ""
 echo "Starting containers..."
-docker-compose up -d
+"${DOCKER_COMPOSE[@]}" up -d
 
 echo ""
 echo "Waiting for database to be ready..."
@@ -54,15 +58,15 @@ sleep 10
 
 # Run migrations
 echo "Running database migrations..."
-docker-compose exec -T backend python manage.py migrate
+"${DOCKER_COMPOSE[@]}" exec -T backend python manage.py migrate
 
 echo ""
 echo "Creating cache table..."
-docker-compose exec -T backend python manage.py createcachetable || true
+"${DOCKER_COMPOSE[@]}" exec -T backend python manage.py createcachetable || true
 
 echo ""
 echo "Collecting static files..."
-docker-compose exec -T backend python manage.py collectstatic --noinput
+"${DOCKER_COMPOSE[@]}" exec -T backend python manage.py collectstatic --noinput
 
 echo ""
 echo "=========================================="
@@ -71,7 +75,7 @@ echo "=========================================="
 echo ""
 echo "Next steps:"
 echo "1. Create a superuser account:"
-echo "   docker-compose exec backend python manage.py createsuperuser"
+echo "   ${DOCKER_COMPOSE[*]} exec backend python manage.py createsuperuser"
 echo ""
 echo "2. Access the application:"
 echo "   - Frontend: http://localhost:3000"
@@ -79,8 +83,8 @@ echo "   - Django Admin: http://localhost:8000/admin"
 echo "   - API Docs: http://localhost:8000/api/docs/"
 echo ""
 echo "3. To stop the application:"
-echo "   docker-compose down"
+echo "   ${DOCKER_COMPOSE[*]} down"
 echo ""
 echo "4. To view logs:"
-echo "   docker-compose logs -f"
+echo "   ${DOCKER_COMPOSE[*]} logs -f"
 echo ""

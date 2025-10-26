@@ -1,14 +1,17 @@
 """
 Tests for QR code and PDF generation utilities.
 """
-import pytest
+
 from io import BytesIO
-from PIL import Image
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 
+import pytest
+from PIL import Image
+
 from inventory.tests.factories import InventoryItemFactory
+from inventory.utils.pdf_generator import generate_bulk_cards, generate_item_card
 from inventory.utils.qr_generator import generate_qr_code_image, save_qr_code_to_item
-from inventory.utils.pdf_generator import generate_item_card, generate_bulk_cards
 
 
 @pytest.mark.unit
@@ -17,7 +20,7 @@ class TestQRCodeGeneration:
 
     def test_generate_qr_code_image(self):
         """Test generating a QR code image."""
-        item_id = 'test-uuid-1234'
+        item_id = "test-uuid-1234"
         qr_buffer = generate_qr_code_image(item_id)
 
         assert isinstance(qr_buffer, BytesIO)
@@ -25,14 +28,14 @@ class TestQRCodeGeneration:
 
         # Verify it's a valid image
         img = Image.open(qr_buffer)
-        assert img.format == 'PNG'
+        assert img.format == "PNG"
         assert img.size[0] > 0
         assert img.size[1] > 0
 
     def test_generate_qr_code_with_custom_url(self):
         """Test generating QR code with custom base URL."""
-        item_id = 'test-uuid-1234'
-        base_url = 'https://custom.example.com'
+        item_id = "test-uuid-1234"
+        base_url = "https://custom.example.com"
         qr_buffer = generate_qr_code_image(item_id, base_url=base_url)
 
         assert isinstance(qr_buffer, BytesIO)
@@ -47,7 +50,7 @@ class TestQRCodeGeneration:
         # Verify QR code was saved
         item.refresh_from_db()
         assert item.qr_code
-        assert item.qr_code.name.startswith('inventory/qrcodes/qr_')
+        assert item.qr_code.name.startswith("inventory/qrcodes/qr_")
 
 
 @pytest.mark.unit
@@ -57,10 +60,10 @@ class TestPDFGeneration:
     def test_generate_item_card(self):
         """Test generating a 3x5 index card PDF."""
         item = InventoryItemFactory(
-            name='Test Widget',
-            description='A test item for PDF generation',
+            name="Test Widget",
+            description="A test item for PDF generation",
             reorder_quantity=25,
-            location='Shelf A'
+            location="Shelf A",
         )
 
         pdf_buffer = generate_item_card(item)
@@ -110,9 +113,9 @@ class TestPDFGeneration:
     def test_generate_card_handles_long_text(self):
         """Test PDF generation handles long text gracefully."""
         item = InventoryItemFactory(
-            name='A' * 100,  # Very long name
-            description='B' * 500,  # Very long description
-            location='C' * 100  # Very long location
+            name="A" * 100,  # Very long name
+            description="B" * 500,  # Very long description
+            location="C" * 100,  # Very long location
         )
 
         pdf_buffer = generate_item_card(item)

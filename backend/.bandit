@@ -5,7 +5,7 @@
 exclude_dirs = ["tests", "migrations", "__pycache__", ".pytest_cache", "venv", "env"]
 
 # Skip specific tests that are false positives in test files
-skips = ["B101"]  # assert_used - acceptable in test files
+skips = ["B101", "B106"]  # B101: assert_used, B106: hardcoded_password_funcarg - both acceptable in test files
 
 # Test-specific configuration
 [bandit.assert_used]

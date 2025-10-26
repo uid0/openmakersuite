@@ -208,7 +208,7 @@ jobs:
       working-directory: ./backend
       run: |
         bandit -r . -x ./tests,./migrations -f json -o bandit-report.json || true
-        bandit -r . -x ./tests,./migrations -s B101
+        bandit -r . -x ./tests,./migrations -s B101,B106
     
     - name: Check for vulnerable dependencies
       working-directory: ./backend

@@ -33,6 +33,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     total_value = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     image = serializers.ImageField(read_only=True)
     thumbnail = serializers.SerializerMethodField()
+    qr_code_url = serializers.SerializerMethodField()
     supplier = serializers.SerializerMethodField()
 
     class Meta:
@@ -44,6 +45,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "sku",
             "image",
             "thumbnail",
+            "qr_code_url",
             "category",
             "category_name",
             "location",
@@ -81,6 +83,14 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
         supplier = obj.supplier
         return str(supplier.pk) if supplier else None
+
+    def get_qr_code_url(self, obj):
+        """Return the QR code URL when available."""
+
+        try:
+            return obj.qr_code.url if obj.qr_code else None
+        except Exception:
+            return None
 
 
 class InventoryItemDetailSerializer(InventoryItemSerializer):

@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import ReorderRequest
@@ -28,9 +28,11 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         return ReorderRequestSerializer
 
     def get_permissions(self):
-        """Allow anyone to create reorder requests, but require auth for updates."""
-        if self.action == "create":
-            return []
+        """Allow anyone to create reorder requests and view pending, but require auth for admin actions."""
+        # Public actions that don't require authentication
+        if self.action in ["create", "list", "retrieve", "pending"]:
+            return [AllowAny()]
+        # Admin actions require authentication
         return [IsAuthenticated()]
 
     def create(self, request, *args, **kwargs):
@@ -48,11 +50,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def pending(self, request):
         """Get all pending reorder requests."""
+        # Return all pending requests without pagination for admin dashboard
         pending = self.queryset.filter(status="pending").order_by("-priority", "requested_at")
-        page = self.paginate_queryset(pending)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
         serializer = self.get_serializer(pending, many=True)
         return Response(serializer.data)
 

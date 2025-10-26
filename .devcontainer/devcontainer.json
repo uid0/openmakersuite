@@ -1,84 +1,49 @@
 {
   "name": "OpenMakerSuite Development",
-  "dockerComposeFile": [
-    "../docker-compose.yml",
-    "docker-compose.dev.yml"
-  ],
-  "service": "devcontainer",
-  "workspaceFolder": "/workspace",
-  
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
   "features": {
-    "ghcr.io/devcontainers/features/git:1": {
-      "ppa": true,
-      "version": "latest"
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11",
+      "installTools": true
     },
-    "ghcr.io/devcontainers/features/github-cli:1": {
-      "version": "latest"
-    }
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "18",
+      "nodeGypDependencies": true,
+      "installYarnUsingApt": true
+    },
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
 
   "customizations": {
     "vscode": {
       "extensions": [
-        // Python extensions
         "ms-python.python",
         "ms-python.flake8",
         "ms-python.black-formatter",
         "ms-python.isort",
-        "ms-toolsai.jupyter",
-        
-        // JavaScript/TypeScript extensions
-        "ms-vscode.vscode-typescript-next",
-        "bradlc.vscode-tailwindcss",
         "esbenp.prettier-vscode",
         "dbaeumer.vscode-eslint",
-        
-        // React extensions
-        "burkeholland.simple-react-snippets",
-        "ms-vscode.vscode-json",
-        
-        // Docker extensions
         "ms-azuretools.vscode-docker",
-        
-        // Git extensions
         "eamodio.gitlens",
-        
-        // Testing extensions
-        "ms-vscode.test-adapter-converter",
-        
-        // General productivity
-        "christian-kohler.path-intellisense",
-        "ms-vscode.vscode-json",
-        "redhat.vscode-yaml"
+        "ms-vscode.vscode-json"
       ],
-      
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
         "python.linting.enabled": true,
         "python.linting.flake8Enabled": true,
         "python.formatting.provider": "black",
         "python.sortImports.args": ["--profile", "black"],
-        
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
           "source.organizeImports": "explicit",
           "source.fixAll.eslint": "explicit"
-        },
-        
-        "eslint.workingDirectories": ["frontend"],
-        "eslint.validate": [
-          "javascript",
-          "javascriptreact",
-          "typescript",
-          "typescriptreact"
-        ],
-        
-        "typescript.preferences.importModuleSpecifier": "relative"
+        }
       }
     }
   },
 
-  "forwardPorts": [3000, 8000, 5432, 6379],
+  "forwardPorts": [3000, 8000],
   "portsAttributes": {
     "3000": {
       "label": "Frontend (React)",
@@ -87,22 +52,13 @@
     "8000": {
       "label": "Backend (Django)",
       "onAutoForward": "notify"
-    },
-    "5432": {
-      "label": "PostgreSQL Database",
-      "onAutoForward": "silent"
-    },
-    "6379": {
-      "label": "Redis Cache",
-      "onAutoForward": "silent"
     }
   },
 
-  "postCreateCommand": ".devcontainer/setup.sh",
-  
+  "postCreateCommand": ".devcontainer/post-create.sh",
   "remoteUser": "vscode",
-  
+
   "mounts": [
-    "source=${localWorkspaceFolder}/.git,target=/workspace/.git,type=bind,consistency=cached"
+    "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
   ]
 }

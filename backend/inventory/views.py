@@ -9,7 +9,7 @@ from django.http import HttpResponse
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from .models import Category, InventoryItem, ItemSupplier, Location, Supplier, UsageLog
@@ -47,7 +47,14 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         .prefetch_related("item_suppliers__supplier")
         .all()
     )
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_permissions(self):
+        """Allow public access for reading and common actions, require auth for admin operations."""
+        # Public/common actions
+        if self.action in ["list", "retrieve", "low_stock", "download_card", "log_usage", "generate_qr"]:
+            return [AllowAny()]
+        # Admin actions (create, update, delete)
+        return [IsAuthenticated()]
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -87,8 +94,31 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     def generate_qr(self, request, pk=None):
         """Generate QR code for an item."""
         item = self.get_object()
-        generate_qr_code.delay(str(item.id))
-        return Response({"status": "QR code generation started"})
+
+        # Generate QR code synchronously for immediate response
+        from .utils.qr_generator import save_qr_code_to_item
+
+        try:
+            save_qr_code_to_item(item)
+            return Response({
+                "status": "QR code generated successfully",
+                "qr_code_url": request.build_absolute_uri(item.qr_code.url) if item.qr_code else None
+            })
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+    @action(detail=True, methods=["get"])
+    def qr_code(self, request, pk=None):
+        """Get QR code image for an item."""
+        item = self.get_object()
+
+        if not item.qr_code:
+            return Response({"error": "QR code not generated yet"}, status=404)
+
+        from django.http import HttpResponse
+        response = HttpResponse(item.qr_code.read(), content_type="image/png")
+        response["Content-Disposition"] = f'inline; filename="qr_{item.sku or item.id}.png"'
+        return response
 
     @action(detail=True, methods=["get"])
     def download_card(self, request, pk=None):

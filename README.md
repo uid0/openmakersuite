@@ -108,34 +108,69 @@ An open-source inventory management system designed specifically for makerspaces
 
 ### Option 1: DevContainer (Recommended)
 
-For the most consistent development experience that matches CI exactly:
+**Zero-setup development environment that matches CI exactly.**
 
 1. **Prerequisites:**
-   - Docker Desktop
-   - VS Code with Dev Containers extension
+   - Docker Desktop (running)
+   - VS Code with "Dev Containers" extension
 
-2. **Setup:**
+2. **One-Click Setup:**
    ```bash
    git clone https://github.com/yourusername/makerspace-inventory.git
    code makerspace-inventory
-   # VS Code will prompt to reopen in container
+   # Click "Reopen in Container" when prompted
    ```
 
-3. **Benefits:**
-   - Matches CI environment exactly (Ubuntu 22.04, Python 3.11, Node.js 18)
-   - Pre-configured VS Code extensions and settings
-   - Eliminates platform-specific issues between macOS/Windows/Linux
-   - See [DevContainer Setup Guide](.devcontainer/README.md) for details
+3. **What you get:**
+   - ✅ Instant development environment (first build ~5-7 minutes)
+   - ✅ All dependencies pre-installed (Python 3.11, Node.js 18)
+   - ✅ SQLite database and Redis ready to use
+   - ✅ VS Code extensions and settings configured
+   - ✅ Helper scripts: `./dev-commands.sh run-backend`
+   - ✅ Matches CI exactly (eliminates "works on my machine")
+   - 📖 See [DevContainer Guide](.devcontainer/README.md) for full details
+
+4. **Verify Setup:**
+   ```bash
+   # Check if everything is working
+   ./verify-setup.sh
+   ```
 
 ### Option 2: Local Development
 
-If you prefer local development, ensure you have:
+**Fast setup with one script:**
+
+```bash
+./quick-start.sh
+```
+
+This automatically:
+- Creates `.env` file with development settings (including `DEVELOPMENT_MODE=1`)
+- Installs Python and Node dependencies
+- Runs database migrations
+- Creates development superuser (`admin`/`admin`)
+- Checks Redis status
+
+**Then start the services:**
+
+```bash
+# Terminal 1: Backend
+cd backend && python manage.py runserver
+
+# Terminal 2: Frontend
+cd frontend && npm start
+
+# Terminal 3 (optional): Celery worker
+cd backend && celery -A config worker -l info
+```
+
+**Prerequisites:**
 - Python 3.11
 - Node.js 18
-- PostgreSQL 15
+- SQLite (usually pre-installed)
 - Redis 7
 
-Follow the Quick Start guide above, then install dependencies locally.
+**Authentication:** With `DEVELOPMENT_MODE=1`, the API allows unauthenticated access for easier development. See [DEV_AUTH_GUIDE.md](./DEV_AUTH_GUIDE.md) for authentication options.
 
 ## Usage Guide
 

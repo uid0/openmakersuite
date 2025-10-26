@@ -20,6 +20,10 @@ SECRET_KEY = config("SECRET_KEY", default="django-insecure-dev-key-change-in-pro
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
 
+# Development mode - allows unauthenticated API access for easier development
+# ⚠️ NEVER enable this in production!
+DEVELOPMENT_MODE = config("DEVELOPMENT_MODE", default=False, cast=bool)
+
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
 
 # Application definition
@@ -120,7 +124,11 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticatedOrReadOnly",),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.AllowAny",
+    )
+    if DEVELOPMENT_MODE
+    else ("rest_framework.permissions.IsAuthenticatedOrReadOnly",),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
@@ -131,6 +139,37 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+
+# Allow credentials for session authentication
+CORS_ALLOW_CREDENTIALS = True
+
+# Allow all standard HTTP methods
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+
+# Allow all common headers
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+
+# In development mode, allow all origins for easier testing
+if DEVELOPMENT_MODE:
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOW_CREDENTIALS = True
 
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 
@@ -165,7 +204,7 @@ SPECTACULAR_SETTINGS = {
 }
 
 # Sentry Configuration
-SENTRY_DSN = config("SENTRY_DSN", default="")
+SENTRY_DSN = config("SENTRY_DSN", default="https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952")
 SENTRY_ENVIRONMENT = config("SENTRY_ENVIRONMENT", default="development")
 
 if SENTRY_DSN:

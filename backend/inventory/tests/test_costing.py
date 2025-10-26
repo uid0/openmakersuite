@@ -13,7 +13,7 @@ class TestNewCostingLogic:
 
     def test_trash_bag_example(self):
         """Test the specific example from the user: 50-count box for $40.49."""
-        
+
         supplier = Supplier.objects.create(name="Office Supply Co", supplier_type=Supplier.ONLINE)
         item = InventoryItem.objects.create(
             name="Trash Bags",
@@ -35,13 +35,13 @@ class TestNewCostingLogic:
         # Unit cost should be calculated: $40.49 / 50 = $0.8098
         expected_unit_cost = Decimal("40.49") / Decimal("50")
         assert item_supplier.unit_cost == expected_unit_cost
-        
+
         # Verify the calculation is approximately $0.81
         assert abs(item_supplier.unit_cost - Decimal("0.8098")) < Decimal("0.0001")
 
     def test_cost_calculation_precision(self):
         """Test that cost calculations maintain proper decimal precision."""
-        
+
         supplier = Supplier.objects.create(name="Hardware Store", supplier_type=Supplier.LOCAL)
         item = InventoryItem.objects.create(
             name="Screws",
@@ -65,7 +65,7 @@ class TestNewCostingLogic:
 
     def test_inventory_item_total_value_with_new_costing(self):
         """Test that inventory value calculations work correctly with new costing."""
-        
+
         supplier = Supplier.objects.create(name="Electronics Shop", supplier_type=Supplier.ONLINE)
         item = InventoryItem.objects.create(
             name="Resistors",
@@ -90,7 +90,7 @@ class TestNewCostingLogic:
 
     def test_updating_package_cost_recalculates_unit_cost(self):
         """Test that updating package cost recalculates unit cost."""
-        
+
         supplier = Supplier.objects.create(name="Tool Supply", supplier_type=Supplier.LOCAL)
         item = InventoryItem.objects.create(
             name="Drill Bits",
@@ -120,7 +120,7 @@ class TestNewCostingLogic:
 
     def test_edge_case_quantity_per_package_change(self):
         """Test that changing quantity per package recalculates unit cost."""
-        
+
         supplier = Supplier.objects.create(name="Bulk Supplier", supplier_type=Supplier.ONLINE)
         item = InventoryItem.objects.create(
             name="Cable Ties",
@@ -145,5 +145,5 @@ class TestNewCostingLogic:
         item_supplier.quantity_per_package = 200
         item_supplier.save()
 
-        # New unit cost: $15.00 / 200 = $0.075 per unit  
+        # New unit cost: $15.00 / 200 = $0.075 per unit
         assert item_supplier.unit_cost == Decimal("0.075")

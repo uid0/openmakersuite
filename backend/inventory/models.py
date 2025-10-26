@@ -402,16 +402,19 @@ class ItemSupplier(models.Model):
         if self.package_cost is not None and self.quantity_per_package > 0:
             self.unit_cost = self.package_cost / self.quantity_per_package
         # Backward compatibility: if only unit_cost is provided, calculate package_cost
-        elif self.unit_cost is not None and self.package_cost is None and self.quantity_per_package > 0:
+        elif (
+            self.unit_cost is not None
+            and self.package_cost is None
+            and self.quantity_per_package > 0
+        ):
             self.package_cost = self.unit_cost * self.quantity_per_package
-        
+
         if self.is_primary:
             # Remove primary flag from other suppliers for this item
-            ItemSupplier.objects.filter(item=self.item, is_primary=True).exclude(pk=self.pk).update(
-                is_primary=False
-            )
+            ItemSupplier.objects.filter(item=self.item, is_primary=True).exclude(
+                pk=self.pk
+            ).update(is_primary=False)
         super().save(*args, **kwargs)
-
 
 
 class UsageLog(models.Model):

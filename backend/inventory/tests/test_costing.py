@@ -2,9 +2,11 @@
 Tests for the new package cost vs unit cost logic.
 """
 
-import pytest
 from decimal import Decimal
-from inventory.models import Supplier, InventoryItem, ItemSupplier
+
+import pytest
+
+from inventory.models import InventoryItem, ItemSupplier, Supplier
 
 
 @pytest.mark.django_db

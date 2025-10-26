@@ -201,3 +201,36 @@ pre-commit:  ## Run pre-commit checks (format, lint, test)
 	@make lint-backend
 	@make test-backend
 	@echo "\n✅ Pre-commit checks complete!"
+
+# GitHub Actions testing with act
+act-test:  ## Run GitHub Actions workflow locally using act
+	@echo "Running GitHub Actions CI workflow locally with act..."
+	@command -v act >/dev/null 2>&1 || { echo "❌ Error: act is not installed. Install with: brew install act (macOS) or see https://github.com/nektos/act"; exit 1; }
+	act --verbose
+
+act-backend:  ## Run only backend tests job locally with act
+	@echo "Running backend tests job locally with act..."
+	@command -v act >/dev/null 2>&1 || { echo "❌ Error: act is not installed. Install with: brew install act (macOS) or see https://github.com/nektos/act"; exit 1; }
+	act -j backend-tests --verbose
+
+act-frontend:  ## Run only frontend tests job locally with act
+	@echo "Running frontend tests job locally with act..."
+	@command -v act >/dev/null 2>&1 || { echo "❌ Error: act is not installed. Install with: brew install act (macOS) or see https://github.com/nektos/act"; exit 1; }
+	act -j frontend-tests --verbose
+
+act-security:  ## Run only security/code quality job locally with act
+	@echo "Running code quality & security job locally with act..."
+	@command -v act >/dev/null 2>&1 || { echo "❌ Error: act is not installed. Install with: brew install act (macOS) or see https://github.com/nektos/act"; exit 1; }
+	act -j code-quality --verbose
+
+act-docker:  ## Run only docker build job locally with act
+	@echo "Running docker build job locally with act..."
+	@command -v act >/dev/null 2>&1 || { echo "❌ Error: act is not installed. Install with: brew install act (macOS) or see https://github.com/nektos/act"; exit 1; }
+	act -j docker-build --verbose
+
+act-install:  ## Install act utility (macOS only)
+	@echo "Installing act via Homebrew..."
+	@command -v brew >/dev/null 2>&1 || { echo "❌ Error: Homebrew is not installed. Please install from https://brew.sh/"; exit 1; }
+	brew install act
+	@echo "✅ act installed successfully!"
+	@echo "💡 You can now run 'make act-test' to test GitHub Actions locally"

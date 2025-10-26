@@ -156,10 +156,10 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         # Handle both unit_cost (legacy) and package_cost (preferred)
         unit_cost = data.get("unit_cost")
         package_cost = data.get("package_cost")
-        
+
         unit_cost_value = None
         package_cost_value = None
-        
+
         # Prefer package_cost if provided
         if package_cost not in (None, "", "null"):
             try:

@@ -394,7 +394,7 @@ class ItemSupplier(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         """
         Ensure only one primary supplier per item and auto-calculate unit cost.
-        
+
         If package_cost is provided, calculate unit_cost automatically.
         If only unit_cost is provided (backward compatibility), calculate package_cost.
         """
@@ -411,9 +411,9 @@ class ItemSupplier(models.Model):
 
         if self.is_primary:
             # Remove primary flag from other suppliers for this item
-            ItemSupplier.objects.filter(item=self.item, is_primary=True).exclude(
-                pk=self.pk
-            ).update(is_primary=False)
+            ItemSupplier.objects.filter(item=self.item, is_primary=True).exclude(pk=self.pk).update(
+                is_primary=False
+            )
         super().save(*args, **kwargs)
 
 

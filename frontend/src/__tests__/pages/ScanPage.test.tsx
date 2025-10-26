@@ -1,7 +1,7 @@
 /**
  * Tests for ScanPage component
  */
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ScanPage from '../../pages/ScanPage';
 import * as api from '../../services/api';
@@ -48,20 +48,24 @@ describe('ScanPage', () => {
     jest.clearAllMocks();
   });
 
-  const renderWithRouter = (itemId = 'test-id-123') => {
-    return render(
-      <MemoryRouter initialEntries={[`/scan/${itemId}`]}>
-        <Routes>
-          <Route path="/scan/:itemId" element={<ScanPage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+  const renderWithRouter = async (itemId = 'test-id-123') => {
+    let component;
+    await act(async () => {
+      component = render(
+        <MemoryRouter initialEntries={[`/scan/${itemId}`]}>
+          <Routes>
+            <Route path="/scan/:itemId" element={<ScanPage />} />
+          </Routes>
+        </MemoryRouter>
+      );
+    });
+    return component;
   };
 
-  test('displays loading state initially', () => {
+  test('displays loading state initially', async () => {
     (api.inventoryAPI.getItem as jest.Mock).mockReturnValue(new Promise(() => {}));
 
-    renderWithRouter();
+    await renderWithRouter();
 
     expect(screen.getByText(/loading item details/i)).toBeInTheDocument();
   });
@@ -71,7 +75,7 @@ describe('ScanPage', () => {
       data: mockItem,
     });
 
-    renderWithRouter();
+    await renderWithRouter();
 
     await screen.findByText('Test Widget');
 
@@ -91,7 +95,7 @@ describe('ScanPage', () => {
       data: lowStockItem,
     });
 
-    renderWithRouter();
+    await renderWithRouter();
 
     await screen.findByText('Test Widget');
     expect(screen.getByText(/low stock alert/i)).toBeInTheDocument();
@@ -106,7 +110,7 @@ describe('ScanPage', () => {
       data: { id: 1, item: mockItem.id },
     });
 
-    renderWithRouter();
+    await renderWithRouter();
 
     await screen.findByText('Test Widget');
 
@@ -114,12 +118,17 @@ describe('ScanPage', () => {
     const nameInput = screen.getByLabelText(/your name/i);
     const notesInput = screen.getByLabelText(/notes/i);
 
-    fireEvent.change(nameInput, { target: { value: 'John Doe' } });
-    fireEvent.change(notesInput, { target: { value: 'Need more stock' } });
+    await act(async () => {
+      fireEvent.change(nameInput, { target: { value: 'John Doe' } });
+      fireEvent.change(notesInput, { target: { value: 'Need more stock' } });
+    });
 
     // Submit the form
     const submitButton = screen.getByRole('button', { name: /request 25 units/i });
-    fireEvent.click(submitButton);
+    
+    await act(async () => {
+      fireEvent.click(submitButton);
+    });
 
     await waitFor(() => {
       expect(api.reorderAPI.createRequest).toHaveBeenCalledWith({
@@ -141,12 +150,15 @@ describe('ScanPage', () => {
       data: { id: 1 },
     });
 
-    renderWithRouter();
+    await renderWithRouter();
 
     await screen.findByText('Test Widget');
 
     const submitButton = screen.getByRole('button', { name: /request 25 units/i });
-    fireEvent.click(submitButton);
+    
+    await act(async () => {
+      fireEvent.click(submitButton);
+    });
 
     await screen.findByText(/reorder request submitted/i);
   });
@@ -156,7 +168,7 @@ describe('ScanPage', () => {
       response: { data: { detail: 'Item not found' } },
     });
 
-    renderWithRouter();
+    await renderWithRouter();
 
     await screen.findByText(/item not found/i);
   });

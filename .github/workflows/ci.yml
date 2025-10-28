@@ -40,7 +40,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'
@@ -103,7 +103,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Set up Node.js 18
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         node-version: '18'
         cache: 'npm'
@@ -136,7 +136,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
     
     - name: Build and test with docker-compose
       run: |
@@ -175,7 +175,7 @@ jobs:
         fetch-depth: 0  # Fetch all history for gitleaks
     
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'

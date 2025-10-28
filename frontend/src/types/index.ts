@@ -20,6 +20,37 @@ export interface Category {
   parent: number | null;
 }
 
+export interface ItemSupplier {
+  id: number;
+  item: string;
+  item_name: string;
+  supplier: number;
+  supplier_name: string;
+  supplier_sku: string;
+  supplier_url: string;
+  package_upc: string;
+  unit_upc: string;
+  quantity_per_package: number;
+  // Dimensional fields (US units)
+  package_height: string | null;
+  package_width: string | null;
+  package_length: string | null;
+  package_weight: string | null;
+  // Calculated dimensional properties
+  package_volume: string | null;
+  unit_weight: string | null;
+  package_dimensions_display: string;
+  // Pricing
+  unit_cost: string | null;
+  package_cost: string | null;
+  average_lead_time: number;
+  is_primary: boolean;
+  is_active: boolean;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
@@ -46,6 +77,8 @@ export interface InventoryItem {
   total_value: string;
   created_at: string;
   updated_at: string;
+  // Supplier relationships with dimensional data
+  item_suppliers?: ItemSupplier[];
 }
 
 export interface UsageLog {
@@ -89,4 +122,6 @@ export interface CreateReorderRequest {
   requested_by?: string;
   request_notes?: string;
   priority?: ReorderPriority;
+  preferred_supplier?: number;
+  package_quantity?: number;
 }

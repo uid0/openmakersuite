@@ -14,4 +14,5 @@
 - Follow the repository pattern
 - Keep business logic in service layers
 - Always provide a reasonable default when creating entries. We want a good out of the box experience for both developers as well as for new users.
+- Always write appropriate unit, integration, and end-to-end tests using the native language tools and playwright if needed.
 - You don't need to create a markdown file for the things that you've done in the repository. Feel free to summarize those changes in the AGENT's file when they would be beneficial for either a human developer, you, or other development agents in the future.

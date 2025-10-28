@@ -12,11 +12,13 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
-from .models import Category, InventoryItem, ItemSupplier, Location, Supplier, UsageLog
+from .models import Category, InventoryItem, ItemSupplier, Location, PriceHistory, Supplier, UsageLog
 from .serializers import (
     CategorySerializer,
     InventoryItemDetailSerializer,
     InventoryItemSerializer,
+    ItemSupplierSerializer,
+    PriceHistorySerializer,
     SupplierSerializer,
     UsageLogSerializer,
 )
@@ -134,7 +136,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         name="Download Card"
     )
     def download_card(self, request, pk=None):
-        """Generate and download 5x3 horizontal index card PDF."""
+        """Generate and download Avery 5388 compatible index card PDF."""
         item = self.get_object()
 
         # Check if blank card is requested
@@ -292,3 +294,107 @@ class UsageLogViewSet(viewsets.ModelViewSet):
         if item_id:
             queryset = queryset.filter(item_id=item_id)
         return queryset
+
+
+class ItemSupplierViewSet(viewsets.ModelViewSet):
+    """API endpoint for item-supplier relationships with pricing data."""
+    
+    queryset = ItemSupplier.objects.select_related("item", "supplier").prefetch_related("price_history").all()
+    serializer_class = ItemSupplierSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Filter by item if specified
+        item_id = self.request.query_params.get("item_id")
+        if item_id:
+            queryset = queryset.filter(item_id=item_id)
+            
+        # Filter by supplier if specified
+        supplier_id = self.request.query_params.get("supplier_id")
+        if supplier_id:
+            queryset = queryset.filter(supplier_id=supplier_id)
+            
+        # Filter to only active suppliers if requested
+        active_only = self.request.query_params.get("active_only", "false").lower() == "true"
+        if active_only:
+            queryset = queryset.filter(is_active=True)
+        
+        return queryset.order_by("-is_primary", "unit_cost")
+    
+    @action(detail=True, methods=["get"])
+    def price_history(self, request, pk=None):
+        """Get full price history for this item-supplier relationship."""
+        item_supplier = self.get_object()
+        history = item_supplier.price_history.all()
+        
+        # Optional date filtering
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        
+        if start_date:
+            history = history.filter(recorded_at__gte=start_date)
+        if end_date:
+            history = history.filter(recorded_at__lte=end_date)
+            
+        serializer = PriceHistorySerializer(history, many=True)
+        return Response(serializer.data)
+
+
+class PriceHistoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """API endpoint for price history records (read-only)."""
+    
+    queryset = PriceHistory.objects.select_related("item_supplier__item", "item_supplier__supplier").all()
+    serializer_class = PriceHistorySerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Filter by item if specified
+        item_id = self.request.query_params.get("item_id")
+        if item_id:
+            queryset = queryset.filter(item_supplier__item_id=item_id)
+            
+        # Filter by supplier if specified
+        supplier_id = self.request.query_params.get("supplier_id")
+        if supplier_id:
+            queryset = queryset.filter(item_supplier__supplier_id=supplier_id)
+            
+        # Filter by change type if specified
+        change_type = self.request.query_params.get("change_type")
+        if change_type:
+            queryset = queryset.filter(change_type=change_type)
+            
+        # Date range filtering
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+        
+        if start_date:
+            queryset = queryset.filter(recorded_at__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(recorded_at__lte=end_date)
+        
+        return queryset.order_by("-recorded_at")
+    
+    @action(detail=False, methods=["get"])
+    def recent_changes(self, request):
+        """Get recent price changes across all items."""
+        # Get price changes from the last 30 days by default
+        try:
+            days = int(request.query_params.get("days", 30))
+        except (ValueError, TypeError):
+            days = 30
+        
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        since_date = timezone.now() - timedelta(days=days)
+        recent_changes = self.get_queryset().filter(
+            recorded_at__gte=since_date,
+            change_type="updated"  # Only actual price updates, not initial records
+        )[:50]  # Limit to 50 most recent
+        
+        serializer = self.get_serializer(recent_changes, many=True)
+        return Response(serializer.data)

@@ -1,12 +1,12 @@
 /**
  * Main App Component
  */
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import * as Sentry from '@sentry/react';
+import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import AdminDashboard from './pages/AdminDashboard';
 import HomePage from './pages/HomePage';
 import ScanPage from './pages/ScanPage';
-import AdminDashboard from './pages/AdminDashboard';
+import ThanksPage from './pages/ThanksPage';
 import './styles/App.css';
 
 // Wrap routes with Sentry for better error tracking
@@ -30,6 +30,7 @@ function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/scan/:itemId" element={<ScanPage />} />
             <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/thanks" element={<ThanksPage />} />
           </SentryRoutes>
         </Sentry.ErrorBoundary>
       </div>

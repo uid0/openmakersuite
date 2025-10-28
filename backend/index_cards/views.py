@@ -36,7 +36,7 @@ class IndexCardPreviewView(APIView):
 
 
 class IndexCardBatchGenerateView(APIView):
-    """Generate a PDF with up to three 5x3" horizontal index cards per page."""
+    """Generate a PDF using Avery Template 5388 (3 cards per page, 5"×3" each)."""
 
     permission_classes = [IsAuthenticatedOrReadOnly]
 

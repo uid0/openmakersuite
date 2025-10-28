@@ -1,9 +1,9 @@
 /**
  * API service for communicating with the Django backend
  */
-import axios from 'axios';
 import * as Sentry from '@sentry/react';
-import { InventoryItem, ReorderRequest, CreateReorderRequest } from '../types';
+import axios from 'axios';
+import { CreateReorderRequest, InventoryItem, ItemSupplier, ReorderRequest } from '../types';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -65,6 +65,9 @@ export const inventoryAPI = {
   getItem: (id: string) =>
     api.get<InventoryItem>(`/api/inventory/items/${id}/`),
 
+  getItemSuppliers: (itemId: string) => 
+    api.get<{ results: ItemSupplier[] }>(`/api/inventory/item-suppliers/?item_id=${itemId}`),
+
   listItems: (params?: { category?: number; search?: string }) =>
     api.get<{ results: InventoryItem[] }>('/api/inventory/items/', { params }),
 
@@ -125,10 +128,13 @@ export const reorderAPI = {
 // Auth API
 export const authAPI = {
   login: (username: string, password: string) =>
-    api.post('/api/token/', { username, password }),
+    api.post('/api/auth/login/', { username, password }),
+
+  register: (userData: { username: string; email: string; password: string; password2: string }) =>
+    api.post('/api/auth/register/', userData),
 
   refresh: (refreshToken: string) =>
-    api.post('/api/token/refresh/', { refresh: refreshToken }),
+    api.post('/api/auth/refresh/', { refresh: refreshToken }),
 };
 
 export default api;

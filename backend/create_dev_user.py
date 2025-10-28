@@ -4,6 +4,7 @@ Quick script to create a development superuser.
 Usage: python create_dev_user.py
 """
 import os
+
 import django
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")

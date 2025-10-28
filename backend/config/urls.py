@@ -4,8 +4,10 @@ URL configuration for makerspace inventory management system.
 
 from django.contrib import admin
 from django.urls import include, path
+
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from auth_views import register_user, login_user, refresh_token
+
+from auth_views import login_user, refresh_token, register_user
 
 urlpatterns = [
     path("admin/", admin.site.urls),

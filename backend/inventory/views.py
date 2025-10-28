@@ -410,8 +410,9 @@ class PriceHistoryViewSet(viewsets.ReadOnlyModelViewSet):
         except (ValueError, TypeError):
             days = 30
 
-        from django.utils import timezone
         from datetime import timedelta
+
+        from django.utils import timezone
 
         since_date = timezone.now() - timedelta(days=days)
         recent_changes = self.get_queryset().filter(

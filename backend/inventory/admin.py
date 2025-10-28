@@ -12,9 +12,9 @@ from .models import (
     InventoryItem,
     ItemSupplier,
     Location,
+    PriceHistory,
     Supplier,
     UsageLog,
-    PriceHistory,
 )
 
 

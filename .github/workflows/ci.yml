@@ -2,15 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 jobs:
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:15-alpine
@@ -25,7 +25,7 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      
+
       redis:
         image: redis:7-alpine
         ports:
@@ -37,190 +37,190 @@ jobs:
           --health-retries 5
 
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-    
-    - name: Install dependencies
-      run: |
-        cd backend
-        pip install --upgrade pip
-        pip install -r requirements.txt -r requirements-dev.txt
-    
-    - name: Check code formatting with black
-      run: |
-        cd backend
-        black --check .
-    
-    - name: Check import sorting with isort
-      run: |
-        cd backend
-        isort --check-only .
-    
-    - name: Lint with flake8
-      run: |
-        cd backend
-        flake8 .
-    
-    - name: Run migrations
-      run: |
-        cd backend
-        python manage.py migrate --no-input
-      env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
-        SECRET_KEY: test-secret-key-for-ci-only
-        DEBUG: 1
-        ALLOWED_HOSTS: localhost,127.0.0.1
-        REDIS_URL: redis://localhost:6379/0
-    
-    - name: Run tests with coverage
-      run: |
-        cd backend
-        pytest --cov --cov-report=xml --cov-report=html -v
-      env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
-        SECRET_KEY: test-secret-key-for-ci-only
-        DEBUG: 1
-        ALLOWED_HOSTS: localhost,127.0.0.1
-        REDIS_URL: redis://localhost:6379/0
-    
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./backend/coverage.xml
-        flags: backend
-        fail_ci_if_error: false
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Check code formatting with black
+        run: |
+          cd backend
+          black --check .
+
+      - name: Check import sorting with isort
+        run: |
+          cd backend
+          isort --check-only .
+
+      - name: Lint with flake8
+        run: |
+          cd backend
+          flake8 .
+
+      - name: Run migrations
+        run: |
+          cd backend
+          python manage.py migrate --no-input
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
+          SECRET_KEY: test-secret-key-for-ci-only
+          DEBUG: 1
+          ALLOWED_HOSTS: localhost,127.0.0.1
+          REDIS_URL: redis://localhost:6379/0
+
+      - name: Run tests with coverage
+        run: |
+          cd backend
+          pytest --cov --cov-report=xml --cov-report=html -v
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
+          SECRET_KEY: test-secret-key-for-ci-only
+          DEBUG: 1
+          ALLOWED_HOSTS: localhost,127.0.0.1
+          REDIS_URL: redis://localhost:6379/0
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./backend/coverage.xml
+          flags: backend
+          fail_ci_if_error: false
 
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Node.js 18
-      uses: actions/setup-node@v5
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
-    
-    - name: Install dependencies
-      run: |
-        cd frontend
-        npm ci
-    
-    - name: Run tests
-      run: |
-        cd frontend
-        npm test -- --coverage --ci
-      env:
-        CI: true
-    
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./frontend/coverage/clover.xml
-        flags: frontend
-        fail_ci_if_error: false
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v5
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run tests
+        run: |
+          cd frontend
+          npm test -- --coverage --ci
+        env:
+          CI: true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./frontend/coverage/clover.xml
+          flags: frontend
+          fail_ci_if_error: false
 
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
-    
-    - name: Build and test with docker-compose
-      run: |
-        # Start services
-        docker-compose up -d --build
-        
-        # Wait for services to be healthy
-        timeout 300 bash -c 'while [[ "$(docker-compose ps -q | xargs docker inspect -f "{{.State.Health.Status}}" 2>/dev/null | grep -v healthy | wc -l)" != "0" ]]; do sleep 5; done'
-        
-        # Run migrations
-        docker-compose exec -T backend python manage.py migrate --no-input
-        
-        # Run tests in Docker environment
-        docker-compose exec -T backend pytest -v
-      env:
-        POSTGRES_PASSWORD: test_password_for_ci_only
-    
-    - name: Show logs on failure
-      if: failure()
-      run: |
-        docker-compose logs
-    
-    - name: Cleanup
-      if: always()
-      run: |
-        docker-compose down -v
-        docker system prune -f
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and test with docker-compose
+        run: |
+          # Start services
+          docker-compose up -d --build
+
+          # Wait for services to be healthy
+          timeout 300 bash -c 'while [[ "$(docker-compose ps -q | xargs docker inspect -f "{{.State.Health.Status}}" 2>/dev/null | grep -v healthy | wc -l)" != "0" ]]; do sleep 5; done'
+
+          # Run migrations
+          docker-compose exec -T backend python manage.py migrate --no-input
+
+          # Run tests in Docker environment
+          docker-compose exec -T backend pytest -v
+        env:
+          POSTGRES_PASSWORD: test_password_for_ci_only
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker-compose logs
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker-compose down -v
+          docker system prune -f
 
   security:
     name: Code Quality & Security
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Fetch all history for gitleaks
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-    
-    - name: Install security tools
-      run: |
-        pip install bandit[toml] safety
-    
-    - name: Run bandit security check
-      run: |
-        cd backend
-        bandit -r . -x ./tests,./migrations -f json -o bandit-report.json || true
-        bandit -r . -x ./tests,./migrations
-    
-    - name: Check dependencies for vulnerabilities
-      run: |
-        cd backend
-        pip install -r requirements.txt
-        safety check --json --output safety-report.json || true
-        safety check
-    
-    - name: Install gitleaks
-      run: |
-        wget https://github.com/zricethezav/gitleaks/releases/download/v8.18.0/gitleaks_8.18.0_linux_x64.tar.gz
-        tar -xzf gitleaks_8.18.0_linux_x64.tar.gz
-        sudo mv gitleaks /usr/local/bin/
-        rm gitleaks_8.18.0_linux_x64.tar.gz
-    
-    - name: Run gitleaks scan
-      run: |
-        # Run gitleaks with our configuration (works with both GitHub Actions and act)
-        if [ -f .gitleaks.toml ]; then
-          echo "✓ Using custom gitleaks configuration (.gitleaks.toml)"
-          gitleaks detect --config .gitleaks.toml --verbose --no-git
-        else
-          echo "⚠ Using default gitleaks configuration (no .gitleaks.toml found)"
-          gitleaks detect --verbose --no-git
-        fi
-        echo "✅ Gitleaks scan completed successfully"
-    
-    - name: Upload security reports
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: security-reports
-        path: |
-          backend/bandit-report.json
-          backend/safety-report.json
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for gitleaks
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install security tools
+        run: |
+          pip install bandit[toml] safety
+
+      - name: Run bandit security check
+        run: |
+          cd backend
+          bandit -r . -x ./tests,./migrations -f json -o bandit-report.json || true
+          bandit -r . -x ./tests,./migrations
+
+      - name: Check dependencies for vulnerabilities
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          safety check --json --output safety-report.json || true
+          safety check
+
+      - name: Install gitleaks
+        run: |
+          wget https://github.com/zricethezav/gitleaks/releases/download/v8.18.0/gitleaks_8.18.0_linux_x64.tar.gz
+          tar -xzf gitleaks_8.18.0_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+          rm gitleaks_8.18.0_linux_x64.tar.gz
+
+      - name: Run gitleaks scan
+        run: |
+          # Run gitleaks with our configuration (works with both GitHub Actions and act)
+          if [ -f .gitleaks.toml ]; then
+            echo "✓ Using custom gitleaks configuration (.gitleaks.toml)"
+            gitleaks detect --config .gitleaks.toml --verbose --no-git
+          else
+            echo "⚠ Using default gitleaks configuration (no .gitleaks.toml found)"
+            gitleaks detect --verbose --no-git
+          fi
+          echo "✅ Gitleaks scan completed successfully"
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            backend/bandit-report.json
+            backend/safety-report.json

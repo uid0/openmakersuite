@@ -7,8 +7,6 @@ from rest_framework import serializers
 from .models import Category, InventoryItem, ItemSupplier, PriceHistory, Supplier, UsageLog
 
 
-
-
 class SupplierSerializer(serializers.ModelSerializer):
     class Meta:
         model = Supplier
@@ -30,40 +28,42 @@ class UsageLogSerializer(serializers.ModelSerializer):
 
 class PriceHistorySerializer(serializers.ModelSerializer):
     """Serializer for price history records."""
-    
+
     item_name = serializers.CharField(source="item_supplier.item.name", read_only=True)
     supplier_name = serializers.CharField(source="item_supplier.supplier.name", read_only=True)
-    price_change_percentage = serializers.DecimalField(max_digits=6, decimal_places=2, read_only=True)
-    
+    price_change_percentage = serializers.DecimalField(
+        max_digits=6, decimal_places=2, read_only=True
+    )
+
     class Meta:
         model = PriceHistory
         fields = [
             "id",
-            "item_name", 
+            "item_name",
             "supplier_name",
             "unit_cost",
-            "package_cost", 
+            "package_cost",
             "quantity_per_package",
             "change_type",
             "recorded_at",
             "notes",
-            "price_change_percentage"
+            "price_change_percentage",
         ]
         read_only_fields = ["recorded_at", "price_change_percentage"]
 
 
 class ItemSupplierSerializer(serializers.ModelSerializer):
     """Serializer for item-supplier relationships with pricing and dimensional data."""
-    
+
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)
     item_name = serializers.CharField(source="item.name", read_only=True)
     recent_price_history = PriceHistorySerializer(source="price_history", many=True, read_only=True)
-    
+
     # Calculated dimensional properties
     package_volume = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     unit_weight = serializers.DecimalField(max_digits=8, decimal_places=3, read_only=True)
     package_dimensions_display = serializers.CharField(read_only=True)
-    
+
     class Meta:
         model = ItemSupplier
         fields = [
@@ -71,7 +71,7 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
             "item",
             "item_name",
             "supplier",
-            "supplier_name", 
+            "supplier_name",
             "supplier_sku",
             "supplier_url",
             "package_upc",
@@ -79,7 +79,7 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
             "quantity_per_package",
             # Dimensional fields
             "package_height",
-            "package_width", 
+            "package_width",
             "package_length",
             "package_weight",
             # Calculated dimensional properties
@@ -95,16 +95,16 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
             "updated_at",
-            "recent_price_history"
+            "recent_price_history",
         ]
         read_only_fields = ["created_at", "updated_at"]
-        
+
     def to_representation(self, instance):
         """Limit price history to recent records for performance."""
         data = super().to_representation(instance)
         # Limit to most recent 10 price history records
-        if 'recent_price_history' in data:
-            data['recent_price_history'] = data['recent_price_history'][:10]
+        if "recent_price_history" in data:
+            data["recent_price_history"] = data["recent_price_history"][:10]
         return data
 
 
@@ -159,7 +159,6 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
-
     def get_qr_code_url(self, obj):
         """Return the QR code URL when available."""
 
@@ -186,21 +185,21 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
             "all_suppliers",
             "price_trend_summary",
         ]
-        
+
     def get_price_trend_summary(self, obj):
         """Get price trend summary for the primary supplier."""
         primary_supplier = obj.primary_item_supplier
         if not primary_supplier:
             return None
-            
+
         # Get recent price history (last 5 records)
         recent_history = primary_supplier.price_history.all()[:5]
         if len(recent_history) < 2:
             return {"trend": "insufficient_data", "change_percentage": None}
-            
+
         latest = recent_history[0]
         previous = recent_history[1]
-        
+
         if latest.unit_cost and previous.unit_cost:
             change_percentage = latest.price_change_percentage
             if change_percentage is None:
@@ -211,13 +210,13 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
                 trend = "decreasing"
             else:
                 trend = "stable"
-                
+
             return {
                 "trend": trend,
                 "change_percentage": change_percentage,
                 "latest_cost": latest.unit_cost,
                 "previous_cost": previous.unit_cost,
-                "last_updated": latest.recorded_at
+                "last_updated": latest.recorded_at,
             }
-        
+
         return {"trend": "no_data", "change_percentage": None}

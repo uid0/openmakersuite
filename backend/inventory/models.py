@@ -350,7 +350,7 @@ class ItemSupplier(models.Model):
         blank=True,
         help_text="UPC/EAN for individual units when different from the package barcode",
     )
-    
+
     # Package dimensions and weight (supplier-specific)
     package_height = models.DecimalField(
         max_digits=8,
@@ -380,7 +380,7 @@ class ItemSupplier(models.Model):
         blank=True,
         help_text="Package weight in pounds",
     )
-    
+
     quantity_per_package = models.PositiveIntegerField(
         default=1,
         validators=[MinValueValidator(1)],
@@ -441,14 +441,14 @@ class ItemSupplier(models.Model):
         """Return formatted display of package dimensions."""
         dims = []
         if self.package_length:
-            dims.append(f"L: {self.package_length}\"")
+            dims.append(f'L: {self.package_length}"')
         if self.package_width:
-            dims.append(f"W: {self.package_width}\"")
+            dims.append(f'W: {self.package_width}"')
         if self.package_height:
-            dims.append(f"H: {self.package_height}\"")
+            dims.append(f'H: {self.package_height}"')
         if self.package_weight:
             dims.append(f"Weight: {self.package_weight} lbs")
-        
+
         return " | ".join(dims) if dims else "No dimensions specified"
 
     @property
@@ -486,98 +486,91 @@ class ItemSupplier(models.Model):
         # Check if this is a new record or if pricing has changed
         is_new = self.pk is None
         price_changed = False
-        
+
         if not is_new:
             # Get the old values from the database
             old_instance = ItemSupplier.objects.get(pk=self.pk)
             price_changed = (
-                old_instance.unit_cost != self.unit_cost or
-                old_instance.package_cost != self.package_cost or
-                old_instance.quantity_per_package != self.quantity_per_package
+                old_instance.unit_cost != self.unit_cost
+                or old_instance.package_cost != self.package_cost
+                or old_instance.quantity_per_package != self.quantity_per_package
             )
-        
+
         super().save(*args, **kwargs)
-        
+
         # Create price history record if this is new or if pricing changed
         if is_new or price_changed:
-            change_type = 'created' if is_new else 'updated'
+            change_type = "created" if is_new else "updated"
             PriceHistory.objects.create(
                 item_supplier=self,
                 unit_cost=self.unit_cost,
                 package_cost=self.package_cost,
                 quantity_per_package=self.quantity_per_package,
-                change_type=change_type
+                change_type=change_type,
             )
 
 
 class PriceHistory(models.Model):
     """
     Track historical pricing data for item-supplier relationships.
-    
+
     This model maintains a historical record of all price changes,
     allowing for trend analysis and price tracking over time.
     """
-    
+
     CHANGE_TYPE_CHOICES = [
-        ('created', 'Initial Price'),
-        ('updated', 'Price Update'),
-        ('supplier_changed', 'Supplier Info Changed'),
+        ("created", "Initial Price"),
+        ("updated", "Price Update"),
+        ("supplier_changed", "Supplier Info Changed"),
     ]
-    
+
     item_supplier = models.ForeignKey(
-        ItemSupplier, 
-        on_delete=models.CASCADE, 
-        related_name='price_history'
+        ItemSupplier, on_delete=models.CASCADE, related_name="price_history"
     )
     unit_cost = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Unit cost at time of this record"
+        help_text="Unit cost at time of this record",
     )
     package_cost = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Package cost at time of this record"
+        help_text="Package cost at time of this record",
     )
     quantity_per_package = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)],
-        help_text="Quantity per package at time of this record"
+        validators=[MinValueValidator(1)], help_text="Quantity per package at time of this record"
     )
     change_type = models.CharField(
         max_length=20,
         choices=CHANGE_TYPE_CHOICES,
-        default='updated',
-        help_text="Type of change that triggered this history record"
+        default="updated",
+        help_text="Type of change that triggered this history record",
     )
     recorded_at = models.DateTimeField(auto_now_add=True)
-    notes = models.TextField(
-        blank=True,
-        help_text="Optional notes about this price change"
-    )
-    
+    notes = models.TextField(blank=True, help_text="Optional notes about this price change")
+
     class Meta:
         verbose_name_plural = "Price histories"
-        ordering = ['-recorded_at']
+        ordering = ["-recorded_at"]
         indexes = [
-            models.Index(fields=['item_supplier', '-recorded_at']),
-            models.Index(fields=['recorded_at']),
+            models.Index(fields=["item_supplier", "-recorded_at"]),
+            models.Index(fields=["recorded_at"]),
         ]
-    
+
     def __str__(self) -> str:
         return f"{self.item_supplier.item.name} - {self.item_supplier.supplier.name} on {self.recorded_at.date()}"
-    
+
     @property
     def price_change_percentage(self) -> Optional[Decimal]:
         """Calculate percentage change from previous record."""
         previous = PriceHistory.objects.filter(
-            item_supplier=self.item_supplier,
-            recorded_at__lt=self.recorded_at
+            item_supplier=self.item_supplier, recorded_at__lt=self.recorded_at
         ).first()
-        
+
         if previous and previous.unit_cost and self.unit_cost:
             old_cost = previous.unit_cost
             new_cost = self.unit_cost

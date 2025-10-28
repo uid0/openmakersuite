@@ -8,6 +8,7 @@ This module tests all API endpoints with various scenarios including:
 - File uploads and downloads
 - Related object navigation
 """
+
 import json
 from io import BytesIO
 from unittest.mock import patch
@@ -28,10 +29,7 @@ class InventoryAPIComprehensiveTest(APITestCase):
         """Set up test data."""
         self.category = CategoryFactory()
         self.supplier = SupplierFactory()
-        self.item = InventoryItemFactory(
-            category=self.category,
-            supplier=self.supplier
-        )
+        self.item = InventoryItemFactory(category=self.category, supplier=self.supplier)
 
     def test_inventory_item_list(self):
         """Test inventory item list endpoint."""

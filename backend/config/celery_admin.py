@@ -88,7 +88,7 @@ class CustomTaskResultAdmin(TaskResultAdmin):
         if obj.task_name:
             # Shorten long task names
             task_name = obj.task_name.split(".")[-1]
-            return format_html('<strong>{}</strong>', task_name)
+            return format_html("<strong>{}</strong>", task_name)
         return "—"
 
     @admin.display(description="Status", ordering="status")

@@ -41,38 +41,34 @@ class IndexCardRenderer:
     """Render inventory items for Avery Template 5388 (3 cards per page, 5"×3" each)."""
 
     PAGE_WIDTH, PAGE_HEIGHT = letter
-    CARD_WIDTH = 5 * inch   # Avery 5388: 5" wide
+    CARD_WIDTH = 5 * inch  # Avery 5388: 5" wide
     CARD_HEIGHT = 3 * inch  # Avery 5388: 3" tall
-    
+
     # Avery 5388 layout specifications
-    TOP_MARGIN = 1.0 * inch      # Standard Avery margin
+    TOP_MARGIN = 1.0 * inch  # Standard Avery margin
     BOTTOM_MARGIN = 1.0 * inch
-    LEFT_MARGIN = 1.75 * inch    # Center cards: (8.5 - 5.0)/2 = 1.75"
+    LEFT_MARGIN = 1.75 * inch  # Center cards: (8.5 - 5.0)/2 = 1.75"
     RIGHT_MARGIN = 1.75 * inch
-    
+
     # Vertical spacing between cards (3 cards stacked vertically)
-    CARD_GAP = 0.5 * inch        # Gap between cards
-    
+    CARD_GAP = 0.5 * inch  # Gap between cards
+
     # Card content optimized for 5"×3" landscape format
     CARD_PADDING = 0.15 * inch
-    IMAGE_MAX_WIDTH = 2.0 * inch   # Fit in landscape layout
+    IMAGE_MAX_WIDTH = 2.0 * inch  # Fit in landscape layout
     IMAGE_MAX_HEIGHT = 2.0 * inch
-    QR_CODE_SIZE = 0.8 * inch      # Smaller for compact 3" height
+    QR_CODE_SIZE = 0.8 * inch  # Smaller for compact 3" height
 
     CALL_TO_ACTION = "Scan to notify Logistics\nit's time to reorder me!"
 
-    def __init__(
-        self, base_url: str | None = None, blank_cards: bool = False
-    ) -> None:
+    def __init__(self, base_url: str | None = None, blank_cards: bool = False) -> None:
         """Initialize the renderer with base URL and card type.
 
         Args:
             base_url: Base URL for QR codes (defaults to FRONTEND_URL setting)
             blank_cards: If True, render blank cards with only QR codes
         """
-        self.base_url = base_url or getattr(
-            settings, "FRONTEND_URL", "http://localhost:3000"
-        )
+        self.base_url = base_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         self.blank_cards = blank_cards
         self._title_style = ParagraphStyle(
             name="CardTitle",
@@ -129,7 +125,7 @@ class IndexCardRenderer:
 
         # Add blank suffix to filename if blank cards
         if blank_cards:
-            normalized_name = normalized_name.replace('.pdf', '_blank.pdf')
+            normalized_name = normalized_name.replace(".pdf", "_blank.pdf")
 
         pdf_bytes = self.render_to_bytes(items)
 
@@ -151,18 +147,14 @@ class IndexCardRenderer:
             absolute_path=absolute_path,
         )
 
-    def render_to_bytes(
-        self, items: Sequence[InventoryItem], blank_cards: bool = False
-    ) -> bytes:
+    def render_to_bytes(self, items: Sequence[InventoryItem], blank_cards: bool = False) -> bytes:
         """Render cards to PDF bytes without saving to storage."""
         self.blank_cards = blank_cards
         buffer = BytesIO()
         self._render_to_canvas(items, buffer)
         return buffer.getvalue()
 
-    def encode_preview(
-        self, item: InventoryItem, blank_card: bool = False
-    ) -> str:
+    def encode_preview(self, item: InventoryItem, blank_card: bool = False) -> str:
         """Return a base64 encoded preview PDF for quick display."""
         pdf_bytes = self.render_preview(item, blank_card)
         return base64.b64encode(pdf_bytes).decode("ascii")
@@ -170,9 +162,7 @@ class IndexCardRenderer:
     # ------------------------------------------------------------------
     # Internal rendering helpers
     # ------------------------------------------------------------------
-    def _render_to_canvas(
-        self, items: Sequence[InventoryItem], buffer: BytesIO
-    ) -> None:
+    def _render_to_canvas(self, items: Sequence[InventoryItem], buffer: BytesIO) -> None:
         pdf_canvas = canvas.Canvas(buffer, pagesize=letter)
 
         for page_items in self._chunk(items, 3):  # 3 cards per page (Avery 5388)
@@ -182,9 +172,7 @@ class IndexCardRenderer:
         pdf_canvas.save()
         buffer.seek(0)
 
-    def _draw_page(
-        self, pdf_canvas: canvas.Canvas, items: Sequence[InventoryItem]
-    ) -> None:
+    def _draw_page(self, pdf_canvas: canvas.Canvas, items: Sequence[InventoryItem]) -> None:
         # Draw up to 3 cards vertically (Avery 5388 layout)
         cards_per_page = 3
 
@@ -192,7 +180,7 @@ class IndexCardRenderer:
         available_height = self.PAGE_HEIGHT - self.TOP_MARGIN - self.BOTTOM_MARGIN
         total_cards_height = 3 * self.CARD_HEIGHT
         total_gap_height = 2 * self.CARD_GAP
-        
+
         # Adjust gaps if needed to fit perfectly
         if total_cards_height + total_gap_height > available_height:
             adjusted_gap = (available_height - total_cards_height) / 2
@@ -203,8 +191,12 @@ class IndexCardRenderer:
         positions = []
         for i in range(3):
             x = self.LEFT_MARGIN
-            y = (self.PAGE_HEIGHT - self.TOP_MARGIN - 
-                 self.CARD_HEIGHT - i * (self.CARD_HEIGHT + adjusted_gap))
+            y = (
+                self.PAGE_HEIGHT
+                - self.TOP_MARGIN
+                - self.CARD_HEIGHT
+                - i * (self.CARD_HEIGHT + adjusted_gap)
+            )
             positions.append((x, y))
 
         for index, item in enumerate(items[:3]):  # Limit to 3 cards per page
@@ -253,14 +245,14 @@ class IndexCardRenderer:
             )
         else:
             # Simplified cards: Left (Info + Photo) | Right (QR + CTA)
-            
+
             # Define two main sections
-            left_section_width = self.CARD_WIDTH * 0.6   # Info + Photo section
+            left_section_width = self.CARD_WIDTH * 0.6  # Info + Photo section
             right_section_width = self.CARD_WIDTH * 0.4  # QR + CTA section
-            
+
             left_section_x = inner_x
             right_section_x = inner_x + left_section_width
-            
+
             current_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING
 
             # Title - spans full width at top
@@ -271,7 +263,7 @@ class IndexCardRenderer:
 
             # RIGHT SECTION: QR Code and CTA (positioned together to prevent overflow)
 
-            # LEFT SECTION: Stock Info 
+            # LEFT SECTION: Stock Info
             target_stock = self._calculate_desired_stock(item)
             info_lines = [
                 f"Target: {self._pluralize(target_stock, 'unit')}",
@@ -290,7 +282,7 @@ class IndexCardRenderer:
 
             # Calculate space used by info lines
             info_lines_height = len(info_lines) * self._highlight_style.leading
-            
+
             # LEFT SECTION: Product Image (below stock info)
             image_y_start = info_y - info_lines_height - 0.1 * inch
             if item.image and hasattr(item.image, "path"):
@@ -298,9 +290,11 @@ class IndexCardRenderer:
                     image_reader = ImageReader(item.image.path)
                     image_width, image_height = image_reader.getSize()
                     # Calculate available space for image
-                    available_image_space = image_y_start - inner_y - 0.3 * inch  # Reserve space for category
+                    available_image_space = (
+                        image_y_start - inner_y - 0.3 * inch
+                    )  # Reserve space for category
                     max_image_width = left_section_width - 0.2 * inch
-                    
+
                     if available_image_space > 0:
                         scale = min(
                             max_image_width / image_width,
@@ -327,14 +321,14 @@ class IndexCardRenderer:
             padding_vertical = 3  # Slightly more padding for larger text
             box_height = len(cta_lines) * line_height + 2 * padding_vertical
             box_width = right_section_width - 0.2 * inch  # More margin to prevent overflow
-            
+
             # Calculate space needed at bottom for category
             category_space = 0.25 * inch if item.category else 0.1 * inch
-            
+
             # Calculate total space available in right section
             total_right_height = current_y - inner_y - category_space
             qr_and_cta_height = self.QR_CODE_SIZE + 0.1 * inch + box_height  # QR + gap + CTA
-            
+
             # Adjust positioning to fit both QR and CTA properly
             if qr_and_cta_height <= total_right_height:
                 # Both fit comfortably - position QR higher, CTA below
@@ -344,7 +338,7 @@ class IndexCardRenderer:
                 # Tight fit - optimize spacing
                 qr_y_adjusted = current_y - self.QR_CODE_SIZE + 0.05 * inch  # Move QR up slightly
                 box_y = qr_y_adjusted - 0.05 * inch - box_height  # Closer gap
-            
+
             # Ensure CTA box doesn't go below the category space
             min_box_y = inner_y + category_space
             if box_y < min_box_y:
@@ -353,16 +347,18 @@ class IndexCardRenderer:
                 if box_y + box_height > qr_y_adjusted - 0.02 * inch:
                     line_height = 8  # Make text smaller but still readable
                     box_height = len(cta_lines) * line_height + 2 * padding_vertical
-            
+
             # Re-position QR code to final location
             qr_x = right_section_x + (right_section_width - self.QR_CODE_SIZE) / 2
             qr_y = qr_y_adjusted
-            
+
             # Determine if we should frame the QR code based on color lightness
-            category_color = item.category.color if item.category and item.category.color else "#2563eb"
+            category_color = (
+                item.category.color if item.category and item.category.color else "#2563eb"
+            )
             text_color = self._get_contrast_text_color(category_color)
             is_light_color = text_color.red == 0  # Black text means light background
-            
+
             # If light color, add colored frame around QR code
             if is_light_color and item.category and item.category.color:
                 try:
@@ -377,11 +373,11 @@ class IndexCardRenderer:
                         self.QR_CODE_SIZE + 2 * frame_padding,
                         self.QR_CODE_SIZE + 2 * frame_padding,
                         stroke=1,
-                        fill=0
+                        fill=0,
                     )
                 except (ValueError, AttributeError):
                     pass  # Skip frame if color invalid
-            
+
             qr_buffer = self._generate_qr_code(item)
             qr_reader = ImageReader(qr_buffer)
             pdf_canvas.drawImage(
@@ -404,7 +400,7 @@ class IndexCardRenderer:
 
             # Position CTA box with proper margins
             box_x = right_section_x + 0.05 * inch  # Reduced margin
-            
+
             # Ensure CTA box always renders (simplified bounds checking)
             # Draw colored background box for CTA
             pdf_canvas.setFillColor(bg_color)
@@ -419,14 +415,14 @@ class IndexCardRenderer:
             )
 
             # Use optimal text color for contrast (black on light, white on dark)
-            text_color = self._get_contrast_text_color(item.category.color if item.category and item.category.color else "#2563eb")
+            text_color = self._get_contrast_text_color(
+                item.category.color if item.category and item.category.color else "#2563eb"
+            )
             pdf_canvas.setFillColor(text_color)
             pdf_canvas.setFont("Helvetica-Bold", 8)  # Increased from 6 to 8 for better visibility
             cta_y = box_y + box_height - padding_vertical - 8  # Adjusted for larger font
             for line in cta_lines:
-                pdf_canvas.drawCentredString(
-                    right_section_x + right_section_width / 2, cta_y, line
-                )
+                pdf_canvas.drawCentredString(right_section_x + right_section_width / 2, cta_y, line)
                 cta_y -= line_height
 
             # Category at bottom of card (spans full width)
@@ -442,13 +438,11 @@ class IndexCardRenderer:
                 else:
                     # Light color (has QR frame) or no color - use gray text
                     pdf_canvas.setFillColor(colors.gray)
-                
+
                 pdf_canvas.setFont("Helvetica", 8)
                 category_text = f"Category: {item.category.name}"
                 pdf_canvas.drawString(
-                    inner_x, 
-                    inner_y + 0.05 * inch,  # Near bottom of card
-                    category_text
+                    inner_x, inner_y + 0.05 * inch, category_text  # Near bottom of card
                 )
 
             # Reset fill color
@@ -491,9 +485,7 @@ class IndexCardRenderer:
 
         pdf_canvas.drawText(text_object)
 
-    def _draw_cutting_marks(
-        self, pdf_canvas: canvas.Canvas, positions: list
-    ) -> None:
+    def _draw_cutting_marks(self, pdf_canvas: canvas.Canvas, positions: list) -> None:
         """Avery 5388 is pre-perforated - no cutting marks needed."""
         # Avery Template 5388 comes with pre-perforated lines
         # Adding cutting marks would interfere with the template
@@ -543,59 +535,61 @@ class IndexCardRenderer:
 
     def _calculate_desired_stock(self, item: InventoryItem) -> int:
         return max(item.minimum_stock + item.reorder_quantity, item.reorder_quantity)
-    
+
     def _pluralize(self, count: int, word: str) -> str:
         """Return properly pluralized string based on count."""
         if count == 1:
             return f"{count} {word}"
         else:
             # Simple pluralization rules
-            if word.endswith('y') and len(word) > 1 and word[-2] not in 'aeiou':
+            if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
                 # Consonant + y → ies (e.g., company → companies)
-                plural = word[:-1] + 'ies'
-            elif word.endswith('y'):
+                plural = word[:-1] + "ies"
+            elif word.endswith("y"):
                 # Vowel + y → ys (e.g., day → days, key → keys)
-                plural = word + 's'
-            elif word.endswith(('s', 'sh', 'ch', 'x', 'z')):
-                plural = word + 'es'
+                plural = word + "s"
+            elif word.endswith(("s", "sh", "ch", "x", "z")):
+                plural = word + "es"
             else:
-                plural = word + 's'
+                plural = word + "s"
             return f"{count} {plural}"
-    
+
     def _get_contrast_text_color(self, hex_color: str) -> colors.Color:
         """
         Calculate optimal text color (black or white) for given background color.
-        
+
         Uses luminance formula to determine if background is light or dark:
         Luminance = (0.299 * R + 0.587 * G + 0.114 * B) / 255
         """
         try:
             # Remove # if present and ensure we have 6 characters
-            clean_hex = hex_color.strip().lstrip('#')
+            clean_hex = hex_color.strip().lstrip("#")
             if len(clean_hex) != 6:
                 return colors.white  # Default to white for invalid colors
-            
+
             # Convert hex to RGB
             r = int(clean_hex[0:2], 16)
-            g = int(clean_hex[2:4], 16) 
+            g = int(clean_hex[2:4], 16)
             b = int(clean_hex[4:6], 16)
-            
+
             # Calculate relative luminance
             luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-            
+
             # If luminance > 0.5, it's a light color - use black text
             # If luminance <= 0.5, it's a dark color - use white text
             if luminance > 0.5:
                 return colors.black
             else:
                 return colors.white
-                
+
         except (ValueError, AttributeError):
             # Fallback to white for any parsing errors
             return colors.white
 
     @staticmethod
-    def _chunk(sequence: Sequence[InventoryItem], size: int = 3) -> Iterable[Sequence[InventoryItem]]:
+    def _chunk(
+        sequence: Sequence[InventoryItem], size: int = 3
+    ) -> Iterable[Sequence[InventoryItem]]:
         """Split items into chunks of specified size (default 3 for Avery 5388)."""
         for index in range(0, len(sequence), size):
             yield sequence[index : index + size]

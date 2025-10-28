@@ -31,4 +31,3 @@ else:
     print("🚀 You can now:")
     print(f"   1. Log in at http://localhost:8000/admin")
     print(f"   2. Use the API with session authentication")
-

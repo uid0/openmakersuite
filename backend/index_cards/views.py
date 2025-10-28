@@ -63,9 +63,7 @@ class IndexCardBatchGenerateView(APIView):
         blank_cards = serializer.validated_data.get("blank_cards", False)
         renderer = IndexCardRenderer(blank_cards=blank_cards)
         generated = renderer.render_batch_to_storage(
-            items,
-            filename=serializer.validated_data.get("filename"),
-            blank_cards=blank_cards
+            items, filename=serializer.validated_data.get("filename"), blank_cards=blank_cards
         )
 
         card_type = "blank" if blank_cards else "detailed"

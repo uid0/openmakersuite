@@ -13,7 +13,7 @@ class IndexCardPreviewSerializer(serializers.Serializer):
     item_id = serializers.UUIDField(help_text="Inventory item identifier")
     blank_card = serializers.BooleanField(
         default=False,
-        help_text="If True, generate blank card with only QR code for creative customization"
+        help_text="If True, generate blank card with only QR code for creative customization",
     )
 
 
@@ -32,7 +32,7 @@ class IndexCardBatchSerializer(serializers.Serializer):
     )
     blank_cards = serializers.BooleanField(
         default=False,
-        help_text="If True, generate blank cards with only QR codes for creative customization"
+        help_text="If True, generate blank cards with only QR codes for creative customization",
     )
 
     def validate_item_ids(self, value: List[str]) -> List[str]:

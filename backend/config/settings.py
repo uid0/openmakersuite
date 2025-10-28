@@ -126,10 +126,10 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.AllowAny",
-    )
-    if DEVELOPMENT_MODE
-    else ("rest_framework.permissions.IsAuthenticatedOrReadOnly",),
+        ("rest_framework.permissions.AllowAny",)
+        if DEVELOPMENT_MODE
+        else ("rest_framework.permissions.IsAuthenticatedOrReadOnly",)
+    ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
@@ -247,7 +247,10 @@ SPECTACULAR_SETTINGS = {
 }
 
 # Sentry Configuration
-SENTRY_DSN = config("SENTRY_DSN", default="https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952")
+SENTRY_DSN = config(
+    "SENTRY_DSN",
+    default="https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952",
+)
 SENTRY_ENVIRONMENT = config("SENTRY_ENVIRONMENT", default="development")
 
 if SENTRY_DSN:

@@ -221,7 +221,7 @@ act-frontend:  ## Run only frontend tests job locally with act
 act-security:  ## Run only security/code quality job locally with act
 	@echo "Running code quality & security job locally with act..."
 	@command -v act >/dev/null 2>&1 || { echo "❌ Error: act is not installed. Install with: brew install act (macOS) or see https://github.com/nektos/act"; exit 1; }
-	act -j code-quality --verbose
+	act -j security --verbose
 
 act-docker:  ## Run only docker build job locally with act
 	@echo "Running docker build job locally with act..."

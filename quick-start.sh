@@ -17,7 +17,7 @@ if [ ! -f backend/.env ]; then
     cat > backend/.env << 'EOF'
 # Django Configuration
 DEBUG=1
-SECRET_KEY=dev-secret-key-change-in-production
+SECRET_KEY=development-only-insecure-key-replace-in-production
 DATABASE_URL=sqlite:///db.sqlite3
 ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
 

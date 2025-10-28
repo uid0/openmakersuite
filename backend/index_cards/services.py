@@ -210,6 +210,8 @@ class IndexCardRenderer:
         origin_x: float,
         origin_y: float,
     ) -> None:
+        """Draw a single inventory card with item details."""
+        # Draw card border
         pdf_canvas.roundRect(
             origin_x,
             origin_y,
@@ -220,231 +222,222 @@ class IndexCardRenderer:
             fill=0,
         )
 
+        if self.blank_cards:
+            self._draw_blank_card(pdf_canvas, item, origin_x, origin_y)
+        else:
+            self._draw_detailed_card(pdf_canvas, item, origin_x, origin_y)
+
+    def _draw_blank_card(self, pdf_canvas: canvas.Canvas, item: InventoryItem, origin_x: float, origin_y: float) -> None:
+        """Draw a blank card with only a centered QR code."""
+        qr_x = origin_x + (self.CARD_WIDTH - self.QR_CODE_SIZE) / 2
+        qr_y = origin_y + (self.CARD_HEIGHT - self.QR_CODE_SIZE) / 2
+
+        qr_buffer = self._generate_qr_code(item)
+        qr_reader = ImageReader(qr_buffer)
+        pdf_canvas.drawImage(
+            qr_reader,
+            qr_x,
+            qr_y,
+            width=self.QR_CODE_SIZE,
+            height=self.QR_CODE_SIZE,
+            preserveAspectRatio=True,
+        )
+
+    def _draw_detailed_card(self, pdf_canvas: canvas.Canvas, item: InventoryItem, origin_x: float, origin_y: float) -> None:
+        """Draw a detailed card with title, info, image, QR code, and CTA."""
         inner_x = origin_x + self.CARD_PADDING
         inner_y = origin_y + self.CARD_PADDING
         available_width = self.CARD_WIDTH - 2 * self.CARD_PADDING
 
-        # For blank cards, only show QR code
-        if self.blank_cards:
-            # QR code centered on blank card
-            qr_x = origin_x + (self.CARD_WIDTH - self.QR_CODE_SIZE) / 2
-            qr_y = origin_y + (self.CARD_HEIGHT - self.QR_CODE_SIZE) / 2
+        # Define layout sections
+        left_section_width = self.CARD_WIDTH * 0.6
+        right_section_width = self.CARD_WIDTH * 0.4
+        left_section_x = inner_x
+        right_section_x = inner_x + left_section_width
 
-            # Generate QR code
-            qr_buffer = self._generate_qr_code(item)
-            qr_reader = ImageReader(qr_buffer)
-            pdf_canvas.drawImage(
-                qr_reader,
-                qr_x,
-                qr_y,
-                width=self.QR_CODE_SIZE,
-                height=self.QR_CODE_SIZE,
-                preserveAspectRatio=True,
-            )
+        # Draw title and get updated Y position
+        current_y = self._draw_title_section(pdf_canvas, item, inner_x, origin_y, available_width)
+
+        # Draw left section (info + image)
+        self._draw_left_section(pdf_canvas, item, left_section_x, left_section_width, current_y, inner_y)
+
+        # Draw right section (QR + CTA)  
+        self._draw_right_section(pdf_canvas, item, right_section_x, right_section_width, current_y, inner_y)
+
+        # Draw category at bottom
+        self._draw_category_section(pdf_canvas, item, inner_x, inner_y)
+
+    def _draw_title_section(self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, origin_y: float, available_width: float) -> float:
+        """Draw the item title and return the updated Y position."""
+        current_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING
+        title_para = Paragraph(item.name, self._title_style)
+        title_width, title_height = title_para.wrap(available_width, 0.4 * inch)
+        title_para.drawOn(pdf_canvas, inner_x, current_y - title_height)
+        return current_y - title_height - 0.3 * inch
+
+    def _draw_left_section(self, pdf_canvas: canvas.Canvas, item: InventoryItem, left_section_x: float, left_section_width: float, current_y: float, inner_y: float) -> None:
+        """Draw the left section with stock info and product image."""
+        # Draw stock info
+        target_stock = self._calculate_desired_stock(item)
+        info_lines = [
+            f"Target: {self._pluralize(target_stock, 'unit')}",
+            f"Reorder: {self._pluralize(item.reorder_quantity, 'unit')}",
+        ]
+
+        if item.average_lead_time:
+            info_lines.append(f"Lead: {self._pluralize(item.average_lead_time, 'day')}")
+
+        info_y = current_y - 0.1 * inch
+        self._draw_info_lines(pdf_canvas, info_lines, left_section_x, info_y, left_section_width - 0.1 * inch)
+
+        # Draw product image below info
+        info_lines_height = len(info_lines) * self._highlight_style.leading
+        image_y_start = info_y - info_lines_height - 0.1 * inch
+        
+        if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
+            self._draw_product_image(pdf_canvas, item, left_section_x, left_section_width, image_y_start, inner_y)
+
+    def _draw_right_section(self, pdf_canvas: canvas.Canvas, item: InventoryItem, right_section_x: float, right_section_width: float, current_y: float, inner_y: float) -> None:
+        """Draw the right section with QR code and CTA."""
+        # Calculate positioning for QR and CTA
+        cta_dimensions = self._calculate_cta_dimensions(item, right_section_width, current_y, inner_y)
+        qr_x, qr_y, cta_box = cta_dimensions
+
+        # Draw QR code with optional frame
+        self._draw_qr_code_with_frame(pdf_canvas, item, right_section_x, right_section_width, qr_x, qr_y)
+
+        # Draw CTA box
+        self._draw_cta_box(pdf_canvas, item, right_section_x, right_section_width, cta_box)
+
+    def _draw_category_section(self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, inner_y: float) -> None:
+        """Draw the category text at the bottom of the card."""
+        if not item.category:
+            return
+
+        category_color = item.category.color if item.category and item.category.color else "#2563eb"
+        text_color = self._get_contrast_text_color(category_color)
+        is_light_color = text_color.red == 0
+
+        # Use category color for text if it's dark, otherwise use gray
+        if not is_light_color and item.category.color and item.category.color.strip():
+            try:
+                category_text_color = colors.HexColor(item.category.color.strip())
+                pdf_canvas.setFillColor(category_text_color)
+            except (ValueError, AttributeError):
+                pdf_canvas.setFillColor(colors.gray)
         else:
-            # Simplified cards: Left (Info + Photo) | Right (QR + CTA)
+            pdf_canvas.setFillColor(colors.gray)
 
-            # Define two main sections
-            left_section_width = self.CARD_WIDTH * 0.6  # Info + Photo section
-            right_section_width = self.CARD_WIDTH * 0.4  # QR + CTA section
+        pdf_canvas.setFont("Helvetica", 8)
+        category_text = f"Category: {item.category.name}"
+        pdf_canvas.drawString(inner_x, inner_y + 0.05 * inch, category_text)
+        pdf_canvas.setFillColor(colors.black)  # Reset color
 
-            left_section_x = inner_x
-            right_section_x = inner_x + left_section_width
+    def _draw_product_image(self, pdf_canvas: canvas.Canvas, item: InventoryItem, left_section_x: float, left_section_width: float, image_y_start: float, inner_y: float) -> None:
+        """Draw the product image if available."""
+        image_reader = ImageReader(item.image.path)
+        image_width, image_height = image_reader.getSize()
+        available_image_space = image_y_start - inner_y - 0.3 * inch  # Reserve space for category
+        max_image_width = left_section_width - 0.2 * inch
 
-            current_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING
-
-            # Title - spans full width at top
-            title_para = Paragraph(item.name, self._title_style)
-            title_width, title_height = title_para.wrap(available_width, 0.4 * inch)
-            title_para.drawOn(pdf_canvas, inner_x, current_y - title_height)
-            current_y -= title_height + 0.3 * inch  # Space after title
-
-            # RIGHT SECTION: QR Code and CTA (positioned together to prevent overflow)
-
-            # LEFT SECTION: Stock Info
-            target_stock = self._calculate_desired_stock(item)
-            info_lines = [
-                f"Target: {self._pluralize(target_stock, 'unit')}",
-                f"Reorder: {self._pluralize(item.reorder_quantity, 'unit')}",
-            ]
-
-            # Add lead time if available with proper pluralization
-            if item.average_lead_time:
-                info_lines.append(f"Lead: {self._pluralize(item.average_lead_time, 'day')}")
-
-            # Position stock info below title with proper spacing
-            info_y = current_y - 0.1 * inch
-            self._draw_info_lines(
-                pdf_canvas, info_lines, left_section_x, info_y, left_section_width - 0.1 * inch
-            )
-
-            # Calculate space used by info lines
-            info_lines_height = len(info_lines) * self._highlight_style.leading
-
-            # LEFT SECTION: Product Image (below stock info)
-            image_y_start = info_y - info_lines_height - 0.1 * inch
-            if item.image and hasattr(item.image, "path"):
-                if os.path.exists(item.image.path):
-                    image_reader = ImageReader(item.image.path)
-                    image_width, image_height = image_reader.getSize()
-                    # Calculate available space for image
-                    available_image_space = (
-                        image_y_start - inner_y - 0.3 * inch
-                    )  # Reserve space for category
-                    max_image_width = left_section_width - 0.2 * inch
-
-                    if available_image_space > 0:
-                        scale = min(
-                            max_image_width / image_width,
-                            available_image_space / image_height,
-                            1,
-                        )
-                        image_drawn_width = image_width * scale
-                        image_drawn_height = image_height * scale
-                        image_x = left_section_x + (left_section_width - image_drawn_width) / 2
-                        image_y = image_y_start - image_drawn_height
-                        pdf_canvas.drawImage(
-                            image_reader,
-                            image_x,
-                            image_y,
-                            width=image_drawn_width,
-                            height=image_drawn_height,
-                            preserveAspectRatio=True,
-                            mask="auto",
-                        )
-
-            # Calculate dimensions for CTA box first (to determine positioning)
-            cta_lines = self.CALL_TO_ACTION.split("\n")
-            line_height = 10  # Increased from 8 to accommodate larger font
-            padding_vertical = 3  # Slightly more padding for larger text
-            box_height = len(cta_lines) * line_height + 2 * padding_vertical
-            box_width = right_section_width - 0.2 * inch  # More margin to prevent overflow
-
-            # Calculate space needed at bottom for category
-            category_space = 0.25 * inch if item.category else 0.1 * inch
-
-            # Calculate total space available in right section
-            total_right_height = current_y - inner_y - category_space
-            qr_and_cta_height = self.QR_CODE_SIZE + 0.1 * inch + box_height  # QR + gap + CTA
-
-            # Adjust positioning to fit both QR and CTA properly
-            if qr_and_cta_height <= total_right_height:
-                # Both fit comfortably - position QR higher, CTA below
-                qr_y_adjusted = current_y - self.QR_CODE_SIZE
-                box_y = qr_y_adjusted - 0.1 * inch - box_height
-            else:
-                # Tight fit - optimize spacing
-                qr_y_adjusted = current_y - self.QR_CODE_SIZE + 0.05 * inch  # Move QR up slightly
-                box_y = qr_y_adjusted - 0.05 * inch - box_height  # Closer gap
-
-            # Ensure CTA box doesn't go below the category space
-            min_box_y = inner_y + category_space
-            if box_y < min_box_y:
-                box_y = min_box_y
-                # If CTA would be too high, make it smaller
-                if box_y + box_height > qr_y_adjusted - 0.02 * inch:
-                    line_height = 8  # Make text smaller but still readable
-                    box_height = len(cta_lines) * line_height + 2 * padding_vertical
-
-            # Re-position QR code to final location
-            qr_x = right_section_x + (right_section_width - self.QR_CODE_SIZE) / 2
-            qr_y = qr_y_adjusted
-
-            # Determine if we should frame the QR code based on color lightness
-            category_color = (
-                item.category.color if item.category and item.category.color else "#2563eb"
-            )
-            text_color = self._get_contrast_text_color(category_color)
-            is_light_color = text_color.red == 0  # Black text means light background
-
-            # If light color, add colored frame around QR code
-            if is_light_color and item.category and item.category.color:
-                try:
-                    frame_color = colors.HexColor(category_color.strip())
-                    # Draw colored frame around QR code
-                    frame_padding = 0.05 * inch
-                    pdf_canvas.setStrokeColor(frame_color)
-                    pdf_canvas.setLineWidth(2)  # Thick frame for visibility
-                    pdf_canvas.rect(
-                        qr_x - frame_padding,
-                        qr_y - frame_padding,
-                        self.QR_CODE_SIZE + 2 * frame_padding,
-                        self.QR_CODE_SIZE + 2 * frame_padding,
-                        stroke=1,
-                        fill=0,
-                    )
-                except (ValueError, AttributeError):
-                    pass  # Skip frame if color invalid
-
-            qr_buffer = self._generate_qr_code(item)
-            qr_reader = ImageReader(qr_buffer)
+        if available_image_space > 0:
+            scale = min(max_image_width / image_width, available_image_space / image_height, 1)
+            image_drawn_width = image_width * scale
+            image_drawn_height = image_height * scale
+            image_x = left_section_x + (left_section_width - image_drawn_width) / 2
+            image_y = image_y_start - image_drawn_height
             pdf_canvas.drawImage(
-                qr_reader,
-                qr_x,
-                qr_y,
-                width=self.QR_CODE_SIZE,
-                height=self.QR_CODE_SIZE,
-                preserveAspectRatio=True,
+                image_reader, image_x, image_y,
+                width=image_drawn_width, height=image_drawn_height,
+                preserveAspectRatio=True, mask="auto"
             )
 
-            # Use category color for CTA background
-            if item.category and item.category.color and item.category.color.strip():
-                try:
-                    bg_color = colors.HexColor(item.category.color.strip())
-                except (ValueError, AttributeError):
-                    bg_color = colors.HexColor("#2563eb")  # Default blue
-            else:
-                bg_color = colors.HexColor("#2563eb")  # Default blue
+    def _calculate_cta_dimensions(self, item: InventoryItem, right_section_width: float, current_y: float, inner_y: float) -> tuple:
+        """Calculate positioning for QR code and CTA box."""
+        cta_lines = self.CALL_TO_ACTION.split("\n")
+        line_height = 10
+        padding_vertical = 3
+        box_height = len(cta_lines) * line_height + 2 * padding_vertical
+        box_width = right_section_width - 0.2 * inch
 
-            # Position CTA box with proper margins
-            box_x = right_section_x + 0.05 * inch  # Reduced margin
+        category_space = 0.25 * inch if item.category else 0.1 * inch
+        total_right_height = current_y - inner_y - category_space
+        qr_and_cta_height = self.QR_CODE_SIZE + 0.1 * inch + box_height
 
-            # Ensure CTA box always renders (simplified bounds checking)
-            # Draw colored background box for CTA
-            pdf_canvas.setFillColor(bg_color)
-            pdf_canvas.roundRect(
-                box_x,
-                box_y,
-                box_width,
-                box_height,
-                radius=3,
-                stroke=0,
-                fill=1,
-            )
+        # Adjust positioning
+        if qr_and_cta_height <= total_right_height:
+            qr_y_adjusted = current_y - self.QR_CODE_SIZE
+            box_y = qr_y_adjusted - 0.1 * inch - box_height
+        else:
+            qr_y_adjusted = current_y - self.QR_CODE_SIZE + 0.05 * inch
+            box_y = qr_y_adjusted - 0.05 * inch - box_height
 
-            # Use optimal text color for contrast (black on light, white on dark)
-            text_color = self._get_contrast_text_color(
-                item.category.color if item.category and item.category.color else "#2563eb"
-            )
-            pdf_canvas.setFillColor(text_color)
-            pdf_canvas.setFont("Helvetica-Bold", 8)  # Increased from 6 to 8 for better visibility
-            cta_y = box_y + box_height - padding_vertical - 8  # Adjusted for larger font
-            for line in cta_lines:
-                pdf_canvas.drawCentredString(right_section_x + right_section_width / 2, cta_y, line)
-                cta_y -= line_height
+        # Ensure CTA doesn't go below category space
+        min_box_y = inner_y + category_space
+        if box_y < min_box_y:
+            box_y = min_box_y
+            if box_y + box_height > qr_y_adjusted - 0.02 * inch:
+                line_height = 8
+                box_height = len(cta_lines) * line_height + 2 * padding_vertical
 
-            # Category at bottom of card (spans full width)
-            if item.category:
-                # Use category color for text if it's dark, otherwise use gray
-                if not is_light_color and item.category.color and item.category.color.strip():
-                    # Dark color - use it for category text since QR doesn't have frame
-                    try:
-                        category_text_color = colors.HexColor(item.category.color.strip())
-                        pdf_canvas.setFillColor(category_text_color)
-                    except (ValueError, AttributeError):
-                        pdf_canvas.setFillColor(colors.gray)
-                else:
-                    # Light color (has QR frame) or no color - use gray text
-                    pdf_canvas.setFillColor(colors.gray)
+        qr_x = 0  # Will be calculated in draw method
+        return qr_x, qr_y_adjusted, {'x': 0, 'y': box_y, 'width': box_width, 'height': box_height, 'line_height': line_height, 'padding': padding_vertical}
 
-                pdf_canvas.setFont("Helvetica", 8)
-                category_text = f"Category: {item.category.name}"
-                pdf_canvas.drawString(
-                    inner_x, inner_y + 0.05 * inch, category_text  # Near bottom of card
+    def _draw_qr_code_with_frame(self, pdf_canvas: canvas.Canvas, item: InventoryItem, right_section_x: float, right_section_width: float, qr_x: float, qr_y: float) -> None:
+        """Draw QR code with optional colored frame."""
+        qr_x = right_section_x + (right_section_width - self.QR_CODE_SIZE) / 2
+        
+        category_color = item.category.color if item.category and item.category.color else "#2563eb"
+        text_color = self._get_contrast_text_color(category_color)
+        is_light_color = text_color.red == 0
+
+        # Add colored frame for light colors
+        if is_light_color and item.category and item.category.color:
+            try:
+                frame_color = colors.HexColor(category_color.strip())
+                frame_padding = 0.05 * inch
+                pdf_canvas.setStrokeColor(frame_color)
+                pdf_canvas.setLineWidth(2)
+                pdf_canvas.rect(
+                    qr_x - frame_padding, qr_y - frame_padding,
+                    self.QR_CODE_SIZE + 2 * frame_padding, self.QR_CODE_SIZE + 2 * frame_padding,
+                    stroke=1, fill=0
                 )
+            except (ValueError, AttributeError):
+                pass
 
-            # Reset fill color
-            pdf_canvas.setFillColor(colors.black)
+        # Draw QR code
+        qr_buffer = self._generate_qr_code(item)
+        qr_reader = ImageReader(qr_buffer)
+        pdf_canvas.drawImage(qr_reader, qr_x, qr_y, 
+                           width=self.QR_CODE_SIZE, height=self.QR_CODE_SIZE, preserveAspectRatio=True)
+
+    def _draw_cta_box(self, pdf_canvas: canvas.Canvas, item: InventoryItem, right_section_x: float, right_section_width: float, cta_box: dict) -> None:
+        """Draw the call-to-action box with proper colors."""
+        # Get background color
+        if item.category and item.category.color and item.category.color.strip():
+            try:
+                bg_color = colors.HexColor(item.category.color.strip())
+            except (ValueError, AttributeError):
+                bg_color = colors.HexColor("#2563eb")
+        else:
+            bg_color = colors.HexColor("#2563eb")
+
+        # Draw background box
+        box_x = right_section_x + 0.05 * inch
+        pdf_canvas.setFillColor(bg_color)
+        pdf_canvas.roundRect(box_x, cta_box['y'], cta_box['width'], cta_box['height'], radius=3, stroke=0, fill=1)
+
+        # Draw text with optimal contrast
+        text_color = self._get_contrast_text_color(item.category.color if item.category and item.category.color else "#2563eb")
+        pdf_canvas.setFillColor(text_color)
+        pdf_canvas.setFont("Helvetica-Bold", 8)
+        
+        cta_lines = self.CALL_TO_ACTION.split("\n")
+        cta_y = cta_box['y'] + cta_box['height'] - cta_box['padding'] - 8
+        for line in cta_lines:
+            pdf_canvas.drawCentredString(right_section_x + right_section_width / 2, cta_y, line)
+            cta_y -= cta_box['line_height']
 
     def _draw_info_lines(
         self,

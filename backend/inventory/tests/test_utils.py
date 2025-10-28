@@ -4,7 +4,6 @@ Tests for QR code and PDF generation utilities.
 
 from io import BytesIO
 
-
 import pytest
 from PIL import Image
 

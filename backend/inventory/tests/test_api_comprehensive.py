@@ -9,14 +9,8 @@ This module tests all API endpoints with various scenarios including:
 - Related object navigation
 """
 
-import json
-from io import BytesIO
-from unittest.mock import patch
-
-from django.test import TestCase
 from django.urls import reverse
 
-import pytest
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -122,7 +116,7 @@ class InventoryAPIComprehensiveTest(APITestCase):
     def test_pagination(self):
         """Test API pagination."""
         # Create multiple items
-        for i in range(5):
+        for _ in range(5):
             InventoryItemFactory(category=self.category)
 
         url = reverse("inventoryitem-list")
@@ -136,7 +130,7 @@ class InventoryAPIComprehensiveTest(APITestCase):
     def test_filtering_by_category(self):
         """Test filtering items by category."""
         other_category = CategoryFactory()
-        other_item = InventoryItemFactory(category=other_category)
+        InventoryItemFactory(category=other_category)  # Create item in different category
 
         url = reverse("inventoryitem-list")
         response = self.client.get(url, {"category": self.category.id})

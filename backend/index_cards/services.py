@@ -174,8 +174,6 @@ class IndexCardRenderer:
 
     def _draw_page(self, pdf_canvas: canvas.Canvas, items: Sequence[InventoryItem]) -> None:
         # Draw up to 3 cards vertically (Avery 5388 layout)
-        cards_per_page = 3
-
         # Calculate available space for 3 cards + 2 gaps
         available_height = self.PAGE_HEIGHT - self.TOP_MARGIN - self.BOTTOM_MARGIN
         total_cards_height = 3 * self.CARD_HEIGHT

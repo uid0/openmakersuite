@@ -132,5 +132,5 @@ def refresh_token(request):
             }
         )
 
-    except Exception as e:
+    except Exception:
         return Response({"detail": "Invalid refresh token"}, status=status.HTTP_401_UNAUTHORIZED)

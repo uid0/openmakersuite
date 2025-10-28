@@ -30,7 +30,6 @@ from .serializers import (
     SupplierSerializer,
     UsageLogSerializer,
 )
-from .tasks import generate_qr_code
 
 
 class SupplierViewSet(viewsets.ModelViewSet):
@@ -391,8 +390,8 @@ class PriceHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(change_type=change_type)
 
         # Date range filtering
-        start_date = request.query_params.get("start_date")
-        end_date = request.query_params.get("end_date")
+        start_date = self.request.query_params.get("start_date")
+        end_date = self.request.query_params.get("end_date")
 
         if start_date:
             queryset = queryset.filter(recorded_at__gte=start_date)

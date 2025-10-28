@@ -95,8 +95,8 @@ def generate_index_card(item_id):
 
     try:
         item = InventoryItem.objects.get(id=item_id)
-        pdf_buffer = generate_item_card(item)
-        # You could save this to a file storage or send via email
+        generate_item_card(item)
+        # TODO: Save to file storage or send via email
         return f"Index card generated for {item.name}"
     except InventoryItem.DoesNotExist:
         return f"Item {item_id} not found"

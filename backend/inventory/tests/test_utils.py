@@ -4,7 +4,6 @@ Tests for QR code and PDF generation utilities.
 
 from io import BytesIO
 
-from django.core.files.uploadedfile import SimpleUploadedFile
 
 import pytest
 from PIL import Image

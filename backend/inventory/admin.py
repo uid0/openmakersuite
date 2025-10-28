@@ -5,7 +5,6 @@ Admin configuration for inventory app.
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
-from django.utils.safestring import mark_safe
 
 from .models import (
     Category,

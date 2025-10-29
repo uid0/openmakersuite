@@ -9,12 +9,15 @@ This module tests all API endpoints with various scenarios including:
 - Related object navigation
 """
 
+from django.contrib.auth import get_user_model
 from django.urls import reverse
 
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from inventory.tests.factories import CategoryFactory, InventoryItemFactory, SupplierFactory
+
+User = get_user_model()
 
 
 class InventoryAPIComprehensiveTest(APITestCase):
@@ -50,6 +53,10 @@ class InventoryAPIComprehensiveTest(APITestCase):
 
     def test_inventory_item_create(self):
         """Test inventory item creation."""
+        # Create and authenticate user
+        user = User.objects.create_user(username="testuser", password="testpass")
+        self.client.force_authenticate(user=user)
+        
         url = reverse("inventoryitem-list")
         data = {
             "name": "Test Item",
@@ -69,6 +76,10 @@ class InventoryAPIComprehensiveTest(APITestCase):
 
     def test_inventory_item_update(self):
         """Test inventory item update."""
+        # Create and authenticate user
+        user = User.objects.create_user(username="testuser2", password="testpass")
+        self.client.force_authenticate(user=user)
+        
         url = reverse("inventoryitem-detail", kwargs={"pk": self.item.id})
         data = {"name": "Updated Item Name"}
 
@@ -78,6 +89,10 @@ class InventoryAPIComprehensiveTest(APITestCase):
 
     def test_inventory_item_delete(self):
         """Test inventory item deletion."""
+        # Create and authenticate user
+        user = User.objects.create_user(username="testuser3", password="testpass")
+        self.client.force_authenticate(user=user)
+        
         url = reverse("inventoryitem-detail", kwargs={"pk": self.item.id})
         response = self.client.delete(url)
 

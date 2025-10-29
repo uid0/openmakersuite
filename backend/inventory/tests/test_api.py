@@ -154,31 +154,31 @@ class TestInventoryItemAPI:
         client, user = authenticated_client
         item = InventoryItemFactory()
 
-        # Mock the Celery task
-        mock_task = mocker.patch("inventory.views.generate_qr_code.delay")
+        # Mock the QR code generation utility
+        mock_save_qr = mocker.patch("inventory.utils.qr_generator.save_qr_code_to_item")
 
         url = reverse("inventoryitem-generate-qr", kwargs={"pk": str(item.id)})
         response = client.post(url)
 
         assert response.status_code == status.HTTP_200_OK
-        mock_task.assert_called_once_with(str(item.id))
+        mock_save_qr.assert_called_once_with(item)
 
     def test_download_card_endpoint(self, api_client, mocker):
         """Test PDF card download endpoint."""
         item = InventoryItemFactory()
 
-        # Mock PDF generation
-        mock_pdf = mocker.patch("inventory.utils.pdf_generator.generate_item_card")
-        from io import BytesIO
+        # Mock PDF generation (the actual method used in the view)
+        mock_renderer = mocker.patch("index_cards.services.IndexCardRenderer")
+        mock_instance = mock_renderer.return_value
+        mock_instance.render_preview.return_value = b"fake pdf content"
 
-        mock_pdf.return_value = BytesIO(b"fake pdf content")
-
-        url = reverse("inventoryitem-download-card", kwargs={"pk": str(item.id)})
+        url = reverse("inventoryitem-download_card", kwargs={"pk": str(item.id)})
         response = api_client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
         assert response["Content-Type"] == "application/pdf"
-        mock_pdf.assert_called_once()
+        mock_renderer.assert_called_once_with(blank_cards=False)
+        mock_instance.render_preview.assert_called_once_with(item, blank_card=False)
 
     def test_log_usage_endpoint(self, authenticated_client):
         """Test logging item usage."""

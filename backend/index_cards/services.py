@@ -227,7 +227,9 @@ class IndexCardRenderer:
         else:
             self._draw_detailed_card(pdf_canvas, item, origin_x, origin_y)
 
-    def _draw_blank_card(self, pdf_canvas: canvas.Canvas, item: InventoryItem, origin_x: float, origin_y: float) -> None:
+    def _draw_blank_card(
+        self, pdf_canvas: canvas.Canvas, item: InventoryItem, origin_x: float, origin_y: float
+    ) -> None:
         """Draw a blank card with only a centered QR code."""
         qr_x = origin_x + (self.CARD_WIDTH - self.QR_CODE_SIZE) / 2
         qr_y = origin_y + (self.CARD_HEIGHT - self.QR_CODE_SIZE) / 2
@@ -243,7 +245,9 @@ class IndexCardRenderer:
             preserveAspectRatio=True,
         )
 
-    def _draw_detailed_card(self, pdf_canvas: canvas.Canvas, item: InventoryItem, origin_x: float, origin_y: float) -> None:
+    def _draw_detailed_card(
+        self, pdf_canvas: canvas.Canvas, item: InventoryItem, origin_x: float, origin_y: float
+    ) -> None:
         """Draw a detailed card with title, info, image, QR code, and CTA."""
         inner_x = origin_x + self.CARD_PADDING
         inner_y = origin_y + self.CARD_PADDING
@@ -259,15 +263,26 @@ class IndexCardRenderer:
         current_y = self._draw_title_section(pdf_canvas, item, inner_x, origin_y, available_width)
 
         # Draw left section (info + image)
-        self._draw_left_section(pdf_canvas, item, left_section_x, left_section_width, current_y, inner_y)
+        self._draw_left_section(
+            pdf_canvas, item, left_section_x, left_section_width, current_y, inner_y
+        )
 
-        # Draw right section (QR + CTA)  
-        self._draw_right_section(pdf_canvas, item, right_section_x, right_section_width, current_y, inner_y)
+        # Draw right section (QR + CTA)
+        self._draw_right_section(
+            pdf_canvas, item, right_section_x, right_section_width, current_y, inner_y
+        )
 
         # Draw category at bottom
         self._draw_category_section(pdf_canvas, item, inner_x, inner_y)
 
-    def _draw_title_section(self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, origin_y: float, available_width: float) -> float:
+    def _draw_title_section(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        inner_x: float,
+        origin_y: float,
+        available_width: float,
+    ) -> float:
         """Draw the item title and return the updated Y position."""
         current_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING
         title_para = Paragraph(item.name, self._title_style)
@@ -275,7 +290,15 @@ class IndexCardRenderer:
         title_para.drawOn(pdf_canvas, inner_x, current_y - title_height)
         return current_y - title_height - 0.3 * inch
 
-    def _draw_left_section(self, pdf_canvas: canvas.Canvas, item: InventoryItem, left_section_x: float, left_section_width: float, current_y: float, inner_y: float) -> None:
+    def _draw_left_section(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        left_section_x: float,
+        left_section_width: float,
+        current_y: float,
+        inner_y: float,
+    ) -> None:
         """Draw the left section with stock info and product image."""
         # Draw stock info
         target_stock = self._calculate_desired_stock(item)
@@ -288,28 +311,46 @@ class IndexCardRenderer:
             info_lines.append(f"Lead: {self._pluralize(item.average_lead_time, 'day')}")
 
         info_y = current_y - 0.1 * inch
-        self._draw_info_lines(pdf_canvas, info_lines, left_section_x, info_y, left_section_width - 0.1 * inch)
+        self._draw_info_lines(
+            pdf_canvas, info_lines, left_section_x, info_y, left_section_width - 0.1 * inch
+        )
 
         # Draw product image below info
         info_lines_height = len(info_lines) * self._highlight_style.leading
         image_y_start = info_y - info_lines_height - 0.1 * inch
-        
-        if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
-            self._draw_product_image(pdf_canvas, item, left_section_x, left_section_width, image_y_start, inner_y)
 
-    def _draw_right_section(self, pdf_canvas: canvas.Canvas, item: InventoryItem, right_section_x: float, right_section_width: float, current_y: float, inner_y: float) -> None:
+        if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
+            self._draw_product_image(
+                pdf_canvas, item, left_section_x, left_section_width, image_y_start, inner_y
+            )
+
+    def _draw_right_section(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        right_section_x: float,
+        right_section_width: float,
+        current_y: float,
+        inner_y: float,
+    ) -> None:
         """Draw the right section with QR code and CTA."""
         # Calculate positioning for QR and CTA
-        cta_dimensions = self._calculate_cta_dimensions(item, right_section_width, current_y, inner_y)
+        cta_dimensions = self._calculate_cta_dimensions(
+            item, right_section_width, current_y, inner_y
+        )
         qr_x, qr_y, cta_box = cta_dimensions
 
         # Draw QR code with optional frame
-        self._draw_qr_code_with_frame(pdf_canvas, item, right_section_x, right_section_width, qr_x, qr_y)
+        self._draw_qr_code_with_frame(
+            pdf_canvas, item, right_section_x, right_section_width, qr_x, qr_y
+        )
 
         # Draw CTA box
         self._draw_cta_box(pdf_canvas, item, right_section_x, right_section_width, cta_box)
 
-    def _draw_category_section(self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, inner_y: float) -> None:
+    def _draw_category_section(
+        self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, inner_y: float
+    ) -> None:
         """Draw the category text at the bottom of the card."""
         if not item.category:
             return
@@ -333,7 +374,15 @@ class IndexCardRenderer:
         pdf_canvas.drawString(inner_x, inner_y + 0.05 * inch, category_text)
         pdf_canvas.setFillColor(colors.black)  # Reset color
 
-    def _draw_product_image(self, pdf_canvas: canvas.Canvas, item: InventoryItem, left_section_x: float, left_section_width: float, image_y_start: float, inner_y: float) -> None:
+    def _draw_product_image(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        left_section_x: float,
+        left_section_width: float,
+        image_y_start: float,
+        inner_y: float,
+    ) -> None:
         """Draw the product image if available."""
         image_reader = ImageReader(item.image.path)
         image_width, image_height = image_reader.getSize()
@@ -347,12 +396,18 @@ class IndexCardRenderer:
             image_x = left_section_x + (left_section_width - image_drawn_width) / 2
             image_y = image_y_start - image_drawn_height
             pdf_canvas.drawImage(
-                image_reader, image_x, image_y,
-                width=image_drawn_width, height=image_drawn_height,
-                preserveAspectRatio=True, mask="auto"
+                image_reader,
+                image_x,
+                image_y,
+                width=image_drawn_width,
+                height=image_drawn_height,
+                preserveAspectRatio=True,
+                mask="auto",
             )
 
-    def _calculate_cta_dimensions(self, item: InventoryItem, right_section_width: float, current_y: float, inner_y: float) -> tuple:
+    def _calculate_cta_dimensions(
+        self, item: InventoryItem, right_section_width: float, current_y: float, inner_y: float
+    ) -> tuple:
         """Calculate positioning for QR code and CTA box."""
         cta_lines = self.CALL_TO_ACTION.split("\n")
         line_height = 10
@@ -381,12 +436,31 @@ class IndexCardRenderer:
                 box_height = len(cta_lines) * line_height + 2 * padding_vertical
 
         qr_x = 0  # Will be calculated in draw method
-        return qr_x, qr_y_adjusted, {'x': 0, 'y': box_y, 'width': box_width, 'height': box_height, 'line_height': line_height, 'padding': padding_vertical}
+        return (
+            qr_x,
+            qr_y_adjusted,
+            {
+                "x": 0,
+                "y": box_y,
+                "width": box_width,
+                "height": box_height,
+                "line_height": line_height,
+                "padding": padding_vertical,
+            },
+        )
 
-    def _draw_qr_code_with_frame(self, pdf_canvas: canvas.Canvas, item: InventoryItem, right_section_x: float, right_section_width: float, qr_x: float, qr_y: float) -> None:
+    def _draw_qr_code_with_frame(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        right_section_x: float,
+        right_section_width: float,
+        qr_x: float,
+        qr_y: float,
+    ) -> None:
         """Draw QR code with optional colored frame."""
         qr_x = right_section_x + (right_section_width - self.QR_CODE_SIZE) / 2
-        
+
         category_color = item.category.color if item.category and item.category.color else "#2563eb"
         text_color = self._get_contrast_text_color(category_color)
         is_light_color = text_color.red == 0
@@ -399,9 +473,12 @@ class IndexCardRenderer:
                 pdf_canvas.setStrokeColor(frame_color)
                 pdf_canvas.setLineWidth(2)
                 pdf_canvas.rect(
-                    qr_x - frame_padding, qr_y - frame_padding,
-                    self.QR_CODE_SIZE + 2 * frame_padding, self.QR_CODE_SIZE + 2 * frame_padding,
-                    stroke=1, fill=0
+                    qr_x - frame_padding,
+                    qr_y - frame_padding,
+                    self.QR_CODE_SIZE + 2 * frame_padding,
+                    self.QR_CODE_SIZE + 2 * frame_padding,
+                    stroke=1,
+                    fill=0,
                 )
             except (ValueError, AttributeError):
                 pass
@@ -409,10 +486,23 @@ class IndexCardRenderer:
         # Draw QR code
         qr_buffer = self._generate_qr_code(item)
         qr_reader = ImageReader(qr_buffer)
-        pdf_canvas.drawImage(qr_reader, qr_x, qr_y, 
-                           width=self.QR_CODE_SIZE, height=self.QR_CODE_SIZE, preserveAspectRatio=True)
+        pdf_canvas.drawImage(
+            qr_reader,
+            qr_x,
+            qr_y,
+            width=self.QR_CODE_SIZE,
+            height=self.QR_CODE_SIZE,
+            preserveAspectRatio=True,
+        )
 
-    def _draw_cta_box(self, pdf_canvas: canvas.Canvas, item: InventoryItem, right_section_x: float, right_section_width: float, cta_box: dict) -> None:
+    def _draw_cta_box(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        right_section_x: float,
+        right_section_width: float,
+        cta_box: dict,
+    ) -> None:
         """Draw the call-to-action box with proper colors."""
         # Get background color
         if item.category and item.category.color and item.category.color.strip():
@@ -426,18 +516,22 @@ class IndexCardRenderer:
         # Draw background box
         box_x = right_section_x + 0.05 * inch
         pdf_canvas.setFillColor(bg_color)
-        pdf_canvas.roundRect(box_x, cta_box['y'], cta_box['width'], cta_box['height'], radius=3, stroke=0, fill=1)
+        pdf_canvas.roundRect(
+            box_x, cta_box["y"], cta_box["width"], cta_box["height"], radius=3, stroke=0, fill=1
+        )
 
         # Draw text with optimal contrast
-        text_color = self._get_contrast_text_color(item.category.color if item.category and item.category.color else "#2563eb")
+        text_color = self._get_contrast_text_color(
+            item.category.color if item.category and item.category.color else "#2563eb"
+        )
         pdf_canvas.setFillColor(text_color)
         pdf_canvas.setFont("Helvetica-Bold", 8)
-        
+
         cta_lines = self.CALL_TO_ACTION.split("\n")
-        cta_y = cta_box['y'] + cta_box['height'] - cta_box['padding'] - 8
+        cta_y = cta_box["y"] + cta_box["height"] - cta_box["padding"] - 8
         for line in cta_lines:
             pdf_canvas.drawCentredString(right_section_x + right_section_width / 2, cta_y, line)
-            cta_y -= cta_box['line_height']
+            cta_y -= cta_box["line_height"]
 
     def _draw_info_lines(
         self,

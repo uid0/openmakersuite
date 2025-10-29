@@ -231,54 +231,72 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return Location.objects.get_or_create(name=str(value))[0]
 
     def _sync_primary_supplier(self, item, data):
-        supplier_id = data.get("supplier")
+        """Sync primary supplier data with reduced complexity."""
+        supplier = self._validate_supplier(data.get("supplier"))
+        if not supplier:
+            return
+
+        cost_data = self._process_cost_data(data)
+        lead_time = self._process_lead_time_value(data.get("average_lead_time"))
+        quantity = self._process_quantity_value(data.get("quantity_per_package"))
+
+        self._create_supplier_relationship(item, supplier, data, cost_data, lead_time, quantity)
+
+    def _validate_supplier(self, supplier_id):
+        """Validate and return supplier or None if invalid."""
         if not supplier_id:
-            return
-
+            return None
         try:
-            supplier = Supplier.objects.get(pk=supplier_id)
+            return Supplier.objects.get(pk=supplier_id)
         except Supplier.DoesNotExist:
-            return
+            return None
 
-        # Handle both unit_cost (legacy) and package_cost (preferred)
+    def _process_cost_data(self, data):
+        """Process unit and package cost data, preferring package_cost."""
         unit_cost = data.get("unit_cost")
         package_cost = data.get("package_cost")
 
-        unit_cost_value = None
-        package_cost_value = None
-
         # Prefer package_cost if provided
         if package_cost not in (None, "", "null"):
-            try:
-                package_cost_value = Decimal(str(package_cost))
-            except (InvalidOperation, TypeError):
-                package_cost_value = None
+            return self._safe_decimal_conversion(package_cost), None
         # Fallback to unit_cost for backward compatibility
         elif unit_cost not in (None, "", "null"):
-            try:
-                unit_cost_value = Decimal(str(unit_cost))
-            except (InvalidOperation, TypeError):
-                unit_cost_value = None
+            return None, self._safe_decimal_conversion(unit_cost)
 
-        average_lead_time = data.get("average_lead_time")
+        return None, None
+
+    def _safe_decimal_conversion(self, value):
+        """Safely convert value to Decimal or return None."""
         try:
-            average_lead_time_value = (
-                int(average_lead_time)
-                if average_lead_time not in (None, "", "null")
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError):
+            return None
+
+    def _process_lead_time_value(self, lead_time):
+        """Process and validate lead time value."""
+        try:
+            return (
+                int(lead_time)
+                if lead_time not in (None, "", "null")
                 else ItemSupplier._meta.get_field("average_lead_time").default
             )
         except (ValueError, TypeError):
-            average_lead_time_value = ItemSupplier._meta.get_field("average_lead_time").default
+            return ItemSupplier._meta.get_field("average_lead_time").default
 
-        quantity = data.get("quantity_per_package")
+    def _process_quantity_value(self, quantity):
+        """Process and validate quantity per package value."""
         try:
-            quantity_value = (
+            return (
                 int(quantity)
                 if quantity not in (None, "", "null")
                 else ItemSupplier._meta.get_field("quantity_per_package").default
             )
         except (ValueError, TypeError):
-            quantity_value = ItemSupplier._meta.get_field("quantity_per_package").default
+            return ItemSupplier._meta.get_field("quantity_per_package").default
+
+    def _create_supplier_relationship(self, item, supplier, data, cost_data, lead_time, quantity):
+        """Create or update the ItemSupplier relationship."""
+        package_cost_value, unit_cost_value = cost_data
 
         ItemSupplier.objects.update_or_create(
             item=item,
@@ -288,8 +306,8 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 "supplier_url": data.get("supplier_url", ""),
                 "unit_cost": unit_cost_value,
                 "package_cost": package_cost_value,
-                "average_lead_time": average_lead_time_value,
-                "quantity_per_package": quantity_value,
+                "average_lead_time": lead_time,
+                "quantity_per_package": quantity,
                 "package_upc": data.get("package_upc", ""),
                 "unit_upc": data.get("unit_upc", ""),
                 "is_primary": True,

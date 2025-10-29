@@ -151,6 +151,36 @@ class InventoryItemFactory(DjangoModelFactory):
         return item
 
 
+class ItemSupplierFactory(DjangoModelFactory):
+    """Factory for creating ItemSupplier instances."""
+
+    class Meta:
+        model = ItemSupplier
+
+    item = SubFactory(InventoryItemFactory)
+    supplier = SubFactory(SupplierFactory)
+    supplier_sku = factory.Sequence(lambda n: f"SUP-SKU-{n:05d}")
+    supplier_url = Faker("url")
+    package_upc = factory.Sequence(lambda n: f"PKG-{n:012d}")
+    unit_upc = factory.Sequence(lambda n: f"UNIT-{n:012d}")
+    quantity_per_package = Faker("random_int", min=1, max=50)
+
+    # Dimensional fields (can be overridden in tests)
+    package_height = None
+    package_width = None
+    package_length = None
+    package_weight = None
+
+    # Pricing fields
+    unit_cost = Faker("pydecimal", left_digits=3, right_digits=4, positive=True)
+    package_cost = Faker("pydecimal", left_digits=3, right_digits=2, positive=True)
+    average_lead_time = Faker("random_int", min=1, max=30)
+
+    is_primary = True
+    is_active = True
+    notes = Faker("text", max_nb_chars=200)
+
+
 class UsageLogFactory(DjangoModelFactory):
     """Factory for creating UsageLog instances."""
 

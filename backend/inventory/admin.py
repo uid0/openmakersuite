@@ -50,20 +50,47 @@ class ItemSupplierInline(admin.TabularInline):
         "package_upc",
         "unit_upc",
         "quantity_per_package",
+        # Editable dimensional fields
+        "package_height",
+        "package_width",
+        "package_length",
+        "package_weight",
+        # Calculated fields (readonly)
         "package_dimensions_display",
+        "package_volume_display",
+        "unit_weight_display",
         "package_cost",
         "unit_cost_display",
         "average_lead_time",
         "is_primary",
         "is_active",
     ]
-    readonly_fields = ["unit_cost_display", "package_dimensions_display"]
+    readonly_fields = [
+        "unit_cost_display",
+        "package_dimensions_display",
+        "package_volume_display",
+        "unit_weight_display",
+    ]
 
     @admin.display(description="Package Dimensions")
     def package_dimensions_display(self, obj):
         """Display package dimensions in a compact format."""
         if obj:
             return obj.package_dimensions_display
+        return "—"
+
+    @admin.display(description="Package Volume")
+    def package_volume_display(self, obj):
+        """Display calculated package volume."""
+        if obj and obj.package_volume:
+            return f"{obj.package_volume:,.2f} in³"
+        return "—"
+
+    @admin.display(description="Unit Weight")
+    def unit_weight_display(self, obj):
+        """Display calculated weight per unit."""
+        if obj and obj.unit_weight:
+            return f"{obj.unit_weight:.3f} oz"
         return "—"
 
     @admin.display(description="Unit cost (calculated)")
@@ -217,10 +244,11 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "minimum_stock",
         "needs_reorder",
         "is_active",
+        "hazmat_status_icon",
         "api_link",
         "reorder_link",
     ]
-    list_filter = ["category", "location", "is_active"]
+    list_filter = ["category", "location", "is_active", "is_hazardous"]
     search_fields = ["name", "sku", "description"]
     readonly_fields = [
         "id",
@@ -231,6 +259,8 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "thumbnail",
         "api_link",
         "reorder_link",
+        "nfpa_fire_diamond_display",
+        "hazmat_compliance_status",
     ]
     inlines = [ItemSupplierInline]
     fieldsets = (
@@ -240,6 +270,22 @@ class InventoryItemAdmin(admin.ModelAdmin):
         ),
         ("Images", {"fields": ("image", "image_url", "thumbnail", "qr_code")}),
         ("Stock Information", {"fields": ("current_stock", "minimum_stock", "reorder_quantity")}),
+        (
+            "Hazardous Materials",
+            {
+                "fields": (
+                    "is_hazardous",
+                    "msds_url",
+                    "nfpa_health_hazard",
+                    "nfpa_fire_hazard",
+                    "nfpa_instability_hazard",
+                    "nfpa_special_hazards",
+                    "nfpa_fire_diamond_display",
+                    "hazmat_compliance_status",
+                ),
+                "description": "Safety information for hazardous materials. NFPA ratings: 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+            },
+        ),
         (
             "Frontend Links",
             {"fields": ("api_link", "reorder_link")},
@@ -277,6 +323,42 @@ class InventoryItemAdmin(admin.ModelAdmin):
         return "—"
 
     reorder_link.short_description = "Reorder Request"
+
+    def hazmat_status_icon(self, obj):
+        """Display hazmat status with visual icon."""
+        if obj.is_hazardous:
+            if obj.hazmat_compliance_status == "Complete":
+                return format_html(
+                    '<span style="color: #d63384; font-weight: bold;" title="{} - {}">⚠️ HAZMAT</span>',
+                    obj.hazmat_compliance_status,
+                    obj.nfpa_fire_diamond_display,
+                )
+            else:
+                return format_html(
+                    '<span style="color: #dc3545; font-weight: bold;" title="{}">❌ INCOMPLETE</span>',
+                    obj.hazmat_compliance_status,
+                )
+        return format_html('<span style="color: #28a745;" title="Not Hazardous">✅</span>')
+
+    hazmat_status_icon.short_description = "Hazmat"
+
+    def nfpa_fire_diamond_display(self, obj):
+        """Display NFPA Fire Diamond ratings in admin."""
+        return obj.nfpa_fire_diamond_display
+
+    nfpa_fire_diamond_display.short_description = "NFPA Fire Diamond"
+
+    def hazmat_compliance_status(self, obj):
+        """Display hazmat compliance status in admin."""
+        status = obj.hazmat_compliance_status
+        if "Complete" in status:
+            return format_html('<span style="color: #28a745; font-weight: bold;">{}</span>', status)
+        elif "Incomplete" in status:
+            return format_html('<span style="color: #dc3545; font-weight: bold;">{}</span>', status)
+        else:
+            return format_html('<span style="color: #6c757d;">{}</span>', status)
+
+    hazmat_compliance_status.short_description = "Compliance Status"
 
 
 @admin.register(PriceHistory)

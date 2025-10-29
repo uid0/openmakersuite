@@ -109,6 +109,7 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):
+    # Primary supplier fields (for backward compatibility)
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
     needs_reorder = serializers.BooleanField(read_only=True)
@@ -117,6 +118,14 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     thumbnail = serializers.SerializerMethodField()
     qr_code_url = serializers.SerializerMethodField()
     location = serializers.CharField(source="location.name", read_only=True)
+
+    # Complete supplier information array
+    suppliers = ItemSupplierSerializer(source="item_suppliers", many=True, read_only=True)
+
+    # Hazmat calculated fields
+    nfpa_fire_diamond_display = serializers.ReadOnlyField()
+    hazmat_compliance_status = serializers.ReadOnlyField()
+    has_complete_nfpa_data = serializers.ReadOnlyField()
 
     class Meta:
         model = InventoryItem
@@ -142,6 +151,18 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "quantity_per_package",
             "average_lead_time",
             "qr_code",
+            # Complete supplier array with all details
+            "suppliers",
+            # Hazmat fields
+            "is_hazardous",
+            "msds_url",
+            "nfpa_health_hazard",
+            "nfpa_fire_hazard",
+            "nfpa_instability_hazard",
+            "nfpa_special_hazards",
+            "nfpa_fire_diamond_display",
+            "hazmat_compliance_status",
+            "has_complete_nfpa_data",
             "is_active",
             "notes",
             "needs_reorder",

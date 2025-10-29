@@ -8,7 +8,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, Optional
 
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.text import slugify
 
@@ -195,6 +195,46 @@ class InventoryItem(models.Model):
     # QR code data
     qr_code = models.ImageField(upload_to="inventory/qrcodes/", blank=True, null=True)
 
+    # Hazardous Materials Information
+    is_hazardous = models.BooleanField(
+        default=False, help_text="Check if this item is classified as a hazardous material"
+    )
+    msds_url = models.URLField(
+        blank=True,
+        verbose_name="Material Safety Data Sheet URL",
+        help_text="Link to the Material Safety Data Sheet (MSDS) or Safety Data Sheet (SDS)",
+    )
+
+    # NFPA Fire Diamond (National Fire Protection Association)
+    # Scale: 0 = Minimal, 1 = Slight, 2 = Moderate, 3 = High, 4 = Extreme
+    nfpa_health_hazard = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(4)],
+        verbose_name="NFPA Health Hazard",
+        help_text="Health hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+    )
+    nfpa_fire_hazard = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(4)],
+        verbose_name="NFPA Fire Hazard",
+        help_text="Fire hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+    )
+    nfpa_instability_hazard = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(4)],
+        verbose_name="NFPA Instability Hazard",
+        help_text="Instability/Reactivity hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+    )
+    nfpa_special_hazards = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="NFPA Special Hazards",
+        help_text="Special hazard symbols (e.g., W=Water Reactive, OX=Oxidizer, COR=Corrosive, ALK=Alkali, ACID=Acid, BIO=Biohazard, POI=Poison, RAD=Radioactive)",
+    )
+
     # Metadata
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
@@ -318,6 +358,83 @@ class InventoryItem(models.Model):
         link = self.primary_item_supplier
         return link.quantity_per_package if link else None
 
+    # Hazardous Materials Helper Methods
+
+    @property
+    def nfpa_fire_diamond_display(self) -> str:
+        """Return a formatted display of the NFPA Fire Diamond ratings."""
+        if not self.is_hazardous:
+            return "Not Hazardous"
+
+        parts = []
+        if self.nfpa_health_hazard is not None:
+            parts.append(f"Health: {self.nfpa_health_hazard}")
+        if self.nfpa_fire_hazard is not None:
+            parts.append(f"Fire: {self.nfpa_fire_hazard}")
+        if self.nfpa_instability_hazard is not None:
+            parts.append(f"Instability: {self.nfpa_instability_hazard}")
+        if self.nfpa_special_hazards:
+            parts.append(f"Special: {self.nfpa_special_hazards}")
+
+        return " | ".join(parts) if parts else "NFPA ratings not specified"
+
+    @property
+    def has_complete_nfpa_data(self) -> bool:
+        """Check if all required NFPA Fire Diamond data is provided."""
+        if not self.is_hazardous:
+            return True  # Not hazardous items don't need NFPA data
+
+        return all(
+            [
+                self.nfpa_health_hazard is not None,
+                self.nfpa_fire_hazard is not None,
+                self.nfpa_instability_hazard is not None,
+            ]
+        )
+
+    @property
+    def hazmat_compliance_status(self) -> str:
+        """Return compliance status for hazardous materials documentation."""
+        if not self.is_hazardous:
+            return "Not Applicable - Not Hazardous"
+
+        missing_items = []
+
+        if not self.msds_url:
+            missing_items.append("MSDS/SDS URL")
+
+        if not self.has_complete_nfpa_data:
+            missing_nfpa = []
+            if self.nfpa_health_hazard is None:
+                missing_nfpa.append("Health")
+            if self.nfpa_fire_hazard is None:
+                missing_nfpa.append("Fire")
+            if self.nfpa_instability_hazard is None:
+                missing_nfpa.append("Instability")
+            missing_items.append(f"NFPA ({', '.join(missing_nfpa)})")
+
+        if missing_items:
+            return f"Incomplete - Missing: {', '.join(missing_items)}"
+
+        return "Complete"
+
+    def get_nfpa_hazard_level_display(self, hazard_type: str) -> str:
+        """Get human-readable display for NFPA hazard levels."""
+        level_map = {0: "Minimal", 1: "Slight", 2: "Moderate", 3: "High", 4: "Extreme"}
+
+        level = None
+        if hazard_type == "health":
+            level = self.nfpa_health_hazard
+        elif hazard_type == "fire":
+            level = self.nfpa_fire_hazard
+        elif hazard_type == "instability":
+            level = self.nfpa_instability_hazard
+
+        if level is not None and level in level_map:
+            return f"{level} - {level_map[level]}"
+
+        return "Not specified"
+
 
 class ItemSupplier(models.Model):
     """
@@ -432,7 +549,13 @@ class ItemSupplier(models.Model):
     @property
     def package_volume(self) -> Optional[Decimal]:
         """Calculate package volume in cubic inches."""
-        if all([self.package_height, self.package_width, self.package_length]):
+        if all(
+            [
+                self.package_height is not None,
+                self.package_width is not None,
+                self.package_length is not None,
+            ]
+        ):
             return self.package_height * self.package_width * self.package_length
         return None
 

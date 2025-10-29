@@ -56,7 +56,7 @@ class InventoryAPIComprehensiveTest(APITestCase):
         # Create and authenticate user
         user = User.objects.create_user(username="testuser", password="testpass")
         self.client.force_authenticate(user=user)
-        
+
         url = reverse("inventoryitem-list")
         data = {
             "name": "Test Item",
@@ -79,7 +79,7 @@ class InventoryAPIComprehensiveTest(APITestCase):
         # Create and authenticate user
         user = User.objects.create_user(username="testuser2", password="testpass")
         self.client.force_authenticate(user=user)
-        
+
         url = reverse("inventoryitem-detail", kwargs={"pk": self.item.id})
         data = {"name": "Updated Item Name"}
 
@@ -92,7 +92,7 @@ class InventoryAPIComprehensiveTest(APITestCase):
         # Create and authenticate user
         user = User.objects.create_user(username="testuser3", password="testpass")
         self.client.force_authenticate(user=user)
-        
+
         url = reverse("inventoryitem-detail", kwargs={"pk": self.item.id})
         response = self.client.delete(url)
 

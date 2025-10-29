@@ -3,12 +3,17 @@ Serializers for reorder queue API.
 """
 
 from inventory.models import ItemSupplier
-from inventory.serializers import (InventoryItemSerializer,
-                                   ItemSupplierSerializer)
+from inventory.serializers import InventoryItemSerializer, ItemSupplierSerializer
 from rest_framework import serializers
 
-from .models import (DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder,
-                     PurchaseOrderItem, ReorderRequest)
+from .models import (
+    DeliveryItem,
+    LeadTimeLog,
+    OrderDelivery,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    ReorderRequest,
+)
 
 
 class ReorderRequestSerializer(serializers.ModelSerializer):

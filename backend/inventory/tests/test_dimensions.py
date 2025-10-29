@@ -17,8 +17,12 @@ from django.test import TestCase
 from django.urls import reverse
 from inventory.admin import ItemSupplierAdmin, ItemSupplierInline
 from inventory.models import ItemSupplier
-from inventory.tests.factories import (CategoryFactory, InventoryItemFactory,
-                                       ItemSupplierFactory, SupplierFactory)
+from inventory.tests.factories import (
+    CategoryFactory,
+    InventoryItemFactory,
+    ItemSupplierFactory,
+    SupplierFactory,
+)
 
 User = get_user_model()
 

@@ -10,8 +10,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from factory import Faker, SubFactory
 from factory.django import DjangoModelFactory
 from faker import Faker as FakerGenerator
-from inventory.models import (Category, InventoryItem, ItemSupplier, Location,
-                              Supplier, UsageLog)
+from inventory.models import Category, InventoryItem, ItemSupplier, Location, Supplier, UsageLog
 from PIL import Image
 
 

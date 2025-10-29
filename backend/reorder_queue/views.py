@@ -14,15 +14,25 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .models import (DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder,
-                     PurchaseOrderItem, ReorderRequest)
-from .serializers import (BarcodeReceiptSerializer, LeadTimeLogSerializer,
-                          OrderDeliverySerializer, OrderMetricsSerializer,
-                          PurchaseOrderCreateSerializer,
-                          PurchaseOrderSerializer,
-                          ReorderRequestCreateSerializer,
-                          ReorderRequestSerializer,
-                          SupplierPerformanceSerializer)
+from .models import (
+    DeliveryItem,
+    LeadTimeLog,
+    OrderDelivery,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    ReorderRequest,
+)
+from .serializers import (
+    BarcodeReceiptSerializer,
+    LeadTimeLogSerializer,
+    OrderDeliverySerializer,
+    OrderMetricsSerializer,
+    PurchaseOrderCreateSerializer,
+    PurchaseOrderSerializer,
+    ReorderRequestCreateSerializer,
+    ReorderRequestSerializer,
+    SupplierPerformanceSerializer,
+)
 
 
 class ReorderRequestViewSet(viewsets.ModelViewSet):

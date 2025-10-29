@@ -6,8 +6,14 @@ from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
 
-from .models import (DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder,
-                     PurchaseOrderItem, ReorderRequest)
+from .models import (
+    DeliveryItem,
+    LeadTimeLog,
+    OrderDelivery,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    ReorderRequest,
+)
 
 
 class DeliveryPerformanceFilter(admin.SimpleListFilter):

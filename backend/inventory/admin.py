@@ -6,8 +6,15 @@ from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
 
-from .models import (Category, InventoryItem, ItemSupplier, Location,
-                     PriceHistory, Supplier, UsageLog)
+from .models import (
+    Category,
+    InventoryItem,
+    ItemSupplier,
+    Location,
+    PriceHistory,
+    Supplier,
+    UsageLog,
+)
 
 
 @admin.register(Supplier)

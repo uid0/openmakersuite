@@ -4,8 +4,7 @@ Serializers for inventory API.
 
 from rest_framework import serializers
 
-from .models import (Category, InventoryItem, ItemSupplier, PriceHistory,
-                     Supplier, UsageLog)
+from .models import Category, InventoryItem, ItemSupplier, PriceHistory, Supplier, UsageLog
 
 
 class SupplierSerializer(serializers.ModelSerializer):

@@ -3,15 +3,10 @@ URL configuration for reorder queue app.
 """
 
 from django.urls import include, path
-
 from rest_framework.routers import DefaultRouter
 
-from .views import (
-    ReorderRequestViewSet,
-    PurchaseOrderViewSet,
-    OrderReceiptViewSet,
-    AnalyticsViewSet,
-)
+from .views import (AnalyticsViewSet, OrderReceiptViewSet,
+                    PurchaseOrderViewSet, ReorderRequestViewSet)
 
 router = DefaultRouter()
 router.register(r"requests", ReorderRequestViewSet)

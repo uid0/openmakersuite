@@ -5,36 +5,24 @@ Views for reorder queue API.
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from django.db import transaction, models
-from django.db.models import Count, Sum, Avg, Q, F
+from django.db import models, transaction
+from django.db.models import Avg, Count, F, Q, Sum
 from django.utils import timezone
-
+from inventory.models import InventoryItem, ItemSupplier
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from inventory.models import ItemSupplier, InventoryItem
-
-from .models import (
-    ReorderRequest,
-    PurchaseOrder,
-    PurchaseOrderItem,
-    OrderDelivery,
-    DeliveryItem,
-    LeadTimeLog,
-)
-from .serializers import (
-    ReorderRequestCreateSerializer,
-    ReorderRequestSerializer,
-    PurchaseOrderSerializer,
-    PurchaseOrderCreateSerializer,
-    OrderDeliverySerializer,
-    BarcodeReceiptSerializer,
-    LeadTimeLogSerializer,
-    OrderMetricsSerializer,
-    SupplierPerformanceSerializer,
-)
+from .models import (DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder,
+                     PurchaseOrderItem, ReorderRequest)
+from .serializers import (BarcodeReceiptSerializer, LeadTimeLogSerializer,
+                          OrderDeliverySerializer, OrderMetricsSerializer,
+                          PurchaseOrderCreateSerializer,
+                          PurchaseOrderSerializer,
+                          ReorderRequestCreateSerializer,
+                          ReorderRequestSerializer,
+                          SupplierPerformanceSerializer)
 
 
 class ReorderRequestViewSet(viewsets.ModelViewSet):

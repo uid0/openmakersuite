@@ -10,21 +10,15 @@ This test suite covers:
 
 from decimal import Decimal
 
+import pytest
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
-
-import pytest
-
 from inventory.admin import ItemSupplierAdmin, ItemSupplierInline
 from inventory.models import ItemSupplier
-from inventory.tests.factories import (
-    CategoryFactory,
-    InventoryItemFactory,
-    ItemSupplierFactory,
-    SupplierFactory,
-)
+from inventory.tests.factories import (CategoryFactory, InventoryItemFactory,
+                                       ItemSupplierFactory, SupplierFactory)
 
 User = get_user_model()
 

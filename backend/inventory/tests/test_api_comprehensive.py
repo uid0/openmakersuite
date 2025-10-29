@@ -11,11 +11,10 @@ This module tests all API endpoints with various scenarios including:
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
-
+from inventory.tests.factories import (CategoryFactory, InventoryItemFactory,
+                                       SupplierFactory)
 from rest_framework import status
 from rest_framework.test import APITestCase
-
-from inventory.tests.factories import CategoryFactory, InventoryItemFactory, SupplierFactory
 
 User = get_user_model()
 

@@ -6,13 +6,11 @@ from typing import List
 
 from django.shortcuts import get_object_or_404
 from django.utils.encoding import iri_to_uri
-
+from inventory.models import InventoryItem
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
-from inventory.models import InventoryItem
 
 from .serializers import IndexCardBatchSerializer, IndexCardPreviewSerializer
 from .services import IndexCardRenderer, build_preview_payload

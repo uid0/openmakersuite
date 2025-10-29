@@ -3,59 +3,58 @@ Admin configuration for reorder queue app.
 """
 
 from django.contrib import admin
-from django.utils.html import format_html
 from django.urls import reverse
+from django.utils.html import format_html
 
-from .models import (
-    ReorderRequest,
-    PurchaseOrder,
-    PurchaseOrderItem,
-    OrderDelivery,
-    DeliveryItem,
-    LeadTimeLog,
-)
+from .models import (DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder,
+                     PurchaseOrderItem, ReorderRequest)
 
 
 class DeliveryPerformanceFilter(admin.SimpleListFilter):
     """Custom filter for delivery performance based on variance_days."""
-    title = 'delivery performance'
-    parameter_name = 'performance'
+
+    title = "delivery performance"
+    parameter_name = "performance"
 
     def lookups(self, request, model_admin):
         return (
-            ('early', 'Early Delivery'),
-            ('on_time', 'On Time'),
-            ('late', 'Late Delivery'),
+            ("early", "Early Delivery"),
+            ("on_time", "On Time"),
+            ("late", "Late Delivery"),
         )
 
     def queryset(self, request, queryset):
-        if self.value() == 'early':
+        if self.value() == "early":
             return queryset.filter(variance_days__lt=0)
-        elif self.value() == 'on_time':
+        elif self.value() == "on_time":
             return queryset.filter(variance_days=0)
-        elif self.value() == 'late':
+        elif self.value() == "late":
             return queryset.filter(variance_days__gt=0)
 
 
 class ReceiptStatusFilter(admin.SimpleListFilter):
     """Custom filter for order item receipt status."""
-    title = 'receipt status'
-    parameter_name = 'receipt_status'
+
+    title = "receipt status"
+    parameter_name = "receipt_status"
 
     def lookups(self, request, model_admin):
         return (
-            ('fully_received', 'Fully Received'),
-            ('partially_received', 'Partially Received'),
-            ('pending', 'Pending Receipt'),
+            ("fully_received", "Fully Received"),
+            ("partially_received", "Partially Received"),
+            ("pending", "Pending Receipt"),
         )
 
     def queryset(self, request, queryset):
         from django.db.models import F
-        if self.value() == 'fully_received':
-            return queryset.filter(quantity_received__gte=F('quantity_ordered'))
-        elif self.value() == 'partially_received':
-            return queryset.filter(quantity_received__gt=0, quantity_received__lt=F('quantity_ordered'))
-        elif self.value() == 'pending':
+
+        if self.value() == "fully_received":
+            return queryset.filter(quantity_received__gte=F("quantity_ordered"))
+        elif self.value() == "partially_received":
+            return queryset.filter(
+                quantity_received__gt=0, quantity_received__lt=F("quantity_ordered")
+            )
+        elif self.value() == "pending":
             return queryset.filter(quantity_received=0)
 
 
@@ -262,9 +261,9 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
         "estimated_cost_display",
     ]
     list_filter = [
-        "purchase_order__status", 
+        "purchase_order__status",
         "purchase_order__supplier",
-        # Note: is_fully_received is a property, not a field, so we can't filter by it directly
+        ReceiptStatusFilter,  # Custom filter for receipt status
     ]
     search_fields = [
         "purchase_order__po_number",
@@ -413,7 +412,7 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
         "quantity_received",
     ]
     list_filter = [
-        "actual_delivery_date", 
+        "actual_delivery_date",
         "item_supplier__supplier",
         DeliveryPerformanceFilter,  # Custom filter for early/on-time/late delivery
     ]

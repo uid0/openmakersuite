@@ -12,10 +12,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
-
-from rest_framework.test import APIClient
-
 from inventory.models import InventoryItem
+from rest_framework.test import APIClient
 
 
 class IndexCardAPITests(TestCase):

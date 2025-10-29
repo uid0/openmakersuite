@@ -5,7 +5,6 @@ Tests for the new package cost vs unit cost logic.
 from decimal import Decimal
 
 import pytest
-
 from inventory.models import InventoryItem, ItemSupplier, Supplier
 
 

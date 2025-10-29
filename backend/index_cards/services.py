@@ -9,12 +9,12 @@ from io import BytesIO
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
+import qrcode
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.utils import timezone
-
-import qrcode
+from inventory.models import InventoryItem
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import letter
@@ -24,8 +24,6 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
-
-from inventory.models import InventoryItem
 
 
 @dataclass

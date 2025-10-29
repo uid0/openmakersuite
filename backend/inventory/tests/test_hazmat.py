@@ -17,11 +17,11 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
-
 from inventory.admin import InventoryItemAdmin
 from inventory.models import InventoryItem
 from inventory.serializers import InventoryItemSerializer
-from inventory.tests.factories import CategoryFactory, InventoryItemFactory, LocationFactory
+from inventory.tests.factories import (CategoryFactory, InventoryItemFactory,
+                                       LocationFactory)
 
 User = get_user_model()
 

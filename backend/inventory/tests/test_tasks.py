@@ -5,8 +5,8 @@ Tests for Celery tasks.
 from unittest.mock import patch
 
 import pytest
-
-from inventory.tasks import generate_index_card, generate_qr_code, update_average_lead_times
+from inventory.tasks import (generate_index_card, generate_qr_code,
+                             update_average_lead_times)
 from inventory.tests.factories import InventoryItemFactory
 from reorder_queue.tests.factories import ReorderRequestFactory
 

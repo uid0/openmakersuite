@@ -17,6 +17,8 @@ django-upgrade==1.16.0
 # Security Scanning
 bandit==1.7.6
 pip-audit==2.7.3
+safety>=3.0.0
+typer[all]>=0.9.0
 
 # Type Checking
 mypy==1.8.0

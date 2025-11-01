@@ -241,3 +241,28 @@ jobs:
           path: |
             backend/bandit-report.json
             backend/safety-report.json
+
+  # Add a final job that signals completion for release workflow
+  ci-complete:
+    name: ✅ CI Complete
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, docker-build, security]
+    if: always()
+    steps:
+      - name: Check all jobs succeeded  
+        run: |
+          # Check if all required jobs passed
+          if [[ "${{ needs.backend-tests.result }}" == "success" && \
+                "${{ needs.frontend-tests.result }}" == "success" && \
+                "${{ needs.docker-build.result }}" == "success" && \
+                "${{ needs.security.result }}" == "success" ]]; then
+            echo "✅ All CI checks passed - ready for release!"
+            exit 0
+          else
+            echo "❌ Some CI checks failed:"
+            echo "  Backend: ${{ needs.backend-tests.result }}"
+            echo "  Frontend: ${{ needs.frontend-tests.result }}"
+            echo "  Docker: ${{ needs.docker-build.result }}"
+            echo "  Security: ${{ needs.security.result }}"
+            exit 1
+          fi

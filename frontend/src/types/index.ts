@@ -77,6 +77,22 @@ export interface InventoryItem {
   total_value: string;
   created_at: string;
   updated_at: string;
+  // Reorder status and tracking
+  reorder_status: string;
+  has_pending_reorder: boolean;
+  expected_delivery_date: string | null;
+  active_reorder_request: {
+    id: number;
+    status: string;
+    quantity: number;
+    requested_at: string;
+    ordered_at: string | null;
+    requested_by: string;
+    priority: string;
+    // Review/approval information
+    reviewed_by: string | null;
+    reviewed_at: string | null;
+  } | null;
   // Supplier relationships with dimensional data
   item_suppliers?: ItemSupplier[];
 }

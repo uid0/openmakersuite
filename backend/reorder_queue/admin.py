@@ -98,6 +98,20 @@ class ReorderRequestAdmin(admin.ModelAdmin):
                 )
             },
         ),
+        (
+            "Transparency Information",
+            {
+                "fields": (
+                    "invoice_number",
+                    "invoice_url",
+                    "purchase_order_url", 
+                    "delivery_tracking_url",
+                    "supplier_url",
+                    "public_notes",
+                ),
+                "description": "Public transparency information - visible to all makerspace members"
+            },
+        ),
         ("Metadata", {"fields": ("days_pending", "updated_at"), "classes": ("collapse",)}),
     )
 

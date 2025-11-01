@@ -129,6 +129,12 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     # Complete supplier information array
     suppliers = ItemSupplierSerializer(source="item_suppliers", many=True, read_only=True)
 
+    # Reorder status and tracking fields
+    reorder_status = serializers.CharField(read_only=True)
+    has_pending_reorder = serializers.BooleanField(read_only=True)
+    expected_delivery_date = serializers.DateField(source="get_expected_delivery_date", read_only=True)
+    active_reorder_request = serializers.SerializerMethodField()
+
     # Hazmat calculated fields
     nfpa_fire_diamond_display = serializers.ReadOnlyField()
     hazmat_compliance_status = serializers.ReadOnlyField()
@@ -160,6 +166,11 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "qr_code",
             # Complete supplier array with all details
             "suppliers",
+            # Reorder status and tracking
+            "reorder_status",
+            "has_pending_reorder", 
+            "expected_delivery_date",
+            "active_reorder_request",
             # Hazmat fields
             "is_hazardous",
             "msds_url",
@@ -194,6 +205,24 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             return obj.qr_code.url if obj.qr_code else None
         except Exception:
             return None
+
+    def get_active_reorder_request(self, obj):
+        """Return details of the active reorder request if any."""
+        active_request = obj.get_active_reorder_request()
+        if active_request:
+            return {
+                'id': active_request.id,
+                'status': active_request.status,
+                'quantity': active_request.quantity,
+                'requested_at': active_request.requested_at,
+                'ordered_at': active_request.ordered_at,
+                'requested_by': active_request.requested_by,
+                'priority': active_request.priority,
+                # Review/approval information
+                'reviewed_by': active_request.reviewed_by.username if active_request.reviewed_by else None,
+                'reviewed_at': active_request.reviewed_at,
+            }
+        return None
 
 
 class InventoryItemDetailSerializer(InventoryItemSerializer):

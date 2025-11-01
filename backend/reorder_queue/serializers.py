@@ -48,6 +48,13 @@ class ReorderRequestSerializer(serializers.ModelSerializer):
             "estimated_cost",
             "days_pending",
             "updated_at",
+            # Transparency fields
+            "invoice_number",
+            "invoice_url",
+            "purchase_order_url",
+            "delivery_tracking_url",
+            "supplier_url",
+            "public_notes",
         ]
         read_only_fields = ["requested_at", "updated_at"]
 

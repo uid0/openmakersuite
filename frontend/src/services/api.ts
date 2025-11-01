@@ -74,6 +74,9 @@ export const inventoryAPI = {
   getLowStockItems: () =>
     api.get<InventoryItem[]>('/api/inventory/items/low_stock/'),
 
+  getReorderedItems: () =>
+    api.get<InventoryItem[]>('/api/inventory/items/reordered/'),
+
   downloadCard: (id: string) =>
     api.get(`/api/inventory/items/${id}/download_card/`, {
       responseType: 'blob',

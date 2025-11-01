@@ -64,6 +64,18 @@ const HomePage: React.FC = () => {
             <li>Stock level monitoring</li>
           </ul>
         </div>
+
+        <div className="feature-card" onClick={() => navigate('/tv-dashboard')}>
+          <div className="icon">📺</div>
+          <h2>TV Dashboard</h2>
+          <p>
+            Large-screen display optimized for Chromecast and TV viewing. 
+            Shows items that have been reordered and are in progress with delivery tracking.
+          </p>
+          <button className="card-button">
+            Open TV Dashboard
+          </button>
+        </div>
       </div>
 
       <div className="info-section">

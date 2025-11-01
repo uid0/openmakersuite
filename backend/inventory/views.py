@@ -67,6 +67,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             "list",
             "retrieve",
             "low_stock",
+            "reordered",
             "download_card",
             "log_usage",
             "generate_qr",
@@ -202,6 +203,18 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             item for item in self.filter_queryset(self.get_queryset()) if item.needs_reorder
         ]
         serializer = self.get_serializer(low_stock_items, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def reordered(self, request):
+        """Get items that have active reorder requests (pending, approved, or ordered)."""
+        # Get items that have active reorder requests
+        reordered_items = []
+        for item in self.filter_queryset(self.get_queryset()):
+            if item.has_pending_reorder():
+                reordered_items.append(item)
+        
+        serializer = self.get_serializer(reordered_items, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])

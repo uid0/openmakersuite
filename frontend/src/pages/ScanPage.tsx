@@ -77,10 +77,17 @@ const ScanPage: React.FC = () => {
     }
   }, [itemId, loadItem]);
 
-  // Auto-submit reorder for non-logged users
+  // Auto-submit reorder for non-logged users (only if no pending request exists)
   useEffect(() => {
     const autoSubmitReorder = async () => {
       if (!isLoggedIn && item && !submitting && !submitted) {
+        // Check if item already has a pending reorder request
+        if (item.has_pending_reorder) {
+          // Don't auto-submit, just set submitted to show the existing request message
+          setSubmitted(true);
+          return;
+        }
+
         try {
           setSubmitting(true);
           await reorderAPI.createRequest({
@@ -211,6 +218,36 @@ const ScanPage: React.FC = () => {
   }
 
   if (submitted) {
+    // Check if we have an existing reorder request
+    if (item?.has_pending_reorder && item?.active_reorder_request) {
+      const request = item.active_reorder_request;
+      const statusMessage = {
+        'pending': 'Your reorder request is pending admin approval',
+        'approved': 'Your reorder request has been approved and will be ordered soon',
+        'ordered': `Your reorder was placed on ${new Date(request.ordered_at || '').toLocaleDateString()}`
+      }[request.status] || 'Your reorder request is being processed';
+
+      return (
+        <div className="scan-page">
+          <div className="info">
+            <h2>ℹ️ Reorder Already Requested</h2>
+            <p><strong>{item.name}</strong> already has a reorder request in progress.</p>
+            <div className="request-details">
+              <p><strong>Status:</strong> {request.status.charAt(0).toUpperCase() + request.status.slice(1)}</p>
+              <p><strong>Quantity:</strong> {request.quantity} units</p>
+              <p><strong>Requested:</strong> {new Date(request.requested_at).toLocaleDateString()}</p>
+              {request.requested_by && <p><strong>Requested by:</strong> {request.requested_by}</p>}
+              {item.expected_delivery_date && (
+                <p><strong>Expected Delivery:</strong> {new Date(item.expected_delivery_date).toLocaleDateString()}</p>
+              )}
+            </div>
+            <p className="status-message">{statusMessage}</p>
+            <p className="redirect-message">Redirecting to home...</p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="scan-page">
         <div className="success">
@@ -293,7 +330,25 @@ const ScanPage: React.FC = () => {
           </div>
         )}
 
-        {isLoggedIn && (
+        {isLoggedIn && item.has_pending_reorder && item.active_reorder_request && (
+          <div className="existing-request-info">
+            <h2>ℹ️ Reorder In Progress</h2>
+            <p>This item already has a reorder request:</p>
+            <div className="request-summary">
+              <p><strong>Status:</strong> {item.active_reorder_request.status.charAt(0).toUpperCase() + item.active_reorder_request.status.slice(1)}</p>
+              <p><strong>Quantity:</strong> {item.active_reorder_request.quantity} units</p>
+              <p><strong>Requested:</strong> {new Date(item.active_reorder_request.requested_at).toLocaleDateString()}</p>
+              {item.active_reorder_request.requested_by && (
+                <p><strong>Requested by:</strong> {item.active_reorder_request.requested_by}</p>
+              )}
+              {item.expected_delivery_date && (
+                <p><strong>Expected Delivery:</strong> {new Date(item.expected_delivery_date).toLocaleDateString()}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isLoggedIn && !item.has_pending_reorder && (
           <form onSubmit={handleSubmitReorder} className="reorder-form">
             <h2>Request Reorder</h2>
             

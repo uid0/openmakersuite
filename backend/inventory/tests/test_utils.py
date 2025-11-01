@@ -64,49 +64,48 @@ class TestPDFGeneration:
             location="Shelf A",
         )
 
-        pdf_buffer = generate_item_card(item)
+        pdf_bytes = generate_item_card(item)
 
-        assert isinstance(pdf_buffer, BytesIO)
-        assert pdf_buffer.tell() == 0  # Buffer is at start
-        assert len(pdf_buffer.getvalue()) > 0  # PDF has content
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0  # PDF has content
 
     def test_generate_item_card_with_image(self, sample_image):
         """Test generating card for item with image."""
         item = InventoryItemFactory(image=sample_image)
 
-        pdf_buffer = generate_item_card(item)
+        pdf_bytes = generate_item_card(item)
 
-        assert isinstance(pdf_buffer, BytesIO)
-        assert len(pdf_buffer.getvalue()) > 0
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0
 
     def test_generate_item_card_without_image(self):
         """Test generating card for item without image."""
         item = InventoryItemFactory(image=None)
 
-        pdf_buffer = generate_item_card(item)
+        pdf_bytes = generate_item_card(item)
 
-        assert isinstance(pdf_buffer, BytesIO)
-        assert len(pdf_buffer.getvalue()) > 0
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0
 
     def test_generate_item_card_with_qr_code(self):
         """Test generating card for item with QR code."""
         item = InventoryItemFactory()
         save_qr_code_to_item(item)
 
-        pdf_buffer = generate_item_card(item)
+        pdf_bytes = generate_item_card(item)
 
-        assert isinstance(pdf_buffer, BytesIO)
-        assert len(pdf_buffer.getvalue()) > 0
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0
 
     def test_generate_bulk_cards(self):
         """Test generating multiple cards on letter pages."""
         items = InventoryItemFactory.create_batch(5)
 
-        pdf_buffer = generate_bulk_cards(items)
+        pdf_bytes = generate_bulk_cards(items)
 
-        assert isinstance(pdf_buffer, BytesIO)
+        assert isinstance(pdf_bytes, bytes)
         # Just verify that the PDF was created successfully
-        assert len(pdf_buffer.getvalue()) > 0
+        assert len(pdf_bytes) > 0
 
     def test_generate_card_handles_long_text(self):
         """Test PDF generation handles long text gracefully."""
@@ -116,7 +115,7 @@ class TestPDFGeneration:
             location="C" * 100,  # Very long location
         )
 
-        pdf_buffer = generate_item_card(item)
+        pdf_bytes = generate_item_card(item)
 
-        assert isinstance(pdf_buffer, BytesIO)
-        assert len(pdf_buffer.getvalue()) > 0
+        assert isinstance(pdf_bytes, bytes)
+        assert len(pdf_bytes) > 0

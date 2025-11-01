@@ -94,9 +94,8 @@ class TestReorderRequestAPI:
         response = client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["count"] == 2
-        assert len(response.data["results"]) == 2
-        for req in response.data["results"]:
+        assert len(response.data) == 2  # Endpoint returns list directly, not paginated
+        for req in response.data:
             assert req["status"] == "pending"
 
     def test_by_supplier_endpoint(self, authenticated_client):

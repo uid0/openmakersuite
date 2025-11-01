@@ -5,6 +5,7 @@ Views for inventory API.
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.db.models import F, Q
 from django.http import HttpResponse
 
 from rest_framework import status, viewsets
@@ -80,11 +81,42 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         return InventoryItemSerializer
 
     def get_queryset(self):
-        return (
+        queryset = (
             InventoryItem.objects.select_related("category", "location")
             .prefetch_related("item_suppliers__supplier")
             .all()
         )
+
+        # Filter by category if specified
+        category = self.request.query_params.get("category")
+        if category:
+            queryset = queryset.filter(category_id=category)
+
+        # Filter by location if specified
+        location = self.request.query_params.get("location")
+        if location:
+            queryset = queryset.filter(location_id=location)
+
+        # Search functionality
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(description__icontains=search)
+                | Q(sku__icontains=search)
+            )
+
+        # Filter by low stock if specified
+        low_stock = self.request.query_params.get("low_stock", "").lower()
+        if low_stock == "true":
+            queryset = queryset.filter(current_stock__lte=F("minimum_stock"))
+
+        # Filter by active status if specified
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == "true")
+
+        return queryset.order_by("name")
 
     def create(self, request, *args, **kwargs):
         data = request.data.copy()

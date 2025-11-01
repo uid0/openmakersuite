@@ -2,9 +2,10 @@
 Serializers for reorder queue API.
 """
 
+from rest_framework import serializers
+
 from inventory.models import ItemSupplier
 from inventory.serializers import InventoryItemSerializer, ItemSupplierSerializer
-from rest_framework import serializers
 
 from .models import (
     DeliveryItem,

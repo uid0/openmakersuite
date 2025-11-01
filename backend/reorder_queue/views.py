@@ -2,17 +2,19 @@
 Views for reorder queue API.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db import models, transaction
 from django.db.models import Avg, Count, F, Q, Sum
 from django.utils import timezone
-from inventory.models import InventoryItem, ItemSupplier
+
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+
+from inventory.models import InventoryItem
 
 from .models import (
     DeliveryItem,
@@ -24,7 +26,6 @@ from .models import (
 )
 from .serializers import (
     BarcodeReceiptSerializer,
-    LeadTimeLogSerializer,
     OrderDeliverySerializer,
     OrderMetricsSerializer,
     PurchaseOrderCreateSerializer,
@@ -593,7 +594,7 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
             )
 
             # Create delivery item
-            delivery_item = DeliveryItem.objects.create(
+            DeliveryItem.objects.create(
                 delivery=delivery,
                 purchase_order_item=po_item,
                 quantity_received=quantity_received,
@@ -824,13 +825,13 @@ class AnalyticsViewSet(viewsets.ViewSet):
             )
 
         return Response(trend_data)
-    
+
     @action(detail=False, methods=["get"], permission_classes=[AllowAny])
     def transparency(self, request):
         """
         Public transparency endpoint showing financial information about orders.
-        
-        Open by default for makerspace transparency - shows costs, invoices, 
+
+        Open by default for makerspace transparency - shows costs, invoices,
         purchase orders, and delivery information for community visibility.
         """
         try:
@@ -838,83 +839,83 @@ class AnalyticsViewSet(viewsets.ViewSet):
             transparency_orders = (
                 self.get_queryset()
                 .filter(
-                    models.Q(actual_cost__isnull=False) |
-                    models.Q(invoice_number__isnull=False) |
-                    models.Q(invoice_url__isnull=False) |
-                    models.Q(purchase_order_url__isnull=False) |
-                    models.Q(delivery_tracking_url__isnull=False) |
-                    models.Q(order_number__isnull=False)
+                    models.Q(actual_cost__isnull=False)
+                    | models.Q(invoice_number__isnull=False)
+                    | models.Q(invoice_url__isnull=False)
+                    | models.Q(purchase_order_url__isnull=False)
+                    | models.Q(delivery_tracking_url__isnull=False)
+                    | models.Q(order_number__isnull=False)
                 )
                 .exclude(
-                    models.Q(actual_cost__isnull=True) &
-                    models.Q(invoice_number='') &
-                    models.Q(invoice_url='') &
-                    models.Q(purchase_order_url='') &
-                    models.Q(delivery_tracking_url='') &
-                    models.Q(order_number='')
+                    models.Q(actual_cost__isnull=True)
+                    & models.Q(invoice_number="")
+                    & models.Q(invoice_url="")
+                    & models.Q(purchase_order_url="")
+                    & models.Q(delivery_tracking_url="")
+                    & models.Q(order_number="")
                 )
-                .order_by('-ordered_at', '-requested_at')[:100]  # Last 100 orders with financial data
+                .order_by("-ordered_at", "-requested_at")[
+                    :100
+                ]  # Last 100 orders with financial data
             )
-            
+
             transparency_data = []
-            total_spent = Decimal('0.00')
-            
+            total_spent = Decimal("0.00")
+
             for order in transparency_orders:
                 if order.actual_cost:
                     total_spent += order.actual_cost
-                
+
                 # Public transparency information
                 order_data = {
-                    'id': order.id,
-                    'item_name': order.item.name,
-                    'item_category': order.item.category.name if order.item.category else None,
-                    'quantity_ordered': order.quantity,
-                    'status': order.status,
-                    'requested_at': order.requested_at.isoformat(),
-                    'ordered_at': order.ordered_at.isoformat() if order.ordered_at else None,
-                    'delivered_at': order.actual_delivery.isoformat() if order.actual_delivery else None,
-                    
+                    "id": order.id,
+                    "item_name": order.item.name,
+                    "item_category": order.item.category.name if order.item.category else None,
+                    "quantity_ordered": order.quantity,
+                    "status": order.status,
+                    "requested_at": order.requested_at.isoformat(),
+                    "ordered_at": order.ordered_at.isoformat() if order.ordered_at else None,
+                    "delivered_at": (
+                        order.actual_delivery.isoformat() if order.actual_delivery else None
+                    ),
                     # Financial transparency
-                    'estimated_cost': float(order.estimated_cost) if order.estimated_cost else None,
-                    'actual_cost': float(order.actual_cost) if order.actual_cost else None,
-                    'cost_per_unit': float(order.cost_per_unit) if order.cost_per_unit else None,
-                    'cost_variance': float(order.actual_cost - order.estimated_cost) if (order.actual_cost and order.estimated_cost) else None,
-                    
+                    "estimated_cost": float(order.estimated_cost) if order.estimated_cost else None,
+                    "actual_cost": float(order.actual_cost) if order.actual_cost else None,
+                    "cost_per_unit": float(order.cost_per_unit) if order.cost_per_unit else None,
+                    "cost_variance": (
+                        float(order.actual_cost - order.estimated_cost)
+                        if (order.actual_cost and order.estimated_cost)
+                        else None
+                    ),
                     # Document links
-                    'order_number': order.order_number,
-                    'invoice_number': order.invoice_number,
-                    'invoice_url': order.invoice_url,
-                    'purchase_order_url': order.purchase_order_url,
-                    'delivery_tracking_url': order.delivery_tracking_url,
-                    'supplier_url': order.supplier_url,
-                    
+                    "order_number": order.order_number,
+                    "invoice_number": order.invoice_number,
+                    "invoice_url": order.invoice_url,
+                    "purchase_order_url": order.purchase_order_url,
+                    "delivery_tracking_url": order.delivery_tracking_url,
+                    "supplier_url": order.supplier_url,
                     # Public notes
-                    'public_notes': order.public_notes,
-                    
+                    "public_notes": order.public_notes,
                     # Supplier info
-                    'supplier_name': order.item.supplier_name if hasattr(order.item, 'supplier_name') else None,
+                    "supplier_name": (
+                        order.item.supplier_name if hasattr(order.item, "supplier_name") else None
+                    ),
                 }
-                
+
                 transparency_data.append(order_data)
-            
+
             # Summary statistics
             summary = {
-                'total_orders_with_financial_data': len(transparency_data),
-                'total_amount_spent': float(total_spent),
-                'last_updated': timezone.now().isoformat(),
-                'transparency_note': 'Dallas Makerspace operates with full financial transparency. All purchase information is publicly available.',
+                "total_orders_with_financial_data": len(transparency_data),
+                "total_amount_spent": float(total_spent),
+                "last_updated": timezone.now().isoformat(),
+                "transparency_note": "Dallas Makerspace operates with full financial transparency. All purchase information is publicly available.",
             }
-            
-            return Response({
-                'summary': summary,
-                'orders': transparency_data
-            })
-            
+
+            return Response({"summary": summary, "orders": transparency_data})
+
         except Exception as e:
             return Response(
-                {
-                    'error': 'Unable to fetch transparency data',
-                    'message': str(e)
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Unable to fetch transparency data", "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

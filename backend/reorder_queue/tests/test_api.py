@@ -4,12 +4,14 @@ API tests for reorder queue endpoints.
 
 from datetime import timedelta
 
-import pytest
 from django.urls import reverse
 from django.utils import timezone
+
+import pytest
+from rest_framework import status
+
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue.tests.factories import ReorderRequestFactory
-from rest_framework import status
 
 
 @pytest.mark.integration

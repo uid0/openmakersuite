@@ -5,6 +5,7 @@ Simple test for suppliers array functionality without factory complications.
 from decimal import Decimal
 
 from django.test import TestCase
+
 from inventory.models import InventoryItem, ItemSupplier
 from inventory.serializers import InventoryItemSerializer
 from inventory.tests.factories import CategoryFactory, LocationFactory, SupplierFactory

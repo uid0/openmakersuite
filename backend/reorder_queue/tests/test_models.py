@@ -5,9 +5,11 @@ Unit tests for reorder queue models.
 from datetime import timedelta
 from decimal import Decimal
 
-import pytest
 from django.utils import timezone
+
+import pytest
 from freezegun import freeze_time
+
 from inventory.tests.factories import InventoryItemFactory
 from reorder_queue.models import ReorderRequest
 from reorder_queue.tests.factories import ReorderRequestFactory, UserFactory

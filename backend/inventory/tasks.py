@@ -2,10 +2,11 @@
 Celery tasks for inventory management.
 """
 
-import requests
-from celery import shared_task
 from django.apps import apps
 from django.core.files.base import ContentFile
+
+import requests
+from celery import shared_task
 
 
 @shared_task

@@ -11,6 +11,7 @@ from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
+
 from inventory.models import InventoryItem, ItemSupplier, Supplier
 
 
@@ -82,14 +83,22 @@ class ReorderRequest(models.Model):
     actual_delivery = models.DateField(null=True, blank=True)
     order_number = models.CharField(max_length=100, blank=True)
     actual_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    
+
     # Transparency tracking (public information)
-    invoice_number = models.CharField(max_length=100, blank=True, help_text="Invoice/receipt number for transparency")
-    invoice_url = models.URLField(blank=True, help_text="Link to invoice/receipt (if publicly available)")
+    invoice_number = models.CharField(
+        max_length=100, blank=True, help_text="Invoice/receipt number for transparency"
+    )
+    invoice_url = models.URLField(
+        blank=True, help_text="Link to invoice/receipt (if publicly available)"
+    )
     purchase_order_url = models.URLField(blank=True, help_text="Link to purchase order document")
-    delivery_tracking_url = models.URLField(blank=True, help_text="Link to shipping/delivery tracking")
+    delivery_tracking_url = models.URLField(
+        blank=True, help_text="Link to shipping/delivery tracking"
+    )
     supplier_url = models.URLField(blank=True, help_text="Link to supplier item page")
-    public_notes = models.TextField(blank=True, help_text="Public notes visible in transparency view")
+    public_notes = models.TextField(
+        blank=True, help_text="Public notes visible in transparency view"
+    )
 
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)
@@ -117,19 +126,19 @@ class ReorderRequest(models.Model):
         if self.status == self.PENDING:
             return (timezone.now() - self.requested_at).days
         return 0
-    
+
     @property
     def has_transparency_data(self) -> bool:
         """Check if this request has financial transparency information to display."""
         return bool(
-            self.actual_cost or 
-            self.invoice_number or 
-            self.invoice_url or 
-            self.purchase_order_url or 
-            self.delivery_tracking_url or
-            self.order_number
+            self.actual_cost
+            or self.invoice_number
+            or self.invoice_url
+            or self.purchase_order_url
+            or self.delivery_tracking_url
+            or self.order_number
         )
-    
+
     @property
     def cost_per_unit(self) -> Optional[Decimal]:
         """Calculate cost per unit if actual cost is available."""

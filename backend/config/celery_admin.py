@@ -4,6 +4,7 @@ Custom admin configuration for Celery task results.
 
 from django.contrib import admin
 from django.utils.html import format_html
+
 from django_celery_results.admin import TaskResultAdmin
 from django_celery_results.models import TaskResult
 

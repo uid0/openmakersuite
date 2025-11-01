@@ -11,6 +11,7 @@ from typing import Any, Optional
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.text import slugify
+
 from imagekit.models import ImageSpecField
 from imagekit.processors import ResizeToFit
 
@@ -274,37 +275,40 @@ class InventoryItem(models.Model):
     def needs_reorder(self) -> bool:
         """Check if item stock is below minimum and needs reordering."""
         return self.current_stock <= self.minimum_stock
-    
+
     def get_active_reorder_request(self):
         """Get the most recent active (pending/approved/ordered) reorder request for this item."""
-        return self.reorder_requests.filter(
-            status__in=['pending', 'approved', 'ordered']
-        ).order_by('-requested_at').first()
-    
+        return (
+            self.reorder_requests.filter(status__in=["pending", "approved", "ordered"])
+            .order_by("-requested_at")
+            .first()
+        )
+
     def has_pending_reorder(self) -> bool:
         """Check if item has any pending, approved, or ordered reorder requests."""
-        return self.reorder_requests.filter(
-            status__in=['pending', 'approved', 'ordered']
-        ).exists()
-    
+        return self.reorder_requests.filter(status__in=["pending", "approved", "ordered"]).exists()
+
     def get_expected_delivery_date(self):
         """Calculate expected delivery date for ordered items."""
-        ordered_request = self.reorder_requests.filter(status='ordered').order_by('-ordered_at').first()
+        ordered_request = (
+            self.reorder_requests.filter(status="ordered").order_by("-ordered_at").first()
+        )
         if ordered_request and ordered_request.ordered_at and self.average_lead_time:
             from datetime import timedelta
+
             return ordered_request.ordered_at.date() + timedelta(days=self.average_lead_time)
         return None
-    
-    @property 
+
+    @property
     def reorder_status(self) -> str:
         """Get current reorder status for this item."""
         if not self.needs_reorder:
-            return 'well_stocked'
-        
+            return "well_stocked"
+
         active_request = self.get_active_reorder_request()
         if not active_request:
-            return 'needs_order'
-        
+            return "needs_order"
+
         return active_request.status  # 'pending', 'approved', or 'ordered'
 
     @property

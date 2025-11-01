@@ -10,19 +10,15 @@ This test suite covers:
 
 from decimal import Decimal
 
-import pytest
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
 from django.test import TestCase
-from django.urls import reverse
+
+import pytest
+
 from inventory.admin import ItemSupplierAdmin, ItemSupplierInline
 from inventory.models import ItemSupplier
-from inventory.tests.factories import (
-    CategoryFactory,
-    InventoryItemFactory,
-    ItemSupplierFactory,
-    SupplierFactory,
-)
+from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 
 User = get_user_model()
 
@@ -463,10 +459,10 @@ class TestDimensionalIntegration(TestCase):
         self.assertEqual(data["package_weight"], "2.000")
 
         # Check that calculated fields are included
-        expected_volume = Decimal("5.00") * Decimal("7.00") * Decimal("9.00")  # 315.00
+        # Volume: 5.00 * 7.00 * 9.00 = 315.00
         self.assertEqual(data["package_volume"], "315.00")
 
-        expected_unit_weight = (Decimal("2.000") * Decimal("16")) / Decimal("10")  # 3.200
+        # Unit weight: (2.000 * 16) / 10 = 3.200
         self.assertEqual(data["unit_weight"], "3.200")
 
         self.assertEqual(

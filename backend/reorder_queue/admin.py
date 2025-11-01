@@ -3,7 +3,6 @@ Admin configuration for reorder queue app.
 """
 
 from django.contrib import admin
-from django.urls import reverse
 from django.utils.html import format_html
 
 from .models import (
@@ -104,12 +103,12 @@ class ReorderRequestAdmin(admin.ModelAdmin):
                 "fields": (
                     "invoice_number",
                     "invoice_url",
-                    "purchase_order_url", 
+                    "purchase_order_url",
                     "delivery_tracking_url",
                     "supplier_url",
                     "public_notes",
                 ),
-                "description": "Public transparency information - visible to all makerspace members"
+                "description": "Public transparency information - visible to all makerspace members",
             },
         ),
         ("Metadata", {"fields": ("days_pending", "updated_at"), "classes": ("collapse",)}),

@@ -4,10 +4,11 @@ Pytest configuration and fixtures for the entire test suite.
 
 from io import BytesIO
 
-import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils.crypto import get_random_string
+
+import pytest
 from PIL import Image
 from rest_framework.test import APIClient
 

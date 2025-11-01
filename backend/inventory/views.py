@@ -6,13 +6,10 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from django.http import HttpResponse
+
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import (
-    AllowAny,
-    IsAuthenticated,
-    IsAuthenticatedOrReadOnly,
-)
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from .models import (
@@ -213,7 +210,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         for item in self.filter_queryset(self.get_queryset()):
             if item.has_pending_reorder():
                 reordered_items.append(item)
-        
+
         serializer = self.get_serializer(reordered_items, many=True)
         return Response(serializer.data)
 

@@ -9,12 +9,12 @@ from io import BytesIO
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
-import qrcode
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.utils import timezone
-from inventory.models import InventoryItem
+
+import qrcode
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import letter
@@ -24,6 +24,8 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
+
+from inventory.models import InventoryItem
 
 
 @dataclass
@@ -306,7 +308,7 @@ class IndexCardRenderer:
         # Add average lead time from primary supplier
         if item.average_lead_time:
             info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
-        
+
         # Add longest lead time across all suppliers
         longest_lead_time = self._get_longest_lead_time(item)
         if longest_lead_time and longest_lead_time != item.average_lead_time:
@@ -622,17 +624,17 @@ class IndexCardRenderer:
 
     def _calculate_desired_stock(self, item: InventoryItem) -> int:
         return max(item.minimum_stock + item.reorder_quantity, item.reorder_quantity)
-    
+
     def _get_longest_lead_time(self, item: InventoryItem) -> int | None:
         """Get the longest lead time across all suppliers for this item."""
-        if not hasattr(item, 'item_suppliers'):
+        if not hasattr(item, "item_suppliers"):
             return None
-        
+
         lead_times = []
         for supplier_link in item.item_suppliers.all():
             if supplier_link.average_lead_time:
                 lead_times.append(supplier_link.average_lead_time)
-        
+
         return max(lead_times) if lead_times else None
 
     def _pluralize(self, count: int, word: str) -> str:

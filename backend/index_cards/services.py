@@ -298,15 +298,19 @@ class IndexCardRenderer:
         inner_y: float,
     ) -> None:
         """Draw the left section with stock info and product image."""
-        # Draw stock info
-        target_stock = self._calculate_desired_stock(item)
+        # Draw Kanban stock info (reorder point and lead times)
         info_lines = [
-            f"Target: {self._pluralize(target_stock, 'unit')}",
-            f"Reorder: {self._pluralize(item.reorder_quantity, 'unit')}",
+            f"Reorder at: {self._pluralize(item.minimum_stock, 'unit')}",
         ]
 
+        # Add average lead time from primary supplier
         if item.average_lead_time:
-            info_lines.append(f"Lead: {self._pluralize(item.average_lead_time, 'day')}")
+            info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
+        
+        # Add longest lead time across all suppliers
+        longest_lead_time = self._get_longest_lead_time(item)
+        if longest_lead_time and longest_lead_time != item.average_lead_time:
+            info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
 
         info_y = current_y - 0.1 * inch
         self._draw_info_lines(
@@ -618,6 +622,18 @@ class IndexCardRenderer:
 
     def _calculate_desired_stock(self, item: InventoryItem) -> int:
         return max(item.minimum_stock + item.reorder_quantity, item.reorder_quantity)
+    
+    def _get_longest_lead_time(self, item: InventoryItem) -> int | None:
+        """Get the longest lead time across all suppliers for this item."""
+        if not hasattr(item, 'item_suppliers'):
+            return None
+        
+        lead_times = []
+        for supplier_link in item.item_suppliers.all():
+            if supplier_link.average_lead_time:
+                lead_times.append(supplier_link.average_lead_time)
+        
+        return max(lead_times) if lead_times else None
 
     def _pluralize(self, count: int, word: str) -> str:
         """Return properly pluralized string based on count."""

@@ -235,8 +235,8 @@ jobs:
           fi
           
           # Pull and start services
-          docker-compose pull
-          docker-compose up -d
+          docker compose pull
+          docker compose up -d
           
           echo "✅ Deployment complete!"
           echo "🌐 Frontend: http://localhost:3000"  

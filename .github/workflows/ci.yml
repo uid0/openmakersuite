@@ -138,31 +138,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and test with docker-compose
+      - name: Build and test with docker compose
         run: |
           # Start services
-          docker-compose up -d --build
+          docker compose up -d --build
 
           # Wait for services to be healthy
-          timeout 300 bash -c 'while [[ "$(docker-compose ps -q | xargs docker inspect -f "{{.State.Health.Status}}" 2>/dev/null | grep -v healthy | wc -l)" != "0" ]]; do sleep 5; done'
+          timeout 300 bash -c 'while [[ "$(docker compose ps -q | xargs docker inspect -f "{{.State.Health.Status}}" 2>/dev/null | grep -v healthy | wc -l)" != "0" ]]; do sleep 5; done'
 
           # Run migrations
-          docker-compose exec -T backend python manage.py migrate --no-input
+          docker compose exec -T backend python manage.py migrate --no-input
 
           # Run tests in Docker environment
-          docker-compose exec -T backend pytest -v
+          docker compose exec -T backend pytest -v
         env:
           POSTGRES_PASSWORD: test_password_for_ci_only
 
       - name: Show logs on failure
         if: failure()
         run: |
-          docker-compose logs
+          docker compose logs
 
       - name: Cleanup
         if: always()
         run: |
-          docker-compose down -v
+          docker compose down -v
           docker system prune -f
 
   security:

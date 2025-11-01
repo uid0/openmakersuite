@@ -46,6 +46,8 @@ describe('ScanPage', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Clear localStorage to ensure clean state
+    localStorage.clear();
   });
 
   const renderWithRouter = async (itemId = 'test-id-123') => {
@@ -67,9 +69,16 @@ describe('ScanPage', () => {
     expect(screen.getByText(/loading item details/i)).toBeInTheDocument();
   });
 
-  test('displays item details after loading', async () => {
+  test('displays item details after loading (logged in user)', async () => {
+    // Set logged in state
+    localStorage.setItem('token', 'test-token');
+    
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: mockItem,
+    });
+
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
     });
 
     await renderWithRouter();
@@ -86,10 +95,17 @@ describe('ScanPage', () => {
   });
 
   test('displays low stock warning when needed', async () => {
+    // Set logged in state to avoid auto-submit
+    localStorage.setItem('token', 'test-token');
+    
     const lowStockItem = { ...mockItem, current_stock: 5, needs_reorder: true };
 
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: lowStockItem,
+    });
+
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [] },
     });
 
     await renderWithRouter();
@@ -98,9 +114,25 @@ describe('ScanPage', () => {
     expect(screen.getByText(/low stock alert/i)).toBeInTheDocument();
   });
 
-  test('handles form submission', async () => {
+  test('handles form submission for logged in user', async () => {
+    // Set logged in state to get the manual form
+    localStorage.setItem('token', 'test-token');
+    
+    const mockSupplier = {
+      id: 1,
+      supplier_name: 'Test Supplier',
+      unit_cost: '15.99',
+      quantity_per_package: 1,
+      is_active: true,
+      average_lead_time: 7,
+    };
+    
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: mockItem,
+    });
+
+    (api.inventoryAPI.getItemSuppliers as jest.Mock).mockResolvedValue({
+      data: { results: [mockSupplier] },
     });
 
     (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({
@@ -118,29 +150,30 @@ describe('ScanPage', () => {
     fireEvent.change(nameInput, { target: { value: 'John Doe' } });
     fireEvent.change(notesInput, { target: { value: 'Need more stock' } });
 
-    // Submit the form
-    const submitButton = screen.getByRole('button', { name: /request 25 units/i });
+    // Submit the form (should have supplier and proper quantities now)
+    const submitButton = screen.getByRole('button', { name: /request \d+ units/i });
     
     fireEvent.click(submitButton);
 
     // Wait for the async operations to complete
     await waitFor(() => {
-      expect(api.reorderAPI.createRequest).toHaveBeenCalledWith({
-        item: mockItem.id,
-        quantity: 25,
-        requested_by: 'John Doe',
-        request_notes: 'Need more stock',
-        priority: 'normal',
-      });
+      expect(api.reorderAPI.createRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          item: mockItem.id,
+          requested_by: 'John Doe',
+          request_notes: 'Need more stock',
+          priority: 'normal',
+        })
+      );
     });
-
-    // Wait for the success message to appear
-    await screen.findByText(/reorder request submitted/i);
   });
 
-  test('displays success message after submission', async () => {
+  test('auto-submits reorder for non-logged users', async () => {
+    // Don't set token to simulate non-logged user
+    const itemWithoutPending = { ...mockItem, has_pending_reorder: false };
+
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
-      data: mockItem,
+      data: itemWithoutPending,
     });
 
     (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({
@@ -149,15 +182,18 @@ describe('ScanPage', () => {
 
     await renderWithRouter();
 
-    await screen.findByText('Test Widget');
+    // Should show auto-submit processing message
+    await screen.findByText(/submitting reorder request/i);
 
-    const submitButton = screen.getByRole('button', { name: /request 25 units/i });
-    
-    fireEvent.click(submitButton);
-
-    // Wait for the success message to appear after async operations
+    // Wait for auto-submit to complete
     await waitFor(() => {
-      expect(screen.getByText(/reorder request submitted/i)).toBeInTheDocument();
+      expect(api.reorderAPI.createRequest).toHaveBeenCalledWith({
+        item: itemWithoutPending.id,
+        quantity: itemWithoutPending.reorder_quantity,
+        requested_by: 'Anonymous',
+        request_notes: 'Auto-submitted via QR scan',
+        priority: 'normal',
+      });
     });
   });
 

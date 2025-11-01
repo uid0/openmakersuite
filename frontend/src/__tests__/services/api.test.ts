@@ -239,7 +239,7 @@ describe('API Service', () => {
         refresh: 'refresh-token',
       };
 
-      mock.onPost('/api/token/').reply(200, mockResponse);
+      mock.onPost('/api/auth/login/').reply(200, mockResponse);
 
       const response = await authAPI.login('testuser', 'password');
 
@@ -251,7 +251,7 @@ describe('API Service', () => {
         access: 'new-access-token',
       };
 
-      mock.onPost('/api/token/refresh/').reply(200, mockResponse);
+      mock.onPost('/api/auth/refresh/').reply(200, mockResponse);
 
       const response = await authAPI.refresh('refresh-token');
 

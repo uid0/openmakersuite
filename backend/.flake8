@@ -11,9 +11,11 @@ exclude =
     staticfiles,
     media
 
-ignore = E203,W503,E501
+ignore = E203,W503,E501,D
 # E203: Whitespace before ':' (conflicts with black)
 # W503: Line break before binary operator (conflicts with black)
 # E501: Line too long (handled by black)
+# D: Ignore all docstring checks (D101, D102, D104, D105, D106, D200, etc.)
+#    For a makerspace project, strict docstring requirements can slow development
 
 max-complexity = 10

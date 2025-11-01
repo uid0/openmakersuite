@@ -9,6 +9,8 @@ dj-database-url==2.1.0
 redis==5.1.1
 celery==5.4.0
 django-redis==5.4.0
+django-celery-results==2.5.1
+flower==2.0.1
 
 # QR Code and PDF generation
 qrcode[pil]==7.4.2

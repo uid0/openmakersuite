@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python manage.py test:*)",
+      "Bash(ruff check:*)",
+      "Bash(flake8:*)",
+      "Bash(python manage.py makemigrations:*)",
+      "Bash(python manage.py:*)",
+      "Bash(docker ps:*)",
+      "Bash(redis-cli ping:*)",
+      "Read(//tmp/**)",
+      "Bash(pip install:*)",
+      "Bash(pkill:*)",
+      "Bash(awk:*)",
+      "Bash(xargs kill:*)",
+      "Bash(bandit:*)",
+      "Bash(safety:*)",
+      "Bash(pip show:*)",
+      "Bash(pip-audit:*)",
+      "Bash(black:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

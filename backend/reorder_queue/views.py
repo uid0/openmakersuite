@@ -2,15 +2,38 @@
 Views for reorder queue API.
 """
 
+from datetime import timedelta
+from decimal import Decimal
+
+from django.db import models, transaction
+from django.db.models import Avg, Count, F, Q, Sum
 from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .models import ReorderRequest
-from .serializers import ReorderRequestCreateSerializer, ReorderRequestSerializer
+from inventory.models import InventoryItem
+
+from .models import (
+    DeliveryItem,
+    LeadTimeLog,
+    OrderDelivery,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    ReorderRequest,
+)
+from .serializers import (
+    BarcodeReceiptSerializer,
+    OrderDeliverySerializer,
+    OrderMetricsSerializer,
+    PurchaseOrderCreateSerializer,
+    PurchaseOrderSerializer,
+    ReorderRequestCreateSerializer,
+    ReorderRequestSerializer,
+    SupplierPerformanceSerializer,
+)
 
 
 class ReorderRequestViewSet(viewsets.ModelViewSet):
@@ -28,9 +51,11 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         return ReorderRequestSerializer
 
     def get_permissions(self):
-        """Allow anyone to create reorder requests, but require auth for updates."""
-        if self.action == "create":
-            return []
+        """Allow anyone to create reorder requests and view pending, but require auth for admin actions."""
+        # Public actions that don't require authentication
+        if self.action in ["create", "list", "retrieve", "pending"]:
+            return [AllowAny()]
+        # Admin actions require authentication
         return [IsAuthenticated()]
 
     def create(self, request, *args, **kwargs):
@@ -48,11 +73,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def pending(self, request):
         """Get all pending reorder requests."""
+        # Return all pending requests without pagination for admin dashboard
         pending = self.queryset.filter(status="pending").order_by("-priority", "requested_at")
-        page = self.paginate_queryset(pending)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
         serializer = self.get_serializer(pending, many=True)
         return Response(serializer.data)
 
@@ -202,3 +224,698 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                 }
 
         return Response(cart_data)
+
+
+class PurchaseOrderViewSet(viewsets.ModelViewSet):
+    """API endpoint for purchase order management."""
+
+    queryset = PurchaseOrder.objects.select_related(
+        "supplier", "created_by", "sent_by"
+    ).prefetch_related(
+        "items__item_supplier__item", "items__item_supplier__supplier", "deliveries__items"
+    )
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return PurchaseOrderCreateSerializer
+        return PurchaseOrderSerializer
+
+    @action(detail=False, methods=["post"])
+    def create_optimized_order(self, request):
+        """Create an optimized purchase order based on current needs and supplier analysis."""
+
+        # Get items that need reordering
+        low_stock_items = (
+            InventoryItem.objects.filter(current_stock__lte=F("minimum_stock"))
+            .select_related("category", "location")
+            .prefetch_related("item_suppliers__supplier")
+        )
+
+        if not low_stock_items.exists():
+            return Response(
+                {"message": "No items currently need reordering"}, status=status.HTTP_200_OK
+            )
+
+        # Group items by optimal supplier
+        supplier_groups = {}
+        recommendations = []
+
+        for item in low_stock_items:
+            # Find the best supplier for this item
+            best_supplier = self._find_best_supplier(item)
+
+            if best_supplier:
+                supplier_id = best_supplier.supplier.id
+
+                if supplier_id not in supplier_groups:
+                    supplier_groups[supplier_id] = {
+                        "supplier": best_supplier.supplier,
+                        "items": [],
+                        "estimated_total": Decimal("0.00"),
+                    }
+
+                # Calculate optimal quantity (considering package sizes)
+                optimal_qty = self._calculate_optimal_quantity(item, best_supplier)
+
+                supplier_groups[supplier_id]["items"].append(
+                    {
+                        "item_id": item.id,
+                        "item_name": item.name,
+                        "item_supplier_id": best_supplier.id,
+                        "current_stock": item.current_stock,
+                        "minimum_stock": item.minimum_stock,
+                        "recommended_quantity": optimal_qty,
+                        "unit_cost": best_supplier.unit_cost,
+                        "package_cost": best_supplier.package_cost,
+                        "quantity_per_package": best_supplier.quantity_per_package,
+                        "estimated_line_total": optimal_qty * (best_supplier.unit_cost or 0),
+                    }
+                )
+
+                supplier_groups[supplier_id]["estimated_total"] += optimal_qty * (
+                    best_supplier.unit_cost or 0
+                )
+
+        # Prepare recommendations for review
+        for supplier_id, group in supplier_groups.items():
+            recommendations.append(
+                {
+                    "supplier_id": supplier_id,
+                    "supplier_name": group["supplier"].name,
+                    "supplier_type": group["supplier"].supplier_type,
+                    "total_items": len(group["items"]),
+                    "estimated_total": group["estimated_total"],
+                    "items": group["items"],
+                }
+            )
+
+        # Sort by estimated total (largest orders first)
+        recommendations.sort(key=lambda x: x["estimated_total"], reverse=True)
+
+        return Response(
+            {
+                "recommendations": recommendations,
+                "total_suppliers": len(recommendations),
+                "total_estimated_cost": sum(r["estimated_total"] for r in recommendations),
+                "message": "Order recommendations generated. Review and confirm to create purchase orders.",
+            }
+        )
+
+    def _find_best_supplier(self, item):
+        """Find the best supplier for an item based on cost, availability, and lead time."""
+        suppliers = item.item_suppliers.filter(is_active=True)
+
+        if not suppliers.exists():
+            return None
+
+        # Score each supplier
+        scored_suppliers = []
+        for supplier in suppliers:
+            score = 0
+
+            # Cost factor (40% weight) - lower cost is better
+            if supplier.unit_cost:
+                # Normalize cost score (assuming max reasonable cost difference of 50%)
+                cost_factor = (
+                    max(
+                        0,
+                        50
+                        - (
+                            (
+                                supplier.unit_cost
+                                / suppliers.aggregate(avg_cost=Avg("unit_cost"))["avg_cost"]
+                                - 1
+                            )
+                            * 100
+                        ),
+                    )
+                    / 50
+                )
+                score += cost_factor * 0.4
+
+            # Lead time factor (30% weight) - shorter lead time is better
+            if supplier.average_lead_time:
+                # Normalize lead time (assuming max reasonable lead time of 30 days)
+                lead_time_factor = max(0, (30 - supplier.average_lead_time) / 30)
+                score += lead_time_factor * 0.3
+
+            # Primary supplier bonus (20% weight)
+            if supplier.is_primary:
+                score += 0.2
+
+            # Historical performance bonus (10% weight)
+            # TODO: Implement based on LeadTimeLog data
+            performance_factor = 0.1  # Default neutral performance
+            score += performance_factor * 0.1
+
+            scored_suppliers.append((supplier, score))
+
+        # Return the highest scoring supplier
+        scored_suppliers.sort(key=lambda x: x[1], reverse=True)
+        return scored_suppliers[0][0] if scored_suppliers else None
+
+    def _calculate_optimal_quantity(self, item, supplier):
+        """Calculate optimal order quantity considering package sizes and stock needs."""
+        # Calculate basic reorder quantity
+        shortage = max(0, item.minimum_stock - item.current_stock)
+        base_quantity = max(shortage, item.reorder_quantity)
+
+        # Adjust for package quantities if available
+        if supplier.quantity_per_package and supplier.quantity_per_package > 1:
+            # Round up to nearest package
+            packages_needed = (
+                base_quantity + supplier.quantity_per_package - 1
+            ) // supplier.quantity_per_package
+            return packages_needed * supplier.quantity_per_package
+
+        return base_quantity
+
+    @action(detail=True, methods=["post"])
+    def send_to_supplier(self, request, pk=None):
+        """Mark purchase order as sent to supplier."""
+        purchase_order = self.get_object()
+
+        if purchase_order.status != PurchaseOrder.DRAFT:
+            return Response(
+                {"error": "Only draft orders can be sent to suppliers"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        purchase_order.status = PurchaseOrder.SENT
+        purchase_order.sent_by = request.user
+        purchase_order.sent_at = timezone.now()
+        purchase_order.save()
+
+        serializer = self.get_serializer(purchase_order)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def confirm_order(self, request, pk=None):
+        """Mark purchase order as confirmed by supplier."""
+        purchase_order = self.get_object()
+
+        if purchase_order.status != PurchaseOrder.SENT:
+            return Response(
+                {"error": "Only sent orders can be confirmed"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        purchase_order.status = PurchaseOrder.CONFIRMED
+        purchase_order.expected_delivery_date = request.data.get("expected_delivery_date")
+        purchase_order.save()
+
+        serializer = self.get_serializer(purchase_order)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def dashboard_summary(self, request):
+        """Get summary data for the orders dashboard."""
+        # Order status counts
+        status_counts = PurchaseOrder.objects.aggregate(
+            total=Count("id"),
+            draft=Count("id", filter=Q(status=PurchaseOrder.DRAFT)),
+            sent=Count("id", filter=Q(status=PurchaseOrder.SENT)),
+            confirmed=Count("id", filter=Q(status=PurchaseOrder.CONFIRMED)),
+            partially_received=Count("id", filter=Q(status=PurchaseOrder.PARTIALLY_RECEIVED)),
+            received=Count("id", filter=Q(status=PurchaseOrder.RECEIVED)),
+        )
+
+        # Financial metrics
+        financial_metrics = PurchaseOrder.objects.aggregate(
+            total_value=Sum("estimated_total"),
+            received_value=Sum("actual_total", filter=Q(status=PurchaseOrder.RECEIVED)),
+        )
+
+        # Recent activity (this week)
+        week_ago = timezone.now() - timedelta(days=7)
+        recent_activity = PurchaseOrder.objects.filter(order_date__gte=week_ago).aggregate(
+            orders_created=Count("id"),
+            orders_received=Count("id", filter=Q(status=PurchaseOrder.RECEIVED)),
+        )
+
+        # Items metrics
+        item_metrics = PurchaseOrderItem.objects.aggregate(
+            total_items_ordered=Sum("quantity_ordered"),
+            total_items_received=Sum("quantity_received"),
+        )
+
+        # Calculate pending values
+        pending_value = (financial_metrics["total_value"] or 0) - (
+            financial_metrics["received_value"] or 0
+        )
+        items_pending = (item_metrics["total_items_ordered"] or 0) - (
+            item_metrics["total_items_received"] or 0
+        )
+
+        # Lead time metrics
+        lead_time_data = LeadTimeLog.objects.aggregate(
+            avg_lead_time=Avg("actual_lead_time_days"),
+            on_time_count=Count("id", filter=Q(variance_days__lte=0)),
+            total_deliveries=Count("id"),
+        )
+
+        on_time_rate = 0
+        if lead_time_data["total_deliveries"] > 0:
+            on_time_rate = (
+                lead_time_data["on_time_count"] / lead_time_data["total_deliveries"]
+            ) * 100
+
+        metrics = OrderMetricsSerializer(
+            {
+                # Order counts
+                "total_orders": status_counts["total"],
+                "draft_orders": status_counts["draft"],
+                "sent_orders": status_counts["sent"],
+                "confirmed_orders": status_counts["confirmed"],
+                "partially_received_orders": status_counts["partially_received"],
+                "completed_orders": status_counts["received"],
+                # Item metrics
+                "total_items_on_order": item_metrics["total_items_ordered"] or 0,
+                "total_items_received": item_metrics["total_items_received"] or 0,
+                "items_pending_receipt": items_pending,
+                # Financial metrics
+                "total_order_value": financial_metrics["total_value"] or 0,
+                "received_order_value": financial_metrics["received_value"] or 0,
+                "pending_order_value": pending_value,
+                # Recent activity
+                "orders_created_this_week": recent_activity["orders_created"],
+                "orders_received_this_week": recent_activity["orders_received"],
+                # Lead time metrics
+                "average_lead_time_days": lead_time_data["avg_lead_time"] or 0,
+                "on_time_delivery_rate": on_time_rate,
+            }
+        )
+
+        return Response(metrics.data)
+
+
+class OrderReceiptViewSet(viewsets.ModelViewSet):
+    """API endpoint for order receipt and barcode scanning."""
+
+    queryset = OrderDelivery.objects.select_related(
+        "purchase_order__supplier", "received_by"
+    ).prefetch_related("items__purchase_order_item__item_supplier__item")
+
+    serializer_class = OrderDeliverySerializer
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["post"])
+    def scan_barcode(self, request):
+        """Process barcode scan for order receipt."""
+        serializer = BarcodeReceiptSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+        purchase_order_id = data["purchase_order_id"]
+        scanned_upc = data["scanned_upc"]
+        quantity_received = data["quantity_received"]
+
+        try:
+            purchase_order = PurchaseOrder.objects.get(id=purchase_order_id)
+        except PurchaseOrder.DoesNotExist:
+            return Response({"error": "Purchase order not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Find matching item by UPC
+        matching_items = []
+        for po_item in purchase_order.items.all():
+            item_supplier = po_item.item_supplier
+            if item_supplier.package_upc == scanned_upc or item_supplier.unit_upc == scanned_upc:
+                matching_items.append(po_item)
+
+        if not matching_items:
+            return Response(
+                {
+                    "error": "No items in this order match the scanned UPC",
+                    "scanned_upc": scanned_upc,
+                    "order_items": [
+                        {
+                            "item_name": poi.item.name,
+                            "package_upc": poi.item_supplier.package_upc,
+                            "unit_upc": poi.item_supplier.unit_upc,
+                        }
+                        for poi in purchase_order.items.all()
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(matching_items) > 1:
+            return Response(
+                {
+                    "error": "Multiple items match this UPC",
+                    "matching_items": [
+                        {"item_name": poi.item.name, "id": poi.id} for poi in matching_items
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        po_item = matching_items[0]
+
+        # Check if we can receive this quantity
+        remaining_quantity = po_item.quantity_pending
+        if quantity_received > remaining_quantity:
+            return Response(
+                {
+                    "error": f"Cannot receive {quantity_received} items. Only {remaining_quantity} remaining to receive.",
+                    "quantity_ordered": po_item.quantity_ordered,
+                    "quantity_already_received": po_item.quantity_received,
+                    "quantity_remaining": remaining_quantity,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create or get delivery for today
+        with transaction.atomic():
+            delivery, created = OrderDelivery.objects.get_or_create(
+                purchase_order=purchase_order,
+                delivery_date__date=timezone.now().date(),
+                defaults={"received_by": request.user, "delivery_date": timezone.now()},
+            )
+
+            # Create delivery item
+            DeliveryItem.objects.create(
+                delivery=delivery,
+                purchase_order_item=po_item,
+                quantity_received=quantity_received,
+                is_damaged=data.get("is_damaged", False),
+                is_expired=data.get("is_expired", False),
+                condition_notes=data.get("condition_notes", ""),
+                scanned_upc=scanned_upc,
+                scanned_at=timezone.now(),
+                scanned_by=request.user,
+            )
+
+            # Update purchase order item received quantity
+            po_item.quantity_received += quantity_received
+            po_item.save()
+
+            # Update inventory stock
+            item = po_item.item
+            item.current_stock += quantity_received
+            item.save()
+
+            # Update purchase order status
+            if purchase_order.is_fully_received:
+                purchase_order.status = PurchaseOrder.RECEIVED
+            else:
+                purchase_order.status = PurchaseOrder.PARTIALLY_RECEIVED
+            purchase_order.save()
+
+            # Create lead time log if order is complete
+            if po_item.is_fully_received:
+                self._create_lead_time_log(po_item, delivery.delivery_date)
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Successfully received {quantity_received} units of {po_item.item.name}",
+                "item_name": po_item.item.name,
+                "quantity_received": quantity_received,
+                "total_received": po_item.quantity_received,
+                "quantity_remaining": po_item.quantity_pending,
+                "order_status": purchase_order.status,
+                "updated_inventory_stock": item.current_stock,
+            }
+        )
+
+    def _create_lead_time_log(self, po_item, delivery_date):
+        """Create a lead time log entry when an item is fully received."""
+        purchase_order = po_item.purchase_order
+
+        if not purchase_order.sent_at:
+            return  # Can't calculate lead time without send date
+
+        # Calculate business days
+        order_date = purchase_order.sent_at
+        actual_delivery_date = (
+            delivery_date.date() if hasattr(delivery_date, "date") else delivery_date
+        )
+
+        estimated_lead_time = po_item.item_supplier.average_lead_time or 14
+        actual_lead_time = LeadTimeLog.calculate_business_days(order_date, actual_delivery_date)
+
+        LeadTimeLog.objects.create(
+            item_supplier=po_item.item_supplier,
+            purchase_order=purchase_order,
+            order_date=order_date,
+            expected_delivery_date=purchase_order.expected_delivery_date
+            or (order_date.date() + timedelta(days=estimated_lead_time)),
+            actual_delivery_date=actual_delivery_date,
+            estimated_lead_time_days=estimated_lead_time,
+            actual_lead_time_days=actual_lead_time,
+            quantity_ordered=po_item.quantity_ordered,
+            quantity_received=po_item.quantity_received,
+        )
+
+    @action(detail=False, methods=["get"])
+    def pending_orders(self, request):
+        """Get all orders that are expecting deliveries."""
+        pending_orders = (
+            PurchaseOrder.objects.filter(
+                status__in=[
+                    PurchaseOrder.SENT,
+                    PurchaseOrder.CONFIRMED,
+                    PurchaseOrder.PARTIALLY_RECEIVED,
+                ]
+            )
+            .select_related("supplier")
+            .prefetch_related("items__item_supplier__item")
+        )
+
+        order_data = []
+        for order in pending_orders:
+            order_data.append(
+                {
+                    "id": order.id,
+                    "po_number": order.po_number,
+                    "supplier_name": order.supplier.name,
+                    "status": order.status,
+                    "expected_delivery_date": order.expected_delivery_date,
+                    "days_since_ordered": order.days_since_ordered,
+                    "total_items": order.total_items,
+                    "items_pending": order.total_quantity - order.total_received_quantity,
+                    "estimated_total": order.estimated_total,
+                }
+            )
+
+        return Response(order_data)
+
+
+class AnalyticsViewSet(viewsets.ViewSet):
+    """Analytics and reporting endpoints."""
+
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["get"])
+    def supplier_performance(self, request):
+        """Get supplier performance metrics."""
+        suppliers_data = []
+
+        # Get all suppliers with orders
+        from inventory.models import Supplier
+
+        suppliers = Supplier.objects.filter(purchase_orders__isnull=False).distinct()
+
+        for supplier in suppliers:
+            # Order metrics
+            orders = supplier.purchase_orders.all()
+            total_orders = orders.count()
+            completed_orders = orders.filter(status=PurchaseOrder.RECEIVED).count()
+            active_orders = orders.exclude(
+                status__in=[PurchaseOrder.RECEIVED, PurchaseOrder.CANCELLED]
+            ).count()
+
+            # Lead time metrics
+            lead_time_logs = LeadTimeLog.objects.filter(item_supplier__supplier=supplier)
+
+            avg_lead_time = lead_time_logs.aggregate(avg=Avg("actual_lead_time_days"))["avg"] or 0
+
+            total_deliveries = lead_time_logs.count()
+            on_time_deliveries = lead_time_logs.filter(variance_days__lte=0).count()
+            early_deliveries = lead_time_logs.filter(variance_days__lt=0).count()
+            late_deliveries = lead_time_logs.filter(variance_days__gt=0).count()
+
+            on_time_rate = (
+                (on_time_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0
+            )
+            early_rate = (early_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0
+            late_rate = (late_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0
+
+            # Financial metrics
+            total_value = orders.aggregate(total=Sum("estimated_total"))["total"] or 0
+
+            # Quality metrics
+            delivered_items = DeliveryItem.objects.filter(
+                purchase_order_item__purchase_order__supplier=supplier
+            )
+            total_items_delivered = delivered_items.count()
+            damaged_items = delivered_items.filter(is_damaged=True).count()
+            damage_rate = (
+                (damaged_items / total_items_delivered * 100) if total_items_delivered > 0 else 0
+            )
+
+            # Recent activity
+            last_order = orders.order_by("-order_date").first()
+            last_order_date = last_order.order_date if last_order else None
+            days_since_last_order = None
+            if last_order_date:
+                days_since_last_order = (timezone.now() - last_order_date).days
+
+            suppliers_data.append(
+                SupplierPerformanceSerializer(
+                    {
+                        "supplier_id": supplier.id,
+                        "supplier_name": supplier.name,
+                        "total_orders": total_orders,
+                        "completed_orders": completed_orders,
+                        "active_orders": active_orders,
+                        "average_lead_time_days": avg_lead_time,
+                        "on_time_delivery_rate": on_time_rate,
+                        "early_delivery_rate": early_rate,
+                        "late_delivery_rate": late_rate,
+                        "total_order_value": total_value,
+                        "damage_rate": damage_rate,
+                        "last_order_date": last_order_date,
+                        "days_since_last_order": days_since_last_order,
+                    }
+                ).data
+            )
+
+        # Sort by total order value descending
+        suppliers_data.sort(key=lambda x: x["total_order_value"], reverse=True)
+
+        return Response(suppliers_data)
+
+    @action(detail=False, methods=["get"])
+    def lead_time_trends(self, request):
+        """Get lead time trends over the past 6 months."""
+        six_months_ago = timezone.now() - timedelta(days=180)
+
+        # Get lead time data by month
+        from django.db.models import Extract
+
+        monthly_data = (
+            LeadTimeLog.objects.filter(actual_delivery_date__gte=six_months_ago.date())
+            .annotate(
+                month=Extract("actual_delivery_date", "month"),
+                year=Extract("actual_delivery_date", "year"),
+            )
+            .values("year", "month")
+            .annotate(
+                avg_lead_time=Avg("actual_lead_time_days"),
+                avg_variance=Avg("variance_days"),
+                total_deliveries=Count("id"),
+                on_time_deliveries=Count("id", filter=Q(variance_days__lte=0)),
+            )
+            .order_by("year", "month")
+        )
+
+        trend_data = []
+        for data in monthly_data:
+            on_time_rate = (data["on_time_deliveries"] / data["total_deliveries"]) * 100
+            trend_data.append(
+                {
+                    "month": f"{data['year']}-{data['month']:02d}",
+                    "average_lead_time_days": round(data["avg_lead_time"], 1),
+                    "average_variance_days": round(data["avg_variance"], 1),
+                    "total_deliveries": data["total_deliveries"],
+                    "on_time_delivery_rate": round(on_time_rate, 1),
+                }
+            )
+
+        return Response(trend_data)
+
+    @action(detail=False, methods=["get"], permission_classes=[AllowAny])
+    def transparency(self, request):
+        """
+        Public transparency endpoint showing financial information about orders.
+
+        Open by default for makerspace transparency - shows costs, invoices,
+        purchase orders, and delivery information for community visibility.
+        """
+        try:
+            # Get orders with transparency data (recent first)
+            transparency_orders = (
+                self.get_queryset()
+                .filter(
+                    models.Q(actual_cost__isnull=False)
+                    | models.Q(invoice_number__isnull=False)
+                    | models.Q(invoice_url__isnull=False)
+                    | models.Q(purchase_order_url__isnull=False)
+                    | models.Q(delivery_tracking_url__isnull=False)
+                    | models.Q(order_number__isnull=False)
+                )
+                .exclude(
+                    models.Q(actual_cost__isnull=True)
+                    & models.Q(invoice_number="")
+                    & models.Q(invoice_url="")
+                    & models.Q(purchase_order_url="")
+                    & models.Q(delivery_tracking_url="")
+                    & models.Q(order_number="")
+                )
+                .order_by("-ordered_at", "-requested_at")[
+                    :100
+                ]  # Last 100 orders with financial data
+            )
+
+            transparency_data = []
+            total_spent = Decimal("0.00")
+
+            for order in transparency_orders:
+                if order.actual_cost:
+                    total_spent += order.actual_cost
+
+                # Public transparency information
+                order_data = {
+                    "id": order.id,
+                    "item_name": order.item.name,
+                    "item_category": order.item.category.name if order.item.category else None,
+                    "quantity_ordered": order.quantity,
+                    "status": order.status,
+                    "requested_at": order.requested_at.isoformat(),
+                    "ordered_at": order.ordered_at.isoformat() if order.ordered_at else None,
+                    "delivered_at": (
+                        order.actual_delivery.isoformat() if order.actual_delivery else None
+                    ),
+                    # Financial transparency
+                    "estimated_cost": float(order.estimated_cost) if order.estimated_cost else None,
+                    "actual_cost": float(order.actual_cost) if order.actual_cost else None,
+                    "cost_per_unit": float(order.cost_per_unit) if order.cost_per_unit else None,
+                    "cost_variance": (
+                        float(order.actual_cost - order.estimated_cost)
+                        if (order.actual_cost and order.estimated_cost)
+                        else None
+                    ),
+                    # Document links
+                    "order_number": order.order_number,
+                    "invoice_number": order.invoice_number,
+                    "invoice_url": order.invoice_url,
+                    "purchase_order_url": order.purchase_order_url,
+                    "delivery_tracking_url": order.delivery_tracking_url,
+                    "supplier_url": order.supplier_url,
+                    # Public notes
+                    "public_notes": order.public_notes,
+                    # Supplier info
+                    "supplier_name": (
+                        order.item.supplier_name if hasattr(order.item, "supplier_name") else None
+                    ),
+                }
+
+                transparency_data.append(order_data)
+
+            # Summary statistics
+            summary = {
+                "total_orders_with_financial_data": len(transparency_data),
+                "total_amount_spent": float(total_spent),
+                "last_updated": timezone.now().isoformat(),
+                "transparency_note": "Dallas Makerspace operates with full financial transparency. All purchase information is publicly available.",
+            }
+
+            return Response({"summary": summary, "orders": transparency_data})
+
+        except Exception as e:
+            return Response(
+                {"error": "Unable to fetch transparency data", "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

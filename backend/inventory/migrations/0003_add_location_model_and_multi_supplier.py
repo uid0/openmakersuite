@@ -1,8 +1,8 @@
 # Generated migration to add Location model and ItemSupplier with data migration
 
-from django.db import migrations, models
-import django.db.models.deletion
 import django.core.validators
+import django.db.models.deletion
+from django.db import migrations, models
 
 
 def create_locations_from_existing_data(apps, schema_editor):

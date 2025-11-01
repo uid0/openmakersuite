@@ -1,13 +1,21 @@
 /**
  * Home Page
- * Landing page with links to scan items and admin dashboard
+ * Landing page with links to scan items, admin dashboard, and authentication
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AuthSection from '../components/AuthSection';
 import '../styles/HomePage.css';
 
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [username, setUsername] = useState('');
+
+  const handleAuthChange = (loggedIn: boolean, user?: string) => {
+    setIsLoggedIn(loggedIn);
+    setUsername(user || '');
+  };
 
   return (
     <div className="home-page">
@@ -15,6 +23,8 @@ const HomePage: React.FC = () => {
         <h1>Makerspace Inventory Management</h1>
         <p className="tagline">Scan. Track. Reorder. Simple.</p>
       </div>
+
+      <AuthSection onAuthChange={handleAuthChange} />
 
       <div className="card-grid">
         <div className="feature-card">
@@ -31,12 +41,16 @@ const HomePage: React.FC = () => {
 
         <div className="feature-card" onClick={() => navigate('/admin')}>
           <div className="icon">⚙️</div>
-          <h2>Admin Dashboard</h2>
+          <h2>{isLoggedIn ? 'Admin Dashboard' : 'Admin Dashboard'}</h2>
           <p>
-            Manage reorder queue, approve requests, and process bulk orders by
-            supplier.
+            {isLoggedIn 
+              ? 'Manage reorder queue, approve requests, and process bulk orders by supplier.'
+              : 'View pending reorder requests and manage inventory workflow (login for enhanced features).'
+            }
           </p>
-          <button className="card-button">Go to Dashboard</button>
+          <button className="card-button">
+            {isLoggedIn ? `Go to Dashboard (${username})` : 'Go to Dashboard'}
+          </button>
         </div>
 
         <div className="feature-card">
@@ -49,6 +63,18 @@ const HomePage: React.FC = () => {
             <li>Multi-supplier support</li>
             <li>Stock level monitoring</li>
           </ul>
+        </div>
+
+        <div className="feature-card" onClick={() => navigate('/tv-dashboard')}>
+          <div className="icon">📺</div>
+          <h2>TV Dashboard</h2>
+          <p>
+            Large-screen display optimized for Chromecast and TV viewing. 
+            Shows items that have been reordered and are in progress with delivery tracking.
+          </p>
+          <button className="card-button">
+            Open TV Dashboard
+          </button>
         </div>
       </div>
 

@@ -1,197 +1,181 @@
-# DevContainer Setup for OpenMakerSuite
+# DevContainer Development Environment
 
-This devcontainer configuration provides a consistent development environment that matches the CI/CD pipeline, eliminating platform-specific differences between macOS, Windows, and Linux development.
+This devcontainer provides a consistent development environment that matches your CI/CD pipeline exactly.
 
-## 🎯 Benefits
+## 🚀 Quick Start
 
-- **Consistent Environment**: Matches exactly with CI (Ubuntu 22.04, Python 3.11, Node.js 18)
-- **Zero Setup**: All dependencies and tools pre-installed
-- **Cross-Platform**: Works identically on macOS, Windows, and Linux
-- **Isolated**: No conflicts with your host system
-- **VS Code Integration**: Optimized extensions and settings included
+### Prerequisites
+- Docker Desktop (running)
+- VS Code with "Dev Containers" extension
 
-## 📋 Prerequisites
+### Getting Started
+1. **Open this project in VS Code**
+2. **Click "Reopen in Container"** when prompted (or use `Cmd/Ctrl+Shift+P` → "Dev Containers: Reopen in Container")
+3. **Wait for setup** (first time ~5-7 minutes, subsequent ~30 seconds)
+4. **The setup script will automatically:**
+   - Install all Python and Node.js dependencies
+   - Set up SQLite database and Redis
+   - Run database migrations
+   - Create helper scripts
 
-1. **Docker Desktop**: Install from [docker.com](https://docs.docker.com/desktop/)
-2. **VS Code**: Install from [code.visualstudio.com](https://code.visualstudio.com/)
-3. **Dev Containers Extension**: Install from VS Code marketplace
+### Development Commands
+Once inside the container, use these helper commands:
 
-## 🚀 Getting Started
-
-### Option 1: VS Code Command Palette
-1. Open VS Code
-2. Press `Cmd/Ctrl + Shift + P`
-3. Type "Dev Containers: Clone Repository in Container Volume"
-4. Enter the repository URL
-5. Wait for the container to build and setup
-
-### Option 2: Existing Repository
-1. Open the project in VS Code
-2. Press `Cmd/Ctrl + Shift + P`
-3. Type "Dev Containers: Reopen in Container"
-4. Wait for the container to build and setup
-
-### Option 3: Command Line
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/openmakersuite.git
-cd openmakersuite
+# Start development servers
+./dev-commands.sh run-backend      # Django on :8000
+./dev-commands.sh run-frontend     # React on :3000
 
-# Open in VS Code
-code .
+# Run tests
+./dev-commands.sh test-backend     # Backend tests
+./dev-commands.sh test-frontend    # Frontend tests  
+./dev-commands.sh test-all         # All tests
 
-# VS Code will prompt to reopen in container
+# Code quality
+./dev-commands.sh lint-backend     # Backend linting
+./dev-commands.sh lint-frontend    # Frontend linting
+
+# Database
+./dev-commands.sh migrate          # Run migrations
+./dev-commands.sh shell            # Django shell
 ```
 
-## 🛠️ What's Included
+### Manual Commands
+You can also run commands manually:
 
-### Development Tools
-- **Python 3.11** with pip
-- **Node.js 18** with npm
-- **Git** with full history
-- **PostgreSQL client** for database operations
-- **Redis CLI** for cache operations
-
-### Python Tools
-- `flake8` - Code linting
-- `black` - Code formatting  
-- `isort` - Import sorting
-- `pytest` - Testing framework
-- `bandit` - Security scanning
-- `ipython` - Enhanced REPL
-
-### VS Code Extensions
-- Python language support
-- TypeScript/JavaScript support  
-- ESLint integration
-- Prettier formatting
-- Docker tools
-- Git tools (GitLens)
-- Testing support
-
-## 📝 Common Commands
-
-### Running Tests (CI-Compatible)
 ```bash
-# Backend tests (matches CI exactly)
-cd backend
-flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-black --check --diff .
-isort --check-only --diff .
-pytest --cov --cov-report=xml --cov-fail-under=80
-
-# Frontend tests (matches CI exactly)  
-cd frontend
-npm run lint
-npm run test:ci
-```
-
-### Development Servers
-```bash
-# Start backend development server
+# Backend
 cd backend
 python manage.py runserver 0.0.0.0:8000
+python -m pytest
+flake8 . && black --check . && isort --check .
 
-# Start frontend development server
-cd frontend  
+# Frontend  
+cd frontend
 npm start
+npm test
+npm run lint
 ```
 
-### Database Operations
-```bash
-# Run migrations
-cd backend
-python manage.py migrate
+## 🌐 Accessing Services
 
-# Create superuser
-./create_superuser.sh
+The devcontainer automatically forwards ports:
 
-# Access database directly
-psql -h db -U makerspace -d makerspace_inventory
-```
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **Django Admin**: http://localhost:8000/admin
 
-## 🌐 Port Forwarding
+**Database & Redis:** Run inside the container (no external access needed):
+- SQLite database: `/workspace/backend/db.sqlite3`
+- Redis: Available via `redis-cli` inside container
 
-The devcontainer automatically forwards these ports:
+## 🛠️ Environment Details
 
-- **3000** - Frontend (React)
-- **8000** - Backend (Django) 
-- **5432** - PostgreSQL (for external tools)
-- **6379** - Redis (for external tools)
+**Development-Optimized Setup:**
+- Ubuntu Linux (same as GitHub Actions)
+- Python 3.11 with pip and development tools
+- Node.js 18 with npm
+- SQLite database (development-friendly)
+- Redis 7 (via system service)
 
-Access your application at:
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8000
+**Pre-installed Tools:**
+- All Python dependencies (production + development)
+- All Node.js dependencies
+- Git, GitHub CLI
+- VS Code extensions for Python, JavaScript, Docker
+- Redis server (system service)
+
+**Environment Variables:**
+- `CI=true` (matches CI behavior)
+- `DEBUG=1` (Django debug mode)
+- `DATABASE_URL=sqlite:///db.sqlite3` (development database)
+- `REDIS_URL=redis://localhost:6379/0` (local Redis)
 
 ## 🔧 Troubleshooting
 
 ### Container Won't Start
-1. Ensure Docker Desktop is running
-2. Check Docker has sufficient resources (4GB+ RAM recommended)
-3. Try rebuilding: `Cmd/Ctrl + Shift + P` → "Dev Containers: Rebuild Container"
+- ✅ **Docker Desktop running?** Check Docker Desktop is open and running
+- ✅ **Dev Containers extension?** Install from VS Code marketplace
+- ✅ **Rebuild container:** `Cmd/Ctrl+Shift+P` → "Dev Containers: Rebuild Container"
+- ✅ **Check logs:** `Cmd/Ctrl+Shift+P` → "Dev Containers: Show Container Log"
+
+### Setup Script Issues
+If the automatic setup doesn't work, try:
+
+```bash
+# Rebuild the container
+Cmd/Ctrl+Shift+P → "Dev Containers: Rebuild Container"
+
+# Or run commands manually inside the container
+cd backend && pip install -r requirements.txt -r requirements-dev.txt
+cd ../frontend && npm install
+cd ../backend && python manage.py migrate
+```
 
 ### Services Not Ready
-The setup script waits for PostgreSQL and Redis, but you might need to wait longer:
 ```bash
-# Check service status
-docker compose ps
+# Check database
+ls -la backend/db.sqlite3
 
-# Check logs
-docker compose logs db
-docker compose logs redis
+# Check Redis
+redis-cli ping
+
+# Check environment status
+./dev-commands.sh status
+
+# Restart Redis if needed
+sudo service redis-server restart
 ```
 
-### Permission Issues
+### Port Conflicts
+- **Check what's using ports:** `lsof -i :3000,8000`
+- **Stop conflicting services:** Close other development servers
+- **Only need ports 3000 and 8000** (SQLite and Redis run inside container)
+
+### Performance Issues
+- **Docker Desktop settings:** Allocate 4GB+ RAM, 2+ CPU cores
+- **Windows:** Ensure WSL 2 is enabled and Docker is using WSL 2
+- **macOS:** Increase Docker Desktop memory allocation
+
+### Missing Commands
+If `dev-commands.sh` isn't available, use these directly:
+
 ```bash
-# Fix file permissions if needed
-sudo chown -R vscode:vscode /workspace
+# Backend
+cd backend
+python manage.py runserver 0.0.0.0:8000  # Start server
+python -m pytest                          # Run tests
+python manage.py migrate                  # Database migrations
+python manage.py shell                    # Django shell
+
+# Frontend
+cd frontend
+npm start    # Development server
+npm test     # Run tests
+npm run lint # Code linting
 ```
 
-### Tests Failing Differently Than CI
-The devcontainer environment should match CI exactly. If you see differences:
+### Still Having Issues?
+1. **Try manual setup:** Run `./setup-dev.sh` from project root
+2. **Check environment:** `./dev-commands.sh status` (if available)
+3. **Restart Docker Desktop** and try "Rebuild Container" again
+4. **Check VS Code output:** View → Output → Dev Containers
 
-1. Check Node.js version: `node --version` (should be 18.x)
-2. Check Python version: `python --version` (should be 3.11.x)
-3. Check environment variables: `env | grep CI`
-4. Rebuild container to ensure clean state
+## 📂 Project Structure
 
-## 🎛️ Customization
-
-### Adding Extensions
-Edit `.devcontainer/devcontainer.json` and add to the extensions array:
-```json
-"customizations": {
-  "vscode": {
-    "extensions": [
-      "your-extension-id"
-    ]
-  }
-}
+```
+/workspace/
+├── backend/          # Django backend
+├── frontend/         # React frontend
+├── dev-commands.sh   # Helper scripts (created by setup)
+├── verify-setup.sh   # Verification script (created by setup)
+└── docker-compose.yml
 ```
 
-### Environment Variables
-Edit `.devcontainer/docker-compose.dev.yml` to add environment variables:
-```yaml
-services:
-  devcontainer:
-    environment:
-      - YOUR_VAR=value
-```
+## 🎯 Benefits
 
-### Additional Dependencies
-Edit `.devcontainer/requirements.dev.txt` for Python packages or modify the Dockerfile for system packages.
-
-## 🔄 Updates
-
-To update the devcontainer:
-1. Pull latest changes: `git pull`
-2. Rebuild container: `Cmd/Ctrl + Shift + P` → "Dev Containers: Rebuild Container"
-
-## 💡 Tips
-
-- Use the integrated terminal for all commands
-- Git history is preserved in the container
-- Extensions and settings are automatically configured
-- The setup script runs automatically on first container creation
-- Use `Cmd/Ctrl + Shift + P` to access Dev Container commands
-- Container volumes persist data between rebuilds
+✅ **Consistency**: Identical to CI/CD environment  
+✅ **Zero Setup**: Everything pre-installed and configured  
+✅ **Team Sync**: Everyone gets the same environment  
+✅ **Isolation**: No conflicts with your host system  
+✅ **Fast**: Hot reloading, volume mounts, cached dependencies

@@ -20,6 +20,10 @@ SECRET_KEY = config("SECRET_KEY", default="django-insecure-dev-key-change-in-pro
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
 
+# Development mode - allows unauthenticated API access for easier development
+# ⚠️ NEVER enable this in production!
+DEVELOPMENT_MODE = config("DEVELOPMENT_MODE", default=False, cast=bool)
+
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
 
 # Application definition
@@ -36,6 +40,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "imagekit",
     "drf_spectacular",
+    "django_celery_results",
     # Local apps
     "inventory",
     "reorder_queue",
@@ -120,7 +125,11 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticatedOrReadOnly",),
+    "DEFAULT_PERMISSION_CLASSES": (
+        ("rest_framework.permissions.AllowAny",)
+        if DEVELOPMENT_MODE
+        else ("rest_framework.permissions.IsAuthenticatedOrReadOnly",)
+    ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
@@ -131,6 +140,37 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+
+# Allow credentials for session authentication
+CORS_ALLOW_CREDENTIALS = True
+
+# Allow all standard HTTP methods
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+
+# Allow all common headers
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+
+# In development mode, allow all origins for easier testing
+if DEVELOPMENT_MODE:
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOW_CREDENTIALS = True
 
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 
@@ -150,22 +190,67 @@ CACHES = {
 
 # Celery Configuration
 CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = REDIS_URL
+CELERY_RESULT_BACKEND = "django-db"  # Store results in Django database
+CELERY_CACHE_BACKEND = "django-cache"  # Use Django cache for intermediate results
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True  # Track when tasks start
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes hard timeout
+CELERY_RESULT_EXTENDED = True  # Store additional task metadata
 
 # Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {
     "TITLE": "Makerspace Inventory Management API",
-    "DESCRIPTION": "Open source inventory management system for makerspaces",
+    "DESCRIPTION": """
+    Open source inventory management system for makerspaces.
+
+    ## Features
+
+    - **Inventory Management**: Track items, categories, suppliers, and locations
+    - **QR Code Integration**: Generate and scan QR codes for easy item identification
+    - **Index Card Generation**: Create printable 3x5" or 5x3" index cards with item details
+    - **Reorder Management**: Automated reorder requests and supplier integration
+    - **Usage Tracking**: Log item usage and calculate reorder timing
+
+    ## Authentication
+
+    This API supports both JWT and session authentication:
+    - Use `DEVELOPMENT_MODE=1` for development (no auth required)
+    - Use JWT tokens for production authentication
+    - Session authentication via Django admin login
+
+    ## Getting Started
+
+    1. Browse available endpoints in the interactive documentation
+    2. Click on any UUID to navigate to related objects
+    3. Generate index cards and QR codes for your inventory
+    4. Set up automated reorder workflows
+
+    ## Support
+
+    For questions or issues, please refer to the project documentation.
+    """,
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "displayRequestDuration": True,
+        "docExpansion": "list",
+        "filter": True,
+        "showExtensions": True,
+        "showCommonExtensions": True,
+        "url": "/api/schema/",
+    },
 }
 
 # Sentry Configuration
-SENTRY_DSN = config("SENTRY_DSN", default="")
+SENTRY_DSN = config(
+    "SENTRY_DSN",
+    default="https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952",
+)
 SENTRY_ENVIRONMENT = config("SENTRY_ENVIRONMENT", default="development")
 
 if SENTRY_DSN:

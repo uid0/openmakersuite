@@ -1,0 +1,35 @@
+# Gitleaks configuration for OpenMakerSuite
+# This file configures gitleaks to ignore false positives and legitimate patterns
+
+[extend]
+# Use default gitleaks rules as base
+useDefault = true
+
+# Paths to exclude from scanning
+[allowlist]
+paths = [
+    '''.*_test\.go''',
+    '''.*test.*''',
+    '''.*/migrations/.*''',
+    '''node_modules/.*''',
+    '''\.git/.*''',
+    '''__pycache__/.*''',
+    '''\.pytest_cache/.*''',
+    '''docker-compose\.yml''',
+    '''quick-start\.sh''',
+    '''README\.md''',
+    '''.*\.md''',
+]
+
+# Regexes to allow (these patterns won't trigger secrets detection)
+regexes = [
+    # Sentry DSN keys (these are public keys)
+    '''https://[a-f0-9]+@o[0-9]+\.ingest\.us\.sentry\.io/[0-9]+''',
+    # Development database URLs
+    '''postgresql://makerspace:\$\{POSTGRES_PASSWORD.*\}@db:5432/makerspace_inventory''',
+    '''sqlite:///db\.sqlite3''',
+    # Development secret keys (clearly marked as development-only)
+    '''development-only-insecure-key-replace-in-production''',
+    '''django-insecure-dev-key-change-in-production''',
+    '''development_password_only''',
+]

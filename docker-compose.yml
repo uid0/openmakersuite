@@ -8,7 +8,7 @@ services:
     environment:
       - POSTGRES_DB=makerspace_inventory
       - POSTGRES_USER=makerspace
-      - POSTGRES_PASSWORD=changeme_in_production
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-development_password_only}
     ports:
       - "5432:5432"
     healthcheck:
@@ -40,7 +40,7 @@ services:
       - "8000:8000"
     environment:
       - DEBUG=1
-      - DATABASE_URL=postgresql://makerspace:changeme_in_production@db:5432/makerspace_inventory
+      - DATABASE_URL=postgresql://makerspace:${POSTGRES_PASSWORD:-development_password_only}@db:5432/makerspace_inventory
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - SENTRY_DSN=${SENTRY_DSN:-https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952}
@@ -61,7 +61,7 @@ services:
       - media_volume:/app/media
     environment:
       - DEBUG=1
-      - DATABASE_URL=postgresql://makerspace:changeme_in_production@db:5432/makerspace_inventory
+      - DATABASE_URL=postgresql://makerspace:${POSTGRES_PASSWORD:-development_password_only}@db:5432/makerspace_inventory
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - SENTRY_DSN=${SENTRY_DSN:-https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952}

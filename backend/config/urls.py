@@ -8,23 +8,23 @@ from django.contrib import admin
 from django.urls import include, path
 
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from auth_views import login_user, refresh_token, register_user
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    # API Documentation
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
-    # Authentication
-    path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    # App URLs
+    path("api/token/", include("rest_framework.urls")),
+    # Custom auth endpoints
+    path("api/auth/register/", register_user, name="register"),
+    path("api/auth/login/", login_user, name="login"),
+    path("api/auth/refresh/", refresh_token, name="refresh"),
     path("api/inventory/", include("inventory.urls")),
     path("api/reorders/", include("reorder_queue.urls")),
     path("api/index-cards/", include("index_cards.urls")),
 ]
 
-# Serve media files in development
+# Serve media files during development
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

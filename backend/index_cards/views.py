@@ -28,14 +28,15 @@ class IndexCardPreviewView(APIView):
         serializer.is_valid(raise_exception=True)
 
         item = get_object_or_404(InventoryItem, id=serializer.validated_data["item_id"])
-        renderer = IndexCardRenderer()
-        payload = build_preview_payload(item, renderer)
+        blank_card = serializer.validated_data.get("blank_card", False)
+        renderer = IndexCardRenderer(blank_cards=blank_card)
+        payload = build_preview_payload(item, renderer, blank_card)
 
         return Response(payload, status=status.HTTP_200_OK)
 
 
 class IndexCardBatchGenerateView(APIView):
-    """Generate a PDF with up to three 3x5" index cards per page."""
+    """Generate a PDF using Avery Template 5388 (3 cards per page, 5"×3" each)."""
 
     permission_classes = [IsAuthenticatedOrReadOnly]
 
@@ -59,15 +60,18 @@ class IndexCardBatchGenerateView(APIView):
 
         items.sort(key=lambda item: item_ids.index(str(item.id)))
 
-        renderer = IndexCardRenderer()
+        blank_cards = serializer.validated_data.get("blank_cards", False)
+        renderer = IndexCardRenderer(blank_cards=blank_cards)
         generated = renderer.render_batch_to_storage(
-            items, filename=serializer.validated_data.get("filename")
+            items, filename=serializer.validated_data.get("filename"), blank_cards=blank_cards
         )
 
+        card_type = "blank" if blank_cards else "detailed"
         response_payload = {
             "file_path": generated.path,
             "file_url": iri_to_uri(generated.url),
             "absolute_path": generated.absolute_path,
             "count": len(items),
+            "card_type": card_type,
         }
         return Response(response_payload, status=status.HTTP_201_CREATED)

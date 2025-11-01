@@ -2,7 +2,7 @@
 Tests for Celery tasks.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -113,7 +113,7 @@ class TestInventoryTasks:
         # Approved request should be ignored
         ReorderRequestFactory(item=item, status="approved")
 
-        result = update_average_lead_times()
+        update_average_lead_times()
 
         # Lead time should not change
         item.refresh_from_db()

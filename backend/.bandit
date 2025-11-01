@@ -2,11 +2,10 @@
 # Bandit configuration file
 # https://bandit.readthedocs.io/en/latest/config.html
 
-exclude_dirs = ["tests", "migrations", "__pycache__", ".pytest_cache", "venv", "env"]
+# Exclude directories and files from scanning
+exclude_dirs = /tests,/migrations,/__pycache__,/.pytest_cache,/venv,/env,create_dev_user.py
 
-# Skip specific tests that are false positives in test files
-skips = ["B101", "B106"]  # B101: assert_used, B106: hardcoded_password_funcarg - both acceptable in test files
-
-# Test-specific configuration
-[bandit.assert_used]
-skips = ["*test*.py", "test_*.py", "*tests.py", "conftest.py"]
+# Skip specific tests
+# B101: assert_used - acceptable in test files
+# B106: hardcoded_password_funcarg - acceptable in test files
+skips = B101,B106

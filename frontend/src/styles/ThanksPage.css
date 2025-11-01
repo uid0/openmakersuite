@@ -1,0 +1,99 @@
+/**
+ * Thanks Page Styles
+ * Simple, clean thank you page for reorder submissions
+ */
+
+.thanks-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
+
+.thanks-content {
+  background: white;
+  border-radius: 20px;
+  padding: 60px 40px;
+  text-align: center;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  max-width: 500px;
+  width: 100%;
+}
+
+.success-icon {
+  font-size: 80px;
+  color: #28a745;
+  margin-bottom: 20px;
+  font-weight: bold;
+  text-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
+}
+
+.thanks-content h1 {
+  color: #333;
+  margin-bottom: 20px;
+  font-size: 2.2rem;
+  font-weight: 600;
+}
+
+.thanks-content p {
+  color: #666;
+  margin-bottom: 15px;
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
+.actions {
+  margin: 40px 0 20px 0;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 15px 30px;
+  font-size: 1.1rem;
+  border-radius: 50px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.redirect-message {
+  font-size: 0.9rem;
+  color: #999;
+  font-style: italic;
+  margin-top: 30px;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .thanks-content {
+    padding: 40px 30px;
+    border-radius: 15px;
+  }
+  
+  .success-icon {
+    font-size: 60px;
+  }
+  
+  .thanks-content h1 {
+    font-size: 1.8rem;
+  }
+  
+  .thanks-content p {
+    font-size: 1rem;
+  }
+}

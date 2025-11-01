@@ -1,279 +1,173 @@
-# Makerspace Inventory Management System
+# 🛠️ OpenMakerSuite
 
-An open-source inventory management system designed specifically for makerspaces. This application helps manage inventory with QR code-enabled shelf labels, automated reordering workflows, and supplier integration.
+A comprehensive inventory management system designed for makerspaces, fab labs, and collaborative workshops. Track supplies, manage reorders, generate QR codes, and keep your space running smoothly.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Python](https://img.shields.io/badge/python-3.11-blue.svg)
-![Django](https://img.shields.io/badge/django-4.2-green.svg)
-![React](https://img.shields.io/badge/react-18.2-blue.svg)
-![CI](https://github.com/[username]/dms-inventory-management-system/workflows/CI/badge.svg)
-![Coverage](https://img.shields.io/badge/coverage-95%25-brightgreen.svg)
+## 🚀 Release Automation
+
+OpenMakerSuite includes a complete automated release system that:
+
+- ✅ **Automatic Releases**: Triggered when all CI/CD tests pass
+- 🔐 **Cryptographic Signing**: Uses Sigstore for tamper-proof releases  
+- 📦 **Multi-Platform Builds**: AMD64 and ARM64 Docker images
+- 📊 **Sentry Integration**: Automatic release tracking and error monitoring
+- 🔄 **Semantic Versioning**: Automatic version bumps based on commits
+
+**Quick Setup**: Run `./scripts/setup-release-automation.sh` to configure
+
+**Verify Releases**: Use `./scripts/verify-release.sh v1.2.3` to cryptographically verify any release
+
+📖 **Full Documentation**: See [RELEASE_AUTOMATION.md](RELEASE_AUTOMATION.md)
 
 ## Features
 
-### 🏷️ Index Card Generation
-- Generate printable 3x5" index cards with:
-  - Product image
-  - Item description
-  - Reorder quantity
-  - QR code for easy scanning
-- Laminate and hang from shelves for quick identification
+- **📦 Inventory Management**: Track items, quantities, locations, and suppliers
+- **🔄 Automated Reordering**: Smart reorder suggestions based on usage patterns
+- **📱 QR Code Integration**: Generate and scan QR codes for quick item access
+- **📊 Usage Analytics**: Monitor consumption patterns and optimize stock
+- **🏷️ Index Card Generation**: Print physical inventory cards
+- **👥 Multi-User Support**: Role-based access control
+- **📈 Supplier Management**: Track lead times, costs, and performance
+- **🔔 Notifications**: Get alerts for low stock and deliveries
+- **📋 Dashboard**: Real-time overview of inventory status
 
-### 📱 QR Code Scanning
-- Users scan QR codes with their phones
-- View product details, average lead time, and current stock
-- Submit reorder requests directly from scan page
-- No login required for basic users
+## 🛠️ Technology Stack
 
-### 📊 Admin Dashboard
-- Queue management for reorder requests
-- Approve, order, and track deliveries
-- Group requests by supplier for bulk ordering
-- Generate shopping cart links for HD Supply, Grainger, and Amazon
-- View estimated costs and lead times
+### Backend
+- **Django**: Python web framework with REST API
+- **PostgreSQL**: Primary database
+- **Redis**: Caching and background tasks
+- **Celery**: Asynchronous task processing
+- **Docker**: Containerization
 
-### 📈 Usage Tracking & Analytics
-- Log item usage over time
-- Calculate average lead times based on historical data
-- Predict reorder timing based on usage patterns
-- Track low-stock items automatically
+### Frontend
+- **React**: Modern JavaScript UI framework
+- **TypeScript**: Type-safe JavaScript development
+- **React Router**: Client-side routing
+- **Axios**: HTTP client for API calls
 
-## Technology Stack
+### Infrastructure
+- **Docker Compose**: Local development orchestration
+- **GitHub Actions**: CI/CD pipeline
+- **Sentry**: Error tracking and performance monitoring
 
-**Backend:**
-- Django 4.2 + Django REST Framework
-- PostgreSQL database
-- Redis for caching and task queue
-- Celery for async tasks
-- ReportLab for PDF generation
-- QRCode for QR generation
-
-**Frontend:**
-- React 18 with TypeScript
-- React Router for navigation
-- Axios for API calls
-- Responsive mobile-first design
-
-**Infrastructure:**
-- Docker & Docker Compose
-- Nginx (production)
-- Supports self-hosting
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- Docker and Docker Compose installed
-- Git
+- Docker & Docker Compose
+- Node.js 18+ (for local frontend development)
+- Python 3.11+ (for local backend development)
 
-### Installation
+### 1. Clone and Setup
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/yourusername/makerspace-inventory.git
-   cd makerspace-inventory
-   ```
-
-2. **Copy environment variables:**
-   ```bash
-   cp .env.example .env
-   ```
-
-3. **Edit `.env` file:**
-   - Change `POSTGRES_PASSWORD` to a secure password
-   - Change `SECRET_KEY` to a random secret key
-   - Update `ALLOWED_HOSTS` for production
-
-4. **Start the application:**
-   ```bash
-   docker-compose up -d
-   ```
-
-5. **Run migrations:**
-   ```bash
-   docker-compose exec backend python manage.py migrate
-   ```
-
-6. **Create a superuser:**
-   ```bash
-   docker-compose exec backend python manage.py createsuperuser
-   ```
-
-7. **Access the application:**
-   - Frontend: http://localhost:3000
-   - Django Admin: http://localhost:8000/admin
-   - API Documentation: http://localhost:8000/api/docs/
-
-## Development Setup
-
-### Option 1: DevContainer (Recommended)
-
-For the most consistent development experience that matches CI exactly:
-
-1. **Prerequisites:**
-   - Docker Desktop
-   - VS Code with Dev Containers extension
-
-2. **Setup:**
-   ```bash
-   git clone https://github.com/yourusername/makerspace-inventory.git
-   code makerspace-inventory
-   # VS Code will prompt to reopen in container
-   ```
-
-3. **Benefits:**
-   - Matches CI environment exactly (Ubuntu 22.04, Python 3.11, Node.js 18)
-   - Pre-configured VS Code extensions and settings
-   - Eliminates platform-specific issues between macOS/Windows/Linux
-   - See [DevContainer Setup Guide](.devcontainer/README.md) for details
-
-### Option 2: Local Development
-
-If you prefer local development, ensure you have:
-- Python 3.11
-- Node.js 18
-- PostgreSQL 15
-- Redis 7
-
-Follow the Quick Start guide above, then install dependencies locally.
-
-## Usage Guide
-
-### Adding Inventory Items
-
-1. Log in to Django Admin at http://localhost:8000/admin
-2. Navigate to "Inventory Items" and click "Add Inventory Item"
-3. Fill in the required fields:
-   - Name, description, SKU
-   - Upload product image
-   - Set location, reorder quantity, minimum stock
-   - Add supplier information
-   - Save the item
-
-### Generating QR Codes & Index Cards
-
-**Via Django Admin:**
-1. Open an inventory item
-2. The QR code will be auto-generated on save
-3. Click "Download Card" to get the 3x5" PDF
-4. Print and laminate the card
-
-**Via API:**
 ```bash
-# Generate QR code
-curl -X POST http://localhost:8000/api/inventory/items/{item-id}/generate_qr/
-
-# Download index card PDF
-curl http://localhost:8000/api/inventory/items/{item-id}/download_card/ --output card.pdf
+git clone https://github.com/your-org/openmakersuite.git
+cd openmakersuite
+cp .env.example .env
 ```
 
-### User Workflow (Scanning & Reordering)
+### 2. Configure Environment
 
-1. User scans QR code on shelf label with phone camera
-2. Browser opens to scan page showing item details
-3. User optionally enters their name and notes
-4. User clicks "Request Reorder" button
-5. Request enters admin queue for approval
+Edit `.env` with your settings:
 
-### Admin Workflow
-
-1. Log in to admin dashboard at http://localhost:3000/admin
-2. Review pending reorder requests
-3. Approve or cancel requests
-4. Click "View by Supplier" to group by supplier
-5. Use supplier URLs to build carts on HD Supply, Grainger, or Amazon
-6. Mark requests as "Ordered" with order number
-7. When items arrive, mark as "Received" (auto-updates inventory)
-
-## API Documentation
-
-Full API documentation is available at http://localhost:8000/api/docs/ when the server is running.
-
-### Key Endpoints
-
-**Inventory:**
-- `GET /api/inventory/items/` - List all items
-- `GET /api/inventory/items/{id}/` - Get item details
-- `GET /api/inventory/items/low_stock/` - Get low stock items
-- `POST /api/inventory/items/{id}/generate_qr/` - Generate QR code
-- `GET /api/inventory/items/{id}/download_card/` - Download PDF card
-
-**Reorder Requests:**
-- `GET /api/reorders/requests/` - List all requests
-- `POST /api/reorders/requests/` - Create reorder request (public)
-- `GET /api/reorders/requests/pending/` - Get pending requests
-- `GET /api/reorders/requests/by_supplier/` - Group by supplier
-- `POST /api/reorders/requests/{id}/approve/` - Approve request
-- `POST /api/reorders/requests/{id}/mark_ordered/` - Mark as ordered
-- `POST /api/reorders/requests/{id}/mark_received/` - Mark as received
-
-## Configuration
-
-### Environment Variables
-
-See [.env.example](.env.example) for all available configuration options.
-
-Key variables:
-- `DATABASE_URL` - PostgreSQL connection string
-- `REDIS_URL` - Redis connection string
-- `SECRET_KEY` - Django secret key
-- `DEBUG` - Enable debug mode (development only)
-- `ALLOWED_HOSTS` - Comma-separated list of allowed hosts
-
-### Supplier Integration
-
-The system supports three main suppliers out of the box:
-
-- **HD Supply** - Set `supplier_type` to `hdsupply`
-- **Grainger** - Set `supplier_type` to `grainger`
-- **Amazon** - Set `supplier_type` to `amazon`
-
-Add the supplier's product URL to each item for direct linking.
-
-## Development
-
-### Running Locally Without Docker
-
-**Backend:**
 ```bash
+# Database
+DATABASE_URL=postgresql://postgres:password@db:5432/makerspace_inventory
+
+# Django
+SECRET_KEY=your-secret-key-here
+DEBUG=1
+ALLOWED_HOSTS=localhost,127.0.0.1
+
+# Redis
+REDIS_URL=redis://redis:6379/0
+```
+
+### 3. Start Services
+
+```bash
+# Development mode with hot reload
+docker-compose up -d
+
+# Or use the latest release (production-ready)
+./scripts/verify-release.sh latest
+./deploy.sh
+```
+
+### 4. Initialize Data
+
+```bash
+# Create superuser
+docker-compose exec backend python manage.py createsuperuser
+
+# Load sample data (optional)
+docker-compose exec backend python manage.py loaddata fixtures/sample_data.json
+```
+
+### 5. Access the Application
+
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000/api/
+- **Admin Panel**: http://localhost:8000/admin/
+- **API Documentation**: http://localhost:8000/api/docs/
+
+## 📱 Usage
+
+### Basic Workflow
+
+1. **Setup Categories & Locations**: Organize your inventory structure
+2. **Add Items**: Create inventory items with details and suppliers  
+3. **Generate QR Codes**: Print QR codes for easy item identification
+4. **Scan & Use**: Scan QR codes to log usage and check stock
+5. **Automatic Reorders**: System suggests reorders based on usage patterns
+6. **Receive Deliveries**: Update stock when supplies arrive
+
+### QR Code Scanning
+
+Access the scanner at `/scan/:itemId` or use the main scanner page:
+
+- **Logged Users**: Manual reorder form with quantity control
+- **Anonymous Users**: Automatic reorder submission
+- **Real-time Updates**: Instant stock level updates
+
+## 🔧 Development
+
+### Local Development Setup
+
+```bash
+# Backend
 cd backend
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 python manage.py migrate
 python manage.py runserver
-```
 
-**Frontend:**
-```bash
+# Frontend  
 cd frontend
 npm install
 npm start
 ```
 
-### Running Tests
+### Code Quality
 
-This project has comprehensive test coverage (80%+ backend, 70%+ frontend).
+The project includes comprehensive linting and testing:
 
 ```bash
-# Run all tests with coverage
-make test
+# Backend
+cd backend
+black .                    # Code formatting
+isort .                    # Import sorting  
+flake8 .                   # Style checking
+bandit -r .               # Security scanning
+pytest --cov             # Tests with coverage
 
-# Backend tests only
-make test-backend
-
-# Frontend tests only
-make test-frontend
-
-# Generate full coverage reports
-make coverage
-
-# Or manually:
-docker-compose exec backend pytest --cov
-docker-compose exec frontend npm run test:coverage
+# Frontend
+cd frontend
+npm run lint              # ESLint checking
+npm test                  # Jest tests
+npm run test:coverage     # Coverage report
 ```
-
-See [TESTING.md](TESTING.md) for detailed testing documentation.
 
 ### Database Migrations
 
@@ -285,135 +179,199 @@ docker-compose exec backend python manage.py makemigrations
 docker-compose exec backend python manage.py migrate
 ```
 
-## Production Deployment
-
-For production deployment:
-
-1. Set `DEBUG=0` in `.env`
-2. Configure proper `SECRET_KEY` and `POSTGRES_PASSWORD`
-3. Update `ALLOWED_HOSTS` with your domain
-4. Use a reverse proxy (Nginx/Caddy) for HTTPS
-5. Set up automated backups for PostgreSQL
-6. Consider using managed services for PostgreSQL and Redis
-
-Example nginx configuration is provided in `nginx.conf.example` (to be created).
-
-## CI/CD & Code Quality
-
-This project uses GitHub Actions for continuous integration and deployment.
+## 🧪 Testing
 
 ### Automated Testing
 
-Every push and pull request triggers:
-- **Backend Tests**: pytest with 95% coverage requirement
-- **Frontend Tests**: Jest with 70% coverage requirement
-- **Code Quality**: flake8, black, isort checks
-- **Security Scans**: bandit, safety, gitleaks
-- **Docker Build**: Full integration test
+GitHub Actions runs comprehensive tests on every push:
 
-### Running Tests Locally
+- ✅ Backend unit & integration tests (pytest)
+- ✅ Frontend component tests (Jest/React Testing Library)  
+- ✅ Code quality checks (Black, isort, flake8, ESLint)
+- ✅ Security scanning (Bandit, Safety, Gitleaks)
+- ✅ Docker build verification
+- ✅ Coverage reporting (Codecov)
+
+### Manual Testing
 
 ```bash
-# Run all tests
-make test
+# Run specific test suites
+docker-compose exec backend pytest inventory/tests/
+docker-compose exec backend pytest reorder_queue/tests/
 
-# Run backend tests only
-make test-backend
+# Frontend tests
+cd frontend && npm test
 
-# Run frontend tests only
-make test-frontend
-
-# Run code quality checks
-make quality-backend
-
-# Run security checks
-make security-backend
-
-# Run full CI suite locally
-make ci-test
+# Integration tests with test database
+docker-compose -f docker-compose.test.yml up --build
 ```
 
-### Code Quality Tools
+## 🔐 Security
 
-**Backend:**
-- `flake8`: Linting and style checks
-- `black`: Code formatting
-- `isort`: Import sorting
-- `bandit`: Security scanning
-- `safety`: Dependency vulnerability checks
+Security is a top priority with multiple layers of protection:
 
-**Run all quality checks:**
+- **🔒 Authentication**: JWT-based authentication system
+- **🛡️ Permissions**: Role-based access control (RBAC)
+- **🔍 Scanning**: Automated security vulnerability scanning
+- **🔐 Secrets**: No hardcoded credentials or API keys
+- **📊 Monitoring**: Sentry integration for security issue tracking
+- **✅ Validation**: Input validation and sanitization
+- **🔒 HTTPS**: SSL/TLS encryption in production
+
+### Security Scanning
+
 ```bash
-make format-backend  # Auto-format code
-make isort-backend   # Sort imports
-make lint-backend    # Check for issues
+# Backend security checks
+bandit -r backend/
+safety check --json
+
+# Frontend dependency audit
+cd frontend && npm audit
+
+# Git secrets scanning
+gitleaks detect
 ```
 
-### Pre-commit Workflow
+## 📦 Deployment
 
-Before committing:
+### Production Deployment
+
+1. **Download Latest Release**:
+   ```bash
+   ./scripts/verify-release.sh latest
+   ```
+
+2. **Configure Environment**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with production settings
+   ```
+
+3. **Deploy**:
+   ```bash
+   ./deploy.sh
+   ```
+
+### Environment Variables
+
+Key production environment variables:
+
 ```bash
-make pre-commit  # Runs formatting, linting, and tests
+# Security
+SECRET_KEY=your-production-secret-key
+DEBUG=0
+ALLOWED_HOSTS=yourdomain.com
+
+# Database
+DATABASE_URL=postgresql://user:pass@host:5432/dbname
+
+# Monitoring
+SENTRY_DSN=https://your-sentry-dsn
+SENTRY_ENVIRONMENT=production
+
+# Email (optional)
+EMAIL_HOST=smtp.yourdomain.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=1
 ```
 
-**Pre-commit Hooks Available:**
-- Automatic code formatting (black, isort)
-- Linting (flake8)
-- Security scanning (bandit)
-- File cleanups (trailing whitespace, line endings)
-- Django best practices (django-upgrade)
+### Reverse Proxy Setup
 
-See [PRE_COMMIT_GUIDE.md](PRE_COMMIT_GUIDE.md) for detailed setup and usage.
-See [CI_CD.md](CI_CD.md) for CI/CD documentation.
+Example Nginx configuration:
 
-## Contributing
+```nginx
+server {
+    listen 80;
+    server_name yourdomain.com;
 
-Contributions are welcome! Please follow these steps:
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+    }
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Write tests for your changes (TDD encouraged)
-4. Run `make pre-commit` to ensure code quality
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
+    location /api/ {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+    }
+}
+```
 
-**Contribution Guidelines:**
-- All tests must pass
-- Coverage must not decrease
-- Follow PEP 8 style guide (enforced by flake8)
-- Use type hints in Python code
-- Write comprehensive docstrings
+## 📖 Documentation
 
-## License
+- **🚀 [Release Automation](RELEASE_AUTOMATION.md)**: Complete release system setup
+- **🔧 [Development Guide](docs/development.md)**: Development workflow and guidelines
+- **🌐 [API Documentation](docs/api.md)**: REST API reference
+- **🐳 [Docker Guide](docs/docker.md)**: Container deployment guide
+- **🔐 [Security Guide](docs/security.md)**: Security best practices
 
-This project is licensed under the AGPL - see the [LICENSE](LICENSE) file for details.
+## 🤝 Contributing
 
-## Roadmap
+We welcome contributions! Please read our [Contributing Guidelines](CONTRIBUTING.md):
 
-- [ ] Barcode scanning support
-- [ ] Email notifications for low stock
-- [ ] Analytics dashboard with usage graphs
-- [ ] Mobile app (React Native)
-- [ ] Multi-location support
-- [ ] Automated reordering based on usage patterns
-- [ ] Integration with accounting software
-- [ ] Bulk import/export functionality
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
 
-## Support
+### Development Workflow
 
-- **Issues:** [GitHub Issues](https://github.com/uid0/openmakersuite/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/uid0/openmakersuite/discussions)
-- **Email:** ianwilson@dallasmakerspace.org
+1. **Issues**: Check existing issues or create new ones
+2. **Testing**: Ensure all tests pass locally
+3. **Code Quality**: Run linting and formatting tools
+4. **Documentation**: Update docs for new features
+5. **Review**: Respond to code review feedback
 
-## Acknowledgments
+## 📊 Monitoring & Analytics
 
-Built with love for the maker, by the maker community. 
+### Sentry Integration
 
-Special thanks to all contributors and to all makerspaces, hackerspaces, and clubs who provided feedback. and to   I'd also like to personally thank the Dallasmakerspace (Dallas, TX) and Hive13 (Cincinnati, Ohio) for putting up with me for all those years.  
+OpenMakerSuite integrates with Sentry for:
 
+- **🐛 Error Tracking**: Automatic error capture and reporting
+- **📈 Performance Monitoring**: API response times and database queries
+- **📱 Release Tracking**: Associate errors with specific releases
+- **🔔 Alerting**: Real-time notifications for critical issues
 
+### Metrics Dashboard
+
+The admin dashboard provides:
+
+- 📊 Inventory levels and trends
+- 📈 Usage patterns and analytics
+- 🔄 Reorder queue status
+- 👥 User activity logs
+- 📦 Supplier performance metrics
+
+## 🛟 Support
+
+### Getting Help
+
+- **📖 Documentation**: Check the docs folder for detailed guides
+- **🐛 Issues**: Report bugs on GitHub Issues  
+- **💬 Discussions**: Join GitHub Discussions for questions
+- **📧 Security**: Email security issues to security@yourdomain.com
+
+### Community
+
+- **🎯 Roadmap**: See planned features in GitHub Projects
+- **🎉 Releases**: Follow release notes for updates
+- **⭐ Star**: Star the repo if you find it useful!
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **Django** community for the excellent web framework
+- **React** team for the powerful UI library
+- **Sigstore** for keyless cryptographic signing
+- **PostgreSQL** for robust database functionality
+- **All contributors** who help improve OpenMakerSuite
 
 ---
 
-**Made for Makerspaces, by Makerspaces** 🛠️
+**Built with ❤️ for the maker community**
+
+*OpenMakerSuite helps makerspaces focus on creating instead of managing inventory.*

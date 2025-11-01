@@ -8,7 +8,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, Optional
 
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.text import slugify
 
@@ -105,6 +105,12 @@ class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(max_length=100, unique=True, blank=True)
     description = models.TextField(blank=True)
+    color = models.CharField(
+        max_length=7,
+        blank=True,
+        default="",
+        help_text="Hex color code for category (e.g., #FF5733) - used for index card styling",
+    )
     parent = models.ForeignKey(
         "self", on_delete=models.CASCADE, null=True, blank=True, related_name="children"
     )
@@ -189,6 +195,46 @@ class InventoryItem(models.Model):
     # QR code data
     qr_code = models.ImageField(upload_to="inventory/qrcodes/", blank=True, null=True)
 
+    # Hazardous Materials Information
+    is_hazardous = models.BooleanField(
+        default=False, help_text="Check if this item is classified as a hazardous material"
+    )
+    msds_url = models.URLField(
+        blank=True,
+        verbose_name="Material Safety Data Sheet URL",
+        help_text="Link to the Material Safety Data Sheet (MSDS) or Safety Data Sheet (SDS)",
+    )
+
+    # NFPA Fire Diamond (National Fire Protection Association)
+    # Scale: 0 = Minimal, 1 = Slight, 2 = Moderate, 3 = High, 4 = Extreme
+    nfpa_health_hazard = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(4)],
+        verbose_name="NFPA Health Hazard",
+        help_text="Health hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+    )
+    nfpa_fire_hazard = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(4)],
+        verbose_name="NFPA Fire Hazard",
+        help_text="Fire hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+    )
+    nfpa_instability_hazard = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(4)],
+        verbose_name="NFPA Instability Hazard",
+        help_text="Instability/Reactivity hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+    )
+    nfpa_special_hazards = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="NFPA Special Hazards",
+        help_text="Special hazard symbols (e.g., W=Water Reactive, OX=Oxidizer, COR=Corrosive, ALK=Alkali, ACID=Acid, BIO=Biohazard, POI=Poison, RAD=Radioactive)",
+    )
+
     # Metadata
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
@@ -229,6 +275,41 @@ class InventoryItem(models.Model):
     def needs_reorder(self) -> bool:
         """Check if item stock is below minimum and needs reordering."""
         return self.current_stock <= self.minimum_stock
+
+    def get_active_reorder_request(self):
+        """Get the most recent active (pending/approved/ordered) reorder request for this item."""
+        return (
+            self.reorder_requests.filter(status__in=["pending", "approved", "ordered"])
+            .order_by("-requested_at")
+            .first()
+        )
+
+    def has_pending_reorder(self) -> bool:
+        """Check if item has any pending, approved, or ordered reorder requests."""
+        return self.reorder_requests.filter(status__in=["pending", "approved", "ordered"]).exists()
+
+    def get_expected_delivery_date(self):
+        """Calculate expected delivery date for ordered items."""
+        ordered_request = (
+            self.reorder_requests.filter(status="ordered").order_by("-ordered_at").first()
+        )
+        if ordered_request and ordered_request.ordered_at and self.average_lead_time:
+            from datetime import timedelta
+
+            return ordered_request.ordered_at.date() + timedelta(days=self.average_lead_time)
+        return None
+
+    @property
+    def reorder_status(self) -> str:
+        """Get current reorder status for this item."""
+        if not self.needs_reorder:
+            return "well_stocked"
+
+        active_request = self.get_active_reorder_request()
+        if not active_request:
+            return "needs_order"
+
+        return active_request.status  # 'pending', 'approved', or 'ordered'
 
     @property
     def lowest_unit_cost(self) -> Optional[Decimal]:
@@ -312,6 +393,83 @@ class InventoryItem(models.Model):
         link = self.primary_item_supplier
         return link.quantity_per_package if link else None
 
+    # Hazardous Materials Helper Methods
+
+    @property
+    def nfpa_fire_diamond_display(self) -> str:
+        """Return a formatted display of the NFPA Fire Diamond ratings."""
+        if not self.is_hazardous:
+            return "Not Hazardous"
+
+        parts = []
+        if self.nfpa_health_hazard is not None:
+            parts.append(f"Health: {self.nfpa_health_hazard}")
+        if self.nfpa_fire_hazard is not None:
+            parts.append(f"Fire: {self.nfpa_fire_hazard}")
+        if self.nfpa_instability_hazard is not None:
+            parts.append(f"Instability: {self.nfpa_instability_hazard}")
+        if self.nfpa_special_hazards:
+            parts.append(f"Special: {self.nfpa_special_hazards}")
+
+        return " | ".join(parts) if parts else "NFPA ratings not specified"
+
+    @property
+    def has_complete_nfpa_data(self) -> bool:
+        """Check if all required NFPA Fire Diamond data is provided."""
+        if not self.is_hazardous:
+            return True  # Not hazardous items don't need NFPA data
+
+        return all(
+            [
+                self.nfpa_health_hazard is not None,
+                self.nfpa_fire_hazard is not None,
+                self.nfpa_instability_hazard is not None,
+            ]
+        )
+
+    @property
+    def hazmat_compliance_status(self) -> str:
+        """Return compliance status for hazardous materials documentation."""
+        if not self.is_hazardous:
+            return "Not Applicable - Not Hazardous"
+
+        missing_items = []
+
+        if not self.msds_url:
+            missing_items.append("MSDS/SDS URL")
+
+        if not self.has_complete_nfpa_data:
+            missing_nfpa = []
+            if self.nfpa_health_hazard is None:
+                missing_nfpa.append("Health")
+            if self.nfpa_fire_hazard is None:
+                missing_nfpa.append("Fire")
+            if self.nfpa_instability_hazard is None:
+                missing_nfpa.append("Instability")
+            missing_items.append(f"NFPA ({', '.join(missing_nfpa)})")
+
+        if missing_items:
+            return f"Incomplete - Missing: {', '.join(missing_items)}"
+
+        return "Complete"
+
+    def get_nfpa_hazard_level_display(self, hazard_type: str) -> str:
+        """Get human-readable display for NFPA hazard levels."""
+        level_map = {0: "Minimal", 1: "Slight", 2: "Moderate", 3: "High", 4: "Extreme"}
+
+        level = None
+        if hazard_type == "health":
+            level = self.nfpa_health_hazard
+        elif hazard_type == "fire":
+            level = self.nfpa_fire_hazard
+        elif hazard_type == "instability":
+            level = self.nfpa_instability_hazard
+
+        if level is not None and level in level_map:
+            return f"{level} - {level_map[level]}"
+
+        return "Not specified"
+
 
 class ItemSupplier(models.Model):
     """
@@ -322,6 +480,8 @@ class ItemSupplier(models.Model):
     - Prices
     - Lead times
     - URLs
+    - Package dimensions and weights
+    - Quantities per package
     """
 
     item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name="item_suppliers")
@@ -342,6 +502,37 @@ class ItemSupplier(models.Model):
         blank=True,
         help_text="UPC/EAN for individual units when different from the package barcode",
     )
+
+    # Package dimensions and weight (supplier-specific)
+    package_height = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Package height in inches",
+    )
+    package_width = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Package width in inches",
+    )
+    package_length = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Package length in inches",
+    )
+    package_weight = models.DecimalField(
+        max_digits=8,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Package weight in pounds",
+    )
+
     quantity_per_package = models.PositiveIntegerField(
         default=1,
         validators=[MinValueValidator(1)],
@@ -390,6 +581,43 @@ class ItemSupplier(models.Model):
         primary = " (Primary)" if self.is_primary else ""
         return f"{self.item.name} - {self.supplier.name}{primary}"
 
+    @property
+    def package_volume(self) -> Optional[Decimal]:
+        """Calculate package volume in cubic inches."""
+        if all(
+            [
+                self.package_height is not None,
+                self.package_width is not None,
+                self.package_length is not None,
+            ]
+        ):
+            return self.package_height * self.package_width * self.package_length
+        return None
+
+    @property
+    def package_dimensions_display(self) -> str:
+        """Return formatted display of package dimensions."""
+        dims = []
+        if self.package_length:
+            dims.append(f'L: {self.package_length}"')
+        if self.package_width:
+            dims.append(f'W: {self.package_width}"')
+        if self.package_height:
+            dims.append(f'H: {self.package_height}"')
+        if self.package_weight:
+            dims.append(f"Weight: {self.package_weight} lbs")
+
+        return " | ".join(dims) if dims else "No dimensions specified"
+
+    @property
+    def unit_weight(self) -> Optional[Decimal]:
+        """Calculate weight per individual unit in ounces."""
+        if self.package_weight and self.quantity_per_package > 0:
+            # Convert pounds to ounces (1 lb = 16 oz)
+            package_weight_oz = self.package_weight * 16
+            return package_weight_oz / self.quantity_per_package
+        return None
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         """
         Ensure only one primary supplier per item and auto-calculate unit cost.
@@ -413,7 +641,100 @@ class ItemSupplier(models.Model):
             ItemSupplier.objects.filter(item=self.item, is_primary=True).exclude(pk=self.pk).update(
                 is_primary=False
             )
+        # Check if this is a new record or if pricing has changed
+        is_new = self.pk is None
+        price_changed = False
+
+        if not is_new:
+            # Get the old values from the database
+            old_instance = ItemSupplier.objects.get(pk=self.pk)
+            price_changed = (
+                old_instance.unit_cost != self.unit_cost
+                or old_instance.package_cost != self.package_cost
+                or old_instance.quantity_per_package != self.quantity_per_package
+            )
+
         super().save(*args, **kwargs)
+
+        # Create price history record if this is new or if pricing changed
+        if is_new or price_changed:
+            change_type = "created" if is_new else "updated"
+            PriceHistory.objects.create(
+                item_supplier=self,
+                unit_cost=self.unit_cost,
+                package_cost=self.package_cost,
+                quantity_per_package=self.quantity_per_package,
+                change_type=change_type,
+            )
+
+
+class PriceHistory(models.Model):
+    """
+    Track historical pricing data for item-supplier relationships.
+
+    This model maintains a historical record of all price changes,
+    allowing for trend analysis and price tracking over time.
+    """
+
+    CHANGE_TYPE_CHOICES = [
+        ("created", "Initial Price"),
+        ("updated", "Price Update"),
+        ("supplier_changed", "Supplier Info Changed"),
+    ]
+
+    item_supplier = models.ForeignKey(
+        ItemSupplier, on_delete=models.CASCADE, related_name="price_history"
+    )
+    unit_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Unit cost at time of this record",
+    )
+    package_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Package cost at time of this record",
+    )
+    quantity_per_package = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)], help_text="Quantity per package at time of this record"
+    )
+    change_type = models.CharField(
+        max_length=20,
+        choices=CHANGE_TYPE_CHOICES,
+        default="updated",
+        help_text="Type of change that triggered this history record",
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, help_text="Optional notes about this price change")
+
+    class Meta:
+        verbose_name_plural = "Price histories"
+        ordering = ["-recorded_at"]
+        indexes = [
+            models.Index(fields=["item_supplier", "-recorded_at"]),
+            models.Index(fields=["recorded_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.item_supplier.item.name} - {self.item_supplier.supplier.name} on {self.recorded_at.date()}"
+
+    @property
+    def price_change_percentage(self) -> Optional[Decimal]:
+        """Calculate percentage change from previous record."""
+        previous = PriceHistory.objects.filter(
+            item_supplier=self.item_supplier, recorded_at__lt=self.recorded_at
+        ).first()
+
+        if previous and previous.unit_cost and self.unit_cost:
+            old_cost = previous.unit_cost
+            new_cost = self.unit_cost
+            change = ((new_cost - old_cost) / old_cost) * 100
+            return round(change, 2)
+        return None
 
 
 class UsageLog(models.Model):

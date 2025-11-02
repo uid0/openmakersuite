@@ -34,6 +34,7 @@ function App() {
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/thanks" element={<ThanksPage />} />
             <Route path="/tv-dashboard" element={<TVDashboard />} />
+            <Route path="/tv-dashboard/:location" element={<TVDashboard />} />
             <Route path="/transparency" element={<TransparencyPage />} />
           </SentryRoutes>
         </Sentry.ErrorBoundary>

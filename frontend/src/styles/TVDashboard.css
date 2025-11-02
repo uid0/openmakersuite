@@ -11,6 +11,8 @@
   font-weight: 500;
   overflow-x: hidden;
   position: relative;
+  /* Anti-burn-in support */
+  transition: transform 2s ease-in-out;
 }
 
 /* Subtle texture overlay for depth */
@@ -214,6 +216,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
   gap: 2rem;
+  /* Anti-burn-in support for content reordering */
+  transition: all 1s ease-in-out;
   max-width: 1800px;
   margin: 0 auto;
 }
@@ -742,30 +746,44 @@
   font-size: 1.6rem;
 }
 
-/* Transparency Link */
-.transparency-link {
+/* Transparency QR Code */
+.transparency-qr {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  opacity: 0.9;
-  transition: opacity 0.3s ease;
+  gap: 1rem;
 }
 
-.transparency-link:hover {
-  opacity: 1;
+.qr-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  border: 2px solid #10b981;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  transition: all 0.3s ease;
 }
 
-.transparency-link-text {
-  color: #ffffff;
-  text-decoration: none;
-  font-size: 1.2rem;
-  font-weight: 500;
-  transition: color 0.3s ease;
+.qr-section:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
 }
 
-.transparency-link-text:hover {
-  color: #10b981;
-  text-decoration: underline;
+.qr-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 1.1rem;
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.qr-label small {
+  font-size: 0.9rem;
+  opacity: 0.7;
+  color: #64748b;
+  font-weight: 400;
 }
 
 .refresh-icon {

@@ -1,9 +1,12 @@
 /**
  * TV Dashboard Component - Optimized for Chromecast/TV display
  * Shows items that have been reordered and are in progress
+ * Features: Location-specific filtering, QR codes, anti-burn-in
  */
 import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import { QRCodeSVG as QRCode } from 'qrcode.react';
 import { InventoryItem } from '../types';
 import '../styles/TVDashboard.css';
 
@@ -16,20 +19,41 @@ const tvAPI = axios.create({
 });
 
 const TVDashboard: React.FC = () => {
+  const { location } = useParams<{ location?: string }>();
   const [reorderedItems, setReorderedItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+  const [burnInOffset, setBurnInOffset] = useState({ x: 0, y: 0 });
+  const [itemOrder, setItemOrder] = useState<number[]>([]);
 
-  // Branding configuration - can be set via environment variables
-  const [config] = useState({
-    title: process.env.REACT_APP_DASHBOARD_TITLE || 'Dallas Makerspace Inventory',
-    subtitle: process.env.REACT_APP_DASHBOARD_SUBTITLE || 'Items on Order',
-    logo: process.env.REACT_APP_DASHBOARD_LOGO || null,
-    showLogo: process.env.REACT_APP_SHOW_LOGO !== 'false',
-    showTransparency: process.env.REACT_APP_SHOW_TRANSPARENCY !== 'false',
-  });
+  // Location-specific configuration
+  const getLocationConfig = () => {
+    const baseConfig = {
+      title: process.env.REACT_APP_DASHBOARD_TITLE || 'Dallas Makerspace Inventory',
+      subtitle: process.env.REACT_APP_DASHBOARD_SUBTITLE || 'Items on Order',
+      logo: process.env.REACT_APP_DASHBOARD_LOGO || null,
+      showLogo: process.env.REACT_APP_SHOW_LOGO !== 'false',
+      showTransparency: process.env.REACT_APP_SHOW_TRANSPARENCY !== 'false',
+    };
+
+    // Location-specific overrides
+    if (location) {
+      const locationUpper = location.toUpperCase();
+      return {
+        ...baseConfig,
+        title: process.env[`REACT_APP_DASHBOARD_TITLE_${locationUpper}`] || `${baseConfig.title} - ${location.charAt(0).toUpperCase() + location.slice(1)}`,
+        subtitle: process.env[`REACT_APP_DASHBOARD_SUBTITLE_${locationUpper}`] || baseConfig.subtitle,
+        logo: process.env[`REACT_APP_DASHBOARD_LOGO_${locationUpper}`] || baseConfig.logo,
+        locationFilter: location.toLowerCase(),
+      };
+    }
+    
+    return baseConfig;
+  };
+  
+  const [config] = useState(getLocationConfig());
 
   // Configurable footer messages - can be set via environment variables
   const footerMessages = useState(() => {
@@ -59,7 +83,18 @@ const TVDashboard: React.FC = () => {
       setError(null);
       // Use dedicated TV API instance that doesn't send auth headers
       const response = await tvAPI.get<InventoryItem[]>('/api/inventory/items/reordered/');
-      setReorderedItems(response.data);
+      
+      // Filter items by location if specified
+      let filteredItems = response.data;
+      if ((config as any).locationFilter) {
+        filteredItems = response.data.filter(item => 
+          item.location && item.location.toLowerCase().includes((config as any).locationFilter)
+        );
+      }
+      
+      setReorderedItems(filteredItems);
+      // Initialize item order for anti-burn-in
+      setItemOrder(filteredItems.map((_, index) => index));
       setLastUpdated(new Date());
     } catch (err: any) {
       console.error('Error fetching reordered items:', err);
@@ -107,6 +142,35 @@ const TVDashboard: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [footerMessages.length, rotationInterval]);
+
+  // Anti-burn-in effects
+  useEffect(() => {
+    // Pixel shifting every 3 minutes to prevent burn-in
+    const pixelShiftInterval = setInterval(() => {
+      setBurnInOffset(prev => ({
+        x: (prev.x + 1) % 4, // Shift up to 3 pixels
+        y: (prev.y + 1) % 3
+      }));
+    }, 180000); // 3 minutes
+
+    // Content reordering every 5 minutes
+    const reorderInterval = setInterval(() => {
+      setItemOrder(prevOrder => {
+        const newOrder = [...prevOrder];
+        // Fisher-Yates shuffle algorithm for random reordering
+        for (let i = newOrder.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [newOrder[i], newOrder[j]] = [newOrder[j], newOrder[i]];
+        }
+        return newOrder;
+      });
+    }, 300000); // 5 minutes
+
+    return () => {
+      clearInterval(pixelShiftInterval);
+      clearInterval(reorderInterval);
+    };
+  }, []);
 
   const getOrderInfo = (item: InventoryItem) => {
     const request = item.active_reorder_request;
@@ -286,8 +350,20 @@ const TVDashboard: React.FC = () => {
     );
   }
 
+  // Generate transparency QR code URL
+  const getTransparencyQRUrl = () => {
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/transparency`;
+  };
+
   return (
-    <div className="tv-dashboard">
+    <div 
+      className="tv-dashboard"
+      style={{
+        transform: `translate(${burnInOffset.x}px, ${burnInOffset.y}px)`,
+        transition: 'transform 2s ease-in-out'
+      }}
+    >
       <header className="dashboard-header">
         <div className="header-content">
           {config.showLogo && config.logo && (
@@ -322,7 +398,9 @@ const TVDashboard: React.FC = () => {
           </div>
         ) : (
           <div className="items-grid">
-            {reorderedItems.map((item) => {
+            {itemOrder.map((originalIndex) => {
+              if (originalIndex >= reorderedItems.length) return null;
+              const item = reorderedItems[originalIndex];
               const orderInfo = getOrderInfo(item);
               return (
                 <div key={item.id} className={`item-card ${getOrderStatusClass(orderInfo.status)}`}>
@@ -505,20 +583,25 @@ const TVDashboard: React.FC = () => {
         </div>
         <div className="footer-links">
           {config.showTransparency && (
-            <div className="transparency-link">
-              <span className="transparency-icon">🔍</span>
-              <a 
-                href="/transparency" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="transparency-link-text"
-              >
-                Financial Transparency
-              </a>
+            <div className="transparency-qr">
+              <div className="qr-section">
+                <QRCode 
+                  value={getTransparencyQRUrl()}
+                  size={80}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  level="M"
+                />
+                <div className="qr-label">
+                  <span className="transparency-icon">🔍</span>
+                  <span>Financial Transparency</span>
+                  <small>Scan to view</small>
+                </div>
+              </div>
             </div>
           )}
           <div className="debug-info" style={{ fontSize: '0.9rem', opacity: 0.7 }}>
-            API: {process.env.REACT_APP_API_URL || 'http://localhost:8000'}
+            {location ? `Location: ${location} | ` : ''}API: {process.env.REACT_APP_API_URL || 'http://localhost:8000'}
           </div>
         </div>
       </footer>

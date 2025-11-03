@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { CreateReorderRequest, InventoryItem, ItemSupplier, ReorderRequest } from '../types';
+import { Asset, CreateReorderRequest, InventoryItem, ItemSupplier, ReorderRequest } from '../types';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -90,6 +90,27 @@ export const inventoryAPI = {
       quantity,
       notes,
     }),
+};
+
+// Assets API
+export const assetsAPI = {
+  listAssets: (params?: { status?: string; category?: number; search?: string }) =>
+    api.get<{ results: Asset[] }>('/api/inventory/assets/', { params }),
+
+  getAsset: (id: string) =>
+    api.get<Asset>(`/api/inventory/assets/${id}/`),
+
+  createAsset: (data: Partial<Asset>) =>
+    api.post<Asset>('/api/inventory/assets/', data),
+
+  updateAsset: (id: string, data: Partial<Asset>) =>
+    api.patch<Asset>(`/api/inventory/assets/${id}/`, data),
+
+  deleteAsset: (id: string) =>
+    api.delete(`/api/inventory/assets/${id}/`),
+
+  generateQR: (id: string) =>
+    api.post(`/api/inventory/assets/${id}/generate_qr/`),
 };
 
 // Reorder API

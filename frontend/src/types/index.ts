@@ -141,3 +141,43 @@ export interface CreateReorderRequest {
   preferred_supplier?: number;
   package_quantity?: number;
 }
+
+export type AssetStatus = 'active' | 'maintenance' | 'retired' | 'lost' | 'donated_out';
+
+export interface Asset {
+  id: string;
+  name: string;
+  serial_number: string;
+  asset_tag: string;
+  inventory_item: string | null;
+  inventory_item_name: string;
+  manufacturer: number | null;
+  manufacturer_name: string;
+  display_manufacturer: string;
+  date_received: string | null;
+  amount_paid: string;
+  is_donation: boolean;
+  donor_name: string;
+  acquisition_display: string;
+  category: number | null;
+  category_name: string;
+  location: number | null;
+  location_name: string;
+  product_url: string;
+  wiki_page_url: string;
+  maintenance_plan: string;
+  image: string | null;
+  image_url: string | null;
+  thumbnail_url: string | null;
+  manual_pdf: string | null;
+  manual_pdf_url: string | null;
+  qr_code: string | null;
+  qr_code_url: string | null;
+  status: AssetStatus;
+  condition_notes: string;
+  age_in_days: number;
+  is_active: boolean;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}

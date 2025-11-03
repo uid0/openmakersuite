@@ -63,3 +63,43 @@ def save_qr_code_to_item(item):
     item.qr_code.save(filename, File(qr_buffer), save=True)
 
     return item
+
+
+def save_qr_code_to_asset(asset):
+    """
+    Generate and save QR code to an asset.
+
+    For assets, the QR code points to the frontend scan page which can display
+    a nice UI with wiki links for unauthenticated users and full maintenance
+    info for authenticated users.
+
+    Args:
+        asset: Asset instance
+    """
+    # Use frontend URL for assets to enable proper UI
+    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+    scan_url = f"{frontend_url}/scan/asset/{asset.id}"
+
+    # Generate QR code
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(scan_url)
+    qr.make(fit=True)
+
+    # Create image
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    # Save to BytesIO
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    # Save to asset's qr_code field
+    filename = f"asset_qr_{asset.id}.png"
+    asset.qr_code.save(filename, File(buffer), save=True)
+
+    return asset

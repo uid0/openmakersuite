@@ -237,6 +237,11 @@ class InventoryItem(models.Model):
 
     # Metadata
     is_active = models.BooleanField(default=True)
+    is_requestable = models.BooleanField(
+        default=True,
+        help_text="Allow general users to request reorders for this item. "
+        "Uncheck to restrict reorder requests to admins only."
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -760,3 +765,232 @@ class UsageLog(models.Model):
 
     def __str__(self) -> str:
         return f"{self.item.name} - {self.quantity_used} units on {self.usage_date.date()}"
+
+
+class Asset(models.Model):
+    """
+    Track individual hard assets in the makerspace.
+
+    Assets represent physical items with unique identifiers like:
+    - Equipment (3D printers, CNC machines, hand tools)
+    - Electronics (oscilloscopes, multimeters, computers)
+    - Furniture (workbenches, chairs, storage cabinets)
+    - Donated items with specific serial numbers
+
+    Each asset can optionally be linked to an InventoryItem to indicate
+    what type of item it is (e.g., this laptop is a Dell XPS 15).
+    """
+
+    # Status choices
+    ACTIVE = "active"
+    MAINTENANCE = "maintenance"
+    RETIRED = "retired"
+    LOST = "lost"
+    DONATED_OUT = "donated_out"
+
+    STATUS_CHOICES = [
+        (ACTIVE, "Active"),
+        (MAINTENANCE, "Under Maintenance"),
+        (RETIRED, "Retired"),
+        (LOST, "Lost"),
+        (DONATED_OUT, "Donated Out"),
+    ]
+
+    # Identification
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=200, help_text="Asset name or model")
+    description = models.TextField(blank=True, help_text="Detailed description of the asset")
+    serial_number = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Serial number or unique identifier (if available)",
+    )
+    asset_tag = models.CharField(
+        max_length=50,
+        blank=True,
+        unique=True,
+        help_text="Internal asset tag number",
+    )
+
+    # Relationship to inventory item type
+    inventory_item = models.ForeignKey(
+        InventoryItem,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assets",
+        help_text="Link to inventory item type (optional)",
+    )
+
+    # Organization
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assets",
+        help_text="Category for organizing assets",
+    )
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assets",
+        help_text="Current physical location of the asset",
+    )
+
+    # Manufacturer and supplier information
+    manufacturer = models.ForeignKey(
+        Supplier,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="manufactured_assets",
+        help_text="Manufacturer or supplier of the asset",
+    )
+    manufacturer_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Manufacturer name (use if not in supplier list)",
+    )
+
+    # Acquisition information
+    date_received = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Date the asset was received or acquired",
+    )
+    amount_paid = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Amount paid for the asset (0.00 for donations)",
+    )
+    is_donation = models.BooleanField(
+        default=False,
+        help_text="Check if this asset was donated",
+    )
+    donor_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Name of donor (if applicable)",
+    )
+
+    # Product information
+    product_url = models.URLField(
+        blank=True,
+        help_text="Link to product page or documentation",
+    )
+    wiki_page_url = models.URLField(
+        blank=True,
+        help_text="Link to wiki page for this asset (shown to all users when scanning QR code)",
+    )
+
+    # Maintenance
+    maintenance_plan = models.TextField(
+        blank=True,
+        help_text="Maintenance schedule and procedures (visible to authenticated users only)",
+    )
+
+    # Media files
+    image = models.ImageField(
+        upload_to="assets/images/",
+        null=True,
+        blank=True,
+        help_text="Photo of the asset",
+    )
+    thumbnail = ImageSpecField(
+        source="image",
+        processors=[ResizeToFit(300, 300)],
+        format="WEBP",
+        options={"quality": 85},
+    )
+    manual_pdf = models.FileField(
+        upload_to="assets/manuals/",
+        null=True,
+        blank=True,
+        help_text="User manual or documentation PDF",
+    )
+
+    # QR code for asset tracking
+    qr_code = models.ImageField(
+        upload_to="assets/qrcodes/",
+        blank=True,
+        null=True,
+        help_text="QR code for quick asset identification",
+    )
+
+    # Status and condition
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=ACTIVE,
+        help_text="Current status of the asset",
+    )
+    condition_notes = models.TextField(
+        blank=True,
+        help_text="Notes about the asset's condition, maintenance history, etc.",
+    )
+
+    # Metadata
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive assets are hidden from most views",
+    )
+    notes = models.TextField(blank=True, help_text="General notes about the asset")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["name"]),
+            models.Index(fields=["serial_number"]),
+            models.Index(fields=["asset_tag"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["manufacturer"]),
+        ]
+
+    def __str__(self) -> str:
+        if self.asset_tag:
+            return f"{self.name} ({self.asset_tag})"
+        return self.name
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Auto-generate asset tag if not provided."""
+        if not self.asset_tag:
+            # Generate asset tag using UUID
+            self.asset_tag = f"ASSET-{generate_sku()[:8].upper()}"
+
+        super().save(*args, **kwargs)
+
+    @property
+    def display_manufacturer(self) -> str:
+        """Return manufacturer name from either FK or text field."""
+        if self.manufacturer:
+            return self.manufacturer.name
+        elif self.manufacturer_name:
+            return self.manufacturer_name
+        return "Unknown"
+
+    @property
+    def acquisition_display(self) -> str:
+        """Return formatted acquisition information."""
+        if self.is_donation:
+            donor = f" from {self.donor_name}" if self.donor_name else ""
+            return f"Donated{donor}"
+        elif self.amount_paid > 0:
+            return f"Purchased for ${self.amount_paid}"
+        return "No acquisition info"
+
+    @property
+    def age_in_days(self) -> Optional[int]:
+        """Calculate how many days since the asset was received."""
+        if self.date_received:
+            from datetime import date
+
+            today = date.today()
+            delta = today - self.date_received
+            return delta.days
+        return None

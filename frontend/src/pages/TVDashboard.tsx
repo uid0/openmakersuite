@@ -9,6 +9,7 @@ import axios from 'axios';
 import { QRCodeSVG as QRCode } from 'qrcode.react';
 import { InventoryItem } from '../types';
 import '../styles/TVDashboard.css';
+import '../styles/InventoryList.css';
 
 // Create a dedicated API instance for TV Dashboard that doesn't send auth headers
 const tvAPI = axios.create({
@@ -27,6 +28,7 @@ const TVDashboard: React.FC = () => {
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const [burnInOffset, setBurnInOffset] = useState({ x: 0, y: 0 });
   const [itemOrder, setItemOrder] = useState<number[]>([]);
+  const [emptyStateSlide, setEmptyStateSlide] = useState(0); // 0 = "No items", 1 = "How to scan"
 
   // Location-specific configuration
   const getLocationConfig = () => {
@@ -135,13 +137,24 @@ const TVDashboard: React.FC = () => {
     if (footerMessages.length <= 1) return; // Don't rotate if only one message
 
     const interval = setInterval(() => {
-      setCurrentMessageIndex((prevIndex) => 
+      setCurrentMessageIndex((prevIndex) =>
         (prevIndex + 1) % footerMessages.length
       );
     }, rotationInterval);
 
     return () => clearInterval(interval);
   }, [footerMessages.length, rotationInterval]);
+
+  // Empty state carousel rotation (when no items on order)
+  useEffect(() => {
+    if (reorderedItems.length > 0) return; // Only run when empty
+
+    const interval = setInterval(() => {
+      setEmptyStateSlide((prev) => (prev + 1) % 2); // Toggle between 0 and 1
+    }, 8000); // Switch every 8 seconds
+
+    return () => clearInterval(interval);
+  }, [reorderedItems.length]);
 
   // Anti-burn-in effects
   useEffect(() => {
@@ -391,10 +404,106 @@ const TVDashboard: React.FC = () => {
 
       <main className="dashboard-content">
         {reorderedItems.length === 0 ? (
-          <div className="no-items">
-            <div className="no-items-icon">✅</div>
-            <h2>No Items on Order</h2>
-            <p>All reorder requests have been completed</p>
+          <div className="empty-state-carousel">
+            {emptyStateSlide === 0 ? (
+              <div className="no-items slide-in">
+                <div className="no-items-icon">✅</div>
+                <h2>No Items on Order</h2>
+                <p>All reorder requests have been completed</p>
+              </div>
+            ) : (
+              <div className="scan-instructions slide-in">
+                <h2 className="instructions-title">
+                  <span className="icon-large">📱</span>
+                  How to Request a Reorder
+                </h2>
+                <div className="instruction-content">
+                  <div className="sample-card-container">
+                    {/* Use actual inventory card styling */}
+                    <div className="inventory-card low-stock sample-card-demo">
+                      <div className="item-details">
+                        <h3 className="item-name">Power Tool Batteries</h3>
+                        <p className="item-sku">SKU: BATT-18V-5AH</p>
+                        <span className="item-category">Workshop Supplies</span>
+
+                        <div className="item-stock">
+                          <div className="stock-row">
+                            <span className="stock-label">Current:</span>
+                            <span className="stock-value low">3</span>
+                          </div>
+                          <div className="stock-row">
+                            <span className="stock-label">Minimum:</span>
+                            <span className="stock-value">10</span>
+                          </div>
+                        </div>
+
+                        <div className="reorder-badge">
+                          ⚠️ Needs Reorder (12 units)
+                        </div>
+
+                        <div className="item-location">
+                          📍 Main Workshop
+                        </div>
+
+                        <div className="sample-qr-highlight">
+                          <QRCode
+                            value="https://example.com/scan"
+                            size={140}
+                            bgColor="#ffffff"
+                            fgColor="#000000"
+                            level="M"
+                          />
+                          <div className="qr-pulse"></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="giant-arrow">
+                      <svg width="200" height="200" viewBox="0 0 200 200">
+                        <defs>
+                          <marker
+                            id="arrowhead"
+                            markerWidth="10"
+                            markerHeight="10"
+                            refX="9"
+                            refY="3"
+                            orient="auto"
+                          >
+                            <polygon points="0 0, 10 3, 0 6" fill="#fbbf24" />
+                          </marker>
+                        </defs>
+                        <path
+                          d="M 20 100 Q 100 20 180 100"
+                          stroke="#fbbf24"
+                          strokeWidth="8"
+                          fill="none"
+                          markerEnd="url(#arrowhead)"
+                          className="arrow-path"
+                        />
+                      </svg>
+                      <span className="arrow-label">SCAN HERE!</span>
+                    </div>
+                  </div>
+                  <div className="instruction-steps">
+                    <div className="step">
+                      <span className="step-number">1</span>
+                      <span>Find the item shelf label</span>
+                    </div>
+                    <div className="step">
+                      <span className="step-number">2</span>
+                      <span>Open your phone camera</span>
+                    </div>
+                    <div className="step">
+                      <span className="step-number">3</span>
+                      <span>Scan the QR code</span>
+                    </div>
+                    <div className="step">
+                      <span className="step-number">4</span>
+                      <span>Submit reorder request</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="items-grid">

@@ -9,6 +9,7 @@ from . import views
 urlpatterns = [
     # Public endpoints (used by TV Dashboard)
     path("messages/", views.get_dashboard_messages, name="dashboard_messages"),
+    path("inventory-summary/", views.get_inventory_summary, name="inventory_summary"),
     path("health/", views.dashboard_health, name="dashboard_health"),
     # Admin endpoints (authentication required)
     path("config/", views.get_dashboard_config, name="dashboard_config"),

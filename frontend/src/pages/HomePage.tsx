@@ -5,6 +5,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AuthSection from '../components/AuthSection';
+import AssetList from '../components/AssetList';
 import '../styles/HomePage.css';
 
 const HomePage: React.FC = () => {
@@ -77,6 +78,8 @@ const HomePage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <AssetList />
 
       <div className="info-section">
         <h2>How It Works</h2>

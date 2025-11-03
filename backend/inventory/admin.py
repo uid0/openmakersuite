@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from .models import (
+    Asset,
     Category,
     InventoryItem,
     ItemSupplier,
@@ -244,11 +245,12 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "minimum_stock",
         "needs_reorder",
         "is_active",
+        "is_requestable",
         "hazmat_status_icon",
         "api_link",
         "reorder_link",
     ]
-    list_filter = ["category", "location", "is_active", "is_hazardous"]
+    list_filter = ["category", "location", "is_active", "is_requestable", "is_hazardous"]
     search_fields = ["name", "sku", "description"]
     readonly_fields = [
         "id",
@@ -266,7 +268,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
     fieldsets = (
         (
             "Basic Information",
-            {"fields": ("name", "description", "sku", "category", "location", "is_active")},
+            {"fields": ("name", "description", "sku", "category", "location", "is_active", "is_requestable")},
         ),
         ("Images", {"fields": ("image", "image_url", "thumbnail", "qr_code")}),
         ("Stock Information", {"fields": ("current_stock", "minimum_stock", "reorder_quantity")}),
@@ -403,3 +405,167 @@ class UsageLogAdmin(admin.ModelAdmin):
     search_fields = ["item__name", "notes"]
     readonly_fields = ["usage_date"]
     date_hierarchy = "usage_date"
+
+
+@admin.register(Asset)
+class AssetAdmin(admin.ModelAdmin):
+    """Admin interface for managing hard assets."""
+
+    list_display = [
+        "name",
+        "asset_tag",
+        "serial_number",
+        "status_badge",
+        "category",
+        "location",
+        "display_manufacturer",
+        "acquisition_display",
+        "is_active",
+        "api_link",
+    ]
+    list_filter = ["status", "category", "location", "is_donation", "is_active", "manufacturer"]
+    search_fields = [
+        "name",
+        "description",
+        "serial_number",
+        "asset_tag",
+        "manufacturer_name",
+        "donor_name",
+    ]
+    readonly_fields = [
+        "id",
+        "asset_tag",
+        "qr_code",
+        "thumbnail",
+        "display_manufacturer",
+        "acquisition_display",
+        "age_in_days",
+        "created_at",
+        "updated_at",
+        "api_link",
+    ]
+
+    fieldsets = (
+        (
+            "Basic Information",
+            {
+                "fields": (
+                    "name",
+                    "description",
+                    "asset_tag",
+                    "serial_number",
+                    "is_active",
+                )
+            },
+        ),
+        (
+            "Classification",
+            {
+                "fields": (
+                    "inventory_item",
+                    "category",
+                    "location",
+                )
+            },
+        ),
+        (
+            "Manufacturer Information",
+            {
+                "fields": (
+                    "manufacturer",
+                    "manufacturer_name",
+                    "display_manufacturer",
+                )
+            },
+        ),
+        (
+            "Acquisition Details",
+            {
+                "fields": (
+                    "date_received",
+                    "amount_paid",
+                    "is_donation",
+                    "donor_name",
+                    "acquisition_display",
+                    "age_in_days",
+                )
+            },
+        ),
+        (
+            "Product Information & Wiki",
+            {
+                "fields": (
+                    "product_url",
+                    "wiki_page_url",
+                )
+            },
+        ),
+        (
+            "Maintenance",
+            {
+                "fields": ("maintenance_plan",),
+                "description": "Maintenance plan is only visible to authenticated users when scanning QR codes.",
+            },
+        ),
+        (
+            "Media Files",
+            {
+                "fields": (
+                    "image",
+                    "thumbnail",
+                    "manual_pdf",
+                    "qr_code",
+                )
+            },
+        ),
+        (
+            "Status & Condition",
+            {
+                "fields": (
+                    "status",
+                    "condition_notes",
+                )
+            },
+        ),
+        (
+            "API Link",
+            {"fields": ("api_link",)},
+        ),
+        (
+            "Additional Information",
+            {
+                "fields": ("notes", "created_at", "updated_at"),
+                "classes": ("collapse",),
+            },
+        ),
+    )
+
+    def status_badge(self, obj):
+        """Display status with color-coded badge."""
+        status_colors = {
+            "active": "#28a745",
+            "maintenance": "#ffc107",
+            "retired": "#6c757d",
+            "lost": "#dc3545",
+            "donated_out": "#17a2b8",
+        }
+        color = status_colors.get(obj.status, "#6c757d")
+        return format_html(
+            '<span style="background: {}; color: white; padding: 4px 8px; border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            obj.get_status_display(),
+        )
+
+    status_badge.short_description = "Status"
+
+    def api_link(self, obj):
+        """Create a link to the DRF API endpoint for this Asset."""
+        if obj.pk:
+            api_url = f"/api/inventory/assets/{obj.pk}/"
+            return format_html(
+                '<a href="{}" target="_blank" style="background: #007cba; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px;">📡 See API Object</a>',
+                api_url,
+            )
+        return "—"
+
+    api_link.short_description = "API Link"

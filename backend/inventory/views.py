@@ -14,6 +14,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticate
 from rest_framework.response import Response
 
 from .models import (
+    Asset,
     Category,
     InventoryItem,
     ItemSupplier,
@@ -23,6 +24,7 @@ from .models import (
     UsageLog,
 )
 from .serializers import (
+    AssetSerializer,
     CategorySerializer,
     InventoryItemDetailSerializer,
     InventoryItemSerializer,
@@ -486,3 +488,86 @@ class PriceHistoryViewSet(viewsets.ReadOnlyModelViewSet):
 
         serializer = self.get_serializer(recent_changes, many=True)
         return Response(serializer.data)
+
+
+class AssetViewSet(viewsets.ModelViewSet):
+    """API endpoint for hard assets."""
+
+    queryset = (
+        Asset.objects.select_related(
+            "inventory_item", "category", "location", "manufacturer"
+        )
+        .all()
+    )
+    serializer_class = AssetSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        # Filter by category if specified
+        category = self.request.query_params.get("category")
+        if category:
+            queryset = queryset.filter(category_id=category)
+
+        # Filter by location if specified
+        location = self.request.query_params.get("location")
+        if location:
+            queryset = queryset.filter(location_id=location)
+
+        # Filter by status if specified
+        asset_status = self.request.query_params.get("status")
+        if asset_status:
+            queryset = queryset.filter(status=asset_status)
+
+        # Search functionality
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(description__icontains=search)
+                | Q(serial_number__icontains=search)
+                | Q(asset_tag__icontains=search)
+                | Q(manufacturer_name__icontains=search)
+            )
+
+        # Filter by active status if specified
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == "true")
+
+        return queryset.order_by("name")
+
+    @action(detail=True, methods=["post"])
+    def generate_qr(self, request, pk=None):
+        """Generate QR code for an asset."""
+        asset = self.get_object()
+
+        # Generate QR code synchronously for immediate response
+        from .utils.qr_generator import save_qr_code_to_asset
+
+        try:
+            save_qr_code_to_asset(asset)
+            serializer = self.get_serializer(asset)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to generate QR code: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=True, methods=["get"])
+    def qr_code(self, request, pk=None):
+        """Get the QR code image for an asset."""
+        asset = self.get_object()
+
+        if not asset.qr_code:
+            return Response(
+                {"error": "QR code not generated yet"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Return the QR code image
+        response = HttpResponse(asset.qr_code.read(), content_type="image/png")
+        response["Content-Disposition"] = f'attachment; filename="asset-{asset.asset_tag}-qr.png"'
+        return response

@@ -1,0 +1,162 @@
+/**
+ * Inventory List Component
+ * Displays all active inventory items with search and filtering
+ */
+import React, { useEffect, useState } from 'react';
+import { inventoryAPI } from '../services/api';
+import { InventoryItem } from '../types';
+import '../styles/InventoryList.css';
+
+const InventoryList: React.FC = () => {
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filter, setFilter] = useState<'all' | 'low-stock'>('all');
+
+  useEffect(() => {
+    console.log('InventoryList: Component mounted, loading items...');
+    loadItems();
+  }, []);
+
+  const loadItems = async () => {
+    try {
+      console.log('InventoryList: Making API call to /api/inventory/items/');
+      setLoading(true);
+      const response = await inventoryAPI.listItems();
+      console.log('InventoryList: API response received:', response.data);
+      setItems(response.data.results);
+    } catch (err) {
+      console.error('InventoryList: Error loading inventory:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredItems = items.filter((item) => {
+    // Apply search filter
+    const matchesSearch =
+      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (item.description && item.description.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    // Apply stock filter
+    const matchesFilter =
+      filter === 'all' || (filter === 'low-stock' && item.needs_reorder);
+
+    return matchesSearch && matchesFilter;
+  });
+
+  const lowStockCount = items.filter((item) => item.needs_reorder).length;
+
+  if (loading) {
+    return <div className="loading">Loading inventory...</div>;
+  }
+
+  return (
+    <div className="inventory-list-container">
+      <div className="inventory-header">
+        <h2>Active Inventory ({items.length} items)</h2>
+        <div className="inventory-stats">
+          {lowStockCount > 0 && (
+            <span className="stat-badge low-stock">
+              {lowStockCount} items need reordering
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="inventory-controls">
+        <input
+          type="text"
+          placeholder="Search inventory..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="search-input"
+        />
+
+        <div className="filter-buttons">
+          <button
+            className={filter === 'all' ? 'active' : ''}
+            onClick={() => setFilter('all')}
+          >
+            All Items ({items.length})
+          </button>
+          <button
+            className={filter === 'low-stock' ? 'active' : ''}
+            onClick={() => setFilter('low-stock')}
+          >
+            Low Stock ({lowStockCount})
+          </button>
+        </div>
+      </div>
+
+      {filteredItems.length === 0 ? (
+        <div className="no-results">
+          {searchTerm ? 'No items match your search.' : 'No inventory items found.'}
+        </div>
+      ) : (
+        <div className="inventory-grid">
+          {filteredItems.map((item) => (
+            <div key={item.id} className={`inventory-card ${item.needs_reorder ? 'low-stock' : ''}`}>
+              {item.thumbnail && (
+                <div className="item-image">
+                  <img src={item.thumbnail} alt={item.name} />
+                </div>
+              )}
+
+              <div className="item-details">
+                <h3 className="item-name">{item.name}</h3>
+                <p className="item-sku">SKU: {item.sku}</p>
+
+                {item.category_name && (
+                  <span className="item-category">{item.category_name}</span>
+                )}
+
+                <div className="item-stock">
+                  <div className="stock-row">
+                    <span className="stock-label">Current:</span>
+                    <span
+                      className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
+                    >
+                      {item.current_stock}
+                    </span>
+                  </div>
+                  <div className="stock-row">
+                    <span className="stock-label">Minimum:</span>
+                    <span className="stock-value">{item.minimum_stock}</span>
+                  </div>
+                </div>
+
+                {item.needs_reorder && (
+                  <div className="reorder-badge">
+                    ⚠️ Needs Reorder ({item.reorder_quantity} units)
+                  </div>
+                )}
+
+                {item.has_pending_reorder && (
+                  <div className="pending-badge">
+                    🔄 Reorder in Progress
+                  </div>
+                )}
+
+                {item.location && (
+                  <div className="item-location">
+                    📍 {item.location}
+                  </div>
+                )}
+
+                {item.unit_cost && (
+                  <div className="item-price">
+                    ${parseFloat(item.unit_cost).toFixed(2)} per unit
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default InventoryList;

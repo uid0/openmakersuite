@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "inventory",
     "reorder_queue",
     "index_cards",
+    "dashboard",
 ]
 
 MIDDLEWARE = [

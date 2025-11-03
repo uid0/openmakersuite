@@ -4,7 +4,7 @@ Serializers for inventory API.
 
 from rest_framework import serializers
 
-from .models import Category, InventoryItem, ItemSupplier, PriceHistory, Supplier, UsageLog
+from .models import Asset, Category, InventoryItem, ItemSupplier, PriceHistory, Supplier, UsageLog
 
 
 class SupplierSerializer(serializers.ModelSerializer):
@@ -274,3 +274,107 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
             }
 
         return {"trend": "no_data", "change_percentage": None}
+
+
+class AssetSerializer(serializers.ModelSerializer):
+    """Serializer for hard asset tracking."""
+
+    # Related field names for display
+    inventory_item_name = serializers.CharField(
+        source="inventory_item.name", read_only=True
+    )
+    category_name = serializers.CharField(source="category.name", read_only=True)
+    location_name = serializers.CharField(source="location.name", read_only=True)
+    manufacturer_name_display = serializers.CharField(
+        source="manufacturer.name", read_only=True
+    )
+
+    # Calculated properties
+    display_manufacturer = serializers.ReadOnlyField()
+    acquisition_display = serializers.ReadOnlyField()
+    age_in_days = serializers.ReadOnlyField()
+
+    # Image/file URLs
+    image_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+    qr_code_url = serializers.SerializerMethodField()
+    manual_pdf_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Asset
+        fields = [
+            "id",
+            "name",
+            "description",
+            "serial_number",
+            "asset_tag",
+            # Relationships
+            "inventory_item",
+            "inventory_item_name",
+            "category",
+            "category_name",
+            "location",
+            "location_name",
+            # Manufacturer
+            "manufacturer",
+            "manufacturer_name",
+            "manufacturer_name_display",
+            "display_manufacturer",
+            # Acquisition
+            "date_received",
+            "amount_paid",
+            "is_donation",
+            "donor_name",
+            "acquisition_display",
+            "age_in_days",
+            # Product info
+            "product_url",
+            "wiki_page_url",
+            # Maintenance
+            "maintenance_plan",
+            # Media
+            "image",
+            "image_url",
+            "thumbnail_url",
+            "manual_pdf",
+            "manual_pdf_url",
+            "qr_code",
+            "qr_code_url",
+            # Status
+            "status",
+            "condition_notes",
+            # Metadata
+            "is_active",
+            "notes",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["asset_tag", "qr_code", "created_at", "updated_at"]
+
+    def get_image_url(self, obj):
+        """Return the image URL when available."""
+        try:
+            return obj.image.url if obj.image else None
+        except Exception:
+            return None
+
+    def get_thumbnail_url(self, obj):
+        """Return the thumbnail URL when available."""
+        try:
+            return obj.thumbnail.url if obj.thumbnail else None
+        except Exception:
+            return None
+
+    def get_qr_code_url(self, obj):
+        """Return the QR code URL when available."""
+        try:
+            return obj.qr_code.url if obj.qr_code else None
+        except Exception:
+            return None
+
+    def get_manual_pdf_url(self, obj):
+        """Return the manual PDF URL when available."""
+        try:
+            return obj.manual_pdf.url if obj.manual_pdf else None
+        except Exception:
+            return None

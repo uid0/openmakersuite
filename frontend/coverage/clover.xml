@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<coverage generated="1762212616782" clover="3.2.0">
-  <project timestamp="1762212616782" name="All files">
-    <metrics statements="539" coveredstatements="122" conditionals="441" coveredconditionals="77" methods="140" coveredmethods="34" elements="1120" coveredelements="233" complexity="0" loc="539" ncloc="539" packages="4" files="9" classes="9"/>
+<coverage generated="1762212771455" clover="3.2.0">
+  <project timestamp="1762212771455" name="All files">
+    <metrics statements="540" coveredstatements="122" conditionals="441" coveredconditionals="77" methods="141" coveredmethods="34" elements="1122" coveredelements="233" complexity="0" loc="540" ncloc="540" packages="4" files="9" classes="9"/>
     <package name="src">
       <metrics statements="3" coveredstatements="2" conditionals="0" coveredconditionals="0" methods="2" coveredmethods="1"/>
       <file name="App.tsx" path="/workspaces/openmakersuite/frontend/src/App.tsx">
@@ -530,9 +530,9 @@
       </file>
     </package>
     <package name="src.services">
-      <metrics statements="45" coveredstatements="36" conditionals="8" coveredconditionals="8" methods="29" coveredmethods="20"/>
+      <metrics statements="46" coveredstatements="36" conditionals="8" coveredconditionals="8" methods="30" coveredmethods="20"/>
       <file name="api.ts" path="/workspaces/openmakersuite/frontend/src/services/api.ts">
-        <metrics statements="45" coveredstatements="36" conditionals="8" coveredconditionals="8" methods="29" coveredmethods="20"/>
+        <metrics statements="46" coveredstatements="36" conditionals="8" coveredconditionals="8" methods="30" coveredmethods="20"/>
         <line num="8" count="2" type="cond" truecount="2" falsecount="0"/>
         <line num="10" count="2" type="stmt"/>
         <line num="18" count="2" type="stmt"/>
@@ -574,10 +574,11 @@
         <line num="141" count="1" type="stmt"/>
         <line num="146" count="1" type="stmt"/>
         <line num="149" count="1" type="stmt"/>
-        <line num="153" count="2" type="stmt"/>
-        <line num="155" count="1" type="stmt"/>
-        <line num="158" count="0" type="stmt"/>
-        <line num="161" count="1" type="stmt"/>
+        <line num="157" count="0" type="stmt"/>
+        <line num="161" count="2" type="stmt"/>
+        <line num="163" count="1" type="stmt"/>
+        <line num="166" count="0" type="stmt"/>
+        <line num="169" count="1" type="stmt"/>
       </file>
     </package>
   </project>

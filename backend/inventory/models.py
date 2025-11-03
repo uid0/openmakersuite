@@ -240,7 +240,7 @@ class InventoryItem(models.Model):
     is_requestable = models.BooleanField(
         default=True,
         help_text="Allow general users to request reorders for this item. "
-        "Uncheck to restrict reorder requests to admins only."
+        "Uncheck to restrict reorder requests to admins only.",
     )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

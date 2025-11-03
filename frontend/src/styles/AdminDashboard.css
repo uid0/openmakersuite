@@ -124,6 +124,38 @@
   color: #999;
 }
 
+/* Order tracking styles */
+.tracking-info,
+.delivery-info {
+  margin-top: 4px;
+}
+
+.tracking-info small,
+.delivery-info small {
+  color: #0066cc;
+  font-weight: 500;
+}
+
+.delivery-status small {
+  font-weight: 600;
+}
+
+.delivery-status .overdue {
+  color: #e74c3c;
+}
+
+.delivery-status .due-today {
+  color: #e67e22;
+}
+
+.delivery-status .due-soon {
+  color: #f39c12;
+}
+
+.delivery-status .due-later {
+  color: #27ae60;
+}
+
 .priority-badge,
 .status-badge {
   display: inline-block;
@@ -222,6 +254,22 @@
 .btn-receive {
   background-color: #28a745;
   color: white;
+}
+
+.btn-tracking {
+  background-color: #17a2b8;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-right: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+}
+
+.btn-tracking:hover {
+  background-color: #138496;
 }
 
 .btn-receive:hover {

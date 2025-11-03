@@ -147,6 +147,14 @@ export const reorderAPI = {
 
   generateCartLinks: () =>
     api.get('/api/reorders/requests/generate_cart_links/'),
+
+  updateTracking: (id: number, data: {
+    tracking_number?: string;
+    carrier?: string;
+    expected_delivery_date?: string;
+    delivery_tracking_url?: string;
+  }) =>
+    api.patch(`/api/reorders/requests/${id}/`, data),
 };
 
 // Auth API

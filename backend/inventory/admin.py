@@ -268,7 +268,17 @@ class InventoryItemAdmin(admin.ModelAdmin):
     fieldsets = (
         (
             "Basic Information",
-            {"fields": ("name", "description", "sku", "category", "location", "is_active", "is_requestable")},
+            {
+                "fields": (
+                    "name",
+                    "description",
+                    "sku",
+                    "category",
+                    "location",
+                    "is_active",
+                    "is_requestable",
+                )
+            },
         ),
         ("Images", {"fields": ("image", "image_url", "thumbnail", "qr_code")}),
         ("Stock Information", {"fields": ("current_stock", "minimum_stock", "reorder_quantity")}),

@@ -101,6 +101,33 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleUpdateTracking = async (id: number) => {
+    const trackingNumber = prompt('Enter tracking number (optional):');
+    const carrier = prompt('Enter carrier/shipper (optional):');
+    const expectedDeliveryStr = prompt('Update expected delivery date (YYYY-MM-DD, optional):');
+    const trackingUrl = prompt('Enter tracking URL (optional):');
+    
+    // If user cancels all prompts, don't proceed
+    if (trackingNumber === null && carrier === null && expectedDeliveryStr === null && trackingUrl === null) {
+      return;
+    }
+    
+    try {
+      const data: any = {};
+      if (trackingNumber) data.tracking_number = trackingNumber;
+      if (carrier) data.carrier = carrier;
+      if (expectedDeliveryStr) data.expected_delivery_date = expectedDeliveryStr;
+      if (trackingUrl) data.delivery_tracking_url = trackingUrl;
+      
+      await reorderAPI.updateTracking(id, data);
+      loadRequests();
+      alert('Tracking information updated');
+    } catch (err) {
+      console.error('Error updating tracking:', err);
+      alert('Failed to update tracking information');
+    }
+  };
+
   const getPriorityClass = (priority: string) => {
     const map: Record<string, string> = {
       urgent: 'priority-urgent',
@@ -289,12 +316,21 @@ const AdminDashboard: React.FC = () => {
                           </button>
                         )}
                         {request.status === 'ordered' && (
-                          <button
-                            onClick={() => handleMarkReceived(request.id)}
-                            className="btn-receive"
-                          >
-                            Mark Received
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleUpdateTracking(request.id)}
+                              className="btn-tracking"
+                              title="Update Tracking"
+                            >
+                              📦
+                            </button>
+                            <button
+                              onClick={() => handleMarkReceived(request.id)}
+                              className="btn-receive"
+                            >
+                              Mark Received
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>

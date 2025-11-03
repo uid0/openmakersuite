@@ -194,21 +194,25 @@ def get_inventory_summary(request):
     Public endpoint showing overview of inventory status.
     """
     try:
-        from inventory.models import InventoryItem, Asset
-        from django.db.models import Count, Q, Sum, F
         from datetime import timedelta
+
+        from django.db.models import Count, F
         from django.utils import timezone
+
+        from inventory.models import Asset, InventoryItem
 
         # Inventory Items Stats
         items_query = InventoryItem.objects.filter(is_active=True)
 
         total_items = items_query.count()
-        low_stock_items = items_query.filter(current_stock__lte=F('minimum_stock')).count()
+        low_stock_items = items_query.filter(current_stock__lte=F("minimum_stock")).count()
 
         # Items with pending reorders
-        items_with_reorders = items_query.filter(
-            reorder_requests__status__in=['pending', 'approved', 'ordered']
-        ).distinct().count()
+        items_with_reorders = (
+            items_query.filter(reorder_requests__status__in=["pending", "approved", "ordered"])
+            .distinct()
+            .count()
+        )
 
         # Total inventory value
         total_value = sum(item.total_value for item in items_query)
@@ -218,42 +222,41 @@ def get_inventory_summary(request):
         recent_items = items_query.filter(created_at__gte=thirty_days_ago).count()
 
         # Get actual low stock items list (limit to 20)
-        low_stock_list = items_query.filter(
-            current_stock__lte=F('minimum_stock')
-        ).order_by('current_stock')[:20].values(
-            'id', 'name', 'current_stock', 'minimum_stock', 'reorder_quantity'
+        low_stock_list = (
+            items_query.filter(current_stock__lte=F("minimum_stock"))
+            .order_by("current_stock")[:20]
+            .values("id", "name", "current_stock", "minimum_stock", "reorder_quantity")
         )
 
         # Asset Stats
         assets_query = Asset.objects.filter(is_active=True)
         total_assets = assets_query.count()
         assets_by_status = dict(
-            assets_query.values('status').annotate(count=Count('id')).values_list('status', 'count')
+            assets_query.values("status").annotate(count=Count("id")).values_list("status", "count")
         )
-        assets_needing_maintenance = assets_query.filter(status='maintenance').count()
+        assets_needing_maintenance = assets_query.filter(status="maintenance").count()
 
-        return Response({
-            "inventory": {
-                "total_items": total_items,
-                "low_stock_count": low_stock_items,
-                "items_with_pending_reorders": items_with_reorders,
-                "total_value": float(total_value),
-                "recently_added": recent_items,
-                "low_stock_items": list(low_stock_list),
-            },
-            "assets": {
-                "total_assets": total_assets,
-                "by_status": assets_by_status,
-                "needing_maintenance": assets_needing_maintenance,
-            },
-            "timestamp": timezone.now().isoformat(),
-        })
+        return Response(
+            {
+                "inventory": {
+                    "total_items": total_items,
+                    "low_stock_count": low_stock_items,
+                    "items_with_pending_reorders": items_with_reorders,
+                    "total_value": float(total_value),
+                    "recently_added": recent_items,
+                    "low_stock_items": list(low_stock_list),
+                },
+                "assets": {
+                    "total_assets": total_assets,
+                    "by_status": assets_by_status,
+                    "needing_maintenance": assets_needing_maintenance,
+                },
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
 
     except Exception as e:
-        return Response(
-            {"error": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # Simple health check endpoint

@@ -280,14 +280,10 @@ class AssetSerializer(serializers.ModelSerializer):
     """Serializer for hard asset tracking."""
 
     # Related field names for display
-    inventory_item_name = serializers.CharField(
-        source="inventory_item.name", read_only=True
-    )
+    inventory_item_name = serializers.CharField(source="inventory_item.name", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
     location_name = serializers.CharField(source="location.name", read_only=True)
-    manufacturer_name_display = serializers.CharField(
-        source="manufacturer.name", read_only=True
-    )
+    manufacturer_name_display = serializers.CharField(source="manufacturer.name", read_only=True)
 
     # Calculated properties
     display_manufacturer = serializers.ReadOnlyField()

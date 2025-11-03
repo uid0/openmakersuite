@@ -493,12 +493,9 @@ class PriceHistoryViewSet(viewsets.ReadOnlyModelViewSet):
 class AssetViewSet(viewsets.ModelViewSet):
     """API endpoint for hard assets."""
 
-    queryset = (
-        Asset.objects.select_related(
-            "inventory_item", "category", "location", "manufacturer"
-        )
-        .all()
-    )
+    queryset = Asset.objects.select_related(
+        "inventory_item", "category", "location", "manufacturer"
+    ).all()
     serializer_class = AssetSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 

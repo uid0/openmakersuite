@@ -343,7 +343,7 @@ const TVDashboard: React.FC = () => {
     return (
       <div className="tv-dashboard">
         <div className="loading-screen">
-          <div className="loading-spinner"></div>
+          <div className="loading-spinner" data-testid="loading-spinner"></div>
           <h1>Loading Inventory Dashboard...</h1>
         </div>
       </div>

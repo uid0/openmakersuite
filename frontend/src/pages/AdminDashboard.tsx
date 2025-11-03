@@ -57,10 +57,18 @@ const AdminDashboard: React.FC = () => {
 
   const handleMarkOrdered = async (id: number) => {
     const orderNumber = prompt('Enter order number (optional):');
+    const estimatedDeliveryStr = prompt('Enter estimated delivery date (YYYY-MM-DD, optional):');
+    const actualCostStr = prompt('Enter actual cost (optional):');
+    
     try {
-      await reorderAPI.markOrdered(id, { order_number: orderNumber || undefined });
+      const data: any = {};
+      if (orderNumber) data.order_number = orderNumber;
+      if (estimatedDeliveryStr) data.estimated_delivery = estimatedDeliveryStr;
+      if (actualCostStr) data.actual_cost = parseFloat(actualCostStr);
+      
+      await reorderAPI.markOrdered(id, data);
       loadRequests();
-      alert('Marked as ordered');
+      alert('Marked as ordered with tracking information');
     } catch (err) {
       console.error('Error marking as ordered:', err);
       alert('Failed to mark as ordered');
@@ -68,8 +76,9 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleMarkReceived = async (id: number) => {
+    const actualDeliveryStr = prompt('Enter actual delivery date (YYYY-MM-DD, optional - defaults to today):');
     try {
-      await reorderAPI.markReceived(id);
+      await reorderAPI.markReceived(id, actualDeliveryStr || undefined);
       loadRequests();
       alert('Marked as received and inventory updated');
     } catch (err) {
@@ -181,6 +190,52 @@ const AdminDashboard: React.FC = () => {
                           {request.item_details.supplier_name && (
                             <div className="item-supplier">
                               {request.item_details.supplier_name}
+                            </div>
+                          )}
+                          
+                          {/* Order tracking information */}
+                          {request.order_number && (
+                            <div className="tracking-info">
+                              <small>📋 Order: {request.order_number}</small>
+                            </div>
+                          )}
+                          
+                          {request.estimated_delivery && (
+                            <div className="delivery-info">
+                              <small>
+                                📅 Expected: {new Date(request.estimated_delivery).toLocaleDateString()}
+                              </small>
+                            </div>
+                          )}
+                          
+                          {request.actual_delivery && (
+                            <div className="delivery-info">
+                              <small>
+                                ✅ Delivered: {new Date(request.actual_delivery).toLocaleDateString()}
+                              </small>
+                            </div>
+                          )}
+                          
+                          {request.status === 'ordered' && request.estimated_delivery && (
+                            <div className="delivery-status">
+                              <small>
+                                {(() => {
+                                  const estimatedDate = new Date(request.estimated_delivery);
+                                  const today = new Date();
+                                  const diffTime = estimatedDate.getTime() - today.getTime();
+                                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                                  
+                                  if (diffDays < 0) {
+                                    return <span className="overdue">⚠️ {Math.abs(diffDays)} days overdue</span>;
+                                  } else if (diffDays === 0) {
+                                    return <span className="due-today">🚚 Expected today</span>;
+                                  } else if (diffDays === 1) {
+                                    return <span className="due-soon">📦 Expected tomorrow</span>;
+                                  } else {
+                                    return <span className="due-later">📅 {diffDays} days to go</span>;
+                                  }
+                                })()}
+                              </small>
                             </div>
                           )}
                         </div>

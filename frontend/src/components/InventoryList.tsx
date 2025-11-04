@@ -113,23 +113,52 @@ const InventoryList: React.FC = () => {
                 )}
 
                 <div className="item-stock">
-                  <div className="stock-row">
-                    <span className="stock-label">Current:</span>
-                    <span
-                      className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
-                    >
-                      {item.current_stock}
-                    </span>
-                  </div>
-                  <div className="stock-row">
-                    <span className="stock-label">Minimum:</span>
-                    <span className="stock-value">{item.minimum_stock}</span>
-                  </div>
+                  {item.use_case_based_reorder ? (
+                    // Case-based display
+                    <>
+                      <div className="stock-row">
+                        <span className="stock-label">Current Cases:</span>
+                        <span
+                          className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
+                        >
+                          {item.current_cases.toFixed(1)}
+                        </span>
+                      </div>
+                      <div className="stock-row">
+                        <span className="stock-label">Minimum Cases:</span>
+                        <span className="stock-value">{item.minimum_cases}</span>
+                      </div>
+                      <div className="stock-row units-detail">
+                        <span className="stock-label">Units:</span>
+                        <span className="stock-value-small">{item.current_stock}</span>
+                      </div>
+                    </>
+                  ) : (
+                    // Traditional unit-based display
+                    <>
+                      <div className="stock-row">
+                        <span className="stock-label">Current:</span>
+                        <span
+                          className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
+                        >
+                          {item.current_stock}
+                        </span>
+                      </div>
+                      <div className="stock-row">
+                        <span className="stock-label">Minimum:</span>
+                        <span className="stock-value">{item.minimum_stock}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {item.needs_reorder && (
                   <div className="reorder-badge">
-                    ⚠️ Needs Reorder ({item.reorder_quantity} units)
+                    ⚠️ Needs Reorder (
+                    {item.use_case_based_reorder 
+                      ? `${item.reorder_cases} cases` 
+                      : `${item.reorder_quantity} units`
+                    })
                   </div>
                 )}
 

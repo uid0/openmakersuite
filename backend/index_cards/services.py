@@ -301,9 +301,17 @@ class IndexCardRenderer:
     ) -> None:
         """Draw the left section with stock info and product image."""
         # Draw Kanban stock info (reorder point and lead times)
-        info_lines = [
-            f"Reorder at: {self._pluralize(item.minimum_stock, 'unit')}",
-        ]
+        if item.use_case_based_reorder:
+            # Case-based reordering display
+            info_lines = [
+                f"Reorder at: {self._pluralize(item.minimum_cases, 'case')}",
+                f"Current: {item.current_cases:.1f} cases ({item.current_stock} units)",
+            ]
+        else:
+            # Traditional unit-based display
+            info_lines = [
+                f"Reorder at: {self._pluralize(item.minimum_stock, 'unit')}",
+            ]
 
         # Add average lead time from primary supplier
         if item.average_lead_time:

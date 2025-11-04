@@ -106,6 +106,12 @@
   font-weight: bold;
 }
 
+.info-item .value.secondary {
+  font-size: 0.95rem;
+  color: #666;
+  font-weight: normal;
+}
+
 .alert {
   padding: 15px 20px;
   border-radius: 5px;

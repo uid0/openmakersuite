@@ -46,3 +46,39 @@ class IndexCardRendererTests(TestCase):
 
         # Clean up temporary media directory
         shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def test_case_based_item_rendering(self) -> None:
+        """Test that case-based items render correctly in index cards."""
+        # Create a case-based item (like trashbags)
+        case_item = InventoryItem.objects.create(
+            name="Heavy Duty Trash Bags",
+            description="33-gallon trash bags, 100 per box",
+            reorder_quantity=300,  # Traditional field (will be ignored)
+            current_stock=150,  # 1.5 boxes worth
+            minimum_stock=100,  # Traditional field (will be ignored)
+            use_case_based_reorder=True,
+            minimum_cases=1,  # Reorder when 1 case left
+            reorder_cases=3,  # Order 3 cases at a time
+        )
+
+        # Create a supplier with quantity per package to calculate current_cases
+        from inventory.models import Supplier, ItemSupplier
+
+        supplier = Supplier.objects.create(name="Test Supplier", supplier_type="online")
+        ItemSupplier.objects.create(
+            item=case_item,
+            supplier=supplier,
+            quantity_per_package=100,  # 100 bags per box
+            unit_cost=0.46,
+            is_primary=True,
+        )
+
+        renderer = IndexCardRenderer(base_url="http://localhost:3000")
+        preview_bytes = renderer.render_preview(case_item)
+
+        # Verify PDF is generated
+        self.assertTrue(preview_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(preview_bytes), 200)
+
+        # Note: The actual content verification would require PDF parsing,
+        # but the important part is that the renderer doesn't crash with case-based items

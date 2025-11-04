@@ -193,6 +193,18 @@
   color: #dc3545;
 }
 
+/* Case-based reordering styles */
+.units-detail {
+  opacity: 0.7;
+  font-size: 0.85em;
+  margin-top: 2px;
+}
+
+.stock-value-small {
+  font-size: 0.9em;
+  color: #666;
+}
+
 .reorder-badge {
   margin-top: 0.75rem;
   padding: 0.5rem 0.75rem;

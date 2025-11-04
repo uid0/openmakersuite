@@ -64,6 +64,11 @@ export interface InventoryItem {
   reorder_quantity: number;
   current_stock: number;
   minimum_stock: number;
+  // Case-based reordering fields
+  use_case_based_reorder: boolean;
+  minimum_cases: number;
+  reorder_cases: number;
+  current_cases: number;
   supplier: number | null;
   supplier_name: string;
   supplier_sku: string;

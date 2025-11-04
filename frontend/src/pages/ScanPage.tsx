@@ -282,17 +282,41 @@ const ScanPage: React.FC = () => {
               <span className="value">{item.location}</span>
             </div>
 
-            <div className="info-item">
-              <span className="label">Current Stock:</span>
-              <span className={`value ${item.needs_reorder ? 'low-stock' : ''}`}>
-                {item.current_stock} units
-              </span>
-            </div>
-
-            <div className="info-item">
-              <span className="label">Reorder Quantity:</span>
-              <span className="value">{item.reorder_quantity} units</span>
-            </div>
+            {item.use_case_based_reorder ? (
+              // Case-based display
+              <>
+                <div className="info-item">
+                  <span className="label">Current Cases:</span>
+                  <span className={`value ${item.needs_reorder ? 'low-stock' : ''}`}>
+                    {item.current_cases.toFixed(1)} cases
+                  </span>
+                </div>
+                <div className="info-item">
+                  <span className="label">Current Units:</span>
+                  <span className="value secondary">
+                    {item.current_stock} units
+                  </span>
+                </div>
+                <div className="info-item">
+                  <span className="label">Reorder Quantity:</span>
+                  <span className="value">{item.reorder_cases} cases</span>
+                </div>
+              </>
+            ) : (
+              // Traditional unit-based display
+              <>
+                <div className="info-item">
+                  <span className="label">Current Stock:</span>
+                  <span className={`value ${item.needs_reorder ? 'low-stock' : ''}`}>
+                    {item.current_stock} units
+                  </span>
+                </div>
+                <div className="info-item">
+                  <span className="label">Reorder Quantity:</span>
+                  <span className="value">{item.reorder_quantity} units</span>
+                </div>
+              </>
+            )}
 
             <div className="info-item">
               <span className="label">Average Lead Time:</span>
@@ -325,7 +349,12 @@ const ScanPage: React.FC = () => {
         {!isLoggedIn && !submitting && (
           <div className="auto-submit-message">
             <h2>🔄 Processing Reorder Request</h2>
-            <p>We're automatically submitting a reorder request for <strong>{item.reorder_quantity} units</strong> of this item.</p>
+            <p>We're automatically submitting a reorder request for <strong>
+              {item.use_case_based_reorder 
+                ? `${item.reorder_cases} cases` 
+                : `${item.reorder_quantity} units`
+              }
+            </strong> of this item.</p>
             <p>You'll be redirected to a confirmation page shortly...</p>
           </div>
         )}

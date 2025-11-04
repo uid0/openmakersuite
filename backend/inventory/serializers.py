@@ -57,7 +57,8 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
 
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)
     item_name = serializers.CharField(source="item.name", read_only=True)
-    recent_price_history = PriceHistorySerializer(source="price_history", many=True, read_only=True)
+    # REMOVED: recent_price_history to prevent circular recursion
+    # Use ItemSupplierDetailSerializer for full details including price history
 
     # Calculated dimensional properties
     package_volume = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
@@ -95,9 +96,20 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
             "updated_at",
-            "recent_price_history",
         ]
         read_only_fields = ["created_at", "updated_at"]
+
+
+class ItemSupplierDetailSerializer(ItemSupplierSerializer):
+    """
+    Extended serializer with price history.
+    Use this for detail views where full supplier information is needed.
+    """
+
+    recent_price_history = PriceHistorySerializer(source="price_history", many=True, read_only=True)
+
+    class Meta(ItemSupplierSerializer.Meta):
+        fields = ItemSupplierSerializer.Meta.fields + ["recent_price_history"]
 
     def to_representation(self, instance):
         """Limit price history to recent records for performance."""
@@ -224,12 +236,12 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
 
 class InventoryItemDetailSerializer(InventoryItemSerializer):
-    """Extended serializer with related data."""
+    """Extended serializer with related data and full supplier details including price history."""
 
     recent_usage = UsageLogSerializer(source="usage_logs", many=True, read_only=True)
     supplier_details = SupplierSerializer(source="supplier", read_only=True)
     category_details = CategorySerializer(source="category", read_only=True)
-    all_suppliers = ItemSupplierSerializer(source="item_suppliers", many=True, read_only=True)
+    all_suppliers = ItemSupplierDetailSerializer(source="item_suppliers", many=True, read_only=True)
     price_trend_summary = serializers.SerializerMethodField()
 
     class Meta(InventoryItemSerializer.Meta):

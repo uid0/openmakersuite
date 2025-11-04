@@ -5,6 +5,7 @@ Simple tests for reorder queue views to improve coverage.
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from rest_framework import status
 from rest_framework.test import APIClient
 
 from reorder_queue.tests.factories import ReorderRequestFactory
@@ -60,7 +61,8 @@ class SimpleReorderViewTests(TestCase):
             "request_notes": "Test request",
         }
 
-        # Try to create a reorder request
-        response = self.client.post("/api/reorders/requests/", data, format="json")
-        # Just verify we get some kind of response
-        self.assertIsNotNone(response.status_code)
+        client = APIClient(enforce_csrf_checks=True)
+
+        response = client.post("/api/reorders/requests/", data, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)

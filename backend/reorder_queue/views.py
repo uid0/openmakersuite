@@ -10,9 +10,11 @@ from django.db.models import Avg, Count, F, Q, Sum
 from django.utils import timezone
 
 from rest_framework import status, viewsets
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from inventory.models import InventoryItem
 
@@ -36,9 +38,20 @@ from .serializers import (
 )
 
 
+class AnonymousCsrfExemptSessionAuthentication(SessionAuthentication):
+    """Skip CSRF enforcement for anonymous requests while keeping it for logged-in admins."""
+
+    def enforce_csrf(self, request):
+        user = getattr(request, "user", None)
+        if user is not None and user.is_authenticated:
+            return super().enforce_csrf(request)
+        return None
+
+
 class ReorderRequestViewSet(viewsets.ModelViewSet):
     """API endpoint for reorder requests."""
 
+    authentication_classes = (JWTAuthentication, AnonymousCsrfExemptSessionAuthentication)
     queryset = (
         ReorderRequest.objects.select_related("item", "reviewed_by")
         .prefetch_related("item__item_suppliers__supplier")

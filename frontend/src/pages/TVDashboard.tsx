@@ -84,7 +84,7 @@ const TVDashboard: React.FC = () => {
     try {
       setError(null);
       // Use dedicated TV API instance that doesn't send auth headers
-      const response = await tvAPI.get<InventoryItem[]>('/api/inventory/items/reordered/');
+      const response = await tvAPI.get<InventoryItem[]>('/inventory/items/reordered/');
       
       // Filter items by location if specified
       let filteredItems = response.data;

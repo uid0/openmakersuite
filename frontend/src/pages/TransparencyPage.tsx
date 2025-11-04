@@ -6,6 +6,14 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import '../styles/TransparencyPage.css';
 
+// Create axios instance with proper base URL
+const api = axios.create({
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
 interface TransparencyOrder {
   id: number;
   item_name: string;
@@ -49,7 +57,7 @@ const TransparencyPage: React.FC = () => {
   useEffect(() => {
     const fetchTransparencyData = async () => {
       try {
-        const response = await axios.get<TransparencyData>('/api/reorders/transparency/');
+        const response = await api.get<TransparencyData>('/reorders/transparency/');
         setData(response.data);
       } catch (err: any) {
         setError('Unable to load transparency data');

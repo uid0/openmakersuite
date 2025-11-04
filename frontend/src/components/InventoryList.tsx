@@ -20,7 +20,7 @@ const InventoryList: React.FC = () => {
 
   const loadItems = async () => {
     try {
-      console.log('InventoryList: Making API call to /api/inventory/items/');
+      console.log('InventoryList: Making API call to /inventory/items/');
       setLoading(true);
       const response = await inventoryAPI.listItems();
       console.log('InventoryList: API response received:', response.data);

@@ -30,7 +30,7 @@ describe('API Service', () => {
         description: 'Test description',
       };
 
-      mock.onGet('/api/inventory/items/test-id/').reply(200, mockItem);
+      mock.onGet('/inventory/items/test-id/').reply(200, mockItem);
 
       const response = await inventoryAPI.getItem('test-id');
 
@@ -46,7 +46,7 @@ describe('API Service', () => {
         ],
       };
 
-      mock.onGet('/api/inventory/items/').reply(200, mockItems);
+      mock.onGet('/inventory/items/').reply(200, mockItems);
 
       const response = await inventoryAPI.listItems();
 
@@ -59,7 +59,7 @@ describe('API Service', () => {
         { id: '1', name: 'Low Stock Item', current_stock: 2 },
       ];
 
-      mock.onGet('/api/inventory/items/low_stock/').reply(200, mockItems);
+      mock.onGet('/inventory/items/low_stock/').reply(200, mockItems);
 
       const response = await inventoryAPI.getLowStockItems();
 
@@ -68,7 +68,7 @@ describe('API Service', () => {
 
     test('downloadCard requests blob response', async () => {
       mock
-        .onGet('/api/inventory/items/test-id/download_card/')
+        .onGet('/inventory/items/test-id/download_card/')
         .reply((config) => {
           expect(config.responseType).toBe('blob');
           return [200, 'card-bytes'];
@@ -80,7 +80,7 @@ describe('API Service', () => {
     });
 
     test('generateQR posts without payload', async () => {
-      mock.onPost('/api/inventory/items/test-id/generate_qr/').reply((config) => {
+      mock.onPost('/inventory/items/test-id/generate_qr/').reply((config) => {
         expect(config.data).toBeUndefined();
         return [201, { qr: 'data' }];
       });
@@ -98,7 +98,7 @@ describe('API Service', () => {
         quantity_used: 5,
       };
 
-      mock.onPost('/api/inventory/items/test-id/log_usage/').reply(200, mockResponse);
+      mock.onPost('/inventory/items/test-id/log_usage/').reply(200, mockResponse);
 
       const response = await inventoryAPI.logUsage('test-id', 5, 'Test notes');
 
@@ -120,7 +120,7 @@ describe('API Service', () => {
         status: 'pending',
       };
 
-      mock.onPost('/api/reorders/requests/').reply(201, mockResponse);
+      mock.onPost('/reorders/requests/').reply(201, mockResponse);
 
       const response = await reorderAPI.createRequest(requestData);
 
@@ -134,7 +134,7 @@ describe('API Service', () => {
         { id: 2, status: 'pending' },
       ];
 
-      mock.onGet('/api/reorders/requests/pending/').reply(200, mockRequests);
+      mock.onGet('/reorders/requests/pending/').reply(200, mockRequests);
 
       const response = await reorderAPI.getPendingRequests();
 
@@ -147,7 +147,7 @@ describe('API Service', () => {
         status: 'approved',
       };
 
-      mock.onPost('/api/reorders/requests/1/approve/').reply(200, mockResponse);
+      mock.onPost('/reorders/requests/1/approve/').reply(200, mockResponse);
 
       const response = await reorderAPI.approveRequest(1, 'Approved');
 
@@ -159,7 +159,7 @@ describe('API Service', () => {
         results: [{ id: 7, status: 'ordered' }],
       };
 
-      mock.onGet('/api/reorders/requests/').reply((config) => {
+      mock.onGet('/reorders/requests/').reply((config) => {
         expect(config.params).toEqual({ status: 'ordered' });
         return [200, mockResponse];
       });
@@ -175,7 +175,7 @@ describe('API Service', () => {
         status: 'received',
       };
 
-      mock.onPost('/api/reorders/requests/1/mark_received/').reply(200, mockResponse);
+      mock.onPost('/reorders/requests/1/mark_received/').reply(200, mockResponse);
 
       const response = await reorderAPI.markReceived(1);
 
@@ -189,7 +189,7 @@ describe('API Service', () => {
         actual_cost: 42.5,
       };
 
-      mock.onPost('/api/reorders/requests/1/mark_ordered/').reply((config) => {
+      mock.onPost('/reorders/requests/1/mark_ordered/').reply((config) => {
         expect(JSON.parse(config.data)).toEqual(requestBody);
         return [200, { id: 1, status: 'ordered' }];
       });
@@ -200,7 +200,7 @@ describe('API Service', () => {
     });
 
     test('cancelRequest posts admin notes', async () => {
-      mock.onPost('/api/reorders/requests/1/cancel/').reply((config) => {
+      mock.onPost('/reorders/requests/1/cancel/').reply((config) => {
         expect(JSON.parse(config.data)).toEqual({ admin_notes: 'No stock' });
         return [200, { id: 1, status: 'cancelled' }];
       });
@@ -213,7 +213,7 @@ describe('API Service', () => {
     test('generateCartLinks fetches generated links', async () => {
       const mockResponse = { links: ['http://example.com'] };
 
-      mock.onGet('/api/reorders/requests/generate_cart_links/').reply(200, mockResponse);
+      mock.onGet('/reorders/requests/generate_cart_links/').reply(200, mockResponse);
 
       const response = await reorderAPI.generateCartLinks();
 
@@ -223,7 +223,7 @@ describe('API Service', () => {
     test('getBySupplier returns grouped data', async () => {
       const mockResponse = { supplier: [{ id: 1 }] };
 
-      mock.onGet('/api/reorders/requests/by_supplier/').reply(200, mockResponse);
+      mock.onGet('/reorders/requests/by_supplier/').reply(200, mockResponse);
 
       // eslint-disable-next-line testing-library/no-await-sync-query
       const response = await reorderAPI.getBySupplier();
@@ -239,7 +239,7 @@ describe('API Service', () => {
         refresh: 'refresh-token',
       };
 
-      mock.onPost('/api/auth/login/').reply(200, mockResponse);
+      mock.onPost('/auth/login/').reply(200, mockResponse);
 
       const response = await authAPI.login('testuser', 'password');
 
@@ -251,7 +251,7 @@ describe('API Service', () => {
         access: 'new-access-token',
       };
 
-      mock.onPost('/api/auth/refresh/').reply(200, mockResponse);
+      mock.onPost('/auth/refresh/').reply(200, mockResponse);
 
       const response = await authAPI.refresh('refresh-token');
 
@@ -263,7 +263,7 @@ describe('API Service', () => {
     test('adds auth token to requests when available', async () => {
       localStorage.setItem('token', 'test-token');
 
-      mock.onGet('/api/inventory/items/test-id/').reply((config) => {
+      mock.onGet('/inventory/items/test-id/').reply((config) => {
         expect(config.headers?.Authorization).toBe('Bearer test-token');
         return [200, {}];
       });
@@ -272,7 +272,7 @@ describe('API Service', () => {
     });
 
     test('does not add auth token when not available', async () => {
-      mock.onGet('/api/inventory/items/test-id/').reply((config) => {
+      mock.onGet('/inventory/items/test-id/').reply((config) => {
         expect(config.headers?.Authorization).toBeUndefined();
         return [200, {}];
       });
@@ -284,7 +284,7 @@ describe('API Service', () => {
       const errorPayload = { detail: 'boom' };
 
       mock
-        .onGet('/api/inventory/items/error/')
+        .onGet('/inventory/items/error/')
         .reply(500, errorPayload);
 
       await expect(inventoryAPI.getItem('error')).rejects.toBeDefined();
@@ -300,7 +300,7 @@ describe('API Service', () => {
       const handler = (api as any).interceptors.response.handlers[0].rejected;
       const networkError = Object.assign(new Error('Network Error'), {
         request: {},
-        config: { url: '/api/inventory/items/network/', method: 'get' },
+        config: { url: '/inventory/items/network/', method: 'get' },
       });
 
       await expect(handler(networkError)).rejects.toBe(networkError);
@@ -308,7 +308,7 @@ describe('API Service', () => {
       expect(Sentry.captureException).toHaveBeenCalledWith(networkError, {
         contexts: expect.objectContaining({
           api: expect.objectContaining({
-            url: '/api/inventory/items/network/',
+            url: '/inventory/items/network/',
             method: 'get',
             error: 'No response received',
           }),

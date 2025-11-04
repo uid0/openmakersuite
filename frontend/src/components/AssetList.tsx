@@ -20,7 +20,7 @@ const AssetList: React.FC = () => {
 
   const loadAssets = async () => {
     try {
-      console.log('AssetList: Making API call to /api/inventory/assets/');
+      console.log('AssetList: Making API call to /inventory/assets/');
       setLoading(true);
       const response = await assetsAPI.listAssets();
       console.log('AssetList: API response received:', response.data);

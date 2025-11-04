@@ -42,13 +42,16 @@ class AnonymousCsrfExemptSessionAuthentication(SessionAuthentication):
     """Skip CSRF enforcement for anonymous requests while keeping it for logged-in admins."""
 
     def enforce_csrf(self, request):
-        # Check if user has already been authenticated (avoid triggering authentication here)
-        # Access the underlying Django request to check if a session user exists
+        # For anonymous requests (QR code scanning), skip CSRF validation
+        # Only enforce CSRF if there's an authenticated session
+        # Check the session directly to avoid triggering authentication
         django_request = request._request
-        if hasattr(django_request, 'user') and django_request.user.is_authenticated:
-            # User is logged in, enforce CSRF
+        
+        # If there's a session with a user_id, enforce CSRF (admin is logged in)
+        if hasattr(django_request, 'session') and django_request.session.get('_auth_user_id'):
             return super().enforce_csrf(request)
-        # Anonymous user or no session, skip CSRF
+        
+        # No authenticated session - skip CSRF for public QR code scanning
         return None
 
 

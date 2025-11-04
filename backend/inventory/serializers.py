@@ -142,6 +142,9 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     )
     active_reorder_request = serializers.SerializerMethodField()
 
+    # Case-based reordering fields
+    current_cases = serializers.FloatField(read_only=True)
+
     # Hazmat calculated fields
     nfpa_fire_diamond_display = serializers.ReadOnlyField()
     hazmat_compliance_status = serializers.ReadOnlyField()
@@ -163,6 +166,11 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "reorder_quantity",
             "current_stock",
             "minimum_stock",
+            # Case-based reordering fields
+            "use_case_based_reorder",
+            "minimum_cases",
+            "reorder_cases",
+            "current_cases",
             "supplier_name",
             "supplier_sku",
             "supplier_url",

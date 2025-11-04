@@ -10,6 +10,7 @@ from inventory.models import Category, InventoryItem, ItemSupplier, Supplier, Us
 from inventory.tests.factories import (
     CategoryFactory,
     InventoryItemFactory,
+    ItemSupplierFactory,
     SupplierFactory,
     UsageLogFactory,
 )
@@ -245,3 +246,154 @@ class TestItemSupplierModel:
         assert item_supplier.unit_upc == "00012345678905"
         # sanity check that package cost remains accurate with UPC metadata present
         assert item_supplier.package_cost == Decimal("16.00")
+
+
+class TestCaseBasedReordering:
+    """Test case-based reordering functionality."""
+
+    def test_current_cases_calculation(self):
+        """Test that current_cases property calculates correctly."""
+        # Create item with case-based reordering enabled
+        item = InventoryItemFactory(
+            current_stock=120, use_case_based_reorder=True, minimum_cases=2, reorder_cases=5
+        )
+
+        # Create supplier with quantity per package
+        supplier = SupplierFactory()
+        ItemSupplierFactory(
+            item=item,
+            supplier=supplier,
+            quantity_per_package=24,  # 24 units per case
+            is_primary=True,
+        )
+
+        # 120 units / 24 units per case = 5 cases
+        assert item.current_cases == 5.0
+
+    def test_current_cases_with_partial_case(self):
+        """Test current_cases with partial cases."""
+        item = InventoryItemFactory(current_stock=100, use_case_based_reorder=True)
+
+        supplier = SupplierFactory()
+        ItemSupplierFactory(item=item, supplier=supplier, quantity_per_package=24, is_primary=True)
+
+        # 100 units / 24 units per case = 4.167 cases
+        expected_cases = 100 / 24
+        assert abs(item.current_cases - expected_cases) < 0.001
+
+    def test_current_cases_disabled(self):
+        """Test current_cases returns 0 when case-based reordering is disabled."""
+        item = InventoryItemFactory(current_stock=120, use_case_based_reorder=False)
+
+        assert item.current_cases == 0
+
+    def test_needs_reorder_case_based(self):
+        """Test needs_reorder logic for case-based items."""
+        # Create item with 2 cases minimum, currently has 3 cases
+        item = InventoryItemFactory(
+            current_stock=72,  # 3 cases * 24 units per case
+            use_case_based_reorder=True,
+            minimum_cases=2,
+            minimum_stock=10,  # This should be ignored for case-based items
+        )
+
+        supplier = SupplierFactory()
+        ItemSupplierFactory(item=item, supplier=supplier, quantity_per_package=24, is_primary=True)
+
+        # Should not need reorder (3 cases > 2 minimum cases)
+        assert not item.needs_reorder
+
+    def test_needs_reorder_case_based_low_stock(self):
+        """Test needs_reorder when case-based item is below minimum cases."""
+        # Create item with 2 cases minimum, currently has 1.5 cases
+        item = InventoryItemFactory(
+            current_stock=36,  # 1.5 cases * 24 units per case
+            use_case_based_reorder=True,
+            minimum_cases=2,
+        )
+
+        supplier = SupplierFactory()
+        ItemSupplierFactory(item=item, supplier=supplier, quantity_per_package=24, is_primary=True)
+
+        # Should need reorder (1.5 cases <= 2 minimum cases)
+        assert item.needs_reorder
+
+    def test_needs_reorder_case_based_exactly_at_minimum(self):
+        """Test needs_reorder when exactly at minimum cases."""
+        # Create item with 2 cases minimum, currently has exactly 2 cases
+        item = InventoryItemFactory(
+            current_stock=48,  # 2 cases * 24 units per case
+            use_case_based_reorder=True,
+            minimum_cases=2,
+        )
+
+        supplier = SupplierFactory()
+        ItemSupplierFactory(item=item, supplier=supplier, quantity_per_package=24, is_primary=True)
+
+        # Should need reorder (2 cases <= 2 minimum cases)
+        assert item.needs_reorder
+
+    def test_needs_reorder_traditional_mode_unchanged(self):
+        """Test that traditional reordering logic still works when case-based is disabled."""
+        item = InventoryItemFactory(current_stock=5, minimum_stock=10, use_case_based_reorder=False)
+
+        # Should need reorder using traditional logic
+        assert item.needs_reorder
+
+    def test_case_based_reorder_scenario_trashbags(self):
+        """Test the trashbag scenario: reorder when 1 box is left."""
+        # Trashbags come 100 per box, want to reorder when 1 box is left
+        trashbags = InventoryItemFactory(
+            name="Heavy Duty Trash Bags",
+            current_stock=150,  # 1.5 boxes
+            use_case_based_reorder=True,
+            minimum_cases=1,  # Reorder when 1 box is left
+            reorder_cases=3,  # Reorder 3 boxes at a time
+        )
+
+        supplier = SupplierFactory()
+        ItemSupplierFactory(
+            item=trashbags,
+            supplier=supplier,
+            quantity_per_package=100,  # 100 bags per box
+            is_primary=True,
+        )
+
+        # Should not need reorder yet (1.5 boxes > 1 minimum box)
+        assert not trashbags.needs_reorder
+
+        # Reduce stock to exactly 1 box
+        trashbags.current_stock = 100
+        trashbags.save()
+
+        # Should need reorder now (1 box <= 1 minimum box)
+        assert trashbags.needs_reorder
+
+    def test_case_based_reorder_scenario_paper_towels(self):
+        """Test the paper towel scenario: 6 per case, reorder when opening second-to-last case."""
+        # Paper towels come 6 per case, want to reorder when opening second-to-last case (1 case left)
+        paper_towels = InventoryItemFactory(
+            name="Paper Towels - Bathroom",
+            current_stock=12,  # 2 cases
+            use_case_based_reorder=True,
+            minimum_cases=1,  # Reorder when 1 case is left
+            reorder_cases=2,  # Reorder 2 cases at a time
+        )
+
+        supplier = SupplierFactory()
+        ItemSupplierFactory(
+            item=paper_towels,
+            supplier=supplier,
+            quantity_per_package=6,  # 6 rolls per case
+            is_primary=True,
+        )
+
+        # Should not need reorder yet (2 cases > 1 minimum case)
+        assert not paper_towels.needs_reorder
+
+        # Reduce stock to 1 case
+        paper_towels.current_stock = 6
+        paper_towels.save()
+
+        # Should need reorder now (1 case <= 1 minimum case)
+        assert paper_towels.needs_reorder

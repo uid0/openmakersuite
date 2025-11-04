@@ -192,6 +192,22 @@ class InventoryItem(models.Model):
         default=0, help_text="Minimum quantity before reordering"
     )
 
+    # Case-based reordering (for bulk items like trashbags, toilet paper)
+    use_case_based_reorder = models.BooleanField(
+        default=False,
+        help_text="Enable case/package-based reordering instead of individual unit reordering",
+    )
+    minimum_cases = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Minimum number of cases/packages before reordering (only used if case-based reordering is enabled)",
+    )
+    reorder_cases = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Number of cases/packages to reorder when stock is low (only used if case-based reordering is enabled)",
+    )
+
     # QR code data
     qr_code = models.ImageField(upload_to="inventory/qrcodes/", blank=True, null=True)
 
@@ -277,9 +293,29 @@ class InventoryItem(models.Model):
             download_image_from_url.delay(str(self.id), self.image_url)
 
     @property
+    def current_cases(self) -> float:
+        """Calculate current number of cases/packages in stock."""
+        if not self.use_case_based_reorder:
+            return 0
+
+        # Get quantity per package from primary supplier
+        primary_supplier = self.primary_item_supplier
+        if primary_supplier and primary_supplier.quantity_per_package > 0:
+            return self.current_stock / primary_supplier.quantity_per_package
+
+        # Fallback to 1 unit per package if no supplier info
+        return self.current_stock
+
+    @property
     def needs_reorder(self) -> bool:
         """Check if item stock is below minimum and needs reordering."""
-        return self.current_stock <= self.minimum_stock
+        if self.use_case_based_reorder:
+            # For case-based reordering, calculate current cases and compare to minimum cases
+            current_cases = self.current_cases
+            return current_cases <= self.minimum_cases
+        else:
+            # Traditional individual unit reordering
+            return self.current_stock <= self.minimum_stock
 
     def get_active_reorder_request(self):
         """Get the most recent active (pending/approved/ordered) reorder request for this item."""

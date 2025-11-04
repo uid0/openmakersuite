@@ -41,7 +41,7 @@ from .serializers import (
 class ReorderRequestViewSet(viewsets.ModelViewSet):
     """
     API endpoint for reorder requests.
-    
+
     Public endpoint - allows unauthenticated QR code scanning for creating requests.
     Admin actions require JWT authentication.
     """

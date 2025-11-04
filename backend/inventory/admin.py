@@ -244,13 +244,21 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "current_stock",
         "minimum_stock",
         "needs_reorder",
+        "use_case_based_reorder",
         "is_active",
         "is_requestable",
         "hazmat_status_icon",
         "api_link",
         "reorder_link",
     ]
-    list_filter = ["category", "location", "is_active", "is_requestable", "is_hazardous"]
+    list_filter = [
+        "category",
+        "location",
+        "is_active",
+        "is_requestable",
+        "is_hazardous",
+        "use_case_based_reorder",
+    ]
     search_fields = ["name", "sku", "description"]
     readonly_fields = [
         "id",
@@ -282,6 +290,13 @@ class InventoryItemAdmin(admin.ModelAdmin):
         ),
         ("Images", {"fields": ("image", "image_url", "thumbnail", "qr_code")}),
         ("Stock Information", {"fields": ("current_stock", "minimum_stock", "reorder_quantity")}),
+        (
+            "Case-Based Reordering",
+            {
+                "fields": ("use_case_based_reorder", "minimum_cases", "reorder_cases"),
+                "description": "Enable case/package-based reordering for bulk items like trashbags, toilet paper, etc.",
+            },
+        ),
         (
             "Hazardous Materials",
             {

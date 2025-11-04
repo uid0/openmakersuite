@@ -63,30 +63,30 @@ api.interceptors.response.use(
 // Inventory API
 export const inventoryAPI = {
   getItem: (id: string) =>
-    api.get<InventoryItem>(`/api/inventory/items/${id}/`),
+    api.get<InventoryItem>(`/inventory/items/${id}/`),
 
-  getItemSuppliers: (itemId: string) => 
-    api.get<{ results: ItemSupplier[] }>(`/api/inventory/item-suppliers/?item_id=${itemId}`),
+  getItemSuppliers: (itemId: string) =>
+    api.get<{ results: ItemSupplier[] }>(`/inventory/item-suppliers/?item_id=${itemId}`),
 
   listItems: (params?: { category?: number; search?: string }) =>
-    api.get<{ results: InventoryItem[] }>('/api/inventory/items/', { params }),
+    api.get<{ results: InventoryItem[] }>('/inventory/items/', { params }),
 
   getLowStockItems: () =>
-    api.get<InventoryItem[]>('/api/inventory/items/low_stock/'),
+    api.get<InventoryItem[]>('/inventory/items/low_stock/'),
 
   getReorderedItems: () =>
-    api.get<InventoryItem[]>('/api/inventory/items/reordered/'),
+    api.get<InventoryItem[]>('/inventory/items/reordered/'),
 
   downloadCard: (id: string) =>
-    api.get(`/api/inventory/items/${id}/download_card/`, {
+    api.get(`/inventory/items/${id}/download_card/`, {
       responseType: 'blob',
     }),
 
   generateQR: (id: string) =>
-    api.post(`/api/inventory/items/${id}/generate_qr/`),
+    api.post(`/inventory/items/${id}/generate_qr/`),
 
   logUsage: (id: string, quantity: number, notes?: string) =>
-    api.post(`/api/inventory/items/${id}/log_usage/`, {
+    api.post(`/inventory/items/${id}/log_usage/`, {
       quantity,
       notes,
     }),
@@ -95,58 +95,58 @@ export const inventoryAPI = {
 // Assets API
 export const assetsAPI = {
   listAssets: (params?: { status?: string; category?: number; search?: string }) =>
-    api.get<{ results: Asset[] }>('/api/inventory/assets/', { params }),
+    api.get<{ results: Asset[] }>('/inventory/assets/', { params }),
 
   getAsset: (id: string) =>
-    api.get<Asset>(`/api/inventory/assets/${id}/`),
+    api.get<Asset>(`/inventory/assets/${id}/`),
 
   createAsset: (data: Partial<Asset>) =>
-    api.post<Asset>('/api/inventory/assets/', data),
+    api.post<Asset>('/inventory/assets/', data),
 
   updateAsset: (id: string, data: Partial<Asset>) =>
-    api.patch<Asset>(`/api/inventory/assets/${id}/`, data),
+    api.patch<Asset>(`/inventory/assets/${id}/`, data),
 
   deleteAsset: (id: string) =>
-    api.delete(`/api/inventory/assets/${id}/`),
+    api.delete(`/inventory/assets/${id}/`),
 
   generateQR: (id: string) =>
-    api.post(`/api/inventory/assets/${id}/generate_qr/`),
+    api.post(`/inventory/assets/${id}/generate_qr/`),
 };
 
 // Reorder API
 export const reorderAPI = {
   createRequest: (data: CreateReorderRequest) =>
-    api.post<ReorderRequest>('/api/reorders/requests/', data),
+    api.post<ReorderRequest>('/reorders/requests/', data),
 
   listRequests: (params?: { status?: string }) =>
-    api.get<{ results: ReorderRequest[] }>('/api/reorders/requests/', { params }),
+    api.get<{ results: ReorderRequest[] }>('/reorders/requests/', { params }),
 
   getPendingRequests: () =>
-    api.get<ReorderRequest[]>('/api/reorders/requests/pending/'),
+    api.get<ReorderRequest[]>('/reorders/requests/pending/'),
 
   getBySupplier: () =>
-    api.get('/api/reorders/requests/by_supplier/'),
+    api.get('/reorders/requests/by_supplier/'),
 
   approveRequest: (id: number, adminNotes?: string) =>
-    api.post(`/api/reorders/requests/${id}/approve/`, { admin_notes: adminNotes }),
+    api.post(`/reorders/requests/${id}/approve/`, { admin_notes: adminNotes }),
 
   markOrdered: (id: number, data: {
     order_number?: string;
     estimated_delivery?: string;
     actual_cost?: number;
   }) =>
-    api.post(`/api/reorders/requests/${id}/mark_ordered/`, data),
+    api.post(`/reorders/requests/${id}/mark_ordered/`, data),
 
   markReceived: (id: number, actualDelivery?: string) =>
-    api.post(`/api/reorders/requests/${id}/mark_received/`, {
+    api.post(`/reorders/requests/${id}/mark_received/`, {
       actual_delivery: actualDelivery,
     }),
 
   cancelRequest: (id: number, adminNotes?: string) =>
-    api.post(`/api/reorders/requests/${id}/cancel/`, { admin_notes: adminNotes }),
+    api.post(`/reorders/requests/${id}/cancel/`, { admin_notes: adminNotes }),
 
   generateCartLinks: () =>
-    api.get('/api/reorders/requests/generate_cart_links/'),
+    api.get('/reorders/requests/generate_cart_links/'),
 
   updateTracking: (id: number, data: {
     tracking_number?: string;
@@ -154,19 +154,19 @@ export const reorderAPI = {
     expected_delivery_date?: string;
     delivery_tracking_url?: string;
   }) =>
-    api.patch(`/api/reorders/requests/${id}/`, data),
+    api.patch(`/reorders/requests/${id}/`, data),
 };
 
 // Auth API
 export const authAPI = {
   login: (username: string, password: string) =>
-    api.post('/api/auth/login/', { username, password }),
+    api.post('/auth/login/', { username, password }),
 
   register: (userData: { username: string; email: string; password: string; password2: string }) =>
-    api.post('/api/auth/register/', userData),
+    api.post('/auth/register/', userData),
 
   refresh: (refreshToken: string) =>
-    api.post('/api/auth/refresh/', { refresh: refreshToken }),
+    api.post('/auth/refresh/', { refresh: refreshToken }),
 };
 
 export default api;

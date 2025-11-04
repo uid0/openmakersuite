@@ -31,7 +31,7 @@ function App() {
           <SentryRoutes>
             <Route path="/" element={<HomePage />} />
             <Route path="/scan/:itemId" element={<ScanPage />} />
-            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/orderadmin" element={<AdminDashboard />} />
             <Route path="/thanks" element={<ThanksPage />} />
             <Route path="/tv-dashboard" element={<TVDashboard />} />
             <Route path="/tv-dashboard/:location" element={<TVDashboard />} />

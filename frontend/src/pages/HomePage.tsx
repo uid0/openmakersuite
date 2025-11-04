@@ -40,11 +40,11 @@ const HomePage: React.FC = () => {
           </p>
         </div>
 
-        <div className="feature-card" onClick={() => navigate('/admin')}>
+        <div className="feature-card" onClick={() => navigate('/orderadmin')}>
           <div className="icon">⚙️</div>
           <h2>{isLoggedIn ? 'Admin Dashboard' : 'Admin Dashboard'}</h2>
           <p>
-            {isLoggedIn 
+            {isLoggedIn
               ? 'Manage reorder queue, approve requests, and process bulk orders by supplier.'
               : 'View pending reorder requests and manage inventory workflow (login for enhanced features).'
             }

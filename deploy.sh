@@ -36,6 +36,24 @@ docker-compose -f docker-compose.prod.yml exec -T backend python manage.py migra
 echo "📁 Collecting static files..."
 docker-compose -f docker-compose.prod.yml exec -T backend python manage.py collectstatic --noinput
 
+# Verify frontend build
+echo "🔍 Verifying frontend build..."
+if docker-compose -f docker-compose.prod.yml exec -T nginx ls -la /app/frontend/index.html >/dev/null 2>&1; then
+    echo "✅ Frontend files found!"
+else
+    echo "❌ Frontend files NOT found in nginx container!"
+    echo "   Checking frontend container..."
+    docker-compose -f docker-compose.prod.yml exec -T frontend ls -la /app/frontend/ || echo "   Frontend volume is empty!"
+fi
+
+# Verify static files
+echo "🔍 Verifying Django static files..."
+if docker-compose -f docker-compose.prod.yml exec -T nginx ls -la /app/staticfiles/ >/dev/null 2>&1; then
+    echo "✅ Django static files found!"
+else
+    echo "❌ Django static files NOT found!"
+fi
+
 # Create superuser (if needed)
 echo "👤 Create superuser? (y/n)"
 read -r create_superuser

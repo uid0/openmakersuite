@@ -1,0 +1,46 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e5]:
+  - generic [ref=e6]:
+    - img "Test Item" [ref=e7]
+    - generic [ref=e8]:
+      - heading "Test Item" [level=1] [ref=e9]
+      - paragraph [ref=e10]: "SKU: TEST-SKU-001"
+  - generic [ref=e11]:
+    - paragraph [ref=e12]: A test inventory item for E2E testing
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: "Location:"
+        - generic [ref=e16]: Test Location A1
+      - generic [ref=e17]:
+        - generic [ref=e18]: "Current Stock:"
+        - generic [ref=e19]: 5 units
+      - generic [ref=e20]:
+        - generic [ref=e21]: "Reorder Quantity:"
+        - generic [ref=e22]: 20 units
+      - generic [ref=e23]:
+        - generic [ref=e24]: "Average Lead Time:"
+        - generic [ref=e25]: 7 days
+      - generic [ref=e26]:
+        - generic [ref=e27]: "Supplier:"
+        - generic [ref=e28]: Test Supplier
+      - generic [ref=e29]:
+        - generic [ref=e30]: "Unit Cost:"
+        - generic [ref=e31]: $15.99
+    - generic [ref=e32]:
+      - strong [ref=e33]: ⚠ Low Stock Alert
+      - paragraph [ref=e34]: This item is below minimum stock level and needs reordering.
+  - generic [ref=e35]:
+    - heading "Request Reorder" [level=2] [ref=e36]
+    - generic [ref=e37]:
+      - generic [ref=e38]: Your Name (Optional)
+      - textbox "Your Name (Optional)" [ref=e39]:
+        - /placeholder: Enter your name
+    - generic [ref=e40]:
+      - generic [ref=e41]: Notes (Optional)
+      - textbox "Notes (Optional)" [ref=e42]:
+        - /placeholder: Any additional information...
+        - text: Running low
+    - button "Request 20 Units" [ref=e43] [cursor=pointer]
+```

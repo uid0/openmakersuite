@@ -501,8 +501,8 @@
 
 /* Item Image */
 .item-image {
-  width: 120px;
-  height: 120px;
+  width: 100px;
+  height: 100px;
   border-radius: 1rem;
   overflow: hidden;
   margin: 0 auto 1.5rem auto;
@@ -517,9 +517,10 @@
 .item-image img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain; /* Changed from 'cover' to 'contain' to show full image */
   border-radius: 1rem;
   transition: opacity 0.3s ease;
+  padding: 0.25rem; /* Add small padding to prevent edge clipping */
 }
 
 .item-image img:hover {
@@ -527,7 +528,7 @@
 }
 
 .placeholder-image {
-  font-size: 3rem;
+  font-size: 2.5rem; /* Reduced from 3rem to match smaller image container */
   opacity: 0.6;
   display: flex;
   align-items: center;
@@ -557,7 +558,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 3rem;
+  font-size: 2.5rem; /* Reduced from 3rem to match smaller image container */
   opacity: 0.6;
   z-index: 1;
 }

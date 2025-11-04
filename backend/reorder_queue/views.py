@@ -38,27 +38,15 @@ from .serializers import (
 )
 
 
-class AnonymousCsrfExemptSessionAuthentication(SessionAuthentication):
-    """Skip CSRF enforcement for anonymous requests while keeping it for logged-in admins."""
-
-    def enforce_csrf(self, request):
-        # For anonymous requests (QR code scanning), skip CSRF validation
-        # Only enforce CSRF if there's an authenticated session
-        # Check the session directly to avoid triggering authentication
-        django_request = request._request
-        
-        # If there's a session with a user_id, enforce CSRF (admin is logged in)
-        if hasattr(django_request, 'session') and django_request.session.get('_auth_user_id'):
-            return super().enforce_csrf(request)
-        
-        # No authenticated session - skip CSRF for public QR code scanning
-        return None
-
-
 class ReorderRequestViewSet(viewsets.ModelViewSet):
-    """API endpoint for reorder requests."""
+    """
+    API endpoint for reorder requests.
+    
+    Public endpoint - allows unauthenticated QR code scanning for creating requests.
+    Admin actions require JWT authentication.
+    """
 
-    authentication_classes = (JWTAuthentication, AnonymousCsrfExemptSessionAuthentication)
+    authentication_classes = (JWTAuthentication,)  # Only JWT, no session auth needed
     queryset = (
         ReorderRequest.objects.select_related("item", "reviewed_by")
         .prefetch_related("item__item_suppliers__supplier")

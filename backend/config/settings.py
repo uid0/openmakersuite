@@ -311,36 +311,20 @@ LOGGING = {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
         },
-        "django_file": {
-            "level": "INFO",
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/tmp/django.log",
-            "maxBytes": 1024 * 1024 * 10,  # 10MB
-            "backupCount": 5,
-            "formatter": "verbose",
-        },
-        "error_file": {
-            "level": "ERROR",
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/tmp/django_errors.log",
-            "maxBytes": 1024 * 1024 * 10,  # 10MB
-            "backupCount": 5,
-            "formatter": "verbose",
-        },
     },
     "loggers": {
         "django": {
-            "handlers": ["console", "django_file", "error_file"],
+            "handlers": ["console"],
             "level": "INFO",
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["console", "error_file"],
+            "handlers": ["console"],
             "level": "ERROR",
             "propagate": False,
         },
         "django.server": {
-            "handlers": ["console", "error_file"],
+            "handlers": ["console"],
             "level": "INFO",
             "propagate": False,
         },
@@ -350,18 +334,23 @@ LOGGING = {
             "propagate": False,
         },
         "inventory": {
-            "handlers": ["console", "django_file", "error_file"],
+            "handlers": ["console"],
             "level": "DEBUG" if DEBUG else "INFO",
             "propagate": False,
         },
         "reorder_queue": {
-            "handlers": ["console", "django_file", "error_file"],
+            "handlers": ["console"],
             "level": "DEBUG" if DEBUG else "INFO",
+            "propagate": False,
+        },
+        "celery": {
+            "handlers": ["console"],
+            "level": "INFO",
             "propagate": False,
         },
     },
     "root": {
-        "handlers": ["console", "error_file"],
+        "handlers": ["console"],
         "level": "INFO",
     },
 }

@@ -123,7 +123,7 @@ class ReorderRequest(models.Model):
     @property
     def days_pending(self) -> int:
         """Calculate how many days the request has been pending."""
-        if self.status == self.PENDING:
+        if self.status == self.PENDING and self.requested_at:
             return (timezone.now() - self.requested_at).days
         return 0
 

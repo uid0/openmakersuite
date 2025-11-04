@@ -24,6 +24,9 @@ RUN pip install --upgrade pip && \
 # Copy project
 COPY . /app/
 
+# Ensure entrypoint script is executable
+RUN chmod +x /app/docker-entrypoint.sh
+
 # Create directories for static and media files
 RUN mkdir -p /app/staticfiles /app/media
 
@@ -34,6 +37,8 @@ RUN python manage.py collectstatic --noinput || true
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 USER appuser
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 EXPOSE 8000
 

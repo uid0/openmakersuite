@@ -1,0 +1,34 @@
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --production=false
+
+# Copy application code
+COPY . .
+
+# Build arguments for environment variables
+ARG REACT_APP_API_URL
+ARG REACT_APP_SENTRY_DSN
+ARG REACT_APP_SENTRY_ENVIRONMENT=production
+
+# Set environment variables for build
+ENV REACT_APP_API_URL=$REACT_APP_API_URL
+ENV REACT_APP_SENTRY_DSN=$REACT_APP_SENTRY_DSN
+ENV REACT_APP_SENTRY_ENVIRONMENT=$REACT_APP_SENTRY_ENVIRONMENT
+
+# Build the application
+RUN npm run build
+
+# Production stage - just serve the build files
+FROM nginx:alpine
+
+# Copy built files
+COPY --from=builder /app/build /app/build
+
+# The actual serving will be done by the main nginx service
+CMD ["sh", "-c", "while true; do sleep 3600; done"]

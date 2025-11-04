@@ -177,6 +177,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "hazmat_compliance_status",
             "has_complete_nfpa_data",
             "is_active",
+            "is_requestable",
             "notes",
             "needs_reorder",
             "total_value",

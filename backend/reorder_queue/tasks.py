@@ -8,9 +8,10 @@ import json
 import logging
 from typing import Any, Dict
 
+from django.utils import timezone
+
 import requests
 from celery import shared_task
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 

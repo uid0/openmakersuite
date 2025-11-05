@@ -4,9 +4,10 @@ Tests for webhook functionality.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+
+import pytest
 
 from inventory.models import Category, InventoryItem, Location
 from reorder_queue.models import ReorderRequest, WebHook

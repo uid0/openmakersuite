@@ -1,0 +1,10 @@
+[DEFAULT]
+branch_name_format = {issue}-{title}
+
+[issue-tracker]
+name = github
+
+[github]
+repo = uid0/openmakersuite
+token = ${GITHUB_TOKEN}
+

@@ -227,15 +227,15 @@ class PurchaseOrder(models.Model):
     def total_quantity(self) -> int:
         """Total quantity of all items ordered."""
         return sum(
-            item.quantity_ordered for item in self.items.all()
-            if item.quantity_ordered is not None
+            item.quantity_ordered for item in self.items.all() if item.quantity_ordered is not None
         )
 
     @property
     def total_received_quantity(self) -> int:
         """Total quantity of all items received."""
         return sum(
-            item.quantity_received for item in self.items.all()
+            item.quantity_received
+            for item in self.items.all()
             if item.quantity_received is not None
         )
 
@@ -253,10 +253,7 @@ class PurchaseOrder(models.Model):
 
     def calculate_estimated_total(self) -> Decimal:
         """Calculate estimated total cost from all line items."""
-        total = sum(
-            (item.estimated_cost for item in self.items.all()),
-            start=Decimal("0.00")
-        )
+        total = sum((item.estimated_cost for item in self.items.all()), start=Decimal("0.00"))
         self.estimated_total = total
         return total
 

@@ -12,6 +12,7 @@ from .models import (
     PurchaseOrder,
     PurchaseOrderItem,
     ReorderRequest,
+    WebHook,
 )
 
 
@@ -484,3 +485,120 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
             return format_html('<span style="color: blue;">⚡ {} days early</span>', abs(variance))
         else:
             return format_html('<span style="color: red;">⚠️ {} days late</span>', variance)
+
+
+# WebHook Admin
+
+
+@admin.register(WebHook)
+class WebHookAdmin(admin.ModelAdmin):
+    list_display = [
+        "name",
+        "event_type",
+        "url",
+        "is_active",
+        "success_rate_display",
+        "total_triggers_display",
+        "last_triggered_at",
+    ]
+    list_filter = ["event_type", "is_active", "last_triggered_at"]
+    search_fields = ["name", "url", "description"]
+    readonly_fields = [
+        "success_count",
+        "failure_count",
+        "success_rate_display",
+        "total_triggers_display",
+        "last_triggered_at",
+        "last_error",
+        "created_at",
+        "updated_at",
+    ]
+
+    fieldsets = (
+        (
+            "Basic Information",
+            {"fields": ("name", "description", "event_type", "is_active")},
+        ),
+        (
+            "Endpoint Configuration",
+            {
+                "fields": ("url", "secret", "headers"),
+                "description": "Configure the webhook endpoint. Secret is used for HMAC signature verification.",
+            },
+        ),
+        (
+            "Statistics",
+            {
+                "fields": (
+                    "success_count",
+                    "failure_count",
+                    "success_rate_display",
+                    "total_triggers_display",
+                    "last_triggered_at",
+                    "last_error",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Metadata",
+            {"fields": ("created_at", "updated_at"), "classes": ("collapse",)},
+        ),
+    )
+
+    actions = ["test_selected_webhooks", "reset_statistics"]
+
+    @admin.display(description="Success Rate")
+    def success_rate_display(self, obj):
+        """Display success rate with color coding."""
+        total = obj.success_count + obj.failure_count
+        if total == 0:
+            return format_html('<span style="color: gray;">No triggers yet</span>')
+
+        rate = (obj.success_count / total) * 100
+        if rate >= 95:
+            color = "green"
+        elif rate >= 80:
+            color = "orange"
+        else:
+            color = "red"
+
+        return format_html(
+            '<span style="color: {};">{:.1f}% ({}/{})</span>',
+            color,
+            rate,
+            obj.success_count,
+            total,
+        )
+
+    @admin.display(description="Total Triggers")
+    def total_triggers_display(self, obj):
+        """Display total trigger count."""
+        total = obj.success_count + obj.failure_count
+        return format_html("{} total", total)
+
+    @admin.action(description="Test selected webhooks")
+    def test_selected_webhooks(self, request, queryset):
+        """Test selected webhook configurations."""
+        from .tasks import test_webhook
+
+        count = 0
+        for webhook in queryset:
+            test_webhook.delay(webhook.id)
+            count += 1
+
+        self.message_user(
+            request,
+            f"{count} webhook test(s) queued. Check the webhook statistics for results.",
+        )
+
+    @admin.action(description="Reset statistics for selected webhooks")
+    def reset_statistics(self, request, queryset):
+        """Reset success/failure statistics for selected webhooks."""
+        updated = queryset.update(
+            success_count=0,
+            failure_count=0,
+            last_error="",
+            last_triggered_at=None,
+        )
+        self.message_user(request, f"Statistics reset for {updated} webhook(s).")

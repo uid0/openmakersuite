@@ -1,0 +1,276 @@
+"""
+Celery tasks for reorder queue operations.
+"""
+
+import hashlib
+import hmac
+import json
+import logging
+from typing import Any, Dict
+
+import requests
+from celery import shared_task
+from django.utils import timezone
+
+logger = logging.getLogger(__name__)
+
+
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,  # Retry after 1 minute
+    autoretry_for=(requests.exceptions.RequestException,),
+)
+def send_webhook_notification(self, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:  # noqa: C901
+
+    """
+    Send webhook notifications for a specific event type.
+
+    This task finds all active webhooks for the given event type and sends
+    HTTP POST requests with the payload. It handles retries automatically
+    and records success/failure statistics.
+
+    Args:
+        event_type: Type of event (e.g., "reorder_request_created")
+        payload: Data to send in the webhook (will be JSON-encoded)
+
+    Returns:
+        Dictionary with results for each webhook
+
+    Example payload for reorder_request_created:
+        {
+            "event": "reorder_request_created",
+            "timestamp": "2025-11-05T12:34:56Z",
+            "data": {
+                "id": 123,
+                "item_name": "Paper Towels",
+                "quantity": 10,
+                "requested_by": "John Doe",
+                "status": "pending",
+                "url": "https://dms.example.com/admin/reorder_queue/reorderrequest/123/"
+            }
+        }
+    """
+    from .models import WebHook
+
+    # Find all active webhooks for this event type
+    webhooks = WebHook.objects.filter(event_type=event_type, is_active=True)
+
+    if not webhooks.exists():
+        logger.info(f"No active webhooks found for event type: {event_type}")
+        return {"event_type": event_type, "webhooks_triggered": 0}
+
+    results = {
+        "event_type": event_type,
+        "webhooks_triggered": webhooks.count(),
+        "successful": [],
+        "failed": [],
+    }
+
+    # Add event type and timestamp to payload if not present
+    if "event" not in payload:
+        payload["event"] = event_type
+    if "timestamp" not in payload:
+        payload["timestamp"] = timezone.now().isoformat()
+
+    for webhook in webhooks:
+        try:
+            # Prepare request
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "DMS-Inventory-Webhook/1.0",
+            }
+
+            # Add custom headers from webhook configuration
+            if webhook.headers:
+                headers.update(webhook.headers)
+
+            # Prepare payload
+            json_payload = json.dumps(payload)
+
+            # Add HMAC signature if secret is configured
+            if webhook.secret:
+                signature = hmac.new(
+                    webhook.secret.encode("utf-8"),
+                    json_payload.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                headers["X-Webhook-Signature"] = f"sha256={signature}"
+
+            # Send webhook
+            response = requests.post(
+                webhook.url, data=json_payload, headers=headers, timeout=30  # 30 second timeout
+            )
+
+            # Check response
+            response.raise_for_status()
+
+            # Record success
+            webhook.record_success()
+
+            results["successful"].append(
+                {
+                    "webhook_id": webhook.id,
+                    "webhook_name": webhook.name,
+                    "status_code": response.status_code,
+                }
+            )
+
+            logger.info(
+                f"Webhook '{webhook.name}' delivered successfully "
+                f"(status: {response.status_code})"
+            )
+
+        except requests.exceptions.RequestException as e:
+            # Record failure
+            error_message = str(e)
+            webhook.record_failure(error_message)
+
+            results["failed"].append(
+                {"webhook_id": webhook.id, "webhook_name": webhook.name, "error": error_message}
+            )
+
+            logger.error(f"Webhook '{webhook.name}' delivery failed: {error_message}")
+
+            # Raise exception to trigger Celery retry
+            if self.request.retries < self.max_retries:
+                raise
+
+        except Exception as e:
+            # Catch any other exceptions
+            error_message = f"Unexpected error: {str(e)}"
+            webhook.record_failure(error_message)
+
+            results["failed"].append(
+                {"webhook_id": webhook.id, "webhook_name": webhook.name, "error": error_message}
+            )
+
+            logger.exception(f"Unexpected error delivering webhook '{webhook.name}': {e}")
+
+    return results
+
+
+@shared_task
+def trigger_reorder_request_webhook(request_id: int) -> Dict[str, Any]:
+    """
+    Trigger webhook notification for a reorder request.
+
+    This task is called when a reorder request is created or updated.
+    It prepares the payload and triggers the webhook notification.
+
+    Args:
+        request_id: ID of the ReorderRequest
+
+    Returns:
+        Results from webhook delivery
+    """
+    from .models import ReorderRequest
+
+    try:
+        request = ReorderRequest.objects.select_related("item").get(id=request_id)
+    except ReorderRequest.DoesNotExist:
+        logger.error(f"ReorderRequest {request_id} not found")
+        return {"error": "ReorderRequest not found"}
+
+    # Prepare payload
+    payload = {
+        "event": "reorder_request_created",
+        "timestamp": timezone.now().isoformat(),
+        "data": {
+            "id": request.id,
+            "item_id": str(request.item.id),
+            "item_name": request.item.name,
+            "item_sku": request.item.sku,
+            "quantity": request.quantity,
+            "status": request.status,
+            "priority": request.priority,
+            "requested_by": request.requested_by,
+            "requested_at": request.requested_at.isoformat(),
+            "request_notes": request.request_notes,
+            "estimated_cost": float(request.estimated_cost) if request.estimated_cost else None,
+            # Admin URL for viewing the request
+            "admin_url": f"/admin/reorder_queue/reorderrequest/{request.id}/",
+        },
+    }
+
+    # Trigger webhook - call directly instead of using .delay() to avoid nesting tasks
+    # In production, this runs in a Celery worker, so it's still async from the web request
+    from celery import current_app
+
+    if current_app.conf.task_always_eager:
+        # In eager mode (tests), call the function directly
+        return send_webhook_notification.run("reorder_request_created", payload)
+    else:
+        # In production, queue the webhook task
+        send_webhook_notification.delay("reorder_request_created", payload)
+        return {"queued": True, "event_type": "reorder_request_created"}
+
+
+@shared_task
+def test_webhook(webhook_id: int) -> Dict[str, Any]:
+    """
+    Test a webhook configuration by sending a test payload.
+
+    Args:
+        webhook_id: ID of the WebHook to test
+
+    Returns:
+        Test result with status
+    """
+    from .models import WebHook
+
+    try:
+        webhook = WebHook.objects.get(id=webhook_id)
+    except WebHook.DoesNotExist:
+        return {"success": False, "error": "Webhook not found"}
+
+    # Prepare test payload
+    test_payload = {
+        "event": webhook.event_type,
+        "test": True,
+        "timestamp": timezone.now().isoformat(),
+        "data": {
+            "message": "This is a test webhook notification",
+            "webhook_id": webhook.id,
+            "webhook_name": webhook.name,
+        },
+    }
+
+    try:
+        # Prepare request
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "DMS-Inventory-Webhook/1.0",
+        }
+
+        # Add custom headers
+        if webhook.headers:
+            headers.update(webhook.headers)
+
+        # Prepare payload
+        json_payload = json.dumps(test_payload)
+
+        # Add HMAC signature if configured
+        if webhook.secret:
+            signature = hmac.new(
+                webhook.secret.encode("utf-8"),
+                json_payload.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            headers["X-Webhook-Signature"] = f"sha256={signature}"
+
+        # Send test webhook
+        response = requests.post(webhook.url, data=json_payload, headers=headers, timeout=30)
+
+        response.raise_for_status()
+
+        return {
+            "success": True,
+            "status_code": response.status_code,
+            "response_body": response.text[:500],  # First 500 chars of response
+        }
+
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        return {"success": False, "error": f"Unexpected error: {str(e)}"}

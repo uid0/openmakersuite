@@ -62,7 +62,7 @@ class IndexCardRendererTests(TestCase):
         )
 
         # Create a supplier with quantity per package to calculate current_cases
-        from inventory.models import Supplier, ItemSupplier
+        from inventory.models import ItemSupplier, Supplier
 
         supplier = Supplier.objects.create(name="Test Supplier", supplier_type="online")
         ItemSupplier.objects.create(

@@ -20,15 +20,19 @@ from .models import (
 
 @admin.register(Supplier)
 class SupplierAdmin(admin.ModelAdmin):
-    list_display = ["name", "supplier_type", "account_number", "tax_free_paperwork_filed", "website"]
+    list_display = [
+        "name",
+        "supplier_type",
+        "account_number",
+        "tax_free_paperwork_filed",
+        "website",
+    ]
     list_filter = ["supplier_type", "tax_free_paperwork_filed"]
     search_fields = ["name", "account_number"]
     fieldsets = (
         (
             "Basic Information",
-            {
-                "fields": ("name", "supplier_type", "website")
-            },
+            {"fields": ("name", "supplier_type", "website")},
         ),
         (
             "Account Information",
@@ -314,7 +318,12 @@ class InventoryItemAdmin(admin.ModelAdmin):
         (
             "Case-Based Reordering",
             {
-                "fields": ("use_case_based_reorder", "minimum_cases", "reorder_cases", "reorder_instruction"),
+                "fields": (
+                    "use_case_based_reorder",
+                    "minimum_cases",
+                    "reorder_cases",
+                    "reorder_instruction",
+                ),
                 "description": "Enable case/package-based reordering for bulk items like trashbags, toilet paper, etc. "
                 "Use 'reorder_instruction' to customize the text shown on index cards (e.g., 'Reorder when last case is opened').",
             },

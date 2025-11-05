@@ -10,7 +10,6 @@ from django.db.models import Avg, Count, F, Q, Sum
 from django.utils import timezone
 
 from rest_framework import status, viewsets
-from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response

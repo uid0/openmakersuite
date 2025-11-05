@@ -77,7 +77,12 @@ class ReorderRequestAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "priority", "requested_at"]
     search_fields = ["item__name", "requested_by", "order_number"]
-    readonly_fields = ["requested_at", "updated_at", "estimated_cost_display", "days_pending_display"]
+    readonly_fields = [
+        "requested_at",
+        "updated_at",
+        "estimated_cost_display",
+        "days_pending_display",
+    ]
     date_hierarchy = "requested_at"
 
     fieldsets = (
@@ -159,7 +164,12 @@ class PurchaseOrderItemInline(admin.TabularInline):
 
     model = PurchaseOrderItem
     extra = 0
-    readonly_fields = ["estimated_cost_display", "actual_cost_display", "quantity_pending", "is_fully_received"]
+    readonly_fields = [
+        "estimated_cost_display",
+        "actual_cost_display",
+        "quantity_pending",
+        "is_fully_received",
+    ]
 
     @admin.display(description="Est. Cost")
     def estimated_cost_display(self, obj):

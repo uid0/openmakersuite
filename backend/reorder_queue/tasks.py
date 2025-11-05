@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
     default_retry_delay=60,  # Retry after 1 minute
     autoretry_for=(requests.exceptions.RequestException,),
 )
-def send_webhook_notification(self, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:  # noqa: C901
-
+def send_webhook_notification(
+    self, event_type: str, payload: Dict[str, Any]
+) -> Dict[str, Any]:  # noqa: C901
     """
     Send webhook notifications for a specific event type.
 

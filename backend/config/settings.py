@@ -15,7 +15,8 @@ from sentry_sdk.integrations.redis import RedisIntegration
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = config("SECRET_KEY", default="django-insecure-dev-key-change-in-production")
+SECRET_KEY = config(
+    "SECRET_KEY", default="django-insecure-dev-key-change-in-production")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
@@ -24,7 +25,8 @@ DEBUG = config("DEBUG", default=True, cast=bool)
 # ⚠️ NEVER enable this in production!
 DEVELOPMENT_MODE = config("DEVELOPMENT_MODE", default=False, cast=bool)
 
-ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = config(
+    "ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
 
 # CSRF Settings for production deployment
 # Required when Django is behind a reverse proxy (nginx) with HTTPS
@@ -92,7 +94,8 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Database
 DATABASES = {
     "default": dj_database_url.config(
-        default=config("DATABASE_URL", default=f'sqlite:///{BASE_DIR / "db.sqlite3"}'),
+        default=config(
+            "DATABASE_URL", default=f'sqlite:///{BASE_DIR / "db.sqlite3"}'),
         conn_max_age=600,
     )
 }
@@ -201,7 +204,8 @@ CACHES = {
 }
 
 # Celery Configuration
-CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+CELERY_BROKER_URL = config(
+    "CELERY_BROKER_URL", default="redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = "django-db"  # Store results in Django database
 # Use Django cache for intermediate results
 CELERY_CACHE_BACKEND = "django-cache"
@@ -274,6 +278,7 @@ if SENTRY_DSN:
             CeleryIntegration(),
             RedisIntegration(),
         ],
+        enable_logs=True,
         environment=SENTRY_ENVIRONMENT,
         # Set traces_sample_rate to 1.0 to capture 100% of transactions for performance monitoring.
         # Adjust this value in production to reduce overhead

@@ -171,6 +171,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "minimum_cases",
             "reorder_cases",
             "current_cases",
+            "reorder_instruction",
             "supplier_name",
             "supplier_sku",
             "supplier_url",

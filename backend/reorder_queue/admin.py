@@ -77,7 +77,7 @@ class ReorderRequestAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "priority", "requested_at"]
     search_fields = ["item__name", "requested_by", "order_number"]
-    readonly_fields = ["requested_at", "updated_at", "estimated_cost", "days_pending"]
+    readonly_fields = ["requested_at", "updated_at", "estimated_cost_display", "days_pending_display"]
     date_hierarchy = "requested_at"
 
     fieldsets = (
@@ -93,7 +93,7 @@ class ReorderRequestAdmin(admin.ModelAdmin):
                     "actual_delivery",
                     "order_number",
                     "actual_cost",
-                    "estimated_cost",
+                    "estimated_cost_display",
                 )
             },
         ),
@@ -111,7 +111,7 @@ class ReorderRequestAdmin(admin.ModelAdmin):
                 "description": "Public transparency information - visible to all makerspace members",
             },
         ),
-        ("Metadata", {"fields": ("days_pending", "updated_at"), "classes": ("collapse",)}),
+        ("Metadata", {"fields": ("days_pending_display", "updated_at"), "classes": ("collapse",)}),
     )
 
     @admin.display(description="Est. Cost")
@@ -159,16 +159,16 @@ class PurchaseOrderItemInline(admin.TabularInline):
 
     model = PurchaseOrderItem
     extra = 0
-    readonly_fields = ["estimated_cost", "actual_cost", "quantity_pending", "is_fully_received"]
+    readonly_fields = ["estimated_cost_display", "actual_cost_display", "quantity_pending", "is_fully_received"]
 
     @admin.display(description="Est. Cost")
-    def estimated_cost(self, obj):
+    def estimated_cost_display(self, obj):
         if obj and obj.estimated_cost:
             return f"${obj.estimated_cost:.2f}"
         return "-"
 
     @admin.display(description="Actual Cost")
-    def actual_cost(self, obj):
+    def actual_cost_display(self, obj):
         if obj and obj.actual_cost:
             return f"${obj.actual_cost:.2f}"
         return "-"
@@ -290,8 +290,8 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
         "item_supplier__supplier__name",
     ]
     readonly_fields = [
-        "estimated_cost",
-        "actual_cost",
+        "estimated_cost_display",
+        "actual_cost_display",
         "quantity_pending",
         "is_fully_received",
         "created_at",
@@ -319,6 +319,12 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
     def estimated_cost_display(self, obj):
         if obj.estimated_cost:
             return f"${obj.estimated_cost:.2f}"
+        return "-"
+
+    @admin.display(description="Actual Cost")
+    def actual_cost_display(self, obj):
+        if obj.actual_cost:
+            return f"${obj.actual_cost:.2f}"
         return "-"
 
 

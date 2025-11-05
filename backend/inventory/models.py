@@ -77,6 +77,15 @@ class Supplier(models.Model):
         help_text="Classification of supplier by distribution type",
     )
     website = models.URLField(blank=True)
+    account_number = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Account number with this supplier (if applicable)",
+    )
+    tax_free_paperwork_filed = models.BooleanField(
+        default=False,
+        help_text="Check if tax-free paperwork has been filed with this supplier",
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -206,6 +215,11 @@ class InventoryItem(models.Model):
         default=1,
         validators=[MinValueValidator(1)],
         help_text="Number of cases/packages to reorder when stock is low (only used if case-based reordering is enabled)",
+    )
+    reorder_instruction = models.TextField(
+        blank=True,
+        help_text="Custom reorder instruction text for index cards (e.g., 'Reorder when last case is opened'). "
+        "If empty, will show default text based on stock levels.",
     )
 
     # QR code data

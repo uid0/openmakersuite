@@ -304,7 +304,11 @@ class IndexCardRenderer:
     ) -> None:
         """Draw the left section with stock info and product image."""
         # Draw Kanban stock info (reorder point and lead times)
-        if item.use_case_based_reorder:
+
+        # Use custom reorder instruction if provided
+        if item.reorder_instruction and item.reorder_instruction.strip():
+            info_lines = [item.reorder_instruction.strip()]
+        elif item.use_case_based_reorder:
             # Case-based reordering display
             info_lines = [
                 f"Reorder at: {self._pluralize(item.minimum_cases, 'case')}",

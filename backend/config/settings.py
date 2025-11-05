@@ -2,6 +2,7 @@
 Django settings for makerspace inventory management system.
 """
 
+import sys
 from pathlib import Path
 
 import dj_database_url
@@ -201,8 +202,6 @@ CACHES = {
 }
 
 # Celery Configuration
-import sys
-
 # Check if we're running tests
 TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
 

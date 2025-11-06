@@ -14,6 +14,7 @@ from .models import (
     PurchaseOrder,
     PurchaseOrderItem,
     ReorderRequest,
+    WebHook,
 )
 
 
@@ -431,3 +432,93 @@ class SupplierPerformanceSerializer(serializers.Serializer):
     # Recent activity
     last_order_date = serializers.DateTimeField(allow_null=True)
     days_since_last_order = serializers.IntegerField(allow_null=True)
+
+
+# WebHook Serializers
+
+
+class WebHookSerializer(serializers.ModelSerializer):
+    """Serializer for webhook configurations."""
+
+    # Display fields
+    event_type_display = serializers.CharField(source="get_event_type_display", read_only=True)
+    success_rate = serializers.SerializerMethodField()
+    total_triggers = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WebHook
+        fields = [
+            "id",
+            "name",
+            "description",
+            "url",
+            "event_type",
+            "event_type_display",
+            "is_active",
+            "secret",
+            "headers",
+            "last_triggered_at",
+            "success_count",
+            "failure_count",
+            "success_rate",
+            "total_triggers",
+            "last_error",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "last_triggered_at",
+            "success_count",
+            "failure_count",
+            "last_error",
+            "created_at",
+            "updated_at",
+        ]
+        extra_kwargs = {
+            "secret": {"write_only": True},  # Don't expose secret in responses
+        }
+
+    def get_success_rate(self, obj):
+        """Calculate success rate percentage."""
+        total = obj.success_count + obj.failure_count
+        if total == 0:
+            return None
+        return round((obj.success_count / total) * 100, 2)
+
+    def get_total_triggers(self, obj):
+        """Get total number of webhook triggers."""
+        return obj.success_count + obj.failure_count
+
+
+class WebHookCreateSerializer(serializers.ModelSerializer):
+    """Simplified serializer for creating webhooks."""
+
+    class Meta:
+        model = WebHook
+        fields = [
+            "name",
+            "description",
+            "url",
+            "event_type",
+            "is_active",
+            "secret",
+            "headers",
+        ]
+        extra_kwargs = {
+            "description": {"required": False},
+            "is_active": {"required": False},
+            "secret": {"required": False},
+            "headers": {"required": False},
+        }
+
+
+class WebHookTestResultSerializer(serializers.Serializer):
+    """Serializer for webhook test results."""
+
+    webhook_id = serializers.IntegerField()
+    webhook_name = serializers.CharField()
+    success = serializers.BooleanField()
+    status_code = serializers.IntegerField(required=False, allow_null=True)
+    response_time_ms = serializers.FloatField(required=False, allow_null=True)
+    error_message = serializers.CharField(required=False, allow_blank=True)
+    tested_at = serializers.DateTimeField()

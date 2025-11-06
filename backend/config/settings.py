@@ -2,6 +2,7 @@
 Django settings for makerspace inventory management system.
 """
 
+import sys
 from pathlib import Path
 
 import dj_database_url
@@ -201,10 +202,21 @@ CACHES = {
 }
 
 # Celery Configuration
-CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = "django-db"  # Store results in Django database
-# Use Django cache for intermediate results
-CELERY_CACHE_BACKEND = "django-cache"
+# Check if we're running tests
+TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
+
+if TESTING:
+    # Run tasks synchronously during tests (no Redis required)
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = True
+    CELERY_BROKER_URL = "memory://"
+    CELERY_RESULT_BACKEND = "cache"
+    CELERY_CACHE_BACKEND = "memory"
+else:
+    CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+    CELERY_RESULT_BACKEND = "django-db"  # Store results in Django database
+    CELERY_CACHE_BACKEND = "django-cache"  # Use Django cache for intermediate results
+
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

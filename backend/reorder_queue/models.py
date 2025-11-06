@@ -226,12 +226,18 @@ class PurchaseOrder(models.Model):
     @property
     def total_quantity(self) -> int:
         """Total quantity of all items ordered."""
-        return sum(item.quantity_ordered for item in self.items.all())
+        return sum(
+            item.quantity_ordered for item in self.items.all() if item.quantity_ordered is not None
+        )
 
     @property
     def total_received_quantity(self) -> int:
         """Total quantity of all items received."""
-        return sum(item.quantity_received for item in self.items.all())
+        return sum(
+            item.quantity_received
+            for item in self.items.all()
+            if item.quantity_received is not None
+        )
 
     @property
     def is_fully_received(self) -> bool:
@@ -247,7 +253,7 @@ class PurchaseOrder(models.Model):
 
     def calculate_estimated_total(self) -> Decimal:
         """Calculate estimated total cost from all line items."""
-        total = sum(item.estimated_cost for item in self.items.all())
+        total = sum((item.estimated_cost for item in self.items.all()), start=Decimal("0.00"))
         self.estimated_total = total
         return total
 
@@ -338,6 +344,8 @@ class PurchaseOrderItem(models.Model):
     @property
     def estimated_cost(self) -> Decimal:
         """Calculate estimated total cost for this line item."""
+        if self.quantity_ordered is None or self.unit_cost_ordered is None:
+            return Decimal("0.00")
         return self.quantity_ordered * self.unit_cost_ordered
 
     @property
@@ -350,11 +358,15 @@ class PurchaseOrderItem(models.Model):
     @property
     def is_fully_received(self) -> bool:
         """Check if the full ordered quantity has been received."""
+        if self.quantity_ordered is None:
+            return False
         return self.quantity_received >= self.quantity_ordered
 
     @property
     def quantity_pending(self) -> int:
         """Calculate quantity still pending delivery."""
+        if self.quantity_ordered is None:
+            return 0
         return max(0, self.quantity_ordered - self.quantity_received)
 
 
@@ -567,3 +579,107 @@ class LeadTimeLog(models.Model):
         """Auto-calculate variance when saving."""
         self.variance_days = self.actual_lead_time_days - self.estimated_lead_time_days
         super().save(*args, **kwargs)
+
+
+class WebHook(models.Model):
+    """
+    Generic webhook configuration for event notifications.
+
+    Webhooks allow external systems to be notified when specific events occur,
+    such as reorder requests, low stock alerts, delivery notifications, etc.
+    """
+
+    # Event type choices
+    REORDER_REQUEST_CREATED = "reorder_request_created"
+    REORDER_REQUEST_APPROVED = "reorder_request_approved"
+    REORDER_REQUEST_ORDERED = "reorder_request_ordered"
+    REORDER_REQUEST_RECEIVED = "reorder_request_received"
+    ITEM_LOW_STOCK = "item_low_stock"
+    PURCHASE_ORDER_CREATED = "purchase_order_created"
+    DELIVERY_RECEIVED = "delivery_received"
+
+    EVENT_TYPE_CHOICES = [
+        (REORDER_REQUEST_CREATED, "Reorder Request Created"),
+        (REORDER_REQUEST_APPROVED, "Reorder Request Approved"),
+        (REORDER_REQUEST_ORDERED, "Reorder Request Ordered"),
+        (REORDER_REQUEST_RECEIVED, "Reorder Request Received"),
+        (ITEM_LOW_STOCK, "Item Low Stock"),
+        (PURCHASE_ORDER_CREATED, "Purchase Order Created"),
+        (DELIVERY_RECEIVED, "Delivery Received"),
+    ]
+
+    # Core fields
+    name = models.CharField(max_length=200, help_text="Descriptive name for this webhook")
+    url = models.URLField(help_text="Webhook endpoint URL to POST notifications to")
+    event_type = models.CharField(
+        max_length=50,
+        choices=EVENT_TYPE_CHOICES,
+        help_text="Type of event that triggers this webhook",
+    )
+
+    # Configuration
+    is_active = models.BooleanField(
+        default=True, help_text="Enable or disable this webhook without deleting it"
+    )
+    secret = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Optional secret key for HMAC signature verification",
+    )
+    headers = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Optional custom HTTP headers to send with webhook (as JSON object)",
+    )
+
+    # Metadata
+    description = models.TextField(blank=True, help_text="Description of what this webhook does")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # Statistics
+    last_triggered_at = models.DateTimeField(
+        null=True, blank=True, help_text="When this webhook was last triggered"
+    )
+    success_count = models.PositiveIntegerField(
+        default=0, help_text="Number of successful webhook deliveries"
+    )
+    failure_count = models.PositiveIntegerField(
+        default=0, help_text="Number of failed webhook deliveries"
+    )
+    last_error = models.TextField(
+        blank=True, help_text="Last error message if webhook delivery failed"
+    )
+
+    class Meta:
+        ordering = ["event_type", "name"]
+        indexes = [
+            models.Index(fields=["event_type", "is_active"]),
+            models.Index(fields=["is_active", "-last_triggered_at"]),
+        ]
+
+    def __str__(self) -> str:
+        status = "✓" if self.is_active else "✗"
+        return f"{status} {self.name} ({self.get_event_type_display()})"
+
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate percentage."""
+        total = self.success_count + self.failure_count
+        if total == 0:
+            return 0.0
+        return (self.success_count / total) * 100
+
+    def record_success(self) -> None:
+        """Record a successful webhook delivery."""
+        self.success_count += 1
+        self.last_triggered_at = timezone.now()
+        self.last_error = ""
+        self.save(update_fields=["success_count", "last_triggered_at", "last_error"])
+
+    def record_failure(self, error_message: str) -> None:
+        """Record a failed webhook delivery."""
+        self.failure_count += 1
+        self.last_triggered_at = timezone.now()
+        self.last_error = error_message[:1000]  # Limit error message length
+        self.save(update_fields=["failure_count", "last_triggered_at", "last_error"])

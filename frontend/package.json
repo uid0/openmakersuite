@@ -13,7 +13,7 @@
     "@types/react-dom": "^18.2.17",
     "axios": "^1.6.2",
     "axios-mock-adapter": "^1.22.0",
-    "nth-class": ">=2.0.1",
+    "nth-check": ">=2.0.1",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

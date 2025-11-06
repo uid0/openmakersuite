@@ -472,30 +472,30 @@ api.interceptors.response.use(
 // Inventory API
 export const inventoryAPI = {
   getItem: (id: string) =&gt;
-    api.get&lt;InventoryItem&gt;(`/api/inventory/items/${id}/`),
+    api.get&lt;InventoryItem&gt;(`/inventory/items/${id}/`),
 &nbsp;
-  getItemSuppliers: <span class="fstat-no" title="function not covered" >(i</span>temId: string) =&gt; 
-<span class="cstat-no" title="statement not covered" >    api.get&lt;{ results: ItemSupplier[] }&gt;(`/api/inventory/item-suppliers/?item_id=${itemId}`),</span>
+  getItemSuppliers: <span class="fstat-no" title="function not covered" >(i</span>temId: string) =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;{ results: ItemSupplier[] }&gt;(`/inventory/item-suppliers/?item_id=${itemId}`),</span>
 &nbsp;
   listItems: (params?: { category?: number; search?: string }) =&gt;
-    api.get&lt;{ results: InventoryItem[] }&gt;('/api/inventory/items/', { params }),
+    api.get&lt;{ results: InventoryItem[] }&gt;('/inventory/items/', { params }),
 &nbsp;
   getLowStockItems: () =&gt;
-    api.get&lt;InventoryItem[]&gt;('/api/inventory/items/low_stock/'),
+    api.get&lt;InventoryItem[]&gt;('/inventory/items/low_stock/'),
 &nbsp;
   getReorderedItems: <span class="fstat-no" title="function not covered" >()</span> =&gt;
-<span class="cstat-no" title="statement not covered" >    api.get&lt;InventoryItem[]&gt;('/api/inventory/items/reordered/'),</span>
+<span class="cstat-no" title="statement not covered" >    api.get&lt;InventoryItem[]&gt;('/inventory/items/reordered/'),</span>
 &nbsp;
   downloadCard: (id: string) =&gt;
-    api.get(`/api/inventory/items/${id}/download_card/`, {
+    api.get(`/inventory/items/${id}/download_card/`, {
       responseType: 'blob',
     }),
 &nbsp;
   generateQR: (id: string) =&gt;
-    api.post(`/api/inventory/items/${id}/generate_qr/`),
+    api.post(`/inventory/items/${id}/generate_qr/`),
 &nbsp;
   logUsage: (id: string, quantity: number, notes?: string) =&gt;
-    api.post(`/api/inventory/items/${id}/log_usage/`, {
+    api.post(`/inventory/items/${id}/log_usage/`, {
       quantity,
       notes,
     }),
@@ -504,58 +504,58 @@ export const inventoryAPI = {
 // Assets API
 export const assetsAPI = {
   listAssets: <span class="fstat-no" title="function not covered" >(p</span>arams?: { status?: string; category?: number; search?: string }) =&gt;
-<span class="cstat-no" title="statement not covered" >    api.get&lt;{ results: Asset[] }&gt;('/api/inventory/assets/', { params }),</span>
+<span class="cstat-no" title="statement not covered" >    api.get&lt;{ results: Asset[] }&gt;('/inventory/assets/', { params }),</span>
 &nbsp;
   getAsset: <span class="fstat-no" title="function not covered" >(i</span>d: string) =&gt;
-<span class="cstat-no" title="statement not covered" >    api.get&lt;Asset&gt;(`/api/inventory/assets/${id}/`),</span>
+<span class="cstat-no" title="statement not covered" >    api.get&lt;Asset&gt;(`/inventory/assets/${id}/`),</span>
 &nbsp;
   createAsset: <span class="fstat-no" title="function not covered" >(d</span>ata: Partial&lt;Asset&gt;) =&gt;
-<span class="cstat-no" title="statement not covered" >    api.post&lt;Asset&gt;('/api/inventory/assets/', data),</span>
+<span class="cstat-no" title="statement not covered" >    api.post&lt;Asset&gt;('/inventory/assets/', data),</span>
 &nbsp;
   updateAsset: <span class="fstat-no" title="function not covered" >(i</span>d: string, data: Partial&lt;Asset&gt;) =&gt;
-<span class="cstat-no" title="statement not covered" >    api.patch&lt;Asset&gt;(`/api/inventory/assets/${id}/`, data),</span>
+<span class="cstat-no" title="statement not covered" >    api.patch&lt;Asset&gt;(`/inventory/assets/${id}/`, data),</span>
 &nbsp;
   deleteAsset: <span class="fstat-no" title="function not covered" >(i</span>d: string) =&gt;
-<span class="cstat-no" title="statement not covered" >    api.delete(`/api/inventory/assets/${id}/`),</span>
+<span class="cstat-no" title="statement not covered" >    api.delete(`/inventory/assets/${id}/`),</span>
 &nbsp;
   generateQR: <span class="fstat-no" title="function not covered" >(i</span>d: string) =&gt;
-<span class="cstat-no" title="statement not covered" >    api.post(`/api/inventory/assets/${id}/generate_qr/`),</span>
+<span class="cstat-no" title="statement not covered" >    api.post(`/inventory/assets/${id}/generate_qr/`),</span>
 };
 &nbsp;
 // Reorder API
 export const reorderAPI = {
   createRequest: (data: CreateReorderRequest) =&gt;
-    api.post&lt;ReorderRequest&gt;('/api/reorders/requests/', data),
+    api.post&lt;ReorderRequest&gt;('/reorders/requests/', data),
 &nbsp;
   listRequests: (params?: { status?: string }) =&gt;
-    api.get&lt;{ results: ReorderRequest[] }&gt;('/api/reorders/requests/', { params }),
+    api.get&lt;{ results: ReorderRequest[] }&gt;('/reorders/requests/', { params }),
 &nbsp;
   getPendingRequests: () =&gt;
-    api.get&lt;ReorderRequest[]&gt;('/api/reorders/requests/pending/'),
+    api.get&lt;ReorderRequest[]&gt;('/reorders/requests/pending/'),
 &nbsp;
   getBySupplier: () =&gt;
-    api.get('/api/reorders/requests/by_supplier/'),
+    api.get('/reorders/requests/by_supplier/'),
 &nbsp;
   approveRequest: (id: number, adminNotes?: string) =&gt;
-    api.post(`/api/reorders/requests/${id}/approve/`, { admin_notes: adminNotes }),
+    api.post(`/reorders/requests/${id}/approve/`, { admin_notes: adminNotes }),
 &nbsp;
   markOrdered: (id: number, data: {
     order_number?: string;
     estimated_delivery?: string;
     actual_cost?: number;
   }) =&gt;
-    api.post(`/api/reorders/requests/${id}/mark_ordered/`, data),
+    api.post(`/reorders/requests/${id}/mark_ordered/`, data),
 &nbsp;
   markReceived: (id: number, actualDelivery?: string) =&gt;
-    api.post(`/api/reorders/requests/${id}/mark_received/`, {
+    api.post(`/reorders/requests/${id}/mark_received/`, {
       actual_delivery: actualDelivery,
     }),
 &nbsp;
   cancelRequest: (id: number, adminNotes?: string) =&gt;
-    api.post(`/api/reorders/requests/${id}/cancel/`, { admin_notes: adminNotes }),
+    api.post(`/reorders/requests/${id}/cancel/`, { admin_notes: adminNotes }),
 &nbsp;
   generateCartLinks: () =&gt;
-    api.get('/api/reorders/requests/generate_cart_links/'),
+    api.get('/reorders/requests/generate_cart_links/'),
 &nbsp;
   updateTracking: <span class="fstat-no" title="function not covered" >(i</span>d: number, data: {
     tracking_number?: string;
@@ -563,19 +563,19 @@ export const reorderAPI = {
     expected_delivery_date?: string;
     delivery_tracking_url?: string;
   }) =&gt;
-<span class="cstat-no" title="statement not covered" >    api.patch(`/api/reorders/requests/${id}/`, data),</span>
+<span class="cstat-no" title="statement not covered" >    api.patch(`/reorders/requests/${id}/`, data),</span>
 };
 &nbsp;
 // Auth API
 export const authAPI = {
   login: (username: string, password: string) =&gt;
-    api.post('/api/auth/login/', { username, password }),
+    api.post('/auth/login/', { username, password }),
 &nbsp;
   register: <span class="fstat-no" title="function not covered" >(u</span>serData: { username: string; email: string; password: string; password2: string }) =&gt;
-<span class="cstat-no" title="statement not covered" >    api.post('/api/auth/register/', userData),</span>
+<span class="cstat-no" title="statement not covered" >    api.post('/auth/register/', userData),</span>
 &nbsp;
   refresh: (refreshToken: string) =&gt;
-    api.post('/api/auth/refresh/', { refresh: refreshToken }),
+    api.post('/auth/refresh/', { refresh: refreshToken }),
 };
 &nbsp;
 export default api;
@@ -586,7 +586,7 @@ export default api;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-11-03T23:32:51.393Z
+                at 2025-11-06T22:16:51.714Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

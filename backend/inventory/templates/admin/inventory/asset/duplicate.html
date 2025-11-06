@@ -1,0 +1,77 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+<a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+&rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+&rsaquo; <a href="{% url 'admin:inventory_asset_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+&rsaquo; <a href="{% url 'admin:inventory_asset_change' original_asset.pk %}">{{ original_asset|truncatewords:"18" }}</a>
+&rsaquo; {% trans 'Duplicate' %}
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>{% trans 'Duplicate Asset' %}</h1>
+
+<div class="module aligned">
+    <h2>Original Asset Information</h2>
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+        <p><strong>Name:</strong> {{ original_asset.name }}</p>
+        <p><strong>Current Serial Number:</strong> {{ original_asset.serial_number|default:"(none)" }}</p>
+        <p><strong>Asset Tag:</strong> {{ original_asset.asset_tag|default:"(will be auto-generated)" }}</p>
+        {% if original_asset.inventory_item %}
+            <p><strong>Type:</strong> {{ original_asset.inventory_item.name }}</p>
+        {% endif %}
+        {% if original_asset.category %}
+            <p><strong>Category:</strong> {{ original_asset.category.name }}</p>
+        {% endif %}
+        {% if original_asset.location %}
+            <p><strong>Location:</strong> {{ original_asset.location.name }}</p>
+        {% endif %}
+    </div>
+
+    <p style="margin-bottom: 20px;">
+        <strong>All information from the original asset will be copied to the new asset.</strong>
+        You only need to provide a new serial number. The asset tag will be automatically generated.
+    </p>
+</div>
+
+<form method="post" id="duplicate-asset-form">
+    {% csrf_token %}
+    
+    <fieldset class="module aligned">
+        <h2>New Asset Details</h2>
+        
+        <div class="form-row">
+            <div>
+                <label for="{{ form.serial_number.id_for_label }}" class="required">
+                    {{ form.serial_number.label }}
+                </label>
+                {{ form.serial_number }}
+                {% if form.serial_number.help_text %}
+                    <p class="help">{{ form.serial_number.help_text }}</p>
+                {% endif %}
+                {% if form.serial_number.errors %}
+                    <ul class="errorlist">
+                        {% for error in form.serial_number.errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </div>
+        </div>
+    </fieldset>
+
+    <div class="submit-row">
+        <input type="submit" value="{% trans 'Duplicate Asset' %}" class="default" name="_save">
+        <p class="deletelink-box">
+            <a href="{% url 'admin:inventory_asset_change' original_asset.pk %}" class="deletelink">{% trans 'Cancel' %}</a>
+        </p>
+    </div>
+</form>
+
+{% endblock %}
+

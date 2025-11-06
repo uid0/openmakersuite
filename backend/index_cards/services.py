@@ -25,7 +25,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 
-from inventory.models import Fixture, InventoryItem
+from inventory.models import InventoryItem
 
 
 @dataclass
@@ -568,7 +568,7 @@ class IndexCardRenderer:
             scale = min(max_image_width / image_width, available_image_space / image_height, 1)
             image_drawn_width = image_width * scale
             image_drawn_height = image_height * scale
-            image_x = left_section_x + 0.1 * inch  # Left-aligned with small margin
+            image_x = left_section_x + (left_section_width - image_drawn_width) / 2
             image_y = image_y_start - image_drawn_height
             pdf_canvas.drawImage(
                 image_reader,

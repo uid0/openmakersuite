@@ -331,9 +331,18 @@ class IndexCardRenderer:
             pdf_canvas, info_lines, left_section_x, info_y, left_section_width - 0.1 * inch
         )
 
-        # Draw product image below info
+        # Draw hazmat indicator if item is hazardous
         info_lines_height = len(info_lines) * self._highlight_style.leading
-        image_y_start = info_y - info_lines_height - 0.1 * inch
+        hazmat_y = info_y - info_lines_height - 0.15 * inch
+
+        hazmat_height = 0
+        if item.is_hazardous:
+            hazmat_height = self._draw_hazmat_indicator(
+                pdf_canvas, item, left_section_x, left_section_width, hazmat_y
+            )
+
+        # Draw product image below info and hazmat indicator
+        image_y_start = hazmat_y - hazmat_height - 0.1 * inch
 
         if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
             self._draw_product_image(
@@ -363,6 +372,156 @@ class IndexCardRenderer:
 
         # Draw CTA box
         self._draw_cta_box(pdf_canvas, item, right_section_x, right_section_width, cta_box)
+
+    def _draw_hazmat_indicator(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        left_section_x: float,
+        left_section_width: float,
+        y_position: float,
+    ) -> float:
+        """Draw hazmat indicator - either NFPA diamond or HAZMAT text.
+
+        Returns:
+            Height of the drawn indicator
+        """
+        # Check if we have complete NFPA data
+        has_nfpa_data = (
+            item.nfpa_health_hazard is not None
+            and item.nfpa_fire_hazard is not None
+            and item.nfpa_instability_hazard is not None
+        )
+
+        if has_nfpa_data:
+            # Draw NFPA diamond
+            return self._draw_nfpa_diamond(
+                pdf_canvas, item, left_section_x, left_section_width, y_position
+            )
+        else:
+            # Draw HAZMAT text
+            return self._draw_hazmat_text(pdf_canvas, left_section_x, y_position)
+
+    def _draw_nfpa_diamond(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        left_section_x: float,
+        left_section_width: float,
+        y_position: float,
+    ) -> float:
+        """Draw NFPA 704 fire diamond.
+
+        Returns:
+            Height of the diamond
+        """
+        diamond_size = 0.8 * inch
+        half_size = diamond_size / 2
+
+        # Center the diamond horizontally
+        center_x = left_section_x + left_section_width / 2
+        center_y = y_position - half_size
+
+        # Define diamond quadrants (rotated 45 degrees)
+        # Top (Health - Blue), Right (Fire - Red), Bottom (Reactivity - Yellow), Left (Special - White)
+
+        # Draw the four diamond sections
+        sections = [
+            {  # Top - Health (Blue)
+                "points": [
+                    (center_x, center_y + half_size),
+                    (center_x - half_size, center_y),
+                    (center_x, center_y),
+                    (center_x + half_size, center_y),
+                ],
+                "color": colors.HexColor("#0000FF"),
+                "value": item.nfpa_health_hazard,
+            },
+            {  # Right - Fire (Red)
+                "points": [
+                    (center_x + half_size, center_y),
+                    (center_x, center_y + half_size),
+                    (center_x, center_y),
+                    (center_x, center_y - half_size),
+                ],
+                "color": colors.HexColor("#FF0000"),
+                "value": item.nfpa_fire_hazard,
+            },
+            {  # Bottom - Instability/Reactivity (Yellow)
+                "points": [
+                    (center_x, center_y - half_size),
+                    (center_x + half_size, center_y),
+                    (center_x, center_y),
+                    (center_x - half_size, center_y),
+                ],
+                "color": colors.HexColor("#FFFF00"),
+                "value": item.nfpa_instability_hazard,
+            },
+            {  # Left - Special Hazards (White)
+                "points": [
+                    (center_x - half_size, center_y),
+                    (center_x, center_y - half_size),
+                    (center_x, center_y),
+                    (center_x, center_y + half_size),
+                ],
+                "color": colors.white,
+                "value": item.nfpa_special_hazards or "",
+            },
+        ]
+
+        # Draw each section
+        for section in sections:
+            path = pdf_canvas.beginPath()
+            path.moveTo(section["points"][0][0], section["points"][0][1])
+            for point in section["points"][1:]:
+                path.lineTo(point[0], point[1])
+            path.close()
+
+            pdf_canvas.setFillColor(section["color"])
+            pdf_canvas.setStrokeColor(colors.black)
+            pdf_canvas.setLineWidth(1)
+            pdf_canvas.drawPath(path, stroke=1, fill=1)
+
+        # Draw values/text in each section
+        pdf_canvas.setFillColor(colors.black)
+        pdf_canvas.setFont("Helvetica-Bold", 14)
+
+        # Health (top)
+        pdf_canvas.drawCentredString(
+            center_x, center_y + half_size / 2 - 5, str(sections[0]["value"])
+        )
+
+        # Fire (right)
+        pdf_canvas.drawCentredString(
+            center_x + half_size / 2, center_y - 5, str(sections[1]["value"])
+        )
+
+        # Instability (bottom)
+        pdf_canvas.drawCentredString(
+            center_x, center_y - half_size / 2 - 5, str(sections[2]["value"])
+        )
+
+        # Special (left) - may be text
+        special_value = str(sections[3]["value"]) if sections[3]["value"] else ""
+        if special_value:
+            pdf_canvas.setFont("Helvetica-Bold", 10)
+            pdf_canvas.drawCentredString(center_x - half_size / 2, center_y - 5, special_value)
+
+        return diamond_size
+
+    def _draw_hazmat_text(
+        self, pdf_canvas: canvas.Canvas, left_section_x: float, y_position: float
+    ) -> float:
+        """Draw HAZMAT text indicator.
+
+        Returns:
+            Height of the text
+        """
+        pdf_canvas.setFillColor(colors.HexColor("#FF0000"))
+        pdf_canvas.setFont("Helvetica-Bold", 16)
+        pdf_canvas.drawString(left_section_x, y_position - 0.2 * inch, "⚠ HAZMAT")
+        pdf_canvas.setFillColor(colors.black)  # Reset color
+        return 0.25 * inch
 
     def _draw_category_section(
         self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, inner_y: float

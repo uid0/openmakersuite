@@ -580,11 +580,11 @@ class WebHookAdmin(admin.ModelAdmin):
     @admin.action(description="Test selected webhooks")
     def test_selected_webhooks(self, request, queryset):
         """Test selected webhook configurations."""
-        from .tasks import test_webhook
+        from .tasks import run_webhook_test
 
         count = 0
         for webhook in queryset:
-            test_webhook.delay(webhook.id)
+            run_webhook_test.delay(webhook.id)
             count += 1
 
         self.message_user(

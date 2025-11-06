@@ -209,7 +209,7 @@ def trigger_reorder_request_webhook(request_id: int) -> Dict[str, Any]:
 
 
 @shared_task
-def test_webhook(webhook_id: int) -> Dict[str, Any]:
+def run_webhook_test(webhook_id: int) -> Dict[str, Any]:
     """
     Test a webhook configuration by sending a test payload.
 

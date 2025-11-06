@@ -79,3 +79,13 @@ def mock_celery_task(mocker):
         return mocker.patch(task_path, side_effect=lambda *args, **kwargs: None)
 
     return _mock_task
+
+
+@pytest.fixture(autouse=True)
+def configure_celery_for_tests(settings):
+    """Configure Celery to run tasks synchronously in tests."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    settings.CELERY_BROKER_URL = "memory://"
+    settings.CELERY_RESULT_BACKEND = "cache"
+    settings.CELERY_CACHE_BACKEND = "memory"

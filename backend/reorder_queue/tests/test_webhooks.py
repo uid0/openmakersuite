@@ -12,8 +12,8 @@ import pytest
 from inventory.models import Category, InventoryItem, Location
 from reorder_queue.models import ReorderRequest, WebHook
 from reorder_queue.tasks import (
+    run_webhook_test,
     send_webhook_notification,
-    test_webhook,
     trigger_reorder_request_webhook,
 )
 
@@ -233,7 +233,7 @@ class TestWebHookTasks(TestCase):
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
-        result = test_webhook(self.webhook.id)
+        result = run_webhook_test(self.webhook.id)
 
         self.assertTrue(result["success"])
         self.assertEqual(result["status_code"], 200)

@@ -254,7 +254,7 @@ class TestHazmatCalculatedProperties(TestCase):
             nfpa_instability_hazard=1,
         )
 
-        expected = "Incomplete - Missing: MSDS/SDS URL"
+        expected = "Incomplete - Missing: MSDS/SDS (URL or File)"
         self.assertEqual(item.hazmat_compliance_status, expected)
 
     def test_hazmat_compliance_status_missing_nfpa(self):
@@ -286,7 +286,7 @@ class TestHazmatCalculatedProperties(TestCase):
 
         status = item.hazmat_compliance_status
         self.assertIn("Incomplete - Missing:", status)
-        self.assertIn("MSDS/SDS URL", status)
+        self.assertIn("MSDS/SDS (URL or File)", status)
         self.assertIn("NFPA (Health, Fire, Instability)", status)
 
     def test_get_nfpa_hazard_level_display(self):

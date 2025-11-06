@@ -25,7 +25,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 
-from inventory.models import InventoryItem
+from inventory.models import Fixture, InventoryItem
 
 
 @dataclass
@@ -875,6 +875,165 @@ class IndexCardRenderer:
         timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
         return f"index_cards_{timestamp}.pdf"
 
+
+class FixtureCardRenderer(IndexCardRenderer):
+    """Render fixture refill request cards leveraging the index card layout."""
+
+    CALL_TO_ACTION = "Scan this code to request a refill"
+
+    def __init__(self, base_url: str | None = None) -> None:
+        super().__init__(base_url=base_url, blank_cards=False)
+        self._subtitle_style = ParagraphStyle(
+            name="FixtureSubtitle",
+            fontName="Helvetica",
+            fontSize=12,
+            leading=14,
+            alignment=TA_LEFT,
+            textColor=colors.HexColor("#1F2937"),
+        )
+        self._summary_style = ParagraphStyle(
+            name="FixtureSummary",
+            fontName="Helvetica",
+            fontSize=11,
+            leading=13,
+            alignment=TA_LEFT,
+            textColor=colors.HexColor("#111827"),
+        )
+        self._cta_style = ParagraphStyle(
+            name="FixtureCTA",
+            fontName="Helvetica-Bold",
+            fontSize=12,
+            leading=14,
+            alignment=TA_LEFT,
+            textColor=colors.white,
+        )
+
+    # Public helpers -------------------------------------------------
+    def render_preview(self, fixture: Fixture, blank_card: bool = False) -> bytes:
+        if blank_card:
+            raise ValueError("Fixture cards do not support blank mode.")
+        return super().render_preview(fixture, blank_card=False)
+
+    def render_to_bytes(self, fixtures: Sequence[Fixture], blank_cards: bool = False) -> bytes:
+        if blank_cards:
+            raise ValueError("Fixture cards do not support blank mode.")
+        return super().render_to_bytes(fixtures, blank_cards=False)
+
+    def render_batch_to_storage(
+        self,
+        fixtures: Sequence[Fixture],
+        filename: str | None = None,
+        blank_cards: bool = False,
+    ) -> GeneratedCardFile:
+        if blank_cards:
+            raise ValueError("Fixture cards do not support blank mode.")
+        return super().render_batch_to_storage(fixtures, filename=filename, blank_cards=False)
+
+    # Overrides ------------------------------------------------------
+    def _draw_card(
+        self,
+        pdf_canvas: canvas.Canvas,
+        fixture: Fixture,
+        origin_x: float,
+        origin_y: float,
+    ) -> None:
+        pdf_canvas.roundRect(
+            origin_x,
+            origin_y,
+            self.CARD_WIDTH,
+            self.CARD_HEIGHT,
+            radius=12,
+            stroke=1,
+            fill=0,
+        )
+
+        inner_x = origin_x + self.CARD_PADDING
+        inner_y = origin_y + self.CARD_PADDING
+        available_width = self.CARD_WIDTH - 2 * self.CARD_PADDING
+
+        # Reserve space for QR code on the right
+        qr_offset = 0.2 * inch
+        text_width = available_width - self.QR_CODE_SIZE - qr_offset
+        qr_x = inner_x + text_width + qr_offset / 2
+        qr_y = inner_y + 0.65 * inch
+
+        # Title
+        top_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING
+        title_para = Paragraph(fixture.name, self._title_style)
+        title_width, title_height = title_para.wrap(text_width, 0.7 * inch)
+        title_para.drawOn(pdf_canvas, inner_x, top_y - title_height)
+        current_y = top_y - title_height - 0.1 * inch
+
+        # Location
+        location_name = fixture.location.name if fixture.location else "Unknown location"
+        location_para = Paragraph(f"<b>Location:</b> {location_name}", self._subtitle_style)
+        _, location_height = location_para.wrap(text_width, 0.5 * inch)
+        location_para.drawOn(pdf_canvas, inner_x, current_y - location_height)
+        current_y -= location_height + 0.08 * inch
+
+        # Refill item and identifiers
+        summary_lines: list[str] = []
+        if fixture.refill_item:
+            summary_lines.append(f"<b>Refill Item:</b> {fixture.refill_item.name}")
+            if fixture.refill_item.sku:
+                summary_lines.append(f"<b>SKU:</b> {fixture.refill_item.sku}")
+        if fixture.asset_tag:
+            summary_lines.append(f"<b>Fixture ID:</b> {fixture.asset_tag}")
+
+        for line in summary_lines:
+            summary_para = Paragraph(line, self._summary_style)
+            _, summary_height = summary_para.wrap(text_width, 0.4 * inch)
+            summary_para.drawOn(pdf_canvas, inner_x, current_y - summary_height)
+            current_y -= summary_height + 0.05 * inch
+
+        # CTA box near bottom-left
+        cta_box_width = text_width
+        cta_box_height = 0.9 * inch
+        cta_box_x = inner_x
+        cta_box_y = inner_y + 0.2 * inch
+
+        pdf_canvas.saveState()
+        pdf_canvas.setFillColor(colors.HexColor("#1D4ED8"))
+        pdf_canvas.roundRect(
+            cta_box_x,
+            cta_box_y,
+            cta_box_width,
+            cta_box_height,
+            radius=10,
+            stroke=0,
+            fill=1,
+        )
+        pdf_canvas.restoreState()
+
+        cta_para = Paragraph(
+            f"{self.CALL_TO_ACTION}<br/>Let Logistics know when this fixture needs attention.",
+            self._cta_style,
+        )
+        cta_para.wrapOn(pdf_canvas, cta_box_width - 0.2 * inch, cta_box_height - 0.2 * inch)
+        cta_para.drawOn(pdf_canvas, cta_box_x + 0.1 * inch, cta_box_y + 0.25 * inch)
+
+        # QR code
+        qr_buffer = self._generate_qr_code(fixture)
+        qr_reader = ImageReader(qr_buffer)
+        pdf_canvas.drawImage(
+            qr_reader,
+            qr_x,
+            qr_y,
+            width=self.QR_CODE_SIZE,
+            height=self.QR_CODE_SIZE,
+            preserveAspectRatio=True,
+        )
+
+        # QR caption
+        pdf_canvas.setFont("Helvetica", 9)
+        caption = "Point your phone camera here to submit a refill request."
+        text_width_measure = pdfmetrics.stringWidth(caption, "Helvetica", 9)
+        caption_x = qr_x + (self.QR_CODE_SIZE - text_width_measure) / 2
+        caption_y = qr_y - 0.25 * inch
+        pdf_canvas.drawString(caption_x, caption_y, caption)
+
+    def _build_reorder_url(self, fixture: Fixture) -> str:
+        return f"{self.base_url.rstrip('/')}/scan/fixture/{fixture.id}"
 
 def build_preview_payload(
     item: InventoryItem,

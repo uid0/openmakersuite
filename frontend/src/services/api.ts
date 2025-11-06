@@ -5,7 +5,24 @@ import * as Sentry from '@sentry/react';
 import axios from 'axios';
 import { Asset, CreateReorderRequest, InventoryItem, ItemSupplier, ReorderRequest } from '../types';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const resolveApiBaseUrl = () => {
+  const rawBase = process.env.REACT_APP_API_URL;
+  const defaultBase = 'http://localhost:8000/api';
+
+  if (!rawBase || rawBase.trim().length === 0) {
+    return defaultBase;
+  }
+
+  const trimmedBase = rawBase.replace(/\/+$/, '');
+
+  if (trimmedBase.endsWith('/api') || trimmedBase.includes('/api/')) {
+    return trimmedBase;
+  }
+
+  return `${trimmedBase}/api`;
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -155,6 +172,13 @@ export const reorderAPI = {
     delivery_tracking_url?: string;
   }) =>
     api.patch(`/reorders/requests/${id}/`, data),
+};
+
+export const analyticsAPI = {
+  getTransparencyLedger: <T = unknown>() =>
+    api.get<T>('/reorders/analytics/transparency/'),
+  getLogisticsDashboard: <T = unknown>() =>
+    api.get<T>('/reorders/analytics/logistics_dashboard/'),
 };
 
 // Auth API

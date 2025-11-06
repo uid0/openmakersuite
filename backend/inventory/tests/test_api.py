@@ -10,6 +10,7 @@ from rest_framework import status
 from inventory.models import UsageLog
 from inventory.tests.factories import (
     CategoryFactory,
+    FixtureFactory,
     InventoryItemFactory,
     SupplierFactory,
     UsageLogFactory,
@@ -179,6 +180,22 @@ class TestInventoryItemAPI:
         assert response["Content-Type"] == "application/pdf"
         mock_renderer.assert_called_once_with(blank_cards=False)
         mock_instance.render_preview.assert_called_once_with(item, blank_card=False)
+
+    def test_fixture_download_card_endpoint(self, api_client, mocker):
+        """Test fixture card download endpoint."""
+        fixture = FixtureFactory()
+
+        mock_renderer = mocker.patch("index_cards.services.FixtureCardRenderer")
+        mock_instance = mock_renderer.return_value
+        mock_instance.render_preview.return_value = b"fixture pdf"
+
+        url = reverse("fixture-download_card", kwargs={"pk": str(fixture.id)})
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response["Content-Type"] == "application/pdf"
+        mock_renderer.assert_called_once_with()
+        mock_instance.render_preview.assert_called_once_with(fixture)
 
     def test_log_usage_endpoint(self, authenticated_client):
         """Test logging item usage."""

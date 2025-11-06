@@ -159,6 +159,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     nfpa_fire_diamond_display = serializers.ReadOnlyField()
     hazmat_compliance_status = serializers.ReadOnlyField()
     has_complete_nfpa_data = serializers.ReadOnlyField()
+    msds_file_url = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
@@ -200,6 +201,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             # Hazmat fields
             "is_hazardous",
             "msds_url",
+            "msds_file_url",
             "nfpa_health_hazard",
             "nfpa_fire_hazard",
             "nfpa_instability_hazard",
@@ -230,6 +232,13 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
         try:
             return obj.qr_code.url if obj.qr_code else None
+        except Exception:
+            return None
+
+    def get_msds_file_url(self, obj):
+        """Return the MSDS file URL when available."""
+        try:
+            return obj.msds_file.url if obj.msds_file else None
         except Exception:
             return None
 

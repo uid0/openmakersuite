@@ -3,7 +3,9 @@ API tests for reorder queue endpoints.
 """
 
 from datetime import timedelta
+from decimal import Decimal
 
+from django.contrib.auth.models import User
 from django.urls import reverse
 from django.utils import timezone
 
@@ -11,6 +13,7 @@ import pytest
 from rest_framework import status
 
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
+from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 from reorder_queue.tests.factories import ReorderRequestFactory
 
 
@@ -166,6 +169,89 @@ class TestReorderRequestAPI:
         assert request_obj.status == "ordered"
         assert request_obj.ordered_at is not None
         assert request_obj.order_number == "ORD-12345"
+
+    def test_public_transparency_endpoint_returns_ledger(self, api_client):
+        """Ensure the transparency endpoint is publicly accessible and returns ledger data."""
+        ordered_time = timezone.now()
+        delivery_date = ordered_time.date()
+        request_obj = ReorderRequestFactory(
+            status="received",
+            ordered_at=ordered_time,
+            actual_delivery=delivery_date,
+            actual_cost="150.25",
+            order_number="ORD-LEDGER-1",
+            invoice_number="INV-LEDGER-1",
+            public_notes="Delivered to logistics bay",
+        )
+
+        url = reverse("analytics-transparency")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data
+
+        assert data["summary"]["total_orders_with_financial_data"] == 1
+        assert data["summary"]["total_amount_spent"] == float(request_obj.actual_cost)
+
+        ledger_entry = data["ledger"][0]
+        assert ledger_entry["item_name"] == request_obj.item.name
+        assert ledger_entry["quantity"] == request_obj.quantity
+        assert ledger_entry["ordered_at"] is not None
+        assert ledger_entry["delivered_at"] == delivery_date.isoformat()
+        assert ledger_entry["actual_cost"] == float(request_obj.actual_cost)
+
+        order_entry = data["orders"][0]
+        assert order_entry["supplier_name"] == request_obj.item.supplier.name
+        assert order_entry["invoice_number"] == "INV-LEDGER-1"
+
+    def test_logistics_dashboard_public_endpoint(self, api_client):
+        """The logistics dashboard data should be accessible without authentication."""
+        urgent_request = ReorderRequestFactory(
+            status="pending", priority="urgent", quantity=7, request_notes="Needs ASAP"
+        )
+        approved_request = ReorderRequestFactory(status="approved", quantity=3)
+
+        user = User.objects.create_user(username="logistics-user", password="pass12345")
+        item_supplier = urgent_request.item.primary_item_supplier
+
+        purchase_order = PurchaseOrder.objects.create(
+            po_number="PO-LOG-001",
+            supplier=item_supplier.supplier,
+            status=PurchaseOrder.SENT,
+            created_by=user,
+            sent_at=timezone.now(),
+            expected_delivery_date=timezone.now().date() + timedelta(days=5),
+            estimated_total=Decimal("250.00"),
+        )
+
+        PurchaseOrderItem.objects.create(
+            purchase_order=purchase_order,
+            item_supplier=item_supplier,
+            quantity_ordered=10,
+            quantity_received=2,
+            unit_cost_ordered=Decimal("12.50"),
+        )
+
+        url = reverse("analytics-logistics-dashboard")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data
+
+        assert data["summary"]["pending_requests"] == 2
+        assert data["summary"]["urgent_requests"] == 1
+        assert data["summary"]["pending_orders"] == 1
+
+        # Ensure refill requests include both statuses
+        statuses = {req["status"] for req in data["refill_requests"]}
+        assert "pending" in statuses
+        assert "approved" in statuses
+
+        pending_orders = data["pending_orders"]
+        assert len(pending_orders) == 1
+        order_payload = pending_orders[0]
+        assert order_payload["po_number"] == "PO-LOG-001"
+        assert order_payload["progress_percent"] == 20.0
 
     def test_mark_received(self, authenticated_client):
         """Test marking a request as received and updating inventory."""

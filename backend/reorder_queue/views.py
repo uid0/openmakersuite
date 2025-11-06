@@ -714,6 +714,14 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
     permission_classes = [IsAuthenticated]
 
+    def get_transparency_queryset(self):
+        """Base queryset for transparency data with related objects optimized."""
+        return (
+            ReorderRequest.objects.select_related("item", "item__category")
+            .prefetch_related("item__item_suppliers__supplier")
+            .all()
+        )
+
     @action(detail=False, methods=["get"])
     def supplier_performance(self, request):
         """Get supplier performance metrics."""
@@ -844,7 +852,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
         try:
             # Get orders with transparency data (recent first)
             transparency_orders = (
-                self.get_queryset()
+                self.get_transparency_queryset()
                 .filter(
                     models.Q(actual_cost__isnull=False)
                     | models.Q(invoice_number__isnull=False)
@@ -868,10 +876,14 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
             transparency_data = []
             total_spent = Decimal("0.00")
+            ledger_entries = []
 
             for order in transparency_orders:
                 if order.actual_cost:
                     total_spent += order.actual_cost
+
+                supplier = order.item.supplier
+                supplier_name = supplier.name if supplier else None
 
                 # Public transparency information
                 order_data = {
@@ -904,12 +916,31 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     # Public notes
                     "public_notes": order.public_notes,
                     # Supplier info
-                    "supplier_name": (
-                        order.item.supplier_name if hasattr(order.item, "supplier_name") else None
-                    ),
+                    "supplier_name": supplier_name,
                 }
 
                 transparency_data.append(order_data)
+
+                ledger_entries.append(
+                    {
+                        "id": order.id,
+                        "item_name": order.item.name,
+                        "supplier_name": supplier_name,
+                        "quantity": order.quantity,
+                        "requested_at": order.requested_at.isoformat(),
+                        "ordered_at": order.ordered_at.isoformat() if order.ordered_at else None,
+                        "delivered_at": (
+                            order.actual_delivery.isoformat() if order.actual_delivery else None
+                        ),
+                        "actual_cost": float(order.actual_cost) if order.actual_cost else None,
+                        "estimated_cost": (
+                            float(order.estimated_cost) if order.estimated_cost else None
+                        ),
+                        "status": order.status,
+                        "order_number": order.order_number,
+                        "invoice_number": order.invoice_number,
+                    }
+                )
 
             # Summary statistics
             summary = {
@@ -919,10 +950,130 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 "transparency_note": "Dallas Makerspace operates with full financial transparency. All purchase information is publicly available.",
             }
 
-            return Response({"summary": summary, "orders": transparency_data})
+            return Response({"summary": summary, "orders": transparency_data, "ledger": ledger_entries})
 
         except Exception as e:
             return Response(
                 {"error": "Unable to fetch transparency data", "message": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    @action(detail=False, methods=["get"], permission_classes=[AllowAny])
+    def logistics_dashboard(self, request):
+        """
+        Public endpoint providing data for the logistics TV dashboard.
+
+        Includes open refill requests and purchase orders that are still in-flight so
+        that the logistics team can monitor work without authentication.
+        """
+
+        pending_statuses = [ReorderRequest.PENDING, ReorderRequest.APPROVED]
+        open_order_statuses = [
+            PurchaseOrder.SENT,
+            PurchaseOrder.CONFIRMED,
+            PurchaseOrder.PARTIALLY_RECEIVED,
+        ]
+
+        # Refill requests (limit to most recent 75 to keep payload light)
+        refill_requests_qs = (
+            ReorderRequest.objects.filter(status__in=pending_statuses)
+            .select_related("item", "item__location", "item__category")
+            .order_by("-priority", "requested_at")[:75]
+        )
+
+        refill_requests = []
+        urgent_count = 0
+        awaiting_approval = 0
+        for request_obj in refill_requests_qs:
+            if request_obj.priority == ReorderRequest.URGENT:
+                urgent_count += 1
+            if request_obj.status == ReorderRequest.PENDING:
+                awaiting_approval += 1
+
+            item = request_obj.item
+            location_name = item.location.name if item and item.location else "Unassigned"
+
+            days_open = max(
+                0, (timezone.now() - request_obj.requested_at).days if request_obj.requested_at else 0
+            )
+
+            refill_requests.append(
+                {
+                    "id": request_obj.id,
+                    "item_name": item.name if item else "Unknown Item",
+                    "location": location_name,
+                    "category": item.category.name if item and item.category else None,
+                    "quantity_requested": request_obj.quantity,
+                    "priority": request_obj.priority,
+                    "priority_label": request_obj.get_priority_display(),
+                    "status": request_obj.status,
+                    "status_label": request_obj.get_status_display(),
+                    "requested_at": request_obj.requested_at.isoformat()
+                    if request_obj.requested_at
+                    else None,
+                    "days_open": days_open,
+                    "requested_by": request_obj.requested_by,
+                    "public_notes": request_obj.public_notes,
+                    "request_notes": request_obj.request_notes,
+                }
+            )
+
+        # Purchase orders that are still pending delivery
+        pending_orders_qs = (
+            PurchaseOrder.objects.filter(status__in=open_order_statuses)
+            .select_related("supplier")
+            .prefetch_related("items")
+            .order_by("expected_delivery_date", "-order_date")[:50]
+        )
+
+        pending_orders = []
+        total_open_order_lines = 0
+        for order in pending_orders_qs:
+            total_items = order.total_items
+            total_quantity = order.total_quantity
+            received_quantity = order.total_received_quantity
+            total_open_order_lines += total_items
+
+            progress_percent = None
+            if total_quantity:
+                progress_percent = round((received_quantity / total_quantity) * 100, 1)
+
+            pending_orders.append(
+                {
+                    "id": order.id,
+                    "po_number": order.po_number,
+                    "supplier_name": order.supplier.name if order.supplier else "Unknown Supplier",
+                    "status": order.status,
+                    "status_label": order.get_status_display(),
+                    "sent_at": order.sent_at.isoformat() if order.sent_at else None,
+                    "expected_delivery_date": order.expected_delivery_date.isoformat()
+                    if order.expected_delivery_date
+                    else None,
+                    "days_since_ordered": order.days_since_ordered,
+                    "total_items": total_items,
+                    "total_quantity": total_quantity,
+                    "received_quantity": received_quantity,
+                    "progress_percent": progress_percent,
+                    "estimated_total": float(order.estimated_total)
+                    if order.estimated_total is not None
+                    else None,
+                    "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+                }
+            )
+
+        summary = {
+            "pending_requests": len(refill_requests),
+            "urgent_requests": urgent_count,
+            "awaiting_approval": awaiting_approval,
+            "pending_orders": len(pending_orders),
+            "open_order_lines": total_open_order_lines,
+        }
+
+        return Response(
+            {
+                "summary": summary,
+                "refill_requests": refill_requests,
+                "pending_orders": pending_orders,
+                "last_updated": timezone.now().isoformat(),
+            }
+        )

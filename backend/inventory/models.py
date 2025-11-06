@@ -234,6 +234,13 @@ class InventoryItem(models.Model):
         verbose_name="Material Safety Data Sheet URL",
         help_text="Link to the Material Safety Data Sheet (MSDS) or Safety Data Sheet (SDS)",
     )
+    msds_file = models.FileField(
+        upload_to="inventory/msds/",
+        blank=True,
+        null=True,
+        verbose_name="MSDS/SDS File Upload",
+        help_text="Upload the Material Safety Data Sheet (MSDS/SDS) PDF or document file",
+    )
 
     # NFPA Fire Diamond (National Fire Protection Association)
     # Scale: 0 = Minimal, 1 = Slight, 2 = Moderate, 3 = High, 4 = Extreme
@@ -490,8 +497,9 @@ class InventoryItem(models.Model):
 
         missing_items = []
 
-        if not self.msds_url:
-            missing_items.append("MSDS/SDS URL")
+        # Check if either URL or file is provided
+        if not self.msds_url and not self.msds_file:
+            missing_items.append("MSDS/SDS (URL or File)")
 
         if not self.has_complete_nfpa_data:
             missing_nfpa = []

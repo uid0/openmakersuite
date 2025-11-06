@@ -13,7 +13,15 @@ from factory.django import DjangoModelFactory
 from faker import Faker as FakerGenerator
 from PIL import Image
 
-from inventory.models import Category, InventoryItem, ItemSupplier, Location, Supplier, UsageLog
+from inventory.models import (
+    Category,
+    Fixture,
+    InventoryItem,
+    ItemSupplier,
+    Location,
+    Supplier,
+    UsageLog,
+)
 
 
 class LocationFactory(DjangoModelFactory):
@@ -190,3 +198,17 @@ class UsageLogFactory(DjangoModelFactory):
     item = SubFactory(InventoryItemFactory)
     quantity_used = Faker("random_int", min=1, max=10)
     notes = Faker("text", max_nb_chars=100)
+
+
+class FixtureFactory(DjangoModelFactory):
+    """Factory for creating Fixture instances."""
+
+    class Meta:
+        model = Fixture
+
+    name = factory.Sequence(lambda n: f"Fixture {n}")
+    description = Faker("sentence")
+    location = SubFactory(LocationFactory)
+    refill_item = SubFactory(InventoryItemFactory)
+    asset_tag = factory.Sequence(lambda n: f"FIX-{n:05d}")
+    is_active = True

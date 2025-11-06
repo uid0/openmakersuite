@@ -4,8 +4,8 @@
  */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import AuthSection from '../components/AuthSection';
 import AssetList from '../components/AssetList';
+import AuthSection from '../components/AuthSection';
 import '../styles/HomePage.css';
 
 const HomePage: React.FC = () => {
@@ -77,6 +77,18 @@ const HomePage: React.FC = () => {
             Open TV Dashboard
           </button>
         </div>
+
+        <div className="feature-card" onClick={() => navigate('/tv-logistics')}>
+          <div className="icon">🚛</div>
+          <h2>Logistics Display</h2>
+          <p>
+            FireTV-friendly board for the logistics bay. Highlights refill requests, open purchase orders,
+            and progress toward delivery.
+          </p>
+          <button className="card-button">
+            Launch Logistics Dashboard
+          </button>
+        </div>
       </div>
 
       <AssetList />
@@ -124,7 +136,7 @@ const HomePage: React.FC = () => {
           Open Source Makerspace Inventory Management System
           <br />
           <a
-            href="https://github.com/yourusername/makerspace-inventory"
+            href="https://github.com/uid0/openmakersuite/"
             target="_blank"
             rel="noopener noreferrer"
           >

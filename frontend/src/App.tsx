@@ -5,6 +5,7 @@ import * as Sentry from '@sentry/react';
 import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import AdminDashboard from './pages/AdminDashboard';
 import HomePage from './pages/HomePage';
+import LogisticsDashboard from './pages/LogisticsDashboard';
 import ScanPage from './pages/ScanPage';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
@@ -35,6 +36,7 @@ function App() {
             <Route path="/thanks" element={<ThanksPage />} />
             <Route path="/tv-dashboard" element={<TVDashboard />} />
             <Route path="/tv-dashboard/:location" element={<TVDashboard />} />
+            <Route path="/tv-logistics" element={<LogisticsDashboard />} />
             <Route path="/transparency" element={<TransparencyPage />} />
           </SentryRoutes>
         </Sentry.ErrorBoundary>

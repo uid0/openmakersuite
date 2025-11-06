@@ -280,6 +280,12 @@ class PurchaseOrder(models.Model):
             self.po_number = f"PO-{year}-{next_num:04d}"
         return self.po_number
 
+    def save(self, *args, **kwargs) -> None:
+        """Ensure a PO number exists before saving."""
+        if not self.po_number:
+            self.auto_generate_po_number()
+        super().save(*args, **kwargs)
+
 
 class PurchaseOrderItem(models.Model):
     """

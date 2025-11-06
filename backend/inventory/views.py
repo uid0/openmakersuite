@@ -611,6 +611,28 @@ class FixtureViewSet(viewsets.ModelViewSet):
 
         return queryset.order_by("location__name", "name")
 
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="download_card",
+        url_name="download_card",
+        name="Download Fixture Card",
+    )
+    def download_card(self, request, pk=None):
+        """Generate and download a fixture refill request card."""
+        fixture = self.get_object()
+
+        from index_cards.services import FixtureCardRenderer
+
+        renderer = FixtureCardRenderer()
+        pdf_bytes = renderer.render_preview(fixture)
+        identifier = fixture.asset_tag or fixture.id
+        filename = f"fixture_card_{identifier}.pdf"
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
     @action(detail=True, methods=["post"], permission_classes=[AllowAny])
     def scan(self, request, pk=None):
         """

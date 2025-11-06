@@ -140,6 +140,104 @@
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
 }
 
+/* Ledger Section */
+.ledger-section {
+  background: rgba(248, 250, 252, 0.08);
+  border: 2px solid rgba(248, 250, 252, 0.15);
+  border-radius: 1.5rem;
+  padding: 2rem;
+  margin-bottom: 3rem;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.section-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.section-header h2 {
+  color: #ffffff;
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.section-subtitle {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 1rem;
+  margin: 0 auto;
+  max-width: 700px;
+}
+
+.ledger-table-container {
+  overflow-x: auto;
+}
+
+.ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.ledger-table th,
+.ledger-table td {
+  padding: 0.9rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.ledger-table th {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.85);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.ledger-table tbody tr:hover {
+  background: rgba(30, 41, 59, 0.35);
+}
+
+.ledger-item-name {
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.ledger-item-meta {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: rgba(148, 163, 184, 0.85);
+}
+
+.ledger-item-meta span {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 9999px;
+  padding: 0.2rem 0.75rem;
+}
+
+.ledger-status {
+  display: inline-block;
+  padding: 0.35rem 0.9rem;
+  border-radius: 9999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.empty-ledger {
+  text-align: center;
+  padding: 2rem;
+  border: 2px dashed rgba(148, 163, 184, 0.3);
+  border-radius: 1rem;
+  color: rgba(148, 163, 184, 0.8);
+  background: rgba(15, 23, 42, 0.35);
+}
+
 /* Orders Section */
 .orders-section h2 {
   color: #ffffff;
@@ -386,5 +484,4 @@
     gap: 0.2rem;
   }
 }
-
 

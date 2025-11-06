@@ -3,16 +3,8 @@
  * Dedicated to makerspace transparency and community trust
  */
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
 import '../styles/TransparencyPage.css';
-
-// Create axios instance with proper base URL
-const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+import { analyticsAPI } from '../services/api';
 
 interface TransparencyOrder {
   id: number;
@@ -44,9 +36,25 @@ interface TransparencySummary {
   transparency_note: string;
 }
 
+interface LedgerEntry {
+  id: number;
+  item_name: string;
+  supplier_name: string | null;
+  quantity: number;
+  requested_at: string;
+  ordered_at: string | null;
+  delivered_at: string | null;
+  actual_cost: number | null;
+  estimated_cost: number | null;
+  status: string;
+  order_number: string;
+  invoice_number: string;
+}
+
 interface TransparencyData {
   summary: TransparencySummary;
   orders: TransparencyOrder[];
+  ledger: LedgerEntry[];
 }
 
 const TransparencyPage: React.FC = () => {
@@ -57,7 +65,7 @@ const TransparencyPage: React.FC = () => {
   useEffect(() => {
     const fetchTransparencyData = async () => {
       try {
-        const response = await api.get<TransparencyData>('/reorders/transparency/');
+        const response = await analyticsAPI.getTransparencyLedger<TransparencyData>();
         setData(response.data);
       } catch (err: any) {
         setError('Unable to load transparency data');
@@ -85,6 +93,11 @@ const TransparencyPage: React.FC = () => {
       month: 'short',
       day: 'numeric'
     });
+  };
+
+  const formatStatus = (status: string) => {
+    if (!status) return 'Unknown';
+    return status.charAt(0).toUpperCase() + status.slice(1);
   };
 
   if (loading) {
@@ -142,6 +155,63 @@ const TransparencyPage: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="ledger-section">
+        <div className="section-header">
+          <h2>Logistics Purchase Ledger</h2>
+          <p className="section-subtitle">
+            Chronological record of purchases handled by the logistics team to keep our community informed.
+          </p>
+        </div>
+        {data.ledger.length === 0 ? (
+          <div className="empty-ledger">
+            <p>No logistics purchases with transparency data have been recorded yet.</p>
+          </div>
+        ) : (
+          <div className="ledger-table-container">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>Requested</th>
+                  <th>Ordered</th>
+                  <th>Delivered</th>
+                  <th>Item</th>
+                  <th>Qty</th>
+                  <th>Supplier</th>
+                  <th>Cost</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.ledger.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{formatDate(entry.requested_at)}</td>
+                    <td>{formatDate(entry.ordered_at)}</td>
+                    <td>{formatDate(entry.delivered_at)}</td>
+                    <td>
+                      <div className="ledger-item-name">{entry.item_name}</div>
+                      {(entry.order_number || entry.invoice_number) && (
+                        <div className="ledger-item-meta">
+                          {entry.order_number && <span>Order #{entry.order_number}</span>}
+                          {entry.invoice_number && <span>Invoice #{entry.invoice_number}</span>}
+                        </div>
+                      )}
+                    </td>
+                    <td>{entry.quantity}</td>
+                    <td>{entry.supplier_name || 'N/A'}</td>
+                    <td>{formatCurrency(entry.actual_cost ?? entry.estimated_cost)}</td>
+                    <td>
+                      <span className={`ledger-status status-${entry.status}`}>
+                        {formatStatus(entry.status)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="orders-section">
@@ -277,5 +347,3 @@ const TransparencyPage: React.FC = () => {
 };
 
 export default TransparencyPage;
-
-

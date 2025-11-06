@@ -336,6 +336,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
                 "fields": (
                     "is_hazardous",
                     "msds_url",
+                    "msds_file",
                     "nfpa_health_hazard",
                     "nfpa_fire_hazard",
                     "nfpa_instability_hazard",
@@ -343,7 +344,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
                     "nfpa_fire_diamond_display",
                     "hazmat_compliance_status",
                 ),
-                "description": "Safety information for hazardous materials. NFPA ratings: 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+                "description": "Safety information for hazardous materials. Provide either an MSDS URL or upload the file directly. NFPA ratings: 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
             },
         ),
         (

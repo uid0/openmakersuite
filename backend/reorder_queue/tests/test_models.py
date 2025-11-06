@@ -10,8 +10,8 @@ from django.utils import timezone
 import pytest
 from freezegun import freeze_time
 
-from inventory.tests.factories import InventoryItemFactory
-from reorder_queue.models import ReorderRequest
+from inventory.tests.factories import InventoryItemFactory, SupplierFactory
+from reorder_queue.models import PurchaseOrder, ReorderRequest
 from reorder_queue.tests.factories import ReorderRequestFactory, UserFactory
 
 
@@ -117,3 +117,30 @@ class TestReorderRequestModel:
 
         assert request.estimated_delivery == estimated
         assert request.actual_delivery == actual
+
+
+@pytest.mark.unit
+class TestPurchaseOrderModel:
+    """Tests for the PurchaseOrder model."""
+
+    @freeze_time("2024-04-10 09:30:00")
+    def test_po_number_auto_generated_on_save(self):
+        """PO number should be generated when missing."""
+        supplier = SupplierFactory()
+        user = UserFactory()
+
+        po = PurchaseOrder.objects.create(supplier=supplier, created_by=user)
+
+        assert po.po_number == "PO-2024-0001"
+
+    @freeze_time("2024-04-10 09:30:00")
+    def test_po_number_increments_sequentially(self):
+        """Subsequent POs in same year should increment."""
+        supplier = SupplierFactory()
+        user = UserFactory()
+
+        po1 = PurchaseOrder.objects.create(supplier=supplier, created_by=user)
+        po2 = PurchaseOrder.objects.create(supplier=supplier, created_by=user)
+
+        assert po1.po_number == "PO-2024-0001"
+        assert po2.po_number == "PO-2024-0002"

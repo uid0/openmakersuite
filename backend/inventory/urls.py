@@ -9,6 +9,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AssetViewSet,
     CategoryViewSet,
+    FixtureRefillRequestViewSet,
+    FixtureViewSet,
     InventoryItemViewSet,
     ItemSupplierViewSet,
     PriceHistoryViewSet,
@@ -24,6 +26,8 @@ router.register(r"assets", AssetViewSet)
 router.register(r"usage-logs", UsageLogViewSet)
 router.register(r"item-suppliers", ItemSupplierViewSet)
 router.register(r"price-history", PriceHistoryViewSet)
+router.register(r"fixtures", FixtureViewSet)
+router.register(r"fixture-refill-requests", FixtureRefillRequestViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),

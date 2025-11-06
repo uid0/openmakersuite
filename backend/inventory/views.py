@@ -16,6 +16,8 @@ from rest_framework.response import Response
 from .models import (
     Asset,
     Category,
+    Fixture,
+    FixtureRefillRequest,
     InventoryItem,
     ItemSupplier,
     Location,
@@ -26,6 +28,9 @@ from .models import (
 from .serializers import (
     AssetSerializer,
     CategorySerializer,
+    FixtureDetailSerializer,
+    FixtureRefillRequestSerializer,
+    FixtureSerializer,
     InventoryItemDetailSerializer,
     InventoryItemSerializer,
     ItemSupplierSerializer,
@@ -568,3 +573,163 @@ class AssetViewSet(viewsets.ModelViewSet):
         response = HttpResponse(asset.qr_code.read(), content_type="image/png")
         response["Content-Disposition"] = f'attachment; filename="asset-{asset.asset_tag}-qr.png"'
         return response
+
+
+class FixtureViewSet(viewsets.ModelViewSet):
+    """API endpoint for fixtures (refillable assets)."""
+
+    queryset = Fixture.objects.select_related("location", "refill_item").all()
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_serializer_class(self):
+        if self.action == "retrieve":
+            return FixtureDetailSerializer
+        return FixtureSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        # Filter by location if specified
+        location = self.request.query_params.get("location")
+        if location:
+            queryset = queryset.filter(location_id=location)
+
+        # Filter by active status if specified
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == "true")
+
+        # Search functionality
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(description__icontains=search)
+                | Q(asset_tag__icontains=search)
+                | Q(location__name__icontains=search)
+            )
+
+        return queryset.order_by("location__name", "name")
+
+    @action(detail=True, methods=["post"], permission_classes=[AllowAny])
+    def scan(self, request, pk=None):
+        """
+        Create a refill request when a fixture QR code is scanned.
+        Anyone can scan (AllowAny).
+        """
+        fixture = self.get_object()
+
+        if not fixture.is_active:
+            return Response(
+                {"error": "This fixture is inactive"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get username from request if authenticated
+        requested_by = ""
+        if request.user and request.user.is_authenticated:
+            requested_by = request.user.username
+
+        # Create the refill request
+        refill_request = FixtureRefillRequest.objects.create(
+            fixture=fixture, requested_by=requested_by
+        )
+
+        # Send webhook notification
+        from reorder_queue.tasks import send_fixture_refill_webhook
+
+        try:
+            send_fixture_refill_webhook.delay(str(refill_request.id))
+        except Exception:
+            # Log but don't fail the request if webhook fails
+            pass
+
+        serializer = FixtureRefillRequestSerializer(refill_request)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def resolve_all(self, request, pk=None):
+        """
+        Mark all pending refill requests for this fixture as completed.
+        Requires authentication.
+        """
+        fixture = self.get_object()
+
+        # Get the user who is resolving
+        resolved_by = request.user.username if request.user.is_authenticated else ""
+        notes = request.data.get("notes", "")
+
+        # Update all pending requests
+        from django.utils import timezone
+
+        updated_count = FixtureRefillRequest.objects.filter(
+            fixture=fixture, status="pending"
+        ).update(
+            status="completed",
+            resolved_at=timezone.now(),
+            resolved_by=resolved_by,
+            notes=notes if notes else F("notes"),  # Only update notes if provided
+        )
+
+        return Response(
+            {
+                "message": f"Resolved {updated_count} pending refill request(s)",
+                "fixture": FixtureDetailSerializer(fixture).data,
+            }
+        )
+
+
+class FixtureRefillRequestViewSet(viewsets.ModelViewSet):
+    """API endpoint for fixture refill requests."""
+
+    queryset = FixtureRefillRequest.objects.select_related(
+        "fixture", "fixture__location", "fixture__refill_item"
+    ).all()
+    serializer_class = FixtureRefillRequestSerializer
+
+    def get_permissions(self):
+        """Allow anyone to create requests (scan QR codes), but require auth for other operations."""
+        if self.action == "create":
+            return [AllowAny()]
+        return [IsAuthenticatedOrReadOnly()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        # Filter by fixture if specified
+        fixture = self.request.query_params.get("fixture")
+        if fixture:
+            queryset = queryset.filter(fixture_id=fixture)
+
+        # Filter by status if specified
+        request_status = self.request.query_params.get("status")
+        if request_status:
+            queryset = queryset.filter(status=request_status)
+
+        # Filter by location if specified
+        location = self.request.query_params.get("location")
+        if location:
+            queryset = queryset.filter(fixture__location_id=location)
+
+        return queryset.order_by("-requested_at")
+
+    @action(detail=True, methods=["post"])
+    def resolve(self, request, pk=None):
+        """Mark a single refill request as completed."""
+        refill_request = self.get_object()
+
+        if refill_request.status == "completed":
+            return Response(
+                {"error": "This request is already completed"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.utils import timezone
+
+        refill_request.status = "completed"
+        refill_request.resolved_at = timezone.now()
+        refill_request.resolved_by = request.user.username if request.user.is_authenticated else ""
+        refill_request.notes = request.data.get("notes", refill_request.notes)
+        refill_request.save()
+
+        serializer = self.get_serializer(refill_request)
+        return Response(serializer.data)

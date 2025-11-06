@@ -8,6 +8,7 @@
 - Most calls to actions will be either by wehook push to either discord or integration into slack. Keep that in mind when receiving alerts about supplies being out or areas that may need attention from either the cleaning staff or the logistics/supply team.
 - Keep in mind that you may be working in a context local to the developer's machine, or inside the .devcontainer. When writing scripts, assume that the developer's machine is running zsh or bash, and that the .devcontainer runs bash. When running scripts, make sure that you're running inside the devcontainer or on the developer's system.
 - The developer does approve some actions manually, so please don't assume that the changes you've asked for are immediately ready for use.
+- Place all shell scripts in the ./scripts/ directory
 
 ## Architecture
 
@@ -17,3 +18,47 @@
 - Always write appropriate unit, integration, and end-to-end tests using the native language tools and playwright if needed.
 - You don't need to create a markdown file for the things that you've done in the repository. Feel free to summarize those changes in the AGENT's file when they would be beneficial for either a human developer, you, or other development agents in the future.
 - Always use black, isort, flake8 for python code to make sure that your code is complianct with the tools that we Lint and CI with.
+
+## Backend
+- Use `python manage.py startapp` to create new apps within your project
+- Keep models in `models.py` and register them in `admin.py` for admin interface
+- Use Django's ORM instead of raw SQL queries
+- Avoid N+1 queries with `select_related` and `prefetch_related`:
+
+```python
+# Good pattern
+users = User.objects.select_related('profile')
+posts = Post.objects.prefetch_related('tags')
+```
+
+- Use Django forms for validation:
+
+```python
+class UserForm(forms.ModelForm):
+    class Meta:
+        model = User
+        fields = ['username', 'email']
+```
+
+- Create custom model managers for common queries:
+
+```python
+class ActiveUserManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_active=True)
+```
+
+- Use Django's built-in authentication system
+- Store settings in environment variables and access via `settings.py`
+
+
+## Frontend
+- Use functional components with hooks
+- Follow a consistent folder structure (components, screens, navigation, services, hooks, utils)
+- Use React Navigation for screen navigation
+- Use StyleSheet for styling instead of inline styles
+- Use FlatList for rendering lists instead of map + ScrollView
+- Use custom hooks for reusable logic
+- Implement proper error boundaries and loading states
+- Optimize images and assets for mobile performance
+

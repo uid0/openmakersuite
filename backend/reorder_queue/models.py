@@ -597,6 +597,7 @@ class WebHook(models.Model):
     ITEM_LOW_STOCK = "item_low_stock"
     PURCHASE_ORDER_CREATED = "purchase_order_created"
     DELIVERY_RECEIVED = "delivery_received"
+    FIXTURE_REFILL_REQUESTED = "fixture_refill_requested"
 
     EVENT_TYPE_CHOICES = [
         (REORDER_REQUEST_CREATED, "Reorder Request Created"),
@@ -606,6 +607,7 @@ class WebHook(models.Model):
         (ITEM_LOW_STOCK, "Item Low Stock"),
         (PURCHASE_ORDER_CREATED, "Purchase Order Created"),
         (DELIVERY_RECEIVED, "Delivery Received"),
+        (FIXTURE_REFILL_REQUESTED, "Fixture Refill Requested"),
     ]
 
     # Core fields

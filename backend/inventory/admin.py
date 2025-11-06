@@ -9,6 +9,8 @@ from django.utils.html import format_html
 from .models import (
     Asset,
     Category,
+    Fixture,
+    FixtureRefillRequest,
     InventoryItem,
     ItemSupplier,
     Location,
@@ -625,3 +627,240 @@ class AssetAdmin(admin.ModelAdmin):
         return "—"
 
     api_link.short_description = "API Link"
+
+
+class FixtureRefillRequestInline(admin.TabularInline):
+    """Inline admin for refill requests within fixture admin."""
+
+    model = FixtureRefillRequest
+    extra = 0
+    fields = ["status", "requested_at", "requested_by", "resolved_at", "resolved_by", "notes"]
+    readonly_fields = ["requested_at"]
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        """Prevent adding refill requests from inline (they come from scans)."""
+        return False
+
+
+@admin.register(Fixture)
+class FixtureAdmin(admin.ModelAdmin):
+    """Admin interface for managing fixtures (refillable assets)."""
+
+    list_display = [
+        "name",
+        "location",
+        "refill_item_link",
+        "asset_tag",
+        "is_active",
+        "pending_requests_badge",
+        "qr_code_link",
+        "api_link",
+    ]
+    list_filter = ["location", "is_active"]
+    search_fields = ["name", "description", "asset_tag", "location__name"]
+    readonly_fields = [
+        "id",
+        "created_at",
+        "updated_at",
+        "pending_requests_count",
+        "qr_code_link",
+        "api_link",
+    ]
+    inlines = [FixtureRefillRequestInline]
+
+    fieldsets = (
+        (
+            "Basic Information",
+            {
+                "fields": (
+                    "name",
+                    "description",
+                    "location",
+                    "refill_item",
+                    "asset_tag",
+                    "is_active",
+                )
+            },
+        ),
+        (
+            "Status & Links",
+            {
+                "fields": (
+                    "pending_requests_count",
+                    "qr_code_link",
+                    "api_link",
+                )
+            },
+        ),
+        (
+            "Timestamps",
+            {
+                "fields": ("created_at", "updated_at"),
+                "classes": ("collapse",),
+            },
+        ),
+    )
+
+    def refill_item_link(self, obj):
+        """Create a clickable link to the refill item."""
+        if obj.refill_item:
+            url = reverse("admin:inventory_inventoryitem_change", args=[obj.refill_item.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.refill_item.name)
+        return "—"
+
+    refill_item_link.short_description = "Refill Item"
+
+    def pending_requests_badge(self, obj):
+        """Display pending requests count with badge."""
+        count = obj.pending_requests_count
+        if count > 0:
+            return format_html(
+                '<span style="background: #dc3545; color: white; padding: 4px 8px; border-radius: 12px; font-weight: bold;">{} pending</span>',
+                count,
+            )
+        return format_html('<span style="color: #28a745; font-weight: bold;">✓ None pending</span>')
+
+    pending_requests_badge.short_description = "Pending Requests"
+
+    def qr_code_link(self, obj):
+        """Display QR code URL for scanning."""
+        if obj.pk:
+            from django.conf import settings
+
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+            scan_url = f"{frontend_url}/scan/fixture/{obj.pk}"
+            return format_html(
+                '<a href="{}" target="_blank" style="background: #28a745; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px;">📱 Scan to Request Refill</a>',
+                scan_url,
+            )
+        return "—"
+
+    qr_code_link.short_description = "QR Code Link"
+
+    def api_link(self, obj):
+        """Create a link to the DRF API endpoint for this Fixture."""
+        if obj.pk:
+            api_url = f"/api/inventory/fixtures/{obj.pk}/"
+            return format_html(
+                '<a href="{}" target="_blank" style="background: #007cba; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px;">📡 See API Object</a>',
+                api_url,
+            )
+        return "—"
+
+    api_link.short_description = "API Link"
+
+
+@admin.register(FixtureRefillRequest)
+class FixtureRefillRequestAdmin(admin.ModelAdmin):
+    """Admin interface for viewing and managing fixture refill requests."""
+
+    list_display = [
+        "fixture_link",
+        "fixture_location",
+        "refill_item_link",
+        "status_badge",
+        "requested_at",
+        "requested_by",
+        "resolved_at",
+        "resolved_by",
+        "time_to_resolve_display",
+    ]
+    list_filter = ["status", "fixture__location", "requested_at", "resolved_at"]
+    search_fields = [
+        "fixture__name",
+        "fixture__location__name",
+        "requested_by",
+        "resolved_by",
+        "notes",
+    ]
+    readonly_fields = [
+        "id",
+        "fixture",
+        "requested_at",
+        "requested_by",
+        "time_to_resolve",
+    ]
+    date_hierarchy = "requested_at"
+
+    fieldsets = (
+        (
+            "Request Information",
+            {
+                "fields": (
+                    "fixture",
+                    "status",
+                    "requested_at",
+                    "requested_by",
+                )
+            },
+        ),
+        (
+            "Resolution",
+            {
+                "fields": (
+                    "resolved_at",
+                    "resolved_by",
+                    "notes",
+                    "time_to_resolve",
+                )
+            },
+        ),
+    )
+
+    def fixture_link(self, obj):
+        """Create a clickable link to the fixture."""
+        if obj.fixture:
+            url = reverse("admin:inventory_fixture_change", args=[obj.fixture.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.fixture.name)
+        return "—"
+
+    fixture_link.short_description = "Fixture"
+
+    def fixture_location(self, obj):
+        """Display the fixture's location."""
+        return obj.fixture.location.name if obj.fixture and obj.fixture.location else "—"
+
+    fixture_location.short_description = "Location"
+
+    def refill_item_link(self, obj):
+        """Create a clickable link to the refill item."""
+        if obj.fixture and obj.fixture.refill_item:
+            url = reverse("admin:inventory_inventoryitem_change", args=[obj.fixture.refill_item.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.fixture.refill_item.name)
+        return "—"
+
+    refill_item_link.short_description = "Refill Item"
+
+    def status_badge(self, obj):
+        """Display status with color-coded badge."""
+        status_colors = {
+            "pending": "#ffc107",
+            "in_progress": "#17a2b8",
+            "completed": "#28a745",
+            "cancelled": "#6c757d",
+        }
+        color = status_colors.get(obj.status, "#6c757d")
+        return format_html(
+            '<span style="background: {}; color: white; padding: 4px 8px; border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            obj.get_status_display(),
+        )
+
+    status_badge.short_description = "Status"
+
+    def time_to_resolve_display(self, obj):
+        """Display time to resolve in a human-readable format."""
+        if obj.time_to_resolve:
+            minutes = obj.time_to_resolve
+            if minutes < 60:
+                return f"{minutes} min"
+            elif minutes < 1440:  # Less than a day
+                hours = minutes / 60
+                return f"{hours:.1f} hrs"
+            else:
+                days = minutes / 1440
+                return f"{days:.1f} days"
+        return "—"
+
+    time_to_resolve_display.short_description = "Time to Resolve"

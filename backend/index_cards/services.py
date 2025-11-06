@@ -57,7 +57,7 @@ class IndexCardRenderer:
     CARD_PADDING = 0.15 * inch
     IMAGE_MAX_WIDTH = 2.0 * inch  # Fit in landscape layout
     IMAGE_MAX_HEIGHT = 2.0 * inch
-    QR_CODE_SIZE = 0.8 * inch  # Smaller for compact 3" height
+    QR_CODE_SIZE = 1.2 * inch  # Increased size for better scanability
 
     CALL_TO_ACTION = "Scan to notify Logistics\nit's time to reorder me!"
 
@@ -568,7 +568,7 @@ class IndexCardRenderer:
             scale = min(max_image_width / image_width, available_image_space / image_height, 1)
             image_drawn_width = image_width * scale
             image_drawn_height = image_height * scale
-            image_x = left_section_x + (left_section_width - image_drawn_width) / 2
+            image_x = left_section_x + 0.1 * inch  # Left-aligned with small margin
             image_y = image_y_start - image_drawn_height
             pdf_canvas.drawImage(
                 image_reader,

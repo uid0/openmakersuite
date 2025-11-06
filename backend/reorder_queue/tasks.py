@@ -276,3 +276,60 @@ def run_webhook_test(webhook_id: int) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
     except Exception as e:
         return {"success": False, "error": f"Unexpected error: {str(e)}"}
+
+
+@shared_task
+def send_fixture_refill_webhook(refill_request_id: str) -> Dict[str, Any]:
+    """
+    Trigger webhook notification for a fixture refill request.
+
+    This task is called when a fixture refill request is created.
+    It prepares the payload and triggers the webhook notification.
+
+    Args:
+        refill_request_id: UUID of the FixtureRefillRequest
+
+    Returns:
+        Results from webhook delivery
+    """
+    from inventory.models import FixtureRefillRequest
+
+    try:
+        refill_request = FixtureRefillRequest.objects.select_related(
+            "fixture", "fixture__location", "fixture__refill_item"
+        ).get(id=refill_request_id)
+    except FixtureRefillRequest.DoesNotExist:
+        logger.error(f"FixtureRefillRequest {refill_request_id} not found")
+        return {"error": "FixtureRefillRequest not found"}
+
+    # Prepare payload
+    payload = {
+        "event": "fixture_refill_requested",
+        "timestamp": timezone.now().isoformat(),
+        "data": {
+            "id": str(refill_request.id),
+            "fixture_id": str(refill_request.fixture.id),
+            "fixture_name": refill_request.fixture.name,
+            "fixture_location": refill_request.fixture.location.name,
+            "refill_item_id": str(refill_request.fixture.refill_item.id),
+            "refill_item_name": refill_request.fixture.refill_item.name,
+            "refill_item_sku": refill_request.fixture.refill_item.sku,
+            "current_stock": refill_request.fixture.refill_item.current_stock,
+            "status": refill_request.status,
+            "requested_by": refill_request.requested_by,
+            "requested_at": refill_request.requested_at.isoformat(),
+            # Admin URL for viewing the request
+            "admin_url": f"/admin/inventory/fixturerefillrequest/{refill_request.id}/",
+        },
+    }
+
+    # Trigger webhook - call directly instead of using .delay() to avoid nesting tasks
+    from celery import current_app
+
+    if current_app.conf.task_always_eager:
+        # In eager mode (tests), call the function directly
+        return send_webhook_notification.run("fixture_refill_requested", payload)
+    else:
+        # In production, queue the webhook task
+        send_webhook_notification.delay("fixture_refill_requested", payload)
+        return {"queued": True, "event_type": "fixture_refill_requested"}

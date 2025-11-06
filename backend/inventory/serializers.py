@@ -4,7 +4,17 @@ Serializers for inventory API.
 
 from rest_framework import serializers
 
-from .models import Asset, Category, InventoryItem, ItemSupplier, PriceHistory, Supplier, UsageLog
+from .models import (
+    Asset,
+    Category,
+    Fixture,
+    FixtureRefillRequest,
+    InventoryItem,
+    ItemSupplier,
+    PriceHistory,
+    Supplier,
+    UsageLog,
+)
 
 
 class SupplierSerializer(serializers.ModelSerializer):
@@ -396,3 +406,108 @@ class AssetSerializer(serializers.ModelSerializer):
             return obj.manual_pdf.url if obj.manual_pdf else None
         except Exception:
             return None
+
+
+class FixtureSerializer(serializers.ModelSerializer):
+    """Serializer for fixtures (refillable assets)."""
+
+    # Display names for related fields
+    location_name = serializers.CharField(source="location.name", read_only=True)
+    refill_item_name = serializers.CharField(source="refill_item.name", read_only=True)
+    refill_item_sku = serializers.CharField(source="refill_item.sku", read_only=True)
+
+    # Calculated fields
+    pending_requests_count = serializers.ReadOnlyField()
+
+    # QR code URL
+    qr_code_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Fixture
+        fields = [
+            "id",
+            "name",
+            "description",
+            "location",
+            "location_name",
+            "refill_item",
+            "refill_item_name",
+            "refill_item_sku",
+            "asset_tag",
+            "is_active",
+            "pending_requests_count",
+            "qr_code_url",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def get_qr_code_url(self, obj):
+        """Generate QR code URL for fixture scanning."""
+        from django.conf import settings
+
+        base_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        return f"{base_url.rstrip('/')}/scan/fixture/{obj.id}"
+
+
+class FixtureRefillRequestSerializer(serializers.ModelSerializer):
+    """Serializer for fixture refill requests."""
+
+    # Display names for related fields
+    fixture_name = serializers.CharField(source="fixture.name", read_only=True)
+    fixture_location = serializers.CharField(source="fixture.location.name", read_only=True)
+    refill_item_name = serializers.CharField(source="fixture.refill_item.name", read_only=True)
+    refill_item_sku = serializers.CharField(source="fixture.refill_item.sku", read_only=True)
+
+    # Calculated fields
+    time_to_resolve = serializers.ReadOnlyField()
+
+    class Meta:
+        model = FixtureRefillRequest
+        fields = [
+            "id",
+            "fixture",
+            "fixture_name",
+            "fixture_location",
+            "refill_item_name",
+            "refill_item_sku",
+            "status",
+            "requested_at",
+            "requested_by",
+            "resolved_at",
+            "resolved_by",
+            "notes",
+            "time_to_resolve",
+        ]
+        read_only_fields = ["requested_at", "resolved_at", "time_to_resolve"]
+
+
+class FixtureDetailSerializer(FixtureSerializer):
+    """Extended fixture serializer with recent refill requests."""
+
+    recent_refill_requests = FixtureRefillRequestSerializer(
+        source="refill_requests", many=True, read_only=True
+    )
+    refill_item_details = serializers.SerializerMethodField()
+
+    class Meta(FixtureSerializer.Meta):
+        fields = FixtureSerializer.Meta.fields + ["recent_refill_requests", "refill_item_details"]
+
+    def get_refill_item_details(self, obj):
+        """Return basic details about the refill inventory item."""
+        item = obj.refill_item
+        return {
+            "id": item.id,
+            "name": item.name,
+            "sku": item.sku,
+            "current_stock": item.current_stock,
+            "minimum_stock": item.minimum_stock,
+            "needs_reorder": item.needs_reorder,
+        }
+
+    def to_representation(self, instance):
+        """Limit recent requests to last 10."""
+        data = super().to_representation(instance)
+        if "recent_refill_requests" in data:
+            data["recent_refill_requests"] = data["recent_refill_requests"][:10]
+        return data

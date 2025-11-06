@@ -71,9 +71,12 @@ describe('LogisticsDashboard', () => {
       expect(getLogisticsDashboardMock).toHaveBeenCalledTimes(1);
     });
 
-    expect(screen.getByText('Logistics Command Center')).toBeInTheDocument();
+    // Wait for loading to complete and content to render
+    expect(await screen.findByText('Logistics Command Center')).toBeInTheDocument();
     expect(screen.getByText('Open Requests')).toBeInTheDocument();
-    expect(screen.getByText('2')).toBeInTheDocument();
+    // "2" appears multiple times, so check for it in the context of "Open Requests"
+    const openRequestsSection = screen.getByText('Open Requests').closest('.summary-card');
+    expect(openRequestsSection).toHaveTextContent('2');
     expect(screen.getByText('Nitrile Gloves')).toBeInTheDocument();
     expect(screen.getByText('Logistics Closet')).toBeInTheDocument();
     expect(screen.getByText('Running low on size L.')).toBeInTheDocument();

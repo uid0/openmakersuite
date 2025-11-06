@@ -74,9 +74,12 @@ describe('TransparencyPage', () => {
     });
 
     expect(await screen.findByText('Logistics Purchase Ledger')).toBeInTheDocument();
-    expect(screen.getByText('Laser Cutter Belt')).toBeInTheDocument();
-    expect(screen.getByText('Makersupply Co.')).toBeInTheDocument();
-    expect(screen.getByText(/\$200\.00/)).toBeInTheDocument();
+    // "Laser Cutter Belt" appears in both orders and ledger sections, so use getAllByText
+    expect(screen.getAllByText('Laser Cutter Belt').length).toBeGreaterThan(0);
+    // "Makersupply Co." also appears multiple times (in orders and ledger sections)
+    expect(screen.getAllByText('Makersupply Co.').length).toBeGreaterThan(0);
+    // "$200.00" appears multiple times (in summary and ledger), so use getAllByText
+    expect(screen.getAllByText(/\$200\.00/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Order #ORD-2024-001/)).toBeInTheDocument();
     expect(screen.getByText(/Invoice #INV-2024-001/)).toBeInTheDocument();
   });

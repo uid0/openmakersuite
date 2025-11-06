@@ -304,6 +304,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "reorder_link",
         "nfpa_fire_diamond_display",
         "hazmat_compliance_status",
+        "index_card_preview",
     ]
     inlines = [ItemSupplierInline]
     fieldsets = (
@@ -316,6 +317,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
                     "sku",
                     "category",
                     "location",
+                    "shelf_position",
                     "is_active",
                     "is_requestable",
                 )
@@ -355,7 +357,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         ),
         (
             "Frontend Links",
-            {"fields": ("api_link", "reorder_link")},
+            {"fields": ("api_link", "reorder_link", "index_card_preview")},
         ),
         (
             "Additional Information",
@@ -390,6 +392,88 @@ class InventoryItemAdmin(admin.ModelAdmin):
         return "—"
 
     reorder_link.short_description = "Reorder Request"
+
+    def index_card_preview(self, obj):
+        """Create a preview window for the index card."""
+        if not obj.pk:
+            return "—"
+
+        preview_url = "/api/index-cards/preview/"
+
+        # Create a button that opens a modal with the preview
+        preview_html = format_html(
+            """
+            <button type="button" 
+                    onclick="showIndexCardPreview('{}', '{}')" 
+                    style="background: #007cba; color: white; padding: 8px 16px; 
+                           border: none; border-radius: 4px; cursor: pointer; 
+                           font-weight: bold;">
+                🖼️ Preview Index Card
+            </button>
+            <div id="indexCardPreviewModal" style="display: none; position: fixed; 
+                 top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); 
+                 z-index: 10000; overflow: auto;">
+                <div style="position: relative; width: 90%; max-width: 800px; 
+                    margin: 50px auto; background: white; padding: 20px; border-radius: 8px;">
+                    <button onclick="closeIndexCardPreview()" 
+                            style="position: absolute; top: 10px; right: 10px; 
+                                   background: #dc3545; color: white; border: none; 
+                                   border-radius: 50%; width: 30px; height: 30px; 
+                                   cursor: pointer; font-size: 18px;">×</button>
+                    <h2 style="margin-top: 0;">Index Card Preview</h2>
+                    <div id="indexCardPreviewContent" style="text-align: center;">
+                        <p>Loading preview...</p>
+                    </div>
+                </div>
+            </div>
+            <script>
+                function showIndexCardPreview(itemId, previewUrl) {{
+                    const modal = document.getElementById('indexCardPreviewModal');
+                    const content = document.getElementById('indexCardPreviewContent');
+                    modal.style.display = 'block';
+                    content.innerHTML = '<p>Loading preview...</p>';
+                    
+                    fetch(previewUrl, {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                        }},
+                        body: JSON.stringify({{item_id: itemId}})
+                    }})
+                    .then(response => response.json())
+                    .then(data => {{
+                        if (data.preview) {{
+                            content.innerHTML = '<iframe src="data:application/pdf;base64,' + 
+                                data.preview + '" style="width: 100%; height: 600px; border: none;"></iframe>';
+                        }} else {{
+                            content.innerHTML = '<p style="color: red;">Error loading preview</p>';
+                        }}
+                    }})
+                    .catch(error => {{
+                        content.innerHTML = '<p style="color: red;">Error: ' + error + '</p>';
+                    }});
+                }}
+                
+                function closeIndexCardPreview() {{
+                    document.getElementById('indexCardPreviewModal').style.display = 'none';
+                }}
+                
+                // Close modal when clicking outside
+                window.onclick = function(event) {{
+                    const modal = document.getElementById('indexCardPreviewModal');
+                    if (event.target == modal) {{
+                        modal.style.display = 'none';
+                    }}
+                }}
+            </script>
+            """,
+            str(obj.pk),
+            preview_url,
+        )
+        return preview_html
+
+    index_card_preview.short_description = "Index Card Preview"
 
     def hazmat_status_icon(self, obj):
         """Display hazmat status with visual icon."""

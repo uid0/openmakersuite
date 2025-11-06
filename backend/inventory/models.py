@@ -186,6 +186,12 @@ class InventoryItem(models.Model):
         related_name="items",
         help_text="Physical storage location",
     )
+    shelf_position = models.CharField(
+        max_length=20,
+        blank=True,
+        choices=[("top", "Top Shelf"), ("bottom", "Bottom Shelf")],
+        help_text="Shelf position for index card reference",
+    )
 
     # Suppliers - now many-to-many through ItemSupplier
     suppliers = models.ManyToManyField(

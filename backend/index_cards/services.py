@@ -1,31 +1,17 @@
-"""Utilities for rendering inventory index cards."""
+"""
+Utilities for rendering inventory index cards.
+
+(C) 2025, Ian Wilson <me@ianwilson.org>
+All Rights Reserved.
+This file is licensed under the AGPL-3.0 license.
+For more information, see the LICENSE file.
+
+"""
+
 
 from __future__ import annotations
 
 import base64
-import os
-from dataclasses import dataclass
-from io import BytesIO
-from pathlib import Path
-from typing import Iterable, List, Sequence
-
-from django.conf import settings
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
-from django.utils import timezone
-
-import qrcode
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfgen import canvas
-from reportlab.platypus import Paragraph
-
-from inventory.models import InventoryItem
 
 
 @dataclass
@@ -68,7 +54,8 @@ class IndexCardRenderer:
             base_url: Base URL for QR codes (defaults to FRONTEND_URL setting)
             blank_cards: If True, render blank cards with only QR codes
         """
-        self.base_url = base_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        self.base_url = base_url or getattr(
+            settings, "FRONTEND_URL", "http://localhost:3000")
         self.blank_cards = blank_cards
         self._title_style = ParagraphStyle(
             name="CardTitle",
@@ -118,7 +105,8 @@ class IndexCardRenderer:
     ) -> GeneratedCardFile:
         """Render cards for a sequence of items and persist the PDF."""
         if not items:
-            raise ValueError("At least one item is required to render index cards.")
+            raise ValueError(
+                "At least one item is required to render index cards.")
 
         self.blank_cards = blank_cards
         normalized_name = self._normalize_filename(filename)
@@ -261,7 +249,8 @@ class IndexCardRenderer:
         right_section_x = inner_x + left_section_width
 
         # Draw title and get updated Y position
-        current_y = self._draw_title_section(pdf_canvas, item, inner_x, origin_y, available_width)
+        current_y = self._draw_title_section(
+            pdf_canvas, item, inner_x, origin_y, available_width)
 
         # Draw left section (info + image)
         self._draw_left_section(
@@ -276,6 +265,16 @@ class IndexCardRenderer:
         # Draw category at bottom
         self._draw_category_section(pdf_canvas, item, inner_x, inner_y)
 
+        # Draw Limited Quantity diamond for hazmat items
+        if item.is_hazardous:
+            self._draw_limited_quantity_diamond(
+                pdf_canvas, item, inner_x, inner_y)
+
+        # Draw shelf position arrow
+        if item.shelf_position:
+            self._draw_shelf_position_arrow(
+                pdf_canvas, item, origin_x, origin_y)
+
     def _draw_title_section(
         self,
         pdf_canvas: canvas.Canvas,
@@ -287,7 +286,8 @@ class IndexCardRenderer:
         """Draw the item title and return the updated Y position."""
         current_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING
         title_para = Paragraph(item.name, self._title_style)
-        title_width, title_height = title_para.wrap(available_width, 0.4 * inch)
+        title_width, title_height = title_para.wrap(
+            available_width, 0.4 * inch)
         title_para.drawOn(pdf_canvas, inner_x, current_y - title_height)
         return current_y - title_height - 0.3 * inch
 
@@ -319,12 +319,14 @@ class IndexCardRenderer:
 
         # Add average lead time from primary supplier
         if item.average_lead_time:
-            info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
+            info_lines.append(
+                f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
 
         # Add longest lead time across all suppliers
         longest_lead_time = self._get_longest_lead_time(item)
         if longest_lead_time and longest_lead_time != item.average_lead_time:
-            info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
+            info_lines.append(
+                f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
 
         info_y = current_y - 0.1 * inch
         self._draw_info_lines(
@@ -371,7 +373,8 @@ class IndexCardRenderer:
         )
 
         # Draw CTA box
-        self._draw_cta_box(pdf_canvas, item, right_section_x, right_section_width, cta_box)
+        self._draw_cta_box(pdf_canvas, item, right_section_x,
+                           right_section_width, cta_box)
 
     def _draw_hazmat_indicator(
         self,
@@ -537,7 +540,8 @@ class IndexCardRenderer:
         # Use category color for text if it's dark, otherwise use gray
         if not is_light_color and item.category.color and item.category.color.strip():
             try:
-                category_text_color = colors.HexColor(item.category.color.strip())
+                category_text_color = colors.HexColor(
+                    item.category.color.strip())
                 pdf_canvas.setFillColor(category_text_color)
             except (ValueError, AttributeError):
                 pdf_canvas.setFillColor(colors.gray)
@@ -548,6 +552,71 @@ class IndexCardRenderer:
         category_text = f"Category: {item.category.name}"
         pdf_canvas.drawString(inner_x, inner_y + 0.05 * inch, category_text)
         pdf_canvas.setFillColor(colors.black)  # Reset color
+
+    def _draw_limited_quantity_diamond(
+        self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, inner_y: float
+    ) -> None:
+        """Draw the Limited Quantity diamond for hazmat items."""
+        # Limited Quantity diamond size
+        diamond_size = 0.4 * inch
+        # Position in top-right corner
+        diamond_x = inner_x + self.CARD_WIDTH - 2 * self.CARD_PADDING - diamond_size
+        diamond_y = inner_y + self.CARD_HEIGHT - 2 * self.CARD_PADDING - diamond_size
+
+        # Draw diamond shape (rotated square)
+        pdf_canvas.saveState()
+        pdf_canvas.translate(diamond_x + diamond_size / 2,
+                             diamond_y + diamond_size / 2)
+        pdf_canvas.rotate(45)
+
+        # Draw white background
+        pdf_canvas.setFillColor(colors.white)
+        pdf_canvas.setStrokeColor(colors.black)
+        pdf_canvas.setLineWidth(2)
+        pdf_canvas.rect(
+            -diamond_size / 2, -diamond_size / 2, diamond_size, diamond_size, stroke=1, fill=1
+        )
+
+        # Draw "Y" symbol (Limited Quantity marking)
+        pdf_canvas.setFillColor(colors.black)
+        pdf_canvas.setFont("Helvetica-Bold", 20)
+        pdf_canvas.drawCentredString(0, -7, "Y")
+
+        pdf_canvas.restoreState()
+
+    def _draw_shelf_position_arrow(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        origin_x: float,
+        origin_y: float,
+    ) -> None:
+        """Draw up or down arrow for shelf position."""
+        arrow_size = 0.3 * inch
+        # Position in top-left corner
+        arrow_x = origin_x + self.CARD_PADDING
+        arrow_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING - arrow_size
+
+        pdf_canvas.setFillColor(colors.black)
+        pdf_canvas.setStrokeColor(colors.black)
+        pdf_canvas.setLineWidth(2)
+
+        if item.shelf_position == "top":
+            # Draw up arrow (▲)
+            points = [
+                (arrow_x + arrow_size / 2, arrow_y + arrow_size),  # Top point
+                (arrow_x, arrow_y),  # Bottom left
+                (arrow_x + arrow_size, arrow_y),  # Bottom right
+            ]
+            pdf_canvas.polygon(points, stroke=1, fill=1)
+        elif item.shelf_position == "bottom":
+            # Draw down arrow (▼)
+            points = [
+                (arrow_x + arrow_size / 2, arrow_y),  # Top point
+                (arrow_x, arrow_y + arrow_size),  # Bottom left
+                (arrow_x + arrow_size, arrow_y + arrow_size),  # Bottom right
+            ]
+            pdf_canvas.polygon(points, stroke=1, fill=1)
 
     def _draw_product_image(
         self,
@@ -561,14 +630,17 @@ class IndexCardRenderer:
         """Draw the product image if available."""
         image_reader = ImageReader(item.image.path)
         image_width, image_height = image_reader.getSize()
-        available_image_space = image_y_start - inner_y - 0.3 * inch  # Reserve space for category
+        available_image_space = image_y_start - inner_y - \
+            0.3 * inch  # Reserve space for category
         max_image_width = left_section_width - 0.2 * inch
 
         if available_image_space > 0:
-            scale = min(max_image_width / image_width, available_image_space / image_height, 1)
+            scale = min(max_image_width / image_width,
+                        available_image_space / image_height, 1)
             image_drawn_width = image_width * scale
             image_drawn_height = image_height * scale
-            image_x = left_section_x + (left_section_width - image_drawn_width) / 2
+            image_x = left_section_x + \
+                (left_section_width - image_drawn_width) / 2
             image_y = image_y_start - image_drawn_height
             pdf_canvas.drawImage(
                 image_reader,
@@ -608,7 +680,8 @@ class IndexCardRenderer:
             box_y = min_box_y
             if box_y + box_height > qr_y_adjusted - 0.02 * inch:
                 line_height = 8
-                box_height = len(cta_lines) * line_height + 2 * padding_vertical
+                box_height = len(cta_lines) * line_height + \
+                    2 * padding_vertical
 
         qr_x = 0  # Will be calculated in draw method
         return (
@@ -705,7 +778,8 @@ class IndexCardRenderer:
         cta_lines = self.CALL_TO_ACTION.split("\n")
         cta_y = cta_box["y"] + cta_box["height"] - cta_box["padding"] - 8
         for line in cta_lines:
-            pdf_canvas.drawCentredString(right_section_x + right_section_width / 2, cta_y, line)
+            pdf_canvas.drawCentredString(
+                right_section_x + right_section_width / 2, cta_y, line)
             cta_y -= cta_box["line_height"]
 
     def _draw_info_lines(
@@ -723,7 +797,8 @@ class IndexCardRenderer:
 
         text_object = pdf_canvas.beginText()
         text_object.setTextOrigin(origin_x, origin_y)
-        text_object.setFont(self._highlight_style.fontName, self._highlight_style.fontSize)
+        text_object.setFont(self._highlight_style.fontName,
+                            self._highlight_style.fontSize)
         leading = self._highlight_style.leading
 
         for line in lines:
@@ -784,7 +859,8 @@ class IndexCardRenderer:
         )
         qr.add_data(self._build_reorder_url(item))
         qr.make(fit=True)
-        image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+        image = qr.make_image(fill_color="black",
+                              back_color="white").convert("RGB")
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         buffer.seek(0)
@@ -864,7 +940,7 @@ class IndexCardRenderer:
     ) -> Iterable[Sequence[InventoryItem]]:
         """Split items into chunks of specified size (default 3 for Avery 5388)."""
         for index in range(0, len(sequence), size):
-            yield sequence[index : index + size]
+            yield sequence[index:index + size]
 
     def _normalize_filename(self, filename: str | None) -> str:
         if filename:

@@ -13,6 +13,7 @@ omit =
     */admin.py
     */apps.py
     */views.py
+    */management/commands/*
     config/celery_admin.py
     inventory/utils/label_generator.py
 

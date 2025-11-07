@@ -34,8 +34,8 @@ addopts = [
     "--cov=reorder_queue",
     "--cov=config",
     "--cov=membership",
-    "--cov-report=html",
     "--cov-report=term-missing",
+    "--cov-report=xml",
     "--cov-fail-under=80",
 ]
 testpaths = ["inventory/tests", "reorder_queue/tests", "membership/tests"]

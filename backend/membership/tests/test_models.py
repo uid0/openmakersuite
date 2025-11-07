@@ -2,11 +2,13 @@
 Unit tests for membership models.
 """
 
-from datetime import date, timedelta
-
-import pytest
+from datetime import date
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError
+
+import pytest
 
 from membership.models import Membership
 
@@ -49,7 +51,7 @@ class TestUserModel:
             username="user1", email="user1@example.com", password="pass", handle="uniquehandle"
         )
 
-        with pytest.raises(Exception):  # Should raise IntegrityError or ValidationError
+        with pytest.raises((IntegrityError, ValidationError)):
             User.objects.create_user(
                 username="user2", email="user2@example.com", password="pass", handle="uniquehandle"
             )
@@ -60,9 +62,12 @@ class TestUserModel:
             username="user1", email="user1@example.com", password="pass", badge_number="BADGE001"
         )
 
-        with pytest.raises(Exception):  # Should raise IntegrityError or ValidationError
+        with pytest.raises((IntegrityError, ValidationError)):
             User.objects.create_user(
-                username="user2", email="user2@example.com", password="pass", badge_number="BADGE001"
+                username="user2",
+                email="user2@example.com",
+                password="pass",
+                badge_number="BADGE001",
             )
 
     def test_user_can_login_with_active_membership(self):
@@ -248,4 +253,3 @@ class TestMembershipModel:
         assert memberships[0].id == membership3.id
         assert memberships[1].id == membership2.id
         assert memberships[2].id == membership1.id
-

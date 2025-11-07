@@ -28,6 +28,11 @@ def _add_column(schema_editor, column_sql):
     schema_editor.execute(column_sql)
 
 
+def _drop_index_if_exists(schema_editor, vendor, name):
+    if vendor in {"postgresql", "sqlite"}:
+        schema_editor.execute(f"DROP INDEX IF EXISTS {name}")
+
+
 def _add_unique_index(schema_editor, vendor, name, expression, condition=None):
     if vendor == "postgresql":
         if condition:
@@ -99,22 +104,31 @@ def _ensure_columns(apps, schema_editor):
         "ALTER TABLE auth_user ADD COLUMN is_director BOOLEAN NOT NULL DEFAULT 0",
     )
 
-    # Create partial unique indexes for nullable unique fields.
-    if "handle" not in existing_columns:
-        _add_unique_index(
-            schema_editor,
-            vendor,
+    # Ensure partial unique indexes for nullable unique fields exist consistently.
+    unique_index_specs = [
+        (
             "auth_user_handle_unique_idx",
             "handle",
             "handle IS NOT NULL",
-        )
-    if "badge_number" not in existing_columns:
-        _add_unique_index(
-            schema_editor,
-            vendor,
+            "auth_user_handle_key",
+        ),
+        (
             "auth_user_badge_number_unique_idx",
             "badge_number",
             "badge_number IS NOT NULL",
+            "auth_user_badge_number_key",
+        ),
+    ]
+
+    for index_name, column, condition, legacy_index_name in unique_index_specs:
+        # Drop legacy unique indexes created when the column definition included UNIQUE.
+        _drop_index_if_exists(schema_editor, vendor, legacy_index_name)
+        _add_unique_index(
+            schema_editor,
+            vendor,
+            index_name,
+            column,
+            condition,
         )
 
 

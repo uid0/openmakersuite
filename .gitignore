@@ -48,6 +48,9 @@ yarn-error.log*
 
 # React
 /frontend/build
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/coverage/lcov-report
 .DS_Store
 .env.local
 .env.development.local

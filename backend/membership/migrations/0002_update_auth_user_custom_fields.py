@@ -28,8 +28,13 @@ def _add_column(schema_editor, column_sql):
     schema_editor.execute(column_sql)
 
 
-def _drop_index_if_exists(schema_editor, vendor, name):
-    if vendor in {"postgresql", "sqlite"}:
+def _drop_unique_constraint(schema_editor, vendor, name):
+    if vendor == "postgresql":
+        schema_editor.execute(f"ALTER TABLE auth_user DROP CONSTRAINT IF EXISTS {name}")
+    elif vendor == "sqlite":
+        # SQLite represents UNIQUE column constraints using backing indexes, so dropping the
+        # index by name is the closest analogue. The name may not exist depending on the
+        # database history, but DROP INDEX IF EXISTS keeps the call safe.
         schema_editor.execute(f"DROP INDEX IF EXISTS {name}")
 
 
@@ -122,7 +127,7 @@ def _ensure_columns(apps, schema_editor):
 
     for index_name, column, condition, legacy_index_name in unique_index_specs:
         # Drop legacy unique indexes created when the column definition included UNIQUE.
-        _drop_index_if_exists(schema_editor, vendor, legacy_index_name)
+        _drop_unique_constraint(schema_editor, vendor, legacy_index_name)
         _add_unique_index(
             schema_editor,
             vendor,

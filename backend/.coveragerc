@@ -10,7 +10,11 @@ omit =
     manage.py
     */wsgi.py
     */asgi.py
-    membership/*
+    */admin.py
+    */apps.py
+    */views.py
+    config/celery_admin.py
+    inventory/utils/label_generator.py
 
 [report]
 exclude_lines =

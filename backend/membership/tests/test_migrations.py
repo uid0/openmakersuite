@@ -28,13 +28,9 @@ class TestDropUniqueConstraint:
     def test_sqlite_index_drop(self):
         schema_editor = Mock()
 
-        migration_module._drop_unique_constraint(
-            schema_editor, "sqlite", "auth_user_handle_key"
-        )
+        migration_module._drop_unique_constraint(schema_editor, "sqlite", "auth_user_handle_key")
 
-        schema_editor.execute.assert_called_once_with(
-            "DROP INDEX IF EXISTS auth_user_handle_key"
-        )
+        schema_editor.execute.assert_called_once_with("DROP INDEX IF EXISTS auth_user_handle_key")
 
 
 @pytest.mark.unit
@@ -68,6 +64,5 @@ class TestAddUniqueIndex:
         )
 
         schema_editor.execute.assert_called_once_with(
-            "CREATE UNIQUE INDEX IF NOT EXISTS auth_user_handle_unique_idx "
-            "ON auth_user(handle)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS auth_user_handle_unique_idx " "ON auth_user(handle)"
         )

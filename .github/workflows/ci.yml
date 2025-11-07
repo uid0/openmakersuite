@@ -80,7 +80,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           cd backend
-          pytest --cov --cov-report=xml --cov-report=html -v
+          pytest --cov=inventory --cov=reorder_queue --cov=config --cov=membership --cov-report=xml --cov-report=term -v
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
           SECRET_KEY: test-secret-key-for-ci-only

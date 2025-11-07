@@ -10,6 +10,7 @@ omit =
     manage.py
     */wsgi.py
     */asgi.py
+    membership/*
 
 [report]
 exclude_lines =

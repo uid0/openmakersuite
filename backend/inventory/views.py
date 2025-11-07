@@ -806,9 +806,12 @@ class AssetViewSet(viewsets.ModelViewSet):
             from reorder_queue.tasks import send_asset_problem_webhook
 
             send_asset_problem_webhook.delay(str(problem.id))
-        except Exception:
+        except Exception as e:
             # Log but don't fail the request if webhook fails
-            pass
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to send asset problem webhook: {e}", exc_info=True)
 
         from .serializers import AssetProblemSerializer
 
@@ -903,9 +906,12 @@ class FixtureViewSet(viewsets.ModelViewSet):
 
         try:
             send_fixture_refill_webhook.delay(str(refill_request.id))
-        except Exception:
+        except Exception as e:
             # Log but don't fail the request if webhook fails
-            pass
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to send fixture refill webhook: {e}", exc_info=True)
 
         serializer = FixtureRefillRequestSerializer(refill_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)

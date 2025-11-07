@@ -35,6 +35,7 @@ db.sqlite3
 db.sqlite3-journal
 backend/media
 backend/.coverage
+backend/bandit-report.json
 /staticfiles
 /static
 
@@ -47,10 +48,10 @@ yarn-error.log*
 .pnp.js
 
 # React
-/frontend/build
-/frontend/test-results/
-/frontend/playwright-report/
-/frontend/coverage/lcov-report
+frontend/build
+frontend/test-results/
+frontend/playwright-report/
+frontend/coverage/lcov-report
 .DS_Store
 .env.local
 .env.development.local

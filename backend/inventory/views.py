@@ -632,9 +632,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         try:
             assets = Asset.objects.filter(id__in=asset_ids)
             if not assets.exists():
-                return Response(
-                    {"error": "No assets found"}, status=status.HTTP_404_NOT_FOUND
-                )
+                return Response({"error": "No assets found"}, status=status.HTTP_404_NOT_FOUND)
 
             renderer = BrotherLabelRenderer()
             pdf_bytes = renderer.render_batch(list(assets))

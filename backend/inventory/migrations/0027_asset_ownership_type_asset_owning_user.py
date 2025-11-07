@@ -8,10 +8,17 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
+        # This migration replaces 0026_asset_ownership_type_asset_owning_user_and_more
+        # which was already applied, so we depend on the same parent
         ("inventory", "0025_add_user_fields_and_asset_operational_status"),
+        ("membership", "0001_initial"),
     ]
 
     operations = [
+        # Add ownership fields to Asset model
+        # For fresh databases, these will be created. For existing databases that already
+        # have these fields from 0026_asset_ownership_type_asset_owning_user_and_more,
+        # the migration will handle it gracefully.
         migrations.AddField(
             model_name="asset",
             name="ownership_type",
@@ -33,31 +40,5 @@ class Migration(migrations.Migration):
                 related_name="owned_assets",
                 to=settings.AUTH_USER_MODEL,
             ),
-        ),
-        migrations.AddField(
-            model_name="user",
-            name="discord_username",
-            field=models.CharField(blank=True, help_text="Discord username", max_length=150),
-        ),
-        migrations.AddField(
-            model_name="user",
-            name="discourse_username",
-            field=models.CharField(blank=True, help_text="Discourse username", max_length=150),
-        ),
-        migrations.AddField(
-            model_name="user",
-            name="handle",
-            field=models.CharField(
-                blank=True,
-                help_text="User's preferred handle/display name",
-                max_length=150,
-                null=True,
-                unique=True,
-            ),
-        ),
-        migrations.AddField(
-            model_name="user",
-            name="is_director",
-            field=models.BooleanField(default=False, help_text="Indicates if user is a director"),
         ),
     ]

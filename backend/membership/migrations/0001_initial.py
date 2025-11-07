@@ -7,6 +7,174 @@ from django.db import migrations, models
 import django.utils.timezone
 
 
+def _create_user_table_if_not_exists(apps, schema_editor):
+    """Create auth_user table if it doesn't exist (for fresh databases)."""
+    vendor = schema_editor.connection.vendor
+    connection = schema_editor.connection
+    
+    # Check if table exists
+    if vendor == "postgresql":
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'auth_user'
+                );
+                """
+            )
+            exists = cursor.fetchone()[0]
+    elif vendor == "sqlite":
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='auth_user';"
+            )
+            exists = cursor.fetchone() is not None
+    else:
+        # For other databases, assume table exists (production scenario)
+        exists = True
+
+    if not exists:
+        # Create the table using database-specific SQL
+        if vendor == "postgresql":
+            schema_editor.execute(
+                """
+                CREATE TABLE auth_user (
+                    id SERIAL PRIMARY KEY,
+                    password VARCHAR(128) NOT NULL,
+                    last_login TIMESTAMP WITH TIME ZONE,
+                    is_superuser BOOLEAN NOT NULL DEFAULT FALSE,
+                    username VARCHAR(150) NOT NULL UNIQUE,
+                    first_name VARCHAR(150) NOT NULL DEFAULT '',
+                    last_name VARCHAR(150) NOT NULL DEFAULT '',
+                    email VARCHAR(254) NOT NULL DEFAULT '',
+                    is_staff BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    date_joined TIMESTAMP WITH TIME ZONE NOT NULL,
+                    handle VARCHAR(150) UNIQUE,
+                    active_directory_username VARCHAR(150) NOT NULL DEFAULT '',
+                    badge_number VARCHAR(50) UNIQUE,
+                    discord_username VARCHAR(150) NOT NULL DEFAULT '',
+                    discourse_username VARCHAR(150) NOT NULL DEFAULT '',
+                    is_board_member BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_officer BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_director BOOLEAN NOT NULL DEFAULT FALSE
+                );
+                """
+            )
+        elif vendor == "sqlite":
+            schema_editor.execute(
+                """
+                CREATE TABLE auth_user (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    password VARCHAR(128) NOT NULL,
+                    last_login DATETIME,
+                    is_superuser BOOLEAN NOT NULL DEFAULT 0,
+                    username VARCHAR(150) NOT NULL UNIQUE,
+                    first_name VARCHAR(150) NOT NULL DEFAULT '',
+                    last_name VARCHAR(150) NOT NULL DEFAULT '',
+                    email VARCHAR(254) NOT NULL DEFAULT '',
+                    is_staff BOOLEAN NOT NULL DEFAULT 0,
+                    is_active BOOLEAN NOT NULL DEFAULT 1,
+                    date_joined DATETIME NOT NULL,
+                    handle VARCHAR(150) UNIQUE,
+                    active_directory_username VARCHAR(150) NOT NULL DEFAULT '',
+                    badge_number VARCHAR(50) UNIQUE,
+                    discord_username VARCHAR(150) NOT NULL DEFAULT '',
+                    discourse_username VARCHAR(150) NOT NULL DEFAULT '',
+                    is_board_member BOOLEAN NOT NULL DEFAULT 0,
+                    is_officer BOOLEAN NOT NULL DEFAULT 0,
+                    is_director BOOLEAN NOT NULL DEFAULT 0
+                );
+                """
+                )
+
+
+def _create_membership_table_if_not_exists(apps, schema_editor):
+    """Create inventory_membership table if it doesn't exist (for fresh databases)."""
+    vendor = schema_editor.connection.vendor
+    connection = schema_editor.connection
+    
+    # Check if table exists
+    if vendor == "postgresql":
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'inventory_membership'
+                );
+                """
+            )
+            exists = cursor.fetchone()[0]
+    elif vendor == "sqlite":
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='inventory_membership';"
+            )
+            exists = cursor.fetchone() is not None
+    else:
+        # For other databases, assume table exists (production scenario)
+        exists = True
+
+    if not exists:
+        # Create the table using database-specific SQL
+        if vendor == "postgresql":
+            schema_editor.execute(
+                """
+                CREATE TABLE inventory_membership (
+                    id SERIAL PRIMARY KEY,
+                    membership_type VARCHAR(20) NOT NULL DEFAULT 'monthly',
+                    status VARCHAR(20) NOT NULL DEFAULT 'inactive',
+                    start_date DATE,
+                    end_date DATE,
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+                );
+                """
+            )
+            # Create the many-to-many table
+            schema_editor.execute(
+                """
+                CREATE TABLE inventory_membership_users (
+                    id SERIAL PRIMARY KEY,
+                    membership_id INTEGER NOT NULL REFERENCES inventory_membership(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE,
+                    UNIQUE(membership_id, user_id)
+                );
+                """
+            )
+        elif vendor == "sqlite":
+            schema_editor.execute(
+                """
+                CREATE TABLE inventory_membership (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    membership_type VARCHAR(20) NOT NULL DEFAULT 'monthly',
+                    status VARCHAR(20) NOT NULL DEFAULT 'inactive',
+                    start_date DATE,
+                    end_date DATE,
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                );
+                """
+            )
+            # Create the many-to-many table
+            schema_editor.execute(
+                """
+                CREATE TABLE inventory_membership_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    membership_id INTEGER NOT NULL REFERENCES inventory_membership(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE,
+                    UNIQUE(membership_id, user_id)
+                );
+                """
+            )
+
+
 class Migration(migrations.Migration):
 
     initial = True
@@ -16,7 +184,8 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Create User model in state (table already exists)
+        # Create User model in state (table may or may not exist)
+        # Use SeparateDatabaseAndState to handle both fresh and existing databases
         migrations.SeparateDatabaseAndState(
             state_operations=[
                 migrations.CreateModel(
@@ -167,9 +336,16 @@ class Migration(migrations.Migration):
                     ],
                 ),
             ],
-            database_operations=[],  # Table already exists
+            database_operations=[
+                # For fresh test databases, create the table if it doesn't exist
+                # Use a RunPython operation that detects the database type and creates appropriate SQL
+                migrations.RunPython(
+                    code=_create_user_table_if_not_exists,
+                    reverse_code=migrations.RunPython.noop,
+                ),
+            ],
         ),
-        # Create Membership model in state (table already exists)
+        # Create Membership model (table may or may not exist)
         migrations.SeparateDatabaseAndState(
             state_operations=[
                 migrations.CreateModel(
@@ -250,6 +426,12 @@ class Migration(migrations.Migration):
                     },
                 ),
             ],
-            database_operations=[],  # Table already exists
+            database_operations=[
+                # For fresh test databases, create the table if it doesn't exist
+                migrations.RunPython(
+                    code=_create_membership_table_if_not_exists,
+                    reverse_code=migrations.RunPython.noop,
+                ),
+            ],
         ),
     ]

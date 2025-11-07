@@ -88,14 +88,25 @@ jobs:
           ALLOWED_HOSTS: localhost,127.0.0.1
           REDIS_URL: redis://localhost:6379/0
 
+      - name: Verify coverage file exists
+        run: |
+          if [ ! -f backend/coverage.xml ]; then
+            echo "❌ backend/coverage.xml not found!"
+            ls -la backend/ | grep -i coverage || echo "No coverage files found"
+            exit 1
+          fi
+          echo "✓ Coverage file verified"
+          ls -lh backend/coverage.xml
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: ./backend/coverage.xml
+          file: ./backend/coverage.xml
           flags: backend
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+          name: backend-coverage
 
   frontend-tests:
     name: Frontend Tests

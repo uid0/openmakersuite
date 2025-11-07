@@ -24,13 +24,14 @@ class BrotherLabelRenderer:
     """Render asset labels for Brother QL-820nwb printer (62mm labels)."""
 
     # Brother QL-820nwb uses 62mm wide labels
-    # Standard continuous label height is typically 100mm or 200mm
-    # We'll use 100mm (3.94 inches) for a good balance
+    # The DK-2251 roll is continuous, so we match the printable height to 62mm
+    # for a square label that trims right after the content.
     LABEL_WIDTH = 62 * mm  # 62mm = 2.44 inches
-    LABEL_HEIGHT = 100 * mm  # 100mm = 3.94 inches
+    LABEL_HEIGHT = 62 * mm  # Match the 62mm label roll height as well
 
     # Margins and spacing
-    MARGIN = 2 * mm
+    MARGIN = 4 * mm  # Provide extra breathing room for the title text
+    TOP_PADDING = 1.5 * mm
     QR_SIZE = 25 * mm  # QR code size
     TEXT_AREA_WIDTH = LABEL_WIDTH - (2 * MARGIN) - QR_SIZE - (2 * mm)
 
@@ -101,7 +102,7 @@ class BrotherLabelRenderer:
                 qr_image = ImageReader(asset.qr_code)
                 # Position QR code on the left
                 qr_x = self.MARGIN
-                qr_y = self.LABEL_HEIGHT - self.MARGIN - self.QR_SIZE
+                qr_y = self.LABEL_HEIGHT - self.MARGIN - self.TOP_PADDING - self.QR_SIZE
                 pdf_canvas.drawImage(
                     qr_image,
                     qr_x,
@@ -115,7 +116,7 @@ class BrotherLabelRenderer:
                 pdf_canvas.setFillColor(colors.grey)
                 pdf_canvas.rect(
                     self.MARGIN,
-                    self.LABEL_HEIGHT - self.MARGIN - self.QR_SIZE,
+                    self.LABEL_HEIGHT - self.MARGIN - self.TOP_PADDING - self.QR_SIZE,
                     self.QR_SIZE,
                     self.QR_SIZE,
                     fill=1,
@@ -123,7 +124,7 @@ class BrotherLabelRenderer:
 
         # Text area on the right side
         text_x = self.MARGIN + self.QR_SIZE + (2 * mm)
-        text_y = self.LABEL_HEIGHT - self.MARGIN
+        text_y = self.LABEL_HEIGHT - self.MARGIN - self.TOP_PADDING
 
         # Asset name (largest text)
         pdf_canvas.setFont("Helvetica-Bold", 10)

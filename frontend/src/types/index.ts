@@ -148,10 +148,12 @@ export interface CreateReorderRequest {
 }
 
 export type AssetStatus = 'active' | 'maintenance' | 'retired' | 'lost' | 'donated_out';
+export type OperationalStatus = 'available' | 'reserved' | 'needs_maintenance' | 'disabled';
 
 export interface Asset {
   id: string;
   name: string;
+  description: string;
   serial_number: string;
   asset_tag: string;
   inventory_item: string | null;
@@ -183,6 +185,22 @@ export interface Asset {
   age_in_days: number;
   is_active: boolean;
   notes: string;
+  circuit: string;
+  needs_compressed_air: boolean;
+  needs_ventilation: boolean;
+  is_chargeable: boolean;
+  last_scanned_at: string | null;
+  // Group ownership and locking
+  owning_group: number | null;
+  owning_group_name: string | null;
+  groups_can_enable: number[];
+  is_locked: boolean;
+  locked_by: number | null;
+  locked_by_username: string | null;
+  locked_at: string | null;
+  lock_type: string;
+  // Operational status
+  operational_status: OperationalStatus;
   created_at: string;
   updated_at: string;
 }

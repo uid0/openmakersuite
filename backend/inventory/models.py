@@ -8,6 +8,8 @@ import uuid
 from decimal import Decimal
 from typing import Any, Optional
 
+from django.conf import settings
+from django.contrib.auth.models import AbstractUser, Group
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.text import slugify
@@ -860,6 +862,19 @@ class Asset(models.Model):
         (DONATED_OUT, "Donated Out"),
     ]
 
+    # Operational status choices
+    OPERATIONAL_AVAILABLE = "available"
+    OPERATIONAL_RESERVED = "reserved"
+    OPERATIONAL_NEEDS_MAINTENANCE = "needs_maintenance"
+    OPERATIONAL_DISABLED = "disabled"
+
+    OPERATIONAL_STATUS_CHOICES = [
+        (OPERATIONAL_AVAILABLE, "Available"),
+        (OPERATIONAL_RESERVED, "Reserved"),
+        (OPERATIONAL_NEEDS_MAINTENANCE, "Needs Maintenance"),
+        (OPERATIONAL_DISABLED, "Disabled"),
+    ]
+
     # Identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200, help_text="Asset name or model")
@@ -957,6 +972,32 @@ class Asset(models.Model):
         help_text="Maintenance schedule and procedures (visible to authenticated users only)",
     )
 
+    # Operational requirements
+    circuit = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Circuit identification where this device is plugged in",
+    )
+    needs_compressed_air = models.BooleanField(
+        default=False,
+        help_text="Device requires compressed air to operate",
+    )
+    needs_ventilation = models.BooleanField(
+        default=False,
+        help_text="Device requires ventilation when running",
+    )
+    is_chargeable = models.BooleanField(
+        default=False,
+        help_text="Device is chargeable to members (for billing purposes)",
+    )
+
+    # Scanning tracking
+    last_scanned_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date and time when this asset was last scanned via QR code",
+    )
+
     # Media files
     image = models.ImageField(
         upload_to="assets/images/",
@@ -995,6 +1036,91 @@ class Asset(models.Model):
     condition_notes = models.TextField(
         blank=True,
         help_text="Notes about the asset's condition, maintenance history, etc.",
+    )
+
+    # Ownership - can be owned by User, Group, or Space (makerspace itself)
+    OWNERSHIP_TYPE_USER = "user"
+    OWNERSHIP_TYPE_GROUP = "group"
+    OWNERSHIP_TYPE_SPACE = "space"
+
+    OWNERSHIP_TYPE_CHOICES = [
+        (OWNERSHIP_TYPE_USER, "User"),
+        (OWNERSHIP_TYPE_GROUP, "Group"),
+        (OWNERSHIP_TYPE_SPACE, "Space"),
+    ]
+
+    ownership_type = models.CharField(
+        max_length=10,
+        choices=OWNERSHIP_TYPE_CHOICES,
+        default=OWNERSHIP_TYPE_SPACE,
+        help_text="Type of ownership for this asset",
+    )
+    owning_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="owned_assets",
+        help_text="User that owns this asset (if applicable)",
+    )
+    owning_group = models.ForeignKey(
+        Group,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="owned_assets",
+        help_text="Group that owns this asset (if applicable)",
+    )
+    groups_can_enable = models.ManyToManyField(
+        Group,
+        blank=True,
+        related_name="assets_can_enable",
+        help_text="Groups that are allowed to enable this asset",
+    )
+
+    # Operational status
+    operational_status = models.CharField(
+        max_length=20,
+        choices=OPERATIONAL_STATUS_CHOICES,
+        default=OPERATIONAL_AVAILABLE,
+        help_text="Current operational status of the asset",
+    )
+
+    # Lock tracking
+    is_locked = models.BooleanField(
+        default=False,
+        help_text="If True, non-admins cannot use this asset",
+    )
+    locked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="locked_assets",
+        help_text="User who locked this asset",
+    )
+    locked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this asset was locked",
+    )
+    LOCK_TYPE_ADMIN = "admin"
+    LOCK_TYPE_GROUP_ADMIN = "group_admin"
+    LOCK_TYPE_GROUP_MEMBER = "group_member"
+    LOCK_TYPE_LOGISTICS = "logistics"
+
+    LOCK_TYPE_CHOICES = [
+        (LOCK_TYPE_ADMIN, "Admin"),
+        (LOCK_TYPE_GROUP_ADMIN, "Group Admin"),
+        (LOCK_TYPE_GROUP_MEMBER, "Group Member"),
+        (LOCK_TYPE_LOGISTICS, "Logistics"),
+    ]
+
+    lock_type = models.CharField(
+        max_length=20,
+        choices=LOCK_TYPE_CHOICES,
+        blank=True,
+        help_text="Type of user who locked this asset",
     )
 
     # Metadata
@@ -1058,6 +1184,132 @@ class Asset(models.Model):
             delta = today - self.date_received
             return delta.days
         return None
+
+    def is_user_admin(self, user) -> bool:
+        """Check if user is a system admin (staff or superuser)."""
+        return user.is_authenticated and (user.is_staff or user.is_superuser)
+
+    def is_user_in_logistics(self, user) -> bool:
+        """Check if user is in the Logistics group."""
+        if not user.is_authenticated:
+            return False
+        try:
+            logistics_group = Group.objects.get(name="Logistics")
+            return logistics_group in user.groups.all()
+        except Group.DoesNotExist:
+            return False
+
+    def is_user_group_admin(self, user) -> bool:
+        """Check if user is a group admin for the asset's owning group."""
+        if not user.is_authenticated or not self.owning_group:
+            return False
+        # Check if user is in the owning group and has admin permissions
+        # For now, we'll check if user has a permission or is in a group admin role
+        # This can be customized based on your permission system
+        if self.owning_group not in user.groups.all():
+            return False
+        # Check if user has 'group_admin' permission or is in a group admin group
+        # You may need to adjust this based on your permission structure
+        return user.has_perm("inventory.group_admin") or user.groups.filter(
+            name__endswith="_admin"
+        ).exists()
+
+    def can_user_lock(self, user) -> bool:
+        """Check if user can lock this asset."""
+        if not user.is_authenticated:
+            return False
+        # Admins can always lock
+        if self.is_user_admin(user):
+            return True
+        # Group admins can lock if asset is owned by their group
+        if self.owning_group and self.is_user_group_admin(user):
+            return self.owning_group in user.groups.all()
+        return False
+
+    def can_user_unlock(self, user) -> bool:
+        """Check if user can unlock this asset based on lock rules."""
+        if not user.is_authenticated or not self.is_locked:
+            return False
+
+        # Admins can always unlock
+        if self.is_user_admin(user):
+            return True
+
+        # If locked by admin or Logistics, only admins can unlock
+        if self.lock_type in [self.LOCK_TYPE_ADMIN, self.LOCK_TYPE_LOGISTICS]:
+            return False
+
+        # If locked by group member or group admin, group admins can unlock
+        if self.lock_type in [self.LOCK_TYPE_GROUP_MEMBER, self.LOCK_TYPE_GROUP_ADMIN]:
+            if self.owning_group and self.is_user_group_admin(user):
+                return self.owning_group in user.groups.all()
+
+        return False
+
+
+class AssetProblem(models.Model):
+    """
+    Track problems reported with assets by users.
+    
+    When a user scans an asset QR code and reports a problem,
+    this model stores the issue for admin review.
+    """
+
+    # Problem status choices
+    REPORTED = "reported"
+    IN_PROGRESS = "in_progress"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
+    STATUS_CHOICES = [
+        (REPORTED, "Reported"),
+        (IN_PROGRESS, "In Progress"),
+        (RESOLVED, "Resolved"),
+        (CLOSED, "Closed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="problems",
+        help_text="The asset with the problem",
+    )
+    reported_by = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Username or identifier of person reporting the problem",
+    )
+    description = models.TextField(
+        help_text="Description of the problem or issue",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=REPORTED,
+        help_text="Current status of the problem report",
+    )
+    resolution_notes = models.TextField(
+        blank=True,
+        help_text="Notes about how the problem was resolved",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the problem was resolved",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["asset", "status"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.asset.name} - {self.get_status_display()} ({self.created_at.date()})"
 
 
 class Fixture(models.Model):

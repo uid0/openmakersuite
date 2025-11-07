@@ -14,6 +14,7 @@ from faker import Faker as FakerGenerator
 from PIL import Image
 
 from inventory.models import (
+    Asset,
     Category,
     Fixture,
     InventoryItem,
@@ -212,3 +213,23 @@ class FixtureFactory(DjangoModelFactory):
     refill_item = SubFactory(InventoryItemFactory)
     asset_tag = factory.Sequence(lambda n: f"FIX-{n:05d}")
     is_active = True
+
+
+class AssetFactory(DjangoModelFactory):
+    """Factory for creating Asset instances."""
+
+    class Meta:
+        model = Asset
+
+    name = factory.Sequence(lambda n: f"Asset {n}")
+    description = Faker("text", max_nb_chars=200)
+    serial_number = factory.Sequence(lambda n: f"SER-{n:05d}")
+    category = SubFactory(CategoryFactory)
+    location = SubFactory(LocationFactory)
+    manufacturer = SubFactory(SupplierFactory)
+    status = Asset.ACTIVE
+    is_active = True
+    circuit = ''
+    needs_compressed_air = False
+    needs_ventilation = False
+    is_chargeable = False

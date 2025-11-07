@@ -333,3 +333,58 @@ def send_fixture_refill_webhook(refill_request_id: str) -> Dict[str, Any]:
         # In production, queue the webhook task
         send_webhook_notification.delay("fixture_refill_requested", payload)
         return {"queued": True, "event_type": "fixture_refill_requested"}
+
+
+@shared_task
+def send_asset_problem_webhook(problem_id: str) -> Dict[str, Any]:
+    """
+    Trigger webhook notification for an asset problem report.
+
+    This task is called when an asset problem is reported.
+    It prepares the payload and triggers the webhook notification.
+
+    Args:
+        problem_id: UUID of the AssetProblem
+
+    Returns:
+        Results from webhook delivery
+    """
+    from inventory.models import AssetProblem
+
+    try:
+        problem = AssetProblem.objects.select_related("asset", "asset__location").get(
+            id=problem_id
+        )
+    except AssetProblem.DoesNotExist:
+        logger.error(f"AssetProblem {problem_id} not found")
+        return {"error": "AssetProblem not found"}
+
+    # Prepare payload
+    payload = {
+        "event": "asset_problem_reported",
+        "timestamp": timezone.now().isoformat(),
+        "data": {
+            "id": str(problem.id),
+            "asset_id": str(problem.asset.id),
+            "asset_name": problem.asset.name,
+            "asset_tag": problem.asset.asset_tag,
+            "asset_location": problem.asset.location.name if problem.asset.location else None,
+            "status": problem.status,
+            "reported_by": problem.reported_by,
+            "description": problem.description,
+            "created_at": problem.created_at.isoformat(),
+            # Admin URL for viewing the problem
+            "admin_url": f"/admin/inventory/assetproblem/{problem.id}/",
+        },
+    }
+
+    # Trigger webhook - call directly instead of using .delay() to avoid nesting tasks
+    from celery import current_app
+
+    if current_app.conf.task_always_eager:
+        # In eager mode (tests), call the function directly
+        return send_webhook_notification.run("asset_problem_reported", payload)
+    else:
+        # In production, queue the webhook task
+        send_webhook_notification.delay("asset_problem_reported", payload)
+        return {"queued": True, "event_type": "asset_problem_reported"}

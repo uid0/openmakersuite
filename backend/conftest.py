@@ -4,7 +4,9 @@ Pytest configuration and fixtures for the entire test suite.
 
 from io import BytesIO
 
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils.crypto import get_random_string
 

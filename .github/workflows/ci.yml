@@ -91,9 +91,11 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          file: ./backend/coverage.xml
+          files: ./backend/coverage.xml
           flags: backend
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   frontend-tests:
     name: Frontend Tests
@@ -112,21 +114,48 @@ jobs:
       - name: Install dependencies
         run: |
           cd frontend
-          npm ci
+          # Force IPv4 only for npm operations (via .npmrc and NODE_OPTIONS)
+          npm ci --verbose
+          # Verify react-scripts is installed
+          if [ ! -f node_modules/.bin/react-scripts ]; then
+            echo "⚠️  react-scripts not found after npm ci, running npm install..."
+            npm install
+          fi
+          # Verify installation
+          ls -la node_modules/.bin/react-scripts || (echo "❌ react-scripts still not found!" && exit 1)
+        env:
+          NODE_OPTIONS: "--dns-result-order=ipv4first"
 
       - name: Run tests
         run: |
           cd frontend
-          npm test -- --coverage --ci
+          npm test -- --coverage --ci --watchAll=false
         env:
           CI: true
+          NODE_OPTIONS: "--dns-result-order=ipv4first"
+
+      - name: Verify coverage files exist
+        run: |
+          cd frontend
+          if [ ! -f coverage/clover.xml ]; then
+            echo "❌ clover.xml not found!"
+            exit 1
+          fi
+          if [ ! -f coverage/lcov.info ]; then
+            echo "❌ lcov.info not found!"
+            exit 1
+          fi
+          echo "✓ Coverage files verified"
+          ls -lh coverage/clover.xml coverage/lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          file: ./frontend/coverage/clover.xml
+          files: ./frontend/coverage/clover.xml,./frontend/coverage/lcov.info
           flags: frontend
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   docker-build:
     name: Docker Build Test

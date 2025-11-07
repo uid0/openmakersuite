@@ -14,6 +14,7 @@ from django.utils.html import format_html
 
 from .models import (
     Asset,
+    AssetProblem,
     Category,
     InventoryItem,
     ItemSupplier,
@@ -22,7 +23,6 @@ from .models import (
     Supplier,
     UsageLog,
 )
-
 
 @admin.register(Supplier)
 class SupplierAdmin(admin.ModelAdmin):
@@ -563,14 +563,30 @@ class AssetAdmin(admin.ModelAdmin):
         "asset_tag",
         "serial_number",
         "status_badge",
+        "operational_status",
         "category",
         "location",
         "display_manufacturer",
         "acquisition_display",
         "is_active",
+        "lock_status_display",
         "api_link",
+        "scan_qr_link",
     ]
-    list_filter = ["status", "category", "location", "is_donation", "is_active", "manufacturer"]
+    list_filter = [
+        "status",
+        "operational_status",
+        "category",
+        "location",
+        "is_donation",
+        "is_active",
+        "is_locked",
+        "lock_type",
+        "ownership_type",
+        "owning_user",
+        "owning_group",
+        "manufacturer",
+    ]
     search_fields = [
         "name",
         "description",
@@ -587,9 +603,12 @@ class AssetAdmin(admin.ModelAdmin):
         "display_manufacturer",
         "acquisition_display",
         "age_in_days",
+        "last_scanned_at",
+        "lock_status_display",
         "created_at",
         "updated_at",
         "api_link",
+        "scan_qr_link",
     ]
 
     fieldsets = (
@@ -655,6 +674,49 @@ class AssetAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Operational Requirements",
+            {
+                "fields": (
+                    "circuit",
+                    "needs_compressed_air",
+                    "needs_ventilation",
+                    "is_chargeable",
+                ),
+                "description": "Operational requirements and billing information for the asset.",
+            },
+        ),
+        (
+            "Operational Status",
+            {
+                "fields": ("operational_status",),
+                "description": "Current operational status of the asset.",
+            },
+        ),
+        (
+            "Ownership & Locking",
+            {
+                "fields": (
+                    "ownership_type",
+                    "owning_user",
+                    "owning_group",
+                    "groups_can_enable",
+                    "is_locked",
+                    "lock_status_display",
+                    "locked_by",
+                    "locked_at",
+                    "lock_type",
+                ),
+                "description": "Asset ownership (User, Group, or Space) and lock status. Locked assets prevent non-admin usage. Groups that can enable this asset.",
+            },
+        ),
+        (
+            "Scanning & Tracking",
+            {
+                "fields": ("scan_qr_link", "last_scanned_at"),
+                "description": "Scan the QR code to test the asset scanning workflow. Last time this asset was scanned via QR code.",
+            },
+        ),
+        (
             "Media Files",
             {
                 "fields": (
@@ -716,6 +778,36 @@ class AssetAdmin(admin.ModelAdmin):
         return "—"
 
     api_link.short_description = "API Link"
+
+    def scan_qr_link(self, obj):
+        """Create a link to scan the QR code for this asset on the frontend."""
+        if obj.pk:
+            from django.conf import settings
+
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+            scan_url = f"{frontend_url}/scan/asset/{obj.id}"
+            return format_html(
+                '<a href="{}" target="_blank" style="background: #17a2b8; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px;">📱 Scan QR Code</a>',
+                scan_url,
+            )
+        return "—"
+
+    scan_qr_link.short_description = "Scan QR Code"
+
+    def lock_status_display(self, obj):
+        """Display lock status with details."""
+        if obj.is_locked:
+            lock_info = f"🔒 Locked ({obj.get_lock_type_display()})"
+            if obj.locked_by:
+                lock_info += f" by {obj.locked_by.username}"
+            if obj.locked_at:
+                from django.utils import timezone
+
+                lock_info += f" on {obj.locked_at.strftime('%Y-%m-%d %H:%M')}"
+            return format_html('<span style="color: #dc3545;">{}</span>', lock_info)
+        return format_html('<span style="color: #28a745;">✓ Unlocked</span>')
+
+    lock_status_display.short_description = "Lock Status"
 
     actions = ["duplicate_asset"]
 
@@ -844,3 +936,111 @@ class AssetAdmin(admin.ModelAdmin):
         }
 
         return render(request, "admin/inventory/asset/duplicate.html", context)
+
+
+@admin.register(AssetProblem)
+class AssetProblemAdmin(admin.ModelAdmin):
+    """Admin interface for asset problem reports."""
+
+    list_display = [
+        "asset",
+        "asset_tag_display",
+        "reported_by",
+        "status_badge",
+        "created_at",
+        "resolved_at",
+    ]
+    list_filter = ["status", "created_at", "resolved_at"]
+    search_fields = [
+        "asset__name",
+        "asset__asset_tag",
+        "description",
+        "reported_by",
+    ]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    date_hierarchy = "created_at"
+
+    fieldsets = (
+        (
+            "Problem Information",
+            {
+                "fields": (
+                    "asset",
+                    "reported_by",
+                    "description",
+                    "status",
+                )
+            },
+        ),
+        (
+            "Resolution",
+            {
+                "fields": (
+                    "resolution_notes",
+                    "resolved_at",
+                )
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ("id", "created_at", "updated_at"),
+                "classes": ("collapse",),
+            },
+        ),
+    )
+
+    def asset_tag_display(self, obj):
+        """Display asset tag."""
+        return obj.asset.asset_tag if obj.asset.asset_tag else "—"
+
+    asset_tag_display.short_description = "Asset Tag"
+
+    def status_badge(self, obj):
+        """Display status with color-coded badge."""
+        status_colors = {
+            "reported": "#dc3545",
+            "in_progress": "#ffc107",
+            "resolved": "#28a745",
+            "closed": "#6c757d",
+        }
+        color = status_colors.get(obj.status, "#6c757d")
+        return format_html(
+            '<span style="background: {}; color: white; padding: 4px 8px; border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            obj.get_status_display(),
+        )
+
+    status_badge.short_description = "Status"
+
+    actions = ["mark_resolved", "mark_closed"]
+
+    def mark_resolved(self, request, queryset):
+        """Mark selected problems as resolved."""
+        from django.utils import timezone
+
+        count = 0
+        for problem in queryset.filter(status=AssetProblem.REPORTED):
+            problem.status = AssetProblem.RESOLVED
+            problem.resolved_at = timezone.now()
+            problem.save()
+            count += 1
+
+        self.message_user(
+            request,
+            f"{count} problem(s) marked as resolved.",
+            level=messages.SUCCESS,
+        )
+
+    mark_resolved.short_description = "Mark selected as resolved"
+
+    def mark_closed(self, request, queryset):
+        """Mark selected problems as closed."""
+        count = queryset.update(status=AssetProblem.CLOSED)
+        self.message_user(
+            request,
+            f"{count} problem(s) marked as closed.",
+            level=messages.SUCCESS,
+        )
+
+    mark_closed.short_description = "Mark selected as closed"

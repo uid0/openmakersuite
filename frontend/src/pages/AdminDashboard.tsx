@@ -3,8 +3,8 @@
  * Manage reorder queue, view pending requests, and access supplier cart links
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { reorderAPI } from '../services/api';
-import { ReorderRequest } from '../types';
+import { assetsAPI, reorderAPI } from '../services/api';
+import { Asset, ReorderRequest } from '../types';
 import '../styles/AdminDashboard.css';
 
 const AdminDashboard: React.FC = () => {
@@ -12,6 +12,8 @@ const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
   const [supplierGroups, setSupplierGroups] = useState<any>(null);
+  const [notCheckedInAssets, setNotCheckedInAssets] = useState<Asset[]>([]);
+  const [loadingAssets, setLoadingAssets] = useState(false);
 
   const loadRequests = useCallback(async () => {
     try {
@@ -33,7 +35,20 @@ const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     loadRequests();
+    loadNotCheckedInAssets();
   }, [loadRequests]);
+
+  const loadNotCheckedInAssets = useCallback(async () => {
+    try {
+      setLoadingAssets(true);
+      const response = await assetsAPI.getNotCheckedIn();
+      setNotCheckedInAssets(response.data);
+    } catch (err) {
+      console.error('Error loading assets not checked in:', err);
+    } finally {
+      setLoadingAssets(false);
+    }
+  }, []);
 
   const loadSupplierGroups = async () => {
     try {
@@ -382,6 +397,53 @@ const AdminDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Assets Not Checked In Section */}
+      <div className="assets-section">
+        <h2>Assets Not Checked In (3+ Months)</h2>
+        {loadingAssets ? (
+          <div className="loading">Loading assets...</div>
+        ) : (
+          <>
+            {notCheckedInAssets.length === 0 ? (
+              <p className="no-data">All assets have been checked in recently.</p>
+            ) : (
+              <div className="assets-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Asset Name</th>
+                      <th>Asset Tag</th>
+                      <th>Location</th>
+                      <th>Last Scanned</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {notCheckedInAssets.map((asset) => (
+                      <tr key={asset.id}>
+                        <td>{asset.name}</td>
+                        <td>{asset.asset_tag || '—'}</td>
+                        <td>{asset.location_name || '—'}</td>
+                        <td>
+                          {asset.last_scanned_at
+                            ? new Date(asset.last_scanned_at).toLocaleDateString()
+                            : 'Never'}
+                        </td>
+                        <td>
+                          <span className={`status-badge status-${asset.status}`}>
+                            {asset.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 };

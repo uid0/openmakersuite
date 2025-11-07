@@ -574,6 +574,245 @@ class AssetViewSet(viewsets.ModelViewSet):
         response["Content-Disposition"] = f'attachment; filename="asset-{asset.asset_tag}-qr.png"'
         return response
 
+    @action(detail=True, methods=["get"])
+    def download_label(self, request, pk=None):
+        """Generate and download a Brother QL-820nwb label for an asset."""
+        asset = self.get_object()
+
+        from .utils.label_generator import BrotherLabelRenderer
+
+        try:
+            renderer = BrotherLabelRenderer()
+            pdf_bytes = renderer.render_label(asset)
+            identifier = asset.asset_tag or str(asset.id)[:8]
+            filename = f"asset_label_{identifier}.pdf"
+
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to generate label: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=False, methods=["get"])
+    def not_checked_in(self, request):
+        """Get assets that haven't been checked in for 3+ months."""
+        from django.utils import timezone
+        from datetime import timedelta
+
+        three_months_ago = timezone.now() - timedelta(days=90)
+        
+        # Assets that have never been scanned or were scanned more than 3 months ago
+        assets = Asset.objects.filter(
+            Q(last_scanned_at__lt=three_months_ago) | Q(last_scanned_at__isnull=True)
+        ).filter(is_active=True).select_related("category", "location", "manufacturer")
+
+        serializer = self.get_serializer(assets, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["post"])
+    def download_labels_batch(self, request):
+        """Generate and download labels for multiple assets."""
+        asset_ids = request.data.get("asset_ids", [])
+        if not asset_ids:
+            return Response(
+                {"error": "asset_ids list is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .utils.label_generator import BrotherLabelRenderer
+
+        try:
+            assets = Asset.objects.filter(id__in=asset_ids)
+            if not assets.exists():
+                return Response(
+                    {"error": "No assets found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            renderer = BrotherLabelRenderer()
+            pdf_bytes = renderer.render_batch(list(assets))
+            filename = f"asset_labels_batch.pdf"
+
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to generate labels: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=True, methods=["post"], permission_classes=[AllowAny])
+    def scan(self, request, pk=None):
+        """
+        Handle asset QR code scan.
+        Updates last_scanned_at timestamp and returns asset information.
+        Anyone can scan (AllowAny).
+        """
+        from django.utils import timezone
+
+        asset = self.get_object()
+
+        # Update last scanned timestamp
+        asset.last_scanned_at = timezone.now()
+        asset.save(update_fields=["last_scanned_at"])
+
+        # Return asset data
+        serializer = self.get_serializer(asset)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def enable(self, request, pk=None):
+        """Enable an asset (set is_active=True)."""
+        asset = self.get_object()
+        user = request.user
+
+        if not user.is_authenticated:
+            return Response(
+                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Check if user can enable this asset
+        # Admins can always enable
+        if not asset.is_user_admin(user):
+            # Check if user's groups are in groups_can_enable
+            user_groups = user.groups.all()
+            if asset.groups_can_enable.exists():
+                # If groups are specified, user must be in one of them
+                if not any(group in asset.groups_can_enable.all() for group in user_groups):
+                    return Response(
+                        {"error": "You do not have permission to enable this asset"},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+        asset.is_active = True
+        asset.save(update_fields=["is_active"])
+        serializer = self.get_serializer(asset)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def disable(self, request, pk=None):
+        """Disable an asset (set is_active=False)."""
+        asset = self.get_object()
+        asset.is_active = False
+        asset.save(update_fields=["is_active"])
+        serializer = self.get_serializer(asset)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def lock(self, request, pk=None):
+        """Lock an asset to prevent non-admin usage."""
+        from django.utils import timezone
+
+        asset = self.get_object()
+        user = request.user
+
+        if not user.is_authenticated:
+            return Response(
+                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Check if user can lock this asset
+        if not asset.can_user_lock(user):
+            return Response(
+                {"error": "You do not have permission to lock this asset"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Determine lock type based on user's role
+        lock_type = None
+        if asset.is_user_admin(user):
+            lock_type = asset.LOCK_TYPE_ADMIN
+        elif asset.is_user_in_logistics(user):
+            lock_type = asset.LOCK_TYPE_LOGISTICS
+        elif asset.is_user_group_admin(user):
+            lock_type = asset.LOCK_TYPE_GROUP_ADMIN
+        elif asset.owning_group and asset.owning_group in user.groups.all():
+            lock_type = asset.LOCK_TYPE_GROUP_MEMBER
+
+        if not lock_type:
+            return Response(
+                {"error": "Unable to determine lock type"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Lock the asset
+        asset.is_locked = True
+        asset.locked_by = user
+        asset.locked_at = timezone.now()
+        asset.lock_type = lock_type
+        asset.save(update_fields=["is_locked", "locked_by", "locked_at", "lock_type"])
+
+        serializer = self.get_serializer(asset)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def unlock(self, request, pk=None):
+        """Unlock an asset based on permission rules."""
+        asset = self.get_object()
+        user = request.user
+
+        if not user.is_authenticated:
+            return Response(
+                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Check if user can unlock this asset
+        if not asset.can_user_unlock(user):
+            return Response(
+                {"error": "You do not have permission to unlock this asset"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Unlock the asset
+        asset.is_locked = False
+        asset.locked_by = None
+        asset.locked_at = None
+        asset.lock_type = ""
+        asset.save(update_fields=["is_locked", "locked_by", "locked_at", "lock_type"])
+
+        serializer = self.get_serializer(asset)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def report_problem(self, request, pk=None):
+        """Report a problem with an asset."""
+        asset = self.get_object()
+        description = request.data.get("description", "")
+        if not description:
+            return Response(
+                {"error": "description is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .models import AssetProblem
+
+        reported_by = ""
+        if request.user and request.user.is_authenticated:
+            reported_by = request.user.username
+
+        problem = AssetProblem.objects.create(
+            asset=asset,
+            reported_by=reported_by,
+            description=description,
+        )
+
+        # Send webhook notification if configured
+        try:
+            from reorder_queue.tasks import send_asset_problem_webhook
+
+            send_asset_problem_webhook.delay(str(problem.id))
+        except Exception:
+            # Log but don't fail the request if webhook fails
+            pass
+
+        from .serializers import AssetProblemSerializer
+
+        serializer = AssetProblemSerializer(problem)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 class FixtureViewSet(viewsets.ModelViewSet):
     """API endpoint for fixtures (refillable assets)."""

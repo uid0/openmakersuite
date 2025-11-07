@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "django_celery_results",
     # Local apps
+    "membership",
     "inventory",
     "reorder_queue",
     "index_cards",
@@ -131,6 +132,9 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Custom User Model
+AUTH_USER_MODEL = "membership.User"
 
 # REST Framework
 REST_FRAMEWORK = {

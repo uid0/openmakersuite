@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from .models import (
     Asset,
+    AssetProblem,
     Category,
     Fixture,
     FixtureRefillRequest,
@@ -337,6 +338,10 @@ class AssetSerializer(serializers.ModelSerializer):
     qr_code_url = serializers.SerializerMethodField()
     manual_pdf_url = serializers.SerializerMethodField()
 
+    # Lock-related fields
+    locked_by_username = serializers.CharField(source="locked_by.username", read_only=True)
+    owning_group_name = serializers.CharField(source="owning_group.name", read_only=True)
+
     class Meta:
         model = Asset
         fields = [
@@ -369,6 +374,24 @@ class AssetSerializer(serializers.ModelSerializer):
             "wiki_page_url",
             # Maintenance
             "maintenance_plan",
+            # Operational requirements
+            "circuit",
+            "needs_compressed_air",
+            "needs_ventilation",
+            "is_chargeable",
+            # Scanning tracking
+            "last_scanned_at",
+            # Group ownership and locking
+            "owning_group",
+            "owning_group_name",
+            "groups_can_enable",
+            "is_locked",
+            "locked_by",
+            "locked_by_username",
+            "locked_at",
+            "lock_type",
+            # Operational status
+            "operational_status",
             # Media
             "image",
             "image_url",
@@ -386,7 +409,15 @@ class AssetSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["asset_tag", "qr_code", "created_at", "updated_at"]
+        read_only_fields = [
+            "asset_tag",
+            "qr_code",
+            "last_scanned_at",
+            "locked_by_username",
+            "owning_group_name",
+            "created_at",
+            "updated_at",
+        ]
 
     def get_image_url(self, obj):
         """Return the image URL when available."""
@@ -415,6 +446,30 @@ class AssetSerializer(serializers.ModelSerializer):
             return obj.manual_pdf.url if obj.manual_pdf else None
         except Exception:
             return None
+
+
+class AssetProblemSerializer(serializers.ModelSerializer):
+    """Serializer for asset problem reports."""
+
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    asset_tag = serializers.CharField(source="asset.asset_tag", read_only=True)
+
+    class Meta:
+        model = AssetProblem
+        fields = [
+            "id",
+            "asset",
+            "asset_name",
+            "asset_tag",
+            "reported_by",
+            "description",
+            "status",
+            "resolution_notes",
+            "created_at",
+            "updated_at",
+            "resolved_at",
+        ]
+        read_only_fields = ["created_at", "updated_at", "resolved_at"]
 
 
 class FixtureSerializer(serializers.ModelSerializer):

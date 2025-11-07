@@ -4,6 +4,7 @@
 import * as Sentry from '@sentry/react';
 import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import AdminDashboard from './pages/AdminDashboard';
+import AssetScanPage from './pages/AssetScanPage';
 import FixtureScanPage from './pages/FixtureScanPage';
 import HomePage from './pages/HomePage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
@@ -34,6 +35,7 @@ function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/scan/:itemId" element={<ScanPage />} />
             <Route path="/scan/fixture/:fixtureId" element={<FixtureScanPage />} />
+            <Route path="/scan/asset/:assetId" element={<AssetScanPage />} />
             <Route path="/orderadmin" element={<AdminDashboard />} />
             <Route path="/thanks" element={<ThanksPage />} />
             <Route path="/tv-dashboard" element={<TVDashboard />} />

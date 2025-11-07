@@ -2,7 +2,9 @@
 Factory classes for generating test data for reorder queue models.
 """
 
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 import factory
 from factory import Faker, SubFactory

@@ -128,6 +128,37 @@ export const assetsAPI = {
 
   generateQR: (id: string) =>
     api.post(`/inventory/assets/${id}/generate_qr/`),
+
+  scanAsset: (id: string) =>
+    api.post<Asset>(`/inventory/assets/${id}/scan/`),
+
+  enableAsset: (id: string) =>
+    api.post<Asset>(`/inventory/assets/${id}/enable/`),
+
+  disableAsset: (id: string) =>
+    api.post<Asset>(`/inventory/assets/${id}/disable/`),
+
+  lockAsset: (id: string) =>
+    api.post<Asset>(`/inventory/assets/${id}/lock/`),
+
+  unlockAsset: (id: string) =>
+    api.post<Asset>(`/inventory/assets/${id}/unlock/`),
+
+  reportProblem: (id: string, description: string) =>
+    api.post(`/inventory/assets/${id}/report_problem/`, { description }),
+
+  downloadLabel: (id: string) =>
+    api.get(`/inventory/assets/${id}/download_label/`, {
+      responseType: 'blob',
+    }),
+
+  downloadLabelsBatch: (assetIds: string[]) =>
+    api.post(`/inventory/assets/download_labels_batch/`, { asset_ids: assetIds }, {
+      responseType: 'blob',
+    }),
+
+  getNotCheckedIn: () =>
+    api.get<Asset[]>('/inventory/assets/not_checked_in/'),
 };
 
 // Reorder API

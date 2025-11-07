@@ -4,8 +4,9 @@ Custom authentication views for makerspace users.
 
 import re
 
-from django.contrib.auth import authenticate
-from django.contrib.auth.models import User
+from django.contrib.auth import authenticate, get_user_model
+
+User = get_user_model()
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -96,6 +97,13 @@ def login_user(request):
 
     if not user.is_active:
         return Response({"detail": "User account is disabled"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Check if user can log in based on membership status or role
+    if not user.can_login():
+        return Response(
+            {"detail": "User does not have an active membership or required role"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     # Generate tokens
     refresh = RefreshToken.for_user(user)

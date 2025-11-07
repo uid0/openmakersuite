@@ -24,6 +24,7 @@ from .models import (
     UsageLog,
 )
 
+
 @admin.register(Supplier)
 class SupplierAdmin(admin.ModelAdmin):
     list_display = [
@@ -801,8 +802,6 @@ class AssetAdmin(admin.ModelAdmin):
             if obj.locked_by:
                 lock_info += f" by {obj.locked_by.username}"
             if obj.locked_at:
-                from django.utils import timezone
-
                 lock_info += f" on {obj.locked_at.strftime('%Y-%m-%d %H:%M')}"
             return format_html('<span style="color: #dc3545;">{}</span>', lock_info)
         return format_html('<span style="color: #28a745;">✓ Unlocked</span>')

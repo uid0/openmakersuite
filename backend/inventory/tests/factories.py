@@ -229,7 +229,7 @@ class AssetFactory(DjangoModelFactory):
     manufacturer = SubFactory(SupplierFactory)
     status = Asset.ACTIVE
     is_active = True
-    circuit = ''
+    circuit = ""
     needs_compressed_air = False
     needs_ventilation = False
     is_chargeable = False

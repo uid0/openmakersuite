@@ -352,9 +352,7 @@ def send_asset_problem_webhook(problem_id: str) -> Dict[str, Any]:
     from inventory.models import AssetProblem
 
     try:
-        problem = AssetProblem.objects.select_related("asset", "asset__location").get(
-            id=problem_id
-        )
+        problem = AssetProblem.objects.select_related("asset", "asset__location").get(id=problem_id)
     except AssetProblem.DoesNotExist:
         logger.error(f"AssetProblem {problem_id} not found")
         return {"error": "AssetProblem not found"}

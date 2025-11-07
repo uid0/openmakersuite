@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from django.conf import settings
-from django.contrib.auth.models import AbstractUser, Group
+from django.contrib.auth.models import Group
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.text import slugify
@@ -1210,9 +1210,10 @@ class Asset(models.Model):
             return False
         # Check if user has 'group_admin' permission or is in a group admin group
         # You may need to adjust this based on your permission structure
-        return user.has_perm("inventory.group_admin") or user.groups.filter(
-            name__endswith="_admin"
-        ).exists()
+        return (
+            user.has_perm("inventory.group_admin")
+            or user.groups.filter(name__endswith="_admin").exists()
+        )
 
     def can_user_lock(self, user) -> bool:
         """Check if user can lock this asset."""
@@ -1250,7 +1251,7 @@ class Asset(models.Model):
 class AssetProblem(models.Model):
     """
     Track problems reported with assets by users.
-    
+
     When a user scans an asset QR code and reports a problem,
     this model stores the issue for admin review.
     """

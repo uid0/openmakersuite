@@ -167,4 +167,5 @@ class MembershipAdmin(admin.ModelAdmin):
         if users:
             return ", ".join([user.username for user in users[:5]])
         return "No users"
+
     get_users.short_description = "Users"

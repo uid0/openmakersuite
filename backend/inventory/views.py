@@ -599,15 +599,20 @@ class AssetViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def not_checked_in(self, request):
         """Get assets that haven't been checked in for 3+ months."""
-        from django.utils import timezone
         from datetime import timedelta
 
+        from django.utils import timezone
+
         three_months_ago = timezone.now() - timedelta(days=90)
-        
+
         # Assets that have never been scanned or were scanned more than 3 months ago
-        assets = Asset.objects.filter(
-            Q(last_scanned_at__lt=three_months_ago) | Q(last_scanned_at__isnull=True)
-        ).filter(is_active=True).select_related("category", "location", "manufacturer")
+        assets = (
+            Asset.objects.filter(
+                Q(last_scanned_at__lt=three_months_ago) | Q(last_scanned_at__isnull=True)
+            )
+            .filter(is_active=True)
+            .select_related("category", "location", "manufacturer")
+        )
 
         serializer = self.get_serializer(assets, many=True)
         return Response(serializer.data)
@@ -628,13 +633,12 @@ class AssetViewSet(viewsets.ModelViewSet):
             assets = Asset.objects.filter(id__in=asset_ids)
             if not assets.exists():
                 return Response(
-                    {"error": "No assets found"},
-                    status=status.HTTP_404_NOT_FOUND,
+                    {"error": "No assets found"}, status=status.HTTP_404_NOT_FOUND
                 )
 
             renderer = BrotherLabelRenderer()
             pdf_bytes = renderer.render_batch(list(assets))
-            filename = f"asset_labels_batch.pdf"
+            filename = "asset_labels_batch.pdf"
 
             response = HttpResponse(pdf_bytes, content_type="application/pdf")
             response["Content-Disposition"] = f'attachment; filename="{filename}"'

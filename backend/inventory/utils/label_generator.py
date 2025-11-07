@@ -7,16 +7,13 @@ This generator creates PDF labels optimized for this printer.
 
 from __future__ import annotations
 
-import base64
 from io import BytesIO
 from typing import Optional
 
 from django.conf import settings
+
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import inch, mm
+from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
@@ -43,9 +40,7 @@ class BrotherLabelRenderer:
         Args:
             base_url: Base URL for QR code links (defaults to settings)
         """
-        self.base_url = base_url or getattr(
-            settings, "FRONTEND_URL", "http://localhost:3000"
-        )
+        self.base_url = base_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
 
     def render_label(self, asset: Asset) -> bytes:
         """Generate a single label PDF for an asset.
@@ -57,9 +52,7 @@ class BrotherLabelRenderer:
             PDF content as bytes
         """
         buffer = BytesIO()
-        pdf_canvas = canvas.Canvas(
-            buffer, pagesize=(self.LABEL_WIDTH, self.LABEL_HEIGHT)
-        )
+        pdf_canvas = canvas.Canvas(buffer, pagesize=(self.LABEL_WIDTH, self.LABEL_HEIGHT))
 
         self._draw_label(pdf_canvas, asset)
         pdf_canvas.save()
@@ -77,9 +70,7 @@ class BrotherLabelRenderer:
             PDF content as bytes with one label per page
         """
         buffer = BytesIO()
-        pdf_canvas = canvas.Canvas(
-            buffer, pagesize=(self.LABEL_WIDTH, self.LABEL_HEIGHT)
-        )
+        pdf_canvas = canvas.Canvas(buffer, pagesize=(self.LABEL_WIDTH, self.LABEL_HEIGHT))
 
         for asset in assets:
             self._draw_label(pdf_canvas, asset)
@@ -163,9 +154,7 @@ class BrotherLabelRenderer:
             location_text = f"Loc: {asset.location.name[:20]}"
             pdf_canvas.drawString(text_x, location_y, location_text)
 
-    def _wrap_text(
-        self, text: str, max_width: float, font_name: str, font_size: int
-    ) -> list[str]:
+    def _wrap_text(self, text: str, max_width: float, font_name: str, font_size: int) -> list[str]:
         """Wrap text to fit within a given width.
 
         Args:
@@ -197,4 +186,3 @@ class BrotherLabelRenderer:
             lines.append(current_line)
 
         return lines
-

@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("inventory", "0017_add_case_based_reorder_fields"),
+        ("inventory", "0021_inventoryitem_msds_file"),
     ]
 
     operations = [

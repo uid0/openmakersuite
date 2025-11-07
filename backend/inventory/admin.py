@@ -15,8 +15,6 @@ from django.utils.html import format_html
 from .models import (
     Asset,
     Category,
-    Fixture,
-    FixtureRefillRequest,
     InventoryItem,
     ItemSupplier,
     Location,
@@ -403,22 +401,22 @@ class InventoryItemAdmin(admin.ModelAdmin):
         # Create a button that opens a modal with the preview
         preview_html = format_html(
             """
-            <button type="button" 
-                    onclick="showIndexCardPreview('{}', '{}')" 
-                    style="background: #007cba; color: white; padding: 8px 16px; 
-                           border: none; border-radius: 4px; cursor: pointer; 
+            <button type="button"
+                    onclick="showIndexCardPreview('{}', '{}')"
+                    style="background: #007cba; color: white; padding: 8px 16px;
+                           border: none; border-radius: 4px; cursor: pointer;
                            font-weight: bold;">
                 🖼️ Preview Index Card
             </button>
-            <div id="indexCardPreviewModal" style="display: none; position: fixed; 
-                 top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); 
+            <div id="indexCardPreviewModal" style="display: none; position: fixed;
+                 top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8);
                  z-index: 10000; overflow: auto;">
-                <div style="position: relative; width: 90%; max-width: 800px; 
+                <div style="position: relative; width: 90%; max-width: 800px;
                     margin: 50px auto; background: white; padding: 20px; border-radius: 8px;">
-                    <button onclick="closeIndexCardPreview()" 
-                            style="position: absolute; top: 10px; right: 10px; 
-                                   background: #dc3545; color: white; border: none; 
-                                   border-radius: 50%; width: 30px; height: 30px; 
+                    <button onclick="closeIndexCardPreview()"
+                            style="position: absolute; top: 10px; right: 10px;
+                                   background: #dc3545; color: white; border: none;
+                                   border-radius: 50%; width: 30px; height: 30px;
                                    cursor: pointer; font-size: 18px;">×</button>
                     <h2 style="margin-top: 0;">Index Card Preview</h2>
                     <div id="indexCardPreviewContent" style="text-align: center;">
@@ -432,7 +430,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
                     const content = document.getElementById('indexCardPreviewContent');
                     modal.style.display = 'block';
                     content.innerHTML = '<p>Loading preview...</p>';
-                    
+
                     fetch(previewUrl, {{
                         method: 'POST',
                         headers: {{
@@ -444,7 +442,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
                     .then(response => response.json())
                     .then(data => {{
                         if (data.preview) {{
-                            content.innerHTML = '<iframe src="data:application/pdf;base64,' + 
+                            content.innerHTML = '<iframe src="data:application/pdf;base64,' +
                                 data.preview + '" style="width: 100%; height: 600px; border: none;"></iframe>';
                         }} else {{
                             content.innerHTML = '<p style="color: red;">Error loading preview</p>';
@@ -454,11 +452,11 @@ class InventoryItemAdmin(admin.ModelAdmin):
                         content.innerHTML = '<p style="color: red;">Error: ' + error + '</p>';
                     }});
                 }}
-                
+
                 function closeIndexCardPreview() {{
                     document.getElementById('indexCardPreviewModal').style.display = 'none';
                 }}
-                
+
                 // Close modal when clicking outside
                 window.onclick = function(event) {{
                     const modal = document.getElementById('indexCardPreviewModal');

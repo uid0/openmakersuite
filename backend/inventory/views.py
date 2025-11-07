@@ -652,8 +652,9 @@ class FixtureViewSet(viewsets.ModelViewSet):
             requested_by = request.user.username
 
         # Create the refill request
+        notes = request.data.get("notes", "")
         refill_request = FixtureRefillRequest.objects.create(
-            fixture=fixture, requested_by=requested_by
+            fixture=fixture, requested_by=requested_by, notes=notes
         )
 
         # Send webhook notification

@@ -8,10 +8,32 @@ For more information, see the LICENSE file.
 
 """
 
-
 from __future__ import annotations
 
 import base64
+import os
+from dataclasses import dataclass
+from io import BytesIO
+from pathlib import Path
+from typing import Iterable, List, Sequence
+
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+from django.utils import timezone
+
+import qrcode
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph
+
+from inventory.models import InventoryItem
 
 
 @dataclass
@@ -43,7 +65,7 @@ class IndexCardRenderer:
     CARD_PADDING = 0.15 * inch
     IMAGE_MAX_WIDTH = 2.0 * inch  # Fit in landscape layout
     IMAGE_MAX_HEIGHT = 2.0 * inch
-    QR_CODE_SIZE = 1.2 * inch  # Increased size for better scanability
+    QR_CODE_SIZE = 0.8 * inch  # Smaller for compact 3" height
 
     CALL_TO_ACTION = "Scan to notify Logistics\nit's time to reorder me!"
 
@@ -54,8 +76,7 @@ class IndexCardRenderer:
             base_url: Base URL for QR codes (defaults to FRONTEND_URL setting)
             blank_cards: If True, render blank cards with only QR codes
         """
-        self.base_url = base_url or getattr(
-            settings, "FRONTEND_URL", "http://localhost:3000")
+        self.base_url = base_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         self.blank_cards = blank_cards
         self._title_style = ParagraphStyle(
             name="CardTitle",
@@ -105,8 +126,7 @@ class IndexCardRenderer:
     ) -> GeneratedCardFile:
         """Render cards for a sequence of items and persist the PDF."""
         if not items:
-            raise ValueError(
-                "At least one item is required to render index cards.")
+            raise ValueError("At least one item is required to render index cards.")
 
         self.blank_cards = blank_cards
         normalized_name = self._normalize_filename(filename)
@@ -249,8 +269,7 @@ class IndexCardRenderer:
         right_section_x = inner_x + left_section_width
 
         # Draw title and get updated Y position
-        current_y = self._draw_title_section(
-            pdf_canvas, item, inner_x, origin_y, available_width)
+        current_y = self._draw_title_section(pdf_canvas, item, inner_x, origin_y, available_width)
 
         # Draw left section (info + image)
         self._draw_left_section(
@@ -267,13 +286,11 @@ class IndexCardRenderer:
 
         # Draw Limited Quantity diamond for hazmat items
         if item.is_hazardous:
-            self._draw_limited_quantity_diamond(
-                pdf_canvas, item, inner_x, inner_y)
+            self._draw_limited_quantity_diamond(pdf_canvas, item, inner_x, inner_y)
 
         # Draw shelf position arrow
         if item.shelf_position:
-            self._draw_shelf_position_arrow(
-                pdf_canvas, item, origin_x, origin_y)
+            self._draw_shelf_position_arrow(pdf_canvas, item, origin_x, origin_y)
 
     def _draw_title_section(
         self,
@@ -286,8 +303,7 @@ class IndexCardRenderer:
         """Draw the item title and return the updated Y position."""
         current_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING
         title_para = Paragraph(item.name, self._title_style)
-        title_width, title_height = title_para.wrap(
-            available_width, 0.4 * inch)
+        title_width, title_height = title_para.wrap(available_width, 0.4 * inch)
         title_para.drawOn(pdf_canvas, inner_x, current_y - title_height)
         return current_y - title_height - 0.3 * inch
 
@@ -302,11 +318,7 @@ class IndexCardRenderer:
     ) -> None:
         """Draw the left section with stock info and product image."""
         # Draw Kanban stock info (reorder point and lead times)
-
-        # Use custom reorder instruction if provided
-        if item.reorder_instruction and item.reorder_instruction.strip():
-            info_lines = [item.reorder_instruction.strip()]
-        elif item.use_case_based_reorder:
+        if item.use_case_based_reorder:
             # Case-based reordering display
             info_lines = [
                 f"Reorder at: {self._pluralize(item.minimum_cases, 'case')}",
@@ -319,32 +331,21 @@ class IndexCardRenderer:
 
         # Add average lead time from primary supplier
         if item.average_lead_time:
-            info_lines.append(
-                f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
+            info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
 
         # Add longest lead time across all suppliers
         longest_lead_time = self._get_longest_lead_time(item)
         if longest_lead_time and longest_lead_time != item.average_lead_time:
-            info_lines.append(
-                f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
+            info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
 
         info_y = current_y - 0.1 * inch
         self._draw_info_lines(
             pdf_canvas, info_lines, left_section_x, info_y, left_section_width - 0.1 * inch
         )
 
-        # Draw hazmat indicator if item is hazardous
+        # Draw product image below info
         info_lines_height = len(info_lines) * self._highlight_style.leading
-        hazmat_y = info_y - info_lines_height - 0.15 * inch
-
-        hazmat_height = 0
-        if item.is_hazardous:
-            hazmat_height = self._draw_hazmat_indicator(
-                pdf_canvas, item, left_section_x, left_section_width, hazmat_y
-            )
-
-        # Draw product image below info and hazmat indicator
-        image_y_start = hazmat_y - hazmat_height - 0.1 * inch
+        image_y_start = info_y - info_lines_height - 0.1 * inch
 
         if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
             self._draw_product_image(
@@ -373,158 +374,7 @@ class IndexCardRenderer:
         )
 
         # Draw CTA box
-        self._draw_cta_box(pdf_canvas, item, right_section_x,
-                           right_section_width, cta_box)
-
-    def _draw_hazmat_indicator(
-        self,
-        pdf_canvas: canvas.Canvas,
-        item: InventoryItem,
-        left_section_x: float,
-        left_section_width: float,
-        y_position: float,
-    ) -> float:
-        """Draw hazmat indicator - either NFPA diamond or HAZMAT text.
-
-        Returns:
-            Height of the drawn indicator
-        """
-        # Check if we have complete NFPA data
-        has_nfpa_data = (
-            item.nfpa_health_hazard is not None
-            and item.nfpa_fire_hazard is not None
-            and item.nfpa_instability_hazard is not None
-        )
-
-        if has_nfpa_data:
-            # Draw NFPA diamond
-            return self._draw_nfpa_diamond(
-                pdf_canvas, item, left_section_x, left_section_width, y_position
-            )
-        else:
-            # Draw HAZMAT text
-            return self._draw_hazmat_text(pdf_canvas, left_section_x, y_position)
-
-    def _draw_nfpa_diamond(
-        self,
-        pdf_canvas: canvas.Canvas,
-        item: InventoryItem,
-        left_section_x: float,
-        left_section_width: float,
-        y_position: float,
-    ) -> float:
-        """Draw NFPA 704 fire diamond.
-
-        Returns:
-            Height of the diamond
-        """
-        diamond_size = 0.8 * inch
-        half_size = diamond_size / 2
-
-        # Center the diamond horizontally
-        center_x = left_section_x + left_section_width / 2
-        center_y = y_position - half_size
-
-        # Define diamond quadrants (rotated 45 degrees)
-        # Top (Health - Blue), Right (Fire - Red), Bottom (Reactivity - Yellow), Left (Special - White)
-
-        # Draw the four diamond sections
-        sections = [
-            {  # Top - Health (Blue)
-                "points": [
-                    (center_x, center_y + half_size),
-                    (center_x - half_size, center_y),
-                    (center_x, center_y),
-                    (center_x + half_size, center_y),
-                ],
-                "color": colors.HexColor("#0000FF"),
-                "value": item.nfpa_health_hazard,
-            },
-            {  # Right - Fire (Red)
-                "points": [
-                    (center_x + half_size, center_y),
-                    (center_x, center_y + half_size),
-                    (center_x, center_y),
-                    (center_x, center_y - half_size),
-                ],
-                "color": colors.HexColor("#FF0000"),
-                "value": item.nfpa_fire_hazard,
-            },
-            {  # Bottom - Instability/Reactivity (Yellow)
-                "points": [
-                    (center_x, center_y - half_size),
-                    (center_x + half_size, center_y),
-                    (center_x, center_y),
-                    (center_x - half_size, center_y),
-                ],
-                "color": colors.HexColor("#FFFF00"),
-                "value": item.nfpa_instability_hazard,
-            },
-            {  # Left - Special Hazards (White)
-                "points": [
-                    (center_x - half_size, center_y),
-                    (center_x, center_y - half_size),
-                    (center_x, center_y),
-                    (center_x, center_y + half_size),
-                ],
-                "color": colors.white,
-                "value": item.nfpa_special_hazards or "",
-            },
-        ]
-
-        # Draw each section
-        for section in sections:
-            path = pdf_canvas.beginPath()
-            path.moveTo(section["points"][0][0], section["points"][0][1])
-            for point in section["points"][1:]:
-                path.lineTo(point[0], point[1])
-            path.close()
-
-            pdf_canvas.setFillColor(section["color"])
-            pdf_canvas.setStrokeColor(colors.black)
-            pdf_canvas.setLineWidth(1)
-            pdf_canvas.drawPath(path, stroke=1, fill=1)
-
-        # Draw values/text in each section
-        pdf_canvas.setFillColor(colors.black)
-        pdf_canvas.setFont("Helvetica-Bold", 14)
-
-        # Health (top)
-        pdf_canvas.drawCentredString(
-            center_x, center_y + half_size / 2 - 5, str(sections[0]["value"])
-        )
-
-        # Fire (right)
-        pdf_canvas.drawCentredString(
-            center_x + half_size / 2, center_y - 5, str(sections[1]["value"])
-        )
-
-        # Instability (bottom)
-        pdf_canvas.drawCentredString(
-            center_x, center_y - half_size / 2 - 5, str(sections[2]["value"])
-        )
-
-        # Special (left) - may be text
-        special_value = str(sections[3]["value"]) if sections[3]["value"] else ""
-        if special_value:
-            pdf_canvas.setFont("Helvetica-Bold", 10)
-            pdf_canvas.drawCentredString(center_x - half_size / 2, center_y - 5, special_value)
-
-        return diamond_size
-
-    def _draw_hazmat_text(
-        self, pdf_canvas: canvas.Canvas, left_section_x: float, y_position: float
-    ) -> float:
-        """Draw HAZMAT text indicator.
-
-        Returns:
-            Height of the text
-        """
-        pdf_canvas.setFillColor(colors.HexColor("#FF0000"))
-        pdf_canvas.setFont("Helvetica-Bold", 16)
-        pdf_canvas.drawString(left_section_x, y_position - 0.2 * inch, "⚠ HAZMAT")
-        pdf_canvas.setFillColor(colors.black)  # Reset color
-        return 0.25 * inch
+        self._draw_cta_box(pdf_canvas, item, right_section_x, right_section_width, cta_box)
 
     def _draw_category_section(
         self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, inner_y: float
@@ -540,8 +390,7 @@ class IndexCardRenderer:
         # Use category color for text if it's dark, otherwise use gray
         if not is_light_color and item.category.color and item.category.color.strip():
             try:
-                category_text_color = colors.HexColor(
-                    item.category.color.strip())
+                category_text_color = colors.HexColor(item.category.color.strip())
                 pdf_canvas.setFillColor(category_text_color)
             except (ValueError, AttributeError):
                 pdf_canvas.setFillColor(colors.gray)
@@ -565,8 +414,7 @@ class IndexCardRenderer:
 
         # Draw diamond shape (rotated square)
         pdf_canvas.saveState()
-        pdf_canvas.translate(diamond_x + diamond_size / 2,
-                             diamond_y + diamond_size / 2)
+        pdf_canvas.translate(diamond_x + diamond_size / 2, diamond_y + diamond_size / 2)
         pdf_canvas.rotate(45)
 
         # Draw white background
@@ -630,17 +478,14 @@ class IndexCardRenderer:
         """Draw the product image if available."""
         image_reader = ImageReader(item.image.path)
         image_width, image_height = image_reader.getSize()
-        available_image_space = image_y_start - inner_y - \
-            0.3 * inch  # Reserve space for category
+        available_image_space = image_y_start - inner_y - 0.3 * inch  # Reserve space for category
         max_image_width = left_section_width - 0.2 * inch
 
         if available_image_space > 0:
-            scale = min(max_image_width / image_width,
-                        available_image_space / image_height, 1)
+            scale = min(max_image_width / image_width, available_image_space / image_height, 1)
             image_drawn_width = image_width * scale
             image_drawn_height = image_height * scale
-            image_x = left_section_x + \
-                (left_section_width - image_drawn_width) / 2
+            image_x = left_section_x + (left_section_width - image_drawn_width) / 2
             image_y = image_y_start - image_drawn_height
             pdf_canvas.drawImage(
                 image_reader,
@@ -680,8 +525,7 @@ class IndexCardRenderer:
             box_y = min_box_y
             if box_y + box_height > qr_y_adjusted - 0.02 * inch:
                 line_height = 8
-                box_height = len(cta_lines) * line_height + \
-                    2 * padding_vertical
+                box_height = len(cta_lines) * line_height + 2 * padding_vertical
 
         qr_x = 0  # Will be calculated in draw method
         return (
@@ -778,8 +622,7 @@ class IndexCardRenderer:
         cta_lines = self.CALL_TO_ACTION.split("\n")
         cta_y = cta_box["y"] + cta_box["height"] - cta_box["padding"] - 8
         for line in cta_lines:
-            pdf_canvas.drawCentredString(
-                right_section_x + right_section_width / 2, cta_y, line)
+            pdf_canvas.drawCentredString(right_section_x + right_section_width / 2, cta_y, line)
             cta_y -= cta_box["line_height"]
 
     def _draw_info_lines(
@@ -797,8 +640,7 @@ class IndexCardRenderer:
 
         text_object = pdf_canvas.beginText()
         text_object.setTextOrigin(origin_x, origin_y)
-        text_object.setFont(self._highlight_style.fontName,
-                            self._highlight_style.fontSize)
+        text_object.setFont(self._highlight_style.fontName, self._highlight_style.fontSize)
         leading = self._highlight_style.leading
 
         for line in lines:
@@ -859,8 +701,7 @@ class IndexCardRenderer:
         )
         qr.add_data(self._build_reorder_url(item))
         qr.make(fit=True)
-        image = qr.make_image(fill_color="black",
-                              back_color="white").convert("RGB")
+        image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         buffer.seek(0)
@@ -940,7 +781,7 @@ class IndexCardRenderer:
     ) -> Iterable[Sequence[InventoryItem]]:
         """Split items into chunks of specified size (default 3 for Avery 5388)."""
         for index in range(0, len(sequence), size):
-            yield sequence[index:index + size]
+            yield sequence[index : index + size]
 
     def _normalize_filename(self, filename: str | None) -> str:
         if filename:
@@ -951,165 +792,6 @@ class IndexCardRenderer:
         timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
         return f"index_cards_{timestamp}.pdf"
 
-
-class FixtureCardRenderer(IndexCardRenderer):
-    """Render fixture refill request cards leveraging the index card layout."""
-
-    CALL_TO_ACTION = "Scan this code to request a refill"
-
-    def __init__(self, base_url: str | None = None) -> None:
-        super().__init__(base_url=base_url, blank_cards=False)
-        self._subtitle_style = ParagraphStyle(
-            name="FixtureSubtitle",
-            fontName="Helvetica",
-            fontSize=12,
-            leading=14,
-            alignment=TA_LEFT,
-            textColor=colors.HexColor("#1F2937"),
-        )
-        self._summary_style = ParagraphStyle(
-            name="FixtureSummary",
-            fontName="Helvetica",
-            fontSize=11,
-            leading=13,
-            alignment=TA_LEFT,
-            textColor=colors.HexColor("#111827"),
-        )
-        self._cta_style = ParagraphStyle(
-            name="FixtureCTA",
-            fontName="Helvetica-Bold",
-            fontSize=12,
-            leading=14,
-            alignment=TA_LEFT,
-            textColor=colors.white,
-        )
-
-    # Public helpers -------------------------------------------------
-    def render_preview(self, fixture: Fixture, blank_card: bool = False) -> bytes:
-        if blank_card:
-            raise ValueError("Fixture cards do not support blank mode.")
-        return super().render_preview(fixture, blank_card=False)
-
-    def render_to_bytes(self, fixtures: Sequence[Fixture], blank_cards: bool = False) -> bytes:
-        if blank_cards:
-            raise ValueError("Fixture cards do not support blank mode.")
-        return super().render_to_bytes(fixtures, blank_cards=False)
-
-    def render_batch_to_storage(
-        self,
-        fixtures: Sequence[Fixture],
-        filename: str | None = None,
-        blank_cards: bool = False,
-    ) -> GeneratedCardFile:
-        if blank_cards:
-            raise ValueError("Fixture cards do not support blank mode.")
-        return super().render_batch_to_storage(fixtures, filename=filename, blank_cards=False)
-
-    # Overrides ------------------------------------------------------
-    def _draw_card(
-        self,
-        pdf_canvas: canvas.Canvas,
-        fixture: Fixture,
-        origin_x: float,
-        origin_y: float,
-    ) -> None:
-        pdf_canvas.roundRect(
-            origin_x,
-            origin_y,
-            self.CARD_WIDTH,
-            self.CARD_HEIGHT,
-            radius=12,
-            stroke=1,
-            fill=0,
-        )
-
-        inner_x = origin_x + self.CARD_PADDING
-        inner_y = origin_y + self.CARD_PADDING
-        available_width = self.CARD_WIDTH - 2 * self.CARD_PADDING
-
-        # Reserve space for QR code on the right
-        qr_offset = 0.2 * inch
-        text_width = available_width - self.QR_CODE_SIZE - qr_offset
-        qr_x = inner_x + text_width + qr_offset / 2
-        qr_y = inner_y + 0.65 * inch
-
-        # Title
-        top_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING
-        title_para = Paragraph(fixture.name, self._title_style)
-        title_width, title_height = title_para.wrap(text_width, 0.7 * inch)
-        title_para.drawOn(pdf_canvas, inner_x, top_y - title_height)
-        current_y = top_y - title_height - 0.1 * inch
-
-        # Location
-        location_name = fixture.location.name if fixture.location else "Unknown location"
-        location_para = Paragraph(f"<b>Location:</b> {location_name}", self._subtitle_style)
-        _, location_height = location_para.wrap(text_width, 0.5 * inch)
-        location_para.drawOn(pdf_canvas, inner_x, current_y - location_height)
-        current_y -= location_height + 0.08 * inch
-
-        # Refill item and identifiers
-        summary_lines: list[str] = []
-        if fixture.refill_item:
-            summary_lines.append(f"<b>Refill Item:</b> {fixture.refill_item.name}")
-            if fixture.refill_item.sku:
-                summary_lines.append(f"<b>SKU:</b> {fixture.refill_item.sku}")
-        if fixture.asset_tag:
-            summary_lines.append(f"<b>Fixture ID:</b> {fixture.asset_tag}")
-
-        for line in summary_lines:
-            summary_para = Paragraph(line, self._summary_style)
-            _, summary_height = summary_para.wrap(text_width, 0.4 * inch)
-            summary_para.drawOn(pdf_canvas, inner_x, current_y - summary_height)
-            current_y -= summary_height + 0.05 * inch
-
-        # CTA box near bottom-left
-        cta_box_width = text_width
-        cta_box_height = 0.9 * inch
-        cta_box_x = inner_x
-        cta_box_y = inner_y + 0.2 * inch
-
-        pdf_canvas.saveState()
-        pdf_canvas.setFillColor(colors.HexColor("#1D4ED8"))
-        pdf_canvas.roundRect(
-            cta_box_x,
-            cta_box_y,
-            cta_box_width,
-            cta_box_height,
-            radius=10,
-            stroke=0,
-            fill=1,
-        )
-        pdf_canvas.restoreState()
-
-        cta_para = Paragraph(
-            f"{self.CALL_TO_ACTION}<br/>Let Logistics know when this fixture needs attention.",
-            self._cta_style,
-        )
-        cta_para.wrapOn(pdf_canvas, cta_box_width - 0.2 * inch, cta_box_height - 0.2 * inch)
-        cta_para.drawOn(pdf_canvas, cta_box_x + 0.1 * inch, cta_box_y + 0.25 * inch)
-
-        # QR code
-        qr_buffer = self._generate_qr_code(fixture)
-        qr_reader = ImageReader(qr_buffer)
-        pdf_canvas.drawImage(
-            qr_reader,
-            qr_x,
-            qr_y,
-            width=self.QR_CODE_SIZE,
-            height=self.QR_CODE_SIZE,
-            preserveAspectRatio=True,
-        )
-
-        # QR caption
-        pdf_canvas.setFont("Helvetica", 9)
-        caption = "Point your phone camera here to submit a refill request."
-        text_width_measure = pdfmetrics.stringWidth(caption, "Helvetica", 9)
-        caption_x = qr_x + (self.QR_CODE_SIZE - text_width_measure) / 2
-        caption_y = qr_y - 0.25 * inch
-        pdf_canvas.drawString(caption_x, caption_y, caption)
-
-    def _build_reorder_url(self, fixture: Fixture) -> str:
-        return f"{self.base_url.rstrip('/')}/scan/fixture/{fixture.id}"
 
 def build_preview_payload(
     item: InventoryItem,
@@ -1133,3 +815,23 @@ def build_preview_payload(
         "preview": encoded_pdf,
         "card_type": card_type,
     }
+
+
+class FixtureCardRenderer:
+    """Renderer for fixture refill request cards."""
+
+    def __init__(self, base_url: str | None = None) -> None:
+        """Initialize the renderer with base URL."""
+        from django.conf import settings
+
+        self.base_url = base_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+
+    def render_preview(self, fixture) -> bytes:
+        """Render a preview PDF for a fixture card."""
+        # For now, use the existing IndexCardRenderer with the fixture's refill_item
+        # This is a temporary implementation until a dedicated fixture card renderer is created
+        if not fixture.refill_item:
+            raise ValueError("Fixture must have a refill_item to generate a card")
+
+        renderer = IndexCardRenderer(blank_cards=False)
+        return renderer.render_preview(fixture.refill_item, blank_card=False)

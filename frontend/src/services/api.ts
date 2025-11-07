@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, CreateReorderRequest, InventoryItem, ItemSupplier, ReorderRequest } from '../types';
+import { Asset, CreateReorderRequest, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest } from '../types';
 
 const resolveApiBaseUrl = () => {
   const rawBase = process.env.REACT_APP_API_URL;
@@ -179,6 +179,24 @@ export const analyticsAPI = {
     api.get<T>('/reorders/analytics/transparency/'),
   getLogisticsDashboard: <T = unknown>() =>
     api.get<T>('/reorders/analytics/logistics_dashboard/'),
+};
+
+// Fixtures API
+export const fixturesAPI = {
+  getFixture: (id: string) =>
+    api.get<Fixture>(`/inventory/fixtures/${id}/`),
+
+  scanFixture: (id: string, notes?: string) =>
+    api.post<FixtureRefillRequest>(`/inventory/fixtures/${id}/scan/`, notes ? { notes } : {}),
+
+  resolveFixtureRequest: (fixtureId: string, notes?: string) =>
+    api.post(`/inventory/fixtures/${fixtureId}/resolve_all/`, { notes }),
+
+  resolveRequest: (requestId: string, notes?: string) =>
+    api.post<FixtureRefillRequest>(`/inventory/fixture-refill-requests/${requestId}/resolve/`, { notes }),
+
+  listRequests: (params?: { fixture?: string; status?: string; location?: string }) =>
+    api.get<{ results: FixtureRefillRequest[] }>('/inventory/fixture-refill-requests/', { params }),
 };
 
 // Auth API

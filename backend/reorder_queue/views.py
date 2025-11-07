@@ -950,7 +950,9 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 "transparency_note": "Dallas Makerspace operates with full financial transparency. All purchase information is publicly available.",
             }
 
-            return Response({"summary": summary, "orders": transparency_data, "ledger": ledger_entries})
+            return Response(
+                {"summary": summary, "orders": transparency_data, "ledger": ledger_entries}
+            )
 
         except Exception as e:
             return Response(
@@ -994,7 +996,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
             location_name = item.location.name if item and item.location else "Unassigned"
 
             days_open = max(
-                0, (timezone.now() - request_obj.requested_at).days if request_obj.requested_at else 0
+                0,
+                (timezone.now() - request_obj.requested_at).days if request_obj.requested_at else 0,
             )
 
             refill_requests.append(
@@ -1008,9 +1011,9 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "priority_label": request_obj.get_priority_display(),
                     "status": request_obj.status,
                     "status_label": request_obj.get_status_display(),
-                    "requested_at": request_obj.requested_at.isoformat()
-                    if request_obj.requested_at
-                    else None,
+                    "requested_at": (
+                        request_obj.requested_at.isoformat() if request_obj.requested_at else None
+                    ),
                     "days_open": days_open,
                     "requested_by": request_obj.requested_by,
                     "public_notes": request_obj.public_notes,
@@ -1046,17 +1049,19 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "status": order.status,
                     "status_label": order.get_status_display(),
                     "sent_at": order.sent_at.isoformat() if order.sent_at else None,
-                    "expected_delivery_date": order.expected_delivery_date.isoformat()
-                    if order.expected_delivery_date
-                    else None,
+                    "expected_delivery_date": (
+                        order.expected_delivery_date.isoformat()
+                        if order.expected_delivery_date
+                        else None
+                    ),
                     "days_since_ordered": order.days_since_ordered,
                     "total_items": total_items,
                     "total_quantity": total_quantity,
                     "received_quantity": received_quantity,
                     "progress_percent": progress_percent,
-                    "estimated_total": float(order.estimated_total)
-                    if order.estimated_total is not None
-                    else None,
+                    "estimated_total": (
+                        float(order.estimated_total) if order.estimated_total is not None else None
+                    ),
                     "updated_at": order.updated_at.isoformat() if order.updated_at else None,
                 }
             )

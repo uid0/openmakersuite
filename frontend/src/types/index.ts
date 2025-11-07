@@ -186,3 +186,38 @@ export interface Asset {
   created_at: string;
   updated_at: string;
 }
+
+export interface Fixture {
+  id: string;
+  name: string;
+  description: string;
+  location: number;
+  location_name: string;
+  refill_item: string;
+  refill_item_name: string;
+  refill_item_sku: string;
+  asset_tag: string | null;
+  is_active: boolean;
+  pending_requests_count: number;
+  qr_code_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type FixtureRefillRequestStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface FixtureRefillRequest {
+  id: string;
+  fixture: string;
+  fixture_name: string;
+  fixture_location: string;
+  refill_item_name: string;
+  refill_item_sku: string;
+  status: FixtureRefillRequestStatus;
+  requested_at: string;
+  requested_by: string;
+  resolved_at: string | null;
+  resolved_by: string;
+  notes: string;
+  time_to_resolve: number | null;
+}

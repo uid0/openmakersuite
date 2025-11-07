@@ -46,6 +46,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       localStorage.setItem('token', response.data.access);
       localStorage.setItem('refresh_token', response.data.refresh);
       localStorage.setItem('username', loginUsername);
+      localStorage.setItem('is_staff', String(response.data.is_staff || false));
       
       setIsLoggedIn(true);
       setUsername(loginUsername);

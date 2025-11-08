@@ -34,10 +34,10 @@ This guide walks you through setting up EMQX to accept JWT tokens as MQTT passwo
    ```
    Claim Name: iss
    Expected Value: esp32-sensor
-   
+
    Claim Name: aud
    Expected Value: emqx
-   
+
    Claim Name: sub
    Expected Value: (leave empty - will be validated against username)
    ```
@@ -75,7 +75,7 @@ curl -X POST "http://192.168.1.48:18083/api/v5/authentication" \
    ```bash
    # Install mosquitto client
    sudo apt-get install mosquitto-clients
-   
+
    # Test connection with JWT token
    mosquitto_pub -h 192.168.1.48 -p 1883 \
      -u "8CBFEA8EA40C" \

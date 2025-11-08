@@ -13,6 +13,7 @@ from django.contrib.auth.models import Group
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.text import slugify
+
 from imagekit.models import ImageSpecField
 from imagekit.processors import ResizeToFit
 
@@ -36,8 +37,7 @@ class Location(models.Model):
     """
 
     name = models.CharField(max_length=100, unique=True)
-    description = models.TextField(
-        blank=True, help_text="Details about this location")
+    description = models.TextField(blank=True, help_text="Details about this location")
     is_active = models.BooleanField(
         default=True, help_text="Inactive locations are hidden from selection"
     )
@@ -169,8 +169,7 @@ class InventoryItem(models.Model):
         blank=True,
         help_text="Upload image (supports JPEG, PNG, WebP)",
     )
-    image_url = models.URLField(
-        blank=True, help_text="URL to download image from (optional)")
+    image_url = models.URLField(blank=True, help_text="URL to download image from (optional)")
 
     # Auto-generated thumbnail using ImageSpecField
     thumbnail = ImageSpecField(
@@ -205,8 +204,7 @@ class InventoryItem(models.Model):
     reorder_quantity = models.PositiveIntegerField(
         validators=[MinValueValidator(1)], help_text="Quantity to reorder when stock is low"
     )
-    current_stock = models.PositiveIntegerField(
-        default=0, help_text="Current quantity in stock")
+    current_stock = models.PositiveIntegerField(default=0, help_text="Current quantity in stock")
     minimum_stock = models.PositiveIntegerField(
         default=0, help_text="Minimum quantity before reordering"
     )
@@ -233,8 +231,7 @@ class InventoryItem(models.Model):
     )
 
     # QR code data
-    qr_code = models.ImageField(
-        upload_to="inventory/qrcodes/", blank=True, null=True)
+    qr_code = models.ImageField(upload_to="inventory/qrcodes/", blank=True, null=True)
 
     # Hazardous Materials Information
     is_hazardous = models.BooleanField(
@@ -352,8 +349,7 @@ class InventoryItem(models.Model):
     def get_active_reorder_request(self):
         """Get the most recent active (pending/approved/ordered) reorder request for this item."""
         return (
-            self.reorder_requests.filter(
-                status__in=["pending", "approved", "ordered"])
+            self.reorder_requests.filter(status__in=["pending", "approved", "ordered"])
             .order_by("-requested_at")
             .first()
         )
@@ -365,8 +361,7 @@ class InventoryItem(models.Model):
     def get_expected_delivery_date(self):
         """Calculate expected delivery date for ordered items."""
         ordered_request = (
-            self.reorder_requests.filter(
-                status="ordered").order_by("-ordered_at").first()
+            self.reorder_requests.filter(status="ordered").order_by("-ordered_at").first()
         )
         if ordered_request and ordered_request.ordered_at and self.average_lead_time:
             from datetime import timedelta
@@ -414,8 +409,7 @@ class InventoryItem(models.Model):
         """Return the preferred ItemSupplier relationship if available."""
 
         item_supplier = (
-            self.item_suppliers.select_related(
-                "supplier").filter(is_primary=True).first()
+            self.item_suppliers.select_related("supplier").filter(is_primary=True).first()
         )
         if item_supplier:
             return item_supplier
@@ -532,8 +526,7 @@ class InventoryItem(models.Model):
 
     def get_nfpa_hazard_level_display(self, hazard_type: str) -> str:
         """Get human-readable display for NFPA hazard levels."""
-        level_map = {0: "Minimal", 1: "Slight",
-                     2: "Moderate", 3: "High", 4: "Extreme"}
+        level_map = {0: "Minimal", 1: "Slight", 2: "Moderate", 3: "High", 4: "Extreme"}
 
         level = None
         if hazard_type == "health":
@@ -562,14 +555,11 @@ class ItemSupplier(models.Model):
     - Quantities per package
     """
 
-    item = models.ForeignKey(
-        InventoryItem, on_delete=models.CASCADE, related_name="item_suppliers")
-    supplier = models.ForeignKey(
-        Supplier, on_delete=models.CASCADE, related_name="supplier_items")
+    item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name="item_suppliers")
+    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name="supplier_items")
 
     # Supplier-specific information
-    supplier_sku = models.CharField(
-        max_length=100, help_text="Supplier's product SKU/ID")
+    supplier_sku = models.CharField(max_length=100, help_text="Supplier's product SKU/ID")
     supplier_url = models.URLField(
         blank=True, help_text="Direct link to product on supplier's website"
     )
@@ -646,8 +636,7 @@ class ItemSupplier(models.Model):
     )
 
     # Metadata
-    notes = models.TextField(
-        blank=True, help_text="Notes about this supplier for this item")
+    notes = models.TextField(blank=True, help_text="Notes about this supplier for this item")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -791,8 +780,7 @@ class PriceHistory(models.Model):
         help_text="Type of change that triggered this history record",
     )
     recorded_at = models.DateTimeField(auto_now_add=True)
-    notes = models.TextField(
-        blank=True, help_text="Optional notes about this price change")
+    notes = models.TextField(blank=True, help_text="Optional notes about this price change")
 
     class Meta:
         verbose_name_plural = "Price histories"
@@ -830,10 +818,8 @@ class UsageLog(models.Model):
     - Track item usage history
     """
 
-    item = models.ForeignKey(
-        InventoryItem, on_delete=models.CASCADE, related_name="usage_logs")
-    quantity_used = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)])
+    item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name="usage_logs")
+    quantity_used = models.PositiveIntegerField(validators=[MinValueValidator(1)])
     usage_date = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)
 
@@ -881,8 +867,7 @@ class Asset(models.Model):
     # Identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200, help_text="Asset name or model")
-    description = models.TextField(
-        blank=True, help_text="Detailed description of the asset")
+    description = models.TextField(blank=True, help_text="Detailed description of the asset")
     serial_number = models.CharField(
         max_length=100,
         blank=True,
@@ -1099,8 +1084,7 @@ class Asset(models.Model):
         default=True,
         help_text="Inactive assets are hidden from most views",
     )
-    notes = models.TextField(
-        blank=True, help_text="General notes about the asset")
+    notes = models.TextField(blank=True, help_text="General notes about the asset")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1354,8 +1338,7 @@ class Fixture(models.Model):
         max_length=200,
         help_text="Descriptive name for this fixture (e.g., 'Bathroom 1 Soap Dispenser')",
     )
-    description = models.TextField(
-        blank=True, help_text="Additional details about this fixture")
+    description = models.TextField(blank=True, help_text="Additional details about this fixture")
     location = models.ForeignKey(
         Location,
         on_delete=models.PROTECT,
@@ -1439,8 +1422,7 @@ class FixtureRefillRequest(models.Model):
         blank=True,
         help_text="Username of person who resolved this request",
     )
-    notes = models.TextField(
-        blank=True, help_text="Additional notes about this request")
+    notes = models.TextField(blank=True, help_text="Additional notes about this request")
 
     class Meta:
         ordering = ["-requested_at"]

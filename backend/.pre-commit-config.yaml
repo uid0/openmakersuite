@@ -51,7 +51,7 @@ repos:
     hooks:
       - id: bandit
         exclude: ^(migrations|.*tests.*)/
-        args: ["-ll", "-i"]  # Low and medium severity, ignore info
+        args: ["-r", "."]  # Low and medium severity, ignore info
 
   # Django-specific checks
   - repo: https://github.com/adamchainz/django-upgrade

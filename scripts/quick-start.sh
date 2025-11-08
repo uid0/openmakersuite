@@ -131,4 +131,3 @@ echo "📚 For more details, see:"
 echo "   - README.md"
 echo "   - DEV_AUTH_GUIDE.md"
 echo
-

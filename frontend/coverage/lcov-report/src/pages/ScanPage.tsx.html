@@ -15,41 +15,41 @@
         }
     </style>
 </head>
-    
+
 <body>
 <div class='wrapper'>
     <div class='pad1'>
         <h1><a href="../../index.html">All files</a> / <a href="index.html">src/pages</a> ScanPage.tsx</h1>
         <div class='clearfix'>
-            
+
             <div class='fl pad1y space-right2'>
                 <span class="strong">72.97% </span>
                 <span class="quiet">Statements</span>
                 <span class='fraction'>81/111</span>
             </div>
-        
-            
+
+
             <div class='fl pad1y space-right2'>
                 <span class="strong">60.52% </span>
                 <span class="quiet">Branches</span>
                 <span class='fraction'>69/114</span>
             </div>
-        
-            
+
+
             <div class='fl pad1y space-right2'>
                 <span class="strong">56.52% </span>
                 <span class="quiet">Functions</span>
                 <span class='fraction'>13/23</span>
             </div>
-        
-            
+
+
             <div class='fl pad1y space-right2'>
                 <span class="strong">74.07% </span>
                 <span class="quiet">Lines</span>
                 <span class='fraction'>80/108</span>
             </div>
-        
-            
+
+
         </div>
         <p class="quiet">
             Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
@@ -1124,7 +1124,7 @@ const ScanPage: React.FC = () =&gt; {
           const bestSupplier = supplierList
             .filter(s =&gt; s.is_active &amp;&amp; s.unit_cost)
             .sort(<span class="fstat-no" title="function not covered" >(a</span>, b) =&gt; <span class="cstat-no" title="statement not covered" >parseFloat(a.unit_cost!) - parseFloat(b.unit_cost!))</span>[0];
-          
+
           <span class="missing-if-branch" title="else path not taken" >E</span>if (bestSupplier) {
             setSelectedSupplier(bestSupplier);
             setPackageQuantity(1);
@@ -1186,7 +1186,7 @@ const ScanPage: React.FC = () =&gt; {
   const updateCalculations = useCallback((supplier: ItemSupplier, packages: number) =&gt; {
     const units = packages * supplier.quantity_per_package;
     const cost = packages * parseFloat(supplier.package_cost || '0');
-    
+
     setTotalUnits(units);
     setEstimatedCost(cost);
     setEstimatedLeadTime(supplier.average_lead_time);
@@ -1421,7 +1421,7 @@ const ScanPage: React.FC = () =&gt; {
           &lt;div className="auto-submit-message"&gt;
             &lt;h2&gt;🔄 Processing Reorder Request&lt;/h2&gt;
             &lt;p&gt;We're automatically submitting a reorder request for &lt;strong&gt;
-              {item.use_case_based_reorder 
+              {item.use_case_based_reorder
                 ? <span class="branch-0 cbranch-no" title="branch not covered" >`${item.reorder_cases} cases` </span>
                 : `${item.reorder_quantity} units`
               }
@@ -1451,7 +1451,7 @@ const ScanPage: React.FC = () =&gt; {
         {isLoggedIn &amp;&amp; !item.has_pending_reorder &amp;&amp; (
           &lt;form onSubmit={handleSubmitReorder} className="reorder-form"&gt;
             &lt;h2&gt;Request Reorder&lt;/h2&gt;
-            
+
             {suppliers.length &gt; 0 &amp;&amp; (
                 &lt;div className="form-group"&gt;
                   &lt;label htmlFor="supplierSelect"&gt;Supplier&lt;/label&gt;
@@ -1467,9 +1467,9 @@ const ScanPage: React.FC = () =&gt; {
                       .sort(<span class="fstat-no" title="function not covered" >(a</span>, b) =&gt; <span class="cstat-no" title="statement not covered" >parseFloat(a.unit_cost || '999') - parseFloat(b.unit_cost || '999'))</span>
                       .map(supplier =&gt; (
                         &lt;option key={supplier.id} value={supplier.id}&gt;
-                          {supplier.supplier_name} - ${supplier.unit_cost}/unit 
+                          {supplier.supplier_name} - ${supplier.unit_cost}/unit
                           ({supplier.quantity_per_package} per package)
-                          {supplier.package_dimensions_display !== 'No dimensions specified' &amp;&amp; 
+                          {supplier.package_dimensions_display !== 'No dimensions specified' &amp;&amp;
                             ` - ${supplier.package_dimensions_display}`}
                         &lt;/option&gt;
                       ))}
@@ -1591,4 +1591,3 @@ export default ScanPage;
         <script src="../../block-navigation.js"></script>
     </body>
 </html>
-    

@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 /**
  * Playwright E2E test configuration
- * 
+ *
  * Tests run against the development server (frontend + backend)
  * Make sure both services are running before executing tests
  */
@@ -43,4 +43,3 @@ export default defineConfig({
     timeout: 120 * 1000,
   },
 });
-

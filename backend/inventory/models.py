@@ -876,18 +876,7 @@ class Asset(models.Model):
         (DONATED_OUT, "Donated Out"),
     ]
 
-    # Operational status choices
-    OPERATIONAL_AVAILABLE = "available"
-    OPERATIONAL_RESERVED = "reserved"
-    OPERATIONAL_NEEDS_MAINTENANCE = "needs_maintenance"
-    OPERATIONAL_DISABLED = "disabled"
-
-    OPERATIONAL_STATUS_CHOICES = [
-        (OPERATIONAL_AVAILABLE, "Available"),
-        (OPERATIONAL_RESERVED, "Reserved"),
-        (OPERATIONAL_NEEDS_MAINTENANCE, "Needs Maintenance"),
-        (OPERATIONAL_DISABLED, "Disabled"),
-    ]
+    # Note: Operational status, lockout, and authorization fields have been moved to the forgekey app
 
     # Identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1093,49 +1082,16 @@ class Asset(models.Model):
         help_text="Groups that are allowed to enable this asset",
     )
 
-    # Operational status
-    operational_status = models.CharField(
-        max_length=20,
-        choices=OPERATIONAL_STATUS_CHOICES,
-        default=OPERATIONAL_AVAILABLE,
-        help_text="Current operational status of the asset",
-    )
+    # Note: Operational status, lockout, and authorization fields have been moved to the forgekey app
+    # Use forgekey.models.OperationalMode, DeviceLockout, and AssetAuthorization instead
 
-    # Lock tracking
-    is_locked = models.BooleanField(
-        default=False,
-        help_text="If True, non-admins cannot use this asset",
-    )
-    locked_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
+    # Parts and consumables - many-to-many through AssetPart
+    parts = models.ManyToManyField(
+        InventoryItem,
+        through="AssetPart",
+        related_name="assets_using_part",
         blank=True,
-        related_name="locked_assets",
-        help_text="User who locked this asset",
-    )
-    locked_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When this asset was locked",
-    )
-    LOCK_TYPE_ADMIN = "admin"
-    LOCK_TYPE_GROUP_ADMIN = "group_admin"
-    LOCK_TYPE_GROUP_MEMBER = "group_member"
-    LOCK_TYPE_LOGISTICS = "logistics"
-
-    LOCK_TYPE_CHOICES = [
-        (LOCK_TYPE_ADMIN, "Admin"),
-        (LOCK_TYPE_GROUP_ADMIN, "Group Admin"),
-        (LOCK_TYPE_GROUP_MEMBER, "Group Member"),
-        (LOCK_TYPE_LOGISTICS, "Logistics"),
-    ]
-
-    lock_type = models.CharField(
-        max_length=20,
-        choices=LOCK_TYPE_CHOICES,
-        blank=True,
-        help_text="Type of user who locked this asset",
+        help_text="Consumable parts and supplies used by this asset (e.g., saw blades, nozzles, filters)",
     )
 
     # Metadata
@@ -1231,37 +1187,93 @@ class Asset(models.Model):
             or user.groups.filter(name__endswith="_admin").exists()
         )
 
-    def can_user_lock(self, user) -> bool:
-        """Check if user can lock this asset."""
-        if not user.is_authenticated:
+    # Note: Lock/unlock methods have been moved to forgekey.models.DeviceLockout
+
+
+class AssetPart(models.Model):
+    """
+    Through model for Asset-InventoryItem many-to-many relationship.
+
+    Tracks consumable parts and supplies that are used by assets.
+    Examples: saw blades for table saws, nozzles for 3D printers,
+    soap for soap dispensers, filters for air compressors.
+
+    This allows:
+    - An asset to have multiple parts/consumables
+    - A part to be used by multiple assets
+    - Tracking quantities needed, maintenance schedules, and replacement history
+    """
+
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="asset_parts",
+        help_text="The asset that uses this part",
+    )
+    part = models.ForeignKey(
+        InventoryItem,
+        on_delete=models.CASCADE,
+        related_name="used_by_assets",
+        help_text="The inventory item (part/consumable) used by this asset",
+    )
+
+    # Part-specific information
+    quantity_needed = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="How many of this part are needed for the asset (e.g., 2 saw blades)",
+    )
+    is_required = models.BooleanField(
+        default=True,
+        help_text="If True, this part is required for the asset to function",
+    )
+    maintenance_interval_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Recommended days between replacements (e.g., 90 for filters)",
+    )
+    last_replaced_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this part was last replaced",
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Additional notes about this part (installation instructions, compatibility, etc.)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Asset Part"
+        verbose_name_plural = "Asset Parts"
+        unique_together = [["asset", "part"]]
+        ordering = ["asset", "part__name"]
+        indexes = [
+            models.Index(fields=["asset", "part"]),
+            models.Index(fields=["part", "asset"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.asset.name} - {self.part.name}"
+
+    @property
+    def days_since_replacement(self) -> Optional[int]:
+        """Calculate days since last replacement."""
+        if self.last_replaced_at:
+            from django.utils import timezone
+
+            delta = timezone.now() - self.last_replaced_at
+            return delta.days
+        return None
+
+    @property
+    def needs_replacement(self) -> bool:
+        """Check if part needs replacement based on maintenance interval."""
+        if not self.maintenance_interval_days or not self.last_replaced_at:
             return False
-        # Admins can always lock
-        if self.is_user_admin(user):
-            return True
-        # Group admins can lock if asset is owned by their group
-        if self.owning_group and self.is_user_group_admin(user):
-            return self.owning_group in user.groups.all()
-        return False
-
-    def can_user_unlock(self, user) -> bool:
-        """Check if user can unlock this asset based on lock rules."""
-        if not user.is_authenticated or not self.is_locked:
-            return False
-
-        # Admins can always unlock
-        if self.is_user_admin(user):
-            return True
-
-        # If locked by admin or Logistics, only admins can unlock
-        if self.lock_type in [self.LOCK_TYPE_ADMIN, self.LOCK_TYPE_LOGISTICS]:
-            return False
-
-        # If locked by group member or group admin, group admins can unlock
-        if self.lock_type in [self.LOCK_TYPE_GROUP_MEMBER, self.LOCK_TYPE_GROUP_ADMIN]:
-            if self.owning_group and self.is_user_group_admin(user):
-                return self.owning_group in user.groups.all()
-
-        return False
+        days_since = self.days_since_replacement
+        return days_since is not None and days_since >= self.maintenance_interval_days
 
 
 class AssetProblem(models.Model):

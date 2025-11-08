@@ -8,13 +8,13 @@ from decimal import Decimal
 from typing import Optional
 
 from django.contrib.auth import get_user_model
-
-User = get_user_model()
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
 from inventory.models import InventoryItem, ItemSupplier, Supplier
+
+User = get_user_model()
 
 
 class ReorderRequest(models.Model):

@@ -51,10 +51,10 @@ const TVDashboard: React.FC = () => {
         locationFilter: location.toLowerCase(),
       };
     }
-    
+
     return baseConfig;
   };
-  
+
   const [config] = useState(getLocationConfig());
 
   // Configurable footer messages - can be set via environment variables
@@ -85,15 +85,15 @@ const TVDashboard: React.FC = () => {
       setError(null);
       // Use dedicated TV API instance that doesn't send auth headers
       const response = await tvAPI.get<InventoryItem[]>('/inventory/items/reordered/');
-      
+
       // Filter items by location if specified
       let filteredItems = response.data;
       if ((config as any).locationFilter) {
-        filteredItems = response.data.filter(item => 
+        filteredItems = response.data.filter(item =>
           item.location && item.location.toLowerCase().includes((config as any).locationFilter)
         );
       }
-      
+
       setReorderedItems(filteredItems);
       // Initialize item order for anti-burn-in
       setItemOrder(filteredItems.map((_, index) => index));
@@ -107,7 +107,7 @@ const TVDashboard: React.FC = () => {
         code: err?.code,
         message: err?.message
       });
-      
+
       if (err?.response?.status === 401) {
         setError('Authentication error - Dashboard requires public access');
       } else if (err?.response?.status >= 500) {
@@ -199,7 +199,7 @@ const TVDashboard: React.FC = () => {
     const today = new Date();
     const diffTime = date.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
+
     if (diffDays < 0) {
       return `Overdue by ${Math.abs(diffDays)} days`;
     } else if (diffDays === 0) {
@@ -246,8 +246,8 @@ const TVDashboard: React.FC = () => {
   const formatStatusDate = (dateString: string | null) => {
     if (!dateString) return '';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
       day: 'numeric',
       year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
     });
@@ -305,7 +305,7 @@ const TVDashboard: React.FC = () => {
         const hasDeliveryInfo = item.expected_delivery_date;
         if (hasDeliveryInfo) {
           stages[0].completed = true; // Requested
-          stages[1].completed = true; // Approved  
+          stages[1].completed = true; // Approved
           stages[2].completed = true; // Ordered
           stages[3].completed = false; // En Route (current)
           currentStage = 3;
@@ -370,7 +370,7 @@ const TVDashboard: React.FC = () => {
   };
 
   return (
-    <div 
+    <div
       className="tv-dashboard"
       style={{
         transform: `translate(${burnInOffset.x}px, ${burnInOffset.y}px)`,
@@ -536,7 +536,7 @@ const TVDashboard: React.FC = () => {
                             // If full image fails and we have a thumbnail, try thumbnail
                             const fullImageUrl = getImageUrl(item.image);
                             const thumbnailUrl = getImageUrl(item.thumbnail);
-                            
+
                             if (fullImageUrl && thumbnailUrl && e.currentTarget.src === fullImageUrl) {
                               e.currentTarget.src = thumbnailUrl;
                             } else {
@@ -603,7 +603,7 @@ const TVDashboard: React.FC = () => {
                     {/* Progress Bar */}
                     {(() => {
                       const { currentStage, stages, isCancelled } = getProgressStages(item);
-                      
+
                       if (isCancelled) {
                         return (
                           <div className="progress-cancelled">
@@ -614,26 +614,26 @@ const TVDashboard: React.FC = () => {
                       }
 
                       const progressPercentage = currentStage > 0 ? (currentStage / (stages.length - 1)) * 100 : 0;
-                      
+
                       return (
                         <div className="progress-container">
-                          <div 
+                          <div
                             className="progress-bar"
-                            style={{ 
-                              '--progress-width': `${progressPercentage}%` 
+                            style={{
+                              '--progress-width': `${progressPercentage}%`
                             } as React.CSSProperties & { '--progress-width': string }}
                           >
                             {stages.map((stage, index) => (
                               <div key={stage.key} className="progress-stage">
                                 <div className={`stage-dot ${
-                                  index < currentStage ? 'completed' : 
+                                  index < currentStage ? 'completed' :
                                   index === currentStage ? 'current' : 'pending'
                                 }`}>
-                                  {index < currentStage ? '✓' : 
+                                  {index < currentStage ? '✓' :
                                    index === currentStage ? '●' : '○'}
                                 </div>
                                 <div className={`stage-label ${
-                                  index < currentStage ? 'completed' : 
+                                  index < currentStage ? 'completed' :
                                   index === currentStage ? 'current' : 'pending'
                                 }`}>
                                   {stage.name}
@@ -650,7 +650,7 @@ const TVDashboard: React.FC = () => {
                       <div className="quantity-info">
                         {orderInfo.orderedQuantity || orderInfo.quantity} units
                       </div>
-                      
+
                       <div className="status-history">
                         {(() => {
                           const statusInfo = getLastStatusInfo(item);
@@ -694,7 +694,7 @@ const TVDashboard: React.FC = () => {
           {config.showTransparency && (
             <div className="transparency-qr">
               <div className="qr-section">
-                <QRCode 
+                <QRCode
                   value={getTransparencyQRUrl()}
                   size={80}
                   bgColor="#ffffff"

@@ -53,7 +53,7 @@ const ScanPage: React.FC = () => {
           const bestSupplier = supplierList
             .filter(s => s.is_active && s.unit_cost)
             .sort((a, b) => parseFloat(a.unit_cost!) - parseFloat(b.unit_cost!))[0];
-          
+
           if (bestSupplier) {
             setSelectedSupplier(bestSupplier);
             setPackageQuantity(1);
@@ -115,7 +115,7 @@ const ScanPage: React.FC = () => {
   const updateCalculations = useCallback((supplier: ItemSupplier, packages: number) => {
     const units = packages * supplier.quantity_per_package;
     const cost = packages * parseFloat(supplier.package_cost || '0');
-    
+
     setTotalUnits(units);
     setEstimatedCost(cost);
     setEstimatedLeadTime(supplier.average_lead_time);
@@ -350,8 +350,8 @@ const ScanPage: React.FC = () => {
           <div className="auto-submit-message">
             <h2>🔄 Processing Reorder Request</h2>
             <p>We're automatically submitting a reorder request for <strong>
-              {item.use_case_based_reorder 
-                ? `${item.reorder_cases} cases` 
+              {item.use_case_based_reorder
+                ? `${item.reorder_cases} cases`
                 : `${item.reorder_quantity} units`
               }
             </strong> of this item.</p>
@@ -380,7 +380,7 @@ const ScanPage: React.FC = () => {
         {isLoggedIn && !item.has_pending_reorder && (
           <form onSubmit={handleSubmitReorder} className="reorder-form">
             <h2>Request Reorder</h2>
-            
+
             {suppliers.length > 0 && (
                 <div className="form-group">
                   <label htmlFor="supplierSelect">Supplier</label>
@@ -396,9 +396,9 @@ const ScanPage: React.FC = () => {
                       .sort((a, b) => parseFloat(a.unit_cost || '999') - parseFloat(b.unit_cost || '999'))
                       .map(supplier => (
                         <option key={supplier.id} value={supplier.id}>
-                          {supplier.supplier_name} - ${supplier.unit_cost}/unit 
+                          {supplier.supplier_name} - ${supplier.unit_cost}/unit
                           ({supplier.quantity_per_package} per package)
-                          {supplier.package_dimensions_display !== 'No dimensions specified' && 
+                          {supplier.package_dimensions_display !== 'No dimensions specified' &&
                             ` - ${supplier.package_dimensions_display}`}
                         </option>
                       ))}

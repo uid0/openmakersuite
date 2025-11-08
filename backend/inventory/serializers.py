@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from .models import (
     Asset,
+    AssetPart,
     AssetProblem,
     Category,
     Fixture,
@@ -318,6 +319,63 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
         return {"trend": "no_data", "change_percentage": None}
 
 
+class AssetPartSerializer(serializers.ModelSerializer):
+    """Serializer for asset parts/consumables."""
+
+    part_name = serializers.CharField(source="part.name", read_only=True)
+    part_sku = serializers.CharField(source="part.sku", read_only=True)
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    asset_tag = serializers.CharField(source="asset.asset_tag", read_only=True)
+
+    # Calculated properties
+    days_since_replacement = serializers.ReadOnlyField()
+    needs_replacement = serializers.ReadOnlyField()
+
+    # Part details (nested)
+    part_details = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssetPart
+        fields = [
+            "id",
+            "asset",
+            "asset_name",
+            "asset_tag",
+            "part",
+            "part_name",
+            "part_sku",
+            "quantity_needed",
+            "is_required",
+            "maintenance_interval_days",
+            "last_replaced_at",
+            "days_since_replacement",
+            "needs_replacement",
+            "notes",
+            "part_details",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "days_since_replacement",
+            "needs_replacement",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_part_details(self, obj):
+        """Return basic details about the part inventory item."""
+        part = obj.part
+        return {
+            "id": str(part.id),
+            "name": part.name,
+            "sku": part.sku,
+            "current_stock": part.current_stock,
+            "minimum_stock": part.minimum_stock,
+            "needs_reorder": part.needs_reorder,
+            "category_name": part.category.name if part.category else None,
+        }
+
+
 class AssetSerializer(serializers.ModelSerializer):
     """Serializer for hard asset tracking."""
 
@@ -338,9 +396,14 @@ class AssetSerializer(serializers.ModelSerializer):
     qr_code_url = serializers.SerializerMethodField()
     manual_pdf_url = serializers.SerializerMethodField()
 
-    # Lock-related fields
-    locked_by_username = serializers.CharField(source="locked_by.username", read_only=True)
+    # ForgeKey-related fields (from forgekey app)
+    operational_mode = serializers.SerializerMethodField()
+    is_locked = serializers.SerializerMethodField()
+    lockout_info = serializers.SerializerMethodField()
     owning_group_name = serializers.CharField(source="owning_group.name", read_only=True)
+
+    # Parts/consumables
+    parts = AssetPartSerializer(source="asset_parts", many=True, read_only=True)
 
     class Meta:
         model = Asset
@@ -374,6 +437,8 @@ class AssetSerializer(serializers.ModelSerializer):
             "wiki_page_url",
             # Maintenance
             "maintenance_plan",
+            # Parts/consumables
+            "parts",
             # Operational requirements
             "circuit",
             "needs_compressed_air",
@@ -381,17 +446,14 @@ class AssetSerializer(serializers.ModelSerializer):
             "is_chargeable",
             # Scanning tracking
             "last_scanned_at",
-            # Group ownership and locking
+            # Group ownership
             "owning_group",
             "owning_group_name",
             "groups_can_enable",
+            # ForgeKey fields (operational mode and lockout status)
+            "operational_mode",
             "is_locked",
-            "locked_by",
-            "locked_by_username",
-            "locked_at",
-            "lock_type",
-            # Operational status
-            "operational_status",
+            "lockout_info",
             # Media
             "image",
             "image_url",
@@ -413,11 +475,56 @@ class AssetSerializer(serializers.ModelSerializer):
             "asset_tag",
             "qr_code",
             "last_scanned_at",
-            "locked_by_username",
             "owning_group_name",
+            "operational_mode",
+            "is_locked",
+            "lockout_info",
             "created_at",
             "updated_at",
         ]
+
+    def get_operational_mode(self, obj):
+        """Get operational mode from forgekey app."""
+        try:
+            from forgekey.models import OperationalMode
+
+            mode = OperationalMode.objects.get(asset=obj)
+            return {
+                "mode": mode.mode,
+                "classroom_mode_enabled": mode.classroom_mode_enabled,
+            }
+        except OperationalMode.DoesNotExist:
+            return {"mode": "available", "classroom_mode_enabled": False}
+
+    def get_is_locked(self, obj):
+        """Check if asset is locked via forgekey lockouts."""
+        try:
+            from forgekey.models import DeviceLockout
+
+            return DeviceLockout.objects.filter(asset=obj, is_active=True).exists()
+        except Exception:
+            return False
+
+    def get_lockout_info(self, obj):
+        """Get lockout information from forgekey app."""
+        try:
+            from forgekey.models import DeviceLockout
+
+            active_lockout = DeviceLockout.objects.filter(asset=obj, is_active=True).first()
+            if active_lockout:
+                return {
+                    "locked_by": (
+                        active_lockout.locked_by.username if active_lockout.locked_by else None
+                    ),
+                    "locked_at": (
+                        active_lockout.locked_at.isoformat() if active_lockout.locked_at else None
+                    ),
+                    "lockout_level": active_lockout.lockout_level,
+                    "reason": active_lockout.reason,
+                }
+            return None
+        except Exception:
+            return None
 
     def get_image_url(self, obj):
         """Return the image URL when available."""

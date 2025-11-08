@@ -347,6 +347,3 @@ const TransparencyPage: React.FC = () => {
 };
 
 export default TransparencyPage;
-
-
-

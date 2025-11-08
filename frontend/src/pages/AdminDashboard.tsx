@@ -74,13 +74,13 @@ const AdminDashboard: React.FC = () => {
     const orderNumber = prompt('Enter order number (optional):');
     const estimatedDeliveryStr = prompt('Enter estimated delivery date (YYYY-MM-DD, optional):');
     const actualCostStr = prompt('Enter actual cost (optional):');
-    
+
     try {
       const data: any = {};
       if (orderNumber) data.order_number = orderNumber;
       if (estimatedDeliveryStr) data.estimated_delivery = estimatedDeliveryStr;
       if (actualCostStr) data.actual_cost = parseFloat(actualCostStr);
-      
+
       await reorderAPI.markOrdered(id, data);
       loadRequests();
       alert('Marked as ordered with tracking information');
@@ -121,19 +121,19 @@ const AdminDashboard: React.FC = () => {
     const carrier = prompt('Enter carrier/shipper (optional):');
     const expectedDeliveryStr = prompt('Update expected delivery date (YYYY-MM-DD, optional):');
     const trackingUrl = prompt('Enter tracking URL (optional):');
-    
+
     // If user cancels all prompts, don't proceed
     if (trackingNumber === null && carrier === null && expectedDeliveryStr === null && trackingUrl === null) {
       return;
     }
-    
+
     try {
       const data: any = {};
       if (trackingNumber) data.tracking_number = trackingNumber;
       if (carrier) data.carrier = carrier;
       if (expectedDeliveryStr) data.expected_delivery_date = expectedDeliveryStr;
       if (trackingUrl) data.delivery_tracking_url = trackingUrl;
-      
+
       await reorderAPI.updateTracking(id, data);
       loadRequests();
       alert('Tracking information updated');
@@ -234,14 +234,14 @@ const AdminDashboard: React.FC = () => {
                               {request.item_details.supplier_name}
                             </div>
                           )}
-                          
+
                           {/* Order tracking information */}
                           {request.order_number && (
                             <div className="tracking-info">
                               <small>📋 Order: {request.order_number}</small>
                             </div>
                           )}
-                          
+
                           {request.estimated_delivery && (
                             <div className="delivery-info">
                               <small>
@@ -249,7 +249,7 @@ const AdminDashboard: React.FC = () => {
                               </small>
                             </div>
                           )}
-                          
+
                           {request.actual_delivery && (
                             <div className="delivery-info">
                               <small>
@@ -257,7 +257,7 @@ const AdminDashboard: React.FC = () => {
                               </small>
                             </div>
                           )}
-                          
+
                           {request.status === 'ordered' && request.estimated_delivery && (
                             <div className="delivery-status">
                               <small>
@@ -266,7 +266,7 @@ const AdminDashboard: React.FC = () => {
                                   const today = new Date();
                                   const diffTime = estimatedDate.getTime() - today.getTime();
                                   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                                  
+
                                   if (diffDays < 0) {
                                     return <span className="overdue">⚠️ {Math.abs(diffDays)} days overdue</span>;
                                   } else if (diffDays === 0) {

@@ -1,6 +1,6 @@
 /**
  * E2E tests for Asset QR Code Scanning
- * 
+ *
  * Tests cover:
  * - Unauthenticated user scanning assets
  * - Authenticated user scanning assets
@@ -270,4 +270,3 @@ test.describe('Asset QR Code Scanning', () => {
     await expect(wikiLink).toHaveAttribute('href', wikiUrl);
   });
 });
-

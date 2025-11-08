@@ -221,26 +221,26 @@
     margin: 15px 0;
     padding: 15px;
   }
-  
+
   .auth-buttons {
     flex-direction: column;
   }
-  
+
   .btn-primary,
   .btn-secondary {
     width: 100%;
   }
-  
+
   .form-actions {
     flex-direction: column;
   }
-  
+
   .user-info {
     flex-direction: column;
     text-align: center;
     gap: 15px;
   }
-  
+
   .user-avatar {
     margin-right: 0;
   }

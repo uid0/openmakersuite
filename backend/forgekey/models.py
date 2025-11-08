@@ -1,0 +1,648 @@
+"""
+Models for ForgeKey - ESP32 device management and asset authorization system.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import uuid
+from typing import Optional
+
+from django.conf import settings
+from django.contrib.auth.models import Group
+from django.core.validators import RegexValidator
+from django.db import models
+from django.utils import timezone
+
+from inventory.models import Asset
+
+
+class DeviceType(models.Model):
+    """
+    Types of ESP32 devices that can be managed.
+    """
+
+    TYPE_INDICATOR = "indicator"
+    TYPE_BADGE_READER = "badge_reader"
+    TYPE_EPAPER_SCREEN = "epaper_screen"
+    TYPE_OLED_SCREEN = "oled_screen"
+    TYPE_TEMPERATURE_SENSOR = "temperature_sensor"
+    TYPE_GENERIC_INPUT = "generic_input"
+    TYPE_GENERIC_OUTPUT = "generic_output"
+    TYPE_AC_RELAY = "ac_relay"
+    TYPE_POWER_MEASUREMENT = "power_measurement"
+
+    TYPE_CHOICES = [
+        (TYPE_INDICATOR, "Indicator/Status Light"),
+        (TYPE_BADGE_READER, "Badge Reader"),
+        (TYPE_EPAPER_SCREEN, "E-Paper Screen"),
+        (TYPE_OLED_SCREEN, "OLED Screen"),
+        (TYPE_TEMPERATURE_SENSOR, "Temperature Sensor"),
+        (TYPE_GENERIC_INPUT, "Generic Input"),
+        (TYPE_GENERIC_OUTPUT, "Generic Output"),
+        (TYPE_AC_RELAY, "AC Relay"),
+        (TYPE_POWER_MEASUREMENT, "Power Measurement"),
+    ]
+
+    name = models.CharField(max_length=50, unique=True, help_text="Device type name")
+    code = models.CharField(
+        max_length=30,
+        unique=True,
+        choices=TYPE_CHOICES,
+        help_text="Device type code",
+    )
+    description = models.TextField(blank=True, help_text="Description of this device type")
+    is_active = models.BooleanField(default=True, help_text="Is this device type active?")
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ESP32Device(models.Model):
+    """
+    Represents an ESP32 device managed by ForgeKey.
+    """
+
+    # MAC address validation (format: XX:XX:XX:XX:XX:XX)
+    mac_validator = RegexValidator(
+        regex=r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$",
+        message="MAC address must be in format XX:XX:XX:XX:XX:XX",
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    mac_address = models.CharField(
+        max_length=17,
+        unique=True,
+        validators=[mac_validator],
+        help_text="MAC address of the ESP32 device (format: XX:XX:XX:XX:XX:XX)",
+    )
+    device_type = models.ForeignKey(
+        DeviceType,
+        on_delete=models.PROTECT,
+        related_name="devices",
+        help_text="Type of device",
+    )
+    name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Human-readable name for this device",
+    )
+    description = models.TextField(blank=True, help_text="Description of this device")
+    firmware_version = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Current firmware version on the device",
+    )
+    last_seen = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time the device was seen online",
+    )
+    is_online = models.BooleanField(default=False, help_text="Is the device currently online?")
+    is_active = models.BooleanField(default=True, help_text="Is this device active?")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["mac_address"]
+        indexes = [
+            models.Index(fields=["mac_address"]),
+            models.Index(fields=["device_type"]),
+            models.Index(fields=["is_online"]),
+        ]
+
+    def __str__(self) -> str:
+        if self.name:
+            return f"{self.name} ({self.mac_address})"
+        return self.mac_address
+
+    def generate_jwt_secret(self, shared_secret: str) -> str:
+        """
+        Generate a JWT secret for this device based on MAC address and shared secret.
+        """
+        message = f"{self.mac_address}:{shared_secret}"
+        return hashlib.sha256(message.encode()).hexdigest()
+
+    def normalize_mac_address(self) -> str:
+        """Normalize MAC address to uppercase with colons."""
+        mac = self.mac_address.replace("-", ":").upper()
+        return mac
+
+
+class AssetDevice(models.Model):
+    """
+    Links assets to ESP32 devices.
+    An asset can have multiple devices (e.g., power relay + power meter).
+    """
+
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="forgekey_devices",
+        help_text="Asset this device is associated with",
+    )
+    device = models.ForeignKey(
+        ESP32Device,
+        on_delete=models.CASCADE,
+        related_name="asset_assignments",
+        help_text="ESP32 device",
+    )
+    role = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Role of this device for the asset (e.g., 'power_control', 'metering')",
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        help_text="Is this the primary device for controlling this asset?",
+    )
+    power_off_delay_seconds = models.PositiveIntegerField(
+        default=0,
+        help_text="Delay in seconds before removing power after device is disabled",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["asset", "device"]]
+        ordering = ["asset", "-is_primary", "role"]
+
+    def __str__(self) -> str:
+        return f"{self.asset.name} - {self.device.name or self.device.mac_address}"
+
+
+class OperationalMode(models.Model):
+    """
+    Operational modes for assets.
+    """
+
+    MODE_AVAILABLE = "available"
+    MODE_CLASSROOM = "classroom"
+    MODE_MAINTENANCE = "maintenance"
+    MODE_LOCKED_OUT = "locked_out"
+
+    MODE_CHOICES = [
+        (MODE_AVAILABLE, "Available"),
+        (MODE_CLASSROOM, "Classroom Mode"),
+        (MODE_MAINTENANCE, "Maintenance Mode"),
+        (MODE_LOCKED_OUT, "Locked Out"),
+    ]
+
+    asset = models.OneToOneField(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="operational_mode",
+        help_text="Asset this mode applies to",
+    )
+    mode = models.CharField(
+        max_length=20,
+        choices=MODE_CHOICES,
+        default=MODE_AVAILABLE,
+        help_text="Current operational mode",
+    )
+    classroom_mode_enabled = models.BooleanField(
+        default=False,
+        help_text="Is classroom mode currently enabled?",
+    )
+    classroom_mode_enabled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="classroom_modes_enabled",
+        help_text="User who enabled classroom mode",
+    )
+    classroom_mode_enabled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When classroom mode was enabled",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["asset"]
+
+    def __str__(self) -> str:
+        return f"{self.asset.name} - {self.get_mode_display()}"
+
+
+class AssetAuthorization(models.Model):
+    """
+    Tracks which users are authorized to use an asset.
+    """
+
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="authorizations",
+        help_text="Asset this authorization is for",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="asset_authorizations",
+        help_text="User authorized to use this asset",
+    )
+    authorized_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="authorizations_granted",
+        help_text="User who granted this authorization",
+    )
+    authorized_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True, help_text="Is this authorization active?")
+    notes = models.TextField(blank=True, help_text="Notes about this authorization")
+
+    class Meta:
+        unique_together = [["asset", "user"]]
+        ordering = ["asset", "user"]
+        indexes = [
+            models.Index(fields=["asset", "user", "is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.asset.name} - {self.user.username}"
+
+
+class LockoutLevel(models.TextChoices):
+    """Lockout permission levels in hierarchical order."""
+
+    USER = "user", "User"
+    MAINTAINER = "maintainer", "Maintainer"
+    GROUP_ADMIN = "group_admin", "Group Admin"
+    LOGISTICS_TEAM = "logistics_team", "Logistics Team"
+    LOGISTICS_LEAD = "logistics_lead", "Logistics Lead"
+    COO = "coo", "COO"
+
+
+class DeviceLockout(models.Model):
+    """
+    Tracks lockouts for assets with hierarchical unlock permissions.
+    Lockouts can be stacked - higher level lockouts can only be unlocked by higher level users.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="lockouts",
+        help_text="Asset that is locked out",
+    )
+    locked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lockouts_created",
+        help_text="User who created this lockout",
+    )
+    lockout_level = models.CharField(
+        max_length=20,
+        choices=LockoutLevel.choices,
+        help_text="Permission level of the user who locked this out",
+    )
+    reason = models.TextField(help_text="Reason for the lockout")
+    locked_at = models.DateTimeField(auto_now_add=True)
+    unlocked_at = models.DateTimeField(
+        null=True, blank=True, help_text="When this lockout was cleared"
+    )
+    unlocked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lockouts_unlocked",
+        help_text="User who unlocked this",
+    )
+    is_active = models.BooleanField(default=True, help_text="Is this lockout currently active?")
+
+    class Meta:
+        ordering = ["-locked_at"]
+        indexes = [
+            models.Index(fields=["asset", "is_active"]),
+            models.Index(fields=["locked_by"]),
+        ]
+
+    def __str__(self) -> str:
+        status = "Active" if self.is_active else "Cleared"
+        return f"{self.asset.name} - {status} ({self.get_lockout_level_display()})"
+
+    def can_be_unlocked_by(self, user) -> bool:
+        """
+        Check if this lockout can be unlocked by the given user.
+        Uses hierarchical permission system.
+        """
+        if not user.is_authenticated:
+            return False
+
+        # COO can unlock anything
+        if self._is_coo(user):
+            return True
+
+        # Original locker can always unlock their own lockout
+        if self.locked_by == user:
+            return True
+
+        # Check hierarchical permissions
+        lockout_levels = [
+            LockoutLevel.USER,
+            LockoutLevel.MAINTAINER,
+            LockoutLevel.GROUP_ADMIN,
+            LockoutLevel.LOGISTICS_TEAM,
+            LockoutLevel.LOGISTICS_LEAD,
+            LockoutLevel.COO,
+        ]
+
+        current_level_index = lockout_levels.index(self.lockout_level)
+        user_level = self._get_user_lockout_level(user)
+
+        if user_level not in lockout_levels:
+            return False
+
+        user_level_index = lockout_levels.index(user_level)
+
+        # User can unlock if their level is higher than the lockout level
+        return user_level_index > current_level_index
+
+    def _is_coo(self, user) -> bool:
+        """Check if user is COO."""
+        # COO would be determined by a specific group or flag
+        # For now, check for a "COO" group or is_superuser
+        if user.is_superuser:
+            return True
+        try:
+            coo_group = Group.objects.get(name="COO")
+            return coo_group in user.groups.all()
+        except Group.DoesNotExist:
+            return False
+
+    def _get_user_lockout_level(self, user) -> Optional[str]:
+        """Determine the lockout level for a user."""
+        if self._is_coo(user):
+            return LockoutLevel.COO
+
+        # Check for Logistics Lead
+        try:
+            logistics_lead_group = Group.objects.get(name="Logistics Lead")
+            if logistics_lead_group in user.groups.all():
+                return LockoutLevel.LOGISTICS_LEAD
+        except Group.DoesNotExist:
+            pass
+
+        # Check for Logistics Team
+        try:
+            logistics_group = Group.objects.get(name="Logistics")
+            if logistics_group in user.groups.all():
+                return LockoutLevel.LOGISTICS_TEAM
+        except Group.DoesNotExist:
+            pass
+
+        # Check for Group Admin
+        if self.asset.owning_group and self.asset.owning_group in user.groups.all():
+            # Check if user has group admin permissions
+            if (
+                user.has_perm("inventory.group_admin")
+                or user.groups.filter(name__endswith="_admin").exists()
+            ):
+                return LockoutLevel.GROUP_ADMIN
+
+        # Check for Maintainer
+        try:
+            maintainer_group = Group.objects.get(name="Maintainer")
+            if maintainer_group in user.groups.all():
+                return LockoutLevel.MAINTAINER
+        except Group.DoesNotExist:
+            pass
+
+        # Default to user level
+        return LockoutLevel.USER
+
+
+class DeviceUsage(models.Model):
+    """
+    Tracks usage sessions for assets.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="usage_sessions",
+        help_text="Asset being used",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="device_usage_sessions",
+        help_text="User using the asset",
+    )
+    started_at = models.DateTimeField(auto_now_add=True, help_text="When usage started")
+    ended_at = models.DateTimeField(null=True, blank=True, help_text="When usage ended")
+    duration_seconds = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Duration of usage in seconds",
+    )
+    power_consumption_kwh = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="Power consumption during this session (kWh)",
+    )
+    notes = models.TextField(blank=True, help_text="Notes about this usage session")
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [
+            models.Index(fields=["asset", "user", "started_at"]),
+            models.Index(fields=["started_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.asset.name} - {self.user.username if self.user else 'Unknown'} - {self.started_at}"
+
+    def end_session(self) -> None:
+        """End the usage session and calculate duration."""
+        if self.ended_at:
+            return  # Already ended
+
+        self.ended_at = timezone.now()
+        if self.started_at:
+            delta = self.ended_at - self.started_at
+            self.duration_seconds = int(delta.total_seconds())
+        self.save()
+
+
+class PowerMeterReading(models.Model):
+    """
+    Stores power measurement readings from ESP32 power measurement devices.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        ESP32Device,
+        on_delete=models.CASCADE,
+        related_name="power_readings",
+        help_text="Power measurement device",
+    )
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="power_readings",
+        help_text="Asset this reading is for",
+    )
+    usage_session = models.ForeignKey(
+        DeviceUsage,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="power_readings",
+        help_text="Usage session this reading belongs to",
+    )
+    voltage = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Voltage reading (V)",
+    )
+    current = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="Current reading (A)",
+    )
+    power = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="Power reading (W)",
+    )
+    energy = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Energy reading (kWh)",
+    )
+    timestamp = models.DateTimeField(auto_now_add=True, help_text="When this reading was taken")
+
+    class Meta:
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(fields=["device", "timestamp"]),
+            models.Index(fields=["asset", "timestamp"]),
+            models.Index(fields=["usage_session"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.asset.name} - {self.timestamp} - {self.power or 0}W"
+
+
+class FirmwareVersion(models.Model):
+    """
+    Tracks firmware versions available for ESP32 devices.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    version = models.CharField(max_length=50, unique=True, help_text="Firmware version string")
+    device_type = models.ForeignKey(
+        DeviceType,
+        on_delete=models.CASCADE,
+        related_name="firmware_versions",
+        help_text="Device type this firmware is for",
+    )
+    firmware_file = models.FileField(
+        upload_to="forgekey/firmware/",
+        help_text="Firmware binary file",
+    )
+    signature = models.TextField(help_text="Cryptographic signature of the firmware file")
+    release_notes = models.TextField(blank=True, help_text="Release notes for this version")
+    is_active = models.BooleanField(default=True, help_text="Is this firmware version active?")
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="firmware_versions_created",
+        help_text="User who uploaded this firmware",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = [["version", "device_type"]]
+
+    def __str__(self) -> str:
+        return f"{self.device_type.name} - {self.version}"
+
+
+class DeviceFirmwareUpdate(models.Model):
+    """
+    Tracks firmware update requests and status for ESP32 devices.
+    """
+
+    STATUS_PENDING = "pending"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_IN_PROGRESS, "In Progress"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        ESP32Device,
+        on_delete=models.CASCADE,
+        related_name="firmware_updates",
+        help_text="Device to update",
+    )
+    firmware_version = models.ForeignKey(
+        FirmwareVersion,
+        on_delete=models.PROTECT,
+        related_name="device_updates",
+        help_text="Firmware version to install",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        help_text="Update status",
+    )
+    requested_at = models.DateTimeField(auto_now_add=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="firmware_updates_requested",
+        help_text="User who requested this update",
+    )
+    started_at = models.DateTimeField(null=True, blank=True, help_text="When update started")
+    completed_at = models.DateTimeField(null=True, blank=True, help_text="When update completed")
+    error_message = models.TextField(blank=True, help_text="Error message if update failed")
+
+    class Meta:
+        ordering = ["-requested_at"]
+        indexes = [
+            models.Index(fields=["device", "status"]),
+            models.Index(fields=["status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.device.mac_address} - {self.firmware_version.version} - {self.get_status_display()}"

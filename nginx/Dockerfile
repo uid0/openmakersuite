@@ -8,4 +8,3 @@ COPY templates/ /etc/nginx/templates/
 COPY docker-entrypoint.d/ /docker-entrypoint.d/
 
 RUN chmod +x /docker-entrypoint.d/*.sh
-

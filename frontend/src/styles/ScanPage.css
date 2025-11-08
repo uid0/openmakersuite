@@ -313,7 +313,7 @@
   .detail-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .detail-grid > div {
     flex-direction: column;
     gap: 2px;

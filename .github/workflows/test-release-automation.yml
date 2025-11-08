@@ -56,13 +56,13 @@ jobs:
           # Test semantic version parsing
           CURRENT_VERSION="1.2.3"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          
+
           # Test patch increment
           NEW_PATCH=$((PATCH + 1))
           NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
-          
+
           echo "✅ Version logic test: $CURRENT_VERSION → $NEW_VERSION"
-          
+
           if [ "$NEW_VERSION" = "1.2.4" ]; then
             echo "✅ Version increment logic works correctly"
           else
@@ -121,13 +121,13 @@ jobs:
       - name: Test signing
         run: |
           echo "🔐 Testing cryptographic signing..."
-          
+
           # Sign the test file
           cosign sign-blob \
             --output-signature test-file.txt.sig \
             --output-certificate test-file.txt.pem \
             test-file.txt
-          
+
           echo "✅ Signing completed"
         env:
           COSIGN_EXPERIMENTAL: 1
@@ -135,13 +135,13 @@ jobs:
       - name: Test signature verification
         run: |
           echo "🔍 Testing signature verification..."
-          
+
           # Verify the signature
           cosign verify-blob \
             --certificate test-file.txt.pem \
             --signature test-file.txt.sig \
             test-file.txt
-          
+
           echo "✅ Signature verification successful"
         env:
           COSIGN_EXPERIMENTAL: 1
@@ -153,7 +153,7 @@ jobs:
       - name: Check Sentry secrets
         run: |
           echo "🔍 Checking Sentry configuration..."
-          
+
           if [ -z "${{ secrets.SENTRY_AUTH_TOKEN }}" ]; then
             echo "⚠️  SENTRY_AUTH_TOKEN not configured"
             SENTRY_OK=false
@@ -161,21 +161,21 @@ jobs:
             echo "✅ SENTRY_AUTH_TOKEN is configured"
             SENTRY_OK=true
           fi
-          
+
           if [ -z "${{ secrets.SENTRY_ORG }}" ]; then
             echo "⚠️  SENTRY_ORG not configured"
             SENTRY_OK=false
           else
             echo "✅ SENTRY_ORG is configured"
           fi
-          
+
           if [ -z "${{ secrets.SENTRY_PROJECT }}" ]; then
             echo "⚠️  SENTRY_PROJECT not configured"
             SENTRY_OK=false
           else
             echo "✅ SENTRY_PROJECT is configured"
           fi
-          
+
           if [ "$SENTRY_OK" = true ]; then
             echo "✅ Sentry integration is properly configured"
           else
@@ -195,20 +195,20 @@ jobs:
       - name: Test changelog generation
         run: |
           echo "📝 Testing changelog generation..."
-          
+
           # Generate a test changelog
           echo "## 🚀 Release v1.0.0-test" > test-changelog.md
           echo "" >> test-changelog.md
           echo "### 📝 Changes" >> test-changelog.md
-          
+
           # Get recent commits (last 5)
           git log --oneline -5 --pretty=format:"- %s" >> test-changelog.md || echo "- 🎉 Test release" >> test-changelog.md
-          
+
           echo "" >> test-changelog.md
           echo "### 🔧 Technical Details" >> test-changelog.md
           echo "- **Tests**: All passing" >> test-changelog.md
           echo "- **Security**: All checks passed" >> test-changelog.md
-          
+
           echo "✅ Changelog generated:"
           echo "========================"
           cat test-changelog.md
@@ -225,7 +225,7 @@ jobs:
           echo "🧪 Release Automation Test Results"
           echo "=================================="
           echo ""
-          
+
           # Check job results
           echo "Job Results:"
           echo "- Prerequisites: ${{ needs.test-prerequisites.result }}"
@@ -234,7 +234,7 @@ jobs:
           echo "- Sentry Config: ${{ needs.test-sentry-config.result }}"
           echo "- Changelog: ${{ needs.test-changelog-generation.result }}"
           echo ""
-          
+
           # Overall status
           if [[ "${{ needs.test-prerequisites.result }}" == "success" && \
                 "${{ needs.test-docker-build.result }}" == "success" && \

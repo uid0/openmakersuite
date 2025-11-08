@@ -42,9 +42,7 @@ repos:
       - id: flake8
         exclude: migrations/
         args: [
-          "--max-line-length=127",
-          "--ignore=E203,W503,E501,F401,F841",
-          "--max-complexity=15"
+        "--config","./backend/.flake8"
         ]
 
   # Security checks

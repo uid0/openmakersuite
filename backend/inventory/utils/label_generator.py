@@ -13,7 +13,7 @@ from typing import Optional
 from django.conf import settings
 
 from reportlab.lib import colors
-from reportlab.lib.units import mm
+from reportlab.lib.units import inch, mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
@@ -26,14 +26,19 @@ class BrotherLabelRenderer:
     # Brother QL-820nwb uses 62mm wide labels
     # The DK-2251 roll is continuous, so we match the printable height to 62mm
     # for a square label that trims right after the content.
-    LABEL_WIDTH = 62 * mm  # 62mm = 2.44 inches
-    LABEL_HEIGHT = 62 * mm  # Match the 62mm label roll height as well
+    # Use inches for better printer compatibility (62mm = 2.44 inches)
+    LABEL_WIDTH = 2.44 * inch  # 62mm = 2.44 inches
+    LABEL_HEIGHT = 2.44 * inch  # Match the 62mm label roll height as well
 
-    # Margins and spacing
-    MARGIN = 4 * mm  # Provide extra breathing room for the title text
-    TOP_PADDING = 1.5 * mm
-    QR_SIZE = 25 * mm  # QR code size
-    TEXT_AREA_WIDTH = LABEL_WIDTH - (2 * MARGIN) - QR_SIZE - (2 * mm)
+    # Printer DPI - Brother QL-820NWB supports 300 x 600 dpi
+    # Use 300 DPI for width (horizontal) to match printer resolution
+    PRINTER_DPI = 300
+
+    # Margins and spacing - increased for better readability
+    MARGIN = 6 * mm  # Increased margin for better spacing
+    TOP_PADDING = 2 * mm
+    QR_SIZE = 30 * mm  # Increased QR code size for better scanning
+    TEXT_AREA_WIDTH = LABEL_WIDTH - (2 * MARGIN) - QR_SIZE - (3 * mm)
 
     def __init__(self, base_url: Optional[str] = None) -> None:
         """Initialize the label renderer.
@@ -53,7 +58,18 @@ class BrotherLabelRenderer:
             PDF content as bytes
         """
         buffer = BytesIO()
-        pdf_canvas = canvas.Canvas(buffer, pagesize=(self.LABEL_WIDTH, self.LABEL_HEIGHT))
+        # Set page size in points (1/72 inch) and specify DPI
+        # Convert inches to points: 1 inch = 72 points
+        page_width_pt = self.LABEL_WIDTH
+        page_height_pt = self.LABEL_HEIGHT
+        pdf_canvas = canvas.Canvas(
+            buffer,
+            pagesize=(page_width_pt, page_height_pt),
+            pageCompression=0,  # Disable compression for better compatibility
+        )
+        # Set metadata to help printer understand the document
+        pdf_canvas.setTitle(f"Label: {asset.name}")
+        pdf_canvas.setSubject("Brother QL-820NWB Label")
 
         self._draw_label(pdf_canvas, asset)
         pdf_canvas.save()
@@ -71,7 +87,15 @@ class BrotherLabelRenderer:
             PDF content as bytes with one label per page
         """
         buffer = BytesIO()
-        pdf_canvas = canvas.Canvas(buffer, pagesize=(self.LABEL_WIDTH, self.LABEL_HEIGHT))
+        page_width_pt = self.LABEL_WIDTH
+        page_height_pt = self.LABEL_HEIGHT
+        pdf_canvas = canvas.Canvas(
+            buffer,
+            pagesize=(page_width_pt, page_height_pt),
+            pageCompression=0,
+        )
+        pdf_canvas.setTitle("Brother QL-820NWB Labels")
+        pdf_canvas.setSubject("Asset Labels Batch")
 
         for asset in assets:
             self._draw_label(pdf_canvas, asset)
@@ -123,34 +147,43 @@ class BrotherLabelRenderer:
                 )
 
         # Text area on the right side
-        text_x = self.MARGIN + self.QR_SIZE + (2 * mm)
+        text_x = self.MARGIN + self.QR_SIZE + (3 * mm)
         text_y = self.LABEL_HEIGHT - self.MARGIN - self.TOP_PADDING
 
-        # Asset name (largest text)
-        pdf_canvas.setFont("Helvetica-Bold", 10)
+        # Asset name (largest text) - increased font size
+        font_size_name = 14  # Increased from 10
+        pdf_canvas.setFont("Helvetica-Bold", font_size_name)
         pdf_canvas.setFillColor(colors.black)
-        name_lines = self._wrap_text(asset.name, self.TEXT_AREA_WIDTH, "Helvetica-Bold", 10)
+        name_lines = self._wrap_text(
+            asset.name, self.TEXT_AREA_WIDTH, "Helvetica-Bold", font_size_name
+        )
+        line_height = font_size_name + 2
         for i, line in enumerate(name_lines[:2]):  # Max 2 lines for name
-            pdf_canvas.drawString(text_x, text_y - (i * 12), line)
+            pdf_canvas.drawString(text_x, text_y - (i * line_height), line)
 
-        # Asset tag
+        # Asset tag - increased font size
         if asset.asset_tag:
-            pdf_canvas.setFont("Helvetica", 8)
+            font_size_tag = 10  # Increased from 8
+            pdf_canvas.setFont("Helvetica", font_size_tag)
             pdf_canvas.setFillColor(colors.darkgrey)
-            tag_y = text_y - (len(name_lines[:2]) * 12) - 8
+            tag_y = text_y - (len(name_lines[:2]) * line_height) - 6
             pdf_canvas.drawString(text_x, tag_y, f"Tag: {asset.asset_tag}")
 
-        # Status indicator
-        status_y = tag_y - 10 if asset.asset_tag else text_y - (len(name_lines[:2]) * 12) - 8
-        pdf_canvas.setFont("Helvetica", 7)
+        # Status indicator - increased font size
+        status_y = (
+            tag_y - 12 if asset.asset_tag else text_y - (len(name_lines[:2]) * line_height) - 6
+        )
+        font_size_status = 9  # Increased from 7
+        pdf_canvas.setFont("Helvetica", font_size_status)
         status_color = colors.green if asset.status == Asset.ACTIVE else colors.orange
         pdf_canvas.setFillColor(status_color)
         pdf_canvas.drawString(text_x, status_y, asset.get_status_display())
 
-        # Location (if available)
+        # Location (if available) - increased font size
         if asset.location:
-            location_y = status_y - 10
-            pdf_canvas.setFont("Helvetica", 7)
+            location_y = status_y - 12
+            font_size_location = 9  # Increased from 7
+            pdf_canvas.setFont("Helvetica", font_size_location)
             pdf_canvas.setFillColor(colors.black)
             location_text = f"Loc: {asset.location.name[:20]}"
             pdf_canvas.drawString(text_x, location_y, location_text)

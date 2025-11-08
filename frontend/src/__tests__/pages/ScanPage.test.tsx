@@ -72,7 +72,7 @@ describe('ScanPage', () => {
   test('displays item details after loading (logged in user)', async () => {
     // Set logged in state
     localStorage.setItem('token', 'test-token');
-    
+
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: mockItem,
     });
@@ -97,7 +97,7 @@ describe('ScanPage', () => {
   test('displays low stock warning when needed', async () => {
     // Set logged in state to avoid auto-submit
     localStorage.setItem('token', 'test-token');
-    
+
     const lowStockItem = { ...mockItem, current_stock: 5, needs_reorder: true };
 
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
@@ -117,7 +117,7 @@ describe('ScanPage', () => {
   test('handles form submission for logged in user', async () => {
     // Set logged in state to get the manual form
     localStorage.setItem('token', 'test-token');
-    
+
     const mockSupplier = {
       id: 1,
       supplier_name: 'Test Supplier',
@@ -126,7 +126,7 @@ describe('ScanPage', () => {
       is_active: true,
       average_lead_time: 7,
     };
-    
+
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: mockItem,
     });
@@ -152,7 +152,7 @@ describe('ScanPage', () => {
 
     // Submit the form (should have supplier and proper quantities now)
     const submitButton = screen.getByRole('button', { name: /request \d+ units/i });
-    
+
     fireEvent.click(submitButton);
 
     // Wait for the async operations to complete

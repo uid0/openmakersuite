@@ -41,10 +41,10 @@
 
 <form method="post" id="duplicate-asset-form">
     {% csrf_token %}
-    
+
     <fieldset class="module aligned">
         <h2>New Asset Details</h2>
-        
+
         <div class="form-row">
             <div>
                 <label for="{{ form.serial_number.id_for_label }}" class="required">
@@ -74,4 +74,3 @@
 </form>
 
 {% endblock %}
-

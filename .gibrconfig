@@ -7,4 +7,3 @@ name = github
 [github]
 repo = uid0/openmakersuite
 token = ${GITHUB_TOKEN}
-

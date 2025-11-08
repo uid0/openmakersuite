@@ -61,4 +61,3 @@ class ActiveUserManager(models.Manager):
 - Use custom hooks for reusable logic
 - Implement proper error boundaries and loading states
 - Optimize images and assets for mobile performance
-

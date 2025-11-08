@@ -213,4 +213,3 @@ export async function isLoggedIn(page: Page): Promise<boolean> {
     return !!localStorage.getItem('token');
   });
 }
-

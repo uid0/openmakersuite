@@ -23,7 +23,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background-image: 
+  background-image:
     radial-gradient(circle at 25% 25%, rgba(255, 255, 255, 0.02) 0%, transparent 50%),
     radial-gradient(circle at 75% 75%, rgba(255, 255, 255, 0.01) 0%, transparent 50%);
   pointer-events: none;
@@ -962,11 +962,11 @@
 }
 
 @keyframes fadeInOut {
-  0% { 
+  0% {
     opacity: 0;
     transform: translateY(10px);
   }
-  100% { 
+  100% {
     opacity: 1;
     transform: translateY(0);
   }
@@ -1113,11 +1113,11 @@
   .item-card {
     border: 3px solid white;
   }
-  
+
   .item-name {
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
   }
-  
+
   .stock-level .number {
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
   }

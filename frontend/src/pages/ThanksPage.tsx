@@ -30,7 +30,7 @@ const ThanksPage: React.FC = () => {
           Our inventory team will review your request and take appropriate action.
         </p>
         <div className="actions">
-          <button 
+          <button
             onClick={() => navigate('/')}
             className="btn-primary"
           >

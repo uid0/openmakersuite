@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from django.db import transaction
 from django.db.models import F, Q
 from django.http import HttpResponse
+from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -15,6 +16,7 @@ from rest_framework.response import Response
 
 from .models import (
     Asset,
+    AssetPart,
     Category,
     Fixture,
     FixtureRefillRequest,
@@ -26,6 +28,7 @@ from .models import (
     UsageLog,
 )
 from .serializers import (
+    AssetPartSerializer,
     AssetSerializer,
     CategorySerializer,
     FixtureDetailSerializer,
@@ -498,9 +501,11 @@ class PriceHistoryViewSet(viewsets.ReadOnlyModelViewSet):
 class AssetViewSet(viewsets.ModelViewSet):
     """API endpoint for hard assets."""
 
-    queryset = Asset.objects.select_related(
-        "inventory_item", "category", "location", "manufacturer"
-    ).all()
+    queryset = (
+        Asset.objects.select_related("inventory_item", "category", "location", "manufacturer")
+        .prefetch_related("asset_parts__part", "asset_parts__part__category")
+        .all()
+    )
     serializer_class = AssetSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
@@ -617,6 +622,50 @@ class AssetViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(assets, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["get"])
+    def download_label_escp(self, request, pk=None):
+        """Generate and download ESC/P commands for direct printing to Brother QL-820NWB."""
+        asset = self.get_object()
+
+        from .utils.brother_esc_p import BrotherESCPGenerator
+
+        try:
+            generator = BrotherESCPGenerator()
+            escp_bytes = generator.generate_label_commands(asset)
+            identifier = asset.asset_tag or str(asset.id)[:8]
+            filename = f"asset_label_{identifier}.escp"
+
+            response = HttpResponse(escp_bytes, content_type="application/octet-stream")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to generate ESC/P commands: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=True, methods=["get"])
+    def download_label_preview(self, request, pk=None):
+        """Generate and download PNG preview of label for Brother QL-820NWB."""
+        asset = self.get_object()
+
+        from .utils.brother_esc_p import BrotherESCPGenerator
+
+        try:
+            generator = BrotherESCPGenerator()
+            png_bytes = generator.generate_label_file(asset, output_format="png")
+            identifier = asset.asset_tag or str(asset.id)[:8]
+            filename = f"asset_label_{identifier}_preview.png"
+
+            response = HttpResponse(png_bytes, content_type="image/png")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to generate label preview: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
     @action(detail=False, methods=["post"])
     def download_labels_batch(self, request):
         """Generate and download labels for multiple assets."""
@@ -706,53 +755,45 @@ class AssetViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def lock(self, request, pk=None):
-        """Lock an asset to prevent non-admin usage."""
-        from django.utils import timezone
+        """Lock an asset using ForgeKey lockout system."""
+        from forgekey.models import DeviceLockout, OperationalMode
 
         asset = self.get_object()
         user = request.user
+        reason = request.data.get("reason", "")
 
         if not user.is_authenticated:
             return Response(
                 {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
             )
 
-        # Check if user can lock this asset
-        if not asset.can_user_lock(user):
-            return Response(
-                {"error": "You do not have permission to lock this asset"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        if not reason:
+            return Response({"error": "reason is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Determine lock type based on user's role
-        lock_type = None
-        if asset.is_user_admin(user):
-            lock_type = asset.LOCK_TYPE_ADMIN
-        elif asset.is_user_in_logistics(user):
-            lock_type = asset.LOCK_TYPE_LOGISTICS
-        elif asset.is_user_group_admin(user):
-            lock_type = asset.LOCK_TYPE_GROUP_ADMIN
-        elif asset.owning_group and asset.owning_group in user.groups.all():
-            lock_type = asset.LOCK_TYPE_GROUP_MEMBER
+        # Determine lockout level based on user's role
+        lockout_level = self._get_user_lockout_level(user, asset)
 
-        if not lock_type:
-            return Response(
-                {"error": "Unable to determine lock type"}, status=status.HTTP_400_BAD_REQUEST
-            )
+        # Create lockout
+        DeviceLockout.objects.create(
+            asset=asset,
+            locked_by=user,
+            lockout_level=lockout_level,
+            reason=reason,
+        )
 
-        # Lock the asset
-        asset.is_locked = True
-        asset.locked_by = user
-        asset.locked_at = timezone.now()
-        asset.lock_type = lock_type
-        asset.save(update_fields=["is_locked", "locked_by", "locked_at", "lock_type"])
+        # Update operational mode
+        mode, _ = OperationalMode.objects.get_or_create(asset=asset)
+        mode.mode = OperationalMode.MODE_LOCKED_OUT
+        mode.save()
 
         serializer = self.get_serializer(asset)
-        return Response(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def unlock(self, request, pk=None):
-        """Unlock an asset based on permission rules."""
+        """Unlock an asset using ForgeKey lockout system."""
+        from forgekey.models import DeviceLockout, OperationalMode
+
         asset = self.get_object()
         user = request.user
 
@@ -761,22 +802,96 @@ class AssetViewSet(viewsets.ModelViewSet):
                 {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
             )
 
-        # Check if user can unlock this asset
-        if not asset.can_user_unlock(user):
+        # Get active lockouts
+        active_lockouts = DeviceLockout.objects.filter(asset=asset, is_active=True)
+
+        if not active_lockouts.exists():
+            return Response({"error": "Asset is not locked"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if user can unlock any of the lockouts
+        unlockable_lockout = None
+        for lockout in active_lockouts:
+            if lockout.can_be_unlocked_by(user):
+                unlockable_lockout = lockout
+                break
+
+        if not unlockable_lockout:
             return Response(
                 {"error": "You do not have permission to unlock this asset"},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Unlock the asset
-        asset.is_locked = False
-        asset.locked_by = None
-        asset.locked_at = None
-        asset.lock_type = ""
-        asset.save(update_fields=["is_locked", "locked_by", "locked_at", "lock_type"])
+        # Unlock the lockout
+        unlockable_lockout.is_active = False
+        unlockable_lockout.unlocked_at = timezone.now()
+        unlockable_lockout.unlocked_by = user
+        unlockable_lockout.save()
+
+        # Check if there are other active lockouts
+        remaining_lockouts = DeviceLockout.objects.filter(asset=asset, is_active=True)
+
+        # If no more active lockouts, update operational mode
+        if not remaining_lockouts.exists():
+            try:
+                mode = OperationalMode.objects.get(asset=asset)
+                if mode.mode == OperationalMode.MODE_LOCKED_OUT:
+                    mode.mode = OperationalMode.MODE_AVAILABLE
+                    mode.save()
+            except OperationalMode.DoesNotExist:
+                pass
 
         serializer = self.get_serializer(asset)
         return Response(serializer.data)
+
+    def _get_user_lockout_level(self, user, asset):
+        """Determine the lockout level for a user."""
+        from django.contrib.auth.models import Group
+
+        from forgekey.models import LockoutLevel
+
+        # Check for COO
+        try:
+            coo_group = Group.objects.get(name="COO")
+            if coo_group in user.groups.all() or user.is_superuser:
+                return LockoutLevel.COO
+        except Group.DoesNotExist:
+            if user.is_superuser:
+                return LockoutLevel.COO
+
+        # Check for Logistics Lead
+        try:
+            logistics_lead_group = Group.objects.get(name="Logistics Lead")
+            if logistics_lead_group in user.groups.all():
+                return LockoutLevel.LOGISTICS_LEAD
+        except Group.DoesNotExist:
+            pass
+
+        # Check for Logistics Team
+        try:
+            logistics_group = Group.objects.get(name="Logistics")
+            if logistics_group in user.groups.all():
+                return LockoutLevel.LOGISTICS_TEAM
+        except Group.DoesNotExist:
+            pass
+
+        # Check for Group Admin
+        if asset.owning_group and asset.owning_group in user.groups.all():
+            if (
+                user.has_perm("inventory.group_admin")
+                or user.groups.filter(name__endswith="_admin").exists()
+            ):
+                return LockoutLevel.GROUP_ADMIN
+
+        # Check for Maintainer
+        try:
+            maintainer_group = Group.objects.get(name="Maintainer")
+            if maintainer_group in user.groups.all():
+                return LockoutLevel.MAINTAINER
+        except Group.DoesNotExist:
+            pass
+
+        # Default to user level
+        return LockoutLevel.USER
 
     @action(detail=True, methods=["post"])
     def report_problem(self, request, pk=None):
@@ -817,6 +932,61 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         serializer = AssetProblemSerializer(problem)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AssetPartViewSet(viewsets.ModelViewSet):
+    """API endpoint for asset parts/consumables."""
+
+    queryset = AssetPart.objects.select_related("asset", "part", "part__category").all()
+    serializer_class = AssetPartSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        # Filter by asset if specified
+        asset = self.request.query_params.get("asset")
+        if asset:
+            queryset = queryset.filter(asset_id=asset)
+
+        # Filter by part if specified
+        part = self.request.query_params.get("part")
+        if part:
+            queryset = queryset.filter(part_id=part)
+
+        # Filter by required status if specified
+        is_required = self.request.query_params.get("is_required")
+        if is_required is not None:
+            queryset = queryset.filter(is_required=is_required.lower() == "true")
+
+        # Note: needs_replacement filter is a calculated property, so we can't filter
+        # efficiently in the database. If needed, this would require evaluating the queryset.
+        # For now, we'll skip this filter to maintain queryset laziness.
+
+        # Search functionality
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(asset__name__icontains=search)
+                | Q(asset__asset_tag__icontains=search)
+                | Q(part__name__icontains=search)
+                | Q(part__sku__icontains=search)
+                | Q(notes__icontains=search)
+            )
+
+        return queryset.order_by("asset__name", "part__name")
+
+    @action(detail=True, methods=["post"])
+    def mark_replaced(self, request, pk=None):
+        """Mark a part as replaced (updates last_replaced_at to now)."""
+        from django.utils import timezone
+
+        asset_part = self.get_object()
+        asset_part.last_replaced_at = timezone.now()
+        asset_part.save(update_fields=["last_replaced_at"])
+
+        serializer = self.get_serializer(asset_part)
+        return Response(serializer.data)
 
 
 class FixtureViewSet(viewsets.ModelViewSet):

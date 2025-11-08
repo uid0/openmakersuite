@@ -138,4 +138,3 @@ echo "3. Should show item details and allow usage logging"
 echo
 echo "✅ Test data creation complete!"
 echo "📝 Next: Restart your backend and test the index card generation in the browser"
-

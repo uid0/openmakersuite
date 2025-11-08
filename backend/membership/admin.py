@@ -161,11 +161,10 @@ class MembershipAdmin(admin.ModelAdmin):
     )
     readonly_fields = ["created_at", "updated_at"]
 
+    @admin.display(description="Users")
     def get_users(self, obj):
         """Display users associated with this membership."""
         users = obj.users.all()
         if users:
             return ", ".join([user.username for user in users[:5]])
         return "No users"
-
-    get_users.short_description = "Users"

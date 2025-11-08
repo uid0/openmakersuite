@@ -52,9 +52,9 @@ install_cosign() {
         print_success "cosign is already installed"
         return
     fi
-    
+
     print_warning "Installing cosign $COSIGN_VERSION..."
-    
+
     # Detect architecture
     ARCH=$(uname -m)
     case $ARCH in
@@ -63,35 +63,35 @@ install_cosign() {
         arm64) ARCH="arm64" ;;
         *) print_error "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
-    
+
     # Detect OS
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-    
+
     # Download and install cosign
     COSIGN_URL="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-$OS-$ARCH"
-    
+
     curl -sL "$COSIGN_URL" -o cosign
     chmod +x cosign
     sudo mv cosign /usr/local/bin/
-    
+
     print_success "cosign installed successfully"
 }
 
 download_release() {
     local version=$1
     local repo_url="https://github.com/your-org/openmakersuite"  # Update this to your actual repo
-    
+
     print_warning "Downloading release $version..."
-    
+
     mkdir -p "$DOWNLOAD_DIR"
     cd "$DOWNLOAD_DIR"
-    
+
     # Get the actual version tag if "latest" was specified
     if [ "$version" = "latest" ]; then
         version=$(curl -s https://api.github.com/repos/your-org/openmakersuite/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         print_warning "Latest version is: $version"
     fi
-    
+
     # Download all release files
     local base_url="$repo_url/releases/download/$version"
     local files=(
@@ -100,7 +100,7 @@ download_release() {
         "openmakersuite-$version.tar.gz.sig"
         "openmakersuite-$version.tar.gz.pem"
     )
-    
+
     for file in "${files[@]}"; do
         if [ ! -f "$file" ]; then
             print_warning "Downloading $file..."
@@ -112,46 +112,46 @@ download_release() {
             print_success "$file already exists"
         fi
     done
-    
+
     print_success "All files downloaded successfully"
     cd ..
 }
 
 verify_checksums() {
     local version=$1
-    
+
     print_warning "Verifying checksums..."
-    
+
     cd "$DOWNLOAD_DIR"
-    
+
     if [ ! -f "openmakersuite-$version.tar.gz.sha256" ]; then
         print_error "Checksum file not found"
         return 1
     fi
-    
+
     if sha256sum -c "openmakersuite-$version.tar.gz.sha256"; then
         print_success "Checksums verified successfully"
     else
         print_error "Checksum verification failed"
         return 1
     fi
-    
+
     cd ..
 }
 
 verify_signature() {
     local version=$1
-    
+
     print_warning "Verifying cryptographic signature..."
-    
+
     cd "$DOWNLOAD_DIR"
-    
+
     local files=(
         "openmakersuite-$version.tar.gz"
         "openmakersuite-$version.tar.gz.sig"
         "openmakersuite-$version.tar.gz.pem"
     )
-    
+
     # Check all required files exist
     for file in "${files[@]}"; do
         if [ ! -f "$file" ]; then
@@ -159,7 +159,7 @@ verify_signature() {
             return 1
         fi
     done
-    
+
     # Verify signature using cosign
     if cosign verify-blob \
         --certificate "openmakersuite-$version.tar.gz.pem" \
@@ -170,27 +170,27 @@ verify_signature() {
         print_error "Signature verification failed"
         return 1
     fi
-    
+
     cd ..
 }
 
 show_release_info() {
     local version=$1
-    
+
     cd "$DOWNLOAD_DIR"
-    
+
     echo -e "\n${BLUE}📦 Release Information${NC}"
     echo "======================"
     echo "Version: $version"
     echo "Files:"
-    
+
     for file in openmakersuite-$version.*; do
         if [ -f "$file" ]; then
             size=$(ls -lh "$file" | awk '{print $5}')
             echo "  📄 $file ($size)"
         fi
     done
-    
+
     echo ""
     echo -e "${GREEN}🎉 Release verification completed successfully!${NC}"
     echo ""
@@ -198,17 +198,17 @@ show_release_info() {
     echo "  1. Extract: tar -xzf openmakersuite-$version.tar.gz"
     echo "  2. Configure: cp .env.example .env && nano .env"
     echo "  3. Deploy: ./deploy.sh"
-    
+
     cd ..
 }
 
 main() {
     print_header
-    
+
     # Parse arguments
     DOWNLOAD_ONLY=false
     VERIFY_ONLY=false
-    
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             --help|-h)
@@ -240,19 +240,19 @@ main() {
                 ;;
         esac
     done
-    
+
     # Validate version argument
     if [ -z "$VERSION" ]; then
         print_error "Version argument is required"
         show_usage
         exit 1
     fi
-    
+
     # Install cosign if needed (unless download-only)
     if [ "$DOWNLOAD_ONLY" = false ]; then
         install_cosign
     fi
-    
+
     # Download files (unless verify-only)
     if [ "$VERIFY_ONLY" = false ]; then
         if ! download_release "$VERSION"; then
@@ -260,19 +260,19 @@ main() {
             exit 1
         fi
     fi
-    
+
     # Verify files (unless download-only)
     if [ "$DOWNLOAD_ONLY" = false ]; then
         if ! verify_checksums "$VERSION"; then
             print_error "Checksum verification failed"
             exit 1
         fi
-        
+
         if ! verify_signature "$VERSION"; then
             print_error "Signature verification failed"
             exit 1
         fi
-        
+
         show_release_info "$VERSION"
     else
         print_success "Download completed. Use --verify-only to verify signatures."

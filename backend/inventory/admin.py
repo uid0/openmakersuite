@@ -14,6 +14,7 @@ from django.utils.html import format_html
 
 from .models import (
     Asset,
+    AssetPart,
     AssetProblem,
     Category,
     InventoryItem,
@@ -208,6 +209,7 @@ class ItemSupplierAdmin(admin.ModelAdmin):
         ),
     )
 
+    @admin.display(description="Item")
     def item_link(self, obj):
         """Create a clickable link to the item admin page."""
         if obj.item:
@@ -215,8 +217,7 @@ class ItemSupplierAdmin(admin.ModelAdmin):
             return format_html('<a href="{}">{}</a>', url, obj.item.name)
         return "—"
 
-    item_link.short_description = "Item"
-
+    @admin.display(description="API Link")
     def api_link(self, obj):
         """Create a link to the DRF API endpoint for this ItemSupplier."""
         if obj.pk:
@@ -227,8 +228,7 @@ class ItemSupplierAdmin(admin.ModelAdmin):
             )
         return "—"
 
-    api_link.short_description = "API Link"
-
+    @admin.display(description="Price History")
     def price_history_link(self, obj):
         """Create a link to the price history for this item-supplier relationship."""
         if obj.pk:
@@ -239,31 +239,61 @@ class ItemSupplierAdmin(admin.ModelAdmin):
             )
         return "—"
 
-    price_history_link.short_description = "Price History"
-
+    @admin.display(description="Package Dimensions")
     def package_dimensions_display(self, obj):
         """Display package dimensions in a readable format."""
         if obj:
             return obj.package_dimensions_display
         return "—"
 
-    package_dimensions_display.short_description = "Package Dimensions"
-
+    @admin.display(description="Package Volume")
     def package_volume_display(self, obj):
         """Display calculated package volume."""
         if obj and obj.package_volume:
             return f"{obj.package_volume:,.2f} in³"
         return "—"
 
-    package_volume_display.short_description = "Package Volume"
-
+    @admin.display(description="Unit Weight")
     def unit_weight_display(self, obj):
         """Display calculated weight per unit."""
         if obj and obj.unit_weight:
             return f"{obj.unit_weight:.3f} oz"
         return "—"
 
-    unit_weight_display.short_description = "Unit Weight"
+
+class AssetPartInline(admin.TabularInline):
+    """Inline admin for managing asset parts/consumables."""
+
+    model = AssetPart
+    extra = 1
+    fields = [
+        "part",
+        "quantity_needed",
+        "is_required",
+        "maintenance_interval_days",
+        "last_replaced_at",
+        "needs_replacement_display",
+        "days_since_replacement_display",
+        "notes",
+    ]
+    readonly_fields = ["needs_replacement_display", "days_since_replacement_display"]
+    autocomplete_fields = ["part"]
+
+    @admin.display(description="Needs Replacement")
+    def needs_replacement_display(self, obj):
+        """Display if part needs replacement."""
+        if obj and obj.needs_replacement:
+            return format_html('<span style="color: #dc3545; font-weight: bold;">⚠️ Yes</span>')
+        return format_html('<span style="color: #28a745;">✓ No</span>')
+
+    @admin.display(description="Days Since Replacement")
+    def days_since_replacement_display(self, obj):
+        """Display days since last replacement."""
+        if obj:
+            days = obj.days_since_replacement
+            if days is not None:
+                return f"{days} days"
+        return "—"
 
 
 @admin.register(InventoryItem)
@@ -364,6 +394,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         ),
     )
 
+    @admin.display(description="API Link")
     def api_link(self, obj):
         """Create a link to the DRF API endpoint for this InventoryItem."""
         if obj.pk:
@@ -374,8 +405,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
             )
         return "—"
 
-    api_link.short_description = "API Link"
-
+    @admin.display(description="Reorder Request")
     def reorder_link(self, obj):
         """Create a link to request reorder on the frontend application."""
         if obj.pk:
@@ -390,8 +420,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
             )
         return "—"
 
-    reorder_link.short_description = "Reorder Request"
-
+    @admin.display(description="Index Card Preview")
     def index_card_preview(self, obj):
         """Create a preview window for the index card."""
         if not obj.pk:
@@ -403,7 +432,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         preview_html = format_html(
             """
             <button type="button"
-                    onclick="showIndexCardPreview('{}', '{}')"
+                    onclick="showIndexCardPreview('{}', '{}', event)"
                     style="background: #007cba; color: white; padding: 8px 16px;
                            border: none; border-radius: 4px; cursor: pointer;
                            font-weight: bold;">
@@ -414,7 +443,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
                  z-index: 10000; overflow: auto;">
                 <div style="position: relative; width: 90%; max-width: 800px;
                     margin: 50px auto; background: white; padding: 20px; border-radius: 8px;">
-                    <button onclick="closeIndexCardPreview()"
+                    <button type="button" onclick="closeIndexCardPreview('{}', event)"
                             style="position: absolute; top: 10px; right: 10px;
                                    background: #dc3545; color: white; border: none;
                                    border-radius: 50%; width: 30px; height: 30px;
@@ -426,7 +455,11 @@ class InventoryItemAdmin(admin.ModelAdmin):
                 </div>
             </div>
             <script>
-                function showIndexCardPreview(itemId, previewUrl) {{
+                function showIndexCardPreview(itemId, previewUrl, event) {{
+                    if (event) {{
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }}
                     const modal = document.getElementById('indexCardPreviewModal');
                     const content = document.getElementById('indexCardPreviewContent');
                     modal.style.display = 'block';
@@ -454,26 +487,34 @@ class InventoryItemAdmin(admin.ModelAdmin):
                     }});
                 }}
 
-                function closeIndexCardPreview() {{
+                function closeIndexCardPreview(itemId, event) {{
+                    if (event) {{
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }}
                     document.getElementById('indexCardPreviewModal').style.display = 'none';
+                    // Ensure we stay on the current item page - don't trigger any form submission
+                    // The form should remain unchanged when closing the modal
                 }}
 
                 // Close modal when clicking outside
-                window.onclick = function(event) {{
+                window.addEventListener('click', function(event) {{
                     const modal = document.getElementById('indexCardPreviewModal');
                     if (event.target == modal) {{
+                        event.preventDefault();
+                        event.stopPropagation();
                         modal.style.display = 'none';
                     }}
-                }}
+                }});
             </script>
             """,
             str(obj.pk),
             preview_url,
+            str(obj.pk),
         )
         return preview_html
 
-    index_card_preview.short_description = "Index Card Preview"
-
+    @admin.display(description="Hazmat")
     def hazmat_status_icon(self, obj):
         """Display hazmat status with visual icon."""
         if obj.is_hazardous:
@@ -490,14 +531,12 @@ class InventoryItemAdmin(admin.ModelAdmin):
                 )
         return format_html('<span style="color: #28a745;" title="Not Hazardous">✅</span>')
 
-    hazmat_status_icon.short_description = "Hazmat"
-
+    @admin.display(description="NFPA Fire Diamond")
     def nfpa_fire_diamond_display(self, obj):
         """Display NFPA Fire Diamond ratings in admin."""
         return obj.nfpa_fire_diamond_display
 
-    nfpa_fire_diamond_display.short_description = "NFPA Fire Diamond"
-
+    @admin.display(description="Compliance Status")
     def hazmat_compliance_status(self, obj):
         """Display hazmat compliance status in admin."""
         status = obj.hazmat_compliance_status
@@ -508,7 +547,51 @@ class InventoryItemAdmin(admin.ModelAdmin):
         else:
             return format_html('<span style="color: #6c757d;">{}</span>', status)
 
-    hazmat_compliance_status.short_description = "Compliance Status"
+    def response_change(self, request, obj):
+        """Override to redirect back to the change page instead of the list after saving."""
+        # Handle special save buttons normally
+        if "_continue" in request.POST:
+            # "Save and continue editing" - stay on change page (default behavior)
+            return super().response_change(request, obj)
+        if "_addanother" in request.POST:
+            # "Save and add another" - go to add page (default behavior)
+            return super().response_change(request, obj)
+        # For regular "Save" button, redirect back to change page instead of list
+        return HttpResponseRedirect(reverse("admin:inventory_inventoryitem_change", args=[obj.pk]))
+
+    actions = ["print_selected_items"]
+
+    @admin.action(description="Print these items (Avery card templates)")
+    def print_selected_items(self, request, queryset):
+        """Admin action to generate and download PDF for selected items."""
+        from django.http import HttpResponse
+
+        from index_cards.services import IndexCardRenderer
+
+        if not queryset.exists():
+            self.message_user(request, "No items selected.", level=messages.ERROR)
+            return
+
+        items = list(queryset.order_by("name"))
+        renderer = IndexCardRenderer(blank_cards=False)
+        pdf_bytes = renderer.render_to_bytes(items, blank_cards=False)
+
+        # Generate filename with timestamp
+        from django.utils import timezone
+
+        timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"index_cards_{timestamp}.pdf"
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+        self.message_user(
+            request,
+            f"Generated PDF for {queryset.count()} item(s). Download should start automatically.",
+            level=messages.SUCCESS,
+        )
+
+        return response
 
 
 @admin.register(PriceHistory)
@@ -564,7 +647,7 @@ class AssetAdmin(admin.ModelAdmin):
         "asset_tag",
         "serial_number",
         "status_badge",
-        "operational_status",
+        "operational_mode_display",
         "category",
         "location",
         "display_manufacturer",
@@ -576,13 +659,10 @@ class AssetAdmin(admin.ModelAdmin):
     ]
     list_filter = [
         "status",
-        "operational_status",
         "category",
         "location",
         "is_donation",
         "is_active",
-        "is_locked",
-        "lock_type",
         "ownership_type",
         "owning_user",
         "owning_group",
@@ -596,6 +676,7 @@ class AssetAdmin(admin.ModelAdmin):
         "manufacturer_name",
         "donor_name",
     ]
+    inlines = [AssetPartInline]
     readonly_fields = [
         "id",
         "asset_tag",
@@ -675,6 +756,15 @@ class AssetAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Parts & Consumables",
+            {
+                "fields": (),
+                "description": "Parts and consumables used by this asset (e.g., saw blades, nozzles, filters, soap). "
+                "Manage these in the inline table below.",
+                "classes": ("collapse",),
+            },
+        ),
+        (
             "Operational Requirements",
             {
                 "fields": (
@@ -687,27 +777,15 @@ class AssetAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "Operational Status",
-            {
-                "fields": ("operational_status",),
-                "description": "Current operational status of the asset.",
-            },
-        ),
-        (
-            "Ownership & Locking",
+            "Ownership",
             {
                 "fields": (
                     "ownership_type",
                     "owning_user",
                     "owning_group",
                     "groups_can_enable",
-                    "is_locked",
-                    "lock_status_display",
-                    "locked_by",
-                    "locked_at",
-                    "lock_type",
                 ),
-                "description": "Asset ownership (User, Group, or Space) and lock status. Locked assets prevent non-admin usage. Groups that can enable this asset.",
+                "description": "Asset ownership (User, Group, or Space). Groups that can enable this asset. For operational status and lockouts, see the ForgeKey app.",
             },
         ),
         (
@@ -750,6 +828,7 @@ class AssetAdmin(admin.ModelAdmin):
         ),
     )
 
+    @admin.display(description="Status")
     def status_badge(self, obj):
         """Display status with color-coded badge."""
         status_colors = {
@@ -766,8 +845,7 @@ class AssetAdmin(admin.ModelAdmin):
             obj.get_status_display(),
         )
 
-    status_badge.short_description = "Status"
-
+    @admin.display(description="API Link")
     def api_link(self, obj):
         """Create a link to the DRF API endpoint for this Asset."""
         if obj.pk:
@@ -778,8 +856,7 @@ class AssetAdmin(admin.ModelAdmin):
             )
         return "—"
 
-    api_link.short_description = "API Link"
-
+    @admin.display(description="Scan QR Code")
     def scan_qr_link(self, obj):
         """Create a link to scan the QR code for this asset on the frontend."""
         if obj.pk:
@@ -793,23 +870,44 @@ class AssetAdmin(admin.ModelAdmin):
             )
         return "—"
 
-    scan_qr_link.short_description = "Scan QR Code"
+    @admin.display(description="Operational Mode")
+    def operational_mode_display(self, obj):
+        """Display operational mode from ForgeKey."""
+        try:
+            from forgekey.models import OperationalMode
 
+            mode = OperationalMode.objects.get(asset=obj)
+            mode_display = mode.get_mode_display()
+            if mode.classroom_mode_enabled:
+                mode_display += " (Classroom)"
+            return format_html("<span>{}</span>", mode_display)
+        except OperationalMode.DoesNotExist:
+            return format_html('<span style="color: #6c757d;">Available</span>')
+
+    @admin.display(description="Lock Status")
     def lock_status_display(self, obj):
-        """Display lock status with details."""
-        if obj.is_locked:
-            lock_info = f"🔒 Locked ({obj.get_lock_type_display()})"
-            if obj.locked_by:
-                lock_info += f" by {obj.locked_by.username}"
-            if obj.locked_at:
-                lock_info += f" on {obj.locked_at.strftime('%Y-%m-%d %H:%M')}"
-            return format_html('<span style="color: #dc3545;">{}</span>', lock_info)
-        return format_html('<span style="color: #28a745;">✓ Unlocked</span>')
+        """Display lock status from ForgeKey."""
+        try:
+            from forgekey.models import DeviceLockout
 
-    lock_status_display.short_description = "Lock Status"
+            active_lockouts = DeviceLockout.objects.filter(asset=obj, is_active=True)
+            if active_lockouts.exists():
+                lockout = active_lockouts.first()
+                lock_info = f"🔒 Locked ({lockout.get_lockout_level_display()})"
+                if lockout.locked_by:
+                    lock_info += f" by {lockout.locked_by.username}"
+                if lockout.locked_at:
+                    lock_info += f" on {lockout.locked_at.strftime('%Y-%m-%d %H:%M')}"
+                if active_lockouts.count() > 1:
+                    lock_info += f" (+{active_lockouts.count() - 1} more)"
+                return format_html('<span style="color: #dc3545;">{}</span>', lock_info)
+            return format_html('<span style="color: #28a745;">✓ Unlocked</span>')
+        except Exception:
+            return format_html('<span style="color: #28a745;">✓ Unlocked</span>')
 
     actions = ["duplicate_asset"]
 
+    @admin.action(description="Duplicate selected asset (enter new serial number)")
     def duplicate_asset(self, request, queryset):
         """Admin action to duplicate selected assets."""
         if queryset.count() != 1:
@@ -823,8 +921,6 @@ class AssetAdmin(admin.ModelAdmin):
         asset = queryset.first()
         # Redirect to the duplicate view with the asset ID
         return HttpResponseRedirect(reverse("admin:inventory_asset_duplicate", args=[asset.pk]))
-
-    duplicate_asset.short_description = "Duplicate selected asset (enter new serial number)"
 
     def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
         """Add duplicate button to change form."""
@@ -937,6 +1033,107 @@ class AssetAdmin(admin.ModelAdmin):
         return render(request, "admin/inventory/asset/duplicate.html", context)
 
 
+@admin.register(AssetPart)
+class AssetPartAdmin(admin.ModelAdmin):
+    """Admin interface for managing asset parts/consumables."""
+
+    list_display = [
+        "asset_link",
+        "part_link",
+        "quantity_needed",
+        "is_required",
+        "maintenance_interval_days",
+        "last_replaced_at",
+        "needs_replacement_display",
+        "days_since_replacement_display",
+    ]
+    list_filter = [
+        "is_required",
+        "asset__category",
+        "part__category",
+        "last_replaced_at",
+    ]
+    search_fields = [
+        "asset__name",
+        "asset__asset_tag",
+        "part__name",
+        "part__sku",
+        "notes",
+    ]
+    readonly_fields = [
+        "needs_replacement_display",
+        "days_since_replacement_display",
+        "created_at",
+        "updated_at",
+    ]
+    autocomplete_fields = ["asset", "part"]
+    date_hierarchy = "last_replaced_at"
+
+    fieldsets = (
+        (
+            "Part Information",
+            {
+                "fields": (
+                    "asset",
+                    "part",
+                    "quantity_needed",
+                    "is_required",
+                )
+            },
+        ),
+        (
+            "Maintenance",
+            {
+                "fields": (
+                    "maintenance_interval_days",
+                    "last_replaced_at",
+                    "needs_replacement_display",
+                    "days_since_replacement_display",
+                )
+            },
+        ),
+        (
+            "Additional Information",
+            {
+                "fields": ("notes", "created_at", "updated_at"),
+                "classes": ("collapse",),
+            },
+        ),
+    )
+
+    @admin.display(description="Asset")
+    def asset_link(self, obj):
+        """Create a clickable link to the asset admin page."""
+        if obj.asset:
+            url = reverse("admin:inventory_asset_change", args=[obj.asset.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.asset.name)
+        return "—"
+
+    @admin.display(description="Part")
+    def part_link(self, obj):
+        """Create a clickable link to the inventory item admin page."""
+        if obj.part:
+            url = reverse("admin:inventory_inventoryitem_change", args=[obj.part.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.part.name)
+        return "—"
+
+    @admin.display(description="Needs Replacement")
+    def needs_replacement_display(self, obj):
+        """Display if part needs replacement."""
+        if obj and obj.needs_replacement:
+            return format_html('<span style="color: #dc3545; font-weight: bold;">⚠️ Yes</span>')
+        return format_html('<span style="color: #28a745;">✓ No</span>')
+
+    @admin.display(description="Days Since Replacement")
+    def days_since_replacement_display(self, obj):
+        """Display days since last replacement."""
+        if obj:
+            days = obj.days_since_replacement
+            if days is not None:
+                return f"{days} days"
+        return "—"
+
+
 @admin.register(AssetProblem)
 class AssetProblemAdmin(admin.ModelAdmin):
     """Admin interface for asset problem reports."""
@@ -989,12 +1186,12 @@ class AssetProblemAdmin(admin.ModelAdmin):
         ),
     )
 
+    @admin.display(description="Asset Tag")
     def asset_tag_display(self, obj):
         """Display asset tag."""
         return obj.asset.asset_tag if obj.asset.asset_tag else "—"
 
-    asset_tag_display.short_description = "Asset Tag"
-
+    @admin.display(description="Status")
     def status_badge(self, obj):
         """Display status with color-coded badge."""
         status_colors = {
@@ -1010,10 +1207,9 @@ class AssetProblemAdmin(admin.ModelAdmin):
             obj.get_status_display(),
         )
 
-    status_badge.short_description = "Status"
-
     actions = ["mark_resolved", "mark_closed"]
 
+    @admin.action(description="Mark selected as resolved")
     def mark_resolved(self, request, queryset):
         """Mark selected problems as resolved."""
         from django.utils import timezone
@@ -1031,8 +1227,7 @@ class AssetProblemAdmin(admin.ModelAdmin):
             level=messages.SUCCESS,
         )
 
-    mark_resolved.short_description = "Mark selected as resolved"
-
+    @admin.action(description="Mark selected as closed")
     def mark_closed(self, request, queryset):
         """Mark selected problems as closed."""
         count = queryset.update(status=AssetProblem.CLOSED)
@@ -1041,5 +1236,3 @@ class AssetProblemAdmin(admin.ModelAdmin):
             f"{count} problem(s) marked as closed.",
             level=messages.SUCCESS,
         )
-
-    mark_closed.short_description = "Mark selected as closed"

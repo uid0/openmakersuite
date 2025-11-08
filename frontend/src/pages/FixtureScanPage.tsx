@@ -335,4 +335,3 @@ const FixtureScanPage: React.FC = () => {
 };
 
 export default FixtureScanPage;
-

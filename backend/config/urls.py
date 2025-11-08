@@ -20,10 +20,13 @@ urlpatterns = [
     path("api/auth/register/", register_user, name="register"),
     path("api/auth/login/", login_user, name="login"),
     path("api/auth/refresh/", refresh_token, name="refresh"),
+    # Passkey/WebAuthn endpoints
+    path("auth/passkey/", include("passkeys.urls")),
     path("api/inventory/", include("inventory.urls")),
     path("api/reorders/", include("reorder_queue.urls")),
     path("api/index-cards/", include("index_cards.urls")),
     path("api/dashboard/", include("dashboard.urls")),
+    path("api/forgekey/", include("forgekey.urls")),
 ]
 
 # Serve media files during development

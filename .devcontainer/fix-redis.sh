@@ -66,4 +66,3 @@ echo "Port 6379 open: $(netstat -tln 2>/dev/null | grep :6379 || echo 'Not liste
 echo
 echo "🚀 Django should now work with Redis!"
 echo "   Restart your backend to test: ./dev-commands.sh run-backend"
-

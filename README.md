@@ -7,7 +7,7 @@ A comprehensive inventory management system designed for makerspaces, fab labs, 
 OpenMakerSuite includes a complete automated release system that:
 
 - ✅ **Automatic Releases**: Triggered when all CI/CD tests pass
-- 🔐 **Cryptographic Signing**: Uses Sigstore for tamper-proof releases  
+- 🔐 **Cryptographic Signing**: Uses Sigstore for tamper-proof releases
 - 📦 **Multi-Platform Builds**: AMD64 and ARM64 Docker images
 - 📊 **Sentry Integration**: Automatic release tracking and error monitoring
 - 🔄 **Semantic Versioning**: Automatic version bumps based on commits
@@ -116,7 +116,7 @@ docker-compose exec backend python manage.py loaddata fixtures/sample_data.json
 ### Basic Workflow
 
 1. **Setup Categories & Locations**: Organize your inventory structure
-2. **Add Items**: Create inventory items with details and suppliers  
+2. **Add Items**: Create inventory items with details and suppliers
 3. **Generate QR Codes**: Print QR codes for easy item identification
 4. **Scan & Use**: Scan QR codes to log usage and check stock
 5. **Automatic Reorders**: System suggests reorders based on usage patterns
@@ -143,7 +143,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python manage.py migrate
 python manage.py runserver
 
-# Frontend  
+# Frontend
 cd frontend
 npm install
 npm start
@@ -157,7 +157,7 @@ The project includes comprehensive linting and testing:
 # Backend
 cd backend
 black .                    # Code formatting
-isort .                    # Import sorting  
+isort .                    # Import sorting
 flake8 .                   # Style checking
 bandit -r .               # Security scanning
 pytest --cov             # Tests with coverage
@@ -186,7 +186,7 @@ docker-compose exec backend python manage.py migrate
 GitHub Actions runs comprehensive tests on every push:
 
 - ✅ Backend unit & integration tests (pytest)
-- ✅ Frontend component tests (Jest/React Testing Library)  
+- ✅ Frontend component tests (Jest/React Testing Library)
 - ✅ Code quality checks (Black, isort, flake8, ESLint)
 - ✅ Security scanning (Bandit, Safety, Gitleaks)
 - ✅ Docker build verification
@@ -348,7 +348,7 @@ The admin dashboard provides:
 ### Getting Help
 
 - **📖 Documentation**: Check the docs folder for detailed guides
-- **🐛 Issues**: Report bugs on GitHub Issues  
+- **🐛 Issues**: Report bugs on GitHub Issues
 - **💬 Discussions**: Join GitHub Discussions for questions
 - **📧 Security**: Email security issues to security@yourdomain.com
 

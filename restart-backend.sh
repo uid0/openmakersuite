@@ -15,7 +15,7 @@ else
     echo "🛑 Stopping backend server (PID: $PID)..."
     kill $PID
     sleep 2
-    
+
     # Check if it's still running
     if lsof -ti:8000 > /dev/null 2>&1; then
         echo "⚠️  Process still running, force killing..."
@@ -32,4 +32,3 @@ echo
 
 cd backend
 python3 manage.py runserver
-

@@ -12,6 +12,13 @@ from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.redis import RedisIntegration
 
+try:
+    import passkeys
+
+    PASSKEYS_TEMPLATE_DIR = passkeys.template_directory
+except ImportError:
+    PASSKEYS_TEMPLATE_DIR = None
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -52,12 +59,14 @@ INSTALLED_APPS = [
     "imagekit",
     "drf_spectacular",
     "django_celery_results",
+    "passkeys",
     # Local apps
     "membership",
     "inventory",
     "reorder_queue",
     "index_cards",
     "dashboard",
+    "forgekey",
 ]
 
 MIDDLEWARE = [
@@ -76,7 +85,7 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [PASSKEYS_TEMPLATE_DIR] if PASSKEYS_TEMPLATE_DIR else [],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -135,6 +144,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Custom User Model
 AUTH_USER_MODEL = "membership.User"
+
+# Authentication backends
+# django-passkey-auth integrates with Django's default authentication
+# No custom backend needed - it extends the existing authentication system
 
 # REST Framework
 REST_FRAMEWORK = {
@@ -228,6 +241,20 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True  # Track when tasks start
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes hard timeout
 CELERY_RESULT_EXTENDED = True  # Store additional task metadata
+
+# MQTT Configuration for ForgeKey
+MQTT_BROKER_HOST = config("MQTT_BROKER_HOST", default="localhost")
+MQTT_BROKER_PORT = config("MQTT_BROKER_PORT", default=1883, cast=int)
+MQTT_BROKER_USERNAME = config("MQTT_BROKER_USERNAME", default="")
+MQTT_BROKER_PASSWORD = config("MQTT_BROKER_PASSWORD", default="")
+MQTT_TOPIC_PREFIX = config("MQTT_TOPIC_PREFIX", default="forgekey")
+MQTT_CLIENT_ID = config("MQTT_CLIENT_ID", default="forgekey-server")
+MQTT_KEEPALIVE = config("MQTT_KEEPALIVE", default=60, cast=int)
+
+# ForgeKey JWT Configuration
+FORGEKEY_SHARED_SECRET = config("FORGEKEY_SHARED_SECRET", default="change-me-in-production")
+FORGEKEY_JWT_ALGORITHM = "HS256"
+FORGEKEY_JWT_EXPIRATION_SECONDS = 3600  # 1 hour
 
 # Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {

@@ -155,8 +155,8 @@ const InventoryList: React.FC = () => {
                 {item.needs_reorder && (
                   <div className="reorder-badge">
                     ⚠️ Needs Reorder (
-                    {item.use_case_based_reorder 
-                      ? `${item.reorder_cases} cases` 
+                    {item.use_case_based_reorder
+                      ? `${item.reorder_cases} cases`
                       : `${item.reorder_quantity} units`
                     })
                   </div>

@@ -45,4 +45,3 @@ echo "🧪 After restarting backend, test with:"
 echo "  curl http://localhost:8000/api/reorders/requests/pending/"
 echo
 echo "Expected: HTTP 200 with data (not 401)"
-

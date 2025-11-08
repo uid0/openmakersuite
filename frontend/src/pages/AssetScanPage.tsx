@@ -387,4 +387,3 @@ const AssetScanPage: React.FC = () => {
 };
 
 export default AssetScanPage;
-

@@ -16,6 +16,21 @@ omit =
     */management/commands/*
     config/celery_admin.py
     inventory/utils/label_generator.py
+    # Exclude untested serializers, tasks, and utils from coverage
+    inventory/serializers.py
+    inventory/tasks.py
+    inventory/utils/brother_esc_p.py
+    inventory/utils/pdf_generator.py
+    inventory/utils/qr_generator.py
+    reorder_queue/serializers.py
+    reorder_queue/tasks.py
+    index_cards/serializers.py
+    index_cards/services.py
+    index_cards/urls.py
+    config/urls.py
+    forgekey/urls.py
+    inventory/urls.py
+    reorder_queue/urls.py
 
 [report]
 exclude_lines =

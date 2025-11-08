@@ -39,4 +39,3 @@ else
     echo "   2. Or install dependencies: pip install -r requirements.txt"
     exit 1
 fi
-

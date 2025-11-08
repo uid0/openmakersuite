@@ -25,7 +25,7 @@ Configure these secrets in your GitHub repository settings (`Settings` → `Secr
 ### Sentry Integration
 ```bash
 SENTRY_AUTH_TOKEN=your_sentry_auth_token_here
-SENTRY_ORG=your_sentry_organization_slug  
+SENTRY_ORG=your_sentry_organization_slug
 SENTRY_PROJECT=your_sentry_project_slug
 ```
 
@@ -70,7 +70,7 @@ sha256sum -c openmakersuite-v1.2.3.tar.gz.sha256
 The system automatically detects version bumps based on commit messages:
 
 - **Major** (1.0.0 → 2.0.0): Commits containing "breaking" or "major"
-- **Minor** (1.0.0 → 1.1.0): Commits containing "feat", "feature", or "minor"  
+- **Minor** (1.0.0 → 1.1.0): Commits containing "feat", "feature", or "minor"
 - **Patch** (1.0.0 → 1.0.1): All other commits
 
 ### Manual Releases
@@ -142,7 +142,7 @@ cosign verify-blob --certificate *.pem --signature *.sig *.tar.gz
 
 1. **Create a Sentry Account**: https://sentry.io/signup/
 2. **Create a Project**: Choose "Django" for backend monitoring
-3. **Get Auth Token**: 
+3. **Get Auth Token**:
    - Go to Settings → Account → API → Auth Tokens
    - Create token with `project:releases` scope
 4. **Configure Secrets**: Add the three Sentry secrets to GitHub
@@ -175,7 +175,7 @@ The release workflow depends on these other workflows completing successfully:
 
 1. **CI** (`.github/workflows/ci.yml`):
    - Backend tests with coverage
-   - Frontend tests with coverage  
+   - Frontend tests with coverage
    - Security checks (Bandit, Safety)
    - Linting (Black, isort, flake8)
 

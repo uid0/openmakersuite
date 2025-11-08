@@ -458,32 +458,29 @@
   .transparency-page {
     padding: 1rem;
   }
-  
+
   .transparency-header h1 {
     font-size: 2rem;
     flex-direction: column;
     gap: 0.5rem;
   }
-  
+
   .orders-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .stats-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .order-header {
     flex-direction: column;
     gap: 1rem;
     align-items: flex-start;
   }
-  
+
   .detail-row {
     flex-direction: column;
     gap: 0.2rem;
   }
 }
-
-
-

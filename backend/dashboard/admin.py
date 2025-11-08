@@ -29,6 +29,10 @@ class DashboardMessageAdmin(admin.ModelAdmin):
 
     readonly_fields = ["created_at", "updated_at"]
 
+    @admin.display(
+        description="Message",
+        ordering="message",
+    )
     def message_preview(self, obj):
         """Show truncated message with styling."""
         if len(obj.message) > 50:
@@ -39,24 +43,19 @@ class DashboardMessageAdmin(admin.ModelAdmin):
         color = "#28a745" if obj.is_active else "#6c757d"
         return format_html('<span style="color: {};">{}</span>', color, preview)
 
-    message_preview.short_description = "Message"
-    message_preview.admin_order_field = "message"
-
     actions = ["activate_messages", "deactivate_messages"]
 
+    @admin.action(description="Activate selected messages")
     def activate_messages(self, request, queryset):
         """Bulk activate selected messages."""
         count = queryset.update(is_active=True)
         self.message_user(request, f"{count} message(s) activated successfully.")
 
-    activate_messages.short_description = "Activate selected messages"
-
+    @admin.action(description="Deactivate selected messages")
     def deactivate_messages(self, request, queryset):
         """Bulk deactivate selected messages."""
         count = queryset.update(is_active=False)
         self.message_user(request, f"{count} message(s) deactivated successfully.")
-
-    deactivate_messages.short_description = "Deactivate selected messages"
 
 
 @admin.register(DashboardConfig)
@@ -106,6 +105,7 @@ class DashboardConfigAdmin(admin.ModelAdmin):
 
     readonly_fields = ["updated_at"]
 
+    @admin.display(description="Status")
     def config_summary(self, obj):
         """Show configuration summary."""
         status = "Maintenance" if obj.is_maintenance_mode else "Normal"
@@ -114,8 +114,6 @@ class DashboardConfigAdmin(admin.ModelAdmin):
             status,
             DashboardMessage.objects.filter(is_active=True).count(),
         )
-
-    config_summary.short_description = "Status"
 
     def has_add_permission(self, request):
         """Only allow one configuration instance."""

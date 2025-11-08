@@ -15,41 +15,41 @@
         }
     </style>
 </head>
-    
+
 <body>
 <div class='wrapper'>
     <div class='pad1'>
         <h1><a href="../../index.html">All files</a> / <a href="index.html">src/pages</a> TVDashboard.tsx</h1>
         <div class='clearfix'>
-            
+
             <div class='fl pad1y space-right2'>
                 <span class="strong">0.96% </span>
                 <span class="quiet">Statements</span>
                 <span class='fraction'>2/207</span>
             </div>
-        
-            
+
+
             <div class='fl pad1y space-right2'>
                 <span class="strong">1.25% </span>
                 <span class="quiet">Branches</span>
                 <span class='fraction'>2/160</span>
             </div>
-        
-            
+
+
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
                 <span class='fraction'>0/38</span>
             </div>
-        
-            
+
+
             <div class='fl pad1y space-right2'>
                 <span class="strong">1.04% </span>
                 <span class="quiet">Lines</span>
                 <span class='fraction'>2/192</span>
             </div>
-        
-            
+
+
         </div>
         <p class="quiet">
             Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
@@ -1558,10 +1558,10 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
         locationFilter: location.toLowerCase(),
       };
     }
-    
+
 <span class="cstat-no" title="statement not covered" >    return baseConfig;</span>
   };
-  
+
   const [config] = <span class="cstat-no" title="statement not covered" >useState(getLocationConfig());</span>
 &nbsp;
   // Configurable footer messages - can be set via environment variables
@@ -1592,7 +1592,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
 <span class="cstat-no" title="statement not covered" >      setError(null);</span>
       // Use dedicated TV API instance that doesn't send auth headers
       const response = <span class="cstat-no" title="statement not covered" >await tvAPI.get&lt;InventoryItem[]&gt;('/inventory/items/reordered/');</span>
-      
+
       // Filter items by location if specified
       let filteredItems = <span class="cstat-no" title="statement not covered" >response.data;</span>
 <span class="cstat-no" title="statement not covered" >      if ((config as any).locationFilter) {</span>
@@ -1600,7 +1600,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
 <span class="cstat-no" title="statement not covered" >          item.location &amp;&amp; item.location.toLowerCase().includes((config as any).locationFilter)</span>
         );
       }
-      
+
 <span class="cstat-no" title="statement not covered" >      setReorderedItems(filteredItems);</span>
       // Initialize item order for anti-burn-in
 <span class="cstat-no" title="statement not covered" >      setItemOrder(filteredItems.map(<span class="fstat-no" title="function not covered" >(_</span>, index) =&gt; <span class="cstat-no" title="statement not covered" >index)</span>);</span>
@@ -1614,7 +1614,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
         code: err?.code,
         message: err?.message
       });
-      
+
 <span class="cstat-no" title="statement not covered" >      if (err?.response?.status === 401) {</span>
 <span class="cstat-no" title="statement not covered" >        setError('Authentication error - Dashboard requires public access');</span>
       } else <span class="cstat-no" title="statement not covered" >if (err?.response?.status &gt;= 500) {</span>
@@ -1706,7 +1706,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
     const today = <span class="cstat-no" title="statement not covered" >new Date();</span>
     const diffTime = <span class="cstat-no" title="statement not covered" >date.getTime() - today.getTime();</span>
     const diffDays = <span class="cstat-no" title="statement not covered" >Math.ceil(diffTime / (1000 * 60 * 60 * 24));</span>
-    
+
 <span class="cstat-no" title="statement not covered" >    if (diffDays &lt; 0) {</span>
 <span class="cstat-no" title="statement not covered" >      return `Overdue by ${Math.abs(diffDays)} days`;</span>
     } else <span class="cstat-no" title="statement not covered" >if (diffDays === 0) {</span>
@@ -1754,7 +1754,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
 <span class="cstat-no" title="statement not covered" >    if (!dateString) <span class="cstat-no" title="statement not covered" >return '';</span></span>
     const date = <span class="cstat-no" title="statement not covered" >new Date(dateString);</span>
 <span class="cstat-no" title="statement not covered" >    return date.toLocaleDateString('en-US', { </span>
-      month: 'short', 
+      month: 'short',
       day: 'numeric',
       year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
     });
@@ -1812,7 +1812,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
         const hasDeliveryInfo = <span class="cstat-no" title="statement not covered" >item.expected_delivery_date;</span>
 <span class="cstat-no" title="statement not covered" >        if (hasDeliveryInfo) {</span>
 <span class="cstat-no" title="statement not covered" >          stages[0].completed = true; </span>// Requested
-<span class="cstat-no" title="statement not covered" >          stages[1].completed = true; </span>// Approved  
+<span class="cstat-no" title="statement not covered" >          stages[1].completed = true; </span>// Approved
 <span class="cstat-no" title="statement not covered" >          stages[2].completed = true; </span>// Ordered
 <span class="cstat-no" title="statement not covered" >          stages[3].completed = false; </span>// En Route (current)
 <span class="cstat-no" title="statement not covered" >          currentStage = 3;</span>
@@ -1877,7 +1877,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
   };
 &nbsp;
 <span class="cstat-no" title="statement not covered" >  return (</span>
-    &lt;div 
+    &lt;div
       className="tv-dashboard"
       style={{
         transform: `translate(${burnInOffset.x}px, ${burnInOffset.y}px)`,
@@ -2043,7 +2043,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
                             // If full image fails and we have a thumbnail, try thumbnail
                             const fullImageUrl = <span class="cstat-no" title="statement not covered" >getImageUrl(item.image);</span>
                             const thumbnailUrl = <span class="cstat-no" title="statement not covered" >getImageUrl(item.thumbnail);</span>
-                            
+
 <span class="cstat-no" title="statement not covered" >                            if (fullImageUrl &amp;&amp; thumbnailUrl &amp;&amp; e.currentTarget.src === fullImageUrl) {</span>
 <span class="cstat-no" title="statement not covered" >                              e.currentTarget.src = thumbnailUrl;</span>
                             } else {
@@ -2110,7 +2110,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
                     {/* Progress Bar */}
                     {(<span class="fstat-no" title="function not covered" >()</span> =&gt; {
                       const { currentStage, stages, isCancelled } = <span class="cstat-no" title="statement not covered" >getProgressStages(item);</span>
-                      
+
 <span class="cstat-no" title="statement not covered" >                      if (isCancelled) {</span>
 <span class="cstat-no" title="statement not covered" >                        return (</span>
                           &lt;div className="progress-cancelled"&gt;
@@ -2121,26 +2121,26 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
                       }
 &nbsp;
                       const progressPercentage = <span class="cstat-no" title="statement not covered" >currentStage &gt; 0 ? (currentStage / (stages.length - 1)) * 100 : 0;</span>
-                      
+
 <span class="cstat-no" title="statement not covered" >                      return (</span>
                         &lt;div className="progress-container"&gt;
-                          &lt;div 
+                          &lt;div
                             className="progress-bar"
-                            style={{ 
-                              '--progress-width': `${progressPercentage}%` 
+                            style={{
+                              '--progress-width': `${progressPercentage}%`
                             } as React.CSSProperties &amp; { '--progress-width': string }}
                           &gt;
                             {stages.map(<span class="fstat-no" title="function not covered" >(s</span>tage, index) =&gt; (
 <span class="cstat-no" title="statement not covered" >                              &lt;div key={stage.key} className="progress-stage"&gt;</span>
                                 &lt;div className={`stage-dot ${
-                                  index &lt; currentStage ? 'completed' : 
+                                  index &lt; currentStage ? 'completed' :
                                   index === currentStage ? 'current' : 'pending'
                                 }`}&gt;
-                                  {index &lt; currentStage ? '✓' : 
+                                  {index &lt; currentStage ? '✓' :
                                    index === currentStage ? '●' : '○'}
                                 &lt;/div&gt;
                                 &lt;div className={`stage-label ${
-                                  index &lt; currentStage ? 'completed' : 
+                                  index &lt; currentStage ? 'completed' :
                                   index === currentStage ? 'current' : 'pending'
                                 }`}&gt;
                                   {stage.name}
@@ -2157,7 +2157,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
                       &lt;div className="quantity-info"&gt;
                         {orderInfo.orderedQuantity || orderInfo.quantity} units
                       &lt;/div&gt;
-                      
+
                       &lt;div className="status-history"&gt;
                         {(<span class="fstat-no" title="function not covered" >()</span> =&gt; {
                           const statusInfo = <span class="cstat-no" title="statement not covered" >getLastStatusInfo(item);</span>
@@ -2201,7 +2201,7 @@ const TVDashboard: React.FC = <span class="fstat-no" title="function not covered
           {config.showTransparency &amp;&amp; (
             &lt;div className="transparency-qr"&gt;
               &lt;div className="qr-section"&gt;
-                &lt;QRCode 
+                &lt;QRCode
                   value={getTransparencyQRUrl()}
                   size={80}
                   bgColor="#ffffff"
@@ -2245,4 +2245,3 @@ export default TVDashboard;
         <script src="../../block-navigation.js"></script>
     </body>
 </html>
-    

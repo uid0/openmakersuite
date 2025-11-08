@@ -60,4 +60,3 @@ dist/
 .env.template
 settings.example.py
 config.example.yml
-

@@ -6,8 +6,6 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-
-User = get_user_model()
 from django.urls import reverse
 from django.utils import timezone
 
@@ -17,6 +15,8 @@ from rest_framework import status
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 from reorder_queue.tests.factories import ReorderRequestFactory
+
+User = get_user_model()
 
 
 @pytest.mark.integration

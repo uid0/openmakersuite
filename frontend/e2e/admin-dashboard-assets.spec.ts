@@ -1,6 +1,6 @@
 /**
  * E2E tests for Admin Dashboard Assets Section
- * 
+ *
  * Tests cover:
  * - Displaying assets not checked in for 3+ months
  * - Asset information in the table
@@ -143,4 +143,3 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
     }
   });
 });
-

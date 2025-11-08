@@ -28,7 +28,7 @@ Once inside the container, use these helper commands:
 
 # Run tests
 ./dev-commands.sh test-backend     # Backend tests
-./dev-commands.sh test-frontend    # Frontend tests  
+./dev-commands.sh test-frontend    # Frontend tests
 ./dev-commands.sh test-all         # All tests
 
 # Code quality
@@ -50,7 +50,7 @@ python manage.py runserver 0.0.0.0:8000
 python -m pytest
 flake8 . && black --check . && isort --check .
 
-# Frontend  
+# Frontend
 cd frontend
 npm start
 npm test
@@ -174,8 +174,8 @@ npm run lint # Code linting
 
 ## 🎯 Benefits
 
-✅ **Consistency**: Identical to CI/CD environment  
-✅ **Zero Setup**: Everything pre-installed and configured  
-✅ **Team Sync**: Everyone gets the same environment  
-✅ **Isolation**: No conflicts with your host system  
+✅ **Consistency**: Identical to CI/CD environment
+✅ **Zero Setup**: Everything pre-installed and configured
+✅ **Team Sync**: Everyone gets the same environment
+✅ **Isolation**: No conflicts with your host system
 ✅ **Fast**: Hot reloading, volume mounts, cached dependencies

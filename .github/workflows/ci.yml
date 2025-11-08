@@ -80,7 +80,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           cd backend
-          pytest --cov=inventory --cov=reorder_queue --cov=config --cov=membership --cov-report=xml --cov-report=term -v
+          pytest --cov=inventory --cov=reorder_queue --cov=config --cov=membership --cov=forgekey --cov-report=xml --cov-report=term -v
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
           SECRET_KEY: test-secret-key-for-ci-only
@@ -235,17 +235,17 @@ jobs:
         run: |
           cd backend
           echo "🔍 Checking for vulnerable dependencies with multiple tools..."
-          
+
           # Use pip-audit as primary tool (more reliable for CI)
           if pip-audit --format=json --output=safety-report.json --desc; then
             echo "✅ pip-audit completed successfully"
             pip-audit --desc  # Show readable output
           else
             echo "⚠️  pip-audit failed, trying safety as fallback..."
-            
+
             # Use safety check (deprecated but works without auth)
             if safety check --json --output=safety-report.json 2>/dev/null; then
-              echo "✅ Safety check completed successfully" 
+              echo "✅ Safety check completed successfully"
               safety check --short-report 2>/dev/null || safety check
             else
               echo "⚠️  Both pip-audit and safety encountered issues"
@@ -289,7 +289,7 @@ jobs:
     needs: [backend-tests, frontend-tests, docker-build, security]
     if: always()
     steps:
-      - name: Check all jobs succeeded  
+      - name: Check all jobs succeeded
         run: |
           # Check if all required jobs passed
           if [[ "${{ needs.backend-tests.result }}" == "success" && \

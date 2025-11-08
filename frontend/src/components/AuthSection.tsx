@@ -15,7 +15,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
   const [username, setUsername] = useState<string>('');
   const [showLoginForm, setShowLoginForm] = useState<boolean>(false);
   const [showRegisterForm, setShowRegisterForm] = useState<boolean>(false);
-  
+
   // Form states
   const [loginUsername, setLoginUsername] = useState<string>('');
   const [loginPassword, setLoginPassword] = useState<string>('');
@@ -42,12 +42,12 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
 
     try {
       const response = await authAPI.login(loginUsername, loginPassword);
-      
+
       localStorage.setItem('token', response.data.access);
       localStorage.setItem('refresh_token', response.data.refresh);
       localStorage.setItem('username', loginUsername);
       localStorage.setItem('is_staff', String(response.data.is_staff || false));
-      
+
       setIsLoggedIn(true);
       setUsername(loginUsername);
       setShowLoginForm(false);
@@ -69,7 +69,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
     try {
       // Register new user with simple password
       const password = 'makerspace123'; // Simple default password for makerspace
-      
+
       await authAPI.register({
         username: registerUsername,
         email: registerEmail,
@@ -79,11 +79,11 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
 
       // Auto-login after registration
       const loginResponse = await authAPI.login(registerUsername, password);
-      
+
       localStorage.setItem('token', loginResponse.data.access);
       localStorage.setItem('refresh_token', loginResponse.data.refresh);
       localStorage.setItem('username', registerUsername);
-      
+
       setIsLoggedIn(true);
       setUsername(registerUsername);
       setShowRegisterForm(false);
@@ -142,13 +142,13 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
 
       {!showLoginForm && !showRegisterForm && (
         <div className="auth-buttons">
-          <button 
+          <button
             onClick={() => setShowLoginForm(true)}
             className="btn-primary"
           >
             Login
           </button>
-          <button 
+          <button
             onClick={() => setShowRegisterForm(true)}
             className="btn-secondary"
           >
@@ -199,7 +199,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
         <form onSubmit={handleRegister} className="auth-form">
           <h4>Quick Register</h4>
           <p className="register-info">
-            🔧 Simple registration for makerspace members. 
+            🔧 Simple registration for makerspace members.
             We'll use a default secure password - just remember your username!
           </p>
           <div className="form-group">

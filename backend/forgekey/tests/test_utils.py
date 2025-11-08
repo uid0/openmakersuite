@@ -83,7 +83,7 @@ class TestJWTGeneration:
     def test_verify_invalid_jwt(self):
         """Test verifying an invalid JWT token."""
         mac_address = "AA:BB:CC:DD:EE:FF"
-        invalid_token = "invalid.token.here"
+        invalid_token = "invalid.token.here"  # nosec B105
         payload = verify_device_jwt(invalid_token, mac_address)
         assert payload is None
 

@@ -191,8 +191,8 @@ class TestMQTTTasks:
         mock_settings.MQTT_BROKER_HOST = "localhost"
         mock_settings.MQTT_BROKER_PORT = 1883
         mock_settings.MQTT_KEEPALIVE = 60
-        mock_settings.MQTT_BROKER_USERNAME = ""
-        mock_settings.MQTT_BROKER_PASSWORD = ""
+        mock_settings.MQTT_BROKER_USERNAME = ""  # nosec B105
+        mock_settings.MQTT_BROKER_PASSWORD = ""  # nosec B105
 
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
@@ -218,7 +218,7 @@ class TestMQTTTasks:
         mock_settings.MQTT_BROKER_PORT = 1883
         mock_settings.MQTT_KEEPALIVE = 60
         mock_settings.MQTT_BROKER_USERNAME = "user"
-        mock_settings.MQTT_BROKER_PASSWORD = "pass"
+        mock_settings.MQTT_BROKER_PASSWORD = "pass"  # nosec B105
 
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
@@ -242,8 +242,8 @@ class TestMQTTTasks:
         mock_settings.MQTT_BROKER_HOST = "localhost"
         mock_settings.MQTT_BROKER_PORT = 1883
         mock_settings.MQTT_KEEPALIVE = 60
-        mock_settings.MQTT_BROKER_USERNAME = ""
-        mock_settings.MQTT_BROKER_PASSWORD = ""
+        mock_settings.MQTT_BROKER_USERNAME = ""  # nosec B105
+        mock_settings.MQTT_BROKER_PASSWORD = ""  # nosec B105
 
         mock_client = MagicMock()
         mock_client.connect.side_effect = Exception("Connection refused")

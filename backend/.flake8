@@ -18,6 +18,7 @@ ignore = E203,W503,E501,D,C901
 # D: Ignore all docstring checks (D101, D102, D104, D105, D106, D200, etc.)
 #    For a makerspace project, strict docstring requirements can slow development
 # C901: Function complexity checks - allow for complex business logic
+# Note: max-complexity removed since C901 is ignored
 
 max-complexity = 10
 

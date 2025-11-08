@@ -1076,19 +1076,13 @@ class FixtureViewSet(viewsets.ModelViewSet):
 
         try:
             send_fixture_refill_webhook.delay(str(refill_request.id))
-<<<<<<< HEAD
-        except Exception as e:
+        except Exception as e:  # nosec B110
             # Log but don't fail the request if webhook fails
+            # This is intentional - webhook failures should not block refill requests
             import logging
 
             logger = logging.getLogger(__name__)
             logger.warning(f"Failed to send fixture refill webhook: {e}", exc_info=True)
-=======
-        except Exception:  # nosec B110
-            # Log but don't fail the request if webhook fails
-            # This is intentional - webhook failures should not block refill requests
-            pass
->>>>>>> 3b27a72 (Test(CI): Cleaning up tests)
 
         serializer = FixtureRefillRequestSerializer(refill_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1114,7 +1108,8 @@ class FixtureViewSet(viewsets.ModelViewSet):
             status="completed",
             resolved_at=timezone.now(),
             resolved_by=resolved_by,
-            notes=notes if notes else F("notes"),  # Only update notes if provided
+            # Only update notes if provided
+            notes=notes if notes else F("notes"),
         )
 
         return Response(

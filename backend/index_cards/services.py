@@ -450,19 +450,43 @@ class IndexCardRenderer:
         pdf_canvas.setLineWidth(2)
 
         if item.shelf_position == "top":
-            # Draw up arrow (▲)
-            pdf_canvas.moveTo(arrow_x + arrow_size / 2, arrow_y + arrow_size)  # Top point
-            pdf_canvas.lineTo(arrow_x, arrow_y)  # Bottom left
-            pdf_canvas.lineTo(arrow_x + arrow_size, arrow_y)  # Bottom right
-            pdf_canvas.closePath()
-            pdf_canvas.fillStroke()
+            # Draw up arrow (▲) using path object
+            # Top point
+            top_x = arrow_x + arrow_size / 2
+            top_y = arrow_y + arrow_size
+            # Bottom left
+            bottom_left_x = arrow_x
+            bottom_left_y = arrow_y
+            # Bottom right
+            bottom_right_x = arrow_x + arrow_size
+            bottom_right_y = arrow_y
+
+            # Create path object and draw triangle
+            path = pdf_canvas.beginPath()
+            path.moveTo(top_x, top_y)
+            path.lineTo(bottom_left_x, bottom_left_y)
+            path.lineTo(bottom_right_x, bottom_right_y)
+            path.close()
+            pdf_canvas.drawPath(path, stroke=1, fill=1)
         elif item.shelf_position == "bottom":
-            # Draw down arrow (▼)
-            pdf_canvas.moveTo(arrow_x + arrow_size / 2, arrow_y)  # Top point
-            pdf_canvas.lineTo(arrow_x, arrow_y + arrow_size)  # Bottom left
-            pdf_canvas.lineTo(arrow_x + arrow_size, arrow_y + arrow_size)  # Bottom right
-            pdf_canvas.closePath()
-            pdf_canvas.fillStroke()
+            # Draw down arrow (▼) using path object
+            # Top point
+            top_x = arrow_x + arrow_size / 2
+            top_y = arrow_y
+            # Bottom left
+            bottom_left_x = arrow_x
+            bottom_left_y = arrow_y + arrow_size
+            # Bottom right
+            bottom_right_x = arrow_x + arrow_size
+            bottom_right_y = arrow_y + arrow_size
+
+            # Create path object and draw triangle
+            path = pdf_canvas.beginPath()
+            path.moveTo(top_x, top_y)
+            path.lineTo(bottom_left_x, bottom_left_y)
+            path.lineTo(bottom_right_x, bottom_right_y)
+            path.close()
+            pdf_canvas.drawPath(path, stroke=1, fill=1)
 
     def _draw_product_image(
         self,

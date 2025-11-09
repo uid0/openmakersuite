@@ -82,3 +82,111 @@ class IndexCardRendererTests(TestCase):
 
         # Note: The actual content verification would require PDF parsing,
         # but the important part is that the renderer doesn't crash with case-based items
+
+    def test_render_item_with_top_shelf_position(self) -> None:
+        """Test that items with shelf_position='top' render without errors."""
+        item = InventoryItem.objects.create(
+            name="Top Shelf Item",
+            description="Item stored on top shelf",
+            reorder_quantity=10,
+            current_stock=5,
+            minimum_stock=3,
+            shelf_position="top",
+        )
+
+        renderer = IndexCardRenderer(base_url="http://localhost:3000")
+        preview_bytes = renderer.render_preview(item)
+
+        # Verify PDF is generated successfully
+        self.assertTrue(preview_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(preview_bytes), 200)
+
+    def test_render_item_with_bottom_shelf_position(self) -> None:
+        """Test that items with shelf_position='bottom' render without errors."""
+        item = InventoryItem.objects.create(
+            name="Bottom Shelf Item",
+            description="Item stored on bottom shelf",
+            reorder_quantity=10,
+            current_stock=5,
+            minimum_stock=3,
+            shelf_position="bottom",
+        )
+
+        renderer = IndexCardRenderer(base_url="http://localhost:3000")
+        preview_bytes = renderer.render_preview(item)
+
+        # Verify PDF is generated successfully
+        self.assertTrue(preview_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(preview_bytes), 200)
+
+    def test_render_batch_with_shelf_positions(self) -> None:
+        """Test that batch rendering works with items that have shelf positions."""
+        top_item = InventoryItem.objects.create(
+            name="Top Shelf Item",
+            description="Item on top shelf",
+            reorder_quantity=10,
+            current_stock=5,
+            minimum_stock=3,
+            shelf_position="top",
+        )
+
+        bottom_item = InventoryItem.objects.create(
+            name="Bottom Shelf Item",
+            description="Item on bottom shelf",
+            reorder_quantity=10,
+            current_stock=5,
+            minimum_stock=3,
+            shelf_position="bottom",
+        )
+
+        no_position_item = InventoryItem.objects.create(
+            name="Regular Item",
+            description="Item without shelf position",
+            reorder_quantity=10,
+            current_stock=5,
+            minimum_stock=3,
+        )
+
+        renderer = IndexCardRenderer(base_url="http://localhost:3000")
+        # render_preview expects a single item, use render_to_bytes for multiple items
+        preview_bytes = renderer.render_to_bytes([top_item, bottom_item, no_position_item])
+
+        # Verify PDF is generated successfully
+        self.assertTrue(preview_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(preview_bytes), 500)  # Should be larger with multiple items
+
+    @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+    def test_render_batch_to_storage_with_shelf_positions(self) -> None:
+        """Test that batch rendering to storage works with shelf positions."""
+        top_item = InventoryItem.objects.create(
+            name="Top Shelf Item",
+            description="Item on top shelf",
+            reorder_quantity=10,
+            current_stock=5,
+            minimum_stock=3,
+            shelf_position="top",
+        )
+
+        bottom_item = InventoryItem.objects.create(
+            name="Bottom Shelf Item",
+            description="Item on bottom shelf",
+            reorder_quantity=10,
+            current_stock=5,
+            minimum_stock=3,
+            shelf_position="bottom",
+        )
+
+        renderer = IndexCardRenderer(base_url="http://localhost:3000")
+        generated = renderer.render_batch_to_storage(
+            [top_item, bottom_item], filename="test_shelf_cards.pdf"
+        )
+
+        self.assertTrue(generated.path.endswith("test_shelf_cards.pdf"))
+        self.assertTrue(os.path.exists(generated.absolute_path))
+
+        with open(generated.absolute_path, "rb") as pdf_file:
+            header = pdf_file.read(4)
+        self.assertEqual(header, b"%PDF")
+
+        # Clean up temporary media directory
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)

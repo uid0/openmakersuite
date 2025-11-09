@@ -293,7 +293,7 @@ class IndexCardRenderer:
                 info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
             info_lines_height = len(info_lines) * self._highlight_style.leading
             image_y_start = info_y - info_lines_height - 0.1 * inch
-            
+
             # Calculate image bottom (if image exists)
             image_bottom_y = image_y_start
             if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
@@ -302,21 +302,23 @@ class IndexCardRenderer:
                 available_image_space = image_y_start - inner_y - 0.3 * inch
                 max_image_width = left_section_width - 0.2 * inch
                 if available_image_space > 0:
-                    scale = min(max_image_width / image_width, available_image_space / image_height, 1)
+                    scale = min(
+                        max_image_width / image_width, available_image_space / image_height, 1
+                    )
                     image_drawn_height = image_height * scale
                     image_bottom_y = image_y_start - image_drawn_height
-            
+
             # Get QR code top position
             cta_dimensions = self._calculate_cta_dimensions(
                 item, right_section_width, current_y, inner_y
             )
             qr_y = cta_dimensions[1]
-            
+
             # Position arrow horizontally between left and right sections (at the boundary)
             # and vertically centered between image bottom and QR code top
             arrow_x = left_section_x + left_section_width + 0.05 * inch  # Slightly into the gap
             arrow_y = (image_bottom_y + qr_y) / 2
-            
+
             self._draw_shelf_position_arrow(pdf_canvas, item, arrow_x, arrow_y)
 
     def _draw_title_section(
@@ -469,7 +471,7 @@ class IndexCardRenderer:
         arrow_y: float,
     ) -> None:
         """Draw up or down arrow for shelf position.
-        
+
         Args:
             pdf_canvas: Canvas to draw on
             item: Inventory item

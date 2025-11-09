@@ -663,6 +663,7 @@ class AssetAdmin(admin.ModelAdmin):
         "location",
         "is_donation",
         "is_active",
+        "report_only",
         "ownership_type",
         "owning_user",
         "owning_group",
@@ -703,6 +704,7 @@ class AssetAdmin(admin.ModelAdmin):
                     "asset_tag",
                     "serial_number",
                     "is_active",
+                    "report_only",
                 )
             },
         ),

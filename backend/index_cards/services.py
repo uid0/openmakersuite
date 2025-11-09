@@ -451,20 +451,18 @@ class IndexCardRenderer:
 
         if item.shelf_position == "top":
             # Draw up arrow (▲)
-            points = [
-                (arrow_x + arrow_size / 2, arrow_y + arrow_size),  # Top point
-                (arrow_x, arrow_y),  # Bottom left
-                (arrow_x + arrow_size, arrow_y),  # Bottom right
-            ]
-            pdf_canvas.polygon(points, stroke=1, fill=1)
+            pdf_canvas.moveTo(arrow_x + arrow_size / 2, arrow_y + arrow_size)  # Top point
+            pdf_canvas.lineTo(arrow_x, arrow_y)  # Bottom left
+            pdf_canvas.lineTo(arrow_x + arrow_size, arrow_y)  # Bottom right
+            pdf_canvas.closePath()
+            pdf_canvas.fillStroke()
         elif item.shelf_position == "bottom":
             # Draw down arrow (▼)
-            points = [
-                (arrow_x + arrow_size / 2, arrow_y),  # Top point
-                (arrow_x, arrow_y + arrow_size),  # Bottom left
-                (arrow_x + arrow_size, arrow_y + arrow_size),  # Bottom right
-            ]
-            pdf_canvas.polygon(points, stroke=1, fill=1)
+            pdf_canvas.moveTo(arrow_x + arrow_size / 2, arrow_y)  # Top point
+            pdf_canvas.lineTo(arrow_x, arrow_y + arrow_size)  # Bottom left
+            pdf_canvas.lineTo(arrow_x + arrow_size, arrow_y + arrow_size)  # Bottom right
+            pdf_canvas.closePath()
+            pdf_canvas.fillStroke()
 
     def _draw_product_image(
         self,

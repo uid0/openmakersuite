@@ -180,10 +180,12 @@ export interface Asset {
   manual_pdf_url: string | null;
   qr_code: string | null;
   qr_code_url: string | null;
+  qr_code_scan_url: string | null;
   status: AssetStatus;
   condition_notes: string;
   age_in_days: number;
   is_active: boolean;
+  report_only: boolean;
   notes: string;
   circuit: string;
   needs_compressed_air: boolean;
@@ -193,12 +195,18 @@ export interface Asset {
   // Group ownership and locking
   owning_group: number | null;
   owning_group_name: string | null;
+  owning_user_name: string | null;
   groups_can_enable: number[];
   is_locked: boolean;
-  locked_by: number | null;
-  locked_by_username: string | null;
-  locked_at: string | null;
-  lock_type: string;
+  lockout_info: {
+    locked_by: string | null;
+    locked_at: string | null;
+    lockout_level: string;
+    reason: string | null;
+  } | null;
+  // Authorization
+  can_enable: boolean;
+  can_unlock: boolean;
   // Operational status
   operational_status: OperationalStatus;
   created_at: string;

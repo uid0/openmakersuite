@@ -394,13 +394,19 @@ class AssetSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
     qr_code_url = serializers.SerializerMethodField()
+    qr_code_scan_url = serializers.SerializerMethodField()
     manual_pdf_url = serializers.SerializerMethodField()
 
     # ForgeKey-related fields (from forgekey app)
     operational_mode = serializers.SerializerMethodField()
     is_locked = serializers.SerializerMethodField()
     lockout_info = serializers.SerializerMethodField()
-    owning_group_name = serializers.CharField(source="owning_group.name", read_only=True)
+    owning_group_name = serializers.SerializerMethodField()
+    owning_user_name = serializers.SerializerMethodField()
+
+    # Authorization fields
+    can_enable = serializers.SerializerMethodField()
+    can_unlock = serializers.SerializerMethodField()
 
     # Parts/consumables
     parts = AssetPartSerializer(source="asset_parts", many=True, read_only=True)
@@ -449,11 +455,15 @@ class AssetSerializer(serializers.ModelSerializer):
             # Group ownership
             "owning_group",
             "owning_group_name",
+            "owning_user_name",
             "groups_can_enable",
             # ForgeKey fields (operational mode and lockout status)
             "operational_mode",
             "is_locked",
             "lockout_info",
+            # Authorization
+            "can_enable",
+            "can_unlock",
             # Media
             "image",
             "image_url",
@@ -462,11 +472,13 @@ class AssetSerializer(serializers.ModelSerializer):
             "manual_pdf_url",
             "qr_code",
             "qr_code_url",
+            "qr_code_scan_url",
             # Status
             "status",
             "condition_notes",
             # Metadata
             "is_active",
+            "report_only",
             "notes",
             "created_at",
             "updated_at",
@@ -475,10 +487,15 @@ class AssetSerializer(serializers.ModelSerializer):
             "asset_tag",
             "qr_code",
             "last_scanned_at",
-            "owning_group_name",
             "operational_mode",
             "is_locked",
             "lockout_info",
+            "owning_group_name",
+            "owning_user_name",
+            "can_enable",
+            "can_unlock",
+            "qr_code_url",
+            "qr_code_scan_url",
             "created_at",
             "updated_at",
         ]
@@ -541,11 +558,100 @@ class AssetSerializer(serializers.ModelSerializer):
             return None
 
     def get_qr_code_url(self, obj):
-        """Return the QR code URL when available."""
+        """Return the QR code image URL when available."""
         try:
             return obj.qr_code.url if obj.qr_code else None
         except Exception:
             return None
+
+    def get_qr_code_scan_url(self, obj):
+        """Return the scan URL that the QR code points to."""
+        from django.conf import settings
+
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        return f"{frontend_url}/scan/asset/{obj.id}"
+
+    def get_owning_group_name(self, obj):
+        """Return owning group name, or 'Logistics' if owned by space."""
+        if obj.ownership_type == obj.OWNERSHIP_TYPE_SPACE:
+            return "Logistics"
+        if obj.owning_group:
+            return obj.owning_group.name
+        return None
+
+    def get_owning_user_name(self, obj):
+        """Return owning user name, or 'COO' if owned by space."""
+        if obj.ownership_type == obj.OWNERSHIP_TYPE_SPACE:
+            return "COO"
+        if obj.owning_user:
+            return obj.owning_user.username
+        return None
+
+    def get_can_enable(self, obj):
+        """Check if the current user can enable this asset."""
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+
+        # Report-only assets cannot be enabled
+        if obj.report_only:
+            return False
+
+        user = request.user
+
+        # Admins can always enable
+        if obj.is_user_admin(user):
+            return True
+
+        # Check if user's groups are in groups_can_enable
+        user_groups = user.groups.all()
+        if obj.groups_can_enable.exists():
+            return any(group in obj.groups_can_enable.all() for group in user_groups)
+
+        # If no groups specified, default to allowing (for backward compatibility)
+        return True
+
+    def get_can_unlock(self, obj):
+        """Check if the current user can lock or unlock this asset."""
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+
+        # Report-only assets cannot be locked/unlocked
+        if obj.report_only:
+            return False
+
+        user = request.user
+
+        # Admins can always lock/unlock
+        if obj.is_user_admin(user):
+            return True
+
+        # Check if asset is locked
+        try:
+            from forgekey.models import DeviceLockout
+
+            active_lockouts = DeviceLockout.objects.filter(asset=obj, is_active=True)
+
+            if active_lockouts.exists():
+                # Check if user can unlock any of the lockouts
+                for lockout in active_lockouts:
+                    if lockout.can_be_unlocked_by(user):
+                        return True
+                return False
+            else:
+                # Asset is not locked - check if user can lock it
+                # For now, allow locking if user is in logistics or has group permissions
+                # This can be customized based on your requirements
+                if obj.is_user_in_logistics(user):
+                    return True
+                # Check if user is in a group that can enable this asset
+                user_groups = user.groups.all()
+                if obj.groups_can_enable.exists():
+                    return any(group in obj.groups_can_enable.all() for group in user_groups)
+                return False
+        except Exception:
+            return False
 
     def get_manual_pdf_url(self, obj):
         """Return the manual PDF URL when available."""

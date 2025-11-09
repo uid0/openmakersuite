@@ -1084,6 +1084,10 @@ class Asset(models.Model):
         default=True,
         help_text="Inactive assets are hidden from most views",
     )
+    report_only = models.BooleanField(
+        default=False,
+        help_text="If True, this asset only supports problem reporting (no enable/disable functionality). Examples: soap dispensers, fixtures.",
+    )
     notes = models.TextField(blank=True, help_text="General notes about the asset")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

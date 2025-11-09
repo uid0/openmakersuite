@@ -228,28 +228,39 @@ const AssetScanPage: React.FC = () => {
               </div>
             )}
 
-            <div className="info-item">
-              <span className="label">Status:</span>
-              <span className={`value status-${asset.status}`}>{asset.status}</span>
-            </div>
+            {!asset.report_only && (
+              <>
+                <div className="info-item">
+                  <span className="label">Status:</span>
+                  <span className={`value status-${asset.status}`}>{asset.status}</span>
+                </div>
 
-            <div className="info-item">
-              <span className="label">Operational Status:</span>
-              <span className={`value operational-status-${asset.operational_status}`}>
-                {asset.operational_status === 'available' && '✓ Available'}
-                {asset.operational_status === 'reserved' && '🔒 Reserved'}
-                {asset.operational_status === 'needs_maintenance' && '⚠️ Needs Maintenance'}
-                {asset.operational_status === 'disabled' && '❌ Disabled'}
-              </span>
-            </div>
+                <div className="info-item">
+                  <span className="label">Operational Status:</span>
+                  <span className={`value operational-status-${asset.operational_status}`}>
+                    {asset.operational_status === 'available' && '✓ Available'}
+                    {asset.operational_status === 'reserved' && '🔒 Reserved'}
+                    {asset.operational_status === 'needs_maintenance' && '⚠️ Needs Maintenance'}
+                    {asset.operational_status === 'disabled' && '❌ Disabled'}
+                  </span>
+                </div>
 
-            {asset.is_locked && (
+                {asset.is_locked && asset.lockout_info && (
+                  <div className="info-item">
+                    <span className="label">Lock Status:</span>
+                    <span className="value status-locked">
+                      🔒 Locked by {asset.lockout_info.locked_by || 'Unknown'} ({asset.lockout_info.lockout_level})
+                      {asset.lockout_info.locked_at && ` on ${new Date(asset.lockout_info.locked_at).toLocaleString()}`}
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
+
+            {asset.owning_user_name && (
               <div className="info-item">
-                <span className="label">Lock Status:</span>
-                <span className="value status-locked">
-                  🔒 Locked by {asset.locked_by_username || 'Unknown'} ({asset.lock_type})
-                  {asset.locked_at && ` on ${new Date(asset.locked_at).toLocaleString()}`}
-                </span>
+                <span className="label">Owner:</span>
+                <span className="value">{asset.owning_user_name}</span>
               </div>
             )}
 
@@ -290,26 +301,30 @@ const AssetScanPage: React.FC = () => {
           {/* Authenticated users see full details */}
           {isLoggedIn && (
             <>
-              {asset.maintenance_plan && (
-                <div className="maintenance-section">
-                  <h3>Maintenance Plan</h3>
-                  <p className="maintenance-text">{asset.maintenance_plan}</p>
-                </div>
-              )}
+              {!asset.report_only && (
+                <>
+                  {asset.maintenance_plan && (
+                    <div className="maintenance-section">
+                      <h3>Maintenance Plan</h3>
+                      <p className="maintenance-text">{asset.maintenance_plan}</p>
+                    </div>
+                  )}
 
-              {asset.condition_notes && (
-                <div className="condition-section">
-                  <h3>Condition Notes</h3>
-                  <p>{asset.condition_notes}</p>
-                </div>
-              )}
+                  {asset.condition_notes && (
+                    <div className="condition-section">
+                      <h3>Condition Notes</h3>
+                      <p>{asset.condition_notes}</p>
+                    </div>
+                  )}
 
-              {asset.product_url && (
-                <div className="product-link">
-                  <a href={asset.product_url} target="_blank" rel="noopener noreferrer">
-                    🔗 Product Page
-                  </a>
-                </div>
+                  {asset.product_url && (
+                    <div className="product-link">
+                      <a href={asset.product_url} target="_blank" rel="noopener noreferrer">
+                        🔗 Product Page
+                      </a>
+                    </div>
+                  )}
+                </>
               )}
 
               {actionSuccess && (
@@ -322,42 +337,53 @@ const AssetScanPage: React.FC = () => {
               <div className="asset-actions">
                 <h3>Actions</h3>
                 <div className="action-buttons">
-                  {asset.is_active ? (
-                    <button
-                      onClick={handleDisable}
-                      className="btn-disable"
-                      disabled={submitting}
-                    >
-                      Disable Asset
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleEnable}
-                      className="btn-enable"
-                      disabled={submitting}
-                    >
-                      Enable Asset
-                    </button>
+                  {/* Only show enable/disable buttons if not report_only and user has permission */}
+                  {!asset.report_only && asset.can_enable && (
+                    <>
+                      {asset.is_active ? (
+                        <button
+                          onClick={handleDisable}
+                          className="btn-disable"
+                          disabled={submitting}
+                        >
+                          Disable Asset
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleEnable}
+                          className="btn-enable"
+                          disabled={submitting}
+                        >
+                          Enable Asset
+                        </button>
+                      )}
+                    </>
                   )}
 
-                  {asset.is_locked ? (
-                    <button
-                      onClick={handleUnlock}
-                      className="btn-unlock"
-                      disabled={submitting}
-                    >
-                      Unlock Asset
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleLock}
-                      className="btn-lock"
-                      disabled={submitting}
-                    >
-                      Lock Asset
-                    </button>
+                  {/* Only show lock/unlock buttons if not report_only and user has permission */}
+                  {!asset.report_only && asset.can_unlock && (
+                    <>
+                      {asset.is_locked ? (
+                        <button
+                          onClick={handleUnlock}
+                          className="btn-unlock"
+                          disabled={submitting}
+                        >
+                          Unlock Asset
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleLock}
+                          className="btn-lock"
+                          disabled={submitting}
+                        >
+                          Lock Asset
+                        </button>
+                      )}
+                    </>
                   )}
 
+                  {/* Report a Problem form - always available for authenticated users */}
                   <form onSubmit={handleReportProblem} className="problem-form">
                     <h4>Report a Problem</h4>
                     <textarea

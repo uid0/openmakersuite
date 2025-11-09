@@ -279,9 +279,45 @@ class IndexCardRenderer:
         if item.is_hazardous:
             self._draw_limited_quantity_diamond(pdf_canvas, item, inner_x, inner_y)
 
-        # Draw shelf position arrow
+        # Draw shelf position arrow between image and QR code
         if item.shelf_position:
-            self._draw_shelf_position_arrow(pdf_canvas, item, origin_x, origin_y)
+            # Get image bottom position (reuse logic from _draw_left_section)
+            info_y = current_y - 0.1 * inch
+            info_lines = [
+                f"Reorder at: {self._pluralize(item.minimum_cases if item.use_case_based_reorder else item.minimum_stock, 'case' if item.use_case_based_reorder else 'unit')}",
+            ]
+            if item.average_lead_time:
+                info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
+            longest_lead_time = self._get_longest_lead_time(item)
+            if longest_lead_time and longest_lead_time != item.average_lead_time:
+                info_lines.append(f"Max Lead: {self._pluralize(longest_lead_time, 'day')}")
+            info_lines_height = len(info_lines) * self._highlight_style.leading
+            image_y_start = info_y - info_lines_height - 0.1 * inch
+            
+            # Calculate image bottom (if image exists)
+            image_bottom_y = image_y_start
+            if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
+                image_reader = ImageReader(item.image.path)
+                image_width, image_height = image_reader.getSize()
+                available_image_space = image_y_start - inner_y - 0.3 * inch
+                max_image_width = left_section_width - 0.2 * inch
+                if available_image_space > 0:
+                    scale = min(max_image_width / image_width, available_image_space / image_height, 1)
+                    image_drawn_height = image_height * scale
+                    image_bottom_y = image_y_start - image_drawn_height
+            
+            # Get QR code top position
+            cta_dimensions = self._calculate_cta_dimensions(
+                item, right_section_width, current_y, inner_y
+            )
+            qr_y = cta_dimensions[1]
+            
+            # Position arrow horizontally between left and right sections (at the boundary)
+            # and vertically centered between image bottom and QR code top
+            arrow_x = left_section_x + left_section_width + 0.05 * inch  # Slightly into the gap
+            arrow_y = (image_bottom_y + qr_y) / 2
+            
+            self._draw_shelf_position_arrow(pdf_canvas, item, arrow_x, arrow_y)
 
     def _draw_title_section(
         self,
@@ -416,10 +452,12 @@ class IndexCardRenderer:
             -diamond_size / 2, -diamond_size / 2, diamond_size, diamond_size, stroke=1, fill=1
         )
 
-        # Draw "Y" symbol (Limited Quantity marking)
+        # Draw "HM" text (Hazardous Material) - rotate back to horizontal
+        pdf_canvas.rotate(-45)  # Rotate back to horizontal
         pdf_canvas.setFillColor(colors.black)
-        pdf_canvas.setFont("Helvetica-Bold", 20)
-        pdf_canvas.drawCentredString(0, -7, "Y")
+        pdf_canvas.setFont("Helvetica-Bold", 10)
+        # Center the text in the diamond
+        pdf_canvas.drawCentredString(0, -3, "HM")
 
         pdf_canvas.restoreState()
 
@@ -427,30 +465,36 @@ class IndexCardRenderer:
         self,
         pdf_canvas: canvas.Canvas,
         item: InventoryItem,
-        origin_x: float,
-        origin_y: float,
+        arrow_x: float,
+        arrow_y: float,
     ) -> None:
-        """Draw up or down arrow for shelf position."""
+        """Draw up or down arrow for shelf position.
+        
+        Args:
+            pdf_canvas: Canvas to draw on
+            item: Inventory item
+            arrow_x: X position (center of arrow)
+            arrow_y: Y position (center of arrow)
+        """
         arrow_size = 0.3 * inch
-        # Position in top-left corner
-        arrow_x = origin_x + self.CARD_PADDING
-        arrow_y = origin_y + self.CARD_HEIGHT - self.CARD_PADDING - arrow_size
+        # arrow_x and arrow_y are the center position, adjust to draw from center
+        # Calculate triangle points centered on arrow_x, arrow_y
 
         pdf_canvas.setFillColor(colors.black)
         pdf_canvas.setStrokeColor(colors.black)
         pdf_canvas.setLineWidth(2)
 
         if item.shelf_position == "top":
-            # Draw up arrow (▲) using path object
+            # Draw up arrow (▲) using path object, centered on arrow_x, arrow_y
             # Top point
-            top_x = arrow_x + arrow_size / 2
-            top_y = arrow_y + arrow_size
+            top_x = arrow_x
+            top_y = arrow_y + arrow_size / 2
             # Bottom left
-            bottom_left_x = arrow_x
-            bottom_left_y = arrow_y
+            bottom_left_x = arrow_x - arrow_size / 2
+            bottom_left_y = arrow_y - arrow_size / 2
             # Bottom right
-            bottom_right_x = arrow_x + arrow_size
-            bottom_right_y = arrow_y
+            bottom_right_x = arrow_x + arrow_size / 2
+            bottom_right_y = arrow_y - arrow_size / 2
 
             # Create path object and draw triangle
             path = pdf_canvas.beginPath()
@@ -460,16 +504,16 @@ class IndexCardRenderer:
             path.close()
             pdf_canvas.drawPath(path, stroke=1, fill=1)
         elif item.shelf_position == "bottom":
-            # Draw down arrow (▼) using path object
+            # Draw down arrow (▼) using path object, centered on arrow_x, arrow_y
             # Top point
-            top_x = arrow_x + arrow_size / 2
-            top_y = arrow_y
+            top_x = arrow_x
+            top_y = arrow_y - arrow_size / 2
             # Bottom left
-            bottom_left_x = arrow_x
-            bottom_left_y = arrow_y + arrow_size
+            bottom_left_x = arrow_x - arrow_size / 2
+            bottom_left_y = arrow_y + arrow_size / 2
             # Bottom right
-            bottom_right_x = arrow_x + arrow_size
-            bottom_right_y = arrow_y + arrow_size
+            bottom_right_x = arrow_x + arrow_size / 2
+            bottom_right_y = arrow_y + arrow_size / 2
 
             # Create path object and draw triangle
             path = pdf_canvas.beginPath()

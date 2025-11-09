@@ -220,16 +220,7 @@ class IndexCardRenderer:
         origin_y: float,
     ) -> None:
         """Draw a single inventory card with item details."""
-        # Draw card border
-        pdf_canvas.roundRect(
-            origin_x,
-            origin_y,
-            self.CARD_WIDTH,
-            self.CARD_HEIGHT,
-            radius=12,
-            stroke=1,
-            fill=0,
-        )
+        # No border needed - Avery 5388 is pre-perforated
 
         if self.blank_cards:
             self._draw_blank_card(pdf_canvas, item, origin_x, origin_y)

@@ -8,6 +8,7 @@ import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { QRCodeSVG as QRCode } from 'qrcode.react';
 import { InventoryItem } from '../types';
+import { useSiteSettings } from '../hooks/useSiteSettings';
 import '../styles/TVDashboard.css';
 import '../styles/InventoryList.css';
 
@@ -21,6 +22,7 @@ const tvAPI = axios.create({
 
 const TVDashboard: React.FC = () => {
   const { location } = useParams<{ location?: string }>();
+  const { settings: siteSettings, loading: settingsLoading } = useSiteSettings();
   const [reorderedItems, setReorderedItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,17 +32,26 @@ const TVDashboard: React.FC = () => {
   const [itemOrder, setItemOrder] = useState<number[]>([]);
   const [emptyStateSlide, setEmptyStateSlide] = useState(0); // 0 = "No items", 1 = "How to scan"
 
-  // Location-specific configuration
+  // Location-specific configuration with site settings support
   const getLocationConfig = () => {
+    // Use site settings if available, fall back to environment variables
+    const siteName = siteSettings?.site_name || process.env.REACT_APP_DASHBOARD_TITLE || 'Dallas Makerspace Inventory';
+    const dashboardTitle = siteSettings?.dashboard_title || siteName;
+    const dashboardSubtitle = siteSettings?.dashboard_subtitle || process.env.REACT_APP_DASHBOARD_SUBTITLE || 'Items on Order';
+    const logo = siteSettings?.logo_url || process.env.REACT_APP_DASHBOARD_LOGO || null;
+    const showLogo = siteSettings?.show_logo_on_dashboard !== false && process.env.REACT_APP_SHOW_LOGO !== 'false';
+
     const baseConfig = {
-      title: process.env.REACT_APP_DASHBOARD_TITLE || 'Dallas Makerspace Inventory',
-      subtitle: process.env.REACT_APP_DASHBOARD_SUBTITLE || 'Items on Order',
-      logo: process.env.REACT_APP_DASHBOARD_LOGO || null,
-      showLogo: process.env.REACT_APP_SHOW_LOGO !== 'false',
+      title: dashboardTitle,
+      subtitle: dashboardSubtitle,
+      logo: logo,
+      showLogo: showLogo,
       showTransparency: process.env.REACT_APP_SHOW_TRANSPARENCY !== 'false',
+      primaryColor: siteSettings?.primary_color || '#007cba',
+      secondaryColor: siteSettings?.secondary_color || '#417690',
     };
 
-    // Location-specific overrides
+    // Location-specific overrides (environment variables take precedence for location-specific configs)
     if (location) {
       const locationUpper = location.toUpperCase();
       return {
@@ -55,7 +66,8 @@ const TVDashboard: React.FC = () => {
     return baseConfig;
   };
 
-  const [config] = useState(getLocationConfig());
+  // Update config when site settings change
+  const config = getLocationConfig();
 
   // Configurable footer messages - can be set via environment variables
   const footerMessages = useState(() => {
@@ -381,7 +393,7 @@ const TVDashboard: React.FC = () => {
         <div className="header-content">
           {config.showLogo && config.logo && (
             <div className="logo-container">
-              <img src={config.logo} alt="Logo" className="dashboard-logo" />
+              <img src={config.logo} alt={siteSettings?.logo_alt_text || "Logo"} className="dashboard-logo" />
             </div>
           )}
           <div className="title-section">

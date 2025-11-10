@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, CreateReorderRequest, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest } from '../types';
+import { Asset, CreateReorderRequest, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SiteSettings } from '../types';
 
 const resolveApiBaseUrl = () => {
   const rawBase = process.env.REACT_APP_API_URL;
@@ -240,6 +240,12 @@ export const authAPI = {
 
   refresh: (refreshToken: string) =>
     api.post('/auth/refresh/', { refresh: refreshToken }),
+};
+
+// Customization API
+export const customizationAPI = {
+  getSiteSettings: () =>
+    api.get<SiteSettings>('/customization/settings/'),
 };
 
 export default api;

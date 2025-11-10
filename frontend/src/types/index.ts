@@ -213,6 +213,23 @@ export interface Asset {
   updated_at: string;
 }
 
+export interface SiteSettings {
+  site_name: string;
+  site_tagline: string;
+  logo_url: string | null;
+  logo_alt_text: string;
+  favicon_url: string | null;
+  primary_color: string;
+  secondary_color: string;
+  footer_text: string;
+  contact_email: string;
+  contact_phone: string;
+  website_url: string;
+  dashboard_title: string;
+  dashboard_subtitle: string;
+  show_logo_on_dashboard: boolean;
+}
+
 export interface Fixture {
   id: string;
   name: string;

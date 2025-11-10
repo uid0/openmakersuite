@@ -27,6 +27,7 @@ urlpatterns = [
     path("api/index-cards/", include("index_cards.urls")),
     path("api/dashboard/", include("dashboard.urls")),
     path("api/forgekey/", include("forgekey.urls")),
+    path("api/customization/", include("customization.urls")),
 ]
 
 # Serve media files during development

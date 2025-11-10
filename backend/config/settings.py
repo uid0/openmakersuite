@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "index_cards",
     "dashboard",
     "forgekey",
+    "customization",
 ]
 
 MIDDLEWARE = [

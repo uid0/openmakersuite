@@ -2,8 +2,8 @@
 Models for site customization.
 """
 
-from django.db import models
 from django.core.exceptions import ValidationError
+from django.db import models
 
 
 class SiteSettings(models.Model):

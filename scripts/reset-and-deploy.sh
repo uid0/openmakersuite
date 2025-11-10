@@ -14,7 +14,7 @@ fi
 export $(cat .env | grep -v '^#' | xargs)
 
 echo "⏹️  Stopping all containers..."
-docker-compose -f docker-compose.prod.yml down
+docker compose -f docker compose.prod.yml down
 
 echo "🗑️  Removing old volumes (this will delete existing data)..."
 docker volume rm openmakersuite_postgres_data 2>/dev/null || true
@@ -23,10 +23,10 @@ docker volume rm openmakersuite_media_volume 2>/dev/null || true
 docker volume rm openmakersuite_frontend_build 2>/dev/null || true
 
 echo "🏗️  Building fresh images..."
-docker-compose -f docker-compose.prod.yml build --no-cache
+docker compose -f docker compose.prod.yml build --no-cache
 
 echo "🚀 Starting services..."
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker compose.prod.yml up -d
 
 # Wait for database to be ready
 echo "⏳ Waiting for database to initialize..."
@@ -34,7 +34,7 @@ sleep 15
 
 # Check database connection
 echo "🔍 Verifying database connection..."
-docker-compose -f docker-compose.prod.yml exec -T backend python -c "
+docker compose -f docker compose.prod.yml exec -T backend python -c "
 from django.db import connection
 try:
     connection.ensure_connection()
@@ -46,18 +46,18 @@ except Exception as e:
 
 # Run migrations
 echo "📦 Running database migrations..."
-docker-compose -f docker-compose.prod.yml exec -T backend python manage.py migrate --noinput
+docker compose -f docker compose.prod.yml exec -T backend python manage.py migrate --noinput
 
 # Collect static files
 echo "📁 Collecting static files..."
-docker-compose -f docker-compose.prod.yml exec -T backend python manage.py collectstatic --noinput
+docker compose -f docker compose.prod.yml exec -T backend python manage.py collectstatic --noinput
 
 # Create superuser (if needed)
 echo ""
 echo "👤 Would you like to create a superuser? (y/n)"
 read -r create_superuser
 if [ "$create_superuser" = "y" ]; then
-    docker-compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
+    docker compose -f docker compose.prod.yml exec backend python manage.py createsuperuser
 fi
 
 echo ""
@@ -67,6 +67,6 @@ echo "📍 Your application is now running at:"
 echo "   http://${DOMAIN:-dallas.openmakersuite.net}"
 echo ""
 echo "🔧 Useful commands:"
-echo "   View logs:    docker-compose -f docker-compose.prod.yml logs -f"
-echo "   Stop:         docker-compose -f docker-compose.prod.yml down"
-echo "   Restart:      docker-compose -f docker-compose.prod.yml restart"
+echo "   View logs:    docker compose -f docker compose.prod.yml logs -f"
+echo "   Stop:         docker compose -f docker compose.prod.yml down"
+echo "   Restart:      docker compose -f docker compose.prod.yml restart"

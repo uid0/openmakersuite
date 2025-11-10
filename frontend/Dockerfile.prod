@@ -29,8 +29,9 @@ FROM busybox:latest
 
 WORKDIR /app
 
-# Copy built files from builder
-COPY --from=builder /app/build /app/frontend
+# Copy built files from builder to a temporary location
+COPY --from=builder /app/build /app/frontend_build
 
-# Keep container running so volume persists
-CMD ["sh", "-c", "while true; do sleep 3600; done"]
+# Copy files to volume on startup to ensure volume is always up to date
+# This handles the case where the volume already exists with old files
+CMD ["sh", "-c", "cp -r /app/frontend_build/* /app/frontend/ 2>/dev/null || true && while true; do sleep 3600; done"]

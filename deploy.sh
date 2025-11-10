@@ -15,14 +15,14 @@ export $(cat .env | grep -v '^#' | xargs)
 
 # Stop existing containers
 echo "⏹️  Stopping existing containers..."
-docker-compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml down
 
 # Build and start services
 echo "🏗️  Building and starting services..."
-docker-compose -f docker-compose.prod.yml build --no-cache
+docker compose -f docker-compose.prod.yml build --no-cache
 
 echo "🚀 Starting services..."
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Wait for database to be ready
 echo "⏳ Waiting for database..."
@@ -30,25 +30,33 @@ sleep 10
 
 # Run migrations
 echo "📦 Running database migrations..."
-docker-compose -f docker-compose.prod.yml exec -T backend python manage.py migrate --noinput
+docker compose -f docker-compose.prod.yml exec -T backend python manage.py migrate --noinput
 
 # Collect static files
 echo "📁 Collecting static files..."
-docker-compose -f docker-compose.prod.yml exec -T backend python manage.py collectstatic --noinput
+docker compose -f docker-compose.prod.yml exec -T backend python manage.py collectstatic --noinput
+
+# Wait for frontend to finish building and ensure volume is populated
+echo "⏳ Waiting for frontend build to complete..."
+sleep 5
+
+# Restart nginx to pick up any frontend changes
+echo "🔄 Restarting nginx to pick up frontend changes..."
+docker compose -f docker-compose.prod.yml restart nginx
 
 # Verify frontend build
 echo "🔍 Verifying frontend build..."
-if docker-compose -f docker-compose.prod.yml exec -T nginx ls -la /app/frontend/index.html >/dev/null 2>&1; then
+if docker compose -f docker-compose.prod.yml exec -T nginx ls -la /app/frontend/index.html >/dev/null 2>&1; then
     echo "✅ Frontend files found!"
 else
     echo "❌ Frontend files NOT found in nginx container!"
     echo "   Checking frontend container..."
-    docker-compose -f docker-compose.prod.yml exec -T frontend ls -la /app/frontend/ || echo "   Frontend volume is empty!"
+    docker compose -f docker-compose.prod.yml exec -T frontend ls -la /app/frontend/ || echo "   Frontend volume is empty!"
 fi
 
 # Verify static files
 echo "🔍 Verifying Django static files..."
-if docker-compose -f docker-compose.prod.yml exec -T nginx ls -la /app/staticfiles/ >/dev/null 2>&1; then
+if docker compose -f docker-compose.prod.yml exec -T nginx ls -la /app/staticfiles/ >/dev/null 2>&1; then
     echo "✅ Django static files found!"
 else
     echo "❌ Django static files NOT found!"
@@ -58,7 +66,7 @@ fi
 echo "👤 Create superuser? (y/n)"
 read -r create_superuser
 if [ "$create_superuser" = "y" ]; then
-    docker-compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
+    docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
 fi
 
 echo "✅ Deployment complete!"
@@ -67,7 +75,7 @@ echo "📍 Your application is now running at:"
 echo "   http://${DOMAIN:-dallas.openmakersuite.net}"
 echo ""
 echo "🔧 Useful commands:"
-echo "   View logs:    docker-compose -f docker-compose.prod.yml logs -f"
-echo "   Stop:         docker-compose -f docker-compose.prod.yml down"
-echo "   Restart:      docker-compose -f docker-compose.prod.yml restart"
-echo "   Shell:        docker-compose -f docker-compose.prod.yml exec backend python manage.py shell"
+echo "   View logs:    docker compose -f docker-compose.prod.yml logs -f"
+echo "   Stop:         docker compose -f docker-compose.prod.yml down"
+echo "   Restart:      docker compose -f docker-compose.prod.yml restart"
+echo "   Shell:        docker compose -f docker-compose.prod.yml exec backend python manage.py shell"

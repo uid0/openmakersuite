@@ -17,19 +17,19 @@ echo ""
 
 # Check running containers
 echo "2. Checking running containers..."
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker compose.prod.yml ps
 echo ""
 
 # Check database container
 echo "3. Checking database..."
-if docker-compose -f docker-compose.prod.yml exec -T db pg_isready -U makerspace 2>/dev/null; then
+if docker compose -f docker compose.prod.yml exec -T db pg_isready -U makerspace 2>/dev/null; then
     echo "✅ Database is accepting connections"
 
     # Try to connect with the password from .env
     export $(cat .env | grep -v '^#' | grep POSTGRES_PASSWORD | xargs)
     if [ -n "$POSTGRES_PASSWORD" ]; then
         echo "   Testing with POSTGRES_PASSWORD from .env..."
-        if PGPASSWORD=$POSTGRES_PASSWORD docker-compose -f docker-compose.prod.yml exec -T db psql -U makerspace -d makerspace_inventory -c "SELECT 1" >/dev/null 2>&1; then
+        if PGPASSWORD=$POSTGRES_PASSWORD docker compose -f docker compose.prod.yml exec -T db psql -U makerspace -d makerspace_inventory -c "SELECT 1" >/dev/null 2>&1; then
             echo "   ✅ Password from .env works!"
         else
             echo "   ❌ Password from .env does NOT work"
@@ -43,7 +43,7 @@ echo ""
 
 # Check backend logs
 echo "4. Recent backend logs:"
-docker-compose -f docker-compose.prod.yml logs --tail=20 backend
+docker compose -f docker compose.prod.yml logs --tail=20 backend
 echo ""
 
 # Check volumes
@@ -60,6 +60,6 @@ echo "   Option 2: Update .env with the correct password"
 echo "   Option 3: Manually reset database password"
 echo ""
 echo "To reset database password manually:"
-echo "   1. docker-compose -f docker-compose.prod.yml down"
+echo "   1. docker compose -f docker compose.prod.yml down"
 echo "   2. docker volume rm openmakersuite_postgres_data"
-echo "   3. docker-compose -f docker-compose.prod.yml up -d"
+echo "   3. docker compose -f docker compose.prod.yml up -d"

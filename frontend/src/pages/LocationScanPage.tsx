@@ -46,7 +46,7 @@ const LocationScanPage: React.FC = () => {
 
   const loadLocation = useCallback(async () => {
     if (!locationId) return;
-    
+
     try {
       setLoading(true);
       // Get location from inventory API
@@ -273,7 +273,7 @@ const LocationScanPage: React.FC = () => {
           <div className="scan-form">
             <h2>Report an Issue</h2>
             <p>Select the type of issue you'd like to report:</p>
-            
+
             <div className="report-buttons">
               <button
                 type="button"
@@ -420,4 +420,3 @@ const LocationTasksTab: React.FC<{ locationId: string }> = ({ locationId }) => {
 };
 
 export default LocationScanPage;
-

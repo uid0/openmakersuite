@@ -59,6 +59,76 @@ class CategoryViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
 
+class LocationViewSet(viewsets.ReadOnlyModelViewSet):
+    """API endpoint for locations (read-only for public access)."""
+
+    queryset = Location.objects.filter(is_active=True)
+    permission_classes = [AllowAny]
+
+    def list(self, request):
+        """List all active locations."""
+        locations = [
+            {
+                "id": str(loc["id"]),
+                "name": loc["name"],
+                "description": loc["description"],
+                "is_active": loc["is_active"],
+            }
+            for loc in self.queryset.values("id", "name", "description", "is_active")
+        ]
+        return Response(locations)
+
+    def retrieve(self, request, pk=None):
+        """Get a single location."""
+        try:
+            location = self.queryset.get(id=pk)
+            return Response(
+                {
+                    "id": str(location.id),
+                    "name": location.name,
+                    "description": location.description,
+                    "is_active": location.is_active,
+                }
+            )
+        except Location.DoesNotExist:
+            return Response({"error": "Location not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def generate_qr(self, request, pk=None):
+        """Generate QR code for a location."""
+        location = self.get_object()
+
+        from .utils.qr_generator import save_qr_code_to_location
+
+        try:
+            save_qr_code_to_location(location)
+            return Response(
+                {
+                    "message": "QR code generated successfully",
+                    "qr_code_url": location.qr_code.url if location.qr_code else None,
+                }
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to generate QR code: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def qr_code(self, request, pk=None):
+        """Get QR code image for a location."""
+        location = self.get_object()
+
+        if not location.qr_code:
+            return Response({"error": "QR code not generated yet"}, status=404)
+
+        from django.http import HttpResponse
+
+        response = HttpResponse(location.qr_code.read(), content_type="image/png")
+        response["Content-Disposition"] = f'inline; filename="qr_{location.id}.png"'
+        return response
+
+
 class InventoryItemViewSet(viewsets.ModelViewSet):
     """API endpoint for inventory items."""
 

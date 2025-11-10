@@ -41,18 +41,35 @@ interface PendingOrder {
   updated_at: string | null;
 }
 
+interface LocationRequest {
+  id: string;
+  type: string;
+  type_label: string;
+  title: string;
+  description: string;
+  location: string;
+  status: string;
+  status_label: string;
+  is_urgent: boolean;
+  created_at: string | null;
+  days_open: number;
+}
+
 interface LogisticsSummary {
   pending_requests: number;
   urgent_requests: number;
   awaiting_approval: number;
   pending_orders: number;
   open_order_lines: number;
+  location_requests: number;
+  urgent_location_requests: number;
 }
 
 interface LogisticsDashboardResponse {
   summary: LogisticsSummary;
   refill_requests: RefillRequest[];
   pending_orders: PendingOrder[];
+  location_requests: LocationRequest[];
   last_updated: string;
 }
 
@@ -62,7 +79,6 @@ const LogisticsDashboard: React.FC = () => {
   const [data, setData] = useState<LogisticsDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [highlightIndex, setHighlightIndex] = useState(0);
 
   const fetchDashboardData = async () => {
     try {
@@ -83,16 +99,7 @@ const LogisticsDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (!data?.refill_requests.length) return;
-    const interval = setInterval(() => {
-      setHighlightIndex((prev) =>
-        data.refill_requests.length === 0 ? 0 : (prev + 1) % data.refill_requests.length
-      );
-    }, 15000);
-
-    return () => clearInterval(interval);
-  }, [data?.refill_requests.length]);
+  // Removed highlight rotation for TV display - no mouse interaction needed
 
   useEffect(() => {
     let wakeLockSentinel: any;
@@ -137,12 +144,6 @@ const LogisticsDashboard: React.FC = () => {
     };
   }, []);
 
-  const highlightedRequestId = useMemo(() => {
-    if (!data?.refill_requests.length) {
-      return null;
-    }
-    return data.refill_requests[Math.min(highlightIndex, data.refill_requests.length - 1)]?.id ?? null;
-  }, [data, highlightIndex]);
 
   const formatDate = (value: string | null, fallback = '—') => {
     if (!value) return fallback;
@@ -188,7 +189,7 @@ const LogisticsDashboard: React.FC = () => {
     );
   }
 
-  const { summary, refill_requests, pending_orders, last_updated } = data;
+  const { summary, refill_requests, pending_orders, location_requests, last_updated } = data;
 
   return (
     <div className="logistics-dashboard">
@@ -213,8 +214,13 @@ const LogisticsDashboard: React.FC = () => {
         </div>
         <div className="summary-card alert">
           <span className="summary-label">Urgent Requests</span>
-          <span className="summary-value">{summary.urgent_requests}</span>
+          <span className="summary-value">{summary.urgent_requests + summary.urgent_location_requests}</span>
           <span className="summary-subtext">Flagged as urgent</span>
+        </div>
+        <div className="summary-card">
+          <span className="summary-label">Location Requests</span>
+          <span className="summary-value">{summary.location_requests}</span>
+          <span className="summary-subtext">Cleaning, safety & feedback</span>
         </div>
         <div className="summary-card">
           <span className="summary-label">Open Purchase Orders</span>
@@ -235,13 +241,11 @@ const LogisticsDashboard: React.FC = () => {
               <p>No refill requests requiring action.</p>
             </div>
           ) : (
-            <div className="refill-grid">
+            <div className="refill-grid tv-limited">
               {refill_requests.map((request) => (
                 <div
                   key={request.id}
-                  className={`refill-card priority-${request.priority} ${
-                    highlightedRequestId === request.id ? 'highlight' : ''
-                  }`}
+                  className={`refill-card priority-${request.priority}`}
                 >
                   <div className="refill-card-header">
                     <h3>{request.item_name}</h3>
@@ -283,17 +287,67 @@ const LogisticsDashboard: React.FC = () => {
           )}
         </section>
 
-        <section className="pending-orders">
+        <section className="location-requests">
           <div className="section-heading">
-            <h2>Purchase Orders In Flight</h2>
-            <span className="section-subtitle">Track supplier deliveries and expected arrivals</span>
+            <h2>Location Requests</h2>
+            <span className="section-subtitle">Cleaning, safety concerns, and feedback requiring attention</span>
           </div>
-          {pending_orders.length === 0 ? (
+          {location_requests.length === 0 ? (
             <div className="empty-state">
-              <h3>No outstanding orders</h3>
-              <p>Logistics has received all purchase orders currently tracked.</p>
+              <h3>All clear ✅</h3>
+              <p>No location requests requiring action.</p>
             </div>
           ) : (
+            <div className="refill-grid tv-limited">
+              {location_requests.map((request) => (
+                <div
+                  key={request.id}
+                  className={`refill-card priority-${request.is_urgent ? 'urgent' : 'normal'} ${
+                    request.is_urgent ? 'alert' : ''
+                  }`}
+                >
+                  <div className="refill-card-header">
+                    <h3>{request.title}</h3>
+                    <span className={`badge status-${request.status} ${request.is_urgent ? 'urgent-badge' : ''}`}>
+                      {request.is_urgent ? '🚨 URGENT' : request.status_label}
+                    </span>
+                  </div>
+                  <div className="refill-card-body">
+                    <div className="refill-meta">
+                      <span className="meta-block">
+                        <span className="meta-label">Type</span>
+                        <span className="meta-value">{request.type_label}</span>
+                      </span>
+                      <span className="meta-block">
+                        <span className="meta-label">Location</span>
+                        <span className="meta-value">{request.location}</span>
+                      </span>
+                      <span className="meta-block">
+                        <span className="meta-label">Days Open</span>
+                        <span className="meta-value">{request.days_open}</span>
+                      </span>
+                    </div>
+                    {request.description && (
+                      <div className="refill-notes">
+                        <p>{request.description}</p>
+                      </div>
+                    )}
+                  </div>
+                  <footer className="refill-card-footer">
+                    <span>{request.created_at ? formatDate(request.created_at) : '—'}</span>
+                  </footer>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {pending_orders.length > 0 && (
+          <section className="pending-orders">
+            <div className="section-heading">
+              <h2>Purchase Orders</h2>
+              <span className="section-subtitle">In flight deliveries</span>
+            </div>
             <div className="orders-grid">
               {pending_orders.map((order) => (
                 <div key={order.id} className={`order-card status-${order.status}`}>
@@ -337,16 +391,13 @@ const LogisticsDashboard: React.FC = () => {
                 </div>
               ))}
             </div>
-          )}
-        </section>
+          </section>
+        )}
       </main>
 
       <footer className="logistics-footer">
         <div>
-          Tip: On FireTV, set Settings → Display &amp; Sounds → Screensaver to <strong>Never</strong> to prevent sleep.
-        </div>
-        <div>
-          Browser tip: The Silk menu → Settings → Keep Screen Awake helps ensure the dashboard stays visible.
+          Showing top 2 requests per category · Updated {formatTime(last_updated)}
         </div>
       </footer>
     </div>

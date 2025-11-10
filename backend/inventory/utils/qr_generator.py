@@ -103,3 +103,41 @@ def save_qr_code_to_asset(asset):
     asset.qr_code.save(filename, File(buffer), save=True)
 
     return asset
+
+
+def save_qr_code_to_location(location):
+    """
+    Generate and save QR code to a location.
+
+    For locations, the QR code points to the frontend location scan page.
+
+    Args:
+        location: Location instance
+    """
+    # Use frontend URL for locations to enable proper UI
+    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+    scan_url = f"{frontend_url}/scan/location/{location.id}"
+
+    # Generate QR code
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(scan_url)
+    qr.make(fit=True)
+
+    # Create image
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    # Save to BytesIO
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    # Save to location's qr_code field
+    filename = f"location_qr_{location.id}.png"
+    location.qr_code.save(filename, File(buffer), save=True)
+
+    return location

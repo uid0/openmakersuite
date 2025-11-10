@@ -7,6 +7,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import AssetScanPage from './pages/AssetScanPage';
 import FixtureScanPage from './pages/FixtureScanPage';
 import HomePage from './pages/HomePage';
+import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
 import ScanPage from './pages/ScanPage';
 import ThanksPage from './pages/ThanksPage';
@@ -36,6 +37,7 @@ function App() {
             <Route path="/scan/:itemId" element={<ScanPage />} />
             <Route path="/scan/fixture/:fixtureId" element={<FixtureScanPage />} />
             <Route path="/scan/asset/:assetId" element={<AssetScanPage />} />
+            <Route path="/scan/location/:locationId" element={<LocationScanPage />} />
             <Route path="/orderadmin" element={<AdminDashboard />} />
             <Route path="/thanks" element={<ThanksPage />} />
             <Route path="/tv-dashboard" element={<TVDashboard />} />

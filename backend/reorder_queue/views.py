@@ -976,11 +976,11 @@ class AnalyticsViewSet(viewsets.ViewSet):
             PurchaseOrder.PARTIALLY_RECEIVED,
         ]
 
-        # Refill requests (limit to most recent 75 to keep payload light)
+        # Refill requests (limit to top 2 for TV display)
         refill_requests_qs = (
             ReorderRequest.objects.filter(status__in=pending_statuses)
             .select_related("item", "item__location", "item__category")
-            .order_by("-priority", "requested_at")[:75]
+            .order_by("-priority", "requested_at")[:2]
         )
 
         refill_requests = []
@@ -1066,12 +1066,141 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 }
             )
 
+        # Location requests (tasks, feedback, security reports)
+        from location_checkins.models import LocationFeedback, LocationTask, SecurityReport
+
+        # Get open location tasks (limit to top 2 for TV display)
+        location_tasks_qs = (
+            LocationTask.objects.filter(status__in=["pending", "in_progress"])
+            .select_related("location", "created_from_feedback", "created_from_security_report")
+            .order_by("-created_at")[:2]
+        )
+
+        location_requests = []
+        urgent_location_count = 0
+        for task in location_tasks_qs:
+            # Determine if urgent based on security report
+            is_urgent = False
+            request_type = "task"
+            type_label = "Task"
+
+            if task.created_from_security_report:
+                security_report = task.created_from_security_report
+                is_urgent = security_report.is_urgent
+                request_type = security_report.report_type
+                type_label = dict(SecurityReport.REPORT_TYPE_CHOICES).get(
+                    security_report.report_type, security_report.report_type.title()
+                )
+            elif task.created_from_feedback:
+                request_type = "feedback"
+                type_label = "Feedback"
+
+            if is_urgent:
+                urgent_location_count += 1
+
+            days_open = max(
+                0,
+                (timezone.now() - task.created_at).days if task.created_at else 0,
+            )
+
+            location_requests.append(
+                {
+                    "id": str(task.id),
+                    "type": request_type,
+                    "type_label": type_label,
+                    "title": task.title,
+                    "description": task.description,
+                    "location": task.location.name if task.location else "Unknown",
+                    "status": task.status,
+                    "status_label": task.get_status_display(),
+                    "is_urgent": is_urgent,
+                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                    "days_open": days_open,
+                }
+            )
+
+        # Get unresolved negative feedback (limit for TV display)
+        negative_feedback_qs = (
+            LocationFeedback.objects.filter(feedback_type="negative", is_resolved=False)
+            .select_related("location")
+            .order_by("-submitted_at")[:2]
+        )
+
+        for feedback in negative_feedback_qs:
+            days_open = max(
+                0,
+                (timezone.now() - feedback.submitted_at).days if feedback.submitted_at else 0,
+            )
+
+            location_requests.append(
+                {
+                    "id": str(feedback.id),
+                    "type": "feedback",
+                    "type_label": "Negative Feedback",
+                    "title": f"Feedback: {feedback.location.name}",
+                    "description": feedback.message,
+                    "location": feedback.location.name if feedback.location else "Unknown",
+                    "status": "pending",
+                    "status_label": "Pending",
+                    "is_urgent": False,
+                    "created_at": (
+                        feedback.submitted_at.isoformat() if feedback.submitted_at else None
+                    ),
+                    "days_open": days_open,
+                }
+            )
+
+        # Get unresolved security reports (limit for TV display)
+        security_reports_qs = (
+            SecurityReport.objects.filter(is_resolved=False)
+            .select_related("location")
+            .order_by("-is_urgent", "-reported_at")[:2]
+        )
+
+        for report in security_reports_qs:
+            if report.is_urgent:
+                urgent_location_count += 1
+
+            days_open = max(
+                0,
+                (timezone.now() - report.reported_at).days if report.reported_at else 0,
+            )
+
+            report_type_display = dict(SecurityReport.REPORT_TYPE_CHOICES).get(
+                report.report_type, report.report_type
+            )
+
+            location_requests.append(
+                {
+                    "id": str(report.id),
+                    "type": report.report_type,
+                    "type_label": report_type_display,
+                    "title": f"{report_type_display}: {report.location.name}",
+                    "description": report.description or f"{report_type_display} reported",
+                    "location": report.location.name if report.location else "Unknown",
+                    "status": "pending",
+                    "status_label": "Pending",
+                    "is_urgent": report.is_urgent,
+                    "created_at": report.reported_at.isoformat() if report.reported_at else None,
+                    "days_open": days_open,
+                }
+            )
+
+        # Sort location requests by urgency and date, then limit to top 2 for TV display
+        location_requests.sort(key=lambda x: (not x["is_urgent"], -x["days_open"]))
+        location_requests = location_requests[:2]
+
+        # Limit pending orders to 2 for TV display
+        pending_orders = pending_orders[:2]
+
         summary = {
             "pending_requests": len(refill_requests),
             "urgent_requests": urgent_count,
             "awaiting_approval": awaiting_approval,
             "pending_orders": len(pending_orders),
             "open_order_lines": total_open_order_lines,
+            "location_requests": len(location_requests),
+            "urgent_location_requests": urgent_location_count,
         }
 
         return Response(
@@ -1079,6 +1208,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 "summary": summary,
                 "refill_requests": refill_requests,
                 "pending_orders": pending_orders,
+                "location_requests": location_requests,
                 "last_updated": timezone.now().isoformat(),
             }
         )

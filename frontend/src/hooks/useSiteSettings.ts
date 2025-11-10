@@ -55,4 +55,3 @@ export const useSiteSettings = (): UseSiteSettingsReturn => {
 
   return { settings, loading, error };
 };
-

@@ -606,6 +606,9 @@ class WebHook(models.Model):
     PURCHASE_ORDER_CREATED = "purchase_order_created"
     DELIVERY_RECEIVED = "delivery_received"
     FIXTURE_REFILL_REQUESTED = "fixture_refill_requested"
+    LOCATION_CHECKIN = "location_checkin"
+    LOCATION_FEEDBACK = "location_feedback"
+    SECURITY_REPORT = "security_report"
 
     EVENT_TYPE_CHOICES = [
         (REORDER_REQUEST_CREATED, "Reorder Request Created"),
@@ -616,6 +619,9 @@ class WebHook(models.Model):
         (PURCHASE_ORDER_CREATED, "Purchase Order Created"),
         (DELIVERY_RECEIVED, "Delivery Received"),
         (FIXTURE_REFILL_REQUESTED, "Fixture Refill Requested"),
+        (LOCATION_CHECKIN, "Location Check-in"),
+        (LOCATION_FEEDBACK, "Location Feedback"),
+        (SECURITY_REPORT, "Security Report"),
     ]
 
     # Core fields

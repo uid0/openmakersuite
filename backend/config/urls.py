@@ -28,6 +28,7 @@ urlpatterns = [
     path("api/dashboard/", include("dashboard.urls")),
     path("api/forgekey/", include("forgekey.urls")),
     path("api/customization/", include("customization.urls")),
+    path("api/location-checkins/", include("location_checkins.urls")),
 ]
 
 # Serve media files during development

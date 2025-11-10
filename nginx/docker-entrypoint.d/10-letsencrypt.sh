@@ -20,14 +20,14 @@ cert_exists_and_valid() {
     if [ ! -f "$CERT_PATH/fullchain.pem" ] || [ ! -f "$CERT_PATH/privkey.pem" ]; then
         return 1
     fi
-    
+
     # Check if certificate is valid and not expiring soon (within 30 days)
     # Use openssl to check certificate validity
     if openssl x509 -in "$CERT_PATH/fullchain.pem" -noout -checkend 2592000 >/dev/null 2>&1; then
         # Certificate is valid for at least 30 days (2592000 seconds)
         return 0
     fi
-    
+
     return 1
 }
 
@@ -82,7 +82,7 @@ if [ -n "${LETSENCRYPT_EMAIL:-}" ]; then
         sleep 5
         request_cert || true
     ) &
-    
+
     # Set up cron job to renew certificates daily (certbot renew only renews if expiring within 30 days)
     printf '0 3 * * * certbot renew --webroot -w %s --quiet --deploy-hook "nginx -s reload"\n' "$WEBROOT" > /etc/crontabs/root
     crond -b -l 2

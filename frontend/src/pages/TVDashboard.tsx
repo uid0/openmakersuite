@@ -3,18 +3,19 @@
  * Shows items that have been reordered and are in progress
  * Features: Location-specific filtering, QR codes, anti-burn-in
  */
-import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { QRCodeSVG as QRCode } from 'qrcode.react';
-import { InventoryItem } from '../types';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { useSiteSettings } from '../hooks/useSiteSettings';
-import '../styles/TVDashboard.css';
+import { resolveApiBaseUrl } from '../services/api';
 import '../styles/InventoryList.css';
+import '../styles/TVDashboard.css';
+import { InventoryItem } from '../types';
 
 // Create a dedicated API instance for TV Dashboard that doesn't send auth headers
 const tvAPI = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
+  baseURL: resolveApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
@@ -22,7 +23,7 @@ const tvAPI = axios.create({
 
 const TVDashboard: React.FC = () => {
   const { location } = useParams<{ location?: string }>();
-  const { settings: siteSettings, loading: settingsLoading } = useSiteSettings();
+  const { settings: siteSettings } = useSiteSettings();
   const [reorderedItems, setReorderedItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,9 +32,11 @@ const TVDashboard: React.FC = () => {
   const [burnInOffset, setBurnInOffset] = useState({ x: 0, y: 0 });
   const [itemOrder, setItemOrder] = useState<number[]>([]);
   const [emptyStateSlide, setEmptyStateSlide] = useState(0); // 0 = "No items", 1 = "How to scan"
+  const [currentItemRotationIndex, setCurrentItemRotationIndex] = useState(0); // For rotating through items when > 3
 
   // Location-specific configuration with site settings support
-  const getLocationConfig = () => {
+  // Memoize config to prevent unnecessary re-renders and API calls
+  const config = useMemo(() => {
     // Use site settings if available, fall back to environment variables
     const siteName = siteSettings?.site_name || process.env.REACT_APP_DASHBOARD_TITLE || 'Dallas Makerspace Inventory';
     const dashboardTitle = siteSettings?.dashboard_title || siteName;
@@ -64,10 +67,7 @@ const TVDashboard: React.FC = () => {
     }
 
     return baseConfig;
-  };
-
-  // Update config when site settings change
-  const config = getLocationConfig();
+  }, [siteSettings, location]);
 
   // Configurable footer messages - can be set via environment variables
   const footerMessages = useState(() => {
@@ -92,7 +92,10 @@ const TVDashboard: React.FC = () => {
   // Rotation interval - configurable via environment variable
   const rotationInterval = parseInt(process.env.REACT_APP_MESSAGE_ROTATION_SECONDS || '10') * 1000;
 
-  const fetchReorderedItems = async () => {
+  // Extract locationFilter to make fetchReorderedItems more stable
+  const locationFilter = useMemo(() => (config as any).locationFilter, [config]);
+
+  const fetchReorderedItems = useCallback(async () => {
     try {
       setError(null);
       // Use dedicated TV API instance that doesn't send auth headers
@@ -100,9 +103,9 @@ const TVDashboard: React.FC = () => {
 
       // Filter items by location if specified
       let filteredItems = response.data;
-      if ((config as any).locationFilter) {
+      if (locationFilter) {
         filteredItems = response.data.filter(item =>
-          item.location && item.location.toLowerCase().includes((config as any).locationFilter)
+          item.location && item.location.toLowerCase().includes(locationFilter)
         );
       }
 
@@ -132,7 +135,7 @@ const TVDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [locationFilter]);
 
   useEffect(() => {
     // Initial fetch
@@ -142,7 +145,7 @@ const TVDashboard: React.FC = () => {
     const interval = setInterval(fetchReorderedItems, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchReorderedItems]);
 
   // Message rotation effect
   useEffect(() => {
@@ -170,15 +173,15 @@ const TVDashboard: React.FC = () => {
 
   // Anti-burn-in effects
   useEffect(() => {
-    // Pixel shifting every 3 minutes to prevent burn-in
+    // Pixel shifting every 90 seconds to prevent burn-in (more frequent)
     const pixelShiftInterval = setInterval(() => {
       setBurnInOffset(prev => ({
-        x: (prev.x + 1) % 4, // Shift up to 3 pixels
-        y: (prev.y + 1) % 3
+        x: (Math.random() * 6 - 3), // Random shift between -3 and 3 pixels
+        y: (Math.random() * 6 - 3)
       }));
-    }, 180000); // 3 minutes
+    }, 90000); // 90 seconds
 
-    // Content reordering every 5 minutes
+    // Content reordering every 2 minutes (more frequent)
     const reorderInterval = setInterval(() => {
       setItemOrder(prevOrder => {
         const newOrder = [...prevOrder];
@@ -189,13 +192,34 @@ const TVDashboard: React.FC = () => {
         }
         return newOrder;
       });
-    }, 300000); // 5 minutes
+    }, 120000); // 2 minutes
 
     return () => {
       clearInterval(pixelShiftInterval);
       clearInterval(reorderInterval);
     };
   }, []);
+
+  // Item rotation - if more than 3 items, rotate through them showing 3 at a time
+  useEffect(() => {
+    if (reorderedItems.length <= 3) {
+      setCurrentItemRotationIndex(0);
+      return;
+    }
+
+    // Reset rotation index when items change
+    setCurrentItemRotationIndex(0);
+
+    // Rotate every 15 seconds to show different items
+    const rotationInterval = setInterval(() => {
+      setCurrentItemRotationIndex(prev => {
+        const maxIndex = Math.ceil(reorderedItems.length / 3) - 1;
+        return (prev + 1) % (maxIndex + 1);
+      });
+    }, 15000); // 15 seconds
+
+    return () => clearInterval(rotationInterval);
+  }, [reorderedItems.length]);
 
   const getOrderInfo = (item: InventoryItem) => {
     const request = item.active_reorder_request;
@@ -272,7 +296,7 @@ const TVDashboard: React.FC = () => {
       return imageUrl;
     }
     // If URL is relative, combine with base URL
-    const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+    const baseUrl = resolveApiBaseUrl();
     return `${baseUrl.replace(/\/$/, '')}${imageUrl}`;
   };
 
@@ -382,11 +406,12 @@ const TVDashboard: React.FC = () => {
   };
 
   return (
-    <div
+      <div
       className="tv-dashboard"
       style={{
         transform: `translate(${burnInOffset.x}px, ${burnInOffset.y}px)`,
-        transition: 'transform 2s ease-in-out'
+        transition: 'transform 3s ease-in-out',
+        animation: 'subtlePulse 30s ease-in-out infinite'
       }}
     >
       <header className="dashboard-header">
@@ -519,11 +544,20 @@ const TVDashboard: React.FC = () => {
           </div>
         ) : (
           <div className="items-grid">
-            {itemOrder.map((originalIndex) => {
-              if (originalIndex >= reorderedItems.length) return null;
-              const item = reorderedItems[originalIndex];
-              const orderInfo = getOrderInfo(item);
-              return (
+            {(() => {
+              // If more than 3 items, show only 3 at a time with rotation
+              const itemsToShow = reorderedItems.length > 3
+                ? itemOrder.slice(
+                    currentItemRotationIndex * 3,
+                    (currentItemRotationIndex * 3) + 3
+                  )
+                : itemOrder;
+
+              return itemsToShow.map((originalIndex) => {
+                if (originalIndex >= reorderedItems.length) return null;
+                const item = reorderedItems[originalIndex];
+                const orderInfo = getOrderInfo(item);
+                return (
                 <div key={item.id} className={`item-card ${getOrderStatusClass(orderInfo.status)}`}>
                   <div className="item-image">
                     {(item.image || item.thumbnail) ? (
@@ -632,8 +666,9 @@ const TVDashboard: React.FC = () => {
                           <div
                             className="progress-bar"
                             style={{
-                              '--progress-width': `${progressPercentage}%`
-                            } as React.CSSProperties & { '--progress-width': string }}
+                              '--progress-width': `${progressPercentage}%`,
+                              '--progress-width-num': progressPercentage
+                            } as React.CSSProperties & { '--progress-width': string; '--progress-width-num': number }}
                           >
                             {stages.map((stage, index) => (
                               <div key={stage.key} className="progress-stage">
@@ -685,8 +720,9 @@ const TVDashboard: React.FC = () => {
                   </div>
 
                 </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         )}
       </main>
@@ -722,7 +758,7 @@ const TVDashboard: React.FC = () => {
             </div>
           )}
           <div className="debug-info" style={{ fontSize: '0.9rem', opacity: 0.7 }}>
-            {location ? `Location: ${location} | ` : ''}API: {process.env.REACT_APP_API_URL || 'http://localhost:8000'}
+            {location ? `Location: ${location} | ` : ''}API: {resolveApiBaseUrl()}
           </div>
         </div>
       </footer>

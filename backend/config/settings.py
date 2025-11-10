@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     "dashboard",
     "forgekey",
     "customization",
+    "location_checkins",
 ]
 
 MIDDLEWARE = [
@@ -386,7 +387,7 @@ LOGGING = {
         },
         "django.db.backends": {
             "handlers": ["console_debug"],
-            "level": "DEBUG",
+            "level": "WARNING",
             "propagate": False,
         },
         "inventory": {

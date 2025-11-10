@@ -14,6 +14,7 @@ from .views import (
     FixtureViewSet,
     InventoryItemViewSet,
     ItemSupplierViewSet,
+    LocationViewSet,
     PriceHistoryViewSet,
     SupplierViewSet,
     UsageLogViewSet,
@@ -22,6 +23,7 @@ from .views import (
 router = DefaultRouter()
 router.register(r"suppliers", SupplierViewSet)
 router.register(r"categories", CategoryViewSet)
+router.register(r"locations", LocationViewSet)
 router.register(r"items", InventoryItemViewSet)
 router.register(r"assets", AssetViewSet)
 router.register(r"asset-parts", AssetPartViewSet)

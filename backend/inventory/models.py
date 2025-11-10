@@ -41,6 +41,12 @@ class Location(models.Model):
     is_active = models.BooleanField(
         default=True, help_text="Inactive locations are hidden from selection"
     )
+    qr_code = models.ImageField(
+        upload_to="inventory/location_qrcodes/",
+        blank=True,
+        null=True,
+        help_text="QR code for location check-ins and feedback",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

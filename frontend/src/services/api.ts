@@ -5,21 +5,40 @@ import * as Sentry from '@sentry/react';
 import axios from 'axios';
 import { Asset, CreateReorderRequest, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SiteSettings } from '../types';
 
-const resolveApiBaseUrl = () => {
+/**
+ * Resolves the API base URL based on environment.
+ * - If REACT_APP_API_URL is set, uses that (for production/docker)
+ * - If on localhost and not set, uses direct Django backend URL
+ * - Otherwise, uses relative URL for nginx forwarding
+ */
+export const resolveApiBaseUrl = () => {
   const rawBase = process.env.REACT_APP_API_URL;
-  const defaultBase = 'http://localhost:8000/api';
 
-  if (!rawBase || rawBase.trim().length === 0) {
-    return defaultBase;
+  // If REACT_APP_API_URL is explicitly set, use it (handles production and docker dev)
+  if (rawBase && rawBase.trim().length > 0) {
+    const trimmedBase = rawBase.replace(/\/+$/, '');
+
+    if (trimmedBase.endsWith('/api') || trimmedBase.includes('/api/')) {
+      return trimmedBase;
+    }
+
+    return `${trimmedBase}/api`;
   }
 
-  const trimmedBase = rawBase.replace(/\/+$/, '');
+  // If not set, detect environment
+  const isLocalhost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+     window.location.hostname === '127.0.0.1' ||
+     window.location.hostname === '[::1]');
 
-  if (trimmedBase.endsWith('/api') || trimmedBase.includes('/api/')) {
-    return trimmedBase;
+  // When developing locally (no nginx), use direct Django backend
+  if (isLocalhost) {
+    return 'http://localhost:8000/api';
   }
 
-  return `${trimmedBase}/api`;
+  // When deployed (with nginx), use relative URL for nginx forwarding
+  return '/api';
 };
 
 const API_BASE_URL = resolveApiBaseUrl();
@@ -107,6 +126,9 @@ export const inventoryAPI = {
       quantity,
       notes,
     }),
+
+  getLocation: (id: string) =>
+    api.get(`/inventory/locations/${id}/`),
 };
 
 // Assets API
@@ -246,6 +268,43 @@ export const authAPI = {
 export const customizationAPI = {
   getSiteSettings: () =>
     api.get<SiteSettings>('/customization/settings/'),
+};
+
+// Location Check-in API
+export const locationCheckinAPI = {
+  checkin: (locationId: string, data: {
+    checkin_type?: 'volunteer' | 'contractor' | 'anonymous';
+    notes?: string;
+  }) =>
+    api.post(`/location-checkins/checkins/checkin/`, {
+      location_id: locationId,
+      ...data,
+    }),
+
+  submitFeedback: (locationId: string, data: {
+    feedback_type: 'positive' | 'neutral' | 'negative';
+    message: string;
+  }) =>
+    api.post(`/location-checkins/feedback/submit/`, {
+      location_id: locationId,
+      ...data,
+    }),
+
+  reportSecurity: (locationId: string, data: {
+    report_type: 'cleaning' | 'safety';
+    is_urgent?: boolean;
+    description?: string;
+  }) =>
+    api.post(`/location-checkins/security-reports/report/`, {
+      location_id: locationId,
+      ...data,
+    }),
+
+  getTasks: (params?: { location?: string; status?: string }) =>
+    api.get('/location-checkins/tasks/', { params }),
+
+  completeTask: (taskId: string, notes?: string) =>
+    api.post(`/location-checkins/tasks/${taskId}/complete/`, { notes }),
 };
 
 export default api;

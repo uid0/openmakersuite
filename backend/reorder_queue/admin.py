@@ -566,7 +566,7 @@ class WebHookAdmin(admin.ModelAdmin):
         ),
     )
 
-    actions = ["test_selected_webhooks", "reset_statistics"]
+    actions = ["test_selected_webhooks", "test_selected_webhooks_sync", "reset_statistics"]
 
     @admin.display(description="Success Rate")
     def success_rate_display(self, obj):
@@ -597,9 +597,9 @@ class WebHookAdmin(admin.ModelAdmin):
         total = obj.success_count + obj.failure_count
         return format_html("{} total", total)
 
-    @admin.action(description="Test selected webhooks")
+    @admin.action(description="Test selected webhooks (async)")
     def test_selected_webhooks(self, request, queryset):
-        """Test selected webhook configurations."""
+        """Test selected webhook configurations asynchronously via Celery."""
         from .tasks import run_webhook_test
 
         count = 0
@@ -611,6 +611,102 @@ class WebHookAdmin(admin.ModelAdmin):
             request,
             f"{count} webhook test(s) queued. Check the webhook statistics for results.",
         )
+
+    @admin.action(description="Test selected webhooks (sync)")
+    def test_selected_webhooks_sync(self, request, queryset):
+        """Test selected webhook configurations synchronously and show immediate results."""
+        import hashlib
+        import hmac
+        import json
+        import time
+
+        from django.utils import timezone
+
+        import requests
+
+        results = []
+        for webhook in queryset:
+            # Prepare test payload
+            test_payload = {
+                "event": webhook.event_type,
+                "test": True,
+                "timestamp": timezone.now().isoformat(),
+                "data": {
+                    "message": "This is a test webhook notification",
+                    "webhook_id": webhook.id,
+                    "webhook_name": webhook.name,
+                },
+            }
+
+            start_time = time.time()
+
+            try:
+                # Prepare request
+                headers = {
+                    "Content-Type": "application/json",
+                    "User-Agent": "DMS-Inventory-Webhook/1.0",
+                }
+
+                # Add custom headers
+                if webhook.headers:
+                    headers.update(webhook.headers)
+
+                # Prepare payload
+                json_payload = json.dumps(test_payload)
+
+                # Add HMAC signature if configured
+                if webhook.secret:
+                    signature = hmac.new(
+                        webhook.secret.encode("utf-8"),
+                        json_payload.encode("utf-8"),
+                        hashlib.sha256,
+                    ).hexdigest()
+                    headers["X-Webhook-Signature"] = f"sha256={signature}"
+
+                # Send test webhook
+                response = requests.post(
+                    webhook.url, data=json_payload, headers=headers, timeout=30
+                )
+
+                response_time_ms = (time.time() - start_time) * 1000
+
+                response.raise_for_status()
+
+                results.append(
+                    format_html(
+                        '<span style="color: green;">✓ {}: Success ({}ms, status {})</span>',
+                        webhook.name,
+                        round(response_time_ms, 2),
+                        response.status_code,
+                    )
+                )
+
+            except requests.exceptions.RequestException as e:
+                response_time_ms = (time.time() - start_time) * 1000
+                results.append(
+                    format_html(
+                        '<span style="color: red;">✗ {}: Failed ({}ms) - {}</span>',
+                        webhook.name,
+                        round(response_time_ms, 2),
+                        str(e)[:100],
+                    )
+                )
+            except Exception as e:
+                response_time_ms = (time.time() - start_time) * 1000
+                results.append(
+                    format_html(
+                        '<span style="color: red;">✗ {}: Error ({}ms) - {}</span>',
+                        webhook.name,
+                        round(response_time_ms, 2),
+                        str(e)[:100],
+                    )
+                )
+
+        if results:
+            message = format_html("<br>".join(results))
+            self.message_user(request, message)
+        else:
+            self.message_user(request, "No webhooks selected.")
 
     @admin.action(description="Reset statistics for selected webhooks")
     def reset_statistics(self, request, queryset):

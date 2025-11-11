@@ -223,9 +223,13 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
     def get_thumbnail(self, obj):
         """Return the thumbnail URL when available."""
-
         try:
-            return obj.thumbnail.url if obj.thumbnail else None
+            if obj.thumbnail:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.thumbnail.url)
+                return obj.thumbnail.url
+            return None
         except Exception:
             return None
 
@@ -553,7 +557,12 @@ class AssetSerializer(serializers.ModelSerializer):
     def get_thumbnail_url(self, obj):
         """Return the thumbnail URL when available."""
         try:
-            return obj.thumbnail.url if obj.thumbnail else None
+            if obj.thumbnail:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.thumbnail.url)
+                return obj.thumbnail.url
+            return None
         except Exception:
             return None
 

@@ -11,6 +11,7 @@ from .views import (
     OrderReceiptViewSet,
     PurchaseOrderViewSet,
     ReorderRequestViewSet,
+    WebHookViewSet,
 )
 
 router = DefaultRouter()
@@ -18,6 +19,7 @@ router.register(r"requests", ReorderRequestViewSet)
 router.register(r"purchase-orders", PurchaseOrderViewSet)
 router.register(r"receipts", OrderReceiptViewSet)
 router.register(r"analytics", AnalyticsViewSet, basename="analytics")
+router.register(r"webhooks", WebHookViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),

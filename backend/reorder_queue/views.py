@@ -24,6 +24,7 @@ from .models import (
     PurchaseOrder,
     PurchaseOrderItem,
     ReorderRequest,
+    WebHook,
 )
 from .serializers import (
     BarcodeReceiptSerializer,
@@ -34,6 +35,9 @@ from .serializers import (
     ReorderRequestCreateSerializer,
     ReorderRequestSerializer,
     SupplierPerformanceSerializer,
+    WebHookCreateSerializer,
+    WebHookSerializer,
+    WebHookTestResultSerializer,
 )
 
 
@@ -1212,3 +1216,126 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 "last_updated": timezone.now().isoformat(),
             }
         )
+
+
+class WebHookViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for webhook configurations.
+
+    Allows authenticated users to manage webhooks and test them.
+    """
+
+    authentication_classes = (JWTAuthentication,)
+    permission_classes = [IsAuthenticated]
+    queryset = WebHook.objects.all()
+    serializer_class = WebHookSerializer
+
+    def get_serializer_class(self):
+        """Use create serializer for POST requests."""
+        if self.action == "create":
+            return WebHookCreateSerializer
+        return WebHookSerializer
+
+    @action(detail=True, methods=["post"], url_path="test", url_name="test")
+    def test(self, request, pk=None):
+        """
+        Test a webhook by sending a test payload.
+
+        This sends a test webhook notification immediately and returns the result.
+        """
+        import hashlib
+        import hmac
+        import json
+        import time
+
+        import requests
+
+        webhook = self.get_object()
+
+        # Prepare test payload
+        test_payload = {
+            "event": webhook.event_type,
+            "test": True,
+            "timestamp": timezone.now().isoformat(),
+            "data": {
+                "message": "This is a test webhook notification",
+                "webhook_id": webhook.id,
+                "webhook_name": webhook.name,
+            },
+        }
+
+        start_time = time.time()
+
+        try:
+            # Prepare request
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "DMS-Inventory-Webhook/1.0",
+            }
+
+            # Add custom headers
+            if webhook.headers:
+                headers.update(webhook.headers)
+
+            # Prepare payload
+            json_payload = json.dumps(test_payload)
+
+            # Add HMAC signature if configured
+            if webhook.secret:
+                signature = hmac.new(
+                    webhook.secret.encode("utf-8"),
+                    json_payload.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                headers["X-Webhook-Signature"] = f"sha256={signature}"
+
+            # Send test webhook
+            response = requests.post(webhook.url, data=json_payload, headers=headers, timeout=30)
+
+            response_time_ms = (time.time() - start_time) * 1000
+
+            response.raise_for_status()
+
+            # Record success (but don't update statistics for test)
+            result = {
+                "webhook_id": webhook.id,
+                "webhook_name": webhook.name,
+                "success": True,
+                "status_code": response.status_code,
+                "response_time_ms": round(response_time_ms, 2),
+                "response_body": response.text[:500],  # First 500 chars
+                "tested_at": timezone.now(),
+            }
+
+            serializer = WebHookTestResultSerializer(result)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except requests.exceptions.RequestException as e:
+            response_time_ms = (time.time() - start_time) * 1000
+            result = {
+                "webhook_id": webhook.id,
+                "webhook_name": webhook.name,
+                "success": False,
+                "status_code": None,
+                "response_time_ms": round(response_time_ms, 2),
+                "error_message": str(e),
+                "tested_at": timezone.now(),
+            }
+
+            serializer = WebHookTestResultSerializer(result)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            response_time_ms = (time.time() - start_time) * 1000
+            result = {
+                "webhook_id": webhook.id,
+                "webhook_name": webhook.name,
+                "success": False,
+                "status_code": None,
+                "response_time_ms": round(response_time_ms, 2),
+                "error_message": f"Unexpected error: {str(e)}",
+                "tested_at": timezone.now(),
+            }
+
+            serializer = WebHookTestResultSerializer(result)
+            return Response(serializer.data, status=status.HTTP_200_OK)

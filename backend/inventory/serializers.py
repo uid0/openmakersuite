@@ -612,6 +612,10 @@ class AssetSerializer(serializers.ModelSerializer):
         if obj.is_user_admin(user):
             return True
 
+        # Check if user can operate assets in Implementing/Testing status
+        if obj.status in [obj.IMPLEMENTING, obj.TESTING]:
+            return obj.can_user_operate(user)
+
         # Check if user's groups are in groups_can_enable
         user_groups = user.groups.all()
         if obj.groups_can_enable.exists():

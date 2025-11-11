@@ -10,7 +10,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
@@ -886,6 +886,16 @@ class AssetViewSet(viewsets.ModelViewSet):
                 {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
             )
 
+        # Check if user can operate assets in Implementing/Testing status
+        if asset.status in [asset.IMPLEMENTING, asset.TESTING]:
+            if not asset.can_user_operate(user):
+                return Response(
+                    {
+                        "error": "Only Maintainers, Group Admins, Logistics, or COO can operate assets in Implementing or Testing status"
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         # Check if user can enable this asset
         # Admins can always enable
         if not asset.is_user_admin(user):
@@ -908,6 +918,23 @@ class AssetViewSet(viewsets.ModelViewSet):
     def disable(self, request, pk=None):
         """Disable an asset (set is_active=False)."""
         asset = self.get_object()
+        user = request.user
+
+        if not user.is_authenticated:
+            return Response(
+                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Check if user can operate assets in Implementing/Testing status
+        if asset.status in [asset.IMPLEMENTING, asset.TESTING]:
+            if not asset.can_user_operate(user):
+                return Response(
+                    {
+                        "error": "Only Maintainers, Group Admins, Logistics, or COO can operate assets in Implementing or Testing status"
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         asset.is_active = False
         asset.save(update_fields=["is_active"])
         serializer = self.get_serializer(asset)
@@ -1335,3 +1362,99 @@ class FixtureRefillRequestViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(refill_request)
         return Response(serializer.data)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([AllowAny])
+def lookup_by_code(request):
+    """
+    Look up an asset, inventory item, or location by access code.
+
+    Accepts GET or POST with 'code' parameter.
+    Returns the appropriate item with its type and redirect URL.
+    """
+    code = request.data.get("code") or request.query_params.get("code", "").strip().upper()
+
+    if not code:
+        return Response(
+            {"error": "Code parameter is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate code format (6 characters, alphanumeric, excluding I, 0, O, 1, L)
+    if len(code) != 6:
+        return Response(
+            {"error": "Code must be exactly 6 characters"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check for invalid characters
+    invalid_chars = set(code) - set("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+    if invalid_chars:
+        return Response(
+            {"error": f"Code contains invalid characters: {', '.join(invalid_chars)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Try to find in each model
+    from django.conf import settings
+
+    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+
+    # Check Asset
+    try:
+        asset = Asset.objects.get(access_code=code)
+        # Log the scan (same as QR code scanning) - update last_scanned_at
+        from django.utils import timezone
+        asset.last_scanned_at = timezone.now()
+        asset.save(update_fields=["last_scanned_at"])
+        
+        return Response(
+            {
+                "type": "asset",
+                "id": str(asset.id),
+                "name": asset.name,
+                "url": f"{frontend_url}/scan/asset/{asset.id}",
+            }
+        )
+    except Asset.DoesNotExist:
+        pass
+
+    # Check InventoryItem
+    try:
+        item = InventoryItem.objects.get(access_code=code)
+        # For items, we don't have a scan endpoint, but we could log usage if needed
+        # The scan page itself will handle any logging
+        
+        return Response(
+            {
+                "type": "item",
+                "id": str(item.id),
+                "name": item.name,
+                "url": f"{frontend_url}/scan/{item.id}",
+            }
+        )
+    except InventoryItem.DoesNotExist:
+        pass
+
+    # Check Location
+    try:
+        location = Location.objects.get(access_code=code)
+        # Locations don't have scan logging currently, but the scan page handles it
+        
+        return Response(
+            {
+                "type": "location",
+                "id": str(location.id),
+                "name": location.name,
+                "url": f"{frontend_url}/scan/location/{location.id}",
+            }
+        )
+    except Location.DoesNotExist:
+        pass
+
+    # Not found
+    return Response(
+        {"error": "Code not found"},
+        status=status.HTTP_404_NOT_FOUND,
+    )

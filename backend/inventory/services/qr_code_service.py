@@ -10,12 +10,13 @@ from typing import Optional
 
 from django.conf import settings
 from django.core.files import File
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 import qrcode
 from qrcode.image.pil import PilImage
 
 from customization.models import SiteSettings
+from inventory.utils.code_generator import generate_unique_code
 
 
 class QRCodeService:
@@ -73,12 +74,7 @@ class QRCodeService:
         # Validate the QR code
         self._validate_qr_code(img, url)
 
-        # Save to BytesIO
-        buffer = BytesIO()
-        img.save(buffer, format="PNG")
-        buffer.seek(0)
-
-        return buffer
+        return img
 
     def _embed_logo(self, qr_img: PilImage, logo_file) -> PilImage:
         """
@@ -226,11 +222,30 @@ class QRCodeService:
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         scan_url = f"{frontend_url}/scan/asset/{asset.id}"
 
-        qr_buffer = self.generate_qr_code_image(scan_url)
+        # Generate or get access code
+        if not asset.access_code:
+            from inventory.models import Asset
+
+            asset.access_code = generate_unique_code(Asset, "access_code")
+            asset.save(update_fields=["access_code"])
+
+        # Generate QR code image
+        qr_img = self.generate_qr_code_image(scan_url)
+
+        # Add access code text below QR code
+        qr_img = self._add_code_text(qr_img, asset.access_code)
+
+        # Convert to BytesIO for saving
+        buffer = BytesIO()
+        qr_img.save(buffer, format="PNG")
+        buffer.seek(0)
 
         filename = f"asset_qr_{asset.id}.png"
+        # Delete old QR code if it exists (to force regeneration)
+        if asset.qr_code:
+            asset.qr_code.delete(save=False)
         # Save the QR code file and update the model
-        asset.qr_code.save(filename, File(qr_buffer), save=True)
+        asset.qr_code.save(filename, File(buffer), save=True)
         # Refresh from database to ensure model has the latest QR code path
         asset.refresh_from_db()
 
@@ -249,11 +264,30 @@ class QRCodeService:
         base_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         scan_url = f"{base_url}/scan/{item.id}"
 
-        qr_buffer = self.generate_qr_code_image(scan_url)
+        # Generate or get access code
+        if not item.access_code:
+            from inventory.models import InventoryItem
+
+            item.access_code = generate_unique_code(InventoryItem, "access_code")
+            item.save(update_fields=["access_code"])
+
+        # Generate QR code image
+        qr_img = self.generate_qr_code_image(scan_url)
+
+        # Add access code text below QR code
+        qr_img = self._add_code_text(qr_img, item.access_code)
+
+        # Convert to BytesIO for saving
+        buffer = BytesIO()
+        qr_img.save(buffer, format="PNG")
+        buffer.seek(0)
 
         filename = f"qr_{item.id}.png"
+        # Delete old QR code if it exists (to force regeneration)
+        if item.qr_code:
+            item.qr_code.delete(save=False)
         # Save the QR code file and update the model
-        item.qr_code.save(filename, File(qr_buffer), save=True)
+        item.qr_code.save(filename, File(buffer), save=True)
         # Refresh from database to ensure model has the latest QR code path
         item.refresh_from_db()
 
@@ -272,13 +306,94 @@ class QRCodeService:
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         scan_url = f"{frontend_url}/scan/location/{location.id}"
 
-        qr_buffer = self.generate_qr_code_image(scan_url)
+        # Generate or get access code
+        if not location.access_code:
+            from inventory.models import Location
+
+            location.access_code = generate_unique_code(Location, "access_code")
+            location.save(update_fields=["access_code"])
+
+        # Generate QR code image
+        qr_img = self.generate_qr_code_image(scan_url)
+
+        # Add access code text below QR code
+        qr_img = self._add_code_text(qr_img, location.access_code)
+
+        # Convert to BytesIO for saving
+        buffer = BytesIO()
+        qr_img.save(buffer, format="PNG")
+        buffer.seek(0)
 
         filename = f"location_qr_{location.id}.png"
+        # Delete old QR code if it exists (to force regeneration)
+        if location.qr_code:
+            location.qr_code.delete(save=False)
         # Save the QR code file and update the model
-        location.qr_code.save(filename, File(qr_buffer), save=True)
+        location.qr_code.save(filename, File(buffer), save=True)
         # Refresh from database to ensure model has the latest QR code path
         location.refresh_from_db()
 
         return location
+
+    def _add_code_text(self, img: PilImage, code: str) -> PilImage:
+        """
+        Add access code text below the QR code image.
+
+        Args:
+            img: The QR code PIL image
+            code: The access code to display
+
+        Returns:
+            PIL Image with code text added
+        """
+        # Convert to RGB if needed
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+
+        # Calculate dimensions
+        qr_width, qr_height = img.size
+        padding = 20  # Padding below QR code
+        text_height = 40  # Height for text
+        new_height = qr_height + padding + text_height
+
+        # Create new image with space for text
+        new_img = Image.new("RGB", (qr_width, new_height), "white")
+        new_img.paste(img, (0, 0))
+
+        # Draw text
+        draw = ImageDraw.Draw(new_img)
+        
+        # Try to use a nice font, fallback to default if not available
+        try:
+            # Try to use a larger, bold font
+            font_size = 32
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+        except (OSError, IOError):
+            try:
+                # Try default font
+                font = ImageFont.load_default()
+            except:
+                font = None
+
+        # Calculate text position (centered)
+        if font:
+            # Get text bounding box
+            bbox = draw.textbbox((0, 0), code, font=font)
+            text_width = bbox[2] - bbox[0]
+        else:
+            # Estimate width if no font
+            text_width = len(code) * 20
+
+        text_x = (qr_width - text_width) // 2
+        text_y = qr_height + padding
+
+        # Draw text
+        draw.text(
+            (text_x, text_y),
+            code,
+            fill="black",
+            font=font if font else None,
+        )
+
+        return new_img
 

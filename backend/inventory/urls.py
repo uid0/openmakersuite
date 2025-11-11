@@ -18,6 +18,7 @@ from .views import (
     PriceHistoryViewSet,
     SupplierViewSet,
     UsageLogViewSet,
+    lookup_by_code,
 )
 
 router = DefaultRouter()
@@ -35,4 +36,5 @@ router.register(r"fixture-refill-requests", FixtureRefillRequestViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("lookup-code/", lookup_by_code, name="lookup-by-code"),
 ]

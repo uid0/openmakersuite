@@ -142,3 +142,47 @@ def refresh_token(request):
 
     except Exception:
         return Response({"detail": "Invalid refresh token"}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def create_test_membership(request):
+    """
+    Test helper endpoint to create an active membership for a user.
+    Only available in DEBUG mode for E2E testing.
+    """
+    from django.conf import settings
+    from membership.models import Membership
+
+    if not settings.DEBUG:
+        return Response(
+            {"detail": "This endpoint is only available in DEBUG mode"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    username = request.data.get("username", "").strip()
+    if not username:
+        return Response({"detail": "Username is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(username=username)
+    except User.DoesNotExist:
+        return Response(
+            {"detail": f"User '{username}' not found"}, status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Create an active membership for the user
+    membership = Membership.objects.create(
+        membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY,
+        status=Membership.STATUS_ACTIVE,
+    )
+    membership.users.add(user)
+
+    return Response(
+        {
+            "detail": f"Active membership created for {username}",
+            "membership_id": membership.id,
+            "username": username,
+        },
+        status=status.HTTP_201_CREATED,
+    )

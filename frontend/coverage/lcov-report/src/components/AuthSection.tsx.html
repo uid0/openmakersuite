@@ -15,41 +15,41 @@
         }
     </style>
 </head>
-
+    
 <body>
 <div class='wrapper'>
     <div class='pad1'>
         <h1><a href="../../index.html">All files</a> / <a href="index.html">src/components</a> AuthSection.tsx</h1>
         <div class='clearfix'>
-
+            
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
                 <span class='fraction'>0/79</span>
             </div>
-
-
+        
+            
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
                 <span class='fraction'>0/25</span>
             </div>
-
-
+        
+            
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
                 <span class='fraction'>0/12</span>
             </div>
-
-
+        
+            
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
                 <span class='fraction'>0/79</span>
             </div>
-
-
+        
+            
         </div>
         <p class="quiet">
             Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
@@ -552,7 +552,7 @@ const AuthSection: React.FC&lt;AuthSectionProps&gt; = <span class="cstat-no" tit
   const [username, setUsername] = <span class="cstat-no" title="statement not covered" >useState&lt;string&gt;('');</span>
   const [showLoginForm, setShowLoginForm] = <span class="cstat-no" title="statement not covered" >useState&lt;boolean&gt;(false);</span>
   const [showRegisterForm, setShowRegisterForm] = <span class="cstat-no" title="statement not covered" >useState&lt;boolean&gt;(false);</span>
-
+&nbsp;
   // Form states
   const [loginUsername, setLoginUsername] = <span class="cstat-no" title="statement not covered" >useState&lt;string&gt;('');</span>
   const [loginPassword, setLoginPassword] = <span class="cstat-no" title="statement not covered" >useState&lt;string&gt;('');</span>
@@ -579,12 +579,12 @@ const AuthSection: React.FC&lt;AuthSectionProps&gt; = <span class="cstat-no" tit
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    try {</span>
       const response = <span class="cstat-no" title="statement not covered" >await authAPI.login(loginUsername, loginPassword);</span>
-
+&nbsp;
 <span class="cstat-no" title="statement not covered" >      localStorage.setItem('token', response.data.access);</span>
 <span class="cstat-no" title="statement not covered" >      localStorage.setItem('refresh_token', response.data.refresh);</span>
 <span class="cstat-no" title="statement not covered" >      localStorage.setItem('username', loginUsername);</span>
 <span class="cstat-no" title="statement not covered" >      localStorage.setItem('is_staff', String(response.data.is_staff || false));</span>
-
+&nbsp;
 <span class="cstat-no" title="statement not covered" >      setIsLoggedIn(true);</span>
 <span class="cstat-no" title="statement not covered" >      setUsername(loginUsername);</span>
 <span class="cstat-no" title="statement not covered" >      setShowLoginForm(false);</span>
@@ -606,7 +606,7 @@ const AuthSection: React.FC&lt;AuthSectionProps&gt; = <span class="cstat-no" tit
 <span class="cstat-no" title="statement not covered" >    try {</span>
       // Register new user with simple password
       const password = <span class="cstat-no" title="statement not covered" >'makerspace123';</span> // Simple default password for makerspace
-
+&nbsp;
 <span class="cstat-no" title="statement not covered" >      await authAPI.register({</span>
         username: registerUsername,
         email: registerEmail,
@@ -616,11 +616,11 @@ const AuthSection: React.FC&lt;AuthSectionProps&gt; = <span class="cstat-no" tit
 &nbsp;
       // Auto-login after registration
       const loginResponse = <span class="cstat-no" title="statement not covered" >await authAPI.login(registerUsername, password);</span>
-
+&nbsp;
 <span class="cstat-no" title="statement not covered" >      localStorage.setItem('token', loginResponse.data.access);</span>
 <span class="cstat-no" title="statement not covered" >      localStorage.setItem('refresh_token', loginResponse.data.refresh);</span>
 <span class="cstat-no" title="statement not covered" >      localStorage.setItem('username', registerUsername);</span>
-
+&nbsp;
 <span class="cstat-no" title="statement not covered" >      setIsLoggedIn(true);</span>
 <span class="cstat-no" title="statement not covered" >      setUsername(registerUsername);</span>
 <span class="cstat-no" title="statement not covered" >      setShowRegisterForm(false);</span>
@@ -778,7 +778,7 @@ export default AuthSection;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-11-07T07:48:35.442Z
+                at 2025-11-11T08:33:10.011Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
@@ -790,3 +790,4 @@ export default AuthSection;
         <script src="../../block-navigation.js"></script>
     </body>
 </html>
+    

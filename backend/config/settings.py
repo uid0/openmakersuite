@@ -204,10 +204,10 @@ if DEVELOPMENT_MODE:
     CORS_ALLOW_ALL_ORIGINS = True
     CORS_ALLOW_CREDENTIALS = True
 
-FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
+FRONTEND_URL = config("FRONTEND_URL", default="http://192.168.1.36:3000")
 
 # Redis configuration
-REDIS_URL = config("REDIS_URL", default="redis://localhost:6379/0")
+REDIS_URL = config("REDIS_URL", default="redis://192.168.1.36:6379/0")
 
 # Cache configuration
 CACHES = {
@@ -232,9 +232,10 @@ if TESTING:
     CELERY_RESULT_BACKEND = "cache"
     CELERY_CACHE_BACKEND = "memory"
 else:
-    CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+    CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://192.168.1.36:6379/0")
     CELERY_RESULT_BACKEND = "django-db"  # Store results in Django database
-    CELERY_CACHE_BACKEND = "django-cache"  # Use Django cache for intermediate results
+    # Use Django cache for intermediate results
+    CELERY_CACHE_BACKEND = "django-cache"
 
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"

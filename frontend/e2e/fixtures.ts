@@ -17,7 +17,72 @@ declare const process: {
 export const API_BASE_URL = process.env.PLAYWRIGHT_API_URL || 'http://localhost:8000/api';
 
 /**
- * Create a test user via API
+ * Check if the backend API is available
+ */
+export async function checkBackendAvailable(): Promise<boolean> {
+  try {
+    // Try the dashboard health endpoint first
+    const healthUrl = `${API_BASE_URL.replace('/api', '')}/api/dashboard/health/`;
+    const response = await fetch(healthUrl, {
+      method: 'GET',
+      signal: AbortSignal.timeout(2000), // 2 second timeout
+    });
+    if (response.ok) {
+      return true;
+    }
+  } catch {
+    // Health endpoint might not be available, try auth endpoint as fallback
+  }
+  
+  // Try auth endpoint as fallback (should return 400 for bad request, not connection error)
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/login/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(2000),
+    });
+    // Any response (even 400) means backend is up - connection refused would throw
+    return response.status !== 0;
+  } catch (error: any) {
+    // Connection refused or timeout means backend is down
+    if (error.message?.includes('ECONNREFUSED') || error.name === 'AbortError') {
+      return false;
+    }
+    // Other errors might mean backend is up but endpoint doesn't exist
+    return true;
+  }
+}
+
+/**
+ * Create an active membership for a user via test helper endpoint
+ * This endpoint is only available in DEBUG mode
+ */
+export async function createActiveMembershipForUser(
+  username: string,
+  adminToken?: string
+): Promise<void> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/test-membership/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create membership: ${errorText}`);
+    }
+  } catch (error: any) {
+    console.warn(`Could not create membership for ${username}: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Create a test user via API and ensure they can login
  */
 export async function createTestUser(
   username: string,
@@ -51,9 +116,12 @@ export async function createTestUser(
       if (!token) {
         throw new Error('Login succeeded but no access token returned');
       }
+      return { username, password, token };
     } else {
       const errorText = await loginResponse.text();
-      throw new Error(`Failed to create or login user: ${response.statusText}. Login error: ${errorText}`);
+      // If login fails due to membership, try to update user via admin API
+      // For now, we'll throw a more helpful error
+      throw new Error(`Failed to create or login user: ${response.statusText}. Login error: ${errorText}. Note: Test users need active memberships or staff status.`);
     }
   } else {
     const data = await response.json();
@@ -63,10 +131,11 @@ export async function createTestUser(
     }
   }
 
-  // Note: isStaff parameter is not currently supported by the registration endpoint
-  // For tests that need staff users, they should be created via Django admin or
-  // a separate endpoint that supports staff creation
-
+  // Note: Newly registered users won't have memberships, so they can't login
+  // The registration token works, but subsequent logins will fail
+  // For E2E tests, we need to create memberships or make users staff/board members
+  // This should be done in the test setup using an admin token
+  
   return { username, password, token };
 }
 

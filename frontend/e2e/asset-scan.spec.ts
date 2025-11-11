@@ -11,6 +11,7 @@
 import { test, expect } from '@playwright/test';
 import {
   API_BASE_URL,
+  checkBackendAvailable,
   createTestAsset,
   createTestUser,
   dismissWebpackOverlay,
@@ -25,46 +26,59 @@ test.describe('Asset QR Code Scanning', () => {
   let testAsset: any;
   let testUser: { username: string; password: string; token?: string };
   let adminToken: string;
+  let backendAvailable = false;
 
   test.beforeAll(async () => {
-    // Create test user
-    testUser = await createTestUser('testuser', 'testpass123', 'testuser@test.com');
-    if (!testUser.token) {
+    // Check if backend is available
+    backendAvailable = await checkBackendAvailable();
+
+    if (!backendAvailable) {
+      console.warn('Backend not available, skipping E2E tests. Start backend on http://localhost:8000 to run these tests.');
+      return;
+    }
+
+    try {
+      // Create test user first
+      testUser = await createTestUser('testuser', 'testpass123', 'testuser@test.com');
+      
+      // Create active membership for test user (uses test helper endpoint)
+      const { createActiveMembershipForUser } = await import('./fixtures');
+      await createActiveMembershipForUser('testuser');
+      
+      // Now login to get a fresh token (registration token works, but login verifies membership)
       testUser.token = await loginUser(testUser.username, testUser.password);
+
+      // Create admin user for asset creation
+      const adminUser = await createTestUser('admin', 'adminpass123', 'admin@test.com', true);
+      await createActiveMembershipForUser('admin');
+      adminToken = await loginUser('admin', 'adminpass123');
+
+      // Create a test asset (requires authentication)
+      testAsset = await createTestAsset(
+        {
+          name: 'Test 3D Printer',
+          description: 'A test 3D printer for E2E testing',
+          serial_number: 'TEST-12345',
+          status: 'active',
+          circuit: 'Circuit A',
+          needs_compressed_air: false,
+          needs_ventilation: true,
+          is_chargeable: true,
+        },
+        adminToken
+      );
+
+      // Generate QR code for the asset
+      await generateAssetQR(testAsset.id, adminToken);
+    } catch (error: any) {
+      console.error('Failed to set up test data:', error.message);
+      throw new Error(`Test setup failed: ${error.message}. Ensure backend is running on ${API_BASE_URL.replace('/api', '')}`);
     }
-
-    // Create admin user for asset creation
-    const adminUser = await createTestUser('admin', 'adminpass123', 'admin@test.com', true);
-    if (!adminUser.token) {
-      adminToken = await loginUser(adminUser.username, adminUser.password);
-    } else {
-      adminToken = adminUser.token;
-    }
-
-    if (!adminToken) {
-      throw new Error('Failed to obtain admin token for asset creation');
-    }
-
-    // Create a test asset (requires authentication)
-    testAsset = await createTestAsset(
-      {
-        name: 'Test 3D Printer',
-        description: 'A test 3D printer for E2E testing',
-        serial_number: 'TEST-12345',
-        status: 'active',
-        circuit: 'Circuit A',
-        needs_compressed_air: false,
-        needs_ventilation: true,
-        is_chargeable: true,
-      },
-      adminToken
-    );
-
-    // Generate QR code for the asset
-    await generateAssetQR(testAsset.id, adminToken);
   });
 
   test('unauthenticated user can scan asset and see basic info', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Navigate to asset scan page
     await page.goto(`/scan/asset/${testAsset.id}`);
 
@@ -97,6 +111,8 @@ test.describe('Asset QR Code Scanning', () => {
   });
 
   test('authenticated user can scan asset and see full details', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Set authentication token
     await setAuthToken(page, testUser.token!);
 
@@ -132,6 +148,8 @@ test.describe('Asset QR Code Scanning', () => {
   });
 
   test('scanning asset updates last_scanned_at timestamp', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Get initial last_scanned_at
     const initialResponse = await fetch(`${API_BASE_URL}/inventory/assets/${testAsset.id}/`);
     const initialAsset = await initialResponse.json();
@@ -160,6 +178,8 @@ test.describe('Asset QR Code Scanning', () => {
   });
 
   test('authenticated user can report a problem', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Set authentication token
     await setAuthToken(page, testUser.token!);
 
@@ -188,6 +208,8 @@ test.describe('Asset QR Code Scanning', () => {
   });
 
   test('authenticated user can enable/disable asset', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Set authentication token
     await setAuthToken(page, testUser.token!);
 
@@ -227,6 +249,8 @@ test.describe('Asset QR Code Scanning', () => {
   });
 
   test('displays asset operational requirements', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Navigate to asset scan page
     await page.goto(`/scan/asset/${testAsset.id}`);
 
@@ -247,6 +271,8 @@ test.describe('Asset QR Code Scanning', () => {
   });
 
   test('displays wiki page link if available', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Update asset with wiki page URL
     const wikiUrl = 'https://wiki.example.com/test-asset';
     await fetch(`${API_BASE_URL}/inventory/assets/${testAsset.id}/`, {

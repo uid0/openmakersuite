@@ -8,6 +8,7 @@
 import { test, expect } from '@playwright/test';
 import {
   API_BASE_URL,
+  checkBackendAvailable,
   createTestAsset,
   createTestUser,
   loginUser,
@@ -17,60 +18,78 @@ import {
 test.describe('Admin Dashboard - Assets Not Checked In', () => {
   let adminToken: string;
   let testAssets: any[] = [];
+  let backendAvailable = false;
 
   test.beforeAll(async () => {
-    // Create admin user
-    const adminUser = await createTestUser('admin', 'adminpass123', 'admin@test.com', true);
-    if (!adminUser.token) {
-      adminToken = await loginUser(adminUser.username, adminUser.password);
-    } else {
-      adminToken = adminUser.token;
+    // Check if backend is available
+    backendAvailable = await checkBackendAvailable();
+
+    if (!backendAvailable) {
+      console.warn('Backend not available, skipping E2E tests. Start backend on http://localhost:8000 to run these tests.');
+      return;
     }
 
-    if (!adminToken) {
-      throw new Error('Failed to obtain admin token for asset creation');
+    try {
+      // Create admin user
+      const adminUser = await createTestUser('admin', 'adminpass123', 'admin@test.com', true);
+      
+      // Create active membership for admin user
+      const { createActiveMembershipForUser } = await import('./fixtures');
+      await createActiveMembershipForUser('admin');
+      
+      // Login to get admin token
+      adminToken = await loginUser('admin', 'adminpass123');
+
+      if (!adminToken) {
+        throw new Error('Failed to obtain admin token for asset creation');
+      }
+
+      // Create test assets - some old, some recent
+      const oldDate = new Date();
+      oldDate.setMonth(oldDate.getMonth() - 4); // 4 months ago
+
+      // Create asset that hasn't been scanned (last_scanned_at is null)
+      const asset1 = await createTestAsset(
+        {
+          name: 'Old Unscanned Asset',
+          description: 'Asset that has never been scanned',
+          status: 'active',
+        },
+        adminToken
+      );
+
+      // Create asset that was scanned 4 months ago
+      const asset2 = await createTestAsset(
+        {
+          name: 'Old Scanned Asset',
+          description: 'Asset scanned 4 months ago',
+          status: 'active',
+        },
+        adminToken
+      );
+
+      // Update asset2 to have old last_scanned_at
+      await fetch(`${API_BASE_URL}/inventory/assets/${asset2.id}/`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          last_scanned_at: oldDate.toISOString(),
+        }),
+      });
+
+      testAssets = [asset1, asset2];
+    } catch (error: any) {
+      console.error('Failed to set up test data:', error.message);
+      throw new Error(`Test setup failed: ${error.message}. Ensure backend is running on ${API_BASE_URL.replace('/api', '')}`);
     }
-
-    // Create test assets - some old, some recent
-    const oldDate = new Date();
-    oldDate.setMonth(oldDate.getMonth() - 4); // 4 months ago
-
-    // Create asset that hasn't been scanned (last_scanned_at is null)
-    const asset1 = await createTestAsset(
-      {
-        name: 'Old Unscanned Asset',
-        description: 'Asset that has never been scanned',
-        status: 'active',
-      },
-      adminToken
-    );
-
-    // Create asset that was scanned 4 months ago
-    const asset2 = await createTestAsset(
-      {
-        name: 'Old Scanned Asset',
-        description: 'Asset scanned 4 months ago',
-        status: 'active',
-      },
-      adminToken
-    );
-
-    // Update asset2 to have old last_scanned_at
-    await fetch(`${API_BASE_URL}/inventory/assets/${asset2.id}/`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${adminToken}`,
-      },
-      body: JSON.stringify({
-        last_scanned_at: oldDate.toISOString(),
-      }),
-    });
-
-    testAssets = [asset1, asset2];
   });
 
   test('admin can view assets not checked in section', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Set authentication token
     await setAuthToken(page, adminToken);
 
@@ -88,6 +107,8 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
   });
 
   test('displays assets not checked in for 3+ months', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Set authentication token
     await setAuthToken(page, adminToken);
 
@@ -122,6 +143,8 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
   });
 
   test('displays correct last scanned information', async ({ page }) => {
+    test.skip(!backendAvailable, 'Backend not available');
+    
     // Set authentication token
     await setAuthToken(page, adminToken);
 

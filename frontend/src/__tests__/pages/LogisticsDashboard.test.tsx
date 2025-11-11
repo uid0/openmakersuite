@@ -16,6 +16,8 @@ const mockDashboardData = {
     awaiting_approval: 1,
     pending_orders: 1,
     open_order_lines: 4,
+    location_requests: 0,
+    urgent_location_requests: 0,
   },
   refill_requests: [
     {
@@ -53,6 +55,7 @@ const mockDashboardData = {
       updated_at: '2024-02-01T19:30:00Z',
     },
   ],
+  location_requests: [],
   last_updated: '2024-02-01T19:45:00Z',
 };
 

@@ -69,13 +69,14 @@ def generate_qr_code(item_id):
     Args:
         item_id: UUID string of the inventory item
     """
-    from .utils.qr_generator import save_qr_code_to_item
+    from .services.qr_code_service import QRCodeService
 
     InventoryItem = apps.get_model("inventory", "InventoryItem")
 
     try:
         item = InventoryItem.objects.get(id=item_id)
-        save_qr_code_to_item(item)
+        service = QRCodeService(include_logo=True)  # Include logo by default
+        service.generate_for_item(item)
         return f"QR code generated for {item.name}"
     except InventoryItem.DoesNotExist:
         return f"Item {item_id} not found"

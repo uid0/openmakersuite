@@ -115,9 +115,10 @@ class BrotherLabelRenderer:
         """
         # Ensure QR code exists
         if not asset.qr_code:
-            from .qr_generator import save_qr_code_to_asset
+            from ..services.qr_code_service import QRCodeService
 
-            save_qr_code_to_asset(asset)
+            service = QRCodeService(include_logo=False)  # No logo on labels
+            service.generate_for_asset(asset)
             asset.refresh_from_db()
 
         # Draw QR code on the left side

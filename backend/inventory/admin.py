@@ -72,6 +72,32 @@ class LocationAdmin(admin.ModelAdmin):
     list_display = ["name", "is_active", "created_at"]
     list_filter = ["is_active"]
     search_fields = ["name", "description"]
+    actions = ["regenerate_qr_codes"]
+
+    @admin.action(description="Regenerate QR codes for selected locations")
+    def regenerate_qr_codes(self, request, queryset):
+        """Admin action to regenerate QR codes for selected locations."""
+        from .services.qr_code_service import QRCodeService
+
+        count = 0
+        for location in queryset:
+            try:
+                service = QRCodeService(include_logo=True)
+                service.generate_for_location(location)
+                count += 1
+            except Exception as e:
+                self.message_user(
+                    request,
+                    f"Error regenerating QR code for {location.name}: {str(e)}",
+                    level=messages.ERROR,
+                )
+
+        if count > 0:
+            self.message_user(
+                request,
+                f"Successfully regenerated QR codes for {count} location(s).",
+                level=messages.SUCCESS,
+            )
 
 
 class ItemSupplierInline(admin.TabularInline):
@@ -559,7 +585,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         # For regular "Save" button, redirect back to change page instead of list
         return HttpResponseRedirect(reverse("admin:inventory_inventoryitem_change", args=[obj.pk]))
 
-    actions = ["print_selected_items"]
+    actions = ["print_selected_items", "regenerate_qr_codes"]
 
     @admin.action(description="Print these items (Avery card templates)")
     def print_selected_items(self, request, queryset):
@@ -592,6 +618,31 @@ class InventoryItemAdmin(admin.ModelAdmin):
         )
 
         return response
+
+    @admin.action(description="Regenerate QR codes for selected items")
+    def regenerate_qr_codes(self, request, queryset):
+        """Admin action to regenerate QR codes for selected items."""
+        from .services.qr_code_service import QRCodeService
+
+        count = 0
+        for item in queryset:
+            try:
+                service = QRCodeService(include_logo=True)
+                service.generate_for_item(item)
+                count += 1
+            except Exception as e:
+                self.message_user(
+                    request,
+                    f"Error regenerating QR code for {item.name}: {str(e)}",
+                    level=messages.ERROR,
+                )
+
+        if count > 0:
+            self.message_user(
+                request,
+                f"Successfully regenerated QR codes for {count} item(s).",
+                level=messages.SUCCESS,
+            )
 
 
 @admin.register(PriceHistory)
@@ -907,7 +958,7 @@ class AssetAdmin(admin.ModelAdmin):
         except Exception:
             return format_html('<span style="color: #28a745;">✓ Unlocked</span>')
 
-    actions = ["duplicate_asset"]
+    actions = ["duplicate_asset", "regenerate_qr_codes"]
 
     @admin.action(description="Duplicate selected asset (enter new serial number)")
     def duplicate_asset(self, request, queryset):
@@ -923,6 +974,31 @@ class AssetAdmin(admin.ModelAdmin):
         asset = queryset.first()
         # Redirect to the duplicate view with the asset ID
         return HttpResponseRedirect(reverse("admin:inventory_asset_duplicate", args=[asset.pk]))
+
+    @admin.action(description="Regenerate QR codes for selected assets")
+    def regenerate_qr_codes(self, request, queryset):
+        """Admin action to regenerate QR codes for selected assets."""
+        from .services.qr_code_service import QRCodeService
+
+        count = 0
+        for asset in queryset:
+            try:
+                service = QRCodeService(include_logo=True)
+                service.generate_for_asset(asset)
+                count += 1
+            except Exception as e:
+                self.message_user(
+                    request,
+                    f"Error regenerating QR code for {asset.name}: {str(e)}",
+                    level=messages.ERROR,
+                )
+
+        if count > 0:
+            self.message_user(
+                request,
+                f"Successfully regenerated QR codes for {count} asset(s).",
+                level=messages.SUCCESS,
+            )
 
     def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
         """Add duplicate button to change form."""

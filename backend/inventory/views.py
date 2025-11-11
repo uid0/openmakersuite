@@ -93,15 +93,36 @@ class LocationViewSet(viewsets.ReadOnlyModelViewSet):
         except Location.DoesNotExist:
             return Response({"error": "Location not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=["post"], permission_classes=[AllowAny])
     def generate_qr(self, request, pk=None):
-        """Generate QR code for a location."""
+        """Generate or regenerate QR code for a location."""
         location = self.get_object()
 
-        from .utils.qr_generator import save_qr_code_to_location
+        from .services.qr_code_service import QRCodeService
+        from .utils.rate_limiting import QRCodeRateLimiter
+
+        # Get user and IP for rate limiting
+        user = request.user if request.user.is_authenticated else None
+        ip_address = self._get_client_ip(request)
+
+        # Check rate limit
+        is_allowed, error_msg = QRCodeRateLimiter.check_rate_limit(
+            user=user,
+            item_id=str(location.id),
+            item_type="location",
+            ip_address=ip_address,
+        )
+
+        if not is_allowed:
+            return Response(
+                {"error": error_msg},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
         try:
-            save_qr_code_to_location(location)
+            include_logo = request.data.get("include_logo", True)
+            service = QRCodeService(include_logo=include_logo)
+            service.generate_for_location(location)
             return Response(
                 {
                     "message": "QR code generated successfully",
@@ -113,6 +134,15 @@ class LocationViewSet(viewsets.ReadOnlyModelViewSet):
                 {"error": f"Failed to generate QR code: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    def _get_client_ip(self, request):
+        """Get client IP address from request."""
+        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(",")[0]
+        else:
+            ip = request.META.get("REMOTE_ADDR")
+        return ip
 
     @action(detail=True, methods=["get"], permission_classes=[AllowAny])
     def qr_code(self, request, pk=None):
@@ -222,14 +252,35 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def generate_qr(self, request, pk=None):
-        """Generate QR code for an item."""
+        """Generate or regenerate QR code for an item."""
         item = self.get_object()
 
         # Generate QR code synchronously for immediate response
-        from .utils.qr_generator import save_qr_code_to_item
+        from .services.qr_code_service import QRCodeService
+        from .utils.rate_limiting import QRCodeRateLimiter
+
+        # Get user and IP for rate limiting
+        user = request.user if request.user.is_authenticated else None
+        ip_address = self._get_client_ip(request)
+
+        # Check rate limit
+        is_allowed, error_msg = QRCodeRateLimiter.check_rate_limit(
+            user=user,
+            item_id=str(item.id),
+            item_type="item",
+            ip_address=ip_address,
+        )
+
+        if not is_allowed:
+            return Response(
+                {"error": error_msg},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
         try:
-            save_qr_code_to_item(item)
+            include_logo = request.data.get("include_logo", True)
+            service = QRCodeService(include_logo=include_logo)
+            service.generate_for_item(item)
             return Response(
                 {
                     "status": "QR code generated successfully",
@@ -240,6 +291,15 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             )
         except Exception as e:
             return Response({"error": str(e)}, status=500)
+
+    def _get_client_ip(self, request):
+        """Get client IP address from request."""
+        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(",")[0]
+        else:
+            ip = request.META.get("REMOTE_ADDR")
+        return ip
 
     @action(detail=True, methods=["get"], url_path="qr_code", url_name="qr_code", name="QR Code")
     def qr_code(self, request, pk=None):
@@ -617,14 +677,35 @@ class AssetViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def generate_qr(self, request, pk=None):
-        """Generate QR code for an asset."""
+        """Generate or regenerate QR code for an asset."""
         asset = self.get_object()
 
         # Generate QR code synchronously for immediate response
-        from .utils.qr_generator import save_qr_code_to_asset
+        from .services.qr_code_service import QRCodeService
+        from .utils.rate_limiting import QRCodeRateLimiter
+
+        # Get user and IP for rate limiting
+        user = request.user if request.user.is_authenticated else None
+        ip_address = self._get_client_ip(request)
+
+        # Check rate limit
+        is_allowed, error_msg = QRCodeRateLimiter.check_rate_limit(
+            user=user,
+            item_id=str(asset.id),
+            item_type="asset",
+            ip_address=ip_address,
+        )
+
+        if not is_allowed:
+            return Response(
+                {"error": error_msg},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
         try:
-            save_qr_code_to_asset(asset)
+            include_logo = request.data.get("include_logo", True)
+            service = QRCodeService(include_logo=include_logo)
+            service.generate_for_asset(asset)
             serializer = self.get_serializer(asset)
             return Response(serializer.data)
         except Exception as e:
@@ -632,6 +713,15 @@ class AssetViewSet(viewsets.ModelViewSet):
                 {"error": f"Failed to generate QR code: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    def _get_client_ip(self, request):
+        """Get client IP address from request."""
+        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(",")[0]
+        else:
+            ip = request.META.get("REMOTE_ADDR")
+        return ip
 
     @action(detail=True, methods=["get"])
     def qr_code(self, request, pk=None):

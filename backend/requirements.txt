@@ -16,6 +16,7 @@ flower==2.0.1
 qrcode[pil]==7.4.2
 reportlab==4.2.0
 Pillow==10.4.0
+pyzbar==0.1.9  # Optional: for QR code validation (requires system zbar library)
 
 # Authentication
 djangorestframework-simplejwt==5.5.1

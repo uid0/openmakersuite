@@ -2,7 +2,6 @@
 Views for location check-in API.
 """
 
-from django.db import transaction
 from django.utils import timezone
 
 from rest_framework import status, viewsets
@@ -143,7 +142,7 @@ class LocationFeedbackViewSet(viewsets.ModelViewSet):
 
         # Create task for negative feedback
         if feedback_type == "negative":
-            task = LocationTask.objects.create(
+            _task = LocationTask.objects.create(  # noqa: F841
                 location=location,
                 title=f"Address feedback: {location.name}",
                 description=f"Negative feedback received:\n\n{message}",
@@ -220,7 +219,7 @@ class SecurityReportViewSet(viewsets.ModelViewSet):
         if description:
             task_description += f"\n\nAdditional details:\n{description}"
 
-        task = LocationTask.objects.create(
+        _task = LocationTask.objects.create(  # noqa: F841
             location=location,
             title=f"{report_type_display}{urgent_text}: {location.name}",
             description=task_description,

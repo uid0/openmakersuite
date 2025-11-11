@@ -375,3 +375,27 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Built with ❤️ for the maker community**
 
 *OpenMakerSuite helps makerspaces focus on creating instead of managing inventory.*
+
+## Platform Setup & Troubleshooting
+
+If you're experiencing:
+- Docker emulation warnings
+- Migration inconsistency errors
+- Slow performance
+
+See **[PLATFORM-SETUP.md](PLATFORM-SETUP.md)** for detailed setup instructions for both ARM64 (Apple Silicon) and AMD64 (Intel/AMD) architectures.
+
+### Quick Fix for Migration Issues:
+
+```bash
+./scripts/fix-migration-issues.sh
+```
+
+### Quick Fix for Emulation Issues:
+
+```bash
+source scripts/setup-platform.sh
+docker compose down
+docker compose build --no-cache
+docker compose up
+```

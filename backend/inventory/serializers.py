@@ -223,24 +223,37 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
     def get_thumbnail(self, obj):
         """Return the thumbnail URL when available."""
-
         try:
-            return obj.thumbnail.url if obj.thumbnail else None
+            if obj.thumbnail:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.thumbnail.url)
+                return obj.thumbnail.url
+            return None
         except Exception:
             return None
 
     def get_qr_code_url(self, obj):
         """Return the QR code URL when available."""
-
         try:
-            return obj.qr_code.url if obj.qr_code else None
+            if obj.qr_code:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.qr_code.url)
+                return obj.qr_code.url
+            return None
         except Exception:
             return None
 
     def get_msds_file_url(self, obj):
         """Return the MSDS file URL when available."""
         try:
-            return obj.msds_file.url if obj.msds_file else None
+            if obj.msds_file:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.msds_file.url)
+                return obj.msds_file.url
+            return None
         except Exception:
             return None
 
@@ -546,21 +559,36 @@ class AssetSerializer(serializers.ModelSerializer):
     def get_image_url(self, obj):
         """Return the image URL when available."""
         try:
-            return obj.image.url if obj.image else None
+            if obj.image:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.image.url)
+                return obj.image.url
+            return None
         except Exception:
             return None
 
     def get_thumbnail_url(self, obj):
         """Return the thumbnail URL when available."""
         try:
-            return obj.thumbnail.url if obj.thumbnail else None
+            if obj.thumbnail:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.thumbnail.url)
+                return obj.thumbnail.url
+            return None
         except Exception:
             return None
 
     def get_qr_code_url(self, obj):
         """Return the QR code image URL when available."""
         try:
-            return obj.qr_code.url if obj.qr_code else None
+            if obj.qr_code:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.qr_code.url)
+                return obj.qr_code.url
+            return None
         except Exception:
             return None
 
@@ -656,7 +684,12 @@ class AssetSerializer(serializers.ModelSerializer):
     def get_manual_pdf_url(self, obj):
         """Return the manual PDF URL when available."""
         try:
-            return obj.manual_pdf.url if obj.manual_pdf else None
+            if obj.manual_pdf:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.manual_pdf.url)
+                return obj.manual_pdf.url
+            return None
         except Exception:
             return None
 

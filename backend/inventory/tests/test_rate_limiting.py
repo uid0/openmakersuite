@@ -3,13 +3,11 @@ Tests for QR code rate limiting.
 """
 
 from django.core.cache import cache
-from django.utils import timezone
 
 import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from inventory.models import Asset, InventoryItem, Location
 from inventory.tests.factories import AssetFactory, InventoryItemFactory, LocationFactory
 from inventory.utils.rate_limiting import QRCodeRateLimiter
 
@@ -85,7 +83,7 @@ class TestQRCodeRateLimiter:
         item_type = "item"
 
         # Exhaust limit for item 1
-        for i in range(5):
+        for _ in range(5):
             QRCodeRateLimiter.check_rate_limit(
                 user=None, item_id=item_id_1, item_type=item_type, ip_address="127.0.0.1"
             )
@@ -148,13 +146,13 @@ class TestQRCodeRateLimitingAPI:
         asset = AssetFactory()
 
         # First 5 requests should succeed
-        for i in range(5):
+        for _ in range(5):
             response = self.client.post(f"/api/inventory/assets/{asset.id}/generate_qr/")
             assert response.status_code in [
                 status.HTTP_200_OK,
                 status.HTTP_201_CREATED,
                 status.HTTP_500_INTERNAL_SERVER_ERROR,  # May fail for other reasons
-            ], f"Request {i+1} should not be rate limited"
+            ], "Request should not be rate limited"
 
         # 6th request should be rate limited
         response = self.client.post(f"/api/inventory/assets/{asset.id}/generate_qr/")
@@ -167,7 +165,7 @@ class TestQRCodeRateLimitingAPI:
         asset = AssetFactory()
 
         # Staff should be able to make many requests
-        for i in range(10):
+        for _ in range(10):
             response = self.client.post(f"/api/inventory/assets/{asset.id}/generate_qr/")
             assert response.status_code != status.HTTP_429_TOO_MANY_REQUESTS
 
@@ -177,7 +175,7 @@ class TestQRCodeRateLimitingAPI:
         item = InventoryItemFactory()
 
         # First 5 requests should succeed
-        for i in range(5):
+        for _ in range(5):
             response = client.post(f"/api/inventory/items/{item.id}/generate_qr/")
             assert response.status_code != status.HTTP_429_TOO_MANY_REQUESTS
 
@@ -191,7 +189,7 @@ class TestQRCodeRateLimitingAPI:
         location = LocationFactory()
 
         # First 5 requests should succeed
-        for i in range(5):
+        for _ in range(5):
             response = self.client.post(f"/api/inventory/locations/{location.id}/generate_qr/")
             assert response.status_code != status.HTTP_429_TOO_MANY_REQUESTS
 

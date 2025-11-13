@@ -5,8 +5,10 @@ This service provides QR code generation with optional logo embedding
 and validation to ensure the QR code encodes the correct URL.
 """
 
+from __future__ import annotations
+
 from io import BytesIO
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.files import File
@@ -17,6 +19,9 @@ from qrcode.image.pil import PilImage
 
 from customization.models import SiteSettings
 from inventory.utils.code_generator import generate_unique_code
+
+if TYPE_CHECKING:
+    from inventory.models import Asset, InventoryItem, Location
 
 
 class QRCodeService:
@@ -123,10 +128,6 @@ class QRCodeService:
 
         # Calculate position to center the logo
         logo_width, logo_height = logo.size
-        position = (
-            (qr_width - logo_width) // 2,
-            (qr_height - logo_height) // 2,
-        )
 
         # Create a white background for the logo (to ensure readability)
         # Make it slightly larger than the logo for padding
@@ -169,8 +170,6 @@ class QRCodeService:
             buffer.seek(0)
 
             # Decode the QR code
-            from qrcode import QRCode
-
             # Create a new QRCode instance to decode
             # Note: qrcode library doesn't have a built-in decoder
             # We'll use pyzbar or another library, but for now we'll use a simpler approach
@@ -369,11 +368,11 @@ class QRCodeService:
             font = ImageFont.truetype(
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size
             )
-        except (OSError, IOError):
+        except OSError:
             try:
                 # Try default font
                 font = ImageFont.load_default()
-            except:
+            except Exception:
                 font = None
 
         # Calculate text position (centered)

@@ -9,7 +9,6 @@ import qrcode
 from PIL import Image
 
 from customization.models import SiteSettings
-from inventory.models import Asset, InventoryItem, Location
 from inventory.services.qr_code_service import QRCodeService
 from inventory.tests.factories import AssetFactory, InventoryItemFactory, LocationFactory
 

@@ -5,10 +5,7 @@ Codes use capital letters and numbers, excluding ambiguous characters:
 I, 0, O, 1, L
 """
 
-import random
-import string
-
-from django.db import transaction
+import secrets
 
 # Characters to use: A-Z and 0-9, excluding I, 0, O, 1, L
 # This gives us: A-H, J-N, P-Z, 2-9 = 25 letters + 8 numbers = 33 characters
@@ -29,8 +26,11 @@ def generate_unique_code(model_class, field_name="access_code", length=6):
     """
     max_attempts = 1000  # Prevent infinite loops
 
+    # Use secrets.SystemRandom for cryptographically secure random generation
+    secure_random = secrets.SystemRandom()
+
     for _ in range(max_attempts):
-        code = "".join(random.choices(VALID_CHARS, k=length))
+        code = "".join(secure_random.choices(VALID_CHARS, k=length))
         # Check if code already exists
         if not model_class.objects.filter(**{field_name: code}).exists():
             return code
@@ -45,4 +45,6 @@ def generate_code():
     Returns:
         A random code string
     """
-    return "".join(random.choices(VALID_CHARS, k=6))
+    # Use secrets.SystemRandom for cryptographically secure random generation
+    secure_random = secrets.SystemRandom()
+    return "".join(secure_random.choices(VALID_CHARS, k=6))

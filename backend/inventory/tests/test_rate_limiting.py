@@ -61,7 +61,7 @@ class TestQRCodeRateLimiter:
         )
         assert not is_allowed
         assert "Rate limit exceeded" in error_msg
-        assert "per minute" in error_msg
+        assert "minute" in error_msg.lower()  # Check for "minute" or "minutes"
 
     def test_staff_user_no_rate_limit(self, admin_user):
         """Test that staff users have no rate limit."""

@@ -15,18 +15,20 @@ from reorder_queue.tests.factories import ReorderRequestFactory
 class TestInventoryTasks:
     """Tests for inventory Celery tasks."""
 
-    @patch("inventory.utils.qr_generator.save_qr_code_to_item")
-    def test_generate_qr_code_task(self, mock_save_qr):
+    @patch("inventory.services.qr_code_service.QRCodeService")
+    def test_generate_qr_code_task(self, mock_service_class):
         """Test QR code generation task."""
         item = InventoryItemFactory()
+        mock_service_instance = mock_service_class.return_value
+        mock_service_instance.generate_for_item.return_value = item
 
         result = generate_qr_code(str(item.id))
 
         assert f"QR code generated for {item.name}" in result
-        mock_save_qr.assert_called_once_with(item)
+        mock_service_instance.generate_for_item.assert_called_once_with(item)
 
-    @patch("inventory.utils.qr_generator.save_qr_code_to_item")
-    def test_generate_qr_code_task_item_not_found(self, mock_save_qr):
+    @patch("inventory.services.qr_code_service.QRCodeService")
+    def test_generate_qr_code_task_item_not_found(self, mock_service_class):
         """Test QR code generation task with non-existent item."""
         import uuid
 
@@ -35,7 +37,8 @@ class TestInventoryTasks:
         result = generate_qr_code(fake_id)
 
         assert f"Item {fake_id} not found" in result
-        mock_save_qr.assert_not_called()
+        # Service should not be instantiated if item doesn't exist
+        mock_service_class.assert_not_called()
 
     @patch("inventory.utils.pdf_generator.generate_item_card")
     def test_generate_index_card_task(self, mock_generate_pdf):

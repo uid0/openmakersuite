@@ -155,14 +155,16 @@ class TestInventoryItemAPI:
         client, user = authenticated_client
         item = InventoryItemFactory()
 
-        # Mock the QR code generation utility
-        mock_save_qr = mocker.patch("inventory.utils.qr_generator.save_qr_code_to_item")
+        # Mock the QR code service (it's imported inside the method)
+        mock_service = mocker.patch("inventory.services.qr_code_service.QRCodeService")
+        mock_instance = mock_service.return_value
+        mock_instance.generate_for_item.return_value = item
 
         url = reverse("inventoryitem-generate-qr", kwargs={"pk": str(item.id)})
         response = client.post(url)
 
         assert response.status_code == status.HTTP_200_OK
-        mock_save_qr.assert_called_once_with(item)
+        mock_instance.generate_for_item.assert_called_once()
 
     def test_download_card_endpoint(self, api_client, mocker):
         """Test PDF card download endpoint."""

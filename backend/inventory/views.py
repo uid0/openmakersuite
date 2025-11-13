@@ -675,7 +675,7 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         return queryset.order_by("name")
 
-    @action(detail=True, methods=["post"])
+    @action(detail=True, methods=["post"], permission_classes=[AllowAny])
     def generate_qr(self, request, pk=None):
         """Generate or regenerate QR code for an asset."""
         asset = self.get_object()

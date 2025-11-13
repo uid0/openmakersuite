@@ -7,6 +7,7 @@ from io import BytesIO
 import pytest
 import qrcode
 from PIL import Image
+from qrcode.image.pil import PilImage
 
 from customization.models import SiteSettings
 from inventory.services.qr_code_service import QRCodeService
@@ -21,16 +22,19 @@ class TestQRCodeService:
         """Test generating a basic QR code image."""
         service = QRCodeService(include_logo=False)
         url = "https://example.com/test"
-        qr_buffer = service.generate_qr_code_image(url)
+        qr_img = service.generate_qr_code_image(url)
 
-        assert isinstance(qr_buffer, BytesIO)
-        assert qr_buffer.tell() == 0  # Buffer is at start
+        # Verify it's a valid PIL Image (PilImage is a subclass/wrapper)
+        assert isinstance(qr_img, (Image.Image, PilImage))
+        assert qr_img.size[0] > 0
+        assert qr_img.size[1] > 0
 
-        # Verify it's a valid image
-        img = Image.open(qr_buffer)
+        # Verify it can be saved to BytesIO
+        buffer = BytesIO()
+        qr_img.save(buffer, format="PNG")
+        buffer.seek(0)
+        img = Image.open(buffer)
         assert img.format == "PNG"
-        assert img.size[0] > 0
-        assert img.size[1] > 0
 
     def test_generate_qr_code_with_logo(self, sample_image):
         """Test generating QR code with logo when logo is available."""
@@ -41,15 +45,12 @@ class TestQRCodeService:
 
         service = QRCodeService(include_logo=True)
         url = "https://example.com/test"
-        qr_buffer = service.generate_qr_code_image(url)
+        qr_img = service.generate_qr_code_image(url)
 
-        assert isinstance(qr_buffer, BytesIO)
-
-        # Verify it's a valid image
-        img = Image.open(qr_buffer)
-        assert img.format == "PNG"
-        assert img.size[0] > 0
-        assert img.size[1] > 0
+        # Verify it's a valid PIL Image (PilImage is a subclass/wrapper)
+        assert isinstance(qr_img, (Image.Image, PilImage))
+        assert qr_img.size[0] > 0
+        assert qr_img.size[1] > 0
 
     def test_generate_qr_code_without_logo_when_none_available(self):
         """Test generating QR code when no logo is available."""
@@ -60,13 +61,13 @@ class TestQRCodeService:
 
         service = QRCodeService(include_logo=True)
         url = "https://example.com/test"
-        qr_buffer = service.generate_qr_code_image(url)
+        qr_img = service.generate_qr_code_image(url)
 
-        assert isinstance(qr_buffer, BytesIO)
-
-        # Verify it's a valid image
-        img = Image.open(qr_buffer)
-        assert img.format == "PNG"
+        # Verify it's a valid PIL Image (PilImage is a subclass/wrapper)
+        assert isinstance(qr_img, (Image.Image, PilImage))
+        # Format may not be set on PilImage, but it should have size
+        assert qr_img.size[0] > 0
+        assert qr_img.size[1] > 0
 
     def test_generate_qr_code_without_logo_when_disabled(self, sample_image):
         """Test generating QR code when logo embedding is disabled."""
@@ -77,13 +78,12 @@ class TestQRCodeService:
 
         service = QRCodeService(include_logo=False)
         url = "https://example.com/test"
-        qr_buffer = service.generate_qr_code_image(url)
+        qr_img = service.generate_qr_code_image(url)
 
-        assert isinstance(qr_buffer, BytesIO)
-
-        # Verify it's a valid image
-        img = Image.open(qr_buffer)
-        assert img.format == "PNG"
+        # Verify it's a valid PIL Image (PilImage is a subclass/wrapper)
+        assert isinstance(qr_img, (Image.Image, PilImage))
+        assert qr_img.size[0] > 0
+        assert qr_img.size[1] > 0
 
     def test_generate_for_item(self):
         """Test generating QR code for an inventory item."""
@@ -146,11 +146,10 @@ class TestQRCodeService:
 
             service = QRCodeService(include_logo=False)
             url = "https://example.com/test-url"
-            qr_buffer = service.generate_qr_code_image(url)
+            qr_img = service.generate_qr_code_image(url)
 
             # Verify the QR code can be decoded
-            img = Image.open(qr_buffer)
-            decoded_objects = decode(img)
+            decoded_objects = decode(qr_img)
             assert len(decoded_objects) > 0
             decoded_url = decoded_objects[0].data.decode("utf-8")
             assert decoded_url == url
@@ -169,8 +168,8 @@ class TestQRCodeService:
         url = "https://example.com/test-url"
 
         # Should not raise an error even without pyzbar
-        qr_buffer = service.generate_qr_code_image(url)
-        assert isinstance(qr_buffer, BytesIO)
+        qr_img = service.generate_qr_code_image(url)
+        assert isinstance(qr_img, (Image.Image, PilImage))
 
     def test_embed_logo_handles_invalid_logo(self):
         """Test that invalid logo files are handled gracefully."""
@@ -200,8 +199,7 @@ class TestQRCodeService:
             qrcode.constants.ERROR_CORRECT_Q,
             qrcode.constants.ERROR_CORRECT_H,
         ]:
-            qr_buffer = service.generate_qr_code_image(url, error_correction=error_correction)
-            assert isinstance(qr_buffer, BytesIO)
-
-            img = Image.open(qr_buffer)
-            assert img.format == "PNG"
+            qr_img = service.generate_qr_code_image(url, error_correction=error_correction)
+            assert isinstance(qr_img, (Image.Image, PilImage))
+            assert qr_img.size[0] > 0
+            assert qr_img.size[1] > 0

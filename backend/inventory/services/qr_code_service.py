@@ -43,7 +43,7 @@ class QRCodeService:
         error_correction: int = qrcode.constants.ERROR_CORRECT_H,
         box_size: int = 10,
         border: int = 4,
-    ) -> BytesIO:
+    ) -> PilImage:
         """
         Generate a QR code image with optional logo embedding.
 
@@ -54,7 +54,7 @@ class QRCodeService:
             border: Border size in boxes
 
         Returns:
-            BytesIO object containing the QR code image (PNG format)
+            PIL Image object containing the QR code
 
         Raises:
             ValueError: If the generated QR code doesn't decode to the expected URL

@@ -105,9 +105,13 @@ class QRCodeRateLimiter:
         # Check if limit exceeded
         if current_count >= limit:
             if user:
+                minutes = int(cls.AUTHENTICATED_WINDOW.total_seconds() / 60)
+                if minutes == 1:
+                    time_unit = "minute"
+                else:
+                    time_unit = "minutes"
                 error_msg = (
-                    f"Rate limit exceeded: {limit} requests per "
-                    f"{cls.AUTHENTICATED_WINDOW.total_seconds() / 60:.0f} minutes allowed. "
+                    f"Rate limit exceeded: {limit} requests per {minutes} {time_unit} allowed. "
                     f"Please try again later."
                 )
             else:

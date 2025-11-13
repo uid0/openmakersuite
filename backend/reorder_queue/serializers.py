@@ -108,6 +108,7 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "actual_cost",
             "quantity_pending",
             "is_fully_received",
+            "expected_shipment_date",
             "notes",
             "created_at",
             "updated_at",

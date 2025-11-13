@@ -236,6 +236,16 @@ export const analyticsAPI = {
     api.get<T>('/reorders/analytics/logistics_dashboard/'),
 };
 
+// Purchase Order API
+export const purchaseOrderAPI = {
+  listOrders: (params?: { status?: string }) =>
+    api.get<{ results: any[] }>('/reorders/purchase-orders/', { params }),
+  getOrder: (id: string) =>
+    api.get<any>(`/reorders/purchase-orders/${id}/`),
+  updateLineItem: (orderId: string, itemId: string, data: { expected_shipment_date?: string; notes?: string }) =>
+    api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
+};
+
 // Fixtures API
 export const fixturesAPI = {
   getFixture: (id: string) =>

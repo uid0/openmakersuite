@@ -438,6 +438,42 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["patch"], url_path="items/(?P<item_id>[^/.]+)")
+    def update_item(self, request, pk=None, item_id=None):
+        """Update a specific line item in a purchase order."""
+        purchase_order = self.get_object()
+        try:
+            line_item = PurchaseOrderItem.objects.get(id=item_id, purchase_order=purchase_order)
+        except PurchaseOrderItem.DoesNotExist:
+            return Response({"error": "Line item not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Allow updating expected_shipment_date and notes
+        expected_shipment_date = request.data.get("expected_shipment_date")
+        if expected_shipment_date is not None:
+            if expected_shipment_date == "":
+                line_item.expected_shipment_date = None
+            else:
+                from django.utils.dateparse import parse_date
+
+                parsed_date = parse_date(expected_shipment_date)
+                if parsed_date:
+                    line_item.expected_shipment_date = parsed_date
+                else:
+                    return Response(
+                        {"error": "Invalid date format. Use YYYY-MM-DD"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        if "notes" in request.data:
+            line_item.notes = request.data["notes"]
+
+        line_item.save()
+
+        from .serializers import PurchaseOrderItemSerializer
+
+        serializer = PurchaseOrderItemSerializer(line_item)
+        return Response(serializer.data)
+
     @action(detail=False, methods=["get"])
     def dashboard_summary(self, request):
         """Get summary data for the orders dashboard."""

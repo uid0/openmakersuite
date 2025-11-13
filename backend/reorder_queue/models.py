@@ -322,6 +322,13 @@ class PurchaseOrderItem(models.Model):
         max_digits=10, decimal_places=4, null=True, blank=True, help_text="Actual unit cost charged"
     )
 
+    # Shipment tracking
+    expected_shipment_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Expected shipment date for this line item (useful for items with longer lead times)",
+    )
+
     # Notes
     notes = models.TextField(blank=True)
 

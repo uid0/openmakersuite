@@ -1406,9 +1406,10 @@ def lookup_by_code(request):
         asset = Asset.objects.get(access_code=code)
         # Log the scan (same as QR code scanning) - update last_scanned_at
         from django.utils import timezone
+
         asset.last_scanned_at = timezone.now()
         asset.save(update_fields=["last_scanned_at"])
-        
+
         return Response(
             {
                 "type": "asset",
@@ -1425,7 +1426,7 @@ def lookup_by_code(request):
         item = InventoryItem.objects.get(access_code=code)
         # For items, we don't have a scan endpoint, but we could log usage if needed
         # The scan page itself will handle any logging
-        
+
         return Response(
             {
                 "type": "item",
@@ -1441,7 +1442,7 @@ def lookup_by_code(request):
     try:
         location = Location.objects.get(access_code=code)
         # Locations don't have scan logging currently, but the scan page handles it
-        
+
         return Response(
             {
                 "type": "location",

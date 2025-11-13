@@ -161,6 +161,7 @@ class TestQRCodeService:
 
     def test_qr_code_validation_without_pyzbar(self, monkeypatch):
         """Test QR code generation works even without pyzbar."""
+
         # Mock ImportError for pyzbar
         def mock_import_error(*args, **kwargs):
             raise ImportError("No module named 'pyzbar'")
@@ -200,11 +201,8 @@ class TestQRCodeService:
             qrcode.constants.ERROR_CORRECT_Q,
             qrcode.constants.ERROR_CORRECT_H,
         ]:
-            qr_buffer = service.generate_qr_code_image(
-                url, error_correction=error_correction
-            )
+            qr_buffer = service.generate_qr_code_image(url, error_correction=error_correction)
             assert isinstance(qr_buffer, BytesIO)
 
             img = Image.open(qr_buffer)
             assert img.format == "PNG"
-

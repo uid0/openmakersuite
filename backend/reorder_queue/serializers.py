@@ -82,8 +82,12 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
 
     # Related data
     item_details = InventoryItemSerializer(source="item", read_only=True)
-    supplier_details = serializers.CharField(source="supplier.name", read_only=True)
+    supplier_details = serializers.CharField(
+        source="supplier.name", read_only=True, allow_null=True
+    )
     item_supplier_details = ItemSupplierSerializer(source="item_supplier", read_only=True)
+    asset_details = serializers.SerializerMethodField()
+    item_type = serializers.SerializerMethodField()
 
     # Calculated fields
     estimated_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
@@ -97,8 +101,11 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "id",
             "purchase_order",
             "item_supplier",
+            "asset",
             "item_supplier_details",
             "item_details",
+            "asset_details",
+            "item_type",
             "supplier_details",
             "quantity_ordered",
             "quantity_received",
@@ -114,6 +121,22 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["created_at", "updated_at"]
+
+    def get_asset_details(self, obj):
+        """Return asset details if this is an asset purchase."""
+        if obj.asset:
+            from inventory.serializers import AssetSerializer
+
+            return AssetSerializer(obj.asset).data
+        return None
+
+    def get_item_type(self, obj):
+        """Return whether this is an inventory item or asset."""
+        if obj.item_supplier:
+            return "inventory_item"
+        elif obj.asset:
+            return "asset"
+        return None
 
 
 class PurchaseOrderSerializer(serializers.ModelSerializer):
@@ -173,7 +196,9 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
     items = serializers.ListField(
         child=serializers.DictField(),
         write_only=True,
-        help_text="List of items to order with quantities",
+        help_text="List of items or assets to order with quantities. Format: "
+        '[{"item_supplier_id": 1, "quantity": 10}, ...] or '
+        '[{"asset_id": "uuid", "quantity": 1, "unit_cost": 100.00}, ...]',
     )
 
     class Meta:
@@ -182,11 +207,11 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
             "supplier",
             "expected_delivery_date",
             "notes",
-            "items",  # Format: [{"item_supplier_id": 1, "quantity": 10}, ...]
+            "items",
         ]
 
     def create(self, validated_data):
-        """Create purchase order with line items."""
+        """Create purchase order with line items (inventory items or assets)."""
         items_data = validated_data.pop("items")
 
         # Create the purchase order
@@ -201,32 +226,74 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         # Create line items
         total_cost = 0
         for item_data in items_data:
-            item_supplier_id = item_data["item_supplier_id"]
-            quantity = item_data["quantity"]
+            quantity = item_data.get("quantity", 1)
+            notes = item_data.get("notes", "")
 
-            try:
-                item_supplier = ItemSupplier.objects.get(id=item_supplier_id)
+            # Handle inventory items
+            if "item_supplier_id" in item_data:
+                item_supplier_id = item_data["item_supplier_id"]
+                try:
+                    item_supplier = ItemSupplier.objects.get(id=item_supplier_id)
 
-                # Ensure the supplier matches the PO supplier
-                if item_supplier.supplier != purchase_order.supplier:
-                    raise serializers.ValidationError(
-                        f"Item supplier {item_supplier_id} does not belong to selected supplier"
+                    # Ensure the supplier matches the PO supplier
+                    if item_supplier.supplier != purchase_order.supplier:
+                        raise serializers.ValidationError(
+                            f"Item supplier {item_supplier_id} does not belong to selected supplier"
+                        )
+
+                    # Create the line item
+                    line_item = PurchaseOrderItem.objects.create(
+                        purchase_order=purchase_order,
+                        item_supplier=item_supplier,
+                        quantity_ordered=quantity,
+                        unit_cost_ordered=item_supplier.unit_cost or 0,
+                        notes=notes,
                     )
 
-                # Create the line item
-                line_item = PurchaseOrderItem.objects.create(
-                    purchase_order=purchase_order,
-                    item_supplier=item_supplier,
-                    quantity_ordered=quantity,
-                    unit_cost_ordered=item_supplier.unit_cost or 0,
-                    notes=item_data.get("notes", ""),
-                )
+                    total_cost += line_item.estimated_cost
 
-                total_cost += line_item.estimated_cost
+                except ItemSupplier.DoesNotExist:
+                    raise serializers.ValidationError(
+                        f"ItemSupplier with id {item_supplier_id} does not exist"
+                    )
 
-            except ItemSupplier.DoesNotExist:
+            # Handle assets
+            elif "asset_id" in item_data:
+                asset_id = item_data["asset_id"]
+                unit_cost = item_data.get("unit_cost")
+                if unit_cost is None:
+                    raise serializers.ValidationError(
+                        f"unit_cost is required when purchasing asset {asset_id}"
+                    )
+
+                try:
+                    from inventory.models import Asset
+
+                    asset = Asset.objects.get(id=asset_id)
+
+                    # Ensure the asset's manufacturer matches the PO supplier (if set)
+                    if asset.manufacturer and asset.manufacturer != purchase_order.supplier:
+                        raise serializers.ValidationError(
+                            f"Asset {asset_id} manufacturer does not match selected supplier"
+                        )
+
+                    # Create the line item
+                    line_item = PurchaseOrderItem.objects.create(
+                        purchase_order=purchase_order,
+                        asset=asset,
+                        quantity_ordered=quantity,
+                        unit_cost_ordered=unit_cost,
+                        notes=notes,
+                    )
+
+                    total_cost += line_item.estimated_cost
+
+                except Asset.DoesNotExist:
+                    raise serializers.ValidationError(f"Asset with id {asset_id} does not exist")
+
+            else:
                 raise serializers.ValidationError(
-                    f"ItemSupplier with id {item_supplier_id} does not exist"
+                    "Each item must have either 'item_supplier_id' or 'asset_id'"
                 )
 
         # Update estimated total

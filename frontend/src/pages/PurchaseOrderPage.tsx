@@ -9,10 +9,17 @@ import '../styles/PurchaseOrderPage.css';
 
 interface PurchaseOrderItem {
   id: string;
+  item_type: 'inventory_item' | 'asset' | null;
   item_details: {
     name: string;
     sku: string;
-  };
+  } | null;
+  asset_details: {
+    id: string;
+    name: string;
+    asset_tag: string;
+    location_name: string | null;
+  } | null;
   quantity_ordered: number;
   quantity_received: number;
   unit_cost_ordered: string;
@@ -178,10 +185,25 @@ const PurchaseOrderPage: React.FC = () => {
                 </td>
               </tr>
             ) : (
-              order.items.map((item) => (
+              order.items.map((item) => {
+                const itemName = item.item_type === 'asset' 
+                  ? (item.asset_details?.name || 'Unknown Asset')
+                  : (item.item_details?.name || 'Unknown Item');
+                const itemSku = item.item_type === 'asset'
+                  ? (item.asset_details?.asset_tag || '—')
+                  : (item.item_details?.sku || '—');
+                
+                return (
                 <tr key={item.id}>
-                  <td>{item.item_details.name}</td>
-                  <td>{item.item_details.sku || '—'}</td>
+                  <td>
+                    {itemName}
+                    {item.item_type === 'asset' && item.asset_details?.location_name && (
+                      <div style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '0.25rem' }}>
+                        Location: {item.asset_details.location_name}
+                      </div>
+                    )}
+                  </td>
+                  <td>{itemSku}</td>
                   <td>{item.quantity_ordered}</td>
                   <td>{item.quantity_received}</td>
                   <td>{formatCurrency(item.unit_cost_ordered)}</td>
@@ -236,7 +258,8 @@ const PurchaseOrderPage: React.FC = () => {
                     )}
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

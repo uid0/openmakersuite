@@ -7,8 +7,8 @@ Provides rate limiting based on user authentication status and item ID.
 from datetime import timedelta
 from typing import Optional
 
-from django.core.cache import cache
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 
 User = get_user_model()
 
@@ -159,4 +159,3 @@ class QRCodeRateLimiter:
 
         current_count = cache.get(cache_key, 0)
         return max(0, limit - current_count)
-

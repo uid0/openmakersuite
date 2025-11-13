@@ -243,7 +243,11 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     queryset = PurchaseOrder.objects.select_related(
         "supplier", "created_by", "sent_by"
     ).prefetch_related(
-        "items__item_supplier__item", "items__item_supplier__supplier", "deliveries__items"
+        "items__item_supplier__item",
+        "items__item_supplier__supplier",
+        "items__asset",
+        "items__asset__manufacturer",
+        "deliveries__items",
     )
     permission_classes = [IsAuthenticated]
 

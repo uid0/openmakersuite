@@ -10,7 +10,6 @@ import string
 
 from django.db import transaction
 
-
 # Characters to use: A-Z and 0-9, excluding I, 0, O, 1, L
 # This gives us: A-H, J-N, P-Z, 2-9 = 25 letters + 8 numbers = 33 characters
 VALID_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -47,4 +46,3 @@ def generate_code():
         A random code string
     """
     return "".join(random.choices(VALID_CHARS, k=6))
-

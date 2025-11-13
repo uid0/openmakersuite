@@ -10,9 +10,9 @@ from typing import Optional
 
 from django.conf import settings
 from django.core.files import File
-from PIL import Image, ImageDraw, ImageFont
 
 import qrcode
+from PIL import Image, ImageDraw, ImageFont
 from qrcode.image.pil import PilImage
 
 from customization.models import SiteSettings
@@ -176,7 +176,6 @@ class QRCodeService:
             # We'll use pyzbar or another library, but for now we'll use a simpler approach
             # For validation, we can use the qrcode library's ability to verify
             # by creating a new QR code and comparing, or use pyzbar if available
-
             # Try to decode using pyzbar if available, otherwise skip validation
             try:
                 from pyzbar.pyzbar import decode
@@ -362,12 +361,14 @@ class QRCodeService:
 
         # Draw text
         draw = ImageDraw.Draw(new_img)
-        
+
         # Try to use a nice font, fallback to default if not available
         try:
             # Try to use a larger, bold font
             font_size = 32
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+            font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size
+            )
         except (OSError, IOError):
             try:
                 # Try default font
@@ -396,4 +397,3 @@ class QRCodeService:
         )
 
         return new_img
-

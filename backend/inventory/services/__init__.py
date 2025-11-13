@@ -1,4 +1,3 @@
 """
 Services for inventory management.
 """
-

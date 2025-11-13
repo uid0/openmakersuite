@@ -1209,22 +1209,22 @@ class Asset(models.Model):
     def can_user_operate(self, user) -> bool:
         """
         Check if user can operate this asset.
-        
+
         Assets in Implementing or Testing status can be operated by:
         - Maintainers
         - Group Admins (for assets owned by their group)
         - Logistics team members
         - COO
-        
+
         Active assets can be operated by anyone (subject to other permissions).
         """
         if not user.is_authenticated:
             return False
-        
+
         # Active assets can be operated by anyone (subject to other permissions)
         if self.status == self.ACTIVE:
             return True
-        
+
         # Implementing and Testing status assets have restricted access
         if self.status in [self.IMPLEMENTING, self.TESTING]:
             # Check for COO
@@ -1235,15 +1235,15 @@ class Asset(models.Model):
             except Group.DoesNotExist:
                 if user.is_superuser:
                     return True
-            
+
             # Check for Logistics
             if self.is_user_in_logistics(user):
                 return True
-            
+
             # Check for Group Admin
             if self.is_user_group_admin(user):
                 return True
-            
+
             # Check for Maintainer
             try:
                 maintainer_group = Group.objects.get(name="Maintainer")
@@ -1251,9 +1251,9 @@ class Asset(models.Model):
                     return True
             except Group.DoesNotExist:
                 pass
-            
+
             return False
-        
+
         # For other statuses (maintenance, retired, etc.), default to False
         return False
 

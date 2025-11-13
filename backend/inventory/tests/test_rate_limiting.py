@@ -2,9 +2,10 @@
 Tests for QR code rate limiting.
 """
 
-import pytest
 from django.core.cache import cache
 from django.utils import timezone
+
+import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -198,4 +199,3 @@ class TestQRCodeRateLimitingAPI:
         response = self.client.post(f"/api/inventory/locations/{location.id}/generate_qr/")
         assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
         assert "Rate limit exceeded" in str(response.data)
-

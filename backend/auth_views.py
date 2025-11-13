@@ -152,6 +152,7 @@ def create_test_membership(request):
     Only available in DEBUG mode for E2E testing.
     """
     from django.conf import settings
+
     from membership.models import Membership
 
     if not settings.DEBUG:

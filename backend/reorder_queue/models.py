@@ -293,8 +293,12 @@ class PurchaseOrderItem(models.Model):
     """
     Line item within a purchase order.
 
-    Represents a specific item and quantity ordered from a supplier.
+    Represents a specific item or asset ordered from a supplier.
     Tracks received quantities and costs.
+
+    Can be either:
+    - An inventory item (via item_supplier)
+    - An asset (via asset)
     """
 
     purchase_order = models.ForeignKey(
@@ -303,7 +307,17 @@ class PurchaseOrderItem(models.Model):
     item_supplier = models.ForeignKey(
         ItemSupplier,
         on_delete=models.CASCADE,
-        help_text="Specific supplier relationship for this item",
+        null=True,
+        blank=True,
+        help_text="Specific supplier relationship for inventory items",
+    )
+    asset = models.ForeignKey(
+        "inventory.Asset",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="purchase_order_items",
+        help_text="Asset being purchased (for asset purchases)",
     )
 
     # Order quantities
@@ -337,24 +351,47 @@ class PurchaseOrderItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["purchase_order", "item_supplier__item__name"]
-        unique_together = ["purchase_order", "item_supplier"]
+        ordering = ["purchase_order", "item_supplier__item__name", "asset__name"]
+        unique_together = [
+            ["purchase_order", "item_supplier"],
+            ["purchase_order", "asset"],
+        ]
         indexes = [
             models.Index(fields=["purchase_order", "item_supplier"]),
+            models.Index(fields=["purchase_order", "asset"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(item_supplier__isnull=False, asset__isnull=True)
+                    | models.Q(item_supplier__isnull=True, asset__isnull=False)
+                ),
+                name="purchase_order_item_must_have_item_or_asset",
+            ),
         ]
 
     def __str__(self) -> str:
-        return f"{self.item_supplier.item.name} - {self.quantity_ordered} units"
+        if self.item_supplier:
+            return f"{self.item_supplier.item.name} - {self.quantity_ordered} units"
+        elif self.asset:
+            return f"{self.asset.name} - {self.quantity_ordered} units"
+        return f"Purchase Order Item - {self.quantity_ordered} units"
 
     @property
-    def item(self) -> InventoryItem:
-        """Convenience property to access the inventory item."""
-        return self.item_supplier.item
+    def item(self) -> Optional[InventoryItem]:
+        """Convenience property to access the inventory item (if applicable)."""
+        if self.item_supplier:
+            return self.item_supplier.item
+        return None
 
     @property
-    def supplier(self) -> Supplier:
+    def supplier(self) -> Optional[Supplier]:
         """Convenience property to access the supplier."""
-        return self.item_supplier.supplier
+        if self.item_supplier:
+            return self.item_supplier.supplier
+        elif self.asset and self.asset.manufacturer:
+            return self.asset.manufacturer
+        return None
 
     @property
     def estimated_cost(self) -> Decimal:

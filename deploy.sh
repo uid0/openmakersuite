@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+git pull
+
 echo "🚀 Deploying Dallas Makerspace Inventory Management System..."
 
 # Check if .env file exists
@@ -60,13 +62,6 @@ if docker compose -f docker-compose.prod.yml exec -T nginx ls -la /app/staticfil
     echo "✅ Django static files found!"
 else
     echo "❌ Django static files NOT found!"
-fi
-
-# Create superuser (if needed)
-echo "👤 Create superuser? (y/n)"
-read -r create_superuser
-if [ "$create_superuser" = "y" ]; then
-    docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
 fi
 
 echo "✅ Deployment complete!"

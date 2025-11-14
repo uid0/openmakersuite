@@ -1,6 +1,7 @@
 """
 Custom authentication classes for Django REST Framework.
 """
+
 from rest_framework import authentication
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
@@ -8,7 +9,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 class CSRFExemptJWTAuthentication(JWTAuthentication):
     """
     JWT Authentication that exempts requests from CSRF checks.
-    
+
     This is safe because JWT tokens are cryptographically signed and
     cannot be forged like session cookies.
     """
@@ -27,7 +28,7 @@ class CSRFExemptJWTAuthentication(JWTAuthentication):
 class CSRFExemptSessionAuthentication(authentication.SessionAuthentication):
     """
     Session Authentication that exempts API requests from CSRF checks.
-    
+
     This is used for API endpoints where we want session auth but don't
     want to require CSRF tokens (e.g., when using JWT as primary auth).
     """
@@ -39,4 +40,3 @@ class CSRFExemptSessionAuthentication(authentication.SessionAuthentication):
         By not calling the parent's enforce_csrf, we skip CSRF validation.
         """
         pass  # Skip CSRF enforcement for API requests
-

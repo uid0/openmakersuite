@@ -359,9 +359,7 @@ class PurchaseOrderItem(models.Model):
         related_name="voided_purchase_order_items",
         help_text="User who voided this line item",
     )
-    void_reason = models.TextField(
-        blank=True, help_text="Reason for voiding this line item"
-    )
+    void_reason = models.TextField(blank=True, help_text="Reason for voiding this line item")
 
     # Notes
     notes = models.TextField(blank=True)

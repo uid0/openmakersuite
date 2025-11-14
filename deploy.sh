@@ -15,6 +15,10 @@ fi
 # Load environment variables
 export $(cat .env | grep -v '^#' | xargs)
 
+# Get git hash for build
+export GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
+echo "📝 Building with git hash: $GIT_HASH"
+
 # Stop existing containers
 echo "⏹️  Stopping existing containers..."
 docker compose -f docker-compose.prod.yml down

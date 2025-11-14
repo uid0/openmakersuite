@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AssetList from '../components/AssetList';
 import AuthSection from '../components/AuthSection';
+import Footer from '../components/Footer';
 import '../styles/HomePage.css';
 
 const HomePage: React.FC = () => {
@@ -131,19 +132,7 @@ const HomePage: React.FC = () => {
         </div>
       </div>
 
-      <footer className="footer">
-        <p>
-          Open Source Makerspace Inventory Management System
-          <br />
-          <a
-            href="https://github.com/uid0/openmakersuite/"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            View on GitHub
-          </a>
-        </p>
-      </footer>
+      <Footer />
     </div>
   );
 };

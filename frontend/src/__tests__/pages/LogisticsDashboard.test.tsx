@@ -64,7 +64,7 @@ describe('LogisticsDashboard', () => {
     jest.clearAllMocks();
   });
 
-  it('renders headline metrics and lists requests and orders', async () => {
+  it('renders headline metrics and shows summary cards', async () => {
     const getLogisticsDashboardMock = analyticsAPI.getLogisticsDashboard as jest.Mock;
     getLogisticsDashboardMock.mockResolvedValue({ data: mockDashboardData });
 
@@ -75,15 +75,25 @@ describe('LogisticsDashboard', () => {
     });
 
     // Wait for loading to complete and content to render
-    expect(await screen.findByText('Logistics Command Center')).toBeInTheDocument();
-    expect(screen.getByText('Open Requests')).toBeInTheDocument();
-    // "2" appears multiple times, so check for it in the context of "Open Requests"
+    expect(await screen.findByText('Open Requests')).toBeInTheDocument();
+    expect(screen.getByText('Urgent Requests')).toBeInTheDocument();
+    expect(screen.getByText('Location Requests')).toBeInTheDocument();
+    expect(screen.getByText('Open Purchase Orders')).toBeInTheDocument();
+    
+    // Check summary values
     const openRequestsSection = screen.getByText('Open Requests').closest('.summary-card');
     expect(openRequestsSection).toHaveTextContent('2');
-    expect(screen.getByText('Nitrile Gloves')).toBeInTheDocument();
-    expect(screen.getByText('Logistics Closet')).toBeInTheDocument();
-    expect(screen.getByText('Running low on size L.')).toBeInTheDocument();
-    expect(screen.getByText('PO-2024-02')).toBeInTheDocument();
-    expect(screen.getByText('Maker Supply Company')).toBeInTheDocument();
+    
+    const urgentRequestsSection = screen.getByText('Urgent Requests').closest('.summary-card');
+    expect(urgentRequestsSection).toHaveTextContent('1');
+    
+    const locationRequestsSection = screen.getByText('Location Requests').closest('.summary-card');
+    expect(locationRequestsSection).toHaveTextContent('0');
+    
+    const purchaseOrdersSection = screen.getByText('Open Purchase Orders').closest('.summary-card');
+    expect(purchaseOrdersSection).toHaveTextContent('1');
+    
+    // Check that time is displayed in footer
+    expect(screen.getByText(/\d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument();
   });
 });

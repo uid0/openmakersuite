@@ -19,13 +19,22 @@ export $(cat .env | grep -v '^#' | xargs)
 export GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
 echo "📝 Building with git hash: $GIT_HASH"
 
+# Verify GIT_HASH is set
+if [ -z "$GIT_HASH" ] || [ "$GIT_HASH" = "dev" ]; then
+    echo "⚠️  Warning: GIT_HASH is not set or is 'dev'. Using current commit."
+    export GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
+fi
+
 # Stop existing containers
 echo "⏹️  Stopping existing containers..."
 docker compose -f docker-compose.prod.yml down
 
 # Build and start services
 echo "🏗️  Building and starting services..."
-docker compose -f docker-compose.prod.yml build --no-cache
+echo "📝 Using GIT_HASH=$GIT_HASH for build..."
+# Export GIT_HASH so docker-compose can use it in the yml file
+export GIT_HASH
+docker compose -f docker-compose.prod.yml build --no-cache frontend
 
 echo "🚀 Starting services..."
 docker compose -f docker-compose.prod.yml up -d

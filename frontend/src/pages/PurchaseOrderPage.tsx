@@ -106,7 +106,7 @@ const PurchaseOrderPage: React.FC = () => {
       return;
     }
 
-    if (!confirm('Are you sure you want to void this line item? This will also mark the item as discontinued from this supplier.')) {
+    if (!window.confirm('Are you sure you want to void this line item? This will also mark the item as discontinued from this supplier.')) {
       return;
     }
 

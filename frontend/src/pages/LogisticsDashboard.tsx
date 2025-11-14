@@ -79,6 +79,8 @@ const LogisticsDashboard: React.FC = () => {
   const [data, setData] = useState<LogisticsDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshProgress, setRefreshProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   const fetchDashboardData = async () => {
     try {
@@ -98,6 +100,35 @@ const LogisticsDashboard: React.FC = () => {
     const interval = setInterval(fetchDashboardData, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
+
+  // Update current time every second
+  useEffect(() => {
+    const timeInterval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timeInterval);
+  }, []);
+
+  // Progress bar for refresh countdown
+  useEffect(() => {
+    if (!data) return;
+    
+    let startTime = Date.now();
+    setRefreshProgress(0);
+    
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min((elapsed / REFRESH_INTERVAL_MS) * 100, 100);
+      setRefreshProgress(progress);
+      
+      if (progress >= 100) {
+        startTime = Date.now();
+        setRefreshProgress(0);
+      }
+    }, 100);
+    
+    return () => clearInterval(progressInterval);
+  }, [data?.last_updated]);
 
   // Removed highlight rotation for TV display - no mouse interaction needed
 
@@ -189,215 +220,41 @@ const LogisticsDashboard: React.FC = () => {
     );
   }
 
-  const { summary, refill_requests, pending_orders, location_requests, last_updated } = data;
+  const { summary } = data;
+  const hasUrgentRequests = (summary.urgent_requests + summary.urgent_location_requests) > 0;
 
   return (
-    <div className="logistics-dashboard">
-      <header className="logistics-header">
-        <div className="logistics-header-left">
-          <h1>Logistics Command Center</h1>
-          <p>Realtime overview for FireTV in the logistics office.</p>
-        </div>
-        <div className="logistics-header-right">
-          <div className="clock">{new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div>
-          <div className="last-updated">
-            Updated {formatTime(last_updated)} · Next refresh in {Math.round(REFRESH_INTERVAL_MS / 1000)}s
-          </div>
-        </div>
-      </header>
-
+    <div className={`logistics-dashboard ${hasUrgentRequests ? 'urgent-background' : ''}`}>
       <section className="logistics-summary">
         <div className="summary-card emphasis">
           <span className="summary-label">Open Requests</span>
           <span className="summary-value">{summary.pending_requests}</span>
-          <span className="summary-subtext">{summary.awaiting_approval} awaiting approval</span>
         </div>
         <div className="summary-card alert">
           <span className="summary-label">Urgent Requests</span>
           <span className="summary-value">{summary.urgent_requests + summary.urgent_location_requests}</span>
-          <span className="summary-subtext">Flagged as urgent</span>
         </div>
         <div className="summary-card">
           <span className="summary-label">Location Requests</span>
           <span className="summary-value">{summary.location_requests}</span>
-          <span className="summary-subtext">Cleaning, safety & feedback</span>
         </div>
         <div className="summary-card">
           <span className="summary-label">Open Purchase Orders</span>
           <span className="summary-value">{summary.pending_orders}</span>
-          <span className="summary-subtext">{summary.open_order_lines} line items in-flight</span>
         </div>
       </section>
 
-      <main className="logistics-content">
-        <section className="refill-requests">
-          <div className="section-heading">
-            <h2>Item Refill Requests</h2>
-            <span className="section-subtitle">Prioritised by urgency and oldest requests</span>
-          </div>
-          {refill_requests.length === 0 ? (
-            <div className="empty-state">
-              <h3>All caught up 🎉</h3>
-              <p>No refill requests requiring action.</p>
-            </div>
-          ) : (
-            <div className="refill-grid tv-limited">
-              {refill_requests.map((request) => (
-                <div
-                  key={request.id}
-                  className={`refill-card priority-${request.priority}`}
-                >
-                  <div className="refill-card-header">
-                    <h3>{request.item_name}</h3>
-                    <span className={`badge status-${request.status}`}>{request.status_label}</span>
-                  </div>
-                  <div className="refill-card-body">
-                    <div className="refill-meta">
-                      <span className="meta-block">
-                        <span className="meta-label">Location</span>
-                        <span className="meta-value">{request.location}</span>
-                      </span>
-                      <span className="meta-block">
-                        <span className="meta-label">Quantity</span>
-                        <span className="meta-value">{request.quantity_requested}</span>
-                      </span>
-                      <span className="meta-block">
-                        <span className="meta-label">Days Open</span>
-                        <span className="meta-value">{request.days_open}</span>
-                      </span>
-                      <span className="meta-block">
-                        <span className="meta-label">Priority</span>
-                        <span className="meta-value accent">{request.priority_label}</span>
-                      </span>
-                    </div>
-                    {(request.request_notes || request.public_notes) && (
-                      <div className="refill-notes">
-                        {request.request_notes && <p>{request.request_notes}</p>}
-                        {!request.request_notes && request.public_notes && <p>{request.public_notes}</p>}
-                      </div>
-                    )}
-                  </div>
-                  <footer className="refill-card-footer">
-                    <span>Requested by {request.requested_by || 'Member'}</span>
-                    <span>{request.requested_at ? formatDate(request.requested_at) : '—'}</span>
-                  </footer>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="location-requests">
-          <div className="section-heading">
-            <h2>Location Requests</h2>
-            <span className="section-subtitle">Cleaning, safety concerns, and feedback requiring attention</span>
-          </div>
-          {location_requests.length === 0 ? (
-            <div className="empty-state">
-              <h3>All clear ✅</h3>
-              <p>No location requests requiring action.</p>
-            </div>
-          ) : (
-            <div className="refill-grid tv-limited">
-              {location_requests.map((request) => (
-                <div
-                  key={request.id}
-                  className={`refill-card priority-${request.is_urgent ? 'urgent' : 'normal'} ${
-                    request.is_urgent ? 'alert' : ''
-                  }`}
-                >
-                  <div className="refill-card-header">
-                    <h3>{request.title}</h3>
-                    <span className={`badge status-${request.status} ${request.is_urgent ? 'urgent-badge' : ''}`}>
-                      {request.is_urgent ? '🚨 URGENT' : request.status_label}
-                    </span>
-                  </div>
-                  <div className="refill-card-body">
-                    <div className="refill-meta">
-                      <span className="meta-block">
-                        <span className="meta-label">Type</span>
-                        <span className="meta-value">{request.type_label}</span>
-                      </span>
-                      <span className="meta-block">
-                        <span className="meta-label">Location</span>
-                        <span className="meta-value">{request.location}</span>
-                      </span>
-                      <span className="meta-block">
-                        <span className="meta-label">Days Open</span>
-                        <span className="meta-value">{request.days_open}</span>
-                      </span>
-                    </div>
-                    {request.description && (
-                      <div className="refill-notes">
-                        <p>{request.description}</p>
-                      </div>
-                    )}
-                  </div>
-                  <footer className="refill-card-footer">
-                    <span>{request.created_at ? formatDate(request.created_at) : '—'}</span>
-                  </footer>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {pending_orders.length > 0 && (
-          <section className="pending-orders">
-            <div className="section-heading">
-              <h2>Purchase Orders</h2>
-              <span className="section-subtitle">In flight deliveries</span>
-            </div>
-            <div className="orders-grid">
-              {pending_orders.map((order) => (
-                <div key={order.id} className={`order-card status-${order.status}`}>
-                  <header className="order-card-header">
-                    <div>
-                      <h3>{order.po_number}</h3>
-                      <span className="order-supplier">{order.supplier_name}</span>
-                    </div>
-                    <span className="badge status">{order.status_label}</span>
-                  </header>
-                  <div className="order-details">
-                    <div className="order-meta">
-                      <span>
-                        Sent {order.sent_at ? `${formatDate(order.sent_at)} · ${formatTime(order.sent_at)}` : '—'}
-                      </span>
-                      <span>
-                        ETA {formatDate(order.expected_delivery_date)} ({order.days_since_ordered} days in transit)
-                      </span>
-                    </div>
-                    <div className="order-progress">
-                      <span className="progress-label">Receiving Progress</span>
-                      <div className="progress-bar">
-                        <div
-                          className="progress-value"
-                          style={{ width: `${order.progress_percent ?? 0}%` }}
-                        />
-                      </div>
-                      <span className="progress-meta">
-                        {order.received_quantity}/{order.total_quantity || 0} items received
-                      </span>
-                    </div>
-                    <div className="order-financials">
-                      <span className="meta-label">Est. Spend</span>
-                      <span className="meta-value">{formatCurrency(order.estimated_total)}</span>
-                    </div>
-                  </div>
-                  <footer className="order-card-footer">
-                    <span>Lines: {order.total_items}</span>
-                    <span>Last update {formatTime(order.updated_at)}</span>
-                  </footer>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-      </main>
-
       <footer className="logistics-footer">
-        <div>
-          Showing top 2 requests per category · Updated {formatTime(last_updated)}
+        <div className="footer-time">
+          {currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })}
+        </div>
+        <div className="refresh-progress-container">
+          <div className="refresh-progress-bar">
+            <div 
+              className="refresh-progress-fill" 
+              style={{ width: `${refreshProgress}%` }}
+            />
+          </div>
         </div>
       </footer>
     </div>

@@ -23,6 +23,7 @@ interface PurchaseOrderItem {
   quantity_ordered: number;
   quantity_received: number;
   unit_cost_ordered: string;
+  estimated_cost: string;
   expected_shipment_date: string | null;
   notes: string;
   is_voided: boolean;
@@ -52,8 +53,13 @@ const PurchaseOrderPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [voidingItemId, setVoidingItemId] = useState<string | null>(null);
   const [voidReason, setVoidReason] = useState<string>('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
+    // Check if user is authenticated
+    const token = localStorage.getItem('token');
+    setIsAuthenticated(!!token);
+
     if (orderId) {
       loadOrder();
     }
@@ -202,6 +208,7 @@ const PurchaseOrderPage: React.FC = () => {
               <th>Quantity Ordered</th>
               <th>Quantity Received</th>
               <th>Unit Cost</th>
+              <th>Line Total</th>
               <th>Expected Shipment Date</th>
               <th>Status</th>
               <th>Actions</th>
@@ -210,7 +217,7 @@ const PurchaseOrderPage: React.FC = () => {
           <tbody>
             {order.items.length === 0 ? (
               <tr>
-                <td colSpan={8} className="no-data">
+                <td colSpan={9} className="no-data">
                   No line items found
                 </td>
               </tr>
@@ -237,6 +244,7 @@ const PurchaseOrderPage: React.FC = () => {
                   <td>{item.quantity_ordered}</td>
                   <td>{item.quantity_received}</td>
                   <td>{formatCurrency(item.unit_cost_ordered)}</td>
+                  <td>{formatCurrency(item.estimated_cost)}</td>
                   <td>
                     {editingItemId === item.id ? (
                       <div className="edit-shipment-date">
@@ -267,7 +275,7 @@ const PurchaseOrderPage: React.FC = () => {
                     ) : (
                       <div className="shipment-date-display">
                         <span>{formatDate(item.expected_shipment_date)}</span>
-                        {!item.is_voided && (
+                        {!item.is_voided && isAuthenticated && (
                           <button
                             onClick={() => handleEditShipmentDate(item)}
                             className="btn-edit"
@@ -294,58 +302,62 @@ const PurchaseOrderPage: React.FC = () => {
                     )}
                   </td>
                   <td>
-                    {voidingItemId === item.id ? (
-                      <div className="void-item-form">
-                        <textarea
-                          value={voidReason}
-                          onChange={(e) => setVoidReason(e.target.value)}
-                          placeholder="Reason for voiding (e.g., item discontinued by supplier)"
-                          disabled={saving}
-                          rows={3}
-                          style={{ width: '100%', marginBottom: '0.5rem' }}
-                        />
-                        <div className="edit-actions">
-                          <button
-                            onClick={() => handleVoidItem(item.id)}
-                            disabled={saving || !voidReason.trim()}
-                            className="btn-void"
-                          >
-                            {saving ? 'Voiding...' : 'Confirm Void'}
-                          </button>
-                          <button
-                            onClick={() => {
-                              setVoidingItemId(null);
-                              setVoidReason('');
-                            }}
+                    {isAuthenticated ? (
+                      voidingItemId === item.id ? (
+                        <div className="void-item-form">
+                          <textarea
+                            value={voidReason}
+                            onChange={(e) => setVoidReason(e.target.value)}
+                            placeholder="Reason for voiding (e.g., item discontinued by supplier)"
                             disabled={saving}
-                            className="btn-cancel"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="item-actions">
-                        {!item.is_voided && editingItemId !== item.id && (
-                          <>
+                            rows={3}
+                            style={{ width: '100%', marginBottom: '0.5rem' }}
+                          />
+                          <div className="edit-actions">
                             <button
-                              onClick={() => handleEditShipmentDate(item)}
-                              className="btn-edit-item"
+                              onClick={() => handleVoidItem(item.id)}
+                              disabled={saving || !voidReason.trim()}
+                              className="btn-void"
                             >
-                              Edit Shipment Date
+                              {saving ? 'Voiding...' : 'Confirm Void'}
                             </button>
-                            {item.quantity_received === 0 && (
+                            <button
+                              onClick={() => {
+                                setVoidingItemId(null);
+                                setVoidReason('');
+                              }}
+                              disabled={saving}
+                              className="btn-cancel"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="item-actions">
+                          {!item.is_voided && editingItemId !== item.id && (
+                            <>
                               <button
-                                onClick={() => setVoidingItemId(item.id)}
-                                className="btn-void-item"
-                                style={{ marginLeft: '0.5rem' }}
+                                onClick={() => handleEditShipmentDate(item)}
+                                className="btn-edit-item"
                               >
-                                Void Item
+                                Edit Shipment Date
                               </button>
-                            )}
-                          </>
-                        )}
-                      </div>
+                              {item.quantity_received === 0 && (
+                                <button
+                                  onClick={() => setVoidingItemId(item.id)}
+                                  className="btn-void-item"
+                                  style={{ marginLeft: '0.5rem' }}
+                                >
+                                  Void Item
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )
+                    ) : (
+                      <span className="view-only-note">View only</span>
                     )}
                   </td>
                 </tr>

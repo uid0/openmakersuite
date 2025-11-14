@@ -10,6 +10,7 @@ import FixtureScanPage from './pages/FixtureScanPage';
 import HomePage from './pages/HomePage';
 import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
+import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import ScanPage from './pages/ScanPage';
 import ThanksPage from './pages/ThanksPage';
@@ -47,6 +48,7 @@ function App() {
             <Route path="/tv-dashboard/:location" element={<TVDashboard />} />
             <Route path="/tv-logistics" element={<LogisticsDashboard />} />
             <Route path="/transparency" element={<TransparencyPage />} />
+            <Route path="/purchase-order" element={<PurchaseOrderListPage />} />
             <Route path="/purchase-order/:orderId" element={<PurchaseOrderPage />} />
           </SentryRoutes>
         </Sentry.ErrorBoundary>

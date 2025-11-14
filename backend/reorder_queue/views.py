@@ -249,7 +249,40 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         "items__asset__manufacturer",
         "deliveries__items",
     )
-    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """
+        Allow public access for viewing active and settled purchase orders.
+        Require authentication for creating, updating, or viewing draft/cancelled orders.
+        """
+        if self.action in ["list", "retrieve"]:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        """
+        For public access, only show active and settled orders.
+        For authenticated users, show all orders.
+        """
+        queryset = super().get_queryset()
+
+        # If user is not authenticated, only show active and settled orders
+        if not self.request.user.is_authenticated:
+            queryset = queryset.filter(
+                status__in=[
+                    PurchaseOrder.SENT,
+                    PurchaseOrder.CONFIRMED,
+                    PurchaseOrder.PARTIALLY_RECEIVED,
+                    PurchaseOrder.RECEIVED,
+                ]
+            )
+
+        # Apply status filter if provided
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        return queryset
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -1029,16 +1062,70 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     }
                 )
 
-            # Summary statistics
+            # Get purchase orders for transparency
+            purchase_orders = (
+                PurchaseOrder.objects.filter(
+                    status__in=[
+                        PurchaseOrder.SENT,
+                        PurchaseOrder.CONFIRMED,
+                        PurchaseOrder.PARTIALLY_RECEIVED,
+                        PurchaseOrder.RECEIVED,
+                    ]
+                )
+                .select_related("supplier")
+                .prefetch_related("items__item_supplier__item", "items__asset")
+                .order_by("-order_date")[:50]  # Last 50 purchase orders
+            )
+
+            po_transparency_data = []
+            po_total_spent = Decimal("0.00")
+
+            for po in purchase_orders:
+                if po.actual_total:
+                    po_total_spent += po.actual_total
+
+                # Count items (excluding voided)
+                active_items = po.items.filter(is_voided=False)
+                total_items = active_items.count()
+                total_quantity = sum(item.quantity_ordered for item in active_items)
+
+                po_data = {
+                    "id": str(po.id),
+                    "po_number": po.po_number,
+                    "supplier_name": po.supplier.name,
+                    "status": po.status,
+                    "status_label": po.get_status_display(),
+                    "order_date": po.order_date.isoformat(),
+                    "expected_delivery_date": (
+                        po.expected_delivery_date.isoformat()
+                        if po.expected_delivery_date
+                        else None
+                    ),
+                    "estimated_total": float(po.estimated_total) if po.estimated_total else None,
+                    "actual_total": float(po.actual_total) if po.actual_total else None,
+                    "total_items": total_items,
+                    "total_quantity": total_quantity,
+                    "is_fully_received": po.is_fully_received,
+                }
+
+                po_transparency_data.append(po_data)
+
             summary = {
                 "total_orders_with_financial_data": len(transparency_data),
                 "total_amount_spent": float(total_spent),
+                "total_purchase_orders": len(po_transparency_data),
+                "total_po_amount_spent": float(po_total_spent),
                 "last_updated": timezone.now().isoformat(),
                 "transparency_note": "Dallas Makerspace operates with full financial transparency. All purchase information is publicly available.",
             }
 
             return Response(
-                {"summary": summary, "orders": transparency_data, "ledger": ledger_entries}
+                {
+                    "summary": summary,
+                    "orders": transparency_data,
+                    "ledger": ledger_entries,
+                    "purchase_orders": po_transparency_data,
+                }
             )
 
         except Exception as e:

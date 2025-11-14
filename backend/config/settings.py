@@ -154,8 +154,8 @@ AUTH_USER_MODEL = "membership.User"
 # REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
+        "config.authentication.CSRFExemptJWTAuthentication",
+        "config.authentication.CSRFExemptSessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         ("rest_framework.permissions.AllowAny",)

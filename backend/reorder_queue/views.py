@@ -339,7 +339,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
     def _find_best_supplier(self, item):
         """Find the best supplier for an item based on cost, availability, and lead time."""
-        suppliers = item.item_suppliers.filter(is_active=True)
+        suppliers = item.item_suppliers.filter(is_active=True, is_discontinued=False)
 
         if not suppliers.exists():
             return None
@@ -470,6 +470,49 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         if "notes" in request.data:
             line_item.notes = request.data["notes"]
+
+        line_item.save()
+
+        from .serializers import PurchaseOrderItemSerializer
+
+        serializer = PurchaseOrderItemSerializer(line_item)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="items/(?P<item_id>[^/.]+)/void")
+    def void_item(self, request, pk=None, item_id=None):
+        """Void a specific line item in a purchase order (e.g., item discontinued)."""
+        purchase_order = self.get_object()
+        try:
+            line_item = PurchaseOrderItem.objects.get(id=item_id, purchase_order=purchase_order)
+        except PurchaseOrderItem.DoesNotExist:
+            return Response({"error": "Line item not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if line_item.is_voided:
+            return Response(
+                {"error": "Line item is already voided"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if item has been received
+        if line_item.quantity_received > 0:
+            return Response(
+                {
+                    "error": "Cannot void line item that has already been received. "
+                    "Use notes to document the issue instead."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Void the line item
+        line_item.is_voided = True
+        line_item.voided_at = timezone.now()
+        line_item.voided_by = request.user
+        line_item.void_reason = request.data.get("reason", "Item discontinued by supplier")
+
+        # If this is an item_supplier relationship, mark it as discontinued
+        if line_item.item_supplier:
+            line_item.item_supplier.is_discontinued = True
+            line_item.item_supplier.is_active = False
+            line_item.item_supplier.save()
 
         line_item.save()
 

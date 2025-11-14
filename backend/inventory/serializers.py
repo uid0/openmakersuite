@@ -105,6 +105,7 @@ class ItemSupplierSerializer(serializers.ModelSerializer):
             "average_lead_time",
             "is_primary",
             "is_active",
+            "is_discontinued",
             "notes",
             "created_at",
             "updated_at",

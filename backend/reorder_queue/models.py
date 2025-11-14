@@ -343,6 +343,26 @@ class PurchaseOrderItem(models.Model):
         help_text="Expected shipment date for this line item (useful for items with longer lead times)",
     )
 
+    # Status
+    is_voided = models.BooleanField(
+        default=False,
+        help_text="Whether this line item has been voided (e.g., item discontinued by supplier)",
+    )
+    voided_at = models.DateTimeField(
+        null=True, blank=True, help_text="When this line item was voided"
+    )
+    voided_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="voided_purchase_order_items",
+        help_text="User who voided this line item",
+    )
+    void_reason = models.TextField(
+        blank=True, help_text="Reason for voiding this line item"
+    )
+
     # Notes
     notes = models.TextField(blank=True)
 

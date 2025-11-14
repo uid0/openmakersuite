@@ -116,11 +116,15 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "quantity_pending",
             "is_fully_received",
             "expected_shipment_date",
+            "is_voided",
+            "voided_at",
+            "voided_by",
+            "void_reason",
             "notes",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at", "voided_at", "voided_by"]
 
     def get_asset_details(self, obj):
         """Return asset details if this is an asset purchase."""

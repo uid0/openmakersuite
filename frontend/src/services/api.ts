@@ -103,6 +103,8 @@ export const inventoryAPI = {
 
   getItemSuppliers: (itemId: string) =>
     api.get<{ results: ItemSupplier[] }>(`/inventory/item-suppliers/?item_id=${itemId}`),
+  markItemSupplierDiscontinued: (itemSupplierId: string) =>
+    api.post(`/inventory/item-suppliers/${itemSupplierId}/mark_discontinued/`),
 
   listItems: (params?: { category?: number; search?: string }) =>
     api.get<{ results: InventoryItem[] }>('/inventory/items/', { params }),
@@ -244,6 +246,8 @@ export const purchaseOrderAPI = {
     api.get<any>(`/reorders/purchase-orders/${id}/`),
   updateLineItem: (orderId: string, itemId: string, data: { expected_shipment_date?: string; notes?: string }) =>
     api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
+  voidLineItem: (orderId: string, itemId: string, reason?: string) =>
+    api.post(`/reorders/purchase-orders/${orderId}/items/${itemId}/void/`, { reason }),
 };
 
 // Fixtures API

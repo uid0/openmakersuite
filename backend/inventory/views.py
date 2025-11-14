@@ -542,7 +542,7 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
         # Filter to only active suppliers if requested
         active_only = self.request.query_params.get("active_only", "false").lower() == "true"
         if active_only:
-            queryset = queryset.filter(is_active=True)
+            queryset = queryset.filter(is_active=True, is_discontinued=False)
 
         return queryset.order_by("-is_primary", "unit_cost")
 
@@ -562,6 +562,17 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
             history = history.filter(recorded_at__lte=end_date)
 
         serializer = PriceHistorySerializer(history, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def mark_discontinued(self, request, pk=None):
+        """Mark this item as discontinued from this supplier."""
+        item_supplier = self.get_object()
+        item_supplier.is_discontinued = True
+        item_supplier.is_active = False  # Also mark as inactive
+        item_supplier.save()
+
+        serializer = self.get_serializer(item_supplier)
         return Response(serializer.data)
 
 

@@ -654,6 +654,10 @@ class ItemSupplier(models.Model):
     is_active = models.BooleanField(
         default=True, help_text="Whether this supplier option is currently active"
     )
+    is_discontinued = models.BooleanField(
+        default=False,
+        help_text="Whether this item has been discontinued by this supplier (no longer available for purchase)",
+    )
 
     # Metadata
     notes = models.TextField(blank=True, help_text="Notes about this supplier for this item")

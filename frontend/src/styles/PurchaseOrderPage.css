@@ -251,3 +251,91 @@
   color: #64748b;
 }
 
+.voided-item {
+  opacity: 0.6;
+  background-color: #fef2f2 !important;
+}
+
+.voided-item:hover {
+  background-color: #fee2e2 !important;
+}
+
+.status-voided {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.status-active {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.void-item-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 300px;
+}
+
+.void-item-form textarea {
+  padding: 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.void-item-form textarea:focus {
+  outline: none;
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+.btn-void,
+.btn-void-item {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-void {
+  background-color: #dc2626;
+  color: white;
+}
+
+.btn-void:hover:not(:disabled) {
+  background-color: #b91c1c;
+}
+
+.btn-void:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-void-item {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.btn-void-item:hover {
+  background-color: #fecaca;
+}
+
+.voided-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.item-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+

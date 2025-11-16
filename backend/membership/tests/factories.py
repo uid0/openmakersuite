@@ -3,12 +3,13 @@ Factory classes for generating test data for membership models.
 """
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 
 import factory
 from factory import Faker
 from factory.django import DjangoModelFactory
 
-from membership.models import Membership
+from membership.models import Membership, SIGAdmin
 
 User = get_user_model()
 
@@ -60,3 +61,24 @@ class MembershipFactory(DjangoModelFactory):
             # Create a default user if none provided
             user = UserFactory()
             self.users.add(user)
+
+
+class GroupFactory(DjangoModelFactory):
+    """Factory for creating Group instances."""
+
+    class Meta:
+        model = Group
+        django_get_or_create = ("name",)
+
+    name = factory.Sequence(lambda n: f"SIG {n}")
+
+
+class SIGAdminFactory(DjangoModelFactory):
+    """Factory for creating SIGAdmin instances."""
+
+    class Meta:
+        model = SIGAdmin
+
+    user = factory.SubFactory(UserFactory)
+    group = factory.SubFactory(GroupFactory)
+    is_active = True

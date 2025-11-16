@@ -211,8 +211,11 @@ class SIGAdmin(models.Model):
     @classmethod
     def get_sig_admins(cls, group):
         """Get all admin users for a specific SIG."""
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
         if not group:
-            return settings.AUTH_USER_MODEL.objects.none()
-        return settings.AUTH_USER_MODEL.objects.filter(
+            return User.objects.none()
+        return User.objects.filter(
             sig_admin_roles__group=group, sig_admin_roles__is_active=True
         ).distinct()

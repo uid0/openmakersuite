@@ -29,7 +29,7 @@ def can_manage_sig_asset(user, asset):
     - They are a system admin (staff/superuser)
     - They are in the Logistics group
     - They are a SIG admin of the asset's owning group
-    - The asset is space-owned (no owning_group) and user is authenticated
+    - The asset is space-owned (no owning_group) and user is authenticated (but not a SIG admin)
 
     Args:
         user: The user to check
@@ -49,8 +49,15 @@ def can_manage_sig_asset(user, asset):
     if is_logistics_member(user):
         return True
 
-    # If asset has no owning group (space-owned), any authenticated user can manage
+    # If asset has no owning group (space-owned)
     if not asset.owning_group:
+        # Regular authenticated users can manage space-owned assets
+        # But SIG admins cannot (they can only manage assets owned by their SIG)
+        user_managed_sigs = get_user_managed_sigs(user)
+        if user_managed_sigs.exists():
+            # User is a SIG admin, so they cannot manage space-owned assets
+            return False
+        # Regular user can manage space-owned assets
         return True
 
     # SIG admins can manage assets owned by their SIG
@@ -65,7 +72,7 @@ def can_manage_sig_inventory(user, item):
     - They are a system admin (staff/superuser)
     - They are in the Logistics group
     - They are a SIG admin of the item's owning group
-    - The item is space-owned (no owning_group) and user is authenticated
+    - The item is space-owned (no owning_group) and user is authenticated (but not a SIG admin)
 
     Args:
         user: The user to check
@@ -85,8 +92,15 @@ def can_manage_sig_inventory(user, item):
     if is_logistics_member(user):
         return True
 
-    # If item has no owning group (space-owned), any authenticated user can manage
+    # If item has no owning group (space-owned)
     if not item.owning_group:
+        # Regular authenticated users can manage space-owned items
+        # But SIG admins cannot (they can only manage items owned by their SIG)
+        user_managed_sigs = get_user_managed_sigs(user)
+        if user_managed_sigs.exists():
+            # User is a SIG admin, so they cannot manage space-owned items
+            return False
+        # Regular user can manage space-owned items
         return True
 
     # SIG admins can manage inventory items owned by their SIG

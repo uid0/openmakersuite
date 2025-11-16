@@ -79,9 +79,6 @@ class TestSIGAdminModel:
 
     def test_sigadmin_get_sig_admins(self):
         """Test get_sig_admins classmethod."""
-        from django.contrib.auth import get_user_model
-
-        User = get_user_model()
         group = Group.objects.create(name="Test SIG")
         admin1 = UserFactory()
         admin2 = UserFactory()
@@ -113,9 +110,41 @@ class TestSIGPermissionUtils:
 
     def test_is_logistics_member(self):
         """Test is_logistics_member utility function."""
+        from django.contrib.auth import get_user_model
+        from django.db import connection
+
+        User = get_user_model()
         user = UserFactory()
         logistics_group = Group.objects.create(name="Logistics")
-        user.groups.add(logistics_group)
+        
+        # Check if auth_user_groups table exists, if not, create it
+        with connection.cursor() as cursor:
+            if connection.vendor == "sqlite":
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='auth_user_groups';"
+                )
+                table_exists = cursor.fetchone() is not None
+            else:
+                # For other databases, assume table exists
+                table_exists = True
+            
+            if not table_exists:
+                # Create the table
+                cursor.execute(
+                    """
+                    CREATE TABLE auth_user_groups (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        group_id INTEGER NOT NULL,
+                        UNIQUE(user_id, group_id),
+                        FOREIGN KEY (user_id) REFERENCES auth_user(id),
+                        FOREIGN KEY (group_id) REFERENCES auth_group(id)
+                    );
+                    """
+                )
+        
+        # Use through model directly to ensure migrations are applied
+        User.groups.through.objects.create(user=user, group=logistics_group)
 
         assert is_logistics_member(user) is True
 
@@ -138,15 +167,19 @@ class TestSIGPermissionUtils:
 
     def test_can_manage_sig_asset(self):
         """Test can_manage_sig_asset utility function."""
+        from django.contrib.auth import get_user_model
+
         from inventory.tests.factories import AssetFactory
 
+        User = get_user_model()
         # Create test data
         sig_admin = UserFactory()
         regular_user = UserFactory()
         staff_user = UserFactory(is_staff=True)
         logistics_user = UserFactory()
         logistics_group = Group.objects.create(name="Logistics")
-        logistics_user.groups.add(logistics_group)
+        # Use through model directly to ensure migrations are applied
+        User.groups.through.objects.create(user=logistics_user, group=logistics_group)
 
         sig_group = Group.objects.create(name="Test SIG")
         SIGAdmin.objects.create(user=sig_admin, group=sig_group, is_active=True)
@@ -174,15 +207,19 @@ class TestSIGPermissionUtils:
 
     def test_can_manage_sig_inventory(self):
         """Test can_manage_sig_inventory utility function."""
+        from django.contrib.auth import get_user_model
+
         from inventory.tests.factories import InventoryItemFactory
 
+        User = get_user_model()
         # Create test data
         sig_admin = UserFactory()
         regular_user = UserFactory()
         staff_user = UserFactory(is_staff=True)
         logistics_user = UserFactory()
         logistics_group = Group.objects.create(name="Logistics")
-        logistics_user.groups.add(logistics_group)
+        # Use through model directly to ensure migrations are applied
+        User.groups.through.objects.create(user=logistics_user, group=logistics_group)
 
         sig_group = Group.objects.create(name="Test SIG")
         SIGAdmin.objects.create(user=sig_admin, group=sig_group, is_active=True)
@@ -210,15 +247,19 @@ class TestSIGPermissionUtils:
 
     def test_can_create_reorder_request(self):
         """Test can_create_reorder_request utility function."""
+        from django.contrib.auth import get_user_model
+
         from inventory.tests.factories import InventoryItemFactory
 
+        User = get_user_model()
         # Create test data
         sig_admin = UserFactory()
         regular_user = UserFactory()
         staff_user = UserFactory(is_staff=True)
         logistics_user = UserFactory()
         logistics_group = Group.objects.create(name="Logistics")
-        logistics_user.groups.add(logistics_group)
+        # Use through model directly to ensure migrations are applied
+        User.groups.through.objects.create(user=logistics_user, group=logistics_group)
 
         sig_group = Group.objects.create(name="Test SIG")
         SIGAdmin.objects.create(user=sig_admin, group=sig_group, is_active=True)

@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("reorder_queue", "0009_add_asset_to_purchaseorderitem"),
+        ("reorder_queue", "0010_alter_purchaseorderitem_options_and_more"),
     ]
 
     operations = [

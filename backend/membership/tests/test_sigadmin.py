@@ -116,7 +116,7 @@ class TestSIGPermissionUtils:
         User = get_user_model()
         user = UserFactory()
         logistics_group = Group.objects.create(name="Logistics")
-        
+
         # Check if auth_user_groups table exists, if not, create it
         with connection.cursor() as cursor:
             if connection.vendor == "sqlite":
@@ -127,7 +127,7 @@ class TestSIGPermissionUtils:
             else:
                 # For other databases, assume table exists
                 table_exists = True
-            
+
             if not table_exists:
                 # Create the table
                 cursor.execute(
@@ -142,7 +142,7 @@ class TestSIGPermissionUtils:
                     );
                     """
                 )
-        
+
         # Use through model directly to ensure migrations are applied
         User.groups.through.objects.create(user=user, group=logistics_group)
 

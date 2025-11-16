@@ -79,7 +79,11 @@ class SIGSerializer(serializers.ModelSerializer):
 
     def get_member_count(self, obj):
         """Get the number of members in this SIG."""
-        return obj.user_set.count()
+        try:
+            return obj.user_set.count()
+        except Exception:
+            # If auth_user_groups table doesn't exist, return 0
+            return 0
 
     def get_asset_count(self, obj):
         """Get the number of assets owned by this SIG."""

@@ -45,7 +45,15 @@ class SIGViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["get"])
     def details(self, request, pk=None):
         """Get detailed information about a SIG."""
-        sig = self.get_object()
+        from django.contrib.auth.models import Group
+
+        try:
+            sig = Group.objects.get(pk=pk)
+        except Group.DoesNotExist:
+            return Response(
+                {"detail": "SIG not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         # Check if user is admin of this SIG
         if not (

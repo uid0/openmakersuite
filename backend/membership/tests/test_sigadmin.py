@@ -141,8 +141,8 @@ class TestSIGPermissionUtils:
                 cursor.execute(
                     """
                     SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
-                        WHERE table_schema = 'public' 
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = 'public'
                         AND table_name = 'auth_user_groups'
                     );
                     """

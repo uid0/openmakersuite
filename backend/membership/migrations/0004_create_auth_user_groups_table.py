@@ -48,6 +48,7 @@ def create_auth_user_groups_table(apps, schema_editor):
                     """
                 )
             elif vendor == "sqlite":
+                # SQLite requires separate execute calls for each statement
                 cursor.execute(
                     """
                     CREATE TABLE auth_user_groups (
@@ -57,10 +58,14 @@ def create_auth_user_groups_table(apps, schema_editor):
                         UNIQUE(user_id, group_id),
                         FOREIGN KEY (user_id) REFERENCES auth_user(id),
                         FOREIGN KEY (group_id) REFERENCES auth_group(id)
-                    );
-                    CREATE INDEX auth_user_groups_user_id_idx ON auth_user_groups(user_id);
-                    CREATE INDEX auth_user_groups_group_id_idx ON auth_user_groups(group_id);
+                    )
                     """
+                )
+                cursor.execute(
+                    "CREATE INDEX auth_user_groups_user_id_idx ON auth_user_groups(user_id)"
+                )
+                cursor.execute(
+                    "CREATE INDEX auth_user_groups_group_id_idx ON auth_user_groups(group_id)"
                 )
 
 

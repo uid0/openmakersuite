@@ -83,7 +83,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                     item = InventoryItem.objects.get(pk=item_id)
                     if not can_create_reorder_request(user, item):
                         return Response(
-                            {"detail": "You do not have permission to create reorder requests for this item."},
+                            {
+                                "detail": "You do not have permission to create reorder requests for this item."
+                            },
                             status=status.HTTP_403_FORBIDDEN,
                         )
                 except InventoryItem.DoesNotExist:
@@ -134,9 +136,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        pending = (
-            self.queryset.filter(status="pending", item__owning_group__in=user_sigs)
-            .order_by("-priority", "requested_at")
+        pending = self.queryset.filter(status="pending", item__owning_group__in=user_sigs).order_by(
+            "-priority", "requested_at"
         )
         serializer = self.get_serializer(pending, many=True)
         return Response(serializer.data)

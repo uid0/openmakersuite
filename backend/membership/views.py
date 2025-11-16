@@ -3,18 +3,14 @@ Views for membership and SIG management API.
 """
 
 from django.contrib.auth.models import Group
+
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import SIGAdmin, User
-from .serializers import (
-    SIGAdminSerializer,
-    SIGMemberSerializer,
-    SIGSerializer,
-    UserSerializer,
-)
+from .serializers import SIGAdminSerializer, SIGMemberSerializer, SIGSerializer, UserSerializer
 from .utils import get_user_managed_sigs, is_sig_admin
 
 
@@ -52,7 +48,9 @@ class SIGViewSet(viewsets.ReadOnlyModelViewSet):
         sig = self.get_object()
 
         # Check if user is admin of this SIG
-        if not (request.user.is_superuser or request.user.is_staff or is_sig_admin(request.user, sig)):
+        if not (
+            request.user.is_superuser or request.user.is_staff or is_sig_admin(request.user, sig)
+        ):
             return Response(
                 {"detail": "You do not have permission to view this SIG."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -88,7 +86,9 @@ class SIGMemberViewSet(viewsets.ViewSet):
             )
 
         # Check if user is admin of this SIG
-        if not (request.user.is_superuser or request.user.is_staff or is_sig_admin(request.user, sig)):
+        if not (
+            request.user.is_superuser or request.user.is_staff or is_sig_admin(request.user, sig)
+        ):
             return Response(
                 {"detail": "You do not have permission to view members of this SIG."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -117,7 +117,9 @@ class SIGMemberViewSet(viewsets.ViewSet):
             )
 
         # Check if user is admin of this SIG
-        if not (request.user.is_superuser or request.user.is_staff or is_sig_admin(request.user, sig)):
+        if not (
+            request.user.is_superuser or request.user.is_staff or is_sig_admin(request.user, sig)
+        ):
             return Response(
                 {"detail": "You do not have permission to manage members of this SIG."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -167,7 +169,9 @@ class SIGMemberViewSet(viewsets.ViewSet):
             )
 
         # Check if user is admin of this SIG
-        if not (request.user.is_superuser or request.user.is_staff or is_sig_admin(request.user, sig)):
+        if not (
+            request.user.is_superuser or request.user.is_staff or is_sig_admin(request.user, sig)
+        ):
             return Response(
                 {"detail": "You do not have permission to manage members of this SIG."},
                 status=status.HTTP_403_FORBIDDEN,

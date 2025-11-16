@@ -3,6 +3,7 @@ Serializers for membership and SIG management API.
 """
 
 from django.contrib.auth.models import Group
+
 from rest_framework import serializers
 
 from .models import SIGAdmin, User
@@ -120,4 +121,3 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ["id", "username", "email", "handle", "first_name", "last_name"]
         read_only_fields = ["id", "username", "email", "handle", "first_name", "last_name"]
-

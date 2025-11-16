@@ -206,9 +206,7 @@ class SIGAdmin(models.Model):
         """Get all SIGs (Groups) that a user administers."""
         if not user or not user.is_authenticated:
             return Group.objects.none()
-        return Group.objects.filter(
-            sig_admins__user=user, sig_admins__is_active=True
-        ).distinct()
+        return Group.objects.filter(sig_admins__user=user, sig_admins__is_active=True).distinct()
 
     @classmethod
     def get_sig_admins(cls, group):

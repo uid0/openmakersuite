@@ -158,4 +158,3 @@ def can_create_reorder_request(user, item):
 
     # SIG admins can create reorder requests for their SIG's inventory
     return is_sig_admin(user, item.owning_group)
-

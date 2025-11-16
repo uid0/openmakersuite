@@ -249,8 +249,9 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        from membership.utils import can_manage_sig_inventory, is_logistics_member, is_sig_admin
         from django.contrib.auth.models import Group
+
+        from membership.utils import is_logistics_member, is_sig_admin
 
         # Check ownership_type if provided
         ownership_type = request.data.get("ownership_type")
@@ -259,9 +260,16 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         if ownership_type == "group" and owning_group_id:
             try:
                 group = Group.objects.get(pk=owning_group_id)
-                if not (user.is_superuser or user.is_staff or is_logistics_member(user) or is_sig_admin(user, group)):
+                if not (
+                    user.is_superuser
+                    or user.is_staff
+                    or is_logistics_member(user)
+                    or is_sig_admin(user, group)
+                ):
                     return Response(
-                        {"detail": "You do not have permission to create inventory items for this SIG."},
+                        {
+                            "detail": "You do not have permission to create inventory items for this SIG."
+                        },
                         status=status.HTTP_403_FORBIDDEN,
                     )
             except Group.DoesNotExist:
@@ -302,8 +310,9 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        from membership.utils import can_manage_sig_inventory, is_logistics_member, is_sig_admin
         from django.contrib.auth.models import Group
+
+        from membership.utils import can_manage_sig_inventory, is_logistics_member, is_sig_admin
 
         if not can_manage_sig_inventory(user, item):
             return Response(
@@ -317,9 +326,16 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             if owning_group_id:
                 try:
                     group = Group.objects.get(pk=owning_group_id)
-                    if not (user.is_superuser or user.is_staff or is_logistics_member(user) or is_sig_admin(user, group)):
+                    if not (
+                        user.is_superuser
+                        or user.is_staff
+                        or is_logistics_member(user)
+                        or is_sig_admin(user, group)
+                    ):
                         return Response(
-                            {"detail": "You do not have permission to assign inventory items to this SIG."},
+                            {
+                                "detail": "You do not have permission to assign inventory items to this SIG."
+                            },
                             status=status.HTTP_403_FORBIDDEN,
                         )
                 except Group.DoesNotExist:
@@ -827,7 +843,7 @@ class AssetViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        from membership.utils import can_manage_sig_asset, is_logistics_member
+        from membership.utils import is_logistics_member
 
         # Check ownership_type if provided
         ownership_type = request.data.get("ownership_type")
@@ -836,11 +852,17 @@ class AssetViewSet(viewsets.ModelViewSet):
         if ownership_type == "group" and owning_group_id:
             # Check if user is admin of the specified group
             from django.contrib.auth.models import Group
+
             from membership.utils import is_sig_admin
 
             try:
                 group = Group.objects.get(pk=owning_group_id)
-                if not (user.is_superuser or user.is_staff or is_logistics_member(user) or is_sig_admin(user, group)):
+                if not (
+                    user.is_superuser
+                    or user.is_staff
+                    or is_logistics_member(user)
+                    or is_sig_admin(user, group)
+                ):
                     return Response(
                         {"detail": "You do not have permission to create assets for this SIG."},
                         status=status.HTTP_403_FORBIDDEN,
@@ -877,11 +899,17 @@ class AssetViewSet(viewsets.ModelViewSet):
             owning_group_id = request.data.get("owning_group")
             if owning_group_id:
                 from django.contrib.auth.models import Group
-                from membership.utils import is_sig_admin
+
+                from membership.utils import is_logistics_member, is_sig_admin
 
                 try:
                     group = Group.objects.get(pk=owning_group_id)
-                    if not (user.is_superuser or user.is_staff or is_logistics_member(user) or is_sig_admin(user, group)):
+                    if not (
+                        user.is_superuser
+                        or user.is_staff
+                        or is_logistics_member(user)
+                        or is_sig_admin(user, group)
+                    ):
                         return Response(
                             {"detail": "You do not have permission to assign assets to this SIG."},
                             status=status.HTTP_403_FORBIDDEN,

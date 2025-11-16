@@ -3,6 +3,7 @@ URL configuration for membership and SIG management API.
 """
 
 from django.urls import include, path
+
 from rest_framework.routers import DefaultRouter
 
 from .views import SIGAdminViewSet, SIGMemberViewSet, SIGViewSet
@@ -15,4 +16,3 @@ router.register(r"sig-admins", SIGAdminViewSet, basename="sig-admin")
 urlpatterns = [
     path("", include(router.urls)),
 ]
-

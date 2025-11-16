@@ -197,6 +197,18 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             .all()
         )
 
+        # Filter by SIG ownership for SIG admins
+        user = self.request.user
+        if user.is_authenticated and not (user.is_superuser or user.is_staff):
+            from membership.utils import get_user_managed_sigs, is_logistics_member
+
+            # Logistics can see everything
+            if not is_logistics_member(user):
+                # SIG admins can only see inventory items owned by their SIGs
+                user_sigs = get_user_managed_sigs(user)
+                if user_sigs.exists():
+                    queryset = queryset.filter(owning_group__in=user_sigs)
+
         # Filter by category if specified
         category = self.request.query_params.get("category")
         if category:
@@ -229,6 +241,35 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         return queryset.order_by("name")
 
     def create(self, request, *args, **kwargs):
+        # Check permissions
+        user = request.user
+        if not user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        from membership.utils import can_manage_sig_inventory, is_logistics_member, is_sig_admin
+        from django.contrib.auth.models import Group
+
+        # Check ownership_type if provided
+        ownership_type = request.data.get("ownership_type")
+        owning_group_id = request.data.get("owning_group")
+
+        if ownership_type == "group" and owning_group_id:
+            try:
+                group = Group.objects.get(pk=owning_group_id)
+                if not (user.is_superuser or user.is_staff or is_logistics_member(user) or is_sig_admin(user, group)):
+                    return Response(
+                        {"detail": "You do not have permission to create inventory items for this SIG."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except Group.DoesNotExist:
+                return Response(
+                    {"detail": "Group not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
         data = request.data.copy()
         location = self._resolve_location(data.get("location"))
         if location:
@@ -249,6 +290,84 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         output_serializer = self.get_serializer(item)
         return Response(output_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        """Update an inventory item with permission checks."""
+        item = self.get_object()
+        user = request.user
+
+        if not user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        from membership.utils import can_manage_sig_inventory, is_logistics_member, is_sig_admin
+        from django.contrib.auth.models import Group
+
+        if not can_manage_sig_inventory(user, item):
+            return Response(
+                {"detail": "You do not have permission to modify this inventory item."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Check if trying to change ownership to a group user doesn't manage
+        if "owning_group" in request.data:
+            owning_group_id = request.data.get("owning_group")
+            if owning_group_id:
+                try:
+                    group = Group.objects.get(pk=owning_group_id)
+                    if not (user.is_superuser or user.is_staff or is_logistics_member(user) or is_sig_admin(user, group)):
+                        return Response(
+                            {"detail": "You do not have permission to assign inventory items to this SIG."},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                except Group.DoesNotExist:
+                    return Response(
+                        {"detail": "Group not found."},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete an inventory item with permission checks."""
+        item = self.get_object()
+        user = request.user
+
+        if not user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        from membership.utils import can_manage_sig_inventory
+
+        if not can_manage_sig_inventory(user, item):
+            return Response(
+                {"detail": "You do not have permission to delete this inventory item."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
+    def my_sig_inventory(self, request):
+        """List inventory items for SIGs the user administers."""
+        from membership.utils import get_user_managed_sigs
+
+        user = request.user
+        user_sigs = get_user_managed_sigs(user)
+
+        if not user_sigs.exists():
+            return Response(
+                {"detail": "You are not an admin of any SIGs."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        items = self.get_queryset().filter(owning_group__in=user_sigs)
+        serializer = self.get_serializer(items, many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
     def generate_qr(self, request, pk=None):
@@ -653,6 +772,18 @@ class AssetViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
 
+        # Filter by SIG ownership for SIG admins
+        user = self.request.user
+        if user.is_authenticated and not (user.is_superuser or user.is_staff):
+            from membership.utils import get_user_managed_sigs, is_logistics_member
+
+            # Logistics can see everything
+            if not is_logistics_member(user):
+                # SIG admins can only see assets owned by their SIGs
+                user_sigs = get_user_managed_sigs(user)
+                if user_sigs.exists():
+                    queryset = queryset.filter(owning_group__in=user_sigs)
+
         # Filter by category if specified
         category = self.request.query_params.get("category")
         if category:
@@ -685,6 +816,122 @@ class AssetViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(is_active=is_active.lower() == "true")
 
         return queryset.order_by("name")
+
+    def create(self, request, *args, **kwargs):
+        """Create a new asset with permission checks."""
+        # Check if user can create assets (must be admin, logistics, or SIG admin)
+        user = request.user
+        if not user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        from membership.utils import can_manage_sig_asset, is_logistics_member
+
+        # Check ownership_type if provided
+        ownership_type = request.data.get("ownership_type")
+        owning_group_id = request.data.get("owning_group")
+
+        if ownership_type == "group" and owning_group_id:
+            # Check if user is admin of the specified group
+            from django.contrib.auth.models import Group
+            from membership.utils import is_sig_admin
+
+            try:
+                group = Group.objects.get(pk=owning_group_id)
+                if not (user.is_superuser or user.is_staff or is_logistics_member(user) or is_sig_admin(user, group)):
+                    return Response(
+                        {"detail": "You do not have permission to create assets for this SIG."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except Group.DoesNotExist:
+                return Response(
+                    {"detail": "Group not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        """Update an asset with permission checks."""
+        asset = self.get_object()
+        user = request.user
+
+        if not user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        from membership.utils import can_manage_sig_asset
+
+        if not can_manage_sig_asset(user, asset):
+            return Response(
+                {"detail": "You do not have permission to modify this asset."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Check if trying to change ownership to a group user doesn't manage
+        if "owning_group" in request.data:
+            owning_group_id = request.data.get("owning_group")
+            if owning_group_id:
+                from django.contrib.auth.models import Group
+                from membership.utils import is_sig_admin
+
+                try:
+                    group = Group.objects.get(pk=owning_group_id)
+                    if not (user.is_superuser or user.is_staff or is_logistics_member(user) or is_sig_admin(user, group)):
+                        return Response(
+                            {"detail": "You do not have permission to assign assets to this SIG."},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                except Group.DoesNotExist:
+                    return Response(
+                        {"detail": "Group not found."},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete an asset with permission checks."""
+        asset = self.get_object()
+        user = request.user
+
+        if not user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        from membership.utils import can_manage_sig_asset
+
+        if not can_manage_sig_asset(user, asset):
+            return Response(
+                {"detail": "You do not have permission to delete this asset."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
+    def my_sig_assets(self, request):
+        """List assets for SIGs the user administers."""
+        from membership.utils import get_user_managed_sigs
+
+        user = request.user
+        user_sigs = get_user_managed_sigs(user)
+
+        if not user_sigs.exists():
+            return Response(
+                {"detail": "You are not an admin of any SIGs."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        assets = self.get_queryset().filter(owning_group__in=user_sigs)
+        serializer = self.get_serializer(assets, many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"], permission_classes=[AllowAny])
     def generate_qr(self, request, pk=None):

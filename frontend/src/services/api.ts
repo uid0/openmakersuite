@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, CreateReorderRequest, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SiteSettings } from '../types';
+import { Asset, CreateReorderRequest, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -106,8 +106,11 @@ export const inventoryAPI = {
   markItemSupplierDiscontinued: (itemSupplierId: string) =>
     api.post(`/inventory/item-suppliers/${itemSupplierId}/mark_discontinued/`),
 
-  listItems: (params?: { category?: number; search?: string }) =>
+  listItems: (params?: { category?: number; location?: number; search?: string; low_stock?: boolean; owning_group?: number }) =>
     api.get<{ results: InventoryItem[] }>('/inventory/items/', { params }),
+
+  getMySIGInventory: () =>
+    api.get<InventoryItem[]>('/inventory/items/my_sig_inventory/'),
 
   getLowStockItems: () =>
     api.get<InventoryItem[]>('/inventory/items/low_stock/'),
@@ -137,8 +140,11 @@ export const inventoryAPI = {
 
 // Assets API
 export const assetsAPI = {
-  listAssets: (params?: { status?: string; category?: number; search?: string }) =>
+  listAssets: (params?: { status?: string; category?: number; search?: string; owning_group?: number }) =>
     api.get<{ results: Asset[] }>('/inventory/assets/', { params }),
+
+  getMySIGAssets: () =>
+    api.get<Asset[]>('/inventory/assets/my_sig_assets/'),
 
   getAsset: (id: string) =>
     api.get<Asset>(`/inventory/assets/${id}/`),
@@ -197,6 +203,9 @@ export const reorderAPI = {
 
   getPendingRequests: () =>
     api.get<ReorderRequest[]>('/reorders/requests/pending/'),
+
+  getSIGPendingRequests: () =>
+    api.get<ReorderRequest[]>('/reorders/requests/sig_pending/'),
 
   getBySupplier: () =>
     api.get('/reorders/requests/by_supplier/'),
@@ -266,6 +275,27 @@ export const fixturesAPI = {
 
   listRequests: (params?: { fixture?: string; status?: string; location?: string }) =>
     api.get<{ results: FixtureRefillRequest[] }>('/inventory/fixture-refill-requests/', { params }),
+};
+
+// SIG (Special Interest Group) API
+export const sigAPI = {
+  listMySIGs: () =>
+    api.get<{ results: SIG[] }>('/membership/sigs/'),
+
+  getSIG: (id: number) =>
+    api.get<SIG>(`/membership/sigs/${id}/`),
+
+  getSIGDetails: (id: number) =>
+    api.get<SIG>(`/membership/sigs/${id}/details/`),
+
+  getSIGMembers: (sigId: number) =>
+    api.get<SIGMember[]>(`/membership/sigs/${sigId}/members/`),
+
+  addSIGMember: (sigId: number, userId: number) =>
+    api.post(`/membership/sigs/${sigId}/members/`, { user_id: userId }),
+
+  removeSIGMember: (sigId: number, userId: number) =>
+    api.delete(`/membership/sigs/${sigId}/members/${userId}/`),
 };
 
 // Auth API

@@ -300,6 +300,40 @@ class InventoryItem(models.Model):
         help_text="Special hazard symbols (e.g., W=Water Reactive, OX=Oxidizer, COR=Corrosive, ALK=Alkali, ACID=Acid, BIO=Biohazard, POI=Poison, RAD=Radioactive)",
     )
 
+    # Ownership - can be owned by User, Group (SIG), or Space (makerspace itself)
+    OWNERSHIP_TYPE_USER = "user"
+    OWNERSHIP_TYPE_GROUP = "group"
+    OWNERSHIP_TYPE_SPACE = "space"
+
+    OWNERSHIP_TYPE_CHOICES = [
+        (OWNERSHIP_TYPE_USER, "User"),
+        (OWNERSHIP_TYPE_GROUP, "Group"),
+        (OWNERSHIP_TYPE_SPACE, "Space"),
+    ]
+
+    ownership_type = models.CharField(
+        max_length=10,
+        choices=OWNERSHIP_TYPE_CHOICES,
+        default=OWNERSHIP_TYPE_SPACE,
+        help_text="Type of ownership for this inventory item",
+    )
+    owning_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="owned_inventory_items",
+        help_text="User that owns this inventory item (if applicable)",
+    )
+    owning_group = models.ForeignKey(
+        Group,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="owned_inventory_items",
+        help_text="Group (SIG) that owns this inventory item (if applicable)",
+    )
+
     # Metadata
     is_active = models.BooleanField(default=True)
     is_requestable = models.BooleanField(
@@ -454,6 +488,48 @@ class InventoryItem(models.Model):
 
         link = self.primary_item_supplier
         return link.supplier_url if link else None
+
+    def is_user_admin(self, user) -> bool:
+        """Check if user is a system admin (staff or superuser)."""
+        return user.is_authenticated and (user.is_staff or user.is_superuser)
+
+    def is_user_in_logistics(self, user) -> bool:
+        """Check if user is in the Logistics group."""
+        if not user.is_authenticated:
+            return False
+        try:
+            logistics_group = Group.objects.get(name="Logistics")
+            return logistics_group in user.groups.all()
+        except Group.DoesNotExist:
+            return False
+
+    def is_user_group_admin(self, user) -> bool:
+        """Check if user is a SIG admin for the item's owning group."""
+        if not user.is_authenticated or not self.owning_group:
+            return False
+        # Use the permission utility to check SIG admin status
+        from membership.utils import is_sig_admin
+
+        return is_sig_admin(user, self.owning_group)
+
+    def can_user_modify(self, user) -> bool:
+        """
+        Check if user can modify this inventory item.
+
+        Users can modify an inventory item if:
+        - They are a system admin (staff/superuser)
+        - They are in the Logistics group
+        - They are a SIG admin of the item's owning group
+
+        Args:
+            user: The user to check
+
+        Returns:
+            bool: True if user can modify the item, False otherwise
+        """
+        from membership.utils import can_manage_sig_inventory
+
+        return can_manage_sig_inventory(user, self)
 
     @property
     def unit_cost(self) -> Optional[Decimal]:
@@ -1195,20 +1271,13 @@ class Asset(models.Model):
             return False
 
     def is_user_group_admin(self, user) -> bool:
-        """Check if user is a group admin for the asset's owning group."""
+        """Check if user is a SIG admin for the asset's owning group."""
         if not user.is_authenticated or not self.owning_group:
             return False
-        # Check if user is in the owning group and has admin permissions
-        # For now, we'll check if user has a permission or is in a group admin role
-        # This can be customized based on your permission system
-        if self.owning_group not in user.groups.all():
-            return False
-        # Check if user has 'group_admin' permission or is in a group admin group
-        # You may need to adjust this based on your permission structure
-        return (
-            user.has_perm("inventory.group_admin")
-            or user.groups.filter(name__endswith="_admin").exists()
-        )
+        # Use the permission utility to check SIG admin status
+        from membership.utils import is_sig_admin
+
+        return is_sig_admin(user, self.owning_group)
 
     def can_user_operate(self, user) -> bool:
         """

@@ -1,0 +1,161 @@
+"""
+Permission utilities for SIG (Special Interest Group) management.
+"""
+
+from django.contrib.auth.models import Group
+
+from .models import SIGAdmin
+
+
+def is_sig_admin(user, group):
+    """
+    Check if a user is an admin of a specific SIG (Group).
+
+    Args:
+        user: The user to check
+        group: The Group (SIG) to check
+
+    Returns:
+        bool: True if user is an admin of the group, False otherwise
+    """
+    return SIGAdmin.is_sig_admin(user, group)
+
+
+def can_manage_sig_asset(user, asset):
+    """
+    Check if a user can manage a specific asset.
+
+    Users can manage an asset if:
+    - They are a system admin (staff/superuser)
+    - They are in the Logistics group
+    - They are a SIG admin of the asset's owning group
+
+    Args:
+        user: The user to check
+        asset: The asset to check
+
+    Returns:
+        bool: True if user can manage the asset, False otherwise
+    """
+    if not user or not user.is_authenticated:
+        return False
+
+    # System admins can manage everything
+    if user.is_staff or user.is_superuser:
+        return True
+
+    # Logistics can manage everything
+    if is_logistics_member(user):
+        return True
+
+    # If asset has no owning group, only admins/logistics can manage
+    if not asset.owning_group:
+        return False
+
+    # SIG admins can manage assets owned by their SIG
+    return is_sig_admin(user, asset.owning_group)
+
+
+def can_manage_sig_inventory(user, item):
+    """
+    Check if a user can manage a specific inventory item.
+
+    Users can manage an inventory item if:
+    - They are a system admin (staff/superuser)
+    - They are in the Logistics group
+    - They are a SIG admin of the item's owning group
+
+    Args:
+        user: The user to check
+        item: The inventory item to check
+
+    Returns:
+        bool: True if user can manage the item, False otherwise
+    """
+    if not user or not user.is_authenticated:
+        return False
+
+    # System admins can manage everything
+    if user.is_staff or user.is_superuser:
+        return True
+
+    # Logistics can manage everything
+    if is_logistics_member(user):
+        return True
+
+    # If item has no owning group, only admins/logistics can manage
+    if not item.owning_group:
+        return False
+
+    # SIG admins can manage inventory items owned by their SIG
+    return is_sig_admin(user, item.owning_group)
+
+
+def get_user_managed_sigs(user):
+    """
+    Get all SIGs (Groups) that a user can manage.
+
+    Args:
+        user: The user to check
+
+    Returns:
+        QuerySet: QuerySet of Groups the user administers
+    """
+    return SIGAdmin.get_user_sigs(user)
+
+
+def is_logistics_member(user):
+    """
+    Check if a user is a member of the Logistics group.
+
+    Args:
+        user: The user to check
+
+    Returns:
+        bool: True if user is in Logistics group, False otherwise
+    """
+    if not user or not user.is_authenticated:
+        return False
+
+    try:
+        logistics_group = Group.objects.get(name="Logistics")
+        return logistics_group in user.groups.all()
+    except Group.DoesNotExist:
+        return False
+
+
+def can_create_reorder_request(user, item):
+    """
+    Check if a user can create a reorder request for an inventory item.
+
+    Users can create reorder requests if:
+    - They are a system admin (staff/superuser)
+    - They are in the Logistics group (always allowed)
+    - The item is requestable and they are a SIG admin of the item's owning group
+    - The item is requestable and has no owning group (space-owned)
+
+    Args:
+        user: The user to check
+        item: The inventory item to check
+
+    Returns:
+        bool: True if user can create reorder request, False otherwise
+    """
+    if not user or not user.is_authenticated:
+        return False
+
+    # System admins and Logistics can always create reorder requests
+    if user.is_staff or user.is_superuser or is_logistics_member(user):
+        return True
+
+    # Item must be requestable
+    if not item.is_requestable:
+        return False
+
+    # If item has no owning group (space-owned), any authenticated user can request
+    if not item.owning_group:
+        return True
+
+    # SIG admins can create reorder requests for their SIG's inventory
+    return is_sig_admin(user, item.owning_group)
+

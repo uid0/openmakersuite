@@ -13,6 +13,7 @@ import LogisticsDashboard from './pages/LogisticsDashboard';
 import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import ScanPage from './pages/ScanPage';
+import SIGDashboard from './pages/SIGDashboard';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
 import TVDashboard from './pages/TVDashboard';
@@ -50,6 +51,8 @@ function App() {
             <Route path="/transparency" element={<TransparencyPage />} />
             <Route path="/purchase-order" element={<PurchaseOrderListPage />} />
             <Route path="/purchase-order/:orderId" element={<PurchaseOrderPage />} />
+            <Route path="/sig-dashboard" element={<SIGDashboard />} />
+            <Route path="/sig-dashboard/:sigId" element={<SIGDashboard />} />
           </SentryRoutes>
         </Sentry.ErrorBoundary>
       </div>

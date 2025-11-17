@@ -24,6 +24,7 @@ urlpatterns = [
     # Passkey/WebAuthn endpoints
     path("auth/passkey/", include("passkeys.urls")),
     path("api/inventory/", include("inventory.urls")),
+    path("api/membership/", include("membership.urls")),
     path("api/reorders/", include("reorder_queue.urls")),
     path("api/index-cards/", include("index_cards.urls")),
     path("api/dashboard/", include("dashboard.urls")),

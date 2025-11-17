@@ -1,0 +1,160 @@
+.sig-dashboard {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.sig-dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.sig-dashboard-header h1 {
+  margin: 0;
+}
+
+.sig-selector {
+  padding: 8px 12px;
+  font-size: 16px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.sig-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #eee;
+}
+
+.sig-tabs button {
+  padding: 10px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-size: 16px;
+  color: #666;
+  transition: all 0.2s;
+}
+
+.sig-tabs button:hover {
+  color: #333;
+}
+
+.sig-tabs button.active {
+  color: #007bff;
+  border-bottom-color: #007bff;
+}
+
+.sig-content {
+  padding: 20px 0;
+}
+
+.sig-overview h2 {
+  margin-bottom: 20px;
+}
+
+.sig-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.stat-card h3 {
+  margin: 0 0 10px 0;
+  color: #666;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: bold;
+  color: #007bff;
+  margin: 0;
+}
+
+.sig-admins {
+  margin-top: 30px;
+}
+
+.sig-admins h3 {
+  margin-bottom: 10px;
+}
+
+.sig-admins ul {
+  list-style: none;
+  padding: 0;
+}
+
+.sig-admins li {
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.sig-members table,
+.sig-assets .asset-list,
+.sig-inventory .inventory-list,
+.sig-reorders .reorder-list {
+  width: 100%;
+}
+
+.sig-members table {
+  border-collapse: collapse;
+}
+
+.sig-members th,
+.sig-members td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.sig-members th {
+  background: #f8f9fa;
+  font-weight: 600;
+}
+
+.asset-card,
+.inventory-card,
+.reorder-card {
+  padding: 15px;
+  margin-bottom: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.asset-card h3,
+.inventory-card h3,
+.reorder-card h3 {
+  margin: 0 0 10px 0;
+}
+
+.needs-reorder {
+  display: inline-block;
+  padding: 4px 8px;
+  background: #ffc107;
+  color: #000;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sig-dashboard-loading,
+.sig-dashboard-empty {
+  padding: 40px;
+  text-align: center;
+}
+

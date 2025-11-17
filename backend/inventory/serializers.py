@@ -217,6 +217,10 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "notes",
             "needs_reorder",
             "total_value",
+            # Ownership fields
+            "ownership_type",
+            "owning_user",
+            "owning_group",
             "created_at",
             "updated_at",
         ]

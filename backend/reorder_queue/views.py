@@ -71,6 +71,26 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """Create a new reorder request."""
+        # Check permissions if user is authenticated
+        user = request.user
+        if user.is_authenticated:
+            item_id = request.data.get("item")
+            if item_id:
+                try:
+                    from inventory.models import InventoryItem
+                    from membership.utils import can_create_reorder_request
+
+                    item = InventoryItem.objects.get(pk=item_id)
+                    if not can_create_reorder_request(user, item):
+                        return Response(
+                            {
+                                "detail": "You do not have permission to create reorder requests for this item."
+                            },
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                except InventoryItem.DoesNotExist:
+                    pass  # Let serializer handle validation
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -86,6 +106,39 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         """Get all pending reorder requests."""
         # Return all pending requests without pagination for admin dashboard
         pending = self.queryset.filter(status="pending").order_by("-priority", "requested_at")
+
+        # Filter by SIG ownership for SIG admins
+        user = request.user
+        if user.is_authenticated and not (user.is_superuser or user.is_staff):
+            from membership.utils import get_user_managed_sigs, is_logistics_member
+
+            # Logistics can see everything
+            if not is_logistics_member(user):
+                # SIG admins can only see requests for their SIG's inventory
+                user_sigs = get_user_managed_sigs(user)
+                if user_sigs.exists():
+                    pending = pending.filter(item__owning_group__in=user_sigs)
+
+        serializer = self.get_serializer(pending, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
+    def sig_pending(self, request):
+        """Get pending reorder requests for SIGs the user administers."""
+        from membership.utils import get_user_managed_sigs
+
+        user = request.user
+        user_sigs = get_user_managed_sigs(user)
+
+        if not user_sigs.exists():
+            return Response(
+                {"detail": "You are not an admin of any SIGs."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        pending = self.queryset.filter(status="pending", item__owning_group__in=user_sigs).order_by(
+            "-priority", "requested_at"
+        )
         serializer = self.get_serializer(pending, many=True)
         return Response(serializer.data)
 

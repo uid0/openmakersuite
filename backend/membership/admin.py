@@ -4,8 +4,9 @@ Admin configuration for membership app.
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 
-from .models import Membership
+from .models import Membership, SIGAdmin
 
 User = get_user_model()
 
@@ -168,3 +169,69 @@ class MembershipAdmin(admin.ModelAdmin):
         if users:
             return ", ".join([user.username for user in users[:5]])
         return "No users"
+
+
+class SIGAdminInline(admin.TabularInline):
+    """Inline admin for managing SIG admins on Groups."""
+
+    model = SIGAdmin
+    extra = 1
+    fields = ["user", "is_active"]
+    autocomplete_fields = ["user"]
+
+
+@admin.register(SIGAdmin)
+class SIGAdminAdmin(admin.ModelAdmin):
+    """Admin interface for SIGAdmin model."""
+
+    list_display = ["user", "group", "is_active", "created_at"]
+    list_filter = ["is_active", "group", "created_at"]
+    search_fields = ["user__username", "user__email", "group__name"]
+    autocomplete_fields = ["user", "group"]
+    fieldsets = (
+        (
+            "SIG Admin Information",
+            {
+                "fields": (
+                    "user",
+                    "group",
+                    "is_active",
+                )
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": (
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
+    )
+    readonly_fields = ["created_at", "updated_at"]
+
+
+# Register inline for Group admin
+admin.site.unregister(Group)  # Unregister default Group admin
+
+
+@admin.register(Group)
+class GroupAdmin(admin.ModelAdmin):
+    """Admin interface for Group (SIG) model with SIG admin management."""
+
+    list_display = ["name", "get_sig_admin_count", "get_member_count"]
+    search_fields = ["name"]
+    filter_horizontal = ["permissions"]
+    inlines = [SIGAdminInline]
+
+    @admin.display(description="SIG Admins")
+    def get_sig_admin_count(self, obj):
+        """Display count of SIG admins for this group."""
+        count = SIGAdmin.objects.filter(group=obj, is_active=True).count()
+        return count
+
+    @admin.display(description="Members")
+    def get_member_count(self, obj):
+        """Display count of members in this group."""
+        return obj.user_set.count()

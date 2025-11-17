@@ -82,6 +82,10 @@ export interface InventoryItem {
   total_value: string;
   created_at: string;
   updated_at: string;
+  // Ownership fields
+  ownership_type: 'user' | 'group' | 'space';
+  owning_user: number | null;
+  owning_group: number | null;
   // Reorder status and tracking
   reorder_status: string;
   has_pending_reorder: boolean;
@@ -193,8 +197,10 @@ export interface Asset {
   is_chargeable: boolean;
   last_scanned_at: string | null;
   // Group ownership and locking
+  ownership_type: 'user' | 'group' | 'space';
   owning_group: number | null;
   owning_group_name: string | null;
+  owning_user: number | null;
   owning_user_name: string | null;
   groups_can_enable: number[];
   is_locked: boolean;
@@ -263,4 +269,30 @@ export interface FixtureRefillRequest {
   resolved_by: string;
   notes: string;
   time_to_resolve: number | null;
+}
+
+// SIG (Special Interest Group) types
+export interface SIG {
+  id: number;
+  name: string;
+  member_count: number;
+  asset_count: number;
+  inventory_count: number;
+  admins: SIGAdmin[];
+  is_user_admin: boolean;
+}
+
+export interface SIGAdmin {
+  id: number;
+  username: string;
+  email: string;
+  handle: string;
+}
+
+export interface SIGMember {
+  id: number;
+  username: string;
+  email: string;
+  handle: string;
+  is_sig_admin: boolean;
 }

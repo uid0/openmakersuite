@@ -175,7 +175,9 @@ class PurchaseOrder(models.Model):
     ]
 
     # Core fields
-    po_number = models.CharField(max_length=50, unique=True, help_text="Purchase Order Number")
+    po_number = models.CharField(
+        max_length=50, unique=True, blank=True, null=True, help_text="Purchase Order Number"
+    )
     supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name="purchase_orders")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=DRAFT)
 

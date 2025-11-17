@@ -218,14 +218,16 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         """Create purchase order with line items (inventory items or assets)."""
         items_data = validated_data.pop("items")
 
-        # Create the purchase order
-        purchase_order = PurchaseOrder.objects.create(
-            created_by=self.context["request"].user, **validated_data
-        )
+        # Generate PO number before creating
+        temp_po = PurchaseOrder(created_by=self.context["request"].user, **validated_data)
+        temp_po.auto_generate_po_number()
 
-        # Generate PO number
-        purchase_order.auto_generate_po_number()
-        purchase_order.save()
+        # Create the purchase order with PO number already set
+        purchase_order = PurchaseOrder.objects.create(
+            created_by=self.context["request"].user,
+            po_number=temp_po.po_number,
+            **validated_data,
+        )
 
         # Create line items
         total_cost = 0

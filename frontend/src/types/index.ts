@@ -296,3 +296,67 @@ export interface SIGMember {
   handle: string;
   is_sig_admin: boolean;
 }
+
+// Checklist types
+export interface ChecklistStep {
+  id: string;
+  step_number: number;
+  name: string;
+  asset: string | null;
+  location: number | null;
+  inventory_item: string | null;
+  required: boolean;
+  notes: string;
+}
+
+export interface Checklist {
+  id: string;
+  name: string;
+  description: string;
+  sig: number;
+  sig_name: string;
+  is_active: boolean;
+  is_public: boolean;
+  created_by: number | null;
+  created_by_username: string | null;
+  steps: ChecklistStep[];
+  step_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChecklistStepCompletion {
+  id: string;
+  step: string;
+  step_name: string;
+  step_number: number;
+  scanned_at: string;
+  scanned_asset: string | null;
+  scanned_asset_name: string | null;
+  scanned_location: number | null;
+  scanned_location_name: string | null;
+  scanned_item: string | null;
+  scanned_item_name: string | null;
+  notes: string;
+}
+
+export type ChecklistCompletionStatus = 'in_progress' | 'completed' | 'abandoned';
+
+export interface ChecklistCompletion {
+  id: string;
+  checklist: string;
+  checklist_name: string;
+  user: number | null;
+  user_username: string | null;
+  user_name: string;
+  started_at: string;
+  completed_at: string | null;
+  status: ChecklistCompletionStatus;
+  step_completions: ChecklistStepCompletion[];
+  completed_steps_count: number;
+  total_steps_count: number;
+  required_steps_completed: number;
+  required_steps_total: number;
+  created_at: string;
+  updated_at: string;
+}

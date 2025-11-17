@@ -31,6 +31,7 @@ urlpatterns = [
     path("api/forgekey/", include("forgekey.urls")),
     path("api/customization/", include("customization.urls")),
     path("api/location-checkins/", include("location_checkins.urls")),
+    path("api/checklists/", include("checklists.urls")),
 ]
 
 # Serve media files during development

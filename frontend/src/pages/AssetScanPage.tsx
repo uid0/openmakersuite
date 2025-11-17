@@ -5,9 +5,9 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assetsAPI } from '../services/api';
+import { assetsAPI, checklistsAPI } from '../services/api';
 import '../styles/ScanPage.css';
-import { Asset } from '../types';
+import { Asset, Checklist } from '../types';
 
 const AssetScanPage: React.FC = () => {
   const { assetId } = useParams<{ assetId: string }>();
@@ -20,6 +20,8 @@ const AssetScanPage: React.FC = () => {
   const [asset, setAsset] = useState<Asset | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [checklists, setChecklists] = useState<Checklist[]>([]);
+  const [loadingChecklists, setLoadingChecklists] = useState(false);
 
   // Form state (authenticated users)
   const [problemDescription, setProblemDescription] = useState('');
@@ -44,8 +46,33 @@ const AssetScanPage: React.FC = () => {
   useEffect(() => {
     if (assetId) {
       loadAsset();
+      loadChecklists();
     }
   }, [assetId, loadAsset]);
+
+  const loadChecklists = useCallback(async () => {
+    if (!assetId) return;
+    try {
+      setLoadingChecklists(true);
+      const checklistsResponse = await assetsAPI.getAssetChecklists(assetId);
+      setChecklists(checklistsResponse.data);
+    } catch (err: any) {
+      // Silently fail - checklists are optional
+      console.error('Error loading checklists:', err);
+    } finally {
+      setLoadingChecklists(false);
+    }
+  }, [assetId]);
+
+  const handleStartChecklist = async (checklistId: string) => {
+    try {
+      const userName = prompt('Enter your name (optional):') || '';
+      const completion = await checklistsAPI.startChecklist(checklistId, userName || undefined);
+      navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to start checklist');
+    }
+  };
 
   const handleEnable = async () => {
     if (!asset || !isLoggedIn) return;
@@ -200,6 +227,38 @@ const AssetScanPage: React.FC = () => {
             <h3>QR Code</h3>
             <img src={asset.qr_code_url} alt="QR Code" className="qr-code-image" />
             <p className="qr-info">Last scanned: {asset.last_scanned_at ? new Date(asset.last_scanned_at).toLocaleString() : 'Never'}</p>
+          </div>
+        )}
+
+        {/* Checklists Section */}
+        {checklists.length > 0 && (
+          <div className="checklists-section" style={{ marginTop: '20px', padding: '15px', border: '1px solid #ddd', borderRadius: '5px' }}>
+            <h3>Are you completing a checklist?</h3>
+            <p>This asset is part of the following checklists:</p>
+            <ul style={{ listStyle: 'none', padding: 0 }}>
+              {checklists.map((checklist) => (
+                <li key={checklist.id} style={{ marginBottom: '10px' }}>
+                  <button
+                    onClick={() => handleStartChecklist(checklist.id)}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      backgroundColor: '#007bff',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {checklist.name}
+                    {checklist.step_count && ` (${checklist.step_count} steps)`}
+                  </button>
+                  {checklist.description && (
+                    <p style={{ marginTop: '5px', fontSize: '0.9em', color: '#666' }}>{checklist.description}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

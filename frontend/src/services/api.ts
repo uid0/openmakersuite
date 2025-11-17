@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, CreateReorderRequest, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings } from '../types';
+import { Asset, Checklist, ChecklistCompletion, CreateReorderRequest, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -136,6 +136,12 @@ export const inventoryAPI = {
 
   getLocation: (id: string) =>
     api.get(`/inventory/locations/${id}/`),
+
+  getLocationChecklists: (id: string) =>
+    api.get<Checklist[]>(`/inventory/locations/${id}/checklists/`),
+
+  getItemChecklists: (id: string) =>
+    api.get<Checklist[]>(`/inventory/items/${id}/checklists/`),
 };
 
 // Assets API
@@ -163,6 +169,9 @@ export const assetsAPI = {
 
   scanAsset: (id: string) =>
     api.post<Asset>(`/inventory/assets/${id}/scan/`),
+
+  getAssetChecklists: (id: string) =>
+    api.get<Checklist[]>(`/inventory/assets/${id}/checklists/`),
 
   enableAsset: (id: string) =>
     api.post<Asset>(`/inventory/assets/${id}/enable/`),
@@ -351,6 +360,38 @@ export const locationCheckinAPI = {
 
   completeTask: (taskId: string, notes?: string) =>
     api.post(`/location-checkins/tasks/${taskId}/complete/`, { notes }),
+};
+
+// Checklists API
+export const checklistsAPI = {
+  getAvailableChecklists: (params?: { asset_id?: string; location_id?: string; item_id?: string }) =>
+    api.get<Checklist[]>('/checklists/checklists/available/', { params }),
+
+  getChecklist: (id: string) =>
+    api.get<Checklist>(`/checklists/checklists/${id}/detail/`),
+
+  startChecklist: (checklistId: string, userName?: string) =>
+    api.post<ChecklistCompletion>(`/checklists/checklists/${checklistId}/start/`, {
+      user_name: userName || '',
+    }),
+
+  getCompletion: (completionId: string) =>
+    api.get<ChecklistCompletion>(`/checklists/completions/${completionId}/`),
+
+  scanStep: (
+    completionId: string,
+    stepId: string,
+    scannedItem: { asset_id?: string; location_id?: number; item_id?: string },
+    notes?: string
+  ) =>
+    api.post<ChecklistCompletion>(`/checklists/completions/${completionId}/scan/`, {
+      step_id: stepId,
+      ...scannedItem,
+      notes: notes || '',
+    }),
+
+  completeChecklist: (completionId: string) =>
+    api.post<ChecklistCompletion>(`/checklists/completions/${completionId}/complete/`),
 };
 
 export default api;

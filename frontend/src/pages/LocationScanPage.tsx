@@ -8,8 +8,9 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { inventoryAPI, locationCheckinAPI } from '../services/api';
+import { checklistsAPI, inventoryAPI, locationCheckinAPI } from '../services/api';
 import '../styles/ScanPage.css';
+import { Checklist } from '../types';
 
 interface Location {
   id: string;
@@ -33,6 +34,7 @@ const LocationScanPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('checkin');
   const [submitted, setSubmitted] = useState(false);
+  const [checklists, setChecklists] = useState<Checklist[]>([]);
 
   // Form states
   const [checkinType, setCheckinType] = useState<'volunteer' | 'contractor' | 'anonymous'>('anonymous');
@@ -64,8 +66,29 @@ const LocationScanPage: React.FC = () => {
   useEffect(() => {
     if (locationId) {
       loadLocation();
+      loadChecklists();
     }
   }, [locationId, loadLocation]);
+
+  const loadChecklists = useCallback(async () => {
+    if (!locationId) return;
+    try {
+      const checklistsResponse = await inventoryAPI.getLocationChecklists(locationId);
+      setChecklists(checklistsResponse.data);
+    } catch (err: any) {
+      console.error('Error loading checklists:', err);
+    }
+  }, [locationId]);
+
+  const handleStartChecklist = async (checklistId: string) => {
+    try {
+      const userName = prompt('Enter your name (optional):') || '';
+      const completion = await checklistsAPI.startChecklist(checklistId, userName || undefined);
+      navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to start checklist');
+    }
+  };
 
   const handleCheckin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,6 +228,38 @@ const LocationScanPage: React.FC = () => {
         {submitted && (
           <div className="success-message">
             <p>✓ Thank you! Your submission has been recorded.</p>
+          </div>
+        )}
+
+        {/* Checklists Section */}
+        {checklists.length > 0 && (
+          <div className="checklists-section" style={{ marginTop: '20px', padding: '15px', border: '1px solid #ddd', borderRadius: '5px', marginBottom: '20px' }}>
+            <h3>Are you completing a checklist?</h3>
+            <p>This location is part of the following checklists:</p>
+            <ul style={{ listStyle: 'none', padding: 0 }}>
+              {checklists.map((checklist) => (
+                <li key={checklist.id} style={{ marginBottom: '10px' }}>
+                  <button
+                    onClick={() => handleStartChecklist(checklist.id)}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      backgroundColor: '#007bff',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {checklist.name}
+                    {checklist.step_count && ` (${checklist.step_count} steps)`}
+                  </button>
+                  {checklist.description && (
+                    <p style={{ marginTop: '5px', fontSize: '0.9em', color: '#666' }}>{checklist.description}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

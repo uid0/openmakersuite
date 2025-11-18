@@ -158,6 +158,38 @@ class LocationViewSet(viewsets.ReadOnlyModelViewSet):
         response["Content-Disposition"] = f'inline; filename="qr_{location.id}.png"'
         return response
 
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def checklists(self, request, pk=None):
+        """Get checklists associated with this location."""
+        location = self.get_object()
+
+        from checklists.models import Checklist
+        from checklists.serializers import ChecklistListSerializer
+
+        # Get checklists that have steps associated with this location
+        checklists = Checklist.objects.filter(steps__location=location, is_active=True).distinct()
+
+        # Filter by public access
+        user = request.user
+        if not user.is_authenticated:
+            checklists = checklists.filter(is_public=True)
+        else:
+            from membership.utils import get_user_managed_sigs, is_logistics_member
+
+            if not (user.is_superuser or user.is_staff or is_logistics_member(user)):
+                user_sigs = get_user_managed_sigs(user)
+                if user_sigs.exists():
+                    from django.db import models
+
+                    checklists = checklists.filter(
+                        models.Q(is_public=True) | models.Q(sig__in=user_sigs)
+                    )
+                else:
+                    checklists = checklists.filter(is_public=True)
+
+        serializer = ChecklistListSerializer(checklists, many=True)
+        return Response(serializer.data)
+
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
     """API endpoint for inventory items."""
@@ -180,6 +212,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             "log_usage",
             "generate_qr",
             "qr_code",
+            "checklists",
         ]:
             return [AllowAny()]
         # Admin actions (create, update, delete)
@@ -449,6 +482,38 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         response = HttpResponse(item.qr_code.read(), content_type="image/png")
         response["Content-Disposition"] = f'inline; filename="qr_{item.sku or item.id}.png"'
         return response
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def checklists(self, request, pk=None):
+        """Get checklists associated with this inventory item."""
+        item = self.get_object()
+
+        from checklists.models import Checklist
+        from checklists.serializers import ChecklistListSerializer
+
+        # Get checklists that have steps associated with this item
+        checklists = Checklist.objects.filter(steps__inventory_item=item, is_active=True).distinct()
+
+        # Filter by public access
+        user = request.user
+        if not user.is_authenticated:
+            checklists = checklists.filter(is_public=True)
+        else:
+            from membership.utils import get_user_managed_sigs, is_logistics_member
+
+            if not (user.is_superuser or user.is_staff or is_logistics_member(user)):
+                user_sigs = get_user_managed_sigs(user)
+                if user_sigs.exists():
+                    from django.db import models
+
+                    checklists = checklists.filter(
+                        models.Q(is_public=True) | models.Q(sig__in=user_sigs)
+                    )
+                else:
+                    checklists = checklists.filter(is_public=True)
+
+        serializer = ChecklistListSerializer(checklists, many=True)
+        return Response(serializer.data)
 
     @action(
         detail=True,
@@ -1159,6 +1224,38 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         # Return asset data
         serializer = self.get_serializer(asset)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def checklists(self, request, pk=None):
+        """Get checklists associated with this asset."""
+        asset = self.get_object()
+
+        from checklists.models import Checklist
+        from checklists.serializers import ChecklistListSerializer
+
+        # Get checklists that have steps associated with this asset
+        checklists = Checklist.objects.filter(steps__asset=asset, is_active=True).distinct()
+
+        # Filter by public access
+        user = request.user
+        if not user.is_authenticated:
+            checklists = checklists.filter(is_public=True)
+        else:
+            from membership.utils import get_user_managed_sigs, is_logistics_member
+
+            if not (user.is_superuser or user.is_staff or is_logistics_member(user)):
+                user_sigs = get_user_managed_sigs(user)
+                if user_sigs.exists():
+                    from django.db import models
+
+                    checklists = checklists.filter(
+                        models.Q(is_public=True) | models.Q(sig__in=user_sigs)
+                    )
+                else:
+                    checklists = checklists.filter(is_public=True)
+
+        serializer = ChecklistListSerializer(checklists, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])

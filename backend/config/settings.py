@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     "forgekey",
     "customization",
     "location_checkins",
+    "checklists",
 ]
 
 MIDDLEWARE = [

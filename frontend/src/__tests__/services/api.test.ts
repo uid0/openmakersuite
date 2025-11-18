@@ -3,7 +3,7 @@
  */
 import MockAdapter from 'axios-mock-adapter';
 import * as Sentry from '@sentry/react';
-import api, { inventoryAPI, reorderAPI, authAPI } from '../../services/api';
+import api, { checklistsAPI, inventoryAPI, reorderAPI, authAPI } from '../../services/api';
 
 jest.mock('@sentry/react', () => ({
   captureException: jest.fn(),
@@ -323,6 +323,126 @@ describe('API Service', () => {
       await expect(handler(setupError)).rejects.toBe(setupError);
 
       expect(Sentry.captureException).toHaveBeenCalledWith(setupError);
+    });
+  });
+
+  describe('Checklists API', () => {
+    test('getAvailableChecklists fetches available checklists', async () => {
+      const mockChecklists = [
+        { id: '1', name: 'Monthly Walk', description: 'Monthly safety walk' },
+        { id: '2', name: 'Weekly Check', description: 'Weekly equipment check' },
+      ];
+
+      mock.onGet('/checklists/checklists/available/').reply(200, mockChecklists);
+
+      const response = await checklistsAPI.getAvailableChecklists();
+
+      expect(response.data).toEqual(mockChecklists);
+      expect(response.status).toBe(200);
+    });
+
+    test('getAvailableChecklists passes query parameters', async () => {
+      const mockChecklists = [{ id: '1', name: 'Test Checklist' }];
+
+      mock.onGet('/checklists/checklists/available/').reply((config) => {
+        expect(config.params).toEqual({ asset_id: 'test-asset-id' });
+        return [200, mockChecklists];
+      });
+
+      const response = await checklistsAPI.getAvailableChecklists({ asset_id: 'test-asset-id' });
+
+      expect(response.data).toEqual(mockChecklists);
+    });
+
+    test('getChecklist fetches a single checklist', async () => {
+      const mockChecklist = {
+        id: 'test-checklist-id',
+        name: 'Test Checklist',
+        description: 'Test description',
+        steps: [],
+      };
+
+      mock.onGet('/checklists/checklists/test-checklist-id/detail/').reply(200, mockChecklist);
+
+      const response = await checklistsAPI.getChecklist('test-checklist-id');
+
+      expect(response.data).toEqual(mockChecklist);
+      expect(response.status).toBe(200);
+    });
+
+    test('startChecklist creates a new completion', async () => {
+      const mockCompletion = {
+        id: 'completion-id',
+        checklist: 'test-checklist-id',
+        status: 'in_progress',
+        user_name: 'John Doe',
+      };
+
+      mock.onPost('/checklists/checklists/test-checklist-id/start/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({ user_name: 'John Doe' });
+        return [201, mockCompletion];
+      });
+
+      const response = await checklistsAPI.startChecklist('test-checklist-id', 'John Doe');
+
+      expect(response.data).toEqual(mockCompletion);
+      expect(response.status).toBe(201);
+    });
+
+    test('getCompletion fetches a completion record', async () => {
+      const mockCompletion = {
+        id: 'completion-id',
+        checklist: 'test-checklist-id',
+        status: 'in_progress',
+        step_completions: [],
+      };
+
+      mock.onGet('/checklists/completions/completion-id/').reply(200, mockCompletion);
+
+      const response = await checklistsAPI.getCompletion('completion-id');
+
+      expect(response.data).toEqual(mockCompletion);
+    });
+
+    test('scanStep records a step scan', async () => {
+      const mockCompletion = {
+        id: 'completion-id',
+        status: 'in_progress',
+        step_completions: [{ step: 'step-id', scanned_asset: 'asset-id' }],
+      };
+
+      mock.onPost('/checklists/completions/completion-id/scan/').reply((config) => {
+        const data = JSON.parse(config.data);
+        expect(data).toEqual({
+          step_id: 'step-id',
+          asset_id: 'asset-id',
+          notes: 'Test notes',
+        });
+        return [200, mockCompletion];
+      });
+
+      const response = await checklistsAPI.scanStep(
+        'completion-id',
+        'step-id',
+        { asset_id: 'asset-id' },
+        'Test notes'
+      );
+
+      expect(response.data).toEqual(mockCompletion);
+    });
+
+    test('completeChecklist marks checklist as completed', async () => {
+      const mockCompletion = {
+        id: 'completion-id',
+        status: 'completed',
+        completed_at: '2024-01-01T00:00:00Z',
+      };
+
+      mock.onPost('/checklists/completions/completion-id/complete/').reply(200, mockCompletion);
+
+      const response = await checklistsAPI.completeChecklist('completion-id');
+
+      expect(response.data.status).toBe('completed');
     });
   });
 });

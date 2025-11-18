@@ -6,9 +6,9 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { inventoryAPI, reorderAPI } from '../services/api';
+import { checklistsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/ScanPage.css';
-import { InventoryItem, ItemSupplier } from '../types';
+import { Checklist, InventoryItem, ItemSupplier } from '../types';
 
 const ScanPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
@@ -22,6 +22,7 @@ const ScanPage: React.FC = () => {
   const [suppliers, setSuppliers] = useState<ItemSupplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [checklists, setChecklists] = useState<Checklist[]>([]);
 
   // Form state
   const [requestedBy, setRequestedBy] = useState('');
@@ -74,8 +75,29 @@ const ScanPage: React.FC = () => {
   useEffect(() => {
     if (itemId) {
       loadItem();
+      loadChecklists();
     }
   }, [itemId, loadItem]);
+
+  const loadChecklists = useCallback(async () => {
+    if (!itemId) return;
+    try {
+      const checklistsResponse = await inventoryAPI.getItemChecklists(itemId);
+      setChecklists(checklistsResponse.data);
+    } catch (err: any) {
+      console.error('Error loading checklists:', err);
+    }
+  }, [itemId]);
+
+  const handleStartChecklist = async (checklistId: string) => {
+    try {
+      const userName = prompt('Enter your name (optional):') || '';
+      const completion = await checklistsAPI.startChecklist(checklistId, userName || undefined);
+      navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to start checklist');
+    }
+  };
 
   // Auto-submit reorder for non-logged users (only if no pending request exists)
   useEffect(() => {
@@ -272,6 +294,38 @@ const ScanPage: React.FC = () => {
             {item.sku && <p className="sku">SKU: {item.sku}</p>}
           </div>
         </div>
+
+        {/* Checklists Section */}
+        {checklists.length > 0 && (
+          <div className="checklists-section" style={{ marginTop: '20px', padding: '15px', border: '1px solid #ddd', borderRadius: '5px' }}>
+            <h3>Are you completing a checklist?</h3>
+            <p>This item is part of the following checklists:</p>
+            <ul style={{ listStyle: 'none', padding: 0 }}>
+              {checklists.map((checklist) => (
+                <li key={checklist.id} style={{ marginBottom: '10px' }}>
+                  <button
+                    onClick={() => handleStartChecklist(checklist.id)}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      backgroundColor: '#007bff',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {checklist.name}
+                    {checklist.step_count && ` (${checklist.step_count} steps)`}
+                  </button>
+                  {checklist.description && (
+                    <p style={{ marginTop: '5px', fontSize: '0.9em', color: '#666' }}>{checklist.description}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="item-details">
           <p className="description">{item.description}</p>

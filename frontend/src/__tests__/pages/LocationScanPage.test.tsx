@@ -26,6 +26,10 @@ describe('LocationScanPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorage.clear();
+    // Mock checklist API calls
+    (api.inventoryAPI.getLocationChecklists as jest.Mock).mockResolvedValue({
+      data: [],
+    });
   });
 
   const renderWithRouter = async (locationId = 'test-location-123') => {

@@ -48,6 +48,10 @@ describe('ScanPage', () => {
     jest.clearAllMocks();
     // Clear localStorage to ensure clean state
     localStorage.clear();
+    // Mock checklist API calls
+    (api.inventoryAPI.getItemChecklists as jest.Mock).mockResolvedValue({
+      data: [],
+    });
   });
 
   const renderWithRouter = async (itemId = 'test-id-123') => {

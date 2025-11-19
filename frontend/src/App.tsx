@@ -2,7 +2,7 @@
  * Main App Component
  */
 import * as Sentry from '@sentry/react';
-import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { Route, BrowserRouter as Router, Routes, useLocation } from 'react-router-dom';
 import NavigationBar from './components/NavigationBar';
 import AdminDashboard from './pages/AdminDashboard';
 import AssetScanPage from './pages/AssetScanPage';
@@ -25,12 +25,18 @@ import './styles/App.css';
 // Wrap routes with Sentry for better error tracking
 const SentryRoutes = Sentry.withSentryRouting(Routes);
 
-function App() {
+// Component to conditionally show NavigationBar
+function AppContent() {
+  const location = useLocation();
+  
+  // Hide navigation bar on TV Dashboard and Logistics Dashboard routes
+  const shouldShowNavBar = !location.pathname.startsWith('/tv-dashboard') && 
+                           !location.pathname.startsWith('/tv-logistics');
+  
   return (
-    <Router>
-      <div className="App">
-        <NavigationBar />
-        <Sentry.ErrorBoundary
+    <div className="App">
+      {shouldShowNavBar && <NavigationBar />}
+      <Sentry.ErrorBoundary
           fallback={({ error, resetError }) => (
             <div style={{ padding: '20px', textAlign: 'center' }}>
               <h1>Something went wrong</h1>
@@ -61,7 +67,14 @@ function App() {
             <Route path="/sig-dashboard/:sigId" element={<SIGDashboard />} />
           </SentryRoutes>
         </Sentry.ErrorBoundary>
-      </div>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <AppContent />
     </Router>
   );
 }

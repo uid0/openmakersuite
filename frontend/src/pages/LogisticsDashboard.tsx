@@ -32,12 +32,34 @@ const LogisticsDashboard: React.FC = () => {
   const fetchDashboardData = async () => {
     try {
       const response = await analyticsAPI.getLogisticsDashboard<LogisticsDashboardResponse>();
-      setData(response.data);
+      console.log('Logistics Dashboard API Full Response:', response);
+      console.log('Logistics Dashboard API Response Data:', response.data);
+      console.log('Response Data Type:', typeof response.data);
+      console.log('Response Data Keys:', response.data ? Object.keys(response.data) : 'No data');
+      
+      // Handle both direct data and nested data structures
+      const rawData = response.data || {};
+      
+      // Ensure all values are numbers, defaulting to 0 if undefined/null
+      const dashboardData: LogisticsDashboardResponse = {
+        open_item_requests: Number(rawData.open_item_requests) || 0,
+        open_locations_with_problems: Number(rawData.open_locations_with_problems) || 0,
+        assets_overdue_maintenance: Number(rawData.assets_overdue_maintenance) || 0,
+        qr_scans_total: Number(rawData.qr_scans_total) || 0,
+        qr_scans_by_day: Array.isArray(rawData.qr_scans_by_day) ? rawData.qr_scans_by_day : [],
+        last_updated: rawData.last_updated || new Date().toISOString(),
+      };
+      
+      console.log('Processed Dashboard Data:', dashboardData);
+      
+      setData(dashboardData);
       setError(null);
       setRefreshProgress(100); // Reset progress bar
     } catch (err: any) {
       console.error('Failed to load logistics dashboard data', err);
-      setError('Unable to load logistics data. Retrying...');
+      console.error('Error response:', err.response);
+      console.error('Error details:', err.response?.data || err.message);
+      setError(`Unable to load logistics data: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -162,8 +184,13 @@ const LogisticsDashboard: React.FC = () => {
       <div className="logistics-dashboard logistics-error">
         <div className="logistics-error-card">
           <h1>🚧 Logistics Dashboard</h1>
-          <p>{error}</p>
+          <p>{error || 'No data available'}</p>
           <p className="logistics-error-tip">Ensure the backend is reachable at the configured API URL.</p>
+          {data && (
+            <pre style={{ marginTop: '1rem', fontSize: '0.8rem', textAlign: 'left' }}>
+              {JSON.stringify(data, null, 2)}
+            </pre>
+          )}
         </div>
       </div>
     );
@@ -175,27 +202,35 @@ const LogisticsDashboard: React.FC = () => {
         {/* Open Item Requests */}
         <div className="metric-card">
           <div className="metric-label">Open Item Requests</div>
-          <div className="metric-value">{data.open_item_requests}</div>
+          <div className="metric-value">
+            {typeof data.open_item_requests === 'number' ? data.open_item_requests : 0}
+          </div>
         </div>
 
         {/* Open Locations with Problems */}
         <div className="metric-card">
           <div className="metric-label">Locations with Problems</div>
-          <div className="metric-value">{data.open_locations_with_problems}</div>
+          <div className="metric-value">
+            {typeof data.open_locations_with_problems === 'number' ? data.open_locations_with_problems : 0}
+          </div>
         </div>
 
         {/* Assets Overdue Maintenance */}
         <div className="metric-card">
           <div className="metric-label">Assets Overdue Maintenance</div>
-          <div className="metric-value">{data.assets_overdue_maintenance}</div>
+          <div className="metric-value">
+            {typeof data.assets_overdue_maintenance === 'number' ? data.assets_overdue_maintenance : 0}
+          </div>
         </div>
 
         {/* QR Code Scans */}
         <div className="metric-card">
           <div className="metric-label">QR Scans (Last 7 Days)</div>
-          <div className="metric-value">{data.qr_scans_total}</div>
+          <div className="metric-value">
+            {typeof data.qr_scans_total === 'number' ? data.qr_scans_total : 0}
+          </div>
           <div className="sparkline-container">
-            <Sparkline data={data.qr_scans_by_day} />
+            <Sparkline data={Array.isArray(data.qr_scans_by_day) ? data.qr_scans_by_day : []} />
           </div>
         </div>
       </div>

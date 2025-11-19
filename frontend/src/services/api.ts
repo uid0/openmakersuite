@@ -262,7 +262,7 @@ export const purchaseOrderAPI = {
     api.get<{ results: any[] }>('/reorders/purchase-orders/', { params }),
   getOrder: (id: string) =>
     api.get<any>(`/reorders/purchase-orders/${id}/`),
-  updateLineItem: (orderId: string, itemId: string, data: { expected_shipment_date?: string; notes?: string }) =>
+  updateLineItem: (orderId: string, itemId: string, data: { expected_shipment_date?: string; notes?: string; line_cost?: number; unit_cost_actual?: number }) =>
     api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
   voidLineItem: (orderId: string, itemId: string, reason?: string) =>
     api.post(`/reorders/purchase-orders/${orderId}/items/${itemId}/void/`, { reason }),

@@ -3,8 +3,10 @@
  */
 import * as Sentry from '@sentry/react';
 import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import NavigationBar from './components/NavigationBar';
 import AdminDashboard from './pages/AdminDashboard';
 import AssetScanPage from './pages/AssetScanPage';
+import AssetsPage from './pages/AssetsPage';
 import ChecklistCompletionPage from './pages/ChecklistCompletionPage';
 import CodeEntryPage from './pages/CodeEntryPage';
 import FixtureScanPage from './pages/FixtureScanPage';
@@ -27,6 +29,7 @@ function App() {
   return (
     <Router>
       <div className="App">
+        <NavigationBar />
         <Sentry.ErrorBoundary
           fallback={({ error, resetError }) => (
             <div style={{ padding: '20px', textAlign: 'center' }}>
@@ -39,6 +42,7 @@ function App() {
         >
           <SentryRoutes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/assets" element={<AssetsPage />} />
             <Route path="/scan/:itemId" element={<ScanPage />} />
             <Route path="/scan/fixture/:fixtureId" element={<FixtureScanPage />} />
             <Route path="/scan/asset/:assetId" element={<AssetScanPage />} />

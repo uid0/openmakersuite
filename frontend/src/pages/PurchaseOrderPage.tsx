@@ -23,7 +23,9 @@ interface PurchaseOrderItem {
   quantity_ordered: number;
   quantity_received: number;
   unit_cost_ordered: string;
+  unit_cost_actual: string | null;
   estimated_cost: string;
+  actual_cost: string | null;
   expected_shipment_date: string | null;
   notes: string;
   is_voided: boolean;
@@ -50,6 +52,8 @@ const PurchaseOrderPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [shipmentDate, setShipmentDate] = useState<string>('');
+  const [editingCostItemId, setEditingCostItemId] = useState<string | null>(null);
+  const [lineCost, setLineCost] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [voidingItemId, setVoidingItemId] = useState<string | null>(null);
   const [voidReason, setVoidReason] = useState<string>('');
@@ -87,6 +91,48 @@ const PurchaseOrderPage: React.FC = () => {
   const handleCancelEdit = () => {
     setEditingItemId(null);
     setShipmentDate('');
+  };
+
+  const handleEditLineCost = (item: PurchaseOrderItem) => {
+    setEditingCostItemId(item.id);
+    // Calculate line cost from unit_cost_actual if available, otherwise from estimated_cost
+    if (item.unit_cost_actual && item.quantity_received > 0) {
+      const calculatedLineCost = parseFloat(item.unit_cost_actual) * item.quantity_received;
+      setLineCost(calculatedLineCost.toFixed(2));
+    } else if (item.actual_cost) {
+      setLineCost(parseFloat(item.actual_cost).toFixed(2));
+    } else {
+      // Use estimated cost as starting point
+      setLineCost(parseFloat(item.estimated_cost).toFixed(2));
+    }
+  };
+
+  const handleCancelEditCost = () => {
+    setEditingCostItemId(null);
+    setLineCost('');
+  };
+
+  const handleSaveLineCost = async (itemId: string, item: PurchaseOrderItem) => {
+    const lineCostValue = parseFloat(lineCost);
+    if (isNaN(lineCostValue) || lineCostValue < 0) {
+      alert('Please enter a valid line cost (must be a positive number)');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await purchaseOrderAPI.updateLineItem(orderId!, itemId, {
+        line_cost: lineCostValue,
+      });
+      await loadOrder(); // Reload to get updated data
+      setEditingCostItemId(null);
+      setLineCost('');
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to update line cost');
+      console.error('Error updating line cost:', err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSaveShipmentDate = async (itemId: string) => {
@@ -208,7 +254,7 @@ const PurchaseOrderPage: React.FC = () => {
               <th>Quantity Ordered</th>
               <th>Quantity Received</th>
               <th>Unit Cost</th>
-              <th>Line Total</th>
+              <th>Line Cost</th>
               <th>Expected Shipment Date</th>
               <th>Status</th>
               <th>Actions</th>
@@ -243,8 +289,71 @@ const PurchaseOrderPage: React.FC = () => {
                   <td>{itemSku}</td>
                   <td>{item.quantity_ordered}</td>
                   <td>{item.quantity_received}</td>
-                  <td>{formatCurrency(item.unit_cost_ordered)}</td>
-                  <td>{formatCurrency(item.estimated_cost)}</td>
+                  <td>
+                    {item.unit_cost_actual 
+                      ? formatCurrency(item.unit_cost_actual) 
+                      : formatCurrency(item.unit_cost_ordered)}
+                    {item.unit_cost_actual && (
+                      <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                        (ordered: {formatCurrency(item.unit_cost_ordered)})
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {editingCostItemId === item.id ? (
+                      <div className="edit-line-cost">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={lineCost}
+                          onChange={(e) => setLineCost(e.target.value)}
+                          disabled={saving || item.is_voided}
+                          className="cost-input"
+                          placeholder="Enter total line cost"
+                        />
+                        <div className="calculated-unit-cost" style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                          Unit cost: {item.quantity_ordered > 0 
+                            ? formatCurrency((parseFloat(lineCost || '0') / item.quantity_ordered).toFixed(4))
+                            : '—'}
+                        </div>
+                        <div className="edit-actions">
+                          <button
+                            onClick={() => handleSaveLineCost(item.id, item)}
+                            disabled={saving}
+                            className="btn-save"
+                          >
+                            {saving ? 'Saving...' : 'Save'}
+                          </button>
+                          <button
+                            onClick={handleCancelEditCost}
+                            disabled={saving}
+                            className="btn-cancel"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="line-cost-display">
+                        <span>
+                          {item.actual_cost 
+                            ? formatCurrency(item.actual_cost)
+                            : formatCurrency(item.estimated_cost)}
+                        </span>
+                        {!item.is_voided && isAuthenticated && (
+                          <button
+                            onClick={() => handleEditLineCost(item)}
+                            className="btn-edit"
+                            title="Edit line cost"
+                            style={{ marginLeft: '0.5rem' }}
+                          >
+                            ✏️
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </td>
                   <td>
                     {editingItemId === item.id ? (
                       <div className="edit-shipment-date">

@@ -4,7 +4,6 @@
  */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import AssetList from '../components/AssetList';
 import AuthSection from '../components/AuthSection';
 import Footer from '../components/Footer';
 import '../styles/HomePage.css';
@@ -92,8 +91,6 @@ const HomePage: React.FC = () => {
         </div>
       </div>
 
-      <AssetList />
-
       <div className="info-section">
         <h2>How It Works</h2>
         <div className="steps">
@@ -101,32 +98,28 @@ const HomePage: React.FC = () => {
             <div className="step-number">1</div>
             <h3>Create Item</h3>
             <p>
-              Add inventory items via Django admin with photos, descriptions,
-              and reorder quantities.
+              Add inventory items via Django admin with photos, descriptions, and reorder quantities.
             </p>
           </div>
           <div className="step">
             <div className="step-number">2</div>
             <h3>Generate Labels</h3>
             <p>
-              Print 3x5" index cards with QR codes to laminate and hang from
-              shelves.
+              Print 3x5" index cards with QR codes to laminate and hang from shelves.
             </p>
           </div>
           <div className="step">
             <div className="step-number">3</div>
             <h3>Scan & Request</h3>
             <p>
-              Users scan QR codes when items run low and submit reorder
-              requests.
+              Users scan QR codes when items run low and submit reorder requests.
             </p>
           </div>
           <div className="step">
             <div className="step-number">4</div>
             <h3>Admin Review</h3>
             <p>
-              Admins review requests, generate supplier cart links, and track
-              deliveries.
+              Admins review requests, generate supplier cart links, and track deliveries.
             </p>
           </div>
         </div>

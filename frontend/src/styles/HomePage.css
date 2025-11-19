@@ -145,8 +145,10 @@
 
 .step p {
   color: #666;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  max-width: 250px;
+  margin: 0 auto;
 }
 
 .footer {

@@ -557,6 +557,57 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if "notes" in request.data:
             line_item.notes = request.data["notes"]
 
+        # Allow updating unit_cost_actual via line_cost (total cost)
+        # If line_cost is provided, calculate unit_cost_actual = line_cost / quantity
+        line_cost = request.data.get("line_cost")
+        if line_cost is not None:
+            from decimal import Decimal, InvalidOperation
+
+            try:
+                line_cost_decimal = Decimal(str(line_cost))
+                if line_cost_decimal < 0:
+                    return Response(
+                        {"error": "Line cost cannot be negative"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                # Use quantity_ordered for calculation (what was ordered)
+                # This allows users to input the total line cost for the order
+                quantity = line_item.quantity_ordered
+                if quantity <= 0:
+                    return Response(
+                        {
+                            "error": "Cannot calculate unit cost: quantity ordered must be greater than 0"
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                # Calculate unit cost from line cost: unit_cost = line_cost / quantity_ordered
+                unit_cost_actual = line_cost_decimal / Decimal(quantity)
+                line_item.unit_cost_actual = unit_cost_actual
+            except (InvalidOperation, ValueError, TypeError) as e:
+                return Response(
+                    {"error": f"Invalid line cost value: {str(e)}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        # Also allow direct unit_cost_actual update for backwards compatibility
+        elif "unit_cost_actual" in request.data:
+            from decimal import Decimal, InvalidOperation
+
+            try:
+                unit_cost_actual = Decimal(str(request.data["unit_cost_actual"]))
+                if unit_cost_actual < 0:
+                    return Response(
+                        {"error": "Unit cost cannot be negative"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                line_item.unit_cost_actual = unit_cost_actual
+            except (InvalidOperation, ValueError, TypeError) as e:
+                return Response(
+                    {"error": f"Invalid unit cost value: {str(e)}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         line_item.save()
 
         from .serializers import PurchaseOrderItemSerializer

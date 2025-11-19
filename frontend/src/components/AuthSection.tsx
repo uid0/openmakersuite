@@ -54,6 +54,9 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       setLoginUsername('');
       setLoginPassword('');
       onAuthChange(true, loginUsername);
+      
+      // Dispatch custom event for NavigationBar
+      window.dispatchEvent(new Event('authChange'));
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');
     } finally {
@@ -83,6 +86,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       localStorage.setItem('token', loginResponse.data.access);
       localStorage.setItem('refresh_token', loginResponse.data.refresh);
       localStorage.setItem('username', registerUsername);
+      localStorage.setItem('is_staff', String(loginResponse.data.is_staff || false));
 
       setIsLoggedIn(true);
       setUsername(registerUsername);
@@ -90,6 +94,9 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       setRegisterUsername('');
       setRegisterEmail('');
       onAuthChange(true, registerUsername);
+      
+      // Dispatch custom event for NavigationBar
+      window.dispatchEvent(new Event('authChange'));
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Registration failed. Username may already exist.');
     } finally {
@@ -101,9 +108,13 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
     localStorage.removeItem('token');
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('username');
+    localStorage.removeItem('is_staff');
     setIsLoggedIn(false);
     setUsername('');
     onAuthChange(false);
+    
+    // Dispatch custom event for NavigationBar
+    window.dispatchEvent(new Event('authChange'));
   };
 
   const resetForms = () => {

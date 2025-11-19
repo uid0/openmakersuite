@@ -14,8 +14,12 @@ from rest_framework.views import APIView
 
 from inventory.models import InventoryItem
 
-from .serializers import IndexCardBatchSerializer, IndexCardPreviewSerializer
-from .services import IndexCardRenderer, build_preview_payload
+from .serializers import (
+    IndexCardBatchSerializer,
+    IndexCardPreviewSerializer,
+    TestSheetSerializer,
+)
+from .services import IndexCardRenderer, TestSheetRenderer, build_preview_payload
 
 
 class IndexCardPreviewView(APIView):
@@ -75,3 +79,38 @@ class IndexCardBatchGenerateView(APIView):
             "card_type": card_type,
         }
         return Response(response_payload, status=status.HTTP_201_CREATED)
+
+
+class TestSheetGenerateView(APIView):
+    """Generate a test sheet (8.5x11) with items, images, names, and QR codes."""
+
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def post(self, request, *args, **kwargs):
+        serializer = TestSheetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        validated_ids = serializer.validated_data["item_ids"]
+        item_ids: List[str] = [str(value) for value in validated_ids]
+        items = list(InventoryItem.objects.filter(id__in=validated_ids))
+
+        if len(items) != len(validated_ids):
+            missing = set(item_ids) - {str(item.id) for item in items}
+            return Response(
+                {
+                    "detail": "Some requested inventory items were not found.",
+                    "missing_ids": sorted(missing),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        items.sort(key=lambda item: item_ids.index(str(item.id)))
+
+        renderer = TestSheetRenderer()
+        pdf_bytes = renderer.render_to_bytes(items)
+
+        from django.http import HttpResponse
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = 'attachment; filename="test_sheet.pdf"'
+        return response

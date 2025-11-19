@@ -3,7 +3,7 @@
  * Displays all active inventory items with search and filtering
  */
 import React, { useEffect, useState } from 'react';
-import { inventoryAPI } from '../services/api';
+import { indexCardsAPI, inventoryAPI } from '../services/api';
 import { InventoryItem } from '../types';
 import '../styles/InventoryList.css';
 
@@ -12,6 +12,7 @@ const InventoryList: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'all' | 'low-stock'>('all');
+  const [generatingTestSheet, setGeneratingTestSheet] = useState(false);
 
   useEffect(() => {
     console.log('InventoryList: Component mounted, loading items...');
@@ -47,6 +48,35 @@ const InventoryList: React.FC = () => {
   });
 
   const lowStockCount = items.filter((item) => item.needs_reorder).length;
+
+  const generateTestSheet = async () => {
+    if (filteredItems.length === 0) {
+      alert('No items to generate test sheet for.');
+      return;
+    }
+
+    try {
+      setGeneratingTestSheet(true);
+      const itemIds = filteredItems.map((item) => item.id);
+      const response = await indexCardsAPI.generateTestSheet(itemIds);
+
+      // Create a blob URL and trigger download
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'test_sheet.pdf';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error generating test sheet:', err);
+      alert('Failed to generate test sheet. Please try again.');
+    } finally {
+      setGeneratingTestSheet(false);
+    }
+  };
 
   if (loading) {
     return <div className="loading">Loading inventory...</div>;
@@ -86,6 +116,14 @@ const InventoryList: React.FC = () => {
             onClick={() => setFilter('low-stock')}
           >
             Low Stock ({lowStockCount})
+          </button>
+          <button
+            className="generate-test-sheet-btn"
+            onClick={generateTestSheet}
+            disabled={generatingTestSheet || filteredItems.length === 0}
+            title="Generate 8.5x11 test sheet with QR codes for filtered items"
+          >
+            {generatingTestSheet ? 'Generating...' : '📄 Print Test Sheet'}
           </button>
         </div>
       </div>

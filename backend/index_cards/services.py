@@ -876,6 +876,186 @@ def build_preview_payload(
     }
 
 
+class TestSheetRenderer:
+    """Render test sheets (8.5x11) with items, images, names, and QR codes."""
+
+    PAGE_WIDTH, PAGE_HEIGHT = letter
+    MARGIN = 0.5 * inch
+    ITEM_SPACING = 0.3 * inch
+    QR_CODE_SIZE = 1.0 * inch
+    ITEMS_PER_ROW = 3
+    ITEMS_PER_COLUMN = 4
+    ITEMS_PER_PAGE = ITEMS_PER_ROW * ITEMS_PER_COLUMN
+
+    def __init__(self, base_url: str | None = None) -> None:
+        """Initialize the renderer with base URL.
+
+        Args:
+            base_url: Base URL for QR codes (defaults to FRONTEND_URL setting)
+        """
+        self.base_url = base_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        self._title_style = ParagraphStyle(
+            name="TestSheetTitle",
+            fontName="Helvetica-Bold",
+            fontSize=12,
+            leading=14,
+            alignment=TA_LEFT,
+            textColor=colors.HexColor("#1F2937"),
+        )
+
+    def render_to_bytes(self, items: Sequence[InventoryItem]) -> bytes:
+        """Render test sheet to PDF bytes.
+
+        Args:
+            items: Sequence of inventory items to render
+
+        Returns:
+            PDF content as bytes
+        """
+        buffer = BytesIO()
+        self._render_to_canvas(items, buffer)
+        return buffer.getvalue()
+
+    def _render_to_canvas(self, items: Sequence[InventoryItem], buffer: BytesIO) -> None:
+        """Render items to PDF canvas."""
+        pdf_canvas = canvas.Canvas(buffer, pagesize=letter)
+
+        # Calculate item dimensions
+        available_width = self.PAGE_WIDTH - 2 * self.MARGIN
+        available_height = self.PAGE_HEIGHT - 2 * self.MARGIN
+
+        item_width = (available_width - (self.ITEMS_PER_ROW - 1) * self.ITEM_SPACING) / self.ITEMS_PER_ROW
+        item_height = (available_height - (self.ITEMS_PER_COLUMN - 1) * self.ITEM_SPACING) / self.ITEMS_PER_COLUMN
+
+        # Process items in pages
+        for page_items in self._chunk(items, self.ITEMS_PER_PAGE):
+            self._draw_page(pdf_canvas, page_items, item_width, item_height)
+            pdf_canvas.showPage()
+
+        pdf_canvas.save()
+        buffer.seek(0)
+
+    def _draw_page(
+        self,
+        pdf_canvas: canvas.Canvas,
+        items: Sequence[InventoryItem],
+        item_width: float,
+        item_height: float,
+    ) -> None:
+        """Draw a single page with items arranged in a grid."""
+        for index, item in enumerate(items):
+            row = index // self.ITEMS_PER_ROW
+            col = index % self.ITEMS_PER_ROW
+
+            x = self.MARGIN + col * (item_width + self.ITEM_SPACING)
+            y = (
+                self.PAGE_HEIGHT
+                - self.MARGIN
+                - (row + 1) * item_height
+                + row * self.ITEM_SPACING
+            )
+
+            self._draw_item(pdf_canvas, item, x, y, item_width, item_height)
+
+    def _draw_item(
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> None:
+        """Draw a single item with image, name, and QR code (vertically stacked)."""
+        padding = 0.1 * inch
+        inner_x = x + padding
+        inner_y = y + padding
+        inner_width = width - 2 * padding
+        inner_height = height - 2 * padding
+
+        # Calculate positions - vertically stacked: image, name, QR code
+        # Start from top
+        current_y = inner_y + inner_height
+
+        # Image at top (centered horizontally, scaled to QR code size)
+        image_x = inner_x + (inner_width - self.QR_CODE_SIZE) / 2
+        image_y = current_y - self.QR_CODE_SIZE
+
+        # Name below image
+        name_spacing = 0.15 * inch
+        name_y = image_y - name_spacing
+
+        # QR code below name
+        qr_spacing = 0.15 * inch
+        qr_x = inner_x + (inner_width - self.QR_CODE_SIZE) / 2
+        qr_y = name_y
+
+        # Draw image (scaled to QR code size)
+        if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
+            try:
+                image_reader = ImageReader(item.image.path)
+                pdf_canvas.drawImage(
+                    image_reader,
+                    image_x,
+                    image_y,
+                    width=self.QR_CODE_SIZE,
+                    height=self.QR_CODE_SIZE,
+                    preserveAspectRatio=True,
+                    mask="auto",
+                )
+            except Exception:
+                # If image fails to load, just skip it
+                pass
+
+        # Draw item name (centered)
+        name_para = Paragraph(item.name, self._title_style)
+        name_width = min(inner_width, name_para.wrap(inner_width, 0.3 * inch)[0])
+        name_height = name_para.wrap(name_width, 0.3 * inch)[1]
+        # Center the name horizontally
+        name_x = inner_x + (inner_width - name_width) / 2
+        name_para.drawOn(pdf_canvas, name_x, name_y - name_height)
+
+        # Update QR code position to be below name
+        qr_y = name_y - name_height - qr_spacing
+
+        # Draw QR code (centered)
+        qr_buffer = self._generate_qr_code(item)
+        qr_reader = ImageReader(qr_buffer)
+        pdf_canvas.drawImage(
+            qr_reader,
+            qr_x,
+            qr_y,
+            width=self.QR_CODE_SIZE,
+            height=self.QR_CODE_SIZE,
+            preserveAspectRatio=True,
+        )
+
+    def _generate_qr_code(self, item: InventoryItem) -> BytesIO:
+        """Generate QR code for an item."""
+        qr = qrcode.QRCode(
+            version=2,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=10,
+            border=2,
+        )
+        scan_url = f"{self.base_url.rstrip('/')}/scan/{item.id}"
+        qr.add_data(scan_url)
+        qr.make(fit=True)
+        image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        buffer.seek(0)
+        return buffer
+
+    @staticmethod
+    def _chunk(
+        sequence: Sequence[InventoryItem], size: int = 12
+    ) -> Iterable[Sequence[InventoryItem]]:
+        """Split items into chunks of specified size."""
+        for index in range(0, len(sequence), size):
+            yield sequence[index : index + size]
+
+
 class FixtureCardRenderer:
     """Renderer for fixture refill request cards."""
 

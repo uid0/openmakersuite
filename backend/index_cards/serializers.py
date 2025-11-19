@@ -41,3 +41,19 @@ class IndexCardBatchSerializer(serializers.Serializer):
         if len(value) != len(set(value)):
             raise serializers.ValidationError("Duplicate item identifiers are not allowed.")
         return value
+
+
+class TestSheetSerializer(serializers.Serializer):
+    """Validate data for generating a test sheet."""
+
+    item_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        allow_empty=False,
+        help_text="List of inventory item identifiers to include in the test sheet",
+    )
+
+    def validate_item_ids(self, value: List[str]) -> List[str]:
+        """Ensure that each item identifier is unique."""
+        if len(value) != len(set(value)):
+            raise serializers.ValidationError("Duplicate item identifiers are not allowed.")
+        return value

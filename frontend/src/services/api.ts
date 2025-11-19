@@ -394,4 +394,12 @@ export const checklistsAPI = {
     api.post<ChecklistCompletion>(`/checklists/completions/${completionId}/complete/`),
 };
 
+// Index Cards API
+export const indexCardsAPI = {
+  generateTestSheet: (itemIds: string[]) =>
+    api.post('/index-cards/test-sheet/', { item_ids: itemIds }, {
+      responseType: 'blob',
+    }),
+};
+
 export default api;

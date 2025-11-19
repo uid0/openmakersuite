@@ -3,7 +3,7 @@
  * Shows refill requests alongside pending purchase orders with auto-refresh,
  * wake-lock support, and large-format layout for TV readability.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import '../styles/LogisticsDashboard.css';
 import { analyticsAPI } from '../services/api';
 
@@ -220,7 +220,7 @@ const LogisticsDashboard: React.FC = () => {
     );
   }
 
-  const { summary } = data;
+  const { summary, refill_requests, pending_orders, location_requests } = data;
   const hasUrgentRequests = (summary.urgent_requests + summary.urgent_location_requests) > 0;
 
   return (
@@ -243,6 +243,187 @@ const LogisticsDashboard: React.FC = () => {
           <span className="summary-value">{summary.pending_orders}</span>
         </div>
       </section>
+
+      <div className="logistics-content">
+        {/* Refill Requests Section */}
+        <section className="refill-requests">
+          <div className="section-heading">
+            <h2>Refill Requests</h2>
+            <span className="section-subtitle">Top priority items needing restock</span>
+          </div>
+          {refill_requests.length === 0 ? (
+            <div className="empty-state">
+              <p>No pending refill requests</p>
+            </div>
+          ) : (
+            <div className="refill-grid tv-limited">
+              {refill_requests.map((request) => (
+                <div
+                  key={request.id}
+                  className={`refill-card priority-${request.priority}`}
+                >
+                  <div className="refill-card-header">
+                    <h3>{request.item_name}</h3>
+                    <div>
+                      <span className={`badge status-${request.status} ${request.priority === 'urgent' ? 'urgent-badge' : ''}`}>
+                        {request.priority_label}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="refill-card-body">
+                    <div className="refill-meta">
+                      <div className="meta-block">
+                        <span className="meta-label">Location</span>
+                        <span className="meta-value">{request.location}</span>
+                      </div>
+                      <div className="meta-block">
+                        <span className="meta-label">Quantity</span>
+                        <span className="meta-value accent">{request.quantity_requested}</span>
+                      </div>
+                      {request.category && (
+                        <div className="meta-block">
+                          <span className="meta-label">Category</span>
+                          <span className="meta-value">{request.category}</span>
+                        </div>
+                      )}
+                      <div className="meta-block">
+                        <span className="meta-label">Days Open</span>
+                        <span className="meta-value">{request.days_open}</span>
+                      </div>
+                    </div>
+                    {(request.request_notes || request.public_notes) && (
+                      <div className="refill-notes">
+                        <p>{request.request_notes || request.public_notes}</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="refill-card-footer">
+                    <span>Status: {request.status_label}</span>
+                    <span>Requested by: {request.requested_by}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Pending Orders and Location Requests Section */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {/* Pending Orders Section */}
+          <section className="pending-orders">
+            <div className="section-heading">
+              <h2>Pending Orders</h2>
+              <span className="section-subtitle">Orders awaiting delivery</span>
+            </div>
+            {pending_orders.length === 0 ? (
+              <div className="empty-state">
+                <p>No pending purchase orders</p>
+              </div>
+            ) : (
+              <div className="orders-grid">
+                {pending_orders.map((order) => (
+                  <div key={order.id} className="order-card">
+                    <div className="order-card-header">
+                      <div>
+                        <h3>{order.po_number}</h3>
+                        <span className="order-supplier">{order.supplier_name}</span>
+                      </div>
+                      <span className={`badge status ${order.status}`}>
+                        {order.status_label}
+                      </span>
+                    </div>
+                    <div className="order-details">
+                      <div className="order-meta">
+                        <span>Items: {order.total_items}</span>
+                        <span>Total Qty: {order.total_quantity}</span>
+                        <span>Received: {order.received_quantity}</span>
+                      </div>
+                      {order.progress_percent !== null && (
+                        <div className="order-progress">
+                          <div className="progress-label">Progress</div>
+                          <div className="progress-bar">
+                            <div
+                              className="progress-value"
+                              style={{ width: `${order.progress_percent}%` }}
+                            />
+                          </div>
+                          <div className="progress-meta">
+                            {order.progress_percent.toFixed(1)}% complete
+                          </div>
+                        </div>
+                      )}
+                      {order.estimated_total !== null && (
+                        <div className="order-financials">
+                          <span className="meta-value">Est. Total: {formatCurrency(order.estimated_total)}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="order-card-footer">
+                      {order.expected_delivery_date && (
+                        <span>Expected: {formatDate(order.expected_delivery_date)}</span>
+                      )}
+                      <span>Days since ordered: {order.days_since_ordered}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Location Requests Section */}
+          <section className="location-requests">
+            <div className="section-heading">
+              <h2>Location Requests</h2>
+              <span className="section-subtitle">Tasks and feedback from locations</span>
+            </div>
+            {location_requests.length === 0 ? (
+              <div className="empty-state">
+                <p>No location requests</p>
+              </div>
+            ) : (
+              <div className="orders-grid">
+                {location_requests.map((request) => (
+                  <div
+                    key={request.id}
+                    className={`order-card ${request.is_urgent ? 'priority-urgent' : ''}`}
+                  >
+                    <div className="order-card-header">
+                      <div>
+                        <h3>{request.title}</h3>
+                        <span className="order-supplier">{request.location}</span>
+                      </div>
+                      <div>
+                        {request.is_urgent && (
+                          <span className="badge urgent-badge">Urgent</span>
+                        )}
+                        <span className={`badge status-${request.status}`}>
+                          {request.status_label}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="order-details">
+                      <div className="order-meta">
+                        <span>Type: {request.type_label}</span>
+                        <span>Days Open: {request.days_open}</span>
+                      </div>
+                      {request.description && (
+                        <div className="refill-notes">
+                          <p>{request.description}</p>
+                        </div>
+                      )}
+                    </div>
+                    <div className="order-card-footer">
+                      {request.created_at && (
+                        <span>Created: {formatDate(request.created_at)}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
 
       <footer className="logistics-footer">
         <div className="footer-time">

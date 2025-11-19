@@ -1255,8 +1255,11 @@ class AnalyticsViewSet(viewsets.ViewSet):
         from location_checkins.models import LocationTask, SecurityReport, LocationFeedback
 
         # 1. Number of Open Item Requests
-        pending_statuses = [ReorderRequest.PENDING, ReorderRequest.APPROVED]
-        open_item_requests = ReorderRequest.objects.filter(status__in=pending_statuses).count()
+        # Open requests are those that are pending or approved (not yet ordered/received/cancelled)
+        # Using string literals to ensure we match the actual database values
+        open_item_requests = ReorderRequest.objects.filter(
+            status__in=["pending", "approved"]
+        ).count()
 
         # 2. Number of Open Locations with Problems Reported
         # Count unique locations that have unresolved tasks, security reports, or negative feedback
@@ -1297,15 +1300,18 @@ class AnalyticsViewSet(viewsets.ViewSet):
         overdue_maintenance_count = len(overdue_asset_ids)
 
         # 4. QR Code Scans in last 7 days with daily breakdown
+        # Note: We count unique assets scanned per day (since last_scanned_at only stores the most recent scan time)
+        # If an asset is scanned multiple times in a day, we only count it once for that day
         seven_days_ago = timezone.now() - timedelta(days=7)
         
         # Get all assets scanned in last 7 days, grouped by date
+        # Count distinct assets scanned each day
         scans_by_date = (
             Asset.objects.filter(last_scanned_at__gte=seven_days_ago)
             .exclude(last_scanned_at__isnull=True)
             .annotate(scan_date=TruncDate("last_scanned_at"))
             .values("scan_date")
-            .annotate(count=Count("id"))
+            .annotate(count=Count("id", distinct=True))
             .order_by("scan_date")
         )
         
@@ -1313,7 +1319,18 @@ class AnalyticsViewSet(viewsets.ViewSet):
         today = timezone.now().date()
         scan_data = {}
         for scan in scans_by_date:
-            scan_data[scan["scan_date"]] = scan["count"]
+            scan_date = scan["scan_date"]
+            # TruncDate returns a date object, but handle both cases
+            if isinstance(scan_date, str):
+                from datetime import datetime
+                try:
+                    scan_date = datetime.fromisoformat(scan_date).date()
+                except (ValueError, AttributeError):
+                    # If parsing fails, try to get the date from the scan object
+                    continue
+            elif hasattr(scan_date, 'date'):
+                scan_date = scan_date.date()
+            scan_data[scan_date] = scan["count"]
         
         # Build array for last 7 days (including today)
         qr_scans_by_day = []

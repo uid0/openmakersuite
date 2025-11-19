@@ -5,6 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import { assetsAPI } from '../services/api';
 import { Asset } from '../types';
+import AssetDetailModal from './AssetDetailModal';
 import '../styles/AssetList.css';
 
 const AssetList: React.FC = () => {
@@ -12,6 +13,8 @@ const AssetList: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'maintenance' | 'retired'>('all');
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     console.log('AssetList: Component mounted, loading assets...');
@@ -76,6 +79,16 @@ const AssetList: React.FC = () => {
     }
   };
 
+  const handleAssetClick = (assetId: string) => {
+    setSelectedAssetId(assetId);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedAssetId(null);
+  };
+
   if (loading) {
     return <div className="loading">Loading assets...</div>;
   }
@@ -137,7 +150,11 @@ const AssetList: React.FC = () => {
       ) : (
         <div className="asset-grid">
           {filteredAssets.map((asset) => (
-            <div key={asset.id} className={`asset-card ${getStatusBadgeClass(asset.status)}`}>
+            <div
+              key={asset.id}
+              className={`asset-card ${getStatusBadgeClass(asset.status)}`}
+              onClick={() => handleAssetClick(asset.id)}
+            >
               {asset.image_url && (
                 <div className="asset-image">
                   <img src={asset.thumbnail_url || asset.image_url} alt={asset.name} />
@@ -214,6 +231,12 @@ const AssetList: React.FC = () => {
           ))}
         </div>
       )}
+
+      <AssetDetailModal
+        assetId={selectedAssetId}
+        isOpen={isModalOpen}
+        onClose={handleCloseModal}
+      />
     </div>
   );
 };

@@ -215,6 +215,35 @@ export interface Asset {
   can_unlock: boolean;
   // Operational status
   operational_status: OperationalStatus;
+  // Parts/consumables
+  parts?: AssetPart[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetPart {
+  id: string;
+  asset: string;
+  asset_name: string;
+  asset_tag: string;
+  part: string;
+  part_name: string;
+  part_sku: string;
+  quantity_needed: number;
+  is_required: boolean;
+  maintenance_interval_days: number | null;
+  last_replaced_at: string | null;
+  days_since_replacement: number | null;
+  needs_replacement: boolean;
+  notes: string;
+  part_details?: {
+    id: string;
+    name: string;
+    sku: string;
+    current_stock: number;
+    minimum_stock: number;
+    needs_reorder: boolean;
+  };
   created_at: string;
   updated_at: string;
 }

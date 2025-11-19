@@ -1005,7 +1005,7 @@ class TestSheetRenderer:
                     preserveAspectRatio=True,
                     mask="auto",
                 )
-            except (IOError, OSError, ValueError) as e:
+            except (OSError, ValueError) as e:
                 # If image fails to load (file corruption, unsupported format, etc.), skip it
                 logger.warning(
                     "Failed to load image for item %s (path: %s): %s",

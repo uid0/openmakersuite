@@ -21,7 +21,7 @@ const HomePage: React.FC = () => {
   return (
     <div className="home-page">
       <div className="hero">
-        <h1>Makerspace Inventory Management</h1>
+        <h1> Dallas Makerspace Inventory Management</h1>
         <p className="tagline">Scan. Track. Reorder. Simple.</p>
       </div>
 

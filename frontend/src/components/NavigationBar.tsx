@@ -55,7 +55,7 @@ const NavigationBar: React.FC = () => {
       <div className="nav-container">
         <Link to="/" className="nav-logo">
           <span className="logo-icon">📦</span>
-          <span className="logo-text">Makerspace</span>
+          <span className="logo-text">DallasMakerspace</span>
         </Link>
 
         <div className="nav-links">

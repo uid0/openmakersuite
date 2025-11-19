@@ -14,11 +14,7 @@ from rest_framework.views import APIView
 
 from inventory.models import InventoryItem
 
-from .serializers import (
-    IndexCardBatchSerializer,
-    IndexCardPreviewSerializer,
-    TestSheetSerializer,
-)
+from .serializers import IndexCardBatchSerializer, IndexCardPreviewSerializer, TestSheetSerializer
 from .services import IndexCardRenderer, TestSheetRenderer, build_preview_payload
 
 

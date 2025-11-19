@@ -924,8 +924,12 @@ class TestSheetRenderer:
         available_width = self.PAGE_WIDTH - 2 * self.MARGIN
         available_height = self.PAGE_HEIGHT - 2 * self.MARGIN
 
-        item_width = (available_width - (self.ITEMS_PER_ROW - 1) * self.ITEM_SPACING) / self.ITEMS_PER_ROW
-        item_height = (available_height - (self.ITEMS_PER_COLUMN - 1) * self.ITEM_SPACING) / self.ITEMS_PER_COLUMN
+        item_width = (
+            available_width - (self.ITEMS_PER_ROW - 1) * self.ITEM_SPACING
+        ) / self.ITEMS_PER_ROW
+        item_height = (
+            available_height - (self.ITEMS_PER_COLUMN - 1) * self.ITEM_SPACING
+        ) / self.ITEMS_PER_COLUMN
 
         # Process items in pages
         for page_items in self._chunk(items, self.ITEMS_PER_PAGE):
@@ -948,12 +952,7 @@ class TestSheetRenderer:
             col = index % self.ITEMS_PER_ROW
 
             x = self.MARGIN + col * (item_width + self.ITEM_SPACING)
-            y = (
-                self.PAGE_HEIGHT
-                - self.MARGIN
-                - (row + 1) * item_height
-                + row * self.ITEM_SPACING
-            )
+            y = self.PAGE_HEIGHT - self.MARGIN - (row + 1) * item_height + row * self.ITEM_SPACING
 
             self._draw_item(pdf_canvas, item, x, y, item_width, item_height)
 

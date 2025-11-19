@@ -2,11 +2,7 @@
 
 from django.urls import path
 
-from .views import (
-    IndexCardBatchGenerateView,
-    IndexCardPreviewView,
-    TestSheetGenerateView,
-)
+from .views import IndexCardBatchGenerateView, IndexCardPreviewView, TestSheetGenerateView
 
 app_name = "index_cards"
 

@@ -11,6 +11,7 @@ For more information, see the LICENSE file.
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from dataclasses import dataclass
 from io import BytesIO
@@ -34,6 +35,8 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 
 from inventory.models import InventoryItem
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -1002,9 +1005,14 @@ class TestSheetRenderer:
                     preserveAspectRatio=True,
                     mask="auto",
                 )
-            except Exception:
-                # If image fails to load, just skip it
-                pass
+            except (IOError, OSError, ValueError) as e:
+                # If image fails to load (file corruption, unsupported format, etc.), skip it
+                logger.warning(
+                    "Failed to load image for item %s (path: %s): %s",
+                    item.id,
+                    item.image.path,
+                    str(e),
+                )
 
         # Draw item name (centered)
         name_para = Paragraph(item.name, self._title_style)

@@ -103,52 +103,64 @@
 
 .info-section {
   background: white;
-  padding: 40px;
+  padding: 50px 40px;
   border-radius: 8px;
   margin-bottom: 40px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .info-section h2 {
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 50px;
   color: #333;
+  font-size: 2rem;
+  font-weight: 600;
 }
 
 .steps {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 30px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 40px;
+  max-width: 1000px;
+  margin: 0 auto;
 }
 
 .step {
   text-align: center;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .step-number {
-  width: 50px;
-  height: 50px;
+  width: 60px;
+  height: 60px;
   background-color: #667eea;
   color: white;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
+  font-size: 1.75rem;
   font-weight: bold;
-  margin: 0 auto 15px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
 .step h3 {
-  margin-bottom: 10px;
+  margin-bottom: 15px;
   color: #333;
+  font-size: 1.25rem;
+  font-weight: 600;
 }
 
 .step p {
   color: #666;
-  font-size: 0.95rem;
-  line-height: 1.6;
-  max-width: 250px;
-  margin: 0 auto;
+  font-size: 1rem;
+  line-height: 1.7;
+  margin: 0;
+  max-width: 280px;
 }
 
 .footer {

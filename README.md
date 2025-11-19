@@ -1,22 +1,15 @@
-# 🛠️ OpenMakerSuite
+# OpenMakerSuite
 
-A comprehensive inventory management system designed for makerspaces, fab labs, and collaborative workshops. Track supplies, manage reorders, generate QR codes, and keep your space running smoothly.
+Open Maker Suite (OMS) solves a problem that I encountered with my time at Dallas Makerspace. It's an inventory management/asset management system that's designed for Makerspaces and collaborative workshops. Use it to track supplies, manage reorders, manage maintenance on equipment, and keep your space running.
 
-## 🚀 Release Automation
+## Feature Set
 
-OpenMakerSuite includes a complete automated release system that:
+Open Maker Suite isn't just one component or one application. It's a few things:
 
-- ✅ **Automatic Releases**: Triggered when all CI/CD tests pass
-- 🔐 **Cryptographic Signing**: Uses Sigstore for tamper-proof releases
-- 📦 **Multi-Platform Builds**: AMD64 and ARM64 Docker images
-- 📊 **Sentry Integration**: Automatic release tracking and error monitoring
-- 🔄 **Semantic Versioning**: Automatic version bumps based on commits
-
-**Quick Setup**: Run `./scripts/setup-release-automation.sh` to configure
-
-**Verify Releases**: Use `./scripts/verify-release.sh v1.2.3` to cryptographically verify any release
-
-📖 **Full Documentation**: See [RELEASE_AUTOMATION.md](RELEASE_AUTOMATION.md)
+1. A inventory system that's based on Kanban principles. For each item that exists, a 3x5" index card is created that contains the name of the item, where it should live, and the general amount that we like to keep on hand and how much is re-ordered. When any user of the space (no login to OMS needed) scans a QR code, your team will be prompted that the material needs to be re-ordered. When you click on that request on the admin dashboard, you'll see a list of suppliers that you've used in the past, what their per-unit cost is, as well as their lead time for obtaining the part (all based on historical orders). This gives you the flexibiltiy to spend your Makerspace's money responsibily and give you the most bang for your buck.
+1. An asset management system that allows you to specify replaceable parts from inventory items (like 9-volt batteries to an exit alarm) and logs when those items were replaced.
+1. A device management system that allows you to enable or disable a device via MQTT, along with disabling a device for safety or maintenance reasons.
+1. A QR code reporting system that allows members to report issues with restrooms, lobbies, or equipment.
 
 ## Features
 
@@ -33,6 +26,7 @@ OpenMakerSuite includes a complete automated release system that:
 ## 🛠️ Technology Stack
 
 ### Backend
+
 - **Django**: Python web framework with REST API
 - **PostgreSQL**: Primary database
 - **Redis**: Caching and background tasks
@@ -40,12 +34,14 @@ OpenMakerSuite includes a complete automated release system that:
 - **Docker**: Containerization
 
 ### Frontend
+
 - **React**: Modern JavaScript UI framework
 - **TypeScript**: Type-safe JavaScript development
 - **React Router**: Client-side routing
 - **Axios**: HTTP client for API calls
 
 ### Infrastructure
+
 - **Docker Compose**: Local development orchestration
 - **GitHub Actions**: CI/CD pipeline
 - **Sentry**: Error tracking and performance monitoring
@@ -237,11 +233,13 @@ gitleaks detect
 ### Production Deployment
 
 1. **Download Latest Release**:
+
    ```bash
    ./scripts/verify-release.sh latest
    ```
 
 2. **Configure Environment**:
+
    ```bash
    cp .env.example .env
    # Edit .env with production settings
@@ -298,11 +296,7 @@ server {
 
 ## 📖 Documentation
 
-- **🚀 [Release Automation](RELEASE_AUTOMATION.md)**: Complete release system setup
-- **🔧 [Development Guide](docs/development.md)**: Development workflow and guidelines
 - **🌐 [API Documentation](docs/api.md)**: REST API reference
-- **🐳 [Docker Guide](docs/docker.md)**: Container deployment guide
-- **🔐 [Security Guide](docs/security.md)**: Security best practices
 
 ## 🤝 Contributing
 
@@ -360,7 +354,7 @@ The admin dashboard provides:
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the AGPL License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
@@ -369,9 +363,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Sigstore** for keyless cryptographic signing
 - **PostgreSQL** for robust database functionality
 - **All contributors** who help improve OpenMakerSuite
+- **Hive13** Cincinnati's Premier Makerspace
+- **Dallas Makerspace** The biggest makerspace in terms of membership count in the US, where I'm currently the COO.
 
 ---
 
-**Built with ❤️ for the maker community**
+**Built with ❤️ my makers, for the maker community**
 
-*OpenMakerSuite helps makerspaces focus on creating instead of managing inventory.*
+_OpenMakerSuite helps makerspaces focus on creating instead of managing inventory._

@@ -249,17 +249,17 @@ class TestReorderRequestAPI:
         # Check other required fields exist
         assert "open_locations_with_problems" in data
         assert isinstance(data["open_locations_with_problems"], int)
-        
+
         assert "assets_overdue_maintenance" in data
         assert isinstance(data["assets_overdue_maintenance"], int)
-        
+
         assert "qr_scans_total" in data
         assert isinstance(data["qr_scans_total"], int)
-        
+
         assert "qr_scans_by_day" in data
         assert isinstance(data["qr_scans_by_day"], list)
         assert len(data["qr_scans_by_day"]) == 7  # Should have 7 days of data
-        
+
         assert "last_updated" in data
         assert isinstance(data["last_updated"], str)
 

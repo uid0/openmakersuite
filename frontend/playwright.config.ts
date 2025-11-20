@@ -15,7 +15,18 @@ export default defineConfig({
   reporter: 'html',
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
-    trace: 'on-first-retry',
+    // Trace recording options:
+    // 'on' - record trace for every test (good for debugging, larger files)
+    // 'on-first-retry' - record trace only when test fails and retries (default, good balance)
+    // 'retain-on-failure' - record trace only for failed tests (good for CI)
+    // 'off' - no traces (fastest, no debugging info)
+    trace: process.env.PLAYWRIGHT_TRACE || 'on-first-retry',
+    // Video recording options:
+    // 'on' - record video for every test
+    // 'retain-on-failure' - keep videos only for failed tests (recommended)
+    // 'on-first-retry' - record video on retry
+    // 'off' - no video recording
+    video: process.env.PLAYWRIGHT_VIDEO || 'retain-on-failure',
     screenshot: 'only-on-failure',
     // Add a global setup to dismiss webpack overlay
     actionTimeout: 10000,

@@ -2,6 +2,8 @@
 
 This directory contains end-to-end (E2E) tests for the asset management system using Playwright.
 
+**📖 For detailed information on recording interactions and ensuring tests run correctly, see [PLAYWRIGHT_GUIDE.md](./PLAYWRIGHT_GUIDE.md)**
+
 ## Prerequisites
 
 1. **Backend must be running** on `http://localhost:8000`

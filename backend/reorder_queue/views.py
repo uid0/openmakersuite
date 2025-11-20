@@ -1241,7 +1241,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
         """
         Public endpoint providing data for the logistics TV dashboard.
         Optimized for Fire TV / Silk browser display.
-        
+
         Returns:
         - Number of Open Item Requests
         - Number of Open Locations with Problems Reported
@@ -1249,10 +1249,12 @@ class AnalyticsViewSet(viewsets.ViewSet):
         - QR Code Scans in last 7 days (with daily breakdown for sparkline)
         """
         from datetime import timedelta
-        from django.db.models import Count, Q
+
+        from django.db.models import Count
         from django.db.models.functions import TruncDate
+
         from inventory.models import Asset, AssetPart
-        from location_checkins.models import LocationTask, SecurityReport, LocationFeedback
+        from location_checkins.models import LocationFeedback, LocationTask, SecurityReport
 
         # 1. Number of Open Item Requests
         # Open requests are those that are pending or approved (not yet ordered/received/cancelled)
@@ -1263,23 +1265,29 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         # 2. Number of Open Locations with Problems Reported
         # Count unique locations that have unresolved tasks, security reports, or negative feedback
-        locations_with_tasks = LocationTask.objects.filter(
-            status__in=["pending", "in_progress"]
-        ).values_list("location_id", flat=True).distinct()
-        
-        locations_with_security = SecurityReport.objects.filter(
-            is_resolved=False
-        ).values_list("location_id", flat=True).distinct()
-        
-        locations_with_feedback = LocationFeedback.objects.filter(
-            feedback_type="negative", is_resolved=False
-        ).values_list("location_id", flat=True).distinct()
-        
+        locations_with_tasks = (
+            LocationTask.objects.filter(status__in=["pending", "in_progress"])
+            .values_list("location_id", flat=True)
+            .distinct()
+        )
+
+        locations_with_security = (
+            SecurityReport.objects.filter(is_resolved=False)
+            .values_list("location_id", flat=True)
+            .distinct()
+        )
+
+        locations_with_feedback = (
+            LocationFeedback.objects.filter(feedback_type="negative", is_resolved=False)
+            .values_list("location_id", flat=True)
+            .distinct()
+        )
+
         # Combine all unique location IDs
         all_problem_location_ids = set(
-            list(locations_with_tasks) + 
-            list(locations_with_security) + 
-            list(locations_with_feedback)
+            list(locations_with_tasks)
+            + list(locations_with_security)
+            + list(locations_with_feedback)
         )
         open_locations_with_problems = len(all_problem_location_ids)
 
@@ -1288,22 +1296,21 @@ class AnalyticsViewSet(viewsets.ViewSet):
         # We need to check parts that have maintenance_interval_days and last_replaced_at
         # and where days_since_replacement >= maintenance_interval_days
         parts_with_intervals = AssetPart.objects.filter(
-            maintenance_interval_days__isnull=False,
-            last_replaced_at__isnull=False
-        ).select_related('asset')
-        
+            maintenance_interval_days__isnull=False, last_replaced_at__isnull=False
+        ).select_related("asset")
+
         overdue_asset_ids = set()
         for part in parts_with_intervals:
             if part.needs_replacement:
                 overdue_asset_ids.add(part.asset_id)
-        
+
         overdue_maintenance_count = len(overdue_asset_ids)
 
         # 4. QR Code Scans in last 7 days with daily breakdown
         # Note: We count unique assets scanned per day (since last_scanned_at only stores the most recent scan time)
         # If an asset is scanned multiple times in a day, we only count it once for that day
         seven_days_ago = timezone.now() - timedelta(days=7)
-        
+
         # Get all assets scanned in last 7 days, grouped by date
         # Count distinct assets scanned each day
         scans_by_date = (
@@ -1314,7 +1321,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
             .annotate(count=Count("id", distinct=True))
             .order_by("scan_date")
         )
-        
+
         # Create a complete 7-day array with zeros for days with no scans
         today = timezone.now().date()
         scan_data = {}
@@ -1323,25 +1330,23 @@ class AnalyticsViewSet(viewsets.ViewSet):
             # TruncDate returns a date object, but handle both cases
             if isinstance(scan_date, str):
                 from datetime import datetime
+
                 try:
                     scan_date = datetime.fromisoformat(scan_date).date()
                 except (ValueError, AttributeError):
                     # If parsing fails, try to get the date from the scan object
                     continue
-            elif hasattr(scan_date, 'date'):
+            elif hasattr(scan_date, "date"):
                 scan_date = scan_date.date()
             scan_data[scan_date] = scan["count"]
-        
+
         # Build array for last 7 days (including today)
         qr_scans_by_day = []
         total_qr_scans = 0
         for i in range(6, -1, -1):  # 6 days ago to today
             date = today - timedelta(days=i)
             count = scan_data.get(date, 0)
-            qr_scans_by_day.append({
-                "date": date.isoformat(),
-                "count": count
-            })
+            qr_scans_by_day.append({"date": date.isoformat(), "count": count})
             total_qr_scans += count
 
         return Response(

@@ -2,9 +2,10 @@
  * Logistics Dashboard - Optimized for Fire TV / Silk Browser
  * 32" display in the logistics office
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import '../styles/LogisticsDashboard.css';
-import { analyticsAPI } from '../services/api';
+import { analyticsAPI, customizationAPI } from '../services/api';
+import { SiteSettings } from '../types';
 
 interface QRScanDay {
   date: string;
@@ -28,6 +29,11 @@ const LogisticsDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshProgress, setRefreshProgress] = useState(100);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
+  const logoRef = useRef<HTMLDivElement>(null);
+  const animationFrameRef = useRef<number>();
+  const positionRef = useRef({ x: 100, y: 100 });
+  const velocityRef = useRef({ x: 2, y: 2 });
 
   const fetchDashboardData = async () => {
     try {
@@ -64,6 +70,19 @@ const LogisticsDashboard: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Fetch site settings for logo
+  useEffect(() => {
+    const fetchSiteSettings = async () => {
+      try {
+        const response = await customizationAPI.getSiteSettings();
+        setSiteSettings(response.data);
+      } catch (err) {
+        console.warn('Failed to load site settings:', err);
+      }
+    };
+    fetchSiteSettings();
+  }, []);
 
   useEffect(() => {
     fetchDashboardData();
@@ -141,6 +160,96 @@ const LogisticsDashboard: React.FC = () => {
     };
   }, []);
 
+  // Bouncing DVD logo animation
+  useEffect(() => {
+    if (!logoRef.current || !siteSettings?.logo_url) return;
+
+    const logo = logoRef.current;
+    const logoWidth = 120;
+    const logoHeight = 60;
+    const speed = 1.5;
+
+    const animate = () => {
+      const container = logo.parentElement;
+      if (!container) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const maxX = containerRect.width - logoWidth;
+      const maxY = containerRect.height - logoHeight;
+
+      // Update position
+      positionRef.current.x += velocityRef.current.x * speed;
+      positionRef.current.y += velocityRef.current.y * speed;
+
+      // Bounce off walls
+      if (positionRef.current.x <= 0) {
+        velocityRef.current.x = Math.abs(velocityRef.current.x);
+        positionRef.current.x = 0;
+      } else if (positionRef.current.x >= maxX) {
+        velocityRef.current.x = -Math.abs(velocityRef.current.x);
+        positionRef.current.x = maxX;
+      }
+
+      if (positionRef.current.y <= 0) {
+        velocityRef.current.y = Math.abs(velocityRef.current.y);
+        positionRef.current.y = 0;
+      } else if (positionRef.current.y >= maxY) {
+        velocityRef.current.y = -Math.abs(velocityRef.current.y);
+        positionRef.current.y = maxY;
+      }
+
+      // Apply position
+      logo.style.left = `${positionRef.current.x}px`;
+      logo.style.top = `${positionRef.current.y}px`;
+
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    // Initialize random position and velocity
+    const container = logo.parentElement;
+    if (container) {
+      const containerRect = container.getBoundingClientRect();
+      const maxX = containerRect.width - logoWidth;
+      const maxY = containerRect.height - logoHeight;
+      
+      positionRef.current.x = Math.max(0, Math.min(maxX, Math.random() * maxX));
+      positionRef.current.y = Math.max(0, Math.min(maxY, Math.random() * maxY));
+      velocityRef.current.x = Math.random() > 0.5 ? speed : -speed;
+      velocityRef.current.y = Math.random() > 0.5 ? speed : -speed;
+      
+      // Start animation after a short delay to ensure container is sized
+      setTimeout(() => {
+        animate();
+      }, 100);
+    }
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [siteSettings?.logo_url]);
+
+  // Burn-in prevention: subtle pixel shifting
+  useEffect(() => {
+    const shiftInterval = setInterval(() => {
+      const dashboard = document.querySelector('.logistics-dashboard');
+      if (dashboard) {
+        // Subtle 1-2 pixel shift every 5 minutes
+        const shiftX = Math.random() * 2 - 1; // -1 to 1
+        const shiftY = Math.random() * 2 - 1; // -1 to 1
+        (dashboard as HTMLElement).style.transform = `translate(${shiftX}px, ${shiftY}px)`;
+        
+        // Reset after a short time
+        setTimeout(() => {
+          (dashboard as HTMLElement).style.transform = 'translate(0, 0)';
+        }, 1000);
+      }
+    }, 300000); // Every 5 minutes
+
+    return () => clearInterval(shiftInterval);
+  }, []);
+
   // Sparkline component
   const Sparkline: React.FC<{ data: QRScanDay[] }> = ({ data }) => {
     if (!data || data.length === 0) return null;
@@ -198,6 +307,19 @@ const LogisticsDashboard: React.FC = () => {
 
   return (
     <div className="logistics-dashboard">
+      {/* Bouncing DVD Logo */}
+      {siteSettings?.logo_url && (
+        <div className="bouncing-logo-container">
+          <div ref={logoRef} className="bouncing-logo">
+            <img 
+              src={siteSettings.logo_url} 
+              alt={siteSettings.logo_alt_text || 'Logo'} 
+              style={{ maxWidth: '120px', maxHeight: '60px', objectFit: 'contain' }}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="dashboard-grid">
         {/* Open Item Requests */}
         <div className="metric-card">

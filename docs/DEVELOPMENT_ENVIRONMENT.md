@@ -11,6 +11,7 @@ You experienced platform differences between development on macOS and CI running
 ## Root Cause
 
 The primary issue was that React Testing Library's behavior around `act()` can vary between:
+
 - Different Node.js versions
 - Different operating systems
 - Different environment configurations (CI vs development)
@@ -20,11 +21,13 @@ The primary issue was that React Testing Library's behavior around `act()` can v
 ### 1. Fixed Immediate Testing Issues ✅
 
 **Removed unnecessary `act()` wrappers** from `ScanPage.test.tsx`:
+
 - `render()` calls don't need `act()` wrapping
 - `fireEvent.change()` and `fireEvent.click()` are synchronous and don't need `act()`
 - Only async state updates that aren't handled by Testing Library utilities need `act()`
 
 **Changes made:**
+
 - Simplified `renderWithRouter` function
 - Removed `act()` from `fireEvent` calls
 - Tests now follow React Testing Library best practices
@@ -44,6 +47,7 @@ The primary issue was that React Testing Library's behavior around `act()` can v
 ```
 
 **Key Benefits:**
+
 - **Identical to CI**: Ubuntu 22.04, Python 3.11, Node.js 18
 - **Consistent Environment Variables**: `CI=true` matches production
 - **Pre-configured Tools**: All linting, testing, and development tools included
@@ -53,6 +57,7 @@ The primary issue was that React Testing Library's behavior around `act()` can v
 ### 3. Environment Matching
 
 **DevContainer exactly matches CI configuration:**
+
 - OS: Ubuntu 22.04 (same as `ubuntu-latest` in GitHub Actions)
 - Python: 3.11 (exact match)
 - Node.js: 18 (exact match)
@@ -62,12 +67,14 @@ The primary issue was that React Testing Library's behavior around `act()` can v
 ## Usage
 
 ### Quick Start with DevContainer
+
 1. Install Docker Desktop and VS Code with Dev Containers extension
 2. Open project in VS Code
 3. Click "Reopen in Container" when prompted
 4. Environment automatically matches CI exactly
 
 ### Testing Commands (CI-Compatible)
+
 ```bash
 # Frontend (matches CI exactly)
 cd frontend
@@ -105,3 +112,45 @@ pytest --cov --cov-report=xml --cov-fail-under=80
 - **Portability**: Same setup works anywhere Docker runs
 
 The devcontainer approach is the gold standard for eliminating platform differences in modern development workflows.
+
+For testing the API, we use the following pieces:
+
+## Testing Stack
+
+### 1. pytest (primary testing framework)
+
+- Used instead of Django's unittest
+- Provides fixtures, markers, and assertions
+- Markers like @pytest.mark.integration for test categorization
+
+### 2. Django REST Framework's APIClient
+
+- `rest_framework.test.APIClient` for API endpoint testing
+- Handles authentication, request/response handling, and status codes
+
+### 3. factory_boy (test data factories)
+
+- Creates test data via factories (e.g., ReorderRequestFactory, InventoryItemFactory)
+- Uses Faker for realistic fake data
+- Reduces boilerplate in tests
+
+### 4. pytest-django — Django integration
+
+- Enables database access in tests via the db fixture
+- Integrates pytest with Django's test database
+
+### 5. Additional tools/features
+
+- PIL/Pillow: For image testing fixtures
+- Mocking: mocker fixture for mocking Celery tasks
+- Cache configuration: Local memory cache for tests
+- Celery configuration: Tasks run synchronously in tests (CELERY_TASK_ALWAYS_EAGER)
+
+### Test structure
+
+- Tests organized in tests/ directories per app
+- Common fixtures in conftest.py
+- Factories in tests/factories.py files
+- Integration tests marked with @pytest.mark.integration
+
+If you feel like I could be doing something better, please let me know!

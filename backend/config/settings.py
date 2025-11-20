@@ -70,6 +70,7 @@ INSTALLED_APPS = [
     "customization",
     "location_checkins",
     "checklists",
+    "donations",
 ]
 
 MIDDLEWARE = [

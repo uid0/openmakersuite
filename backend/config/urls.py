@@ -32,6 +32,7 @@ urlpatterns = [
     path("api/customization/", include("customization.urls")),
     path("api/location-checkins/", include("location_checkins.urls")),
     path("api/checklists/", include("checklists.urls")),
+    path("api/donations/", include("donations.urls")),
 ]
 
 # Serve media files during development

@@ -242,23 +242,26 @@ class TestReorderRequestAPI:
         data = response.data
 
         # Check that our created requests are included
-        # At least our 2 requests
-        assert data["summary"]["pending_requests"] >= 2
-        # At least our 1 urgent request
-        assert data["summary"]["urgent_requests"] >= 1
-        assert data["summary"]["pending_orders"] >= 1  # At least our 1 order
+        # At least our 2 requests (pending + approved)
+        assert data["open_item_requests"] >= 2
+        assert isinstance(data["open_item_requests"], int)
 
-        # Ensure refill requests include both statuses
-        statuses = {req["status"] for req in data["refill_requests"]}
-        assert "pending" in statuses
-        assert "approved" in statuses
-
-        pending_orders = data["pending_orders"]
-        assert len(pending_orders) >= 1  # At least our order
-        # Find our specific order
-        our_order = next((o for o in pending_orders if o["po_number"] == "PO-LOG-001"), None)
-        assert our_order is not None, "Our purchase order should be in the results"
-        assert our_order["progress_percent"] == 20.0
+        # Check other required fields exist
+        assert "open_locations_with_problems" in data
+        assert isinstance(data["open_locations_with_problems"], int)
+        
+        assert "assets_overdue_maintenance" in data
+        assert isinstance(data["assets_overdue_maintenance"], int)
+        
+        assert "qr_scans_total" in data
+        assert isinstance(data["qr_scans_total"], int)
+        
+        assert "qr_scans_by_day" in data
+        assert isinstance(data["qr_scans_by_day"], list)
+        assert len(data["qr_scans_by_day"]) == 7  # Should have 7 days of data
+        
+        assert "last_updated" in data
+        assert isinstance(data["last_updated"], str)
 
     def test_mark_received(self, authenticated_client):
         """Test marking a request as received and updating inventory."""

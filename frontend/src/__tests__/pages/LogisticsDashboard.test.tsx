@@ -10,52 +10,17 @@ jest.mock('../../services/api', () => ({
 }));
 
 const mockDashboardData = {
-  summary: {
-    pending_requests: 2,
-    urgent_requests: 1,
-    awaiting_approval: 1,
-    pending_orders: 1,
-    open_order_lines: 4,
-    location_requests: 0,
-    urgent_location_requests: 0,
-  },
-  refill_requests: [
-    {
-      id: 1,
-      item_name: 'Nitrile Gloves',
-      location: 'Logistics Closet',
-      category: 'PPE',
-      quantity_requested: 120,
-      priority: 'urgent',
-      priority_label: 'Urgent',
-      status: 'pending',
-      status_label: 'Pending',
-      requested_at: '2024-02-01T12:00:00Z',
-      days_open: 2,
-      requested_by: 'Safety Committee',
-      public_notes: '',
-      request_notes: 'Running low on size L.',
-    },
+  open_item_requests: 2,
+  open_locations_with_problems: 1,
+  assets_overdue_maintenance: 3,
+  qr_scans_total: 45,
+  qr_scans_by_day: [
+    { date: '2024-02-01', count: 8 },
+    { date: '2024-02-02', count: 12 },
+    { date: '2024-02-03', count: 6 },
+    { date: '2024-02-04', count: 10 },
+    { date: '2024-02-05', count: 9 },
   ],
-  pending_orders: [
-    {
-      id: 10,
-      po_number: 'PO-2024-02',
-      supplier_name: 'Maker Supply Company',
-      status: 'sent',
-      status_label: 'Sent to Supplier',
-      sent_at: '2024-01-31T18:30:00Z',
-      expected_delivery_date: '2024-02-05',
-      days_since_ordered: 2,
-      total_items: 3,
-      total_quantity: 75,
-      received_quantity: 15,
-      progress_percent: 20.0,
-      estimated_total: 450.0,
-      updated_at: '2024-02-01T19:30:00Z',
-    },
-  ],
-  location_requests: [],
   last_updated: '2024-02-01T19:45:00Z',
 };
 
@@ -75,23 +40,16 @@ describe('LogisticsDashboard', () => {
     });
 
     // Wait for loading to complete and content to render
-    expect(await screen.findByText('Open Requests')).toBeInTheDocument();
-    expect(screen.getByText('Urgent Requests')).toBeInTheDocument();
-    expect(screen.getByText('Location Requests')).toBeInTheDocument();
-    expect(screen.getByText('Open Purchase Orders')).toBeInTheDocument();
+    expect(await screen.findByText('Open Item Requests')).toBeInTheDocument();
+    expect(screen.getByText('Locations with Problems')).toBeInTheDocument();
+    expect(screen.getByText('Assets Overdue Maintenance')).toBeInTheDocument();
+    expect(screen.getByText('QR Scans (Last 7 Days)')).toBeInTheDocument();
     
-    // Check summary values
-    const openRequestsSection = screen.getByText('Open Requests').closest('.summary-card');
-    expect(openRequestsSection).toHaveTextContent('2');
-    
-    const urgentRequestsSection = screen.getByText('Urgent Requests').closest('.summary-card');
-    expect(urgentRequestsSection).toHaveTextContent('1');
-    
-    const locationRequestsSection = screen.getByText('Location Requests').closest('.summary-card');
-    expect(locationRequestsSection).toHaveTextContent('0');
-    
-    const purchaseOrdersSection = screen.getByText('Open Purchase Orders').closest('.summary-card');
-    expect(purchaseOrdersSection).toHaveTextContent('1');
+    // Check metric values
+    expect(screen.getByText('Open Item Requests').parentElement).toHaveTextContent('2');
+    expect(screen.getByText('Locations with Problems').parentElement).toHaveTextContent('1');
+    expect(screen.getByText('Assets Overdue Maintenance').parentElement).toHaveTextContent('3');
+    expect(screen.getByText('QR Scans (Last 7 Days)').parentElement).toHaveTextContent('45');
     
     // Check that time is displayed in footer
     expect(screen.getByText(/\d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument();

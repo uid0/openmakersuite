@@ -35,6 +35,7 @@ echo "📝 Using GIT_HASH=$GIT_HASH for build..."
 # Export GIT_HASH so docker-compose can use it in the yml file
 export GIT_HASH
 docker compose -f docker-compose.prod.yml build --no-cache frontend
+docker compose -f docker-compose.prod.yml build --no-cache backend
 
 echo "🚀 Starting services..."
 docker compose -f docker-compose.prod.yml up -d

@@ -138,12 +138,15 @@ class DonationItemQRCodeService:
 
         return qr_img
 
-    def generate_for_donation_item(self, donation_item: "DonationItem") -> "DonationItem":
+    def generate_for_donation_item(
+        self, donation_item: "DonationItem", require_access_code: bool = False
+    ) -> "DonationItem":
         """
         Generate and save QR code for a donation item.
 
         Args:
             donation_item: DonationItem instance
+            require_access_code: If True, generate access code. If False, use item ID only.
 
         Returns:
             DonationItem instance with QR code saved
@@ -151,8 +154,8 @@ class DonationItemQRCodeService:
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         scan_url = f"{frontend_url}/scan/donation-item/{donation_item.id}"
 
-        # Generate or get access code
-        if not donation_item.access_code:
+        # Generate or get access code only if required
+        if require_access_code and not donation_item.access_code:
             from ..models import DonationItem
 
             donation_item.access_code = generate_unique_code(DonationItem, "access_code")
@@ -161,8 +164,9 @@ class DonationItemQRCodeService:
         # Generate QR code image
         qr_img = self.generate_qr_code_image(scan_url)
 
-        # Add access code text below QR code
-        qr_img = self._add_code_text(qr_img, donation_item.access_code)
+        # Add access code text below QR code only if it exists
+        if donation_item.access_code:
+            qr_img = self._add_code_text(qr_img, donation_item.access_code)
 
         # Convert to BytesIO for saving
         buffer = BytesIO()
@@ -284,9 +288,9 @@ class DonationItemQRCodeService:
 
         # Generate stickers for each item
         for idx, item in enumerate(donation_items[:stickers_per_sheet]):
-            # Generate QR code if not already generated
+            # Generate QR code if not already generated (no access code needed for donations)
             if not item.qr_code:
-                self.generate_for_donation_item(item)
+                self.generate_for_donation_item(item, require_access_code=False)
 
             # Calculate position
             col = idx % columns

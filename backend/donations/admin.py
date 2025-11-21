@@ -2,7 +2,9 @@
 Admin interface for donations app.
 """
 
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.http import HttpResponse
+from django.shortcuts import redirect
 
 from .models import Disposition, Donation, DonationItem
 
@@ -24,6 +26,7 @@ class DonationAdmin(admin.ModelAdmin):
     list_filter = ["status", "date_received", "tax_receipt_issued"]
     search_fields = ["donation_number", "donor_name", "donor_email"]
     readonly_fields = ["donation_number", "created_at", "updated_at"]
+    actions = ["generate_items_from_estimate", "download_label_sheet"]
     fieldsets = (
         (
             "Donation Information",
@@ -59,6 +62,13 @@ class DonationAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Item Processing",
+            {
+                "fields": ("estimated_number_of_items",),
+                "description": "Enter estimated number of items to generate QR code labels",
+            },
+        ),
+        (
             "Additional Information",
             {
                 "fields": (
@@ -80,6 +90,103 @@ class DonationAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+    @admin.action(description="Generate donation items from estimated count")
+    def generate_items_from_estimate(self, request, queryset):
+        """Generate DonationItem instances based on estimated_number_of_items."""
+        from ..services.qr_code_service import DonationItemQRCodeService
+
+        total_created = 0
+        qr_service = DonationItemQRCodeService(include_logo=False)
+
+        for donation in queryset:
+            if not donation.estimated_number_of_items:
+                self.message_user(
+                    request,
+                    f"Donation {donation.donation_number} has no estimated number of items.",
+                    level=messages.WARNING,
+                )
+                continue
+
+            # Count existing items
+            existing_count = donation.items.count()
+            needed = donation.estimated_number_of_items - existing_count
+
+            if needed <= 0:
+                self.message_user(
+                    request,
+                    f"Donation {donation.donation_number} already has {existing_count} items (estimated: {donation.estimated_number_of_items}).",
+                    level=messages.INFO,
+                )
+                continue
+
+            # Create the needed items
+            for i in range(needed):
+                item = DonationItem.objects.create(
+                    donation=donation,
+                    name=f"Item {existing_count + i + 1}",
+                    description=f"Donation item {existing_count + i + 1} from {donation.donor_name}",
+                    quantity=1,
+                    status=DonationItem.PENDING_REVIEW,
+                )
+                # Generate QR code without access code
+                qr_service.generate_for_donation_item(item, require_access_code=False)
+                total_created += 1
+
+            self.message_user(
+                request,
+                f"Created {needed} item(s) for donation {donation.donation_number}.",
+                level=messages.SUCCESS,
+            )
+
+        if total_created > 0:
+            self.message_user(
+                request,
+                f"Successfully created {total_created} donation item(s) with QR codes.",
+                level=messages.SUCCESS,
+            )
+
+    @admin.action(description='Download 2x2" QR code label sheet')
+    def download_label_sheet(self, request, queryset):
+        """Generate and download 2x2\" label PDF for donation items."""
+        from ..utils.label_generator import DonationLabelRenderer
+
+        if queryset.count() != 1:
+            self.message_user(
+                request,
+                "Please select exactly one donation.",
+                level=messages.ERROR,
+            )
+            return
+
+        donation = queryset.first()
+        items = list(donation.items.all())
+
+        if not items:
+            self.message_user(
+                request,
+                f"No items found for donation {donation.donation_number}. Generate items first.",
+                level=messages.ERROR,
+            )
+            return
+
+        # Generate labels
+        renderer = DonationLabelRenderer()
+        pdf_bytes = renderer.render_batch(items)
+
+        # Generate filename
+        filename = f"donation_labels_{donation.donation_number}.pdf"
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+        self.message_user(
+            request,
+            f"Generated label sheet for {len(items)} item(s). Download should start automatically.",
+            level=messages.SUCCESS,
+        )
+
+        return response
 
 
 @admin.register(DonationItem)

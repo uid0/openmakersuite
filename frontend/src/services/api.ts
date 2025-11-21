@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, Checklist, ChecklistCompletion, CreateReorderRequest, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings } from '../types';
+import { Asset, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -400,6 +400,32 @@ export const indexCardsAPI = {
     api.post('/index-cards/test-sheet/', { item_ids: itemIds }, {
       responseType: 'blob',
     }),
+};
+
+// Donations API
+export const donationsAPI = {
+  getDonationItem: (id: string) =>
+    api.get<DonationItem>(`/donations/donation-items/${id}/`),
+
+  updateDonationItem: (id: string, data: Partial<DonationItem>) =>
+    api.patch<DonationItem>(`/donations/donation-items/${id}/`, data),
+
+  createDisposition: (data: {
+    donation_item: string;
+    disposition_type: string;
+    quantity: number;
+    disposition_date?: string;
+    sale_method?: string;
+    sale_price?: string;
+    kept_destination?: string;
+    kept_for_sig?: number;
+    notes?: string;
+    recipient_name?: string;
+  }) =>
+    api.post<Disposition>('/donations/dispositions/', data),
+
+  getDispositions: (params?: { donation_item?: string }) =>
+    api.get<{ results: Disposition[] }>('/donations/dispositions/', { params }),
 };
 
 export default api;

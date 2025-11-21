@@ -113,9 +113,30 @@ class DonationItemViewSet(viewsets.ModelViewSet):
         """Generate QR code for this donation item."""
         item = self.get_object()
         qr_service = DonationItemQRCodeService()
-        qr_service.generate_for_donation_item(item)
+        qr_service.generate_for_donation_item(item, require_access_code=False)
         serializer = self.get_serializer(item)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"])
+    def download_label(self, request, pk=None):
+        """Generate and download a 2x2\" label PDF for a donation item."""
+        item = self.get_object()
+
+        from ..utils.label_generator import DonationLabelRenderer
+
+        try:
+            renderer = DonationLabelRenderer()
+            pdf_bytes = renderer.render_label(item)
+            filename = f"donation_label_{item.id}.pdf"
+
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to generate label: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class DispositionViewSet(viewsets.ModelViewSet):

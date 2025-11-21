@@ -111,6 +111,11 @@ class Donation(models.Model):
     )
 
     # Additional information
+    estimated_number_of_items = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Estimated number of items in this donation (used to generate QR code labels)",
+    )
     estimated_value = models.DecimalField(
         max_digits=10,
         decimal_places=2,

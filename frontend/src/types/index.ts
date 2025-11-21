@@ -389,3 +389,50 @@ export interface ChecklistCompletion {
   created_at: string;
   updated_at: string;
 }
+
+export type DonationItemStatus = 'pending_review' | 'usable' | 'unusable' | 'processing' | 'disposed';
+export type DonationItemCondition = 'excellent' | 'good' | 'fair' | 'poor' | 'unusable';
+
+export interface DonationItem {
+  id: string;
+  donation: string;
+  donation_number: string;
+  donor_name: string;
+  name: string;
+  description: string;
+  quantity: number;
+  condition: DonationItemCondition;
+  status: DonationItemStatus;
+  access_code: string | null;
+  qr_code: string | null;
+  asset: string | null;
+  inventory_item: string | null;
+  notes: string;
+  remaining_quantity: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DispositionType = 'kept' | 'sold' | 'auctioned' | 'donated_out' | 'recycled' | 'disposed' | 'returned' | 'parted_out' | 'other';
+export type SaleMethod = 'direct' | 'auction';
+export type KeptDestination = 'makerspace' | 'sig';
+
+export interface Disposition {
+  id: string;
+  donation_item: string;
+  donation_item_name: string;
+  donation_number: string;
+  disposition_type: DispositionType;
+  quantity: number;
+  disposition_date: string;
+  disposed_by: number | null;
+  sale_method: SaleMethod | null;
+  sale_price: string | null;
+  kept_destination: KeptDestination | null;
+  kept_for_sig: number | null;
+  notes: string;
+  recipient_name: string;
+  created_asset: string | null;
+  created_at: string;
+  updated_at: string;
+}

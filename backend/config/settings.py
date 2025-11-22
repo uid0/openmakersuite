@@ -247,6 +247,17 @@ CELERY_TASK_TRACK_STARTED = True  # Track when tasks start
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes hard timeout
 CELERY_RESULT_EXTENDED = True  # Store additional task metadata
 
+# Celery Beat Schedule for periodic tasks
+CELERY_BEAT_SCHEDULE = {
+    "send-quarterly-donor-updates": {
+        "task": "donations.tasks.send_quarterly_donor_updates",
+        "schedule": 7776000.0,  # 90 days in seconds (quarterly)
+        # Note: For more precise quarterly scheduling (Jan 1, Apr 1, Jul 1, Oct 1),
+        # use crontab instead:
+        # "schedule": crontab(day_of_month=1, month_of_year="1,4,7,10"),
+    },
+}
+
 # MQTT Configuration for ForgeKey
 MQTT_BROKER_HOST = config("MQTT_BROKER_HOST", default="localhost")
 MQTT_BROKER_PORT = config("MQTT_BROKER_PORT", default=1883, cast=int)

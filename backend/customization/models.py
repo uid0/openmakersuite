@@ -93,6 +93,27 @@ class SiteSettings(models.Model):
         help_text="Whether to display the logo on the dashboard",
     )
 
+    # Tax receipt information
+    organization_address = models.TextField(
+        blank=True,
+        help_text="Organization address for tax receipts",
+    )
+    organization_ein = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Employer Identification Number (EIN) for tax receipts",
+    )
+    authorized_signature_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Name of authorized signatory for tax receipts",
+    )
+    authorized_signature_title = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Title of authorized signatory for tax receipts",
+    )
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

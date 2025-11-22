@@ -4,7 +4,7 @@ Serializers for donations app.
 
 from rest_framework import serializers
 
-from .models import Disposition, Donation, DonationItem
+from .models import Disposition, Donation, DonationItem, TaxReceipt
 
 
 class DonationItemSerializer(serializers.ModelSerializer):
@@ -107,6 +107,7 @@ class DonationSerializer(serializers.ModelSerializer):
             "net_value",
             "tax_receipt_issued",
             "tax_receipt_number",
+            "tax_receipt_issued_at",
             "items",
             "total_items",
             "total_quantity",
@@ -146,4 +147,37 @@ class DonationListSerializer(serializers.ModelSerializer):
             "total_items",
             "total_quantity",
             "created_at",
+        ]
+
+
+class TaxReceiptSerializer(serializers.ModelSerializer):
+    """Serializer for TaxReceipt."""
+
+    donation_number = serializers.CharField(source="donation.donation_number", read_only=True)
+    donor_name = serializers.CharField(source="donation.donor_name", read_only=True)
+    donor_email = serializers.EmailField(source="donation.donor_email", read_only=True)
+    issued_by_username = serializers.CharField(source="issued_by.username", read_only=True)
+
+    class Meta:
+        model = TaxReceipt
+        fields = [
+            "id",
+            "serial_number",
+            "donation",
+            "donation_number",
+            "donor_name",
+            "donor_email",
+            "issued_date",
+            "issued_by",
+            "issued_by_username",
+            "pdf_file",
+            "is_copy",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "serial_number",
+            "created_at",
+            "updated_at",
         ]

@@ -20,6 +20,7 @@ import ScanPage from './pages/ScanPage';
 import SIGDashboard from './pages/SIGDashboard';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
+import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import TVDashboard from './pages/TVDashboard';
 import './styles/App.css';
 
@@ -67,6 +68,7 @@ function AppContent() {
             <Route path="/purchase-order/:orderId" element={<PurchaseOrderPage />} />
             <Route path="/sig-dashboard" element={<SIGDashboard />} />
             <Route path="/sig-dashboard/:sigId" element={<SIGDashboard />} />
+            <Route path="/tax-receipt/lookup" element={<TaxReceiptLookupPage />} />
           </SentryRoutes>
         </Sentry.ErrorBoundary>
     </div>

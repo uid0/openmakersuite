@@ -93,6 +93,18 @@ class SiteSettingsAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Tax Receipt Information",
+            {
+                "fields": (
+                    "organization_address",
+                    "organization_ein",
+                    "authorized_signature_name",
+                    "authorized_signature_title",
+                ),
+                "description": "Information used for generating 501(c)(3) tax receipts",
+            },
+        ),
+        (
             "Metadata",
             {
                 "fields": (

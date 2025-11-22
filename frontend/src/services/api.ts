@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings } from '../types';
+import { Asset, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings, TaxReceipt } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -426,6 +426,41 @@ export const donationsAPI = {
 
   getDispositions: (params?: { donation_item?: string }) =>
     api.get<{ results: Disposition[] }>('/donations/dispositions/', { params }),
+
+  // Tax Receipt API
+  lookupTaxReceipt: (serialNumber: string) =>
+    api.get<TaxReceipt>(`/donations/tax-receipts/lookup/?serial_number=${serialNumber}`),
+
+  getTaxReceipt: (id: string) =>
+    api.get<TaxReceipt>(`/donations/tax-receipts/${id}/`),
+
+  downloadTaxReceipt: (id: string, isCopy: boolean = false) =>
+    api.get(`/donations/tax-receipts/${id}/download_pdf/?copy=${isCopy}`, {
+      responseType: 'blob',
+    }),
+
+  generateTaxReceipt: (donationId: string, data?: { signature_user_id?: string; password?: string }) =>
+    api.post<TaxReceipt>(`/donations/donations/${donationId}/generate_tax_receipt/`, data),
+
+  downloadDonationTaxReceipt: (donationId: string, isCopy: boolean = false) =>
+    api.get(`/donations/donations/${donationId}/download_tax_receipt/?copy=${isCopy}`, {
+      responseType: 'blob',
+    }),
+
+  uploadSignature: (signatureFile: File, password: string) => {
+    const formData = new FormData();
+    formData.append('signature', signatureFile);
+    formData.append('password', password);
+    return api.post<{ message: string; signature_url: string | null }>(
+      '/donations/upload-signature/',
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
+  },
 };
 
 export default api;

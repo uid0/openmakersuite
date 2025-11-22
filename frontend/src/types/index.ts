@@ -417,6 +417,22 @@ export type DispositionType = 'kept' | 'sold' | 'auctioned' | 'donated_out' | 'r
 export type SaleMethod = 'direct' | 'auction';
 export type KeptDestination = 'makerspace' | 'sig';
 
+export interface TaxReceipt {
+  id: string;
+  serial_number: string;
+  donation: string;
+  donation_number: string;
+  donor_name: string;
+  donor_email: string;
+  issued_date: string;
+  issued_by: string;
+  issued_by_username: string;
+  pdf_file: string | null;
+  is_copy: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Disposition {
   id: string;
   donation_item: string;

@@ -142,6 +142,11 @@ class Donation(models.Model):
         blank=True,
         help_text="Tax receipt number (if issued)",
     )
+    tax_receipt_issued_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the tax receipt was issued",
+    )
 
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
@@ -488,3 +493,61 @@ class Disposition(models.Model):
 
     def __str__(self) -> str:
         return f"{self.disposition_type.title()} - {self.donation_item.name} (x{self.quantity})"
+
+
+class TaxReceipt(models.Model):
+    """
+    Tax receipt (501(c)(3) donation certificate) for a donation.
+
+    Each receipt has a unique UUID-based serial number for tracking
+    and can be generated as a clean original or watermarked copy.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    donation = models.ForeignKey(
+        Donation,
+        on_delete=models.CASCADE,
+        related_name="tax_receipts",
+        help_text="The donation this receipt is for",
+    )
+    serial_number = models.UUIDField(
+        unique=True,
+        default=uuid.uuid4,
+        editable=False,
+        help_text="Unique serial number for this tax receipt",
+    )
+    issued_date = models.DateField(
+        default=timezone.now,
+        help_text="Date the receipt was issued",
+    )
+    issued_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="issued_tax_receipts",
+        help_text="User who issued this receipt",
+    )
+    pdf_file = models.FileField(
+        upload_to="donations/tax_receipts/",
+        blank=True,
+        null=True,
+        help_text="Generated PDF file for this receipt",
+    )
+    is_copy = models.BooleanField(
+        default=False,
+        help_text="Whether this is a copy/reprint (watermarked)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-issued_date", "-created_at"]
+        indexes = [
+            models.Index(fields=["serial_number"]),
+            models.Index(fields=["donation", "-issued_date"]),
+        ]
+
+    def __str__(self) -> str:
+        copy_text = " (Copy)" if self.is_copy else ""
+        return f"Tax Receipt {self.serial_number} - {self.donation.donor_name}{copy_text}"

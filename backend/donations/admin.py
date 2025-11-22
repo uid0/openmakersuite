@@ -4,9 +4,9 @@ Admin interface for donations app.
 
 from django.contrib import admin, messages
 from django.http import HttpResponse
-from django.shortcuts import redirect
 
-from .models import Disposition, Donation, DonationItem
+from .models import Disposition, Donation, DonationItem, TaxReceipt
+from .services.tax_receipt_generator import TaxReceiptPDFGenerator
 
 
 @admin.register(Donation)
@@ -25,8 +25,14 @@ class DonationAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "date_received", "tax_receipt_issued"]
     search_fields = ["donation_number", "donor_name", "donor_email"]
-    readonly_fields = ["donation_number", "created_at", "updated_at"]
-    actions = ["generate_items_from_estimate", "download_label_sheet"]
+    readonly_fields = ["donation_number", "created_at", "updated_at", "tax_receipt_issued_at"]
+    actions = [
+        "generate_items_from_estimate",
+        "download_label_sheet",
+        "generate_tax_receipt",
+        "download_tax_receipt_clean",
+        "download_tax_receipt_copy",
+    ]
     fieldsets = (
         (
             "Donation Information",
@@ -77,6 +83,7 @@ class DonationAdmin(admin.ModelAdmin):
                     "cost_notes",
                     "tax_receipt_issued",
                     "tax_receipt_number",
+                    "tax_receipt_issued_at",
                 )
             },
         ),
@@ -187,6 +194,300 @@ class DonationAdmin(admin.ModelAdmin):
         )
 
         return response
+
+    @admin.action(description="Generate Tax Receipt")
+    def generate_tax_receipt(self, request, queryset):
+        """Generate tax receipt for selected donations."""
+        from donations.models import TaxReceipt
+        from donations.services.email_service import DonationEmailService
+
+        generated = 0
+        for donation in queryset:
+            # Check if receipt already exists
+            if donation.tax_receipts.exists():
+                self.message_user(
+                    request,
+                    f"Tax receipt already exists for donation {donation.donation_number}.",
+                    level=messages.WARNING,
+                )
+                continue
+
+            try:
+                # Create tax receipt
+                tax_receipt = TaxReceipt.objects.create(
+                    donation=donation,
+                    issued_by=request.user,
+                    is_copy=False,
+                )
+
+                # Generate PDF
+                generator = TaxReceiptPDFGenerator(is_copy=False)
+                pdf_path = generator.generate_and_save(
+                    donation, tax_receipt, signature_user=request.user
+                )
+
+                # Update tax receipt with PDF path
+                tax_receipt.pdf_file = pdf_path
+                tax_receipt.save()
+
+                # Update donation
+                donation.tax_receipt_issued = True
+                donation.tax_receipt_number = str(tax_receipt.serial_number)
+                donation.tax_receipt_issued_at = tax_receipt.issued_date
+                donation.save(
+                    update_fields=[
+                        "tax_receipt_issued",
+                        "tax_receipt_number",
+                        "tax_receipt_issued_at",
+                    ]
+                )
+
+                # Send email to donor
+                if donation.donor_email:
+                    try:
+                        from django.core.files.storage import default_storage
+
+                        if default_storage.exists(pdf_path):
+                            full_path = default_storage.path(pdf_path)
+                            DonationEmailService.send_tax_receipt_email(
+                                donation, tax_receipt, pdf_path=full_path
+                            )
+                    except Exception as e:
+                        self.message_user(
+                            request,
+                            f"Failed to send email for donation {donation.donation_number}: {e}",
+                            level=messages.WARNING,
+                        )
+
+                generated += 1
+            except Exception as e:
+                self.message_user(
+                    request,
+                    f"Failed to generate tax receipt for donation {donation.donation_number}: {e}",
+                    level=messages.ERROR,
+                )
+
+        if generated > 0:
+            self.message_user(
+                request,
+                f"Successfully generated {generated} tax receipt(s).",
+                level=messages.SUCCESS,
+            )
+
+    @admin.action(description="Download Tax Receipt (Clean)")
+    def download_tax_receipt_clean(self, request, queryset):
+        """Download clean tax receipt PDF."""
+        if queryset.count() != 1:
+            self.message_user(request, "Please select exactly one donation.", level=messages.ERROR)
+            return
+
+        donation = queryset.first()
+        tax_receipt = donation.tax_receipts.filter(is_copy=False).first()
+
+        if not tax_receipt:
+            self.message_user(
+                request,
+                f"No tax receipt found for donation {donation.donation_number}.",
+                level=messages.ERROR,
+            )
+            return
+
+        try:
+            generator = TaxReceiptPDFGenerator(is_copy=False)
+            pdf_bytes = generator.generate_pdf(
+                donation, tax_receipt, signature_user=tax_receipt.issued_by
+            )
+
+            filename = f"tax_receipt_{tax_receipt.serial_number}.pdf"
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+            self.message_user(
+                request,
+                f"Tax receipt downloaded for donation {donation.donation_number}.",
+                level=messages.SUCCESS,
+            )
+            return response
+
+        except Exception as e:
+            self.message_user(
+                request,
+                f"Failed to generate tax receipt: {e}",
+                level=messages.ERROR,
+            )
+
+    @admin.action(description="Download Tax Receipt (Copy)")
+    def download_tax_receipt_copy(self, request, queryset):
+        """Download watermarked copy of tax receipt PDF."""
+        if queryset.count() != 1:
+            self.message_user(request, "Please select exactly one donation.", level=messages.ERROR)
+            return
+
+        donation = queryset.first()
+        tax_receipt = donation.tax_receipts.filter(is_copy=False).first()
+
+        if not tax_receipt:
+            self.message_user(
+                request,
+                f"No tax receipt found for donation {donation.donation_number}.",
+                level=messages.ERROR,
+            )
+            return
+
+        try:
+            generator = TaxReceiptPDFGenerator(is_copy=True)
+            pdf_bytes = generator.generate_pdf(
+                donation, tax_receipt, signature_user=tax_receipt.issued_by
+            )
+
+            filename = f"tax_receipt_{tax_receipt.serial_number}_copy.pdf"
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+            self.message_user(
+                request,
+                f"Tax receipt copy downloaded for donation {donation.donation_number}.",
+                level=messages.SUCCESS,
+            )
+            return response
+
+        except Exception as e:
+            self.message_user(
+                request,
+                f"Failed to generate tax receipt copy: {e}",
+                level=messages.ERROR,
+            )
+
+
+@admin.register(TaxReceipt)
+class TaxReceiptAdmin(admin.ModelAdmin):
+    """Admin interface for TaxReceipt model."""
+
+    list_display = [
+        "serial_number",
+        "donation",
+        "donor_name",
+        "issued_date",
+        "issued_by",
+        "is_copy",
+        "created_at",
+    ]
+    list_filter = ["issued_date", "is_copy"]
+    search_fields = [
+        "serial_number",
+        "donation__donation_number",
+        "donation__donor_name",
+        "issued_by__username",
+    ]
+    readonly_fields = ["serial_number", "created_at", "updated_at"]
+    actions = ["download_pdf_clean", "download_pdf_copy"]
+
+    fieldsets = (
+        (
+            "Receipt Information",
+            {
+                "fields": (
+                    "serial_number",
+                    "donation",
+                    "issued_date",
+                    "issued_by",
+                    "is_copy",
+                )
+            },
+        ),
+        (
+            "PDF File",
+            {
+                "fields": ("pdf_file",),
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": (
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
+    )
+
+    @admin.display(description="Donor Name")
+    def donor_name(self, obj):
+        """Display donor name from donation."""
+        return obj.donation.donor_name
+
+    @admin.action(description="Download PDF (Clean)")
+    def download_pdf_clean(self, request, queryset):
+        """Download clean PDF for selected receipts."""
+        if queryset.count() != 1:
+            self.message_user(
+                request, "Please select exactly one tax receipt.", level=messages.ERROR
+            )
+            return
+
+        tax_receipt = queryset.first()
+        try:
+            generator = TaxReceiptPDFGenerator(is_copy=False)
+            pdf_bytes = generator.generate_pdf(
+                tax_receipt.donation,
+                tax_receipt,
+                signature_user=tax_receipt.issued_by,
+            )
+
+            filename = f"tax_receipt_{tax_receipt.serial_number}.pdf"
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+            self.message_user(
+                request,
+                "Tax receipt downloaded.",
+                level=messages.SUCCESS,
+            )
+            return response
+
+        except Exception as e:
+            self.message_user(
+                request,
+                f"Failed to generate tax receipt: {e}",
+                level=messages.ERROR,
+            )
+
+    @admin.action(description="Download PDF (Copy)")
+    def download_pdf_copy(self, request, queryset):
+        """Download watermarked copy PDF for selected receipts."""
+        if queryset.count() != 1:
+            self.message_user(
+                request, "Please select exactly one tax receipt.", level=messages.ERROR
+            )
+            return
+
+        tax_receipt = queryset.first()
+        try:
+            generator = TaxReceiptPDFGenerator(is_copy=True)
+            pdf_bytes = generator.generate_pdf(
+                tax_receipt.donation,
+                tax_receipt,
+                signature_user=tax_receipt.issued_by,
+            )
+
+            filename = f"tax_receipt_{tax_receipt.serial_number}_copy.pdf"
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+            self.message_user(
+                request,
+                "Tax receipt copy downloaded.",
+                level=messages.SUCCESS,
+            )
+            return response
+
+        except Exception as e:
+            self.message_user(
+                request,
+                f"Failed to generate tax receipt copy: {e}",
+                level=messages.ERROR,
+            )
 
 
 @admin.register(DonationItem)

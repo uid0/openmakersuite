@@ -14,5 +14,5 @@ class DonationsConfig(AppConfig):
 
     def ready(self):
         """Initialize app when Django starts."""
-        # Import any signals here if needed in the future
-        pass
+        # Import signals to register them
+        import donations.signals  # noqa: F401

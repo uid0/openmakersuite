@@ -134,6 +134,17 @@ class User(AbstractUser):
         default=False,
         help_text="Indicates if user is a director",
     )
+    signature_image = models.ImageField(
+        upload_to="signatures/",
+        blank=True,
+        null=True,
+        help_text="PNG signature image for use on tax receipts",
+    )
+    signature_uploaded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the signature was uploaded",
+    )
 
     class Meta:
         db_table = "auth_user"  # Keep using the same table name for compatibility

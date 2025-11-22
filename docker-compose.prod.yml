@@ -98,6 +98,29 @@ services:
     networks:
       - app-network
 
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A config flower --port=5555 --broker=redis://redis:6379/0 --broker_api=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    environment:
+      - DEBUG=1
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery:
+        condition: service_started
+
+
   nginx:
     build:
       context: ./nginx

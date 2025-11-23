@@ -119,6 +119,8 @@ services:
         condition: service_healthy
       celery:
         condition: service_started
+    networks:
+      - app-network
 
 
   nginx:

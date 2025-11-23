@@ -14,7 +14,11 @@ from auth_views import create_test_membership, login_user, refresh_token, regist
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    path(
+        "api/docs/",
+        SpectacularSwaggerView.as_view(url_name="schema"),
+        name="swagger-ui",
+    ),
     path("api/token/", include("rest_framework.urls")),
     # Custom auth endpoints
     path("api/auth/register/", register_user, name="register"),

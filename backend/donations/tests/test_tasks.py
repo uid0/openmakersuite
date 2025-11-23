@@ -2,12 +2,10 @@
 Tests for donation Celery tasks.
 """
 
-from decimal import Decimal
-
-import pytest
 from unittest.mock import patch
 
-from donations.models import Donation
+import pytest
+
 from donations.tasks import send_quarterly_donor_updates
 from donations.tests.factories import DonationFactory
 
@@ -20,16 +18,16 @@ class TestDonationTasks:
     def test_send_quarterly_donor_updates(self, mock_send_update, db):
         """Test quarterly donor update task."""
         # Create donations with tax receipts issued
-        donation1 = DonationFactory(
+        DonationFactory(
             tax_receipt_issued=True,
             donor_email="donor1@example.com",
         )
-        donation2 = DonationFactory(
+        DonationFactory(
             tax_receipt_issued=True,
             donor_email="donor2@example.com",
         )
         # Donation without email (should be skipped)
-        donation3 = DonationFactory(
+        DonationFactory(
             tax_receipt_issued=True,
             donor_email="",
         )
@@ -48,11 +46,11 @@ class TestDonationTasks:
     @patch("donations.tasks.DonationEmailService.send_quarterly_update")
     def test_send_quarterly_donor_updates_with_failures(self, mock_send_update, db):
         """Test quarterly donor update task with some failures."""
-        donation1 = DonationFactory(
+        DonationFactory(
             tax_receipt_issued=True,
             donor_email="donor1@example.com",
         )
-        donation2 = DonationFactory(
+        DonationFactory(
             tax_receipt_issued=True,
             donor_email="donor2@example.com",
         )
@@ -65,4 +63,3 @@ class TestDonationTasks:
         assert result["sent"] == 1
         assert result["failed"] == 1
         assert result["total"] == 2
-

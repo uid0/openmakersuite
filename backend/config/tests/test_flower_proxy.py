@@ -2,10 +2,12 @@
 Tests for Flower proxy view.
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
-from django.test import RequestFactory
+from unittest.mock import MagicMock, patch
+
 from django.contrib.auth import get_user_model
+from django.test import RequestFactory
+
+import pytest
 
 from config.flower_proxy import flower_proxy, is_superuser
 
@@ -81,4 +83,3 @@ class TestFlowerProxy:
 
         assert response.status_code == 502
         assert b"Error connecting to Flower" in response.content
-

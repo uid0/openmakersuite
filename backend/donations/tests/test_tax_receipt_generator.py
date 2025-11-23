@@ -7,9 +7,8 @@ from decimal import Decimal
 import pytest
 
 from customization.models import SiteSettings
-from donations.models import Donation, TaxReceipt
 from donations.services.tax_receipt_generator import TaxReceiptPDFGenerator
-from donations.tests.factories import DonationFactory, DonationItemFactory, TaxReceiptFactory
+from donations.tests.factories import DonationFactory, TaxReceiptFactory
 from forgekey.tests.factories import UserFactory
 
 
@@ -39,7 +38,7 @@ class TestTaxReceiptPDFGenerator:
         from donations.models import DonationItem
         from inventory.utils.code_generator import generate_unique_code
 
-        item1 = DonationItem.objects.create(
+        DonationItem.objects.create(
             donation=donation,
             name="Test Item 1",
             quantity=2,
@@ -47,7 +46,7 @@ class TestTaxReceiptPDFGenerator:
             status=DonationItem.PENDING_REVIEW,
             access_code=generate_unique_code(DonationItem, "access_code"),
         )
-        item2 = DonationItem.objects.create(
+        DonationItem.objects.create(
             donation=donation,
             name="Test Item 2",
             quantity=1,
@@ -102,8 +101,9 @@ class TestTaxReceiptPDFGenerator:
 
     def test_generate_and_save(self, db, tmp_path, monkeypatch):
         """Test generating and saving PDF to storage."""
+        from unittest.mock import patch
+
         from django.core.files.storage import default_storage
-        from unittest.mock import patch, MagicMock
 
         site_settings = SiteSettings.get()
         site_settings.site_name = "Test Makerspace"
@@ -124,4 +124,3 @@ class TestTaxReceiptPDFGenerator:
 
                 assert path is not None
                 mock_save.assert_called_once()
-

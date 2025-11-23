@@ -46,11 +46,13 @@ class DonationItemFactory(DjangoModelFactory):
     quantity = 1
     condition = DonationItem.GOOD
     status = DonationItem.PENDING_REVIEW
+
     @factory.post_generation
     def access_code(self, create, extracted, **kwargs):
         """Generate unique access code if not provided."""
         if not extracted and create:
             from inventory.utils.code_generator import generate_unique_code
+
             self.access_code = generate_unique_code(DonationItem, "access_code")
             self.save(update_fields=["access_code"])
 
@@ -78,4 +80,3 @@ class DispositionFactory(DjangoModelFactory):
     quantity = 1
     disposition_date = factory.LazyFunction(timezone.now)
     disposed_by = SubFactory(UserFactory)
-

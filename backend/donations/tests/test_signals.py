@@ -2,12 +2,11 @@
 Tests for donation signals.
 """
 
-from decimal import Decimal
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import patch, MagicMock
 
-from donations.models import Donation, TaxReceipt
+from donations.models import Donation
 from donations.tests.factories import DonationFactory, TaxReceiptFactory
 from forgekey.tests.factories import UserFactory
 
@@ -18,7 +17,9 @@ class TestDonationSignals:
 
     @patch("donations.signals.TaxReceiptPDFGenerator")
     @patch("donations.signals.DonationEmailService.send_tax_receipt_email")
-    def test_tax_receipt_generated_on_reviewed_status(self, mock_send_email, mock_generator_class, db):
+    def test_tax_receipt_generated_on_reviewed_status(
+        self, mock_send_email, mock_generator_class, db
+    ):
         """Test that tax receipt is generated when donation status changes to reviewed."""
         user = UserFactory()
         donation = DonationFactory(status=Donation.PENDING, reviewed_by=user)
@@ -61,4 +62,3 @@ class TestDonationSignals:
 
         # No receipt should be created
         assert not donation.tax_receipts.exists()
-

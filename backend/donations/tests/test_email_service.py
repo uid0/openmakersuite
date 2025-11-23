@@ -3,14 +3,17 @@ Tests for donation email service.
 """
 
 from decimal import Decimal
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import patch, MagicMock
 
-from donations.models import Donation, TaxReceipt
 from donations.services.email_service import DonationEmailService
-from donations.tests.factories import DonationFactory, TaxReceiptFactory, DonationItemFactory, DispositionFactory
-from forgekey.tests.factories import UserFactory
+from donations.tests.factories import (
+    DispositionFactory,
+    DonationFactory,
+    DonationItemFactory,
+    TaxReceiptFactory,
+)
 
 
 @pytest.mark.unit
@@ -66,4 +69,3 @@ class TestDonationEmailService:
         result = DonationEmailService.send_quarterly_update(donation)
 
         assert result is False
-

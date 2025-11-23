@@ -2,10 +2,11 @@
 Django view to proxy Flower requests with superuser authentication.
 """
 
-import requests
 from django.contrib.auth.decorators import user_passes_test
 from django.http import HttpResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
+
+import requests
 
 
 def is_superuser(user):
@@ -18,10 +19,10 @@ def is_superuser(user):
 def flower_proxy(request, path=""):
     """
     Proxy requests to Flower, only allowing superusers.
-    
+
     This view forwards all requests to the Flower service running
     on flower:5555, but only after verifying the user is a superuser.
-    
+
     Note: WebSocket connections are handled by nginx, but authentication
     is still checked here for HTTP requests.
     """
@@ -46,7 +47,7 @@ def flower_proxy(request, path=""):
             "HTTP_CONTENT_LENGTH",
             "HTTP_UPGRADE",
         }
-        
+
         for key, value in request.META.items():
             if key.startswith("HTTP_") and key not in exclude_headers:
                 # Convert HTTP_HEADER_NAME to Header-Name
@@ -85,7 +86,4 @@ def flower_proxy(request, path=""):
         return django_response
 
     except requests.exceptions.RequestException as e:
-        return HttpResponse(
-            f"Error connecting to Flower: {str(e)}", status=502
-        )
-
+        return HttpResponse(f"Error connecting to Flower: {str(e)}", status=502)

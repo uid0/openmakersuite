@@ -23,7 +23,11 @@ router.register(r"dispositions", DispositionViewSet, basename="disposition")
 router.register(r"tax-receipts", TaxReceiptViewSet, basename="tax-receipt")
 
 urlpatterns = [
-    path("lookup-code/", lookup_donation_item_by_code, name="lookup-donation-item-by-code"),
+    path(
+        "lookup-code/",
+        lookup_donation_item_by_code,
+        name="lookup-donation-item-by-code",
+    ),
     path("tax-receipts/lookup/", lookup_tax_receipt, name="lookup-tax-receipt"),
     path("upload-signature/", upload_signature, name="upload-signature"),
     path("", include(router.urls)),

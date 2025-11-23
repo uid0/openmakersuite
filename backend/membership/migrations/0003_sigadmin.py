@@ -1,8 +1,8 @@
 # Generated manually for SIG management system
 
+import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
-import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
@@ -67,7 +67,8 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="sigadmin",
             index=models.Index(
-                fields=["group", "is_active"], name="membership_sigadmin_group_active_idx"
+                fields=["group", "is_active"],
+                name="membership_sigadmin_group_active_idx",
             ),
         ),
         migrations.AlterUniqueTogether(
@@ -75,4 +76,3 @@ class Migration(migrations.Migration):
             unique_together={("user", "group")},
         ),
     ]
-

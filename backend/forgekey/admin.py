@@ -122,7 +122,15 @@ class DeviceUsageAdmin(admin.ModelAdmin):
 class PowerMeterReadingAdmin(admin.ModelAdmin):
     """Admin interface for power meter readings."""
 
-    list_display = ["asset", "device", "timestamp", "voltage", "current", "power", "energy"]
+    list_display = [
+        "asset",
+        "device",
+        "timestamp",
+        "voltage",
+        "current",
+        "power",
+        "energy",
+    ]
     list_filter = ["timestamp"]
     search_fields = ["asset__name", "device__mac_address"]
     readonly_fields = ["id", "timestamp"]

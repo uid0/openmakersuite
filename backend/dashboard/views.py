@@ -163,7 +163,8 @@ def add_dashboard_message(request):
 
         if "message" not in data:
             return Response(
-                {"error": "Message text is required"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Message text is required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         message = DashboardMessage.objects.create(

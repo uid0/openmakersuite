@@ -469,7 +469,13 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             ip = request.META.get("REMOTE_ADDR")
         return ip
 
-    @action(detail=True, methods=["get"], url_path="qr_code", url_name="qr_code", name="QR Code")
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="qr_code",
+        url_name="qr_code",
+        name="QR Code",
+    )
     def qr_code(self, request, pk=None):
         """Get QR code image for an item."""
         item = self.get_object()
@@ -1266,7 +1272,8 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         if not user.is_authenticated:
             return Response(
-                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         # Check if user can operate assets in Implementing/Testing status
@@ -1305,7 +1312,8 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         if not user.is_authenticated:
             return Response(
-                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         # Check if user can operate assets in Implementing/Testing status
@@ -1334,7 +1342,8 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         if not user.is_authenticated:
             return Response(
-                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         if not reason:
@@ -1369,7 +1378,8 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         if not user.is_authenticated:
             return Response(
-                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         # Get active lockouts
@@ -1627,7 +1637,8 @@ class FixtureViewSet(viewsets.ModelViewSet):
 
         if not fixture.is_active:
             return Response(
-                {"error": "This fixture is inactive"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "This fixture is inactive"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Get username from request if authenticated

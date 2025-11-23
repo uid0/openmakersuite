@@ -24,7 +24,9 @@ class IndexCardAPITests(TestCase):
     def setUp(self) -> None:
         self.client = APIClient()
         self.user = get_user_model().objects.create_user(
-            username="cardmaker", email="cardmaker@example.com", password="strong-password"
+            username="cardmaker",
+            email="cardmaker@example.com",
+            password="strong-password",
         )
         self.client.force_authenticate(self.user)
         self.item = InventoryItem.objects.create(

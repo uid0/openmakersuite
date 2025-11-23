@@ -22,9 +22,15 @@ class DashboardMessageAdmin(admin.ModelAdmin):
         ("Message Content", {"fields": ("message", "is_active")}),
         (
             "Display Settings",
-            {"fields": ("order",), "description": "Lower order numbers are displayed first"},
+            {
+                "fields": ("order",),
+                "description": "Lower order numbers are displayed first",
+            },
         ),
-        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+        (
+            "Timestamps",
+            {"fields": ("created_at", "updated_at"), "classes": ("collapse",)},
+        ),
     )
 
     readonly_fields = ["created_at", "updated_at"]

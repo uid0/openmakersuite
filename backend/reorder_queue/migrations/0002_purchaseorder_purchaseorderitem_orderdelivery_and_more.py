@@ -13,7 +13,10 @@ class Migration(migrations.Migration):
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ("inventory", "0012_inventoryitem_is_hazardous_inventoryitem_msds_url_and_more"),
+        (
+            "inventory",
+            "0012_inventoryitem_is_hazardous_inventoryitem_msds_url_and_more",
+        ),
         ("reorder_queue", "0001_initial"),
     ]
 
@@ -24,12 +27,17 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
                     ),
                 ),
                 (
                     "po_number",
-                    models.CharField(help_text="Purchase Order Number", max_length=50, unique=True),
+                    models.CharField(
+                        help_text="Purchase Order Number", max_length=50, unique=True
+                    ),
                 ),
                 (
                     "status",
@@ -107,7 +115,10 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
                     ),
                 ),
                 (
@@ -119,12 +130,16 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "quantity_received",
-                    models.PositiveIntegerField(default=0, help_text="Quantity actually received"),
+                    models.PositiveIntegerField(
+                        default=0, help_text="Quantity actually received"
+                    ),
                 ),
                 (
                     "unit_cost_ordered",
                     models.DecimalField(
-                        decimal_places=4, help_text="Unit cost at time of ordering", max_digits=10
+                        decimal_places=4,
+                        help_text="Unit cost at time of ordering",
+                        max_digits=10,
                     ),
                 ),
                 (
@@ -167,10 +182,16 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
                     ),
                 ),
-                ("delivery_date", models.DateTimeField(default=django.utils.timezone.now)),
+                (
+                    "delivery_date",
+                    models.DateTimeField(default=django.utils.timezone.now),
+                ),
                 ("tracking_number", models.CharField(blank=True, max_length=100)),
                 ("carrier", models.CharField(blank=True, max_length=100)),
                 ("receipt_notes", models.TextField(blank=True)),
@@ -210,10 +231,16 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
                     ),
                 ),
-                ("order_date", models.DateTimeField(help_text="When the order was placed")),
+                (
+                    "order_date",
+                    models.DateTimeField(help_text="When the order was placed"),
+                ),
                 (
                     "expected_delivery_date",
                     models.DateField(help_text="When delivery was expected"),
@@ -224,11 +251,15 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "estimated_lead_time_days",
-                    models.PositiveIntegerField(help_text="Estimated lead time in business days"),
+                    models.PositiveIntegerField(
+                        help_text="Estimated lead time in business days"
+                    ),
                 ),
                 (
                     "actual_lead_time_days",
-                    models.PositiveIntegerField(help_text="Actual lead time in business days"),
+                    models.PositiveIntegerField(
+                        help_text="Actual lead time in business days"
+                    ),
                 ),
                 (
                     "variance_days",
@@ -266,7 +297,10 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
                     ),
                 ),
                 (
@@ -282,7 +316,9 @@ class Migration(migrations.Migration):
                 (
                     "scanned_upc",
                     models.CharField(
-                        blank=True, help_text="UPC code scanned during receipt", max_length=50
+                        blank=True,
+                        help_text="UPC code scanned during receipt",
+                        max_length=50,
                     ),
                 ),
                 ("scanned_at", models.DateTimeField(blank=True, null=True)),
@@ -321,7 +357,8 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="purchaseorderitem",
             index=models.Index(
-                fields=["purchase_order", "item_supplier"], name="reorder_que_purchas_928f39_idx"
+                fields=["purchase_order", "item_supplier"],
+                name="reorder_que_purchas_928f39_idx",
             ),
         ),
         migrations.AlterUniqueTogether(
@@ -342,18 +379,22 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="purchaseorder",
-            index=models.Index(fields=["po_number"], name="reorder_que_po_numb_4d9084_idx"),
-        ),
-        migrations.AddIndex(
-            model_name="orderdelivery",
             index=models.Index(
-                fields=["purchase_order", "-delivery_date"], name="reorder_que_purchas_7d2083_idx"
+                fields=["po_number"], name="reorder_que_po_numb_4d9084_idx"
             ),
         ),
         migrations.AddIndex(
             model_name="orderdelivery",
             index=models.Index(
-                fields=["received_by", "-delivery_date"], name="reorder_que_receive_3d5883_idx"
+                fields=["purchase_order", "-delivery_date"],
+                name="reorder_que_purchas_7d2083_idx",
+            ),
+        ),
+        migrations.AddIndex(
+            model_name="orderdelivery",
+            index=models.Index(
+                fields=["received_by", "-delivery_date"],
+                name="reorder_que_receive_3d5883_idx",
             ),
         ),
         migrations.AddIndex(
@@ -365,7 +406,9 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="leadtimelog",
-            index=models.Index(fields=["purchase_order"], name="reorder_que_purchas_a5e454_idx"),
+            index=models.Index(
+                fields=["purchase_order"], name="reorder_que_purchas_a5e454_idx"
+            ),
         ),
         migrations.AddIndex(
             model_name="leadtimelog",
@@ -376,13 +419,15 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="deliveryitem",
             index=models.Index(
-                fields=["delivery", "purchase_order_item"], name="reorder_que_deliver_5922c2_idx"
+                fields=["delivery", "purchase_order_item"],
+                name="reorder_que_deliver_5922c2_idx",
             ),
         ),
         migrations.AddIndex(
             model_name="deliveryitem",
             index=models.Index(
-                fields=["scanned_upc", "scanned_at"], name="reorder_que_scanned_d81599_idx"
+                fields=["scanned_upc", "scanned_at"],
+                name="reorder_que_scanned_d81599_idx",
             ),
         ),
     ]

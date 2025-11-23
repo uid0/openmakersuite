@@ -71,7 +71,10 @@ class TestQRCodeRateLimiter:
         # Staff users should have unlimited requests
         for i in range(20):
             is_allowed, error_msg = QRCodeRateLimiter.check_rate_limit(
-                user=admin_user, item_id=item_id, item_type=item_type, ip_address="127.0.0.1"
+                user=admin_user,
+                item_id=item_id,
+                item_type=item_type,
+                ip_address="127.0.0.1",
             )
             assert is_allowed, f"Request {i+1} should be allowed for staff"
             assert error_msg is None
@@ -85,7 +88,10 @@ class TestQRCodeRateLimiter:
         # Exhaust limit for item 1
         for _ in range(5):
             QRCodeRateLimiter.check_rate_limit(
-                user=None, item_id=item_id_1, item_type=item_type, ip_address="127.0.0.1"
+                user=None,
+                item_id=item_id_1,
+                item_type=item_type,
+                ip_address="127.0.0.1",
             )
 
         # Item 2 should still have full limit
@@ -127,7 +133,10 @@ class TestQRCodeRateLimiter:
         item_type = "item"
 
         remaining = QRCodeRateLimiter.get_remaining_requests(
-            user=admin_user, item_id=item_id, item_type=item_type, ip_address="127.0.0.1"
+            user=admin_user,
+            item_id=item_id,
+            item_type=item_type,
+            ip_address="127.0.0.1",
         )
         assert remaining == float("inf")
 

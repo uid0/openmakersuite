@@ -786,7 +786,10 @@ class FixtureDetailSerializer(FixtureSerializer):
     refill_item_details = serializers.SerializerMethodField()
 
     class Meta(FixtureSerializer.Meta):
-        fields = FixtureSerializer.Meta.fields + ["recent_refill_requests", "refill_item_details"]
+        fields = FixtureSerializer.Meta.fields + [
+            "recent_refill_requests",
+            "refill_item_details",
+        ]
 
     def get_refill_item_details(self, obj):
         """Return basic details about the refill inventory item."""

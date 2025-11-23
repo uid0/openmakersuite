@@ -255,7 +255,10 @@ class TestCaseBasedReordering:
         """Test that current_cases property calculates correctly."""
         # Create item with case-based reordering enabled
         item = InventoryItemFactory(
-            current_stock=120, use_case_based_reorder=True, minimum_cases=2, reorder_cases=5
+            current_stock=120,
+            use_case_based_reorder=True,
+            minimum_cases=2,
+            reorder_cases=5,
         )
 
         # Create supplier with quantity per package

@@ -249,14 +249,26 @@ class TestChecklistCompletionAPI:
         asset1 = AssetFactory()
         asset2 = AssetFactory()
         step1 = ChecklistStep.objects.create(
-            checklist=checklist, step_number=1, name="Step 1", asset=asset1, required=True
+            checklist=checklist,
+            step_number=1,
+            name="Step 1",
+            asset=asset1,
+            required=True,
         )
         step2 = ChecklistStep.objects.create(
-            checklist=checklist, step_number=2, name="Step 2", asset=asset2, required=True
+            checklist=checklist,
+            step_number=2,
+            name="Step 2",
+            asset=asset2,
+            required=True,
         )
         # Create optional step (not required for completion)
         ChecklistStep.objects.create(
-            checklist=checklist, step_number=3, name="Step 3", asset=AssetFactory(), required=False
+            checklist=checklist,
+            step_number=3,
+            name="Step 3",
+            asset=AssetFactory(),
+            required=False,
         )
 
         completion = ChecklistCompletionFactory(checklist=checklist, user=None, user_name="John")
@@ -280,11 +292,19 @@ class TestChecklistCompletionAPI:
         asset1 = AssetFactory()
         asset2 = AssetFactory()
         step1 = ChecklistStep.objects.create(
-            checklist=checklist, step_number=1, name="Step 1", asset=asset1, required=True
+            checklist=checklist,
+            step_number=1,
+            name="Step 1",
+            asset=asset1,
+            required=True,
         )
         # Create second required step (not completed)
         ChecklistStep.objects.create(
-            checklist=checklist, step_number=2, name="Step 2", asset=asset2, required=True
+            checklist=checklist,
+            step_number=2,
+            name="Step 2",
+            asset=asset2,
+            required=True,
         )
 
         completion = ChecklistCompletionFactory(checklist=checklist, user=None, user_name="John")

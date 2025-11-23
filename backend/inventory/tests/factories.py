@@ -87,7 +87,9 @@ class InventoryItemFactory(DjangoModelFactory):
         img.save(img_io, format="JPEG")
         img_io.seek(0)
         return SimpleUploadedFile(
-            name=f"{self.name}_image.jpg", content=img_io.read(), content_type="image/jpeg"
+            name=f"{self.name}_image.jpg",
+            content=img_io.read(),
+            content_type="image/jpeg",
         )
 
     @factory.post_generation

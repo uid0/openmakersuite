@@ -15,7 +15,8 @@ class Migration(migrations.Migration):
             model_name="inventoryitem",
             name="is_hazardous",
             field=models.BooleanField(
-                default=False, help_text="Check if this item is classified as a hazardous material"
+                default=False,
+                help_text="Check if this item is classified as a hazardous material",
             ),
         ),
         migrations.AddField(

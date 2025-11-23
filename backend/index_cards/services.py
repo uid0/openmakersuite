@@ -231,7 +231,11 @@ class IndexCardRenderer:
             self._draw_detailed_card(pdf_canvas, item, origin_x, origin_y)
 
     def _draw_blank_card(
-        self, pdf_canvas: canvas.Canvas, item: InventoryItem, origin_x: float, origin_y: float
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        origin_x: float,
+        origin_y: float,
     ) -> None:
         """Draw a blank card with only a centered QR code."""
         qr_x = origin_x + (self.CARD_WIDTH - self.QR_CODE_SIZE) / 2
@@ -249,7 +253,11 @@ class IndexCardRenderer:
         )
 
     def _draw_detailed_card(
-        self, pdf_canvas: canvas.Canvas, item: InventoryItem, origin_x: float, origin_y: float
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        origin_x: float,
+        origin_y: float,
     ) -> None:
         """Draw a detailed card with title, info, image, QR code, and CTA."""
         inner_x = origin_x + self.CARD_PADDING
@@ -306,7 +314,9 @@ class IndexCardRenderer:
                 max_image_width = left_section_width - 0.2 * inch
                 if available_image_space > 0:
                     scale = min(
-                        max_image_width / image_width, available_image_space / image_height, 1
+                        max_image_width / image_width,
+                        available_image_space / image_height,
+                        1,
                     )
                     image_drawn_height = image_height * scale
                     image_bottom_y = image_y_start - image_drawn_height
@@ -372,7 +382,11 @@ class IndexCardRenderer:
 
         info_y = current_y - 0.1 * inch
         self._draw_info_lines(
-            pdf_canvas, info_lines, left_section_x, info_y, left_section_width - 0.1 * inch
+            pdf_canvas,
+            info_lines,
+            left_section_x,
+            info_y,
+            left_section_width - 0.1 * inch,
         )
 
         # Draw product image below info
@@ -381,7 +395,12 @@ class IndexCardRenderer:
 
         if item.image and hasattr(item.image, "path") and os.path.exists(item.image.path):
             self._draw_product_image(
-                pdf_canvas, item, left_section_x, left_section_width, image_y_start, inner_y
+                pdf_canvas,
+                item,
+                left_section_x,
+                left_section_width,
+                image_y_start,
+                inner_y,
             )
 
     def _draw_right_section(
@@ -409,7 +428,11 @@ class IndexCardRenderer:
         self._draw_cta_box(pdf_canvas, item, right_section_x, right_section_width, cta_box)
 
     def _draw_category_section(
-        self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, inner_y: float
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        inner_x: float,
+        inner_y: float,
     ) -> None:
         """Draw the category text at the bottom of the card."""
         if not item.category:
@@ -435,7 +458,11 @@ class IndexCardRenderer:
         pdf_canvas.setFillColor(colors.black)  # Reset color
 
     def _draw_limited_quantity_diamond(
-        self, pdf_canvas: canvas.Canvas, item: InventoryItem, inner_x: float, inner_y: float
+        self,
+        pdf_canvas: canvas.Canvas,
+        item: InventoryItem,
+        inner_x: float,
+        inner_y: float,
     ) -> None:
         """Draw the Limited Quantity diamond for hazmat items."""
         # Limited Quantity diamond size
@@ -454,7 +481,12 @@ class IndexCardRenderer:
         pdf_canvas.setStrokeColor(colors.black)
         pdf_canvas.setLineWidth(2)
         pdf_canvas.rect(
-            -diamond_size / 2, -diamond_size / 2, diamond_size, diamond_size, stroke=1, fill=1
+            -diamond_size / 2,
+            -diamond_size / 2,
+            diamond_size,
+            diamond_size,
+            stroke=1,
+            fill=1,
         )
 
         # Draw "HM" text (Hazardous Material) - rotate back to horizontal
@@ -560,7 +592,11 @@ class IndexCardRenderer:
             )
 
     def _calculate_cta_dimensions(
-        self, item: InventoryItem, right_section_width: float, current_y: float, inner_y: float
+        self,
+        item: InventoryItem,
+        right_section_width: float,
+        current_y: float,
+        inner_y: float,
     ) -> tuple:
         """Calculate positioning for QR code and CTA box."""
         cta_lines = self.CALL_TO_ACTION.split("\n")
@@ -671,7 +707,13 @@ class IndexCardRenderer:
         box_x = right_section_x + 0.05 * inch
         pdf_canvas.setFillColor(bg_color)
         pdf_canvas.roundRect(
-            box_x, cta_box["y"], cta_box["width"], cta_box["height"], radius=3, stroke=0, fill=1
+            box_x,
+            cta_box["y"],
+            cta_box["width"],
+            cta_box["height"],
+            radius=3,
+            stroke=0,
+            fill=1,
         )
 
         # Draw text with optimal contrast
@@ -713,7 +755,10 @@ class IndexCardRenderer:
                 break  # Stop if no space left
 
             wrapped = self._wrap_text(
-                line, max_width, self._highlight_style.fontName, self._highlight_style.fontSize
+                line,
+                max_width,
+                self._highlight_style.fontName,
+                self._highlight_style.fontSize,
             )
             for fragment in wrapped:
                 text_object.textLine(fragment)

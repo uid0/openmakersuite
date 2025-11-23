@@ -108,7 +108,10 @@ class ReorderRequestAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ("Request Information", {"fields": ("item", "quantity", "status", "priority")}),
-        ("Requester Details", {"fields": ("requested_by", "request_notes", "requested_at")}),
+        (
+            "Requester Details",
+            {"fields": ("requested_by", "request_notes", "requested_at")},
+        ),
         ("Admin Review", {"fields": ("reviewed_by", "reviewed_at", "admin_notes")}),
         (
             "Order Details",
@@ -137,7 +140,13 @@ class ReorderRequestAdmin(admin.ModelAdmin):
                 "description": "Public transparency information - visible to all makerspace members",
             },
         ),
-        ("Metadata", {"fields": ("days_pending_display", "updated_at"), "classes": ("collapse",)}),
+        (
+            "Metadata",
+            {
+                "fields": ("days_pending_display", "updated_at"),
+                "classes": ("collapse",),
+            },
+        ),
     )
 
     @admin.display(description="Est. Cost")
@@ -236,7 +245,15 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
     fieldsets = (
         (
             "Order Information",
-            {"fields": ("po_number", "supplier", "status", "order_date", "expected_delivery_date")},
+            {
+                "fields": (
+                    "po_number",
+                    "supplier",
+                    "status",
+                    "order_date",
+                    "expected_delivery_date",
+                )
+            },
         ),
         ("Financial Details", {"fields": ("estimated_total", "actual_total")}),
         ("User Tracking", {"fields": ("created_by", "sent_by", "sent_at")}),
@@ -253,7 +270,10 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
             },
         ),
         ("Notes", {"fields": ("notes",)}),
-        ("Metadata", {"fields": ("days_since_ordered", "updated_at"), "classes": ("collapse",)}),
+        (
+            "Metadata",
+            {"fields": ("days_since_ordered", "updated_at"), "classes": ("collapse",)},
+        ),
     )
 
     @admin.display(description="Est. Total")
@@ -396,9 +416,19 @@ class OrderDeliveryAdmin(admin.ModelAdmin):
     fieldsets = (
         (
             "Delivery Information",
-            {"fields": ("purchase_order", "delivery_date", "tracking_number", "carrier")},
+            {
+                "fields": (
+                    "purchase_order",
+                    "delivery_date",
+                    "tracking_number",
+                    "carrier",
+                )
+            },
         ),
-        ("Receipt Details", {"fields": ("received_by", "receipt_notes", "is_complete")}),
+        (
+            "Receipt Details",
+            {"fields": ("received_by", "receipt_notes", "is_complete")},
+        ),
         (
             "Summary",
             {
@@ -406,7 +436,10 @@ class OrderDeliveryAdmin(admin.ModelAdmin):
                 "classes": ("collapse",),
             },
         ),
-        ("Metadata", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+        (
+            "Metadata",
+            {"fields": ("created_at", "updated_at"), "classes": ("collapse",)},
+        ),
     )
 
 
@@ -566,7 +599,11 @@ class WebHookAdmin(admin.ModelAdmin):
         ),
     )
 
-    actions = ["test_selected_webhooks", "test_selected_webhooks_sync", "reset_statistics"]
+    actions = [
+        "test_selected_webhooks",
+        "test_selected_webhooks_sync",
+        "reset_statistics",
+    ]
 
     @admin.display(description="Success Rate")
     def success_rate_display(self, obj):

@@ -6,20 +6,27 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("reorder_queue", "0002_purchaseorder_purchaseorderitem_orderdelivery_and_more"),
+        (
+            "reorder_queue",
+            "0002_purchaseorder_purchaseorderitem_orderdelivery_and_more",
+        ),
     ]
 
     operations = [
         migrations.AddField(
             model_name="reorderrequest",
             name="delivery_tracking_url",
-            field=models.URLField(blank=True, help_text="Link to shipping/delivery tracking"),
+            field=models.URLField(
+                blank=True, help_text="Link to shipping/delivery tracking"
+            ),
         ),
         migrations.AddField(
             model_name="reorderrequest",
             name="invoice_number",
             field=models.CharField(
-                blank=True, help_text="Invoice/receipt number for transparency", max_length=100
+                blank=True,
+                help_text="Invoice/receipt number for transparency",
+                max_length=100,
             ),
         ),
         migrations.AddField(
@@ -39,7 +46,9 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="reorderrequest",
             name="purchase_order_url",
-            field=models.URLField(blank=True, help_text="Link to purchase order document"),
+            field=models.URLField(
+                blank=True, help_text="Link to purchase order document"
+            ),
         ),
         migrations.AddField(
             model_name="reorderrequest",

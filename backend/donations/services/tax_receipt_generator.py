@@ -221,7 +221,9 @@ class TaxReceiptPDFGenerator:
 
         pdf_canvas.setFont("Helvetica", 10)
         pdf_canvas.drawString(
-            self.MARGIN, y, f"Date of Donation: {donation.date_received.strftime('%B %d, %Y')}"
+            self.MARGIN,
+            y,
+            f"Date of Donation: {donation.date_received.strftime('%B %d, %Y')}",
         )
         y -= 12
 

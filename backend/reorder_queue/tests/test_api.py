@@ -310,10 +310,14 @@ class TestReorderRequestAPI:
         supplier2 = SupplierFactory(supplier_type="grainger")
 
         item1 = InventoryItemFactory(
-            supplier=supplier1, supplier_sku="AMZN-123", supplier_url="https://amazon.com/item1"
+            supplier=supplier1,
+            supplier_sku="AMZN-123",
+            supplier_url="https://amazon.com/item1",
         )
         item2 = InventoryItemFactory(
-            supplier=supplier2, supplier_sku="GRNG-456", supplier_url="https://grainger.com/item2"
+            supplier=supplier2,
+            supplier_sku="GRNG-456",
+            supplier_url="https://grainger.com/item2",
         )
 
         ReorderRequestFactory(item=item1, status="approved")

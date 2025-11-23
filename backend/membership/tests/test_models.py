@@ -48,18 +48,27 @@ class TestUserModel:
     def test_user_handle_unique(self):
         """Test that handle must be unique."""
         User.objects.create_user(
-            username="user1", email="user1@example.com", password="pass", handle="uniquehandle"
+            username="user1",
+            email="user1@example.com",
+            password="pass",
+            handle="uniquehandle",
         )
 
         with pytest.raises((IntegrityError, ValidationError)):
             User.objects.create_user(
-                username="user2", email="user2@example.com", password="pass", handle="uniquehandle"
+                username="user2",
+                email="user2@example.com",
+                password="pass",
+                handle="uniquehandle",
             )
 
     def test_user_badge_number_unique(self):
         """Test that badge_number must be unique."""
         User.objects.create_user(
-            username="user1", email="user1@example.com", password="pass", badge_number="BADGE001"
+            username="user1",
+            email="user1@example.com",
+            password="pass",
+            badge_number="BADGE001",
         )
 
         with pytest.raises((IntegrityError, ValidationError)):
@@ -76,7 +85,8 @@ class TestUserModel:
             username="member", email="member@example.com", password="pass"
         )
         membership = Membership.objects.create(
-            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY, status=Membership.STATUS_ACTIVE
+            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY,
+            status=Membership.STATUS_ACTIVE,
         )
         membership.users.add(user)
 
@@ -101,7 +111,10 @@ class TestUserModel:
     def test_user_can_login_with_board_member_status(self):
         """Test that board members can always login."""
         user = User.objects.create_user(
-            username="board", email="board@example.com", password="pass", is_board_member=True
+            username="board",
+            email="board@example.com",
+            password="pass",
+            is_board_member=True,
         )
 
         assert user.can_login() is True
@@ -109,7 +122,10 @@ class TestUserModel:
     def test_user_can_login_with_director_status(self):
         """Test that directors can always login."""
         user = User.objects.create_user(
-            username="director", email="director@example.com", password="pass", is_director=True
+            username="director",
+            email="director@example.com",
+            password="pass",
+            is_director=True,
         )
 
         assert user.can_login() is True
@@ -128,7 +144,8 @@ class TestUserModel:
             username="inactive", email="inactive@example.com", password="pass"
         )
         membership = Membership.objects.create(
-            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY, status=Membership.STATUS_INACTIVE
+            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY,
+            status=Membership.STATUS_INACTIVE,
         )
         membership.users.add(user)
 
@@ -170,7 +187,8 @@ class TestMembershipModel:
         )
 
         membership = Membership.objects.create(
-            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY, status=Membership.STATUS_ACTIVE
+            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY,
+            status=Membership.STATUS_ACTIVE,
         )
         membership.users.add(user1, user2)
 
@@ -183,7 +201,8 @@ class TestMembershipModel:
     def test_membership_str_with_many_users(self):
         """Test membership string representation truncates when many users."""
         membership = Membership.objects.create(
-            membership_type=Membership.MEMBERSHIP_TYPE_ANNUAL, status=Membership.STATUS_ACTIVE
+            membership_type=Membership.MEMBERSHIP_TYPE_ANNUAL,
+            status=Membership.STATUS_ACTIVE,
         )
 
         # Add more than 3 users
@@ -199,10 +218,12 @@ class TestMembershipModel:
     def test_membership_is_active_property(self):
         """Test membership is_active property."""
         active_membership = Membership.objects.create(
-            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY, status=Membership.STATUS_ACTIVE
+            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY,
+            status=Membership.STATUS_ACTIVE,
         )
         inactive_membership = Membership.objects.create(
-            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY, status=Membership.STATUS_INACTIVE
+            membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY,
+            status=Membership.STATUS_INACTIVE,
         )
 
         assert active_membership.is_active is True
@@ -221,7 +242,8 @@ class TestMembershipModel:
         )
 
         membership = Membership.objects.create(
-            membership_type=Membership.MEMBERSHIP_TYPE_ANNUAL, status=Membership.STATUS_ACTIVE
+            membership_type=Membership.MEMBERSHIP_TYPE_ANNUAL,
+            status=Membership.STATUS_ACTIVE,
         )
         membership.users.add(user1, user2, user3)
 

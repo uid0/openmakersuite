@@ -31,7 +31,9 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="sitesettings",
             name="organization_address",
-            field=models.TextField(blank=True, help_text="Organization address for tax receipts"),
+            field=models.TextField(
+                blank=True, help_text="Organization address for tax receipts"
+            ),
         ),
         migrations.AddField(
             model_name="sitesettings",

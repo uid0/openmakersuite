@@ -16,7 +16,10 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
                     ),
                 ),
                 (
@@ -34,7 +37,8 @@ class Migration(migrations.Migration):
                 (
                     "custom_css",
                     models.TextField(
-                        blank=True, help_text="Optional custom CSS for dashboard styling"
+                        blank=True,
+                        help_text="Optional custom CSS for dashboard styling",
                     ),
                 ),
                 (
@@ -64,13 +68,17 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
                     ),
                 ),
                 (
                     "message",
                     models.CharField(
-                        help_text="Message text to display in dashboard footer", max_length=255
+                        help_text="Message text to display in dashboard footer",
+                        max_length=255,
                     ),
                 ),
                 (

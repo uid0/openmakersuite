@@ -6,7 +6,10 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("reorder_queue", "0004_purchaseorder_carrier_purchaseorder_shipped_at_and_more"),
+        (
+            "reorder_queue",
+            "0004_purchaseorder_carrier_purchaseorder_shipped_at_and_more",
+        ),
     ]
 
     operations = [
@@ -52,14 +55,24 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
                     ),
                 ),
                 (
                     "name",
-                    models.CharField(help_text="Descriptive name for this webhook", max_length=200),
+                    models.CharField(
+                        help_text="Descriptive name for this webhook", max_length=200
+                    ),
                 ),
-                ("url", models.URLField(help_text="Webhook endpoint URL to POST notifications to")),
+                (
+                    "url",
+                    models.URLField(
+                        help_text="Webhook endpoint URL to POST notifications to"
+                    ),
+                ),
                 (
                     "event_type",
                     models.CharField(
@@ -79,7 +92,8 @@ class Migration(migrations.Migration):
                 (
                     "is_active",
                     models.BooleanField(
-                        default=True, help_text="Enable or disable this webhook without deleting it"
+                        default=True,
+                        help_text="Enable or disable this webhook without deleting it",
                     ),
                 ),
                 (
@@ -100,14 +114,18 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "description",
-                    models.TextField(blank=True, help_text="Description of what this webhook does"),
+                    models.TextField(
+                        blank=True, help_text="Description of what this webhook does"
+                    ),
                 ),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 (
                     "last_triggered_at",
                     models.DateTimeField(
-                        blank=True, help_text="When this webhook was last triggered", null=True
+                        blank=True,
+                        help_text="When this webhook was last triggered",
+                        null=True,
                     ),
                 ),
                 (
@@ -125,7 +143,8 @@ class Migration(migrations.Migration):
                 (
                     "last_error",
                     models.TextField(
-                        blank=True, help_text="Last error message if webhook delivery failed"
+                        blank=True,
+                        help_text="Last error message if webhook delivery failed",
                     ),
                 ),
             ],
@@ -133,7 +152,8 @@ class Migration(migrations.Migration):
                 "ordering": ["event_type", "name"],
                 "indexes": [
                     models.Index(
-                        fields=["event_type", "is_active"], name="reorder_que_event_t_0c982f_idx"
+                        fields=["event_type", "is_active"],
+                        name="reorder_que_event_t_0c982f_idx",
                     ),
                     models.Index(
                         fields=["is_active", "-last_triggered_at"],

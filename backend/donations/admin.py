@@ -25,7 +25,12 @@ class DonationAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "date_received", "tax_receipt_issued"]
     search_fields = ["donation_number", "donor_name", "donor_email"]
-    readonly_fields = ["donation_number", "created_at", "updated_at", "tax_receipt_issued_at"]
+    readonly_fields = [
+        "donation_number",
+        "created_at",
+        "updated_at",
+        "tax_receipt_issued_at",
+    ]
     actions = [
         "generate_items_from_estimate",
         "download_label_sheet",
@@ -506,7 +511,12 @@ class DonationItemAdmin(admin.ModelAdmin):
         "remaining_quantity",
     ]
     list_filter = ["status", "condition", "donation__status"]
-    search_fields = ["name", "description", "donation__donor_name", "donation__donation_number"]
+    search_fields = [
+        "name",
+        "description",
+        "donation__donor_name",
+        "donation__donation_number",
+    ]
     readonly_fields = ["created_at", "updated_at", "remaining_quantity"]
     fieldsets = (
         (

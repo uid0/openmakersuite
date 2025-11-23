@@ -66,7 +66,11 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
         delay_seconds = int(request.data.get("delay_seconds", 0))
         disable_device.delay(device.mac_address, delay_seconds=delay_seconds)
         return Response(
-            {"status": "disable command sent", "device": device.mac_address, "delay": delay_seconds}
+            {
+                "status": "disable command sent",
+                "device": device.mac_address,
+                "delay": delay_seconds,
+            }
         )
 
     @action(detail=True, methods=["post"])
@@ -100,7 +104,8 @@ class OperationalModeViewSet(viewsets.ModelViewSet):
 
         if not user.is_authenticated:
             return Response(
-                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         mode.classroom_mode_enabled = True
@@ -120,7 +125,8 @@ class OperationalModeViewSet(viewsets.ModelViewSet):
 
         if not user.is_authenticated:
             return Response(
-                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         mode.classroom_mode_enabled = False
@@ -153,7 +159,8 @@ class AssetAuthorizationViewSet(viewsets.ModelViewSet):
 
         if not user.is_authenticated:
             return Response(
-                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         try:
@@ -190,7 +197,8 @@ class AssetAuthorizationViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(authorization)
         return Response(
-            serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+            serializer.data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
 
@@ -224,7 +232,8 @@ class DeviceLockoutViewSet(viewsets.ModelViewSet):
 
         if not user.is_authenticated:
             return Response(
-                {"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         if not lockout.can_be_unlocked_by(user):

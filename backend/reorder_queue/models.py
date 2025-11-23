@@ -74,7 +74,11 @@ class ReorderRequest(models.Model):
 
     # Admin handling
     reviewed_by = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_reorders"
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_reorders",
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
     admin_notes = models.TextField(blank=True)
@@ -176,7 +180,11 @@ class PurchaseOrder(models.Model):
 
     # Core fields
     po_number = models.CharField(
-        max_length=50, unique=True, blank=True, null=True, help_text="Purchase Order Number"
+        max_length=50,
+        unique=True,
+        blank=True,
+        null=True,
+        help_text="Purchase Order Number",
     )
     supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name="purchase_orders")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=DRAFT)
@@ -204,7 +212,11 @@ class PurchaseOrder(models.Model):
     # User tracking
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="created_orders")
     sent_by = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="sent_orders"
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sent_orders",
     )
     sent_at = models.DateTimeField(null=True, blank=True)
 
@@ -335,7 +347,11 @@ class PurchaseOrderItem(models.Model):
         max_digits=10, decimal_places=4, help_text="Unit cost at time of ordering"
     )
     unit_cost_actual = models.DecimalField(
-        max_digits=10, decimal_places=4, null=True, blank=True, help_text="Actual unit cost charged"
+        max_digits=10,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="Actual unit cost charged",
     )
 
     # Shipment tracking
@@ -467,7 +483,8 @@ class OrderDelivery(models.Model):
 
     # Status
     is_complete = models.BooleanField(
-        default=False, help_text="Mark as complete when all items in this delivery are processed"
+        default=False,
+        help_text="Mark as complete when all items in this delivery are processed",
     )
 
     # Metadata
@@ -510,7 +527,8 @@ class DeliveryItem(models.Model):
 
     # Receipt details
     quantity_received = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)], help_text="Quantity actually received for this item"
+        validators=[MinValueValidator(1)],
+        help_text="Quantity actually received for this item",
     )
 
     # Quality/condition tracking
@@ -524,7 +542,11 @@ class DeliveryItem(models.Model):
     )
     scanned_at = models.DateTimeField(null=True, blank=True)
     scanned_by = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="scanned_items"
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scanned_items",
     )
 
     # Metadata

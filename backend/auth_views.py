@@ -46,7 +46,8 @@ def register_user(request):
     # Validate email if provided
     if email and not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
         return Response(
-            {"detail": "Please enter a valid email address"}, status=status.HTTP_400_BAD_REQUEST
+            {"detail": "Please enter a valid email address"},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     try:
@@ -86,7 +87,8 @@ def login_user(request):
 
     if not username or not password:
         return Response(
-            {"detail": "Username and password are required"}, status=status.HTTP_400_BAD_REQUEST
+            {"detail": "Username and password are required"},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     # Authenticate user

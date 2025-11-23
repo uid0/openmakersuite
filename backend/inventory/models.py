@@ -186,7 +186,10 @@ class InventoryItem(models.Model):
 
     # Auto-generated thumbnail using ImageSpecField
     thumbnail = ImageSpecField(
-        source="image", processors=[ResizeToFit(300, 300)], format="WEBP", options={"quality": 85}
+        source="image",
+        processors=[ResizeToFit(300, 300)],
+        format="WEBP",
+        options={"quality": 85},
     )
 
     # Organization
@@ -215,7 +218,8 @@ class InventoryItem(models.Model):
 
     # Reordering information
     reorder_quantity = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)], help_text="Quantity to reorder when stock is low"
+        validators=[MinValueValidator(1)],
+        help_text="Quantity to reorder when stock is low",
     )
     current_stock = models.PositiveIntegerField(default=0, help_text="Current quantity in stock")
     minimum_stock = models.PositiveIntegerField(
@@ -255,7 +259,8 @@ class InventoryItem(models.Model):
 
     # Hazardous Materials Information
     is_hazardous = models.BooleanField(
-        default=False, help_text="Check if this item is classified as a hazardous material"
+        default=False,
+        help_text="Check if this item is classified as a hazardous material",
     )
     msds_url = models.URLField(
         blank=True,
@@ -871,7 +876,8 @@ class PriceHistory(models.Model):
         help_text="Package cost at time of this record",
     )
     quantity_per_package = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)], help_text="Quantity per package at time of this record"
+        validators=[MinValueValidator(1)],
+        help_text="Quantity per package at time of this record",
     )
     change_type = models.CharField(
         max_length=20,

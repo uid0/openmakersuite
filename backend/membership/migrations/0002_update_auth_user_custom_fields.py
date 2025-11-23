@@ -59,7 +59,9 @@ def _ensure_columns(apps, schema_editor):
 
     # Only handle databases we explicitly support.
     if vendor not in {"postgresql", "sqlite"}:
-        logger.warning("Skipping auth_user column migration for unsupported vendor '%s'", vendor)
+        logger.warning(
+            "Skipping auth_user column migration for unsupported vendor '%s'", vendor
+        )
         return
 
     existing_columns = _get_existing_columns(connection, vendor)

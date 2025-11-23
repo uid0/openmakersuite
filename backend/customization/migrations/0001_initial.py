@@ -16,7 +16,10 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
                     ),
                 ),
                 (
@@ -81,7 +84,8 @@ class Migration(migrations.Migration):
                 (
                     "footer_text",
                     models.TextField(
-                        blank=True, help_text="Text to display in the footer (supports HTML)"
+                        blank=True,
+                        help_text="Text to display in the footer (supports HTML)",
                     ),
                 ),
                 (
@@ -94,11 +98,15 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "contact_phone",
-                    models.CharField(blank=True, help_text="Contact phone number", max_length=20),
+                    models.CharField(
+                        blank=True, help_text="Contact phone number", max_length=20
+                    ),
                 ),
                 (
                     "website_url",
-                    models.URLField(blank=True, help_text="Main website URL for your organization"),
+                    models.URLField(
+                        blank=True, help_text="Main website URL for your organization"
+                    ),
                 ),
                 (
                     "dashboard_title",
@@ -111,13 +119,16 @@ class Migration(migrations.Migration):
                 (
                     "dashboard_subtitle",
                     models.CharField(
-                        blank=True, help_text="Subtitle text for the dashboard", max_length=300
+                        blank=True,
+                        help_text="Subtitle text for the dashboard",
+                        max_length=300,
                     ),
                 ),
                 (
                     "show_logo_on_dashboard",
                     models.BooleanField(
-                        default=True, help_text="Whether to display the logo on the dashboard"
+                        default=True,
+                        help_text="Whether to display the logo on the dashboard",
                     ),
                 ),
                 ("created_at", models.DateTimeField(auto_now_add=True)),

@@ -12,7 +12,15 @@ class ChecklistStepInline(admin.TabularInline):
 
     model = ChecklistStep
     extra = 1
-    fields = ["step_number", "name", "asset", "location", "inventory_item", "required", "notes"]
+    fields = [
+        "step_number",
+        "name",
+        "asset",
+        "location",
+        "inventory_item",
+        "required",
+        "notes",
+    ]
     ordering = ["step_number"]
 
 
@@ -53,7 +61,12 @@ class ChecklistStepCompletionInline(admin.TabularInline):
 
     model = ChecklistStepCompletion
     extra = 0
-    readonly_fields = ["scanned_at", "scanned_asset", "scanned_location", "scanned_item"]
+    readonly_fields = [
+        "scanned_at",
+        "scanned_asset",
+        "scanned_location",
+        "scanned_item",
+    ]
     fields = [
         "step",
         "scanned_at",

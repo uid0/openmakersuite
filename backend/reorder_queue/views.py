@@ -258,7 +258,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                     "quantity": req.quantity,
                     "supplier_sku": req.item.supplier_sku,
                     "supplier_url": req.item.supplier_url,
-                    "estimated_cost": float(req.estimated_cost) if req.estimated_cost else None,
+                    "estimated_cost": (float(req.estimated_cost) if req.estimated_cost else None),
                 }
             )
 
@@ -355,7 +355,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         if not low_stock_items.exists():
             return Response(
-                {"message": "No items currently need reordering"}, status=status.HTTP_200_OK
+                {"message": "No items currently need reordering"},
+                status=status.HTTP_200_OK,
             )
 
         # Group items by optimal supplier
@@ -518,7 +519,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         if purchase_order.status != PurchaseOrder.SENT:
             return Response(
-                {"error": "Only sent orders can be confirmed"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Only sent orders can be confirmed"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         purchase_order.status = PurchaseOrder.CONFIRMED
@@ -626,7 +628,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         if line_item.is_voided:
             return Response(
-                {"error": "Line item is already voided"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Line item is already voided"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Check if item has been received
@@ -1113,18 +1116,20 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 order_data = {
                     "id": order.id,
                     "item_name": order.item.name,
-                    "item_category": order.item.category.name if order.item.category else None,
+                    "item_category": (order.item.category.name if order.item.category else None),
                     "quantity_ordered": order.quantity,
                     "status": order.status,
                     "requested_at": order.requested_at.isoformat(),
-                    "ordered_at": order.ordered_at.isoformat() if order.ordered_at else None,
+                    "ordered_at": (order.ordered_at.isoformat() if order.ordered_at else None),
                     "delivered_at": (
                         order.actual_delivery.isoformat() if order.actual_delivery else None
                     ),
                     # Financial transparency
-                    "estimated_cost": float(order.estimated_cost) if order.estimated_cost else None,
-                    "actual_cost": float(order.actual_cost) if order.actual_cost else None,
-                    "cost_per_unit": float(order.cost_per_unit) if order.cost_per_unit else None,
+                    "estimated_cost": (
+                        float(order.estimated_cost) if order.estimated_cost else None
+                    ),
+                    "actual_cost": (float(order.actual_cost) if order.actual_cost else None),
+                    "cost_per_unit": (float(order.cost_per_unit) if order.cost_per_unit else None),
                     "cost_variance": (
                         float(order.actual_cost - order.estimated_cost)
                         if (order.actual_cost and order.estimated_cost)
@@ -1152,11 +1157,11 @@ class AnalyticsViewSet(viewsets.ViewSet):
                         "supplier_name": supplier_name,
                         "quantity": order.quantity,
                         "requested_at": order.requested_at.isoformat(),
-                        "ordered_at": order.ordered_at.isoformat() if order.ordered_at else None,
+                        "ordered_at": (order.ordered_at.isoformat() if order.ordered_at else None),
                         "delivered_at": (
                             order.actual_delivery.isoformat() if order.actual_delivery else None
                         ),
-                        "actual_cost": float(order.actual_cost) if order.actual_cost else None,
+                        "actual_cost": (float(order.actual_cost) if order.actual_cost else None),
                         "estimated_cost": (
                             float(order.estimated_cost) if order.estimated_cost else None
                         ),
@@ -1203,7 +1208,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "expected_delivery_date": (
                         po.expected_delivery_date.isoformat() if po.expected_delivery_date else None
                     ),
-                    "estimated_total": float(po.estimated_total) if po.estimated_total else None,
+                    "estimated_total": (float(po.estimated_total) if po.estimated_total else None),
                     "actual_total": float(po.actual_total) if po.actual_total else None,
                     "total_items": total_items,
                     "total_quantity": total_quantity,

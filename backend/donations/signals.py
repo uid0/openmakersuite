@@ -67,7 +67,11 @@ def donation_post_save(sender, instance: Donation, created: bool, **kwargs):
             instance.tax_receipt_number = str(tax_receipt.serial_number)
             instance.tax_receipt_issued_at = tax_receipt.issued_date
             instance.save(
-                update_fields=["tax_receipt_issued", "tax_receipt_number", "tax_receipt_issued_at"]
+                update_fields=[
+                    "tax_receipt_issued",
+                    "tax_receipt_number",
+                    "tax_receipt_issued_at",
+                ]
             )
 
             # Send email to donor

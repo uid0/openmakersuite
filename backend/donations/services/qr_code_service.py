@@ -305,7 +305,8 @@ class DonationItemQRCodeService:
                     qr_img = Image.open(item.qr_code.path)
                     # Resize to fit sticker
                     qr_img.thumbnail(
-                        (sticker_width - 20, sticker_height - 40), Image.Resampling.LANCZOS
+                        (sticker_width - 20, sticker_height - 40),
+                        Image.Resampling.LANCZOS,
                     )
                     # Center on sticker
                     qr_x = x + ((sticker_width - qr_img.width) // 2)

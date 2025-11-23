@@ -113,7 +113,10 @@ class TestDimensionalCalculations(TestCase):
         """Test unit weight returns None when data is missing."""
         # Missing package weight
         item_supplier = ItemSupplierFactory(
-            item=self.item, supplier=self.supplier, package_weight=None, quantity_per_package=10
+            item=self.item,
+            supplier=self.supplier,
+            package_weight=None,
+            quantity_per_package=10,
         )
         self.assertIsNone(item_supplier.unit_weight)
 
@@ -288,7 +291,12 @@ class TestDimensionalAdminInterface(TestCase):
                 break
 
         self.assertIsNotNone(package_dimensions_fieldset)
-        expected_fields = ("package_height", "package_width", "package_length", "package_weight")
+        expected_fields = (
+            "package_height",
+            "package_width",
+            "package_length",
+            "package_weight",
+        )
         self.assertEqual(package_dimensions_fieldset["fields"], expected_fields)
 
     def test_inline_fields_include_dimensional_fields(self):
@@ -466,5 +474,6 @@ class TestDimensionalIntegration(TestCase):
         self.assertEqual(data["unit_weight"], "3.200")
 
         self.assertEqual(
-            data["package_dimensions_display"], 'L: 9.00" | W: 7.00" | H: 5.00" | Weight: 2.000 lbs'
+            data["package_dimensions_display"],
+            'L: 9.00" | W: 7.00" | H: 5.00" | Weight: 2.000 lbs',
         )

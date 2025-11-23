@@ -45,7 +45,12 @@ class LocationCheckInViewSet(viewsets.ModelViewSet):
         else:
             serializer.save()
 
-    @action(detail=False, methods=["post"], permission_classes=[AllowAny], url_path="checkin")
+    @action(
+        detail=False,
+        methods=["post"],
+        permission_classes=[AllowAny],
+        url_path="checkin",
+    )
     def checkin(self, request):
         """
         Public endpoint for checking into a location.

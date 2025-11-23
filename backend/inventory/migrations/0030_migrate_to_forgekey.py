@@ -21,30 +21,30 @@ def migrate_operational_status_to_forgekey(apps, schema_editor):
 
     migrated_count = 0
     skipped_count = 0
-    
+
     for asset in Asset.objects.all():
         # Get the old operational_status value
         old_status = getattr(asset, "operational_status", None)
-        
+
         # Check if asset is already locked (will be handled by lockout migration)
         is_locked = getattr(asset, "is_locked", False)
-        
+
         if old_status:
             # Map to new mode
             new_mode = status_to_mode_map.get(old_status, "available")
-            
+
             # If asset is locked, mode should be locked_out (will be set by lockout migration)
             # But we'll set it here too to ensure consistency
             if is_locked:
                 new_mode = "locked_out"
-            
+
             # Create or update OperationalMode
             OperationalMode.objects.update_or_create(
                 asset=asset,
                 defaults={
                     "mode": new_mode,
                     "classroom_mode_enabled": False,
-                }
+                },
             )
             migrated_count += 1
         else:
@@ -55,13 +55,17 @@ def migrate_operational_status_to_forgekey(apps, schema_editor):
                 defaults={
                     "mode": default_mode,
                     "classroom_mode_enabled": False,
-                }
+                },
             )
             skipped_count += 1
 
-    print(f"Migrated operational status for {migrated_count} assets to ForgeKey OperationalMode")
+    print(
+        f"Migrated operational status for {migrated_count} assets to ForgeKey OperationalMode"
+    )
     if skipped_count > 0:
-        print(f"Created default OperationalMode for {skipped_count} assets without status")
+        print(
+            f"Created default OperationalMode for {skipped_count} assets without status"
+        )
 
 
 def migrate_lockout_data_to_forgekey(apps, schema_editor):
@@ -85,15 +89,15 @@ def migrate_lockout_data_to_forgekey(apps, schema_editor):
     for asset in Asset.objects.all():
         # Check if asset is locked
         is_locked = getattr(asset, "is_locked", False)
-        
+
         if is_locked:
             locked_by = getattr(asset, "locked_by", None)
             locked_at = getattr(asset, "locked_at", None)
             lock_type = getattr(asset, "lock_type", None)
-            
+
             # Map lock_type to lockout_level
             lockout_level = lock_type_to_level_map.get(lock_type, "user")
-            
+
             # Create DeviceLockout record
             # Note: We need to set locked_at after creation since auto_now_add might interfere
             lockout = DeviceLockout(
@@ -107,18 +111,20 @@ def migrate_lockout_data_to_forgekey(apps, schema_editor):
             lockout.save()
             if locked_at:
                 DeviceLockout.objects.filter(id=lockout.id).update(locked_at=locked_at)
-            
+
             # Ensure OperationalMode is set to locked_out
             OperationalMode.objects.update_or_create(
                 asset=asset,
                 defaults={
                     "mode": "locked_out",
-                }
+                },
             )
-            
+
             migrated_count += 1
 
-    print(f"Migrated lockout data for {migrated_count} assets to ForgeKey DeviceLockout")
+    print(
+        f"Migrated lockout data for {migrated_count} assets to ForgeKey DeviceLockout"
+    )
 
 
 def reverse_migrate_operational_status(apps, schema_editor):
@@ -140,7 +146,7 @@ def reverse_migrate_operational_status(apps, schema_editor):
     for mode in OperationalMode.objects.all():
         asset = mode.asset
         old_status = mode_to_status_map.get(mode.mode, "available")
-        
+
         # Only update if the field still exists (for rollback)
         if hasattr(asset, "operational_status"):
             asset.operational_status = old_status
@@ -167,14 +173,16 @@ def reverse_migrate_lockout_data(apps, schema_editor):
 
     for lockout in DeviceLockout.objects.filter(is_active=True):
         asset = lockout.asset
-        
+
         # Only update if the fields still exist (for rollback)
         if hasattr(asset, "is_locked"):
             asset.is_locked = True
             asset.locked_by = lockout.locked_by
             asset.locked_at = lockout.locked_at
             asset.lock_type = level_to_lock_type_map.get(lockout.lockout_level, "admin")
-            asset.save(update_fields=["is_locked", "locked_by", "locked_at", "lock_type"])
+            asset.save(
+                update_fields=["is_locked", "locked_by", "locked_at", "lock_type"]
+            )
 
 
 class Migration(migrations.Migration):
@@ -194,4 +202,3 @@ class Migration(migrations.Migration):
             reverse_migrate_lockout_data,
         ),
     ]
-

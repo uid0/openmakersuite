@@ -79,7 +79,10 @@ class TestInventoryTasks:
         delivery_date = (ordered_date + timedelta(days=10)).date()
 
         ReorderRequestFactory(
-            item=item, status="received", ordered_at=ordered_date, actual_delivery=delivery_date
+            item=item,
+            status="received",
+            ordered_at=ordered_date,
+            actual_delivery=delivery_date,
         )
 
         # Second request with different lead time
@@ -87,7 +90,10 @@ class TestInventoryTasks:
         delivery_date2 = (ordered_date2 + timedelta(days=8)).date()
 
         ReorderRequestFactory(
-            item=item, status="received", ordered_at=ordered_date2, actual_delivery=delivery_date2
+            item=item,
+            status="received",
+            ordered_at=ordered_date2,
+            actual_delivery=delivery_date2,
         )
 
         result = update_average_lead_times()

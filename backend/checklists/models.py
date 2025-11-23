@@ -33,7 +33,8 @@ class Checklist(models.Model):
         default=True, help_text="Whether this checklist is currently available"
     )
     is_public = models.BooleanField(
-        default=True, help_text="Whether unauthenticated users can access this checklist"
+        default=True,
+        help_text="Whether unauthenticated users can access this checklist",
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

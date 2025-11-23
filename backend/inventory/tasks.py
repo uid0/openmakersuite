@@ -48,7 +48,9 @@ def download_image_from_url(item_id, image_url):
         # Save the downloaded image
         image_content = ContentFile(response.content)
         item.image.save(
-            f"{item.sku or item.id}.{ext}", image_content, save=True  # This will save the item
+            f"{item.sku or item.id}.{ext}",
+            image_content,
+            save=True,  # This will save the item
         )
 
         return f"Image downloaded for {item.name} from {image_url}"

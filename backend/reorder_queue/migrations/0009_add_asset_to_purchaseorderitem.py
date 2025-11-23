@@ -1,7 +1,7 @@
 # Generated manually
 
-from django.db import migrations, models
 import django.db.models.deletion
+from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
@@ -37,21 +37,28 @@ class Migration(migrations.Migration):
         ),
         migrations.AlterUniqueTogether(
             name="purchaseorderitem",
-            unique_together={("purchase_order", "item_supplier"), ("purchase_order", "asset")},
+            unique_together={
+                ("purchase_order", "item_supplier"),
+                ("purchase_order", "asset"),
+            },
         ),
         migrations.AddIndex(
             model_name="purchaseorderitem",
-            index=models.Index(fields=["purchase_order", "asset"], name="reorder_que_purchas_asset_i_idx"),
+            index=models.Index(
+                fields=["purchase_order", "asset"],
+                name="reorder_que_purchas_asset_i_idx",
+            ),
         ),
         migrations.AddConstraint(
             model_name="purchaseorderitem",
             constraint=models.CheckConstraint(
                 check=(
                     models.Q(("item_supplier__isnull", False), ("asset__isnull", True))
-                    | models.Q(("item_supplier__isnull", True), ("asset__isnull", False))
+                    | models.Q(
+                        ("item_supplier__isnull", True), ("asset__isnull", False)
+                    )
                 ),
                 name="purchase_order_item_must_have_item_or_asset",
             ),
         ),
     ]
-

@@ -2,16 +2,16 @@
 
 import django.contrib.auth.models
 import django.contrib.auth.validators
+import django.utils.timezone
 from django.conf import settings
 from django.db import migrations, models
-import django.utils.timezone
 
 
 def _create_user_table_if_not_exists(apps, schema_editor):
     """Create auth_user table if it doesn't exist (for fresh databases)."""
     vendor = schema_editor.connection.vendor
     connection = schema_editor.connection
-    
+
     # Check if table exists
     if vendor == "postgresql":
         with connection.cursor() as cursor:
@@ -88,14 +88,14 @@ def _create_user_table_if_not_exists(apps, schema_editor):
                     is_director BOOLEAN NOT NULL DEFAULT 0
                 );
                 """
-                )
+            )
 
 
 def _create_membership_table_if_not_exists(apps, schema_editor):
     """Create inventory_membership table if it doesn't exist (for fresh databases)."""
     vendor = schema_editor.connection.vendor
     connection = schema_editor.connection
-    
+
     # Check if table exists
     if vendor == "postgresql":
         with connection.cursor() as cursor:
@@ -194,13 +194,21 @@ class Migration(migrations.Migration):
                         (
                             "id",
                             models.BigAutoField(
-                                auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                                auto_created=True,
+                                primary_key=True,
+                                serialize=False,
+                                verbose_name="ID",
                             ),
                         ),
-                        ("password", models.CharField(max_length=128, verbose_name="password")),
+                        (
+                            "password",
+                            models.CharField(max_length=128, verbose_name="password"),
+                        ),
                         (
                             "last_login",
-                            models.DateTimeField(blank=True, null=True, verbose_name="last login"),
+                            models.DateTimeField(
+                                blank=True, null=True, verbose_name="last login"
+                            ),
                         ),
                         (
                             "is_superuser",
@@ -213,25 +221,35 @@ class Migration(migrations.Migration):
                         (
                             "username",
                             models.CharField(
-                                error_messages={"unique": "A user with that username already exists."},
+                                error_messages={
+                                    "unique": "A user with that username already exists."
+                                },
                                 help_text="Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.",
                                 max_length=150,
                                 unique=True,
-                                validators=[django.contrib.auth.validators.UnicodeUsernameValidator()],
+                                validators=[
+                                    django.contrib.auth.validators.UnicodeUsernameValidator()
+                                ],
                                 verbose_name="username",
                             ),
                         ),
                         (
                             "first_name",
-                            models.CharField(blank=True, max_length=150, verbose_name="first name"),
+                            models.CharField(
+                                blank=True, max_length=150, verbose_name="first name"
+                            ),
                         ),
                         (
                             "last_name",
-                            models.CharField(blank=True, max_length=150, verbose_name="last name"),
+                            models.CharField(
+                                blank=True, max_length=150, verbose_name="last name"
+                            ),
                         ),
                         (
                             "email",
-                            models.EmailField(blank=True, max_length=254, verbose_name="email address"),
+                            models.EmailField(
+                                blank=True, max_length=254, verbose_name="email address"
+                            ),
                         ),
                         (
                             "is_staff",
@@ -252,7 +270,8 @@ class Migration(migrations.Migration):
                         (
                             "date_joined",
                             models.DateTimeField(
-                                default=django.utils.timezone.now, verbose_name="date joined"
+                                default=django.utils.timezone.now,
+                                verbose_name="date joined",
                             ),
                         ),
                         (
@@ -285,25 +304,38 @@ class Migration(migrations.Migration):
                         ),
                         (
                             "discord_username",
-                            models.CharField(blank=True, help_text="Discord username", max_length=150),
+                            models.CharField(
+                                blank=True, help_text="Discord username", max_length=150
+                            ),
                         ),
                         (
                             "discourse_username",
-                            models.CharField(blank=True, help_text="Discourse username", max_length=150),
+                            models.CharField(
+                                blank=True,
+                                help_text="Discourse username",
+                                max_length=150,
+                            ),
                         ),
                         (
                             "is_board_member",
                             models.BooleanField(
-                                default=False, help_text="Indicates if user is a board member"
+                                default=False,
+                                help_text="Indicates if user is a board member",
                             ),
                         ),
                         (
                             "is_officer",
-                            models.BooleanField(default=False, help_text="Indicates if user is an officer"),
+                            models.BooleanField(
+                                default=False,
+                                help_text="Indicates if user is an officer",
+                            ),
                         ),
                         (
                             "is_director",
-                            models.BooleanField(default=False, help_text="Indicates if user is a director"),
+                            models.BooleanField(
+                                default=False,
+                                help_text="Indicates if user is a director",
+                            ),
                         ),
                         (
                             "groups",
@@ -354,7 +386,10 @@ class Migration(migrations.Migration):
                         (
                             "id",
                             models.BigAutoField(
-                                auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                                auto_created=True,
+                                primary_key=True,
+                                serialize=False,
+                                verbose_name="ID",
                             ),
                         ),
                         (
@@ -390,7 +425,9 @@ class Migration(migrations.Migration):
                         (
                             "start_date",
                             models.DateField(
-                                blank=True, help_text="When the membership started", null=True
+                                blank=True,
+                                help_text="When the membership started",
+                                null=True,
                             ),
                         ),
                         (
@@ -404,7 +441,8 @@ class Migration(migrations.Migration):
                         (
                             "notes",
                             models.TextField(
-                                blank=True, help_text="Additional notes about this membership"
+                                blank=True,
+                                help_text="Additional notes about this membership",
                             ),
                         ),
                         ("created_at", models.DateTimeField(auto_now_add=True)),

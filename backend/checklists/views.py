@@ -399,7 +399,11 @@ class ChecklistCompletionViewSet(viewsets.ReadOnlyModelViewSet):
                 {
                     "detail": "Not all required steps are completed.",
                     "missing_steps": [
-                        {"id": str(step.id), "name": step.name, "step_number": step.step_number}
+                        {
+                            "id": str(step.id),
+                            "name": step.name,
+                            "step_number": step.step_number,
+                        }
                         for step in missing_steps
                     ],
                 },

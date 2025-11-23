@@ -101,7 +101,10 @@ def send_webhook_notification(
 
             # Send webhook
             response = requests.post(
-                webhook.url, data=json_payload, headers=headers, timeout=30  # 30 second timeout
+                webhook.url,
+                data=json_payload,
+                headers=headers,
+                timeout=30,  # 30 second timeout
             )
 
             # Check response
@@ -129,7 +132,11 @@ def send_webhook_notification(
             webhook.record_failure(error_message)
 
             results["failed"].append(
-                {"webhook_id": webhook.id, "webhook_name": webhook.name, "error": error_message}
+                {
+                    "webhook_id": webhook.id,
+                    "webhook_name": webhook.name,
+                    "error": error_message,
+                }
             )
 
             logger.error(f"Webhook '{webhook.name}' delivery failed: {error_message}")
@@ -144,7 +151,11 @@ def send_webhook_notification(
             webhook.record_failure(error_message)
 
             results["failed"].append(
-                {"webhook_id": webhook.id, "webhook_name": webhook.name, "error": error_message}
+                {
+                    "webhook_id": webhook.id,
+                    "webhook_name": webhook.name,
+                    "error": error_message,
+                }
             )
 
             logger.exception(f"Unexpected error delivering webhook '{webhook.name}': {e}")
@@ -189,7 +200,7 @@ def trigger_reorder_request_webhook(request_id: int) -> Dict[str, Any]:
             "requested_by": request.requested_by,
             "requested_at": request.requested_at.isoformat(),
             "request_notes": request.request_notes,
-            "estimated_cost": float(request.estimated_cost) if request.estimated_cost else None,
+            "estimated_cost": (float(request.estimated_cost) if request.estimated_cost else None),
             # Admin URL for viewing the request
             "admin_url": f"/admin/reorder_queue/reorderrequest/{request.id}/",
         },
@@ -366,7 +377,7 @@ def send_asset_problem_webhook(problem_id: str) -> Dict[str, Any]:
             "asset_id": str(problem.asset.id),
             "asset_name": problem.asset.name,
             "asset_tag": problem.asset.asset_tag,
-            "asset_location": problem.asset.location.name if problem.asset.location else None,
+            "asset_location": (problem.asset.location.name if problem.asset.location else None),
             "status": problem.status,
             "reported_by": problem.reported_by,
             "description": problem.description,

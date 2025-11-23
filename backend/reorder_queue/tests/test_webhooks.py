@@ -73,7 +73,10 @@ class TestWebHookModel(TestCase):
 
     def test_webhook_headers_field(self):
         """Test webhook headers JSON field."""
-        headers = {"Authorization": "Bearer token123", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": "Bearer token123",
+            "Content-Type": "application/json",
+        }
         webhook = WebHook.objects.create(
             name="Webhook with headers",
             url="https://api.example.com/hook",

@@ -60,7 +60,8 @@ class DonationViewSet(viewsets.ModelViewSet):
 
         if not items.exists():
             return Response(
-                {"error": "No items in this donation"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "No items in this donation"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Generate QR codes for items that don't have them
@@ -162,7 +163,11 @@ class DonationViewSet(viewsets.ModelViewSet):
             donation.tax_receipt_number = str(tax_receipt.serial_number)
             donation.tax_receipt_issued_at = tax_receipt.issued_date
             donation.save(
-                update_fields=["tax_receipt_issued", "tax_receipt_number", "tax_receipt_issued_at"]
+                update_fields=[
+                    "tax_receipt_issued",
+                    "tax_receipt_number",
+                    "tax_receipt_issued_at",
+                ]
             )
 
             # Send email to donor
@@ -448,7 +453,7 @@ def upload_signature(request):
         return Response(
             {
                 "message": "Signature uploaded successfully",
-                "signature_url": user.signature_image.url if user.signature_image else None,
+                "signature_url": (user.signature_image.url if user.signature_image else None),
             },
             status=status.HTTP_201_CREATED,
         )

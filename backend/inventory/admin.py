@@ -205,10 +205,20 @@ class ItemSupplierAdmin(admin.ModelAdmin):
                 )
             },
         ),
-        ("Product Details", {"fields": ("package_upc", "unit_upc", "quantity_per_package")}),
+        (
+            "Product Details",
+            {"fields": ("package_upc", "unit_upc", "quantity_per_package")},
+        ),
         (
             "Package Dimensions",
-            {"fields": ("package_height", "package_width", "package_length", "package_weight")},
+            {
+                "fields": (
+                    "package_height",
+                    "package_width",
+                    "package_length",
+                    "package_weight",
+                )
+            },
         ),
         (
             "Calculated Dimensions",
@@ -379,7 +389,10 @@ class InventoryItemAdmin(admin.ModelAdmin):
             },
         ),
         ("Images", {"fields": ("image", "image_url", "thumbnail", "qr_code")}),
-        ("Stock Information", {"fields": ("current_stock", "minimum_stock", "reorder_quantity")}),
+        (
+            "Stock Information",
+            {"fields": ("current_stock", "minimum_stock", "reorder_quantity")},
+        ),
         (
             "Case-Based Reordering",
             {

@@ -213,6 +213,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             "generate_qr",
             "qr_code",
             "checklists",
+            "scan",
         ]:
             return [AllowAny()]
         # Admin actions (create, update, delete)
@@ -519,6 +520,25 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                     checklists = checklists.filter(is_public=True)
 
         serializer = ChecklistListSerializer(checklists, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], permission_classes=[AllowAny])
+    def scan(self, request, pk=None):
+        """
+        Handle inventory item QR code scan.
+        Updates last_scanned_at timestamp and returns item information.
+        Anyone can scan (AllowAny).
+        """
+        from django.utils import timezone
+
+        item = self.get_object()
+
+        # Update last scanned timestamp
+        item.last_scanned_at = timezone.now()
+        item.save(update_fields=["last_scanned_at"])
+
+        # Return item data
+        serializer = self.get_serializer(item)
         return Response(serializer.data)
 
     @action(
@@ -1818,8 +1838,11 @@ def lookup_by_code(request):
     # Check InventoryItem
     try:
         item = InventoryItem.objects.get(access_code=code)
-        # For items, we don't have a scan endpoint, but we could log usage if needed
-        # The scan page itself will handle any logging
+        # Log the scan (same as QR code scanning) - update last_scanned_at
+        from django.utils import timezone
+
+        item.last_scanned_at = timezone.now()
+        item.save(update_fields=["last_scanned_at"])
 
         return Response(
             {

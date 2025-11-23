@@ -1312,13 +1312,12 @@ class AnalyticsViewSet(viewsets.ViewSet):
         overdue_maintenance_count = len(overdue_asset_ids)
 
         # 4. QR Code Scans in last 7 days with daily breakdown
-        # Note: We count unique assets scanned per day (since last_scanned_at only stores the most recent scan time)
-        # If an asset is scanned multiple times in a day, we only count it once for that day
+        # Note: We count unique assets and inventory items scanned per day
+        # If an item is scanned multiple times in a day, we only count it once for that day
         seven_days_ago = timezone.now() - timedelta(days=7)
 
         # Get all assets scanned in last 7 days, grouped by date
-        # Count distinct assets scanned each day
-        scans_by_date = (
+        asset_scans_by_date = (
             Asset.objects.filter(last_scanned_at__gte=seven_days_ago)
             .exclude(last_scanned_at__isnull=True)
             .annotate(scan_date=TruncDate("last_scanned_at"))
@@ -1327,10 +1326,24 @@ class AnalyticsViewSet(viewsets.ViewSet):
             .order_by("scan_date")
         )
 
-        # Create a complete 7-day array with zeros for days with no scans
+        # Get all inventory items scanned in last 7 days, grouped by date
+        from inventory.models import InventoryItem
+
+        item_scans_by_date = (
+            InventoryItem.objects.filter(last_scanned_at__gte=seven_days_ago)
+            .exclude(last_scanned_at__isnull=True)
+            .annotate(scan_date=TruncDate("last_scanned_at"))
+            .values("scan_date")
+            .annotate(count=Count("id", distinct=True))
+            .order_by("scan_date")
+        )
+
+        # Combine asset and inventory item scans by date
         today = timezone.now().date()
         scan_data = {}
-        for scan in scans_by_date:
+
+        # Process asset scans
+        for scan in asset_scans_by_date:
             scan_date = scan["scan_date"]
             # TruncDate returns a date object, but handle both cases
             if isinstance(scan_date, str):
@@ -1339,11 +1352,25 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 try:
                     scan_date = datetime.fromisoformat(scan_date).date()
                 except (ValueError, AttributeError):
-                    # If parsing fails, try to get the date from the scan object
                     continue
             elif hasattr(scan_date, "date"):
                 scan_date = scan_date.date()
-            scan_data[scan_date] = scan["count"]
+            scan_data[scan_date] = scan_data.get(scan_date, 0) + scan["count"]
+
+        # Process inventory item scans
+        for scan in item_scans_by_date:
+            scan_date = scan["scan_date"]
+            # TruncDate returns a date object, but handle both cases
+            if isinstance(scan_date, str):
+                from datetime import datetime
+
+                try:
+                    scan_date = datetime.fromisoformat(scan_date).date()
+                except (ValueError, AttributeError):
+                    continue
+            elif hasattr(scan_date, "date"):
+                scan_date = scan_date.date()
+            scan_data[scan_date] = scan_data.get(scan_date, 0) + scan["count"]
 
         # Build array for last 7 days (including today)
         qr_scans_by_day = []

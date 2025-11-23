@@ -167,7 +167,7 @@ const LogisticsDashboard: React.FC = () => {
     const logo = logoRef.current;
     const logoWidth = 120;
     const logoHeight = 60;
-    const speed = 1.5;
+    const speed = 2;
 
     const animate = () => {
       const container = logo.parentElement;
@@ -176,6 +176,12 @@ const LogisticsDashboard: React.FC = () => {
       const containerRect = container.getBoundingClientRect();
       const maxX = containerRect.width - logoWidth;
       const maxY = containerRect.height - logoHeight;
+
+      // Skip if container not properly sized
+      if (maxX <= 0 || maxY <= 0) {
+        animationFrameRef.current = requestAnimationFrame(animate);
+        return;
+      }
 
       // Update position
       positionRef.current.x += velocityRef.current.x * speed;
@@ -205,25 +211,39 @@ const LogisticsDashboard: React.FC = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
     };
 
-    // Initialize random position and velocity
-    const container = logo.parentElement;
-    if (container) {
+    // Initialize random position and velocity - wait for container to be sized
+    const initializeAnimation = () => {
+      const container = logo.parentElement;
+      if (!container) return;
+
       const containerRect = container.getBoundingClientRect();
       const maxX = containerRect.width - logoWidth;
       const maxY = containerRect.height - logoHeight;
+      
+      // Wait for container to be properly sized
+      if (maxX <= 0 || maxY <= 0) {
+        setTimeout(initializeAnimation, 50);
+        return;
+      }
       
       positionRef.current.x = Math.max(0, Math.min(maxX, Math.random() * maxX));
       positionRef.current.y = Math.max(0, Math.min(maxY, Math.random() * maxY));
       velocityRef.current.x = Math.random() > 0.5 ? speed : -speed;
       velocityRef.current.y = Math.random() > 0.5 ? speed : -speed;
       
-      // Start animation after a short delay to ensure container is sized
-      setTimeout(() => {
-        animate();
-      }, 100);
-    }
+      // Set initial position
+      logo.style.left = `${positionRef.current.x}px`;
+      logo.style.top = `${positionRef.current.y}px`;
+      
+      // Start animation
+      animate();
+    };
+
+    // Start initialization after a short delay to ensure DOM is ready
+    const timeoutId = setTimeout(initializeAnimation, 200);
 
     return () => {
+      clearTimeout(timeoutId);
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }

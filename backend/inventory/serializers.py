@@ -214,6 +214,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "has_complete_nfpa_data",
             "is_active",
             "is_requestable",
+            "last_scanned_at",
             "notes",
             "needs_reorder",
             "total_value",

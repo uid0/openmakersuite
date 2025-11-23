@@ -256,6 +256,11 @@ class InventoryItem(models.Model):
         null=True,
         help_text="Unique 6-character code for manual entry (excludes I, 0, O, 1, L)",
     )
+    last_scanned_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date and time when this inventory item was last scanned via QR code",
+    )
 
     # Hazardous Materials Information
     is_hazardous = models.BooleanField(

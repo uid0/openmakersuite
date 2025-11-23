@@ -11,6 +11,12 @@ Open Maker Suite isn't just one component or one application. It's a few things:
 1. A device management system that allows you to enable or disable a device via MQTT, along with disabling a device for safety or maintenance reasons.
 1. A QR code reporting system that allows members to report issues with restrooms, lobbies, or equipment.
 
+### Screenshots
+
+<img width="3012" height="1546" alt="2025-11-23_16-41" src="https://github.com/user-attachments/assets/62636aa0-24e5-4480-aac4-666c06b8a424" />
+
+
+
 ## Features
 
 - **📦 Inventory Management**: Track items, quantities, locations, and suppliers

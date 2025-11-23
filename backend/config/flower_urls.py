@@ -10,3 +10,4 @@ urlpatterns = [
     re_path(r"^.*$", flower_proxy, name="flower-proxy"),
 ]
 
+

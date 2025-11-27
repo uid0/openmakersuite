@@ -84,14 +84,32 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     // Handle 401 errors (token expired) with automatic refresh
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Skip refresh logic for:
+    // - The refresh endpoint itself (to avoid infinite loops)
+    // - Public endpoints that don't require authentication
+    const isRefreshEndpoint = originalRequest?.url?.includes('/auth/refresh/');
+    const isPublicEndpoint = originalRequest?.url?.includes('/reorders/purchase-orders/') ||
+                            originalRequest?.url?.includes('/reorders/analytics/transparency/') ||
+                            originalRequest?.url?.includes('/reorders/analytics/logistics_dashboard/');
+    
+    // Only attempt refresh if we have a valid error response with 401 status
+    // and we haven't already retried this request
+    if (
+      error.response?.status === 401 && 
+      !originalRequest._retry && 
+      !isRefreshEndpoint &&
+      !isPublicEndpoint &&
+      originalRequest
+    ) {
       if (isRefreshing) {
         // If already refreshing, queue this request
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
           .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
+            if (token && originalRequest.headers) {
+              originalRequest.headers.Authorization = `Bearer ${token}`;
+            }
             return api(originalRequest);
           })
           .catch((err) => {
@@ -115,14 +133,27 @@ api.interceptors.response.use(
       }
 
       try {
-        const response = await api.post('/auth/refresh/', { refresh: refreshToken });
-        const { access } = response.data;
+        // Use a direct axios call to avoid triggering the interceptor again
+        const refreshResponse = await axios.post(`${API_BASE_URL}/auth/refresh/`, { refresh: refreshToken }, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        const { access } = refreshResponse.data;
         localStorage.setItem('token', access);
+        
+        // Update the original request headers
+        if (!originalRequest.headers) {
+          originalRequest.headers = {};
+        }
         originalRequest.headers.Authorization = `Bearer ${access}`;
+        
         isRefreshing = false;
         processQueue(null, access);
+        
+        // Retry the original request with the new token
         return api(originalRequest);
-      } catch (refreshError) {
+      } catch (refreshError: any) {
         // Refresh failed, clear auth and reject
         localStorage.removeItem('token');
         localStorage.removeItem('refresh_token');
@@ -130,7 +161,8 @@ api.interceptors.response.use(
         localStorage.removeItem('is_staff');
         isRefreshing = false;
         processQueue(refreshError, null);
-        return Promise.reject(refreshError);
+        // Return the original error if refresh failed, as it's more informative
+        return Promise.reject(error);
       }
     }
 

@@ -28,8 +28,14 @@ const AssetList: React.FC = () => {
       const response = await assetsAPI.listAssets();
       console.log('AssetList: API response received:', response.data);
       setAssets(response.data.results);
-    } catch (err) {
+    } catch (err: any) {
       console.error('AssetList: Error loading assets:', err);
+      console.error('AssetList: Error details:', {
+        status: err?.response?.status,
+        statusText: err?.response?.statusText,
+        data: err?.response?.data,
+        message: err?.message,
+      });
     } finally {
       setLoading(false);
     }

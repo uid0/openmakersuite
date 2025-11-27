@@ -41,7 +41,13 @@ const PurchaseOrderListPage: React.FC = () => {
       setOrders(response.data.results || []);
     } catch (err: any) {
       console.error('Error loading purchase orders:', err);
-      setError(err.response?.data?.error || 'Failed to load purchase orders');
+      console.error('Error details:', {
+        status: err?.response?.status,
+        statusText: err?.response?.statusText,
+        data: err?.response?.data,
+        message: err?.message,
+      });
+      setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Failed to load purchase orders');
     } finally {
       setLoading(false);
     }

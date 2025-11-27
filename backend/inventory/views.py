@@ -881,15 +881,21 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         # Filter by SIG ownership for SIG admins
         user = self.request.user
+
+        # Superusers and staff can see all assets (no filtering applied)
         if user.is_authenticated and not (user.is_superuser or user.is_staff):
             from membership.utils import get_user_managed_sigs, is_logistics_member
 
             # Logistics can see everything
             if not is_logistics_member(user):
                 # SIG admins can only see assets owned by their SIGs
+                # Regular users (non-SIG admins) can see all assets including space-owned
                 user_sigs = get_user_managed_sigs(user)
                 if user_sigs.exists():
+                    # SIG admin: only show assets owned by their SIGs
                     queryset = queryset.filter(owning_group__in=user_sigs)
+                # If user_sigs doesn't exist, user is a regular authenticated user
+                # and should see all assets (no filtering needed)
 
         # Filter by category if specified
         category = self.request.query_params.get("category")

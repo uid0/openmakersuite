@@ -1,6 +1,7 @@
 """
 Custom JWT token classes with user-based expiration times.
 """
+
 from datetime import timedelta
 
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
@@ -10,6 +11,7 @@ class CustomAccessToken(AccessToken):
     """
     Custom access token with user-based expiration.
     """
+
     pass  # Expiration will be set dynamically
 
 
@@ -19,9 +21,9 @@ class CustomRefreshToken(RefreshToken):
     - Superusers: 20 minutes of inactivity
     - Regular users: 7 days of inactivity
     """
-    
+
     access_token_class = CustomAccessToken
-    
+
     def __init__(self, token=None, verify=True, user=None):
         """
         Initialize token with user-specific expiration.
@@ -47,7 +49,7 @@ class CustomRefreshToken(RefreshToken):
         access["username"] = self.get("username", "")
         access["is_superuser"] = self.get("is_superuser", False)
         access["is_staff"] = self.get("is_staff", False)
-        
+
         # Set access token lifetime based on user type
         if self.get("is_superuser", False):
             # Superusers: 20 minutes
@@ -55,7 +57,7 @@ class CustomRefreshToken(RefreshToken):
         else:
             # Regular users: 7 days
             access.lifetime = timedelta(days=7)
-        
+
         return access
 
     @classmethod
@@ -70,4 +72,3 @@ class CustomRefreshToken(RefreshToken):
         token["is_staff"] = user.is_staff
 
         return token
-

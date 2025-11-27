@@ -358,11 +358,11 @@ class TaxReceiptPDFGenerator:
             elif signature_user.first_name or signature_user.last_name:
                 # Fall back to combining first and last name if get_full_name() returns empty
                 signature_name = f"{signature_user.first_name} {signature_user.last_name}".strip()
-        
+
         # Use site settings name if no signature user name available
         if not signature_name and site_settings.authorized_signature_name:
             signature_name = site_settings.authorized_signature_name
-        
+
         if signature_name:
             pdf_canvas.drawString(self.MARGIN, name_y, signature_name)
         if site_settings.authorized_signature_title:

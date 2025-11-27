@@ -12,7 +12,8 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken
+
+from config.tokens import CustomRefreshToken
 
 
 @api_view(["POST"])
@@ -56,7 +57,7 @@ def register_user(request):
         user.save()
 
         # Generate tokens for immediate login
-        refresh = RefreshToken.for_user(user)
+        refresh = CustomRefreshToken.for_user(user)
         access = refresh.access_token
 
         return Response(
@@ -108,7 +109,7 @@ def login_user(request):
         )
 
     # Generate tokens
-    refresh = RefreshToken.for_user(user)
+    refresh = CustomRefreshToken.for_user(user)
     access = refresh.access_token
 
     return Response(
@@ -133,7 +134,7 @@ def refresh_token(request):
         return Response({"detail": "Refresh token is required"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        refresh = RefreshToken(refresh_token)
+        refresh = CustomRefreshToken(refresh_token)
         access = refresh.access_token
 
         return Response(

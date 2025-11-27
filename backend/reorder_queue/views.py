@@ -1068,7 +1068,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         return Response(trend_data)
 
-    @action(detail=False, methods=["get"], permission_classes=[AllowAny])
+    @action(detail=False, methods=["get"], permission_classes=[AllowAny], authentication_classes=[])
     def transparency(self, request):
         """
         Public transparency endpoint showing financial information about orders.
@@ -1241,7 +1241,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    @action(detail=False, methods=["get"], permission_classes=[AllowAny])
+    @action(detail=False, methods=["get"], permission_classes=[AllowAny], authentication_classes=[])
     def logistics_dashboard(self, request):
         """
         Public endpoint providing data for the logistics TV dashboard.

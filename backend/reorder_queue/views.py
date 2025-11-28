@@ -51,8 +51,10 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
     authentication_classes = (JWTAuthentication,)  # Only JWT, no session auth needed
     queryset = (
-        ReorderRequest.objects.select_related("item", "reviewed_by")
-        .prefetch_related("item__item_suppliers__supplier")
+        ReorderRequest.objects.select_related(
+            "item", "item__category", "item__location", "reviewed_by"
+        )
+        .prefetch_related("item__item_suppliers__supplier", "item__item_suppliers")
         .all()
     )
 
@@ -104,23 +106,47 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def pending(self, request):
         """Get all pending reorder requests."""
-        # Return all pending requests without pagination for admin dashboard
-        pending = self.queryset.filter(status="pending").order_by("-priority", "requested_at")
+        try:
+            # Return all pending requests without pagination for admin dashboard
+            # Use the base queryset to ensure all prefetching is maintained
+            pending = self.queryset.filter(status="pending").order_by("-priority", "requested_at")
 
-        # Filter by SIG ownership for SIG admins
-        user = request.user
-        if user.is_authenticated and not (user.is_superuser or user.is_staff):
-            from membership.utils import get_user_managed_sigs, is_logistics_member
+            # Filter by SIG ownership for SIG admins
+            user = request.user
+            if user.is_authenticated and not (user.is_superuser or user.is_staff):
+                from membership.utils import get_user_managed_sigs, is_logistics_member
 
-            # Logistics can see everything
-            if not is_logistics_member(user):
-                # SIG admins can only see requests for their SIG's inventory
-                user_sigs = get_user_managed_sigs(user)
-                if user_sigs.exists():
-                    pending = pending.filter(item__owning_group__in=user_sigs)
+                # Logistics can see everything
+                if not is_logistics_member(user):
+                    # SIG admins can only see requests for their SIG's inventory
+                    user_sigs = get_user_managed_sigs(user)
+                    if user_sigs.exists():
+                        pending = pending.filter(item__owning_group__in=user_sigs)
 
-        serializer = self.get_serializer(pending, many=True)
-        return Response(serializer.data)
+            serializer = self.get_serializer(pending, many=True)
+            return Response(serializer.data)
+        except AttributeError as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.exception(
+                "AttributeError in pending endpoint (likely missing supplier data): %s", str(e)
+            )
+            return Response(
+                {
+                    "detail": "Error serializing data. Some items may be missing supplier information."
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.exception("Error in pending endpoint: %s", str(e))
+            return Response(
+                {"detail": f"An error occurred: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
     def sig_pending(self, request):

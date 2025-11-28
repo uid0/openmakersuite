@@ -135,8 +135,14 @@ class ItemSupplierDetailSerializer(ItemSupplierSerializer):
 
 class InventoryItemSerializer(serializers.ModelSerializer):
     # Primary supplier fields (for backward compatibility)
-    supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+    supplier_name = serializers.SerializerMethodField()
     category_name = serializers.CharField(source="category.name", read_only=True)
+
+    def get_supplier_name(self, obj):
+        """Safely get supplier name, handling None values."""
+        supplier = obj.supplier if hasattr(obj, "supplier") else None
+        return supplier.name if supplier else None
+
     needs_reorder = serializers.BooleanField(read_only=True)
     total_value = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     image = serializers.ImageField(read_only=True)

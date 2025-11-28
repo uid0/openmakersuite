@@ -98,6 +98,14 @@ class TaxReceiptPDFGenerator:
         # Get organization settings
         site_settings = SiteSettings.get()
 
+        # Track pages - we'll count as we go
+        self.current_page = 1
+        self.total_pages = 1  # Will be updated as we add pages
+        self.min_y_for_content = (
+            self.MARGIN + 100
+        )  # Minimum Y position for content (leave room for footer)
+        self.tax_receipt = tax_receipt  # Store for footer access
+
         # Draw watermark if this is a copy
         if self.is_copy:
             self._draw_watermark(pdf_canvas, "COPY")
@@ -117,21 +125,51 @@ class TaxReceiptPDFGenerator:
         # Draw donation details
         y_position = self._draw_donation_details(pdf_canvas, donation, tax_receipt, y_position)
 
-        # Draw items list
+        # Draw items list (with page breaks)
         y_position = self._draw_items_list(pdf_canvas, donation, y_position)
 
         # Draw tax language
         y_position = self._draw_tax_language(pdf_canvas, y_position)
 
-        # Draw signature
+        # Draw signature (on last page)
         y_position = self._draw_signature(pdf_canvas, site_settings, signature_user, y_position)
 
-        # Draw footer
-        self._draw_footer(pdf_canvas, tax_receipt)
+        # Draw footer on current page
+        self._draw_footer(pdf_canvas)
 
         pdf_canvas.save()
         buffer.seek(0)
-        return buffer.getvalue()
+        pdf_bytes = buffer.getvalue()
+
+        # If we have multiple pages, we need to regenerate with correct total page count
+        # ReportLab doesn't let us easily update previous pages, so we do a two-pass
+        if self.total_pages > 1:
+            # Store the total for the second pass
+            final_total = self.total_pages
+            buffer = BytesIO()
+            pdf_canvas = canvas.Canvas(buffer, pagesize=letter)
+            pdf_canvas.setTitle(f"Tax Receipt {tax_receipt.serial_number}")
+            pdf_canvas.setSubject("501(c)(3) Donation Tax Receipt")
+            self.current_page = 1
+            self.total_pages = final_total  # Use the final count from first pass
+
+            # Redraw everything with correct page numbers
+            if self.is_copy:
+                self._draw_watermark(pdf_canvas, "COPY")
+            y_position = self._draw_header(pdf_canvas, site_settings)
+            y_position = self._draw_title(pdf_canvas, y_position)
+            y_position = self._draw_organization_info(pdf_canvas, site_settings, y_position)
+            y_position = self._draw_donor_info(pdf_canvas, donation, y_position)
+            y_position = self._draw_donation_details(pdf_canvas, donation, tax_receipt, y_position)
+            y_position = self._draw_items_list(pdf_canvas, donation, y_position)
+            y_position = self._draw_tax_language(pdf_canvas, y_position)
+            y_position = self._draw_signature(pdf_canvas, site_settings, signature_user, y_position)
+            self._draw_footer(pdf_canvas)
+            pdf_canvas.save()
+            buffer.seek(0)
+            pdf_bytes = buffer.getvalue()
+
+        return pdf_bytes
 
     def _draw_watermark(self, pdf_canvas: canvas.Canvas, text: str) -> None:
         """Draw watermark on the page."""
@@ -247,7 +285,7 @@ class TaxReceiptPDFGenerator:
         return y - 10
 
     def _draw_items_list(self, pdf_canvas: canvas.Canvas, donation: Donation, y: float) -> float:
-        """Draw list of donated items."""
+        """Draw list of donated items with page break support."""
         items = donation.items.all()
         if not items.exists():
             return y
@@ -259,10 +297,30 @@ class TaxReceiptPDFGenerator:
 
         pdf_canvas.setFont("Helvetica", 9)
         for item in items:
-            # Item name and quantity
+            # Check if we need a new page before drawing this item
+            estimated_height = 12  # Item name
+            if item.description:
+                desc_lines = self._wrap_text(item.description, 80)
+                estimated_height += len(desc_lines) * 10
+            estimated_height += 3  # Space between items
+
+            if y - estimated_height < self.min_y_for_content:
+                # Need new page
+                self._draw_footer(pdf_canvas)  # Draw footer before page break
+                pdf_canvas.showPage()
+                self.current_page += 1
+                self.total_pages = max(self.total_pages, self.current_page)
+                if self.is_copy:
+                    self._draw_watermark(pdf_canvas, "COPY")
+                y = self.PAGE_HEIGHT - self.MARGIN - 50
+                # Redraw section header on new page
+                pdf_canvas.setFont("Helvetica-Bold", 11)
+                pdf_canvas.drawString(self.MARGIN, y, "ITEMS DONATED (continued):")
+                y -= 15
+                pdf_canvas.setFont("Helvetica", 9)
+
+            # Item name (no quantity)
             item_text = f"• {item.name}"
-            if item.quantity > 1:
-                item_text += f" (Quantity: {item.quantity})"
             pdf_canvas.drawString(self.MARGIN + 10, y, item_text)
             y -= 12
 
@@ -271,6 +329,16 @@ class TaxReceiptPDFGenerator:
                 # Wrap long descriptions
                 desc_lines = self._wrap_text(item.description, 80)
                 for line in desc_lines:
+                    if y < self.min_y_for_content:
+                        # Need new page mid-description
+                        self._draw_footer(pdf_canvas)
+                        pdf_canvas.showPage()
+                        self.current_page += 1
+                        self.total_pages = max(self.total_pages, self.current_page)
+                        if self.is_copy:
+                            self._draw_watermark(pdf_canvas, "COPY")
+                        y = self.PAGE_HEIGHT - self.MARGIN - 50
+                        pdf_canvas.setFont("Helvetica", 9)
                     pdf_canvas.drawString(self.MARGIN + 20, y, line)
                     y -= 10
 
@@ -310,6 +378,17 @@ class TaxReceiptPDFGenerator:
         y: float,
     ) -> float:
         """Draw signature section."""
+        # Check if we need a new page for signature
+        estimated_height = 10 + 30 + 20 + 12  # Spacing + line + name + title
+        if y - estimated_height < self.min_y_for_content:
+            self._draw_footer(pdf_canvas)
+            pdf_canvas.showPage()
+            self.current_page += 1
+            self.total_pages = max(self.total_pages, self.current_page)
+            if self.is_copy:
+                self._draw_watermark(pdf_canvas, "COPY")
+            y = self.PAGE_HEIGHT - self.MARGIN - 50
+
         y -= 10
         pdf_canvas.setFont("Helvetica", 10)
 
@@ -373,10 +452,16 @@ class TaxReceiptPDFGenerator:
 
         return name_y - 30
 
-    def _draw_footer(self, pdf_canvas: canvas.Canvas, tax_receipt: TaxReceipt) -> None:
-        """Draw footer with receipt number."""
+    def _draw_footer(self, pdf_canvas: canvas.Canvas) -> None:
+        """Draw footer with receipt number and page numbers."""
         pdf_canvas.setFont("Helvetica", 8)
-        footer_text = f"Receipt Serial Number: {tax_receipt.serial_number} | Issued: {tax_receipt.issued_date.strftime('%Y-%m-%d')}"
+
+        footer_text = f"Receipt Serial Number: {self.tax_receipt.serial_number} | Issued: {self.tax_receipt.issued_date.strftime('%Y-%m-%d')}"
+
+        # Add page numbers if we have multiple pages
+        if self.total_pages > 1:
+            footer_text += f" | Page {self.current_page} of {self.total_pages}"
+
         pdf_canvas.drawCentredString(self.PAGE_WIDTH / 2, 30, footer_text)
 
     def _wrap_text(self, text: str, max_chars: int) -> list[str]:

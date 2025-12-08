@@ -2,7 +2,7 @@
  * Public Purchase Order List Page
  * Shows all active and settled purchase orders for transparency
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderListPage.css';
@@ -28,11 +28,7 @@ const PurchaseOrderListPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
 
-  useEffect(() => {
-    loadOrders();
-  }, [statusFilter]);
-
-  const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -51,7 +47,11 @@ const PurchaseOrderListPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter]);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return '—';
@@ -114,7 +114,7 @@ const PurchaseOrderListPage: React.FC = () => {
           </p>
         </div>
         <div className="po-list-actions">
-          <Link to="/transparency" className="transparency-link">
+          <Link to="/inventory/transparency" className="transparency-link">
             View Financial Transparency →
           </Link>
         </div>
@@ -212,7 +212,7 @@ const PurchaseOrderListPage: React.FC = () => {
                   </td>
                   <td>
                     <Link
-                      to={`/purchase-order/${order.id}`}
+                      to={`/purchasing/orders/${order.id}`}
                       className="view-order-link"
                     >
                       View Details →

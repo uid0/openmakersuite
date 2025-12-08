@@ -2,7 +2,7 @@
  * SIG Dashboard
  * Main dashboard for SIG admins to manage their SIG's resources
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { assetsAPI, inventoryAPI, reorderAPI, sigAPI } from '../services/api';
 import { Asset, InventoryItem, ReorderRequest, SIG } from '../types';
@@ -36,12 +36,6 @@ const SIGDashboard: React.FC = () => {
     }
   }, [sigId, sigs]);
 
-  useEffect(() => {
-    if (selectedSIG) {
-      loadSIGData();
-    }
-  }, [selectedSIG, activeTab]);
-
   const loadSIGs = async () => {
     try {
       setLoading(true);
@@ -54,7 +48,7 @@ const SIGDashboard: React.FC = () => {
     }
   };
 
-  const loadSIGData = async () => {
+  const loadSIGData = useCallback(async () => {
     if (!selectedSIG) return;
 
     try {
@@ -74,7 +68,13 @@ const SIGDashboard: React.FC = () => {
     } catch (error) {
       console.error(`Error loading ${activeTab}:`, error);
     }
-  };
+  }, [selectedSIG, activeTab]);
+
+  useEffect(() => {
+    if (selectedSIG) {
+      loadSIGData();
+    }
+  }, [selectedSIG, activeTab, loadSIGData]);
 
   if (loading) {
     return <div className="sig-dashboard-loading">Loading SIGs...</div>;

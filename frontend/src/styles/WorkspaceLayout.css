@@ -1,0 +1,56 @@
+/**
+ * Workspace Layout Styles
+ */
+.workspace-layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: #f8f9fa;
+}
+
+.workspace-layout.no-sidebar {
+  display: block;
+}
+
+.workspace-content {
+  flex: 1;
+  margin-left: 260px;
+  display: flex;
+  flex-direction: column;
+  transition: margin-left 0.3s ease;
+  min-height: 100vh;
+}
+
+.sidebar.collapsed ~ .workspace-content {
+  margin-left: 60px;
+}
+
+.workspace-header {
+  background-color: #fff;
+  border-bottom: 1px solid #e0e0e0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.workspace-main {
+  flex: 1;
+  padding: 20px;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+@media (max-width: 768px) {
+  .workspace-content {
+    margin-left: 0;
+  }
+
+  .sidebar.collapsed ~ .workspace-content {
+    margin-left: 0;
+  }
+
+  .workspace-main {
+    padding: 12px;
+  }
+}
+

@@ -90,11 +90,16 @@ describe('SIGDashboard', () => {
 
     render(<MockedSIGDashboard />);
 
+    // Wait for SIG Dashboard to appear
     await waitFor(() => {
       expect(screen.getByText('SIG Dashboard')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Test SIG')).toBeInTheDocument();
+    // Wait for the selected SIG to be set and overview tab to show the SIG name
+    // The name appears in the overview tab as an h2
+    await waitFor(() => {
+      expect(screen.getByText('Test SIG')).toBeInTheDocument();
+    }, { timeout: 3000 });
   });
 
   it('should display overview stats', async () => {

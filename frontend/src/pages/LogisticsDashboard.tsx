@@ -116,7 +116,7 @@ const LogisticsDashboard: React.FC = () => {
     }, 100);
     
     return () => clearInterval(progressInterval);
-  }, [data?.last_updated]);
+  }, [data]);
 
   // Wake lock for Fire TV
   useEffect(() => {

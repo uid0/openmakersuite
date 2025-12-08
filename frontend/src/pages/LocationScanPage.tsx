@@ -63,13 +63,6 @@ const LocationScanPage: React.FC = () => {
     }
   }, [locationId]);
 
-  useEffect(() => {
-    if (locationId) {
-      loadLocation();
-      loadChecklists();
-    }
-  }, [locationId, loadLocation]);
-
   const loadChecklists = useCallback(async () => {
     if (!locationId) return;
     try {
@@ -79,6 +72,13 @@ const LocationScanPage: React.FC = () => {
       console.error('Error loading checklists:', err);
     }
   }, [locationId]);
+
+  useEffect(() => {
+    if (locationId) {
+      loadLocation();
+      loadChecklists();
+    }
+  }, [locationId, loadLocation, loadChecklists]);
 
   const handleStartChecklist = async (checklistId: string) => {
     try {
@@ -411,11 +411,7 @@ const LocationTasksTab: React.FC<{ locationId: string }> = ({ locationId }) => {
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadTasks();
-  }, [locationId]);
-
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     try {
       setLoading(true);
       const response = await locationCheckinAPI.getTasks({ location: locationId });
@@ -425,7 +421,11 @@ const LocationTasksTab: React.FC<{ locationId: string }> = ({ locationId }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [locationId]);
+
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
 
   const handleCompleteTask = async (taskId: string) => {
     try {

@@ -36,7 +36,7 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     loadRequests();
     loadNotCheckedInAssets();
-  }, [loadRequests]);
+  }, [loadRequests, loadNotCheckedInAssets]);
 
   const loadNotCheckedInAssets = useCallback(async () => {
     try {

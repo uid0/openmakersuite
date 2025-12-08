@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings, TaxReceipt } from '../types';
+import { Asset, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings, Supplier, TaxReceipt } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -245,6 +245,15 @@ export const inventoryAPI = {
 
   getItemChecklists: (id: string) =>
     api.get<Checklist[]>(`/inventory/items/${id}/checklists/`),
+
+  listLocations: () =>
+    api.get<{ results: Array<{ id: number; name: string }> }>('/inventory/locations/'),
+
+  listCategories: () =>
+    api.get<{ results: Category[] }>('/inventory/categories/'),
+
+  listSuppliers: () =>
+    api.get<{ results: Supplier[] }>('/inventory/suppliers/'),
 };
 
 // Assets API

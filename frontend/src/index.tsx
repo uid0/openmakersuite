@@ -1,8 +1,12 @@
+import { MantineProvider } from '@mantine/core';
+import '@mantine/core/styles.css';
+import '@mantine/dates/styles.css';
+import '@mantine/dropzone/styles.css';
+import * as Sentry from '@sentry/react';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import * as Sentry from '@sentry/react';
-import './styles/index.css';
 import App from './App';
+import './styles/index.css';
 
 // Initialize Sentry
 const sentryDsn = process.env.REACT_APP_SENTRY_DSN;
@@ -34,6 +38,8 @@ const root = ReactDOM.createRoot(
 
 root.render(
   <React.StrictMode>
-    <App />
+    <MantineProvider>
+      <App />
+    </MantineProvider>
   </React.StrictMode>
 );

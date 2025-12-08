@@ -2,7 +2,7 @@
  * Asset Detail Modal Component
  * Displays full details about an asset including cost, maintenance, and other information
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { assetsAPI } from '../services/api';
 import { Asset } from '../types';
 import '../styles/AssetDetailModal.css';
@@ -18,16 +18,7 @@ const AssetDetailModal: React.FC<AssetDetailModalProps> = ({ assetId, isOpen, on
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen && assetId) {
-      loadAssetDetails();
-    } else {
-      setAsset(null);
-      setError(null);
-    }
-  }, [isOpen, assetId]);
-
-  const loadAssetDetails = async () => {
+  const loadAssetDetails = useCallback(async () => {
     if (!assetId) return;
 
     try {
@@ -41,7 +32,16 @@ const AssetDetailModal: React.FC<AssetDetailModalProps> = ({ assetId, isOpen, on
     } finally {
       setLoading(false);
     }
-  };
+  }, [assetId]);
+
+  useEffect(() => {
+    if (isOpen && assetId) {
+      loadAssetDetails();
+    } else {
+      setAsset(null);
+      setError(null);
+    }
+  }, [isOpen, assetId, loadAssetDetails]);
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return 'N/A';

@@ -40,7 +40,7 @@ const HomePage: React.FC = () => {
           </p>
         </div>
 
-        <div className="feature-card" onClick={() => navigate('/orderadmin')}>
+        <div className="feature-card" onClick={() => navigate('/inventory/admin')}>
           <div className="icon">⚙️</div>
           <h2>{isLoggedIn ? 'Admin Dashboard' : 'Admin Dashboard'}</h2>
           <p>
@@ -66,7 +66,7 @@ const HomePage: React.FC = () => {
           </ul>
         </div>
 
-        <div className="feature-card" onClick={() => navigate('/tv-dashboard')}>
+        <div className="feature-card" onClick={() => navigate('/facilities/tv-dashboard')}>
           <div className="icon">📺</div>
           <h2>TV Dashboard</h2>
           <p>
@@ -78,7 +78,7 @@ const HomePage: React.FC = () => {
           </button>
         </div>
 
-        <div className="feature-card" onClick={() => navigate('/tv-logistics')}>
+        <div className="feature-card" onClick={() => navigate('/facilities/logistics')}>
           <div className="icon">🚛</div>
           <h2>Logistics Display</h2>
           <p>

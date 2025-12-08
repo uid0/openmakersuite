@@ -37,6 +37,26 @@ const ScanPage: React.FC = () => {
   const [estimatedCost, setEstimatedCost] = useState<number>(0);
   const [estimatedLeadTime, setEstimatedLeadTime] = useState<number>(0);
 
+  // Update calculations when supplier or quantity changes
+  const updateCalculations = useCallback((supplier: ItemSupplier, packages: number) => {
+    const units = packages * supplier.quantity_per_package;
+    const cost = packages * parseFloat(supplier.package_cost || '0');
+
+    setTotalUnits(units);
+    setEstimatedCost(cost);
+    setEstimatedLeadTime(supplier.average_lead_time);
+  }, []);
+
+  const loadChecklists = useCallback(async () => {
+    if (!itemId) return;
+    try {
+      const checklistsResponse = await inventoryAPI.getItemChecklists(itemId);
+      setChecklists(checklistsResponse.data);
+    } catch (err: any) {
+      console.error('Error loading checklists:', err);
+    }
+  }, [itemId]);
+
   const loadItem = useCallback(async () => {
     try {
       setLoading(true);
@@ -70,24 +90,14 @@ const ScanPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [itemId, isLoggedIn]);
+  }, [itemId, isLoggedIn, updateCalculations]);
 
   useEffect(() => {
     if (itemId) {
       loadItem();
       loadChecklists();
     }
-  }, [itemId, loadItem]);
-
-  const loadChecklists = useCallback(async () => {
-    if (!itemId) return;
-    try {
-      const checklistsResponse = await inventoryAPI.getItemChecklists(itemId);
-      setChecklists(checklistsResponse.data);
-    } catch (err: any) {
-      console.error('Error loading checklists:', err);
-    }
-  }, [itemId]);
+  }, [itemId, loadItem, loadChecklists]);
 
   const handleStartChecklist = async (checklistId: string) => {
     try {
@@ -132,16 +142,6 @@ const ScanPage: React.FC = () => {
 
     autoSubmitReorder();
   }, [isLoggedIn, item, submitting, submitted, navigate]);
-
-  // Update calculations when supplier or quantity changes
-  const updateCalculations = useCallback((supplier: ItemSupplier, packages: number) => {
-    const units = packages * supplier.quantity_per_package;
-    const cost = packages * parseFloat(supplier.package_cost || '0');
-
-    setTotalUnits(units);
-    setEstimatedCost(cost);
-    setEstimatedLeadTime(supplier.average_lead_time);
-  }, []);
 
   // Handle supplier selection change
   const handleSupplierChange = (supplierId: number) => {

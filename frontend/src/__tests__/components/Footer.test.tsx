@@ -25,7 +25,7 @@ describe('Footer Component', () => {
     expect(screen.getByText('abc1234')).toBeInTheDocument();
     expect(screen.getByText('View on Github')).toBeInTheDocument();
     
-    const githubLink = screen.getByText('View on Github').closest('a');
+    const githubLink = screen.getByRole('link', { name: /view on github/i });
     expect(githubLink).toHaveAttribute('href', 'https://github.com/test/repo');
     expect(githubLink).toHaveAttribute('target', '_blank');
     expect(githubLink).toHaveAttribute('rel', 'noopener noreferrer');
@@ -40,17 +40,17 @@ describe('Footer Component', () => {
     expect(screen.getByText('dev')).toBeInTheDocument();
     expect(screen.getByText('View on Github')).toBeInTheDocument();
     
-    const githubLink = screen.getByText('View on Github').closest('a');
+    const githubLink = screen.getByRole('link', { name: /view on github/i });
     expect(githubLink).toHaveAttribute('href', 'https://github.com/uid0/openmakersuite');
   });
 
   it('applies custom className when provided', () => {
     process.env.REACT_APP_GIT_HASH = 'test123';
     
-    const { container } = render(<Footer className="custom-footer" />);
+    render(<Footer className="custom-footer" />);
     
-    const footer = container.querySelector('.app-footer.custom-footer');
-    expect(footer).toBeInTheDocument();
+    const footer = screen.getByRole('contentinfo');
+    expect(footer).toHaveClass('app-footer', 'custom-footer');
   });
 });
 

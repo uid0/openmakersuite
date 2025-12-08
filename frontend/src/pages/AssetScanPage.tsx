@@ -21,7 +21,6 @@ const AssetScanPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [checklists, setChecklists] = useState<Checklist[]>([]);
-  const [loadingChecklists, setLoadingChecklists] = useState(false);
 
   // Form state (authenticated users)
   const [problemDescription, setProblemDescription] = useState('');
@@ -48,19 +47,16 @@ const AssetScanPage: React.FC = () => {
       loadAsset();
       loadChecklists();
     }
-  }, [assetId, loadAsset]);
+  }, [assetId, loadAsset, loadChecklists]);
 
   const loadChecklists = useCallback(async () => {
     if (!assetId) return;
     try {
-      setLoadingChecklists(true);
       const checklistsResponse = await assetsAPI.getAssetChecklists(assetId);
       setChecklists(checklistsResponse.data);
     } catch (err: any) {
       // Silently fail - checklists are optional
       console.error('Error loading checklists:', err);
-    } finally {
-      setLoadingChecklists(false);
     }
   }, [assetId]);
 

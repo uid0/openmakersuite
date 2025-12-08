@@ -120,11 +120,14 @@ describe('LocationScanPage', () => {
     const notesInput = screen.getByPlaceholderText(/any notes about your check-in/i);
     fireEvent.change(notesInput, { target: { value: 'Test check-in notes' } });
 
-    // Submit check-in - find the form and submit it
-    const form = screen.getByText(/check in to/i).closest('form');
-    expect(form).toBeDefined();
+    // Submit check-in - find the form containing the notes input and submit it
+    const form = notesInput.closest('form');
     if (form) {
       fireEvent.submit(form);
+    } else {
+      // Fallback: find form by submit button
+      const submitButton = screen.getByRole('button', { name: /check in/i });
+      fireEvent.click(submitButton);
     }
 
     await waitFor(() => {
@@ -164,11 +167,14 @@ describe('LocationScanPage', () => {
     const messageInput = await screen.findByPlaceholderText(/share your thoughts about this location/i);
     fireEvent.change(messageInput, { target: { value: 'This is test feedback' } });
 
-    // Submit feedback - find the form and submit it
-    const form = screen.getByRole('heading', { name: /submit feedback/i }).closest('form');
-    expect(form).toBeDefined();
+    // Submit feedback - find the form containing the message input and submit it
+    const form = messageInput.closest('form');
     if (form) {
       fireEvent.submit(form);
+    } else {
+      // Fallback: find form by submit button
+      const submitButton = screen.getByRole('button', { name: /submit feedback/i });
+      fireEvent.click(submitButton);
     }
 
     await waitFor(() => {
@@ -207,19 +213,22 @@ describe('LocationScanPage', () => {
     const cleaningButton = screen.getByText(/needs cleaning/i);
     fireEvent.click(cleaningButton);
 
+    // Wait for form elements to appear
     await waitFor(() => {
-      // Check urgent checkbox
-      const urgentCheckbox = screen.getByLabelText(/needs immediate attention/i);
-      fireEvent.click(urgentCheckbox);
-
-      // Fill in description using placeholder text
-      const descriptionInput = screen.getByPlaceholderText(/add any additional details/i);
-      fireEvent.change(descriptionInput, { target: { value: 'Area needs cleaning' } });
-
-      // Submit report
-      const submitButton = screen.getByRole('button', { name: /submit report/i });
-      fireEvent.click(submitButton);
+      expect(screen.getByLabelText(/needs immediate attention/i)).toBeInTheDocument();
     });
+
+    // Check urgent checkbox
+    const urgentCheckbox = screen.getByLabelText(/needs immediate attention/i);
+    fireEvent.click(urgentCheckbox);
+
+    // Fill in description using placeholder text
+    const descriptionInput = screen.getByPlaceholderText(/add any additional details/i);
+    fireEvent.change(descriptionInput, { target: { value: 'Area needs cleaning' } });
+
+    // Submit report
+    const submitButton = screen.getByRole('button', { name: /submit report/i });
+    fireEvent.click(submitButton);
 
     await waitFor(() => {
       expect(api.locationCheckinAPI.reportSecurity).toHaveBeenCalledWith(

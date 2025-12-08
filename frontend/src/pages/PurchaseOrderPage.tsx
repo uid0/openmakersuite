@@ -59,17 +59,7 @@ const PurchaseOrderPage: React.FC = () => {
   const [voidReason, setVoidReason] = useState<string>('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  useEffect(() => {
-    // Check if user is authenticated
-    const token = localStorage.getItem('token');
-    setIsAuthenticated(!!token);
-
-    if (orderId) {
-      loadOrder();
-    }
-  }, [orderId]);
-
-  const loadOrder = async () => {
+  const loadOrder = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -81,7 +71,17 @@ const PurchaseOrderPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [orderId]);
+
+  useEffect(() => {
+    // Check if user is authenticated
+    const token = localStorage.getItem('token');
+    setIsAuthenticated(!!token);
+
+    if (orderId) {
+      loadOrder();
+    }
+  }, [orderId, loadOrder]);
 
   const handleEditShipmentDate = (item: PurchaseOrderItem) => {
     setEditingItemId(item.id);

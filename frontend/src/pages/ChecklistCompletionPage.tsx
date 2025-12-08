@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { checklistsAPI, inventoryAPI } from '../services/api';
 import '../styles/ScanPage.css';
-import { Checklist, ChecklistCompletion, ChecklistStep } from '../types';
+import { Checklist, ChecklistCompletion } from '../types';
 
 const ChecklistCompletionPage: React.FC = () => {
   const { checklistId, completionId } = useParams<{ checklistId: string; completionId: string }>();

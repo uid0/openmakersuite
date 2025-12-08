@@ -20,6 +20,13 @@ export interface Category {
   parent: number | null;
 }
 
+export interface Location {
+  id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
+}
+
 export interface ItemSupplier {
   id: number;
   item: string;
@@ -104,6 +111,16 @@ export interface InventoryItem {
   } | null;
   // Supplier relationships with dimensional data
   item_suppliers?: ItemSupplier[];
+  // Hazmat fields
+  is_hazardous: boolean;
+  msds_url: string | null;
+  nfpa_health_hazard: number | null;
+  nfpa_fire_hazard: number | null;
+  nfpa_instability_hazard: number | null;
+  nfpa_special_hazards: string;
+  nfpa_fire_diamond_display: string;
+  hazmat_compliance_status: string;
+  has_complete_nfpa_data: boolean;
 }
 
 export interface UsageLog {

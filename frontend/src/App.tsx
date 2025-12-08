@@ -3,6 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'react-router-dom';
+import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AssetScanPage from './pages/AssetScanPage';
 import AssetsPage from './pages/AssetsPage';
@@ -11,17 +12,19 @@ import CodeEntryPage from './pages/CodeEntryPage';
 import DonationItemScanPage from './pages/DonationItemScanPage';
 import FixtureScanPage from './pages/FixtureScanPage';
 import HomePage from './pages/HomePage';
+import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
+import InventoryItemFormPage from './pages/InventoryItemFormPage';
+import InventoryListPage from './pages/InventoryListPage';
 import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
 import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import ScanPage from './pages/ScanPage';
 import SIGDashboard from './pages/SIGDashboard';
+import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
-import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import TVDashboard from './pages/TVDashboard';
-import WorkspaceLayout from './components/WorkspaceLayout';
 import './styles/App.css';
 
 // Wrap routes with Sentry for better error tracking
@@ -97,6 +100,10 @@ function AppContent() {
 
           {/* Inventory Workspace */}
           <Route path="/inventory" element={<WorkspaceLayout><HomePage /></WorkspaceLayout>} />
+          <Route path="/inventory/items" element={<WorkspaceLayout><InventoryListPage /></WorkspaceLayout>} />
+          <Route path="/inventory/items/new" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/items/:id" element={<WorkspaceLayout><InventoryItemDetailPage /></WorkspaceLayout>} />
+          <Route path="/inventory/items/:id/edit" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/assets" element={<WorkspaceLayout><AssetsPage /></WorkspaceLayout>} />
           <Route path="/inventory/admin" element={<WorkspaceLayout><AdminDashboard /></WorkspaceLayout>} />
           <Route path="/inventory/code-entry" element={<WorkspaceLayout><CodeEntryPage /></WorkspaceLayout>} />

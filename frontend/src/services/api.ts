@@ -254,6 +254,44 @@ export const inventoryAPI = {
 
   listSuppliers: () =>
     api.get<{ results: Supplier[] }>('/inventory/suppliers/'),
+
+  createItem: (data: FormData | Partial<InventoryItem>) => {
+    if (data instanceof FormData) {
+      return api.post<InventoryItem>('/inventory/items/', data, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+    }
+    return api.post<InventoryItem>('/inventory/items/', data);
+  },
+
+  updateItem: (id: string, data: FormData | Partial<InventoryItem>) => {
+    if (data instanceof FormData) {
+      return api.patch<InventoryItem>(`/inventory/items/${id}/`, data, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+    }
+    return api.patch<InventoryItem>(`/inventory/items/${id}/`, data);
+  },
+
+  updateStock: (id: string, quantity: number) =>
+    api.patch<InventoryItem>(`/inventory/items/${id}/`, { current_stock: quantity }),
+
+  getUsageLogs: (itemId: string) =>
+    api.get<{ results: UsageLog[] }>(`/inventory/usage-logs/?item_id=${itemId}`),
+
+  createCategory: (data: { name: string; description?: string; parent?: number }) =>
+    api.post<Category>('/inventory/categories/', data),
+
+  createLocation: (name: string) => {
+    // Locations are auto-created by the backend when a name is provided
+    // This is a helper that just returns the name for use in item creation
+    // The actual location will be created/resolved by the backend
+    return Promise.resolve({ name } as any);
+  },
 };
 
 // Assets API

@@ -225,7 +225,17 @@
 <a name='L160'></a><a href='#L160'>160</a>
 <a name='L161'></a><a href='#L161'>161</a>
 <a name='L162'></a><a href='#L162'>162</a>
-<a name='L163'></a><a href='#L163'>163</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -253,21 +263,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
@@ -300,12 +295,31 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -392,6 +406,7 @@
  */
 import * as Sentry from '@sentry/react';
 import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'react-router-dom';
+import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AssetScanPage from './pages/AssetScanPage';
 import AssetsPage from './pages/AssetsPage';
@@ -400,17 +415,19 @@ import CodeEntryPage from './pages/CodeEntryPage';
 import DonationItemScanPage from './pages/DonationItemScanPage';
 import FixtureScanPage from './pages/FixtureScanPage';
 import HomePage from './pages/HomePage';
+import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
+import InventoryItemFormPage from './pages/InventoryItemFormPage';
+import InventoryListPage from './pages/InventoryListPage';
 import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
 import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import ScanPage from './pages/ScanPage';
 import SIGDashboard from './pages/SIGDashboard';
+import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
-import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import TVDashboard from './pages/TVDashboard';
-import WorkspaceLayout from './components/WorkspaceLayout';
 import './styles/App.css';
 &nbsp;
 // Wrap routes with Sentry for better error tracking
@@ -486,6 +503,10 @@ function AppContent() {
 &nbsp;
           {/* Inventory Workspace */}
           &lt;Route path="/inventory" element={&lt;WorkspaceLayout&gt;&lt;HomePage /&gt;&lt;/WorkspaceLayout&gt;} /&gt;
+          &lt;Route path="/inventory/items" element={&lt;WorkspaceLayout&gt;&lt;InventoryListPage /&gt;&lt;/WorkspaceLayout&gt;} /&gt;
+          &lt;Route path="/inventory/items/new" element={&lt;WorkspaceLayout&gt;&lt;InventoryItemFormPage /&gt;&lt;/WorkspaceLayout&gt;} /&gt;
+          &lt;Route path="/inventory/items/:id" element={&lt;WorkspaceLayout&gt;&lt;InventoryItemDetailPage /&gt;&lt;/WorkspaceLayout&gt;} /&gt;
+          &lt;Route path="/inventory/items/:id/edit" element={&lt;WorkspaceLayout&gt;&lt;InventoryItemFormPage /&gt;&lt;/WorkspaceLayout&gt;} /&gt;
           &lt;Route path="/inventory/assets" element={&lt;WorkspaceLayout&gt;&lt;AssetsPage /&gt;&lt;/WorkspaceLayout&gt;} /&gt;
           &lt;Route path="/inventory/admin" element={&lt;WorkspaceLayout&gt;&lt;AdminDashboard /&gt;&lt;/WorkspaceLayout&gt;} /&gt;
           &lt;Route path="/inventory/code-entry" element={&lt;WorkspaceLayout&gt;&lt;CodeEntryPage /&gt;&lt;/WorkspaceLayout&gt;} /&gt;
@@ -556,7 +577,7 @@ export default App;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-12-08T01:13:56.940Z
+                at 2025-12-08T22:49:53.458Z
             </div>
         <script src="../prettify.js"></script>
         <script>

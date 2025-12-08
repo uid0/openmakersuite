@@ -1,9 +1,9 @@
 /**
  * Tests for API service
  */
-import MockAdapter from 'axios-mock-adapter';
 import * as Sentry from '@sentry/react';
-import api, { checklistsAPI, inventoryAPI, reorderAPI, authAPI } from '../../services/api';
+import MockAdapter from 'axios-mock-adapter';
+import api, { authAPI, checklistsAPI, inventoryAPI, reorderAPI } from '../../services/api';
 
 jest.mock('@sentry/react', () => ({
   captureException: jest.fn(),
@@ -101,6 +101,124 @@ describe('API Service', () => {
       mock.onPost('/inventory/items/test-id/log_usage/').reply(200, mockResponse);
 
       const response = await inventoryAPI.logUsage('test-id', 5, 'Test notes');
+
+      expect(response.data).toEqual(mockResponse);
+    });
+
+    test('createItem creates new item with FormData', async () => {
+      const formData = new FormData();
+      formData.append('name', 'New Item');
+      formData.append('current_stock', '10');
+
+      const mockResponse = {
+        id: 'new-id',
+        name: 'New Item',
+        current_stock: 10,
+      };
+
+      mock.onPost('/inventory/items/').reply((config) => {
+        expect(config.headers['Content-Type']).toContain('multipart/form-data');
+        return [201, mockResponse];
+      });
+
+      const response = await inventoryAPI.createItem(formData);
+
+      expect(response.data).toEqual(mockResponse);
+      expect(response.status).toBe(201);
+    });
+
+    test('createItem creates new item with JSON data', async () => {
+      const itemData = {
+        name: 'New Item',
+        current_stock: 10,
+        minimum_stock: 5,
+        reorder_quantity: 20,
+      };
+
+      const mockResponse = {
+        id: 'new-id',
+        ...itemData,
+      };
+
+      mock.onPost('/inventory/items/').reply(201, mockResponse);
+
+      const response = await inventoryAPI.createItem(itemData);
+
+      expect(response.data).toEqual(mockResponse);
+    });
+
+    test('updateItem updates item with FormData', async () => {
+      const formData = new FormData();
+      formData.append('name', 'Updated Item');
+
+      const mockResponse = {
+        id: 'test-id',
+        name: 'Updated Item',
+      };
+
+      mock.onPatch('/inventory/items/test-id/').reply((config) => {
+        expect(config.headers['Content-Type']).toContain('multipart/form-data');
+        return [200, mockResponse];
+      });
+
+      const response = await inventoryAPI.updateItem('test-id', formData);
+
+      expect(response.data).toEqual(mockResponse);
+    });
+
+    test('updateStock updates stock only', async () => {
+      const mockResponse = {
+        id: 'test-id',
+        current_stock: 15,
+      };
+
+      mock.onPatch('/inventory/items/test-id/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({ current_stock: 15 });
+        return [200, mockResponse];
+      });
+
+      const response = await inventoryAPI.updateStock('test-id', 15);
+
+      expect(response.data.current_stock).toBe(15);
+    });
+
+    test('getUsageLogs fetches usage logs for item', async () => {
+      const mockLogs = {
+        results: [
+          {
+            id: 1,
+            item: 'test-id',
+            quantity_used: 5,
+            usage_date: '2024-01-15T00:00:00Z',
+            notes: 'Test usage',
+          },
+        ],
+      };
+
+      mock.onGet('/inventory/usage-logs/?item_id=test-id').reply(200, mockLogs);
+
+      const response = await inventoryAPI.getUsageLogs('test-id');
+
+      expect(response.data.results).toHaveLength(1);
+      expect(response.data.results[0].quantity_used).toBe(5);
+    });
+
+    test('createCategory creates new category', async () => {
+      const categoryData = {
+        name: 'New Category',
+        description: 'Category description',
+      };
+
+      const mockResponse = {
+        id: 1,
+        ...categoryData,
+        slug: 'new-category',
+        parent: null,
+      };
+
+      mock.onPost('/inventory/categories/').reply(201, mockResponse);
+
+      const response = await inventoryAPI.createCategory(categoryData);
 
       expect(response.data).toEqual(mockResponse);
     });

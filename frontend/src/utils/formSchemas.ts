@@ -52,3 +52,106 @@ export const minValue = (min: number, message?: string) =>
 
 export const maxValue = (max: number, message?: string) =>
   z.number().max(max, message || `Must be no more than ${max}`);
+
+// Inventory Item Form Schema
+export const inventoryItemSchema = z
+  .object({
+    // Basic Info
+    name: z.string().min(1, 'Name is required').max(200, 'Name must be 200 characters or less'),
+    description: z.string().optional(),
+    sku: z.string().optional(),
+    image: z.union([z.instanceof(File), z.string().url(), z.null()]).optional(),
+    image_url: z.string().url('Invalid URL').optional().or(z.literal('')),
+
+    // Stock Settings
+    current_stock: z.number().int().min(0, 'Stock cannot be negative').default(0),
+    minimum_stock: z.number().int().min(0, 'Minimum stock cannot be negative').default(0),
+    reorder_quantity: z.number().int().min(1, 'Reorder quantity must be at least 1').default(1),
+
+    // Case-based reordering
+    use_case_based_reorder: z.boolean().default(false),
+    minimum_cases: z
+      .number()
+      .int()
+      .min(1, 'Minimum cases must be at least 1')
+      .optional()
+      .nullable(),
+    reorder_cases: z
+      .number()
+      .int()
+      .min(1, 'Reorder cases must be at least 1')
+      .optional()
+      .nullable(),
+
+    // Category & Location
+    category: z.number().int().positive().optional().nullable(),
+    location: z.union([z.string(), z.number().int().positive()]).optional().nullable(),
+    shelf_position: z.enum(['top', 'bottom', '']).optional(),
+
+    // Hazmat
+    is_hazardous: z.boolean().default(false),
+    msds_url: z.string().url('Invalid URL').optional().or(z.literal('')),
+    msds_file: z.union([z.instanceof(File), z.null()]).optional(),
+    nfpa_health_hazard: z
+      .number()
+      .int()
+      .min(0, 'Rating must be between 0 and 4')
+      .max(4, 'Rating must be between 0 and 4')
+      .optional()
+      .nullable(),
+    nfpa_fire_hazard: z
+      .number()
+      .int()
+      .min(0, 'Rating must be between 0 and 4')
+      .max(4, 'Rating must be between 0 and 4')
+      .optional()
+      .nullable(),
+    nfpa_instability_hazard: z
+      .number()
+      .int()
+      .min(0, 'Rating must be between 0 and 4')
+      .max(4, 'Rating must be between 0 and 4')
+      .optional()
+      .nullable(),
+    nfpa_special_hazards: z.string().max(20, 'Special hazards must be 20 characters or less').optional(),
+
+    // Ownership
+    ownership_type: z.enum(['user', 'group', 'space']).default('space'),
+    owning_user: z.number().int().positive().optional().nullable(),
+    owning_group: z.number().int().positive().optional().nullable(),
+
+    // Other
+    is_active: z.boolean().default(true),
+    notes: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.use_case_based_reorder) {
+        return (
+          data.minimum_cases !== null &&
+          data.minimum_cases !== undefined &&
+          data.reorder_cases !== null &&
+          data.reorder_cases !== undefined
+        );
+      }
+      return true;
+    },
+    {
+      message: 'Minimum cases and reorder cases are required when case-based reordering is enabled',
+      path: ['minimum_cases'],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.is_hazardous && !data.msds_url && !data.msds_file) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: 'MSDS URL or file is required for hazardous materials',
+      path: ['msds_url'],
+    }
+  );
+
+export type InventoryItemFormData = z.infer<typeof inventoryItemSchema>;

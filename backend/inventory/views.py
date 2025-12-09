@@ -38,6 +38,7 @@ from .serializers import (
     InventoryItemSerializer,
     ItemSupplierSerializer,
     PriceHistorySerializer,
+    SupplierDetailSerializer,
     SupplierSerializer,
     UsageLogSerializer,
 )
@@ -46,9 +47,133 @@ from .serializers import (
 class SupplierViewSet(viewsets.ModelViewSet):
     """API endpoint for suppliers."""
 
-    queryset = Supplier.objects.all()
-    serializer_class = SupplierSerializer
+    queryset = Supplier.objects.prefetch_related("supplier_items").all()
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_serializer_class(self):
+        """Use detail serializer for retrieve action."""
+        if self.action == "retrieve":
+            return SupplierDetailSerializer
+        return SupplierSerializer
+
+    def get_queryset(self):
+        """Filter suppliers by type if specified."""
+        queryset = super().get_queryset()
+
+        # Filter by supplier_type if specified
+        supplier_type = self.request.query_params.get("supplier_type")
+        if supplier_type:
+            queryset = queryset.filter(supplier_type=supplier_type)
+
+        # Search functionality
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(Q(name__icontains=search) | Q(notes__icontains=search))
+
+        return queryset.order_by("name")
+
+    @action(detail=True, methods=["get"])
+    def analytics(self, request, pk=None):
+        """Get detailed analytics for a supplier."""
+        supplier = self.get_object()
+
+        try:
+            from datetime import timedelta
+            from decimal import Decimal
+
+            from django.db.models import Avg, Count, Max, Min, Sum
+            from django.utils import timezone
+
+            from reorder_queue.models import LeadTimeLog, PurchaseOrder
+
+            # Lead time analytics
+            lead_time_logs = LeadTimeLog.objects.filter(item_supplier__supplier=supplier)
+
+            lead_time_stats = {}
+            if lead_time_logs.exists():
+                stats = lead_time_logs.aggregate(
+                    avg_lead_time=Avg("actual_lead_time_days"),
+                    min_lead_time=Min("actual_lead_time_days"),
+                    max_lead_time=Max("actual_lead_time_days"),
+                    avg_variance=Avg("variance_days"),
+                    total_orders=Count("id"),
+                )
+
+                on_time_count = lead_time_logs.filter(variance_days__lte=0).count()
+                on_time_percentage = (
+                    (on_time_count / stats["total_orders"] * 100)
+                    if stats["total_orders"] > 0
+                    else None
+                )
+
+                lead_time_stats = {
+                    "average_lead_time": (
+                        float(stats["avg_lead_time"]) if stats["avg_lead_time"] else None
+                    ),
+                    "min_lead_time": stats["min_lead_time"],
+                    "max_lead_time": stats["max_lead_time"],
+                    "average_variance": (
+                        float(stats["avg_variance"]) if stats["avg_variance"] else None
+                    ),
+                    "total_orders": stats["total_orders"],
+                    "on_time_percentage": (
+                        float(on_time_percentage) if on_time_percentage is not None else None
+                    ),
+                }
+
+            # Price trends
+            six_months_ago = timezone.now() - timedelta(days=180)
+            price_history = PriceHistory.objects.filter(
+                item_supplier__supplier=supplier, recorded_at__gte=six_months_ago
+            ).order_by("-recorded_at")
+
+            price_trends = {
+                "recent_changes": [
+                    {
+                        "item_name": ph.item_supplier.item.name,
+                        "recorded_at": ph.recorded_at.isoformat(),
+                        "unit_cost": float(ph.unit_cost) if ph.unit_cost else None,
+                        "package_cost": float(ph.package_cost) if ph.package_cost else None,
+                        "change_type": ph.change_type,
+                        "price_change_percentage": (
+                            float(ph.price_change_percentage)
+                            if ph.price_change_percentage
+                            else None
+                        ),
+                    }
+                    for ph in price_history[:20]
+                ],
+                "total_changes": price_history.count(),
+            }
+
+            # Order statistics
+            purchase_orders = PurchaseOrder.objects.filter(supplier=supplier)
+            order_stats = {
+                "total_orders": purchase_orders.count(),
+                "received_orders": purchase_orders.filter(status=PurchaseOrder.RECEIVED).count(),
+                "total_spent": (
+                    purchase_orders.filter(
+                        status=PurchaseOrder.RECEIVED, actual_total__isnull=False
+                    ).aggregate(total=Sum("actual_total"))["total"]
+                    or Decimal("0.00")
+                ),
+            }
+
+            return Response(
+                {
+                    "lead_time_analytics": lead_time_stats,
+                    "price_trends": price_trends,
+                    "order_statistics": order_stats,
+                }
+            )
+        except ImportError:
+            return Response(
+                {
+                    "lead_time_analytics": {},
+                    "price_trends": {},
+                    "order_statistics": {},
+                }
+            )
 
 
 class CategoryViewSet(viewsets.ModelViewSet):

@@ -20,9 +20,45 @@ from .models import (
 
 
 class SupplierSerializer(serializers.ModelSerializer):
+    """Basic serializer for supplier list views."""
+
+    item_count = serializers.SerializerMethodField()
+    purchase_order_count = serializers.SerializerMethodField()
+    total_spent = serializers.SerializerMethodField()
+
     class Meta:
         model = Supplier
         fields = "__all__"
+        read_only_fields = ["created_at", "updated_at"]
+
+    def get_item_count(self, obj):
+        """Count of items supplied by this supplier."""
+        return obj.supplier_items.filter(is_active=True).count()
+
+    def get_purchase_order_count(self, obj):
+        """Count of purchase orders with this supplier."""
+        try:
+            from reorder_queue.models import PurchaseOrder
+
+            return PurchaseOrder.objects.filter(supplier=obj).count()
+        except ImportError:
+            return 0
+
+    def get_total_spent(self, obj):
+        """Sum of actual totals from received purchase orders."""
+        try:
+            from decimal import Decimal
+
+            from django.db.models import Sum
+
+            from reorder_queue.models import PurchaseOrder
+
+            result = PurchaseOrder.objects.filter(
+                supplier=obj, status=PurchaseOrder.RECEIVED, actual_total__isnull=False
+            ).aggregate(total=Sum("actual_total"))["total"] or Decimal("0.00")
+            return str(result)
+        except (ImportError, TypeError):
+            return "0.00"
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -131,6 +167,192 @@ class ItemSupplierDetailSerializer(ItemSupplierSerializer):
         if "recent_price_history" in data:
             data["recent_price_history"] = data["recent_price_history"][:10]
         return data
+
+
+class SupplierDetailSerializer(SupplierSerializer):
+    """Extended serializer for supplier detail views with related data."""
+
+    items = ItemSupplierSerializer(source="supplier_items", many=True, read_only=True)
+    purchase_orders = serializers.SerializerMethodField()
+    lead_time_analytics = serializers.SerializerMethodField()
+    price_trends = serializers.SerializerMethodField()
+
+    class Meta(SupplierSerializer.Meta):
+        fields = [
+            "id",
+            "name",
+            "supplier_type",
+            "website",
+            "account_number",
+            "tax_free_paperwork_filed",
+            "notes",
+            "created_at",
+            "updated_at",
+            "item_count",
+            "purchase_order_count",
+            "total_spent",
+            "items",
+            "purchase_orders",
+            "lead_time_analytics",
+            "price_trends",
+        ]
+
+    def get_purchase_orders(self, obj):
+        """Get purchase orders for this supplier."""
+        try:
+            from reorder_queue.models import PurchaseOrder
+            from reorder_queue.serializers import PurchaseOrderSerializer
+
+            orders = PurchaseOrder.objects.filter(supplier=obj).order_by("-order_date")[:50]
+            return PurchaseOrderSerializer(orders, many=True).data
+        except ImportError:
+            return []
+
+    def get_lead_time_analytics(self, obj):
+        """Get lead time analytics for this supplier."""
+        try:
+            from django.db.models import Avg, Count, Max, Min
+
+            from reorder_queue.models import LeadTimeLog
+
+            # Get all lead time logs for items from this supplier
+            logs = LeadTimeLog.objects.filter(item_supplier__supplier=obj)
+
+            if not logs.exists():
+                return {
+                    "average_lead_time": None,
+                    "min_lead_time": None,
+                    "max_lead_time": None,
+                    "average_variance": None,
+                    "total_orders": 0,
+                    "on_time_percentage": None,
+                }
+
+            stats = logs.aggregate(
+                avg_lead_time=Avg("actual_lead_time_days"),
+                min_lead_time=Min("actual_lead_time_days"),
+                max_lead_time=Max("actual_lead_time_days"),
+                avg_variance=Avg("variance_days"),
+                total_orders=Count("id"),
+            )
+
+            # Calculate on-time percentage
+            on_time_count = logs.filter(variance_days__lte=0).count()
+            on_time_percentage = (
+                (on_time_count / stats["total_orders"] * 100) if stats["total_orders"] > 0 else None
+            )
+
+            return {
+                "average_lead_time": (
+                    float(stats["avg_lead_time"]) if stats["avg_lead_time"] else None
+                ),
+                "min_lead_time": stats["min_lead_time"],
+                "max_lead_time": stats["max_lead_time"],
+                "average_variance": (
+                    float(stats["avg_variance"]) if stats["avg_variance"] else None
+                ),
+                "total_orders": stats["total_orders"],
+                "on_time_percentage": (
+                    float(on_time_percentage) if on_time_percentage is not None else None
+                ),
+                "recent_logs": [
+                    {
+                        "item_name": log.item_supplier.item.name,
+                        "order_date": log.order_date.isoformat(),
+                        "expected_delivery_date": log.expected_delivery_date.isoformat(),
+                        "actual_delivery_date": log.actual_delivery_date.isoformat(),
+                        "estimated_lead_time_days": log.estimated_lead_time_days,
+                        "actual_lead_time_days": log.actual_lead_time_days,
+                        "variance_days": log.variance_days,
+                        "was_late": log.was_late,
+                    }
+                    for log in logs.order_by("-actual_delivery_date")[:10]
+                ],
+            }
+        except ImportError:
+            return {}
+
+    def get_price_trends(self, obj):
+        """Get price trends for items from this supplier."""
+        try:
+            from datetime import timedelta
+
+            from django.utils import timezone
+
+            # Get price history for items from this supplier
+            price_history = PriceHistory.objects.filter(item_supplier__supplier=obj).order_by(
+                "-recorded_at"
+            )
+
+            if not price_history.exists():
+                return {
+                    "trends": [],
+                    "summary": {
+                        "average_unit_cost": None,
+                        "min_unit_cost": None,
+                        "max_unit_cost": None,
+                        "price_changes_count": 0,
+                    },
+                }
+
+            # Get recent price changes (last 6 months)
+            six_months_ago = timezone.now() - timedelta(days=180)
+            recent_history = price_history.filter(recorded_at__gte=six_months_ago)
+
+            # Group by item and get trends
+            trends = []
+            items_seen = set()
+
+            for price_record in recent_history[:50]:  # Limit to 50 most recent
+                item_supplier = price_record.item_supplier
+                item_id = str(item_supplier.item.id)
+
+                if item_id not in items_seen:
+                    items_seen.add(item_id)
+                    # Get all price history for this item-supplier
+                    item_history = PriceHistory.objects.filter(
+                        item_supplier=item_supplier
+                    ).order_by("recorded_at")[:20]
+
+                    trends.append(
+                        {
+                            "item_id": item_id,
+                            "item_name": item_supplier.item.name,
+                            "price_history": [
+                                {
+                                    "recorded_at": ph.recorded_at.isoformat(),
+                                    "unit_cost": (float(ph.unit_cost) if ph.unit_cost else None),
+                                    "package_cost": (
+                                        float(ph.package_cost) if ph.package_cost else None
+                                    ),
+                                    "change_type": ph.change_type,
+                                    "price_change_percentage": (
+                                        float(ph.price_change_percentage)
+                                        if ph.price_change_percentage
+                                        else None
+                                    ),
+                                }
+                                for ph in item_history
+                            ],
+                        }
+                    )
+
+            # Calculate summary statistics
+            unit_costs = [float(ph.unit_cost) for ph in price_history if ph.unit_cost is not None]
+
+            return {
+                "trends": trends,
+                "summary": {
+                    "average_unit_cost": (
+                        sum(unit_costs) / len(unit_costs) if unit_costs else None
+                    ),
+                    "min_unit_cost": min(unit_costs) if unit_costs else None,
+                    "max_unit_cost": max(unit_costs) if unit_costs else None,
+                    "price_changes_count": price_history.count(),
+                },
+            }
+        except Exception:
+            return {"trends": [], "summary": {}}
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):

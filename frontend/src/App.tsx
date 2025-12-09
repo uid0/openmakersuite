@@ -21,6 +21,9 @@ import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import ScanPage from './pages/ScanPage';
 import SIGDashboard from './pages/SIGDashboard';
+import SupplierDetailPage from './pages/SupplierDetailPage';
+import SupplierFormPage from './pages/SupplierFormPage';
+import SupplierListPage from './pages/SupplierListPage';
 import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
@@ -104,6 +107,10 @@ function AppContent() {
           <Route path="/inventory/items/new" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/:id" element={<WorkspaceLayout><InventoryItemDetailPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/:id/edit" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/suppliers" element={<WorkspaceLayout><SupplierListPage /></WorkspaceLayout>} />
+          <Route path="/inventory/suppliers/new" element={<WorkspaceLayout><SupplierFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/suppliers/:id" element={<WorkspaceLayout><SupplierDetailPage /></WorkspaceLayout>} />
+          <Route path="/inventory/suppliers/:id/edit" element={<WorkspaceLayout><SupplierFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/assets" element={<WorkspaceLayout><AssetsPage /></WorkspaceLayout>} />
           <Route path="/inventory/admin" element={<WorkspaceLayout><AdminDashboard /></WorkspaceLayout>} />
           <Route path="/inventory/code-entry" element={<WorkspaceLayout><CodeEntryPage /></WorkspaceLayout>} />

@@ -5,11 +5,59 @@
 export interface Supplier {
   id: number;
   name: string;
-  supplier_type: 'hdsupply' | 'grainger' | 'amazon' | 'other';
+  supplier_type: 'local' | 'online' | 'national';
   website: string;
+  account_number?: string;
+  tax_free_paperwork_filed: boolean;
   notes: string;
   created_at: string;
   updated_at: string;
+  // Computed fields
+  item_count?: number;
+  purchase_order_count?: number;
+  total_spent?: string;
+}
+
+export interface SupplierDetail extends Supplier {
+  items?: ItemSupplier[];
+  purchase_orders?: any[]; // PurchaseOrder type from reorder_queue
+  lead_time_analytics?: {
+    average_lead_time: number | null;
+    min_lead_time: number | null;
+    max_lead_time: number | null;
+    average_variance: number | null;
+    total_orders: number;
+    on_time_percentage: number | null;
+    recent_logs?: Array<{
+      item_name: string;
+      order_date: string;
+      expected_delivery_date: string;
+      actual_delivery_date: string;
+      estimated_lead_time_days: number;
+      actual_lead_time_days: number;
+      variance_days: number;
+      was_late: boolean;
+    }>;
+  };
+  price_trends?: {
+    trends: Array<{
+      item_id: string;
+      item_name: string;
+      price_history: Array<{
+        recorded_at: string;
+        unit_cost: number | null;
+        package_cost: number | null;
+        change_type: string;
+        price_change_percentage: number | null;
+      }>;
+    }>;
+    summary: {
+      average_unit_cost: number | null;
+      min_unit_cost: number | null;
+      max_unit_cost: number | null;
+      price_changes_count: number;
+    };
+  };
 }
 
 export interface Category {

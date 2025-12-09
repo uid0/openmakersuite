@@ -206,6 +206,14 @@ class LocationViewSet(viewsets.ModelViewSet):
         # Public users only see active locations
         if not self.request.user.is_authenticated or not self.request.user.is_staff:
             queryset = queryset.filter(is_active=True)
+
+        # Search functionality
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(description__icontains=search)
+            )
+
         return queryset
 
     def get_permissions(self):

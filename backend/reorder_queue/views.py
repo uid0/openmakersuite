@@ -361,6 +361,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if status_filter:
             queryset = queryset.filter(status=status_filter)
 
+        # Search functionality
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(po_number__icontains=search)
+                | Q(supplier__name__icontains=search)
+                | Q(notes__icontains=search)
+            )
+
         return queryset
 
     def get_serializer_class(self):

@@ -13,6 +13,7 @@ from .models import (
     FixtureRefillRequest,
     InventoryItem,
     ItemSupplier,
+    Location,
     PriceHistory,
     Supplier,
     UsageLog,

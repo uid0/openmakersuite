@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly, IsAdminUser
 from rest_framework.response import Response
 
 from .models import (
@@ -37,6 +37,7 @@ from .serializers import (
     InventoryItemDetailSerializer,
     InventoryItemSerializer,
     ItemSupplierSerializer,
+    LocationSerializer,
     PriceHistorySerializer,
     SupplierDetailSerializer,
     SupplierSerializer,
@@ -179,44 +180,40 @@ class SupplierViewSet(viewsets.ModelViewSet):
 class CategoryViewSet(viewsets.ModelViewSet):
     """API endpoint for categories."""
 
-    queryset = Category.objects.all()
+    queryset = Category.objects.select_related("parent").prefetch_related("children").all()
     serializer_class = CategorySerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
+    def get_queryset(self):
+        """Return categories with optimized queries."""
+        return Category.objects.select_related("parent").prefetch_related("children").all()
 
-class LocationViewSet(viewsets.ReadOnlyModelViewSet):
-    """API endpoint for locations (read-only for public access)."""
 
-    queryset = Location.objects.filter(is_active=True)
-    permission_classes = [AllowAny]
+class LocationViewSet(viewsets.ModelViewSet):
+    """API endpoint for locations."""
+
+    queryset = Location.objects.all()
+    serializer_class = LocationSerializer
+
+    def get_queryset(self):
+        """Filter queryset based on user permissions."""
+        queryset = Location.objects.select_related("parent").prefetch_related("fixtures")
+        # Public users only see active locations
+        if not self.request.user.is_authenticated or not self.request.user.is_staff:
+            queryset = queryset.filter(is_active=True)
+        return queryset
+
+    def get_permissions(self):
+        """Allow read for all, but require admin for write operations."""
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            return [IsAdminUser()]
+        return [AllowAny()]
 
     def list(self, request):
-        """List all active locations."""
-        locations = [
-            {
-                "id": str(loc["id"]),
-                "name": loc["name"],
-                "description": loc["description"],
-                "is_active": loc["is_active"],
-            }
-            for loc in self.queryset.values("id", "name", "description", "is_active")
-        ]
-        return Response(locations)
-
-    def retrieve(self, request, pk=None):
-        """Get a single location."""
-        try:
-            location = self.queryset.get(id=pk)
-            return Response(
-                {
-                    "id": str(location.id),
-                    "name": location.name,
-                    "description": location.description,
-                    "is_active": location.is_active,
-                }
-            )
-        except Location.DoesNotExist:
-            return Response({"error": "Location not found"}, status=status.HTTP_404_NOT_FOUND)
+        """List locations with hierarchy support."""
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"], permission_classes=[AllowAny])
     def generate_qr(self, request, pk=None):
@@ -282,6 +279,14 @@ class LocationViewSet(viewsets.ReadOnlyModelViewSet):
         response = HttpResponse(location.qr_code.read(), content_type="image/png")
         response["Content-Disposition"] = f'inline; filename="qr_{location.id}.png"'
         return response
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def fixtures(self, request, pk=None):
+        """Get fixtures for a location."""
+        location = self.get_object()
+        fixtures = location.fixtures.filter(is_active=True)
+        serializer = FixtureSerializer(fixtures, many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["get"], permission_classes=[AllowAny])
     def checklists(self, request, pk=None):

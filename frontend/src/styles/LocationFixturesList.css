@@ -1,0 +1,91 @@
+/**
+ * Location Fixtures List Styles
+ */
+.location-fixtures-list {
+  width: 100%;
+}
+
+.fixtures-loading,
+.fixtures-error,
+.fixtures-empty {
+  padding: 20px;
+  text-align: center;
+  color: #666;
+}
+
+.fixtures-error {
+  color: #dc3545;
+}
+
+.fixtures-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.fixture-card {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  transition: box-shadow 0.2s;
+}
+
+.fixture-card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.fixture-card h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.2rem;
+  color: #333;
+}
+
+.fixture-description {
+  margin: 0 0 12px 0;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.fixture-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.fixture-item {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.pending-requests {
+  display: inline-block;
+  padding: 4px 12px;
+  background-color: #fff3cd;
+  color: #856404;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.fixture-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-scan {
+  padding: 8px 16px;
+  background-color: #667eea;
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  display: inline-block;
+}
+
+.btn-scan:hover {
+  background-color: #5568d3;
+}

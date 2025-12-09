@@ -66,6 +66,10 @@ export interface Category {
   slug: string;
   description: string;
   parent: number | null;
+  parent_name?: string | null;
+  color?: string;
+  item_count?: number;
+  children?: Category[];
 }
 
 export interface Location {
@@ -73,6 +77,15 @@ export interface Location {
   name: string;
   description: string;
   is_active: boolean;
+  parent: number | null;
+  parent_name?: string | null;
+  children?: Location[];
+  fixture_count?: number;
+  qr_code?: string | null;
+  qr_code_url?: string | null;
+  access_code?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ItemSupplier {

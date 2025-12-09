@@ -4,8 +4,8 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import RecentPages from './RecentPages';
 import '../styles/Sidebar.css';
+import RecentPages from './RecentPages';
 
 interface NavItem {
   path: string;
@@ -25,11 +25,11 @@ interface WorkspaceSection {
   requiresStaff?: boolean;
 }
 
-const Sidebar: React.FC = () => {
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
-    const saved = localStorage.getItem('sidebarCollapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
+interface SidebarProps {
+  isCollapsed?: boolean;
+}
+
+const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false }) => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [isStaff, setIsStaff] = useState<boolean>(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
@@ -66,10 +66,6 @@ const Sidebar: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem('sidebarCollapsed', JSON.stringify(isCollapsed));
-  }, [isCollapsed]);
-
   const workspaceSections: WorkspaceSection[] = useMemo(() => [
     {
       id: 'inventory',
@@ -78,6 +74,8 @@ const Sidebar: React.FC = () => {
       items: [
         { path: '/inventory', label: 'Dashboard', icon: '🏠' },
         { path: '/inventory/assets', label: 'Assets', icon: '📋' },
+        { path: '/inventory/locations', label: 'Locations', icon: '📍', requiresStaff: true },
+        { path: '/inventory/categories', label: 'Categories', icon: '📁', requiresStaff: true },
         { path: '/inventory/admin', label: 'Admin Dashboard', icon: '⚙️', requiresAuth: true },
         { path: '/inventory/code-entry', label: 'Code Entry', icon: '🔢', requiresAuth: true },
         { path: '/inventory/transparency', label: 'Transparency', icon: '🔍' },
@@ -176,20 +174,6 @@ const Sidebar: React.FC = () => {
 
   return (
     <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
-      <div className="sidebar-header">
-        <Link to="/" className="sidebar-logo">
-          <span className="logo-icon">📦</span>
-          {!isCollapsed && <span className="logo-text">DallasMakerspace</span>}
-        </Link>
-        <button
-          className="sidebar-toggle"
-          onClick={toggleCollapse}
-          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {isCollapsed ? '→' : '←'}
-        </button>
-      </div>
-
       <nav className="sidebar-nav">
         {workspaceSections.map((section) => {
           if (!shouldShowSection(section)) return null;

@@ -247,10 +247,10 @@ export const inventoryAPI = {
     api.get<Checklist[]>(`/inventory/items/${id}/checklists/`),
 
   listLocations: () =>
-    api.get<{ results: Array<{ id: number; name: string }> }>('/inventory/locations/'),
+    api.get<Location[]>('/inventory/locations/'),
 
   listCategories: () =>
-    api.get<{ results: Category[] }>('/inventory/categories/'),
+    api.get<Category[]>('/inventory/categories/'),
 
   listSuppliers: (params?: { supplier_type?: string; search?: string }) =>
     api.get<{ results: Supplier[] }>('/inventory/suppliers/', { params }),
@@ -298,15 +298,29 @@ export const inventoryAPI = {
   getUsageLogs: (itemId: string) =>
     api.get<{ results: UsageLog[] }>(`/inventory/usage-logs/?item_id=${itemId}`),
 
-  createCategory: (data: { name: string; description?: string; parent?: number }) =>
+  createCategory: (data: { name: string; description?: string; parent?: number; color?: string }) =>
     api.post<Category>('/inventory/categories/', data),
 
-  createLocation: (name: string) => {
-    // Locations are auto-created by the backend when a name is provided
-    // This is a helper that just returns the name for use in item creation
-    // The actual location will be created/resolved by the backend
-    return Promise.resolve({ name } as any);
-  },
+  updateCategory: (id: string, data: Partial<Category>) =>
+    api.patch<Category>(`/inventory/categories/${id}/`, data),
+
+  deleteCategory: (id: string) =>
+    api.delete(`/inventory/categories/${id}/`),
+
+  createLocation: (data: Partial<Location>) =>
+    api.post<Location>('/inventory/locations/', data),
+
+  updateLocation: (id: string, data: Partial<Location>) =>
+    api.patch<Location>(`/inventory/locations/${id}/`, data),
+
+  deleteLocation: (id: string) =>
+    api.delete(`/inventory/locations/${id}/`),
+
+  getLocationFixtures: (locationId: string) =>
+    api.get<Fixture[]>(`/inventory/locations/${locationId}/fixtures/`),
+
+  generateLocationQR: (id: string) =>
+    api.post(`/inventory/locations/${id}/generate_qr/`),
 };
 
 // Assets API

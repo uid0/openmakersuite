@@ -54,6 +54,9 @@ class Location(models.Model):
         null=True,
         help_text="Unique 6-character code for manual entry (excludes I, 0, O, 1, L)",
     )
+    parent = models.ForeignKey(
+        "self", on_delete=models.CASCADE, null=True, blank=True, related_name="children"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

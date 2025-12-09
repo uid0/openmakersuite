@@ -16,71 +16,16 @@
   z-index: 1000;
   overflow-y: auto;
   overflow-x: hidden;
+  padding-top: 0;
 }
 
 .sidebar.collapsed {
   width: 60px;
 }
 
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
-  border-bottom: 2px solid #e0e0e0;
-  min-height: 60px;
-}
-
-.sidebar-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-decoration: none;
-  color: #333;
-  font-weight: bold;
-  font-size: 1.2rem;
-  transition: color 0.2s;
-  flex: 1;
-}
-
-.sidebar-logo:hover {
-  color: #667eea;
-}
-
-.logo-icon {
-  font-size: 1.5rem;
-  flex-shrink: 0;
-}
-
-.logo-text {
-  white-space: nowrap;
-  overflow: hidden;
-  transition: opacity 0.2s;
-}
-
-.sidebar.collapsed .logo-text {
-  opacity: 0;
-  width: 0;
-}
-
-.sidebar-toggle {
-  background: none;
-  border: none;
-  font-size: 1.2rem;
-  cursor: pointer;
-  padding: 4px 8px;
-  color: #666;
-  transition: color 0.2s;
-  flex-shrink: 0;
-}
-
-.sidebar-toggle:hover {
-  color: #667eea;
-}
-
 .sidebar-nav {
   flex: 1;
-  padding: 8px 0;
+  padding: 16px 0 8px 0;
   overflow-y: auto;
 }
 

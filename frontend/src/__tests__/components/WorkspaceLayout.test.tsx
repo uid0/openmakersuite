@@ -2,8 +2,7 @@
  * WorkspaceLayout Component Tests
  */
 import { render, screen } from '@testing-library/react';
-import React from 'react';
-import { BrowserRouter, MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import WorkspaceLayout from '../../components/WorkspaceLayout';
 
 // Mock Sidebar and Breadcrumbs
@@ -30,11 +29,17 @@ const renderWithRouter = (path: string) => {
 };
 
 describe('WorkspaceLayout Component', () => {
-  it('renders sidebar and breadcrumbs for normal routes', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('renders sidebar, menu toggle, logo, and breadcrumbs for normal routes', () => {
     renderWithRouter('/inventory');
     expect(screen.getByTestId('sidebar')).toBeInTheDocument();
     expect(screen.getByTestId('breadcrumbs')).toBeInTheDocument();
     expect(screen.getByText('Test Content')).toBeInTheDocument();
+    expect(screen.getByText(/dallasmakerspace/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/collapse sidebar|expand sidebar/i)).toBeInTheDocument();
   });
 
   it('hides sidebar for TV dashboard routes', () => {

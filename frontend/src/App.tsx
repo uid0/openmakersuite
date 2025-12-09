@@ -9,6 +9,8 @@ import AssetDetailPage from './pages/AssetDetailPage';
 import AssetFormPage from './pages/AssetFormPage';
 import AssetScanPage from './pages/AssetScanPage';
 import AssetsPage from './pages/AssetsPage';
+import CategoryFormPage from './pages/CategoryFormPage';
+import CategoryListPage from './pages/CategoryListPage';
 import ChecklistCompletionPage from './pages/ChecklistCompletionPage';
 import CodeEntryPage from './pages/CodeEntryPage';
 import DonationItemScanPage from './pages/DonationItemScanPage';
@@ -17,6 +19,9 @@ import HomePage from './pages/HomePage';
 import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
 import InventoryItemFormPage from './pages/InventoryItemFormPage';
 import InventoryListPage from './pages/InventoryListPage';
+import LocationDetailPage from './pages/LocationDetailPage';
+import LocationFormPage from './pages/LocationFormPage';
+import LocationListPage from './pages/LocationListPage';
 import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
 import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
@@ -122,6 +127,13 @@ function AppContent() {
           <Route path="/inventory/scan/asset/:assetId" element={<WorkspaceLayout><AssetScanPage /></WorkspaceLayout>} />
           <Route path="/inventory/scan/location/:locationId" element={<WorkspaceLayout><LocationScanPage /></WorkspaceLayout>} />
           <Route path="/inventory/scan/donation-item/:itemId" element={<WorkspaceLayout><DonationItemScanPage /></WorkspaceLayout>} />
+          <Route path="/inventory/locations" element={<WorkspaceLayout><LocationListPage /></WorkspaceLayout>} />
+          <Route path="/inventory/locations/new" element={<WorkspaceLayout><LocationFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/locations/:id" element={<WorkspaceLayout><LocationDetailPage /></WorkspaceLayout>} />
+          <Route path="/inventory/locations/:id/edit" element={<WorkspaceLayout><LocationFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/categories" element={<WorkspaceLayout><CategoryListPage /></WorkspaceLayout>} />
+          <Route path="/inventory/categories/new" element={<WorkspaceLayout><CategoryFormPage /></WorkspaceLayout>} />
+          <Route path="/inventory/categories/:id/edit" element={<WorkspaceLayout><CategoryFormPage /></WorkspaceLayout>} />
 
           {/* Purchasing Workspace */}
           <Route path="/purchasing/orders" element={<WorkspaceLayout><PurchaseOrderListPage /></WorkspaceLayout>} />

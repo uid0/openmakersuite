@@ -1,0 +1,63 @@
+/**
+ * ColorPicker Styles
+ */
+.color-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.color-picker-label {
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.color-picker-input-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.color-picker-preview {
+  width: 40px;
+  height: 40px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.color-picker-input {
+  width: 60px;
+  height: 40px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  background: none;
+}
+
+.color-picker-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-picker-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+.color-picker-text {
+  flex: 1;
+  padding: 8px 12px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 0.9rem;
+  transition: border-color 0.2s;
+}
+
+.color-picker-text:focus {
+  outline: none;
+  border-color: #667eea;
+}

@@ -62,9 +62,44 @@ class SupplierSerializer(serializers.ModelSerializer):
 
 
 class CategorySerializer(serializers.ModelSerializer):
+    item_count = serializers.SerializerMethodField()
+    parent_name = serializers.CharField(source="parent.name", read_only=True)
+    children = serializers.SerializerMethodField()
+
     class Meta:
         model = Category
         fields = "__all__"
+        read_only_fields = ["slug"]
+
+    def get_item_count(self, obj):
+        """Count of items in this category."""
+        return obj.inventoryitem_set.filter(is_active=True).count()
+
+    def get_children(self, obj):
+        """Get child categories."""
+        children = obj.children.all()
+        return CategorySerializer(children, many=True).data
+
+
+class LocationSerializer(serializers.ModelSerializer):
+    parent_name = serializers.CharField(source="parent.name", read_only=True)
+    fixture_count = serializers.SerializerMethodField()
+    qr_code_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Location
+        fields = "__all__"
+        read_only_fields = ["created_at", "updated_at", "access_code"]
+
+    def get_fixture_count(self, obj):
+        """Count of fixtures at this location."""
+        return obj.fixtures.filter(is_active=True).count()
+
+    def get_qr_code_url(self, obj):
+        """Get QR code URL if available."""
+        if obj.qr_code:
+            return obj.qr_code.url
+        return None
 
 
 class UsageLogSerializer(serializers.ModelSerializer):

@@ -2,7 +2,6 @@
  * Sidebar Component Tests
  */
 import { render, screen, waitFor } from '@testing-library/react';
-import React from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 
@@ -26,11 +25,6 @@ describe('Sidebar Component', () => {
     localStorage.clear();
   });
 
-  it('renders sidebar with logo', () => {
-    renderSidebar();
-    expect(screen.getByText(/dallasmakerspace/i)).toBeInTheDocument();
-  });
-
   it('renders workspace sections', () => {
     renderSidebar();
     // Sections might be collapsed, so check for section headers (buttons)
@@ -40,23 +34,6 @@ describe('Sidebar Component', () => {
     expect(sectionButtons.length).toBeGreaterThan(0);
     // At least inventory should be visible
     expect(screen.getByText(/inventory/i)).toBeInTheDocument();
-  });
-
-  it('can toggle collapse state', async () => {
-    renderSidebar();
-    const toggleButton = screen.getByLabelText(/collapse sidebar|expand sidebar/i);
-    expect(toggleButton).toBeInTheDocument();
-    
-    const initialState = localStorage.getItem('sidebarCollapsed');
-    
-    // Click to toggle
-    toggleButton.click();
-    
-    // Wait for state to update
-    await waitFor(() => {
-      const newState = localStorage.getItem('sidebarCollapsed');
-      expect(newState).not.toBe(initialState);
-    });
   });
 
   it('expands and collapses sections', () => {

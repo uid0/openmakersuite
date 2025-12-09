@@ -4,8 +4,10 @@
  */
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { useCommandPalette } from '../hooks/useCommandPalette';
 import '../styles/WorkspaceLayout.css';
 import Breadcrumbs from './Breadcrumbs';
+import { CommandPalette } from './CommandPalette';
 import Sidebar from './Sidebar';
 
 interface WorkspaceLayoutProps {
@@ -14,6 +16,7 @@ interface WorkspaceLayoutProps {
 
 const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
   const location = useLocation();
+  const commandPalette = useCommandPalette();
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     const saved = localStorage.getItem('sidebarCollapsed');
     return saved ? JSON.parse(saved) : false;
@@ -42,7 +45,12 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
   };
 
   if (shouldHideSidebar) {
-    return <div className="workspace-layout no-sidebar">{children}</div>;
+    return (
+      <div className="workspace-layout no-sidebar">
+        {children}
+        <CommandPalette isOpen={commandPalette.isOpen} onClose={commandPalette.close} />
+      </div>
+    );
   }
 
   return (
@@ -65,6 +73,7 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
         </div>
         <main className="workspace-main">{children}</main>
       </div>
+      <CommandPalette isOpen={commandPalette.isOpen} onClose={commandPalette.close} />
     </div>
   );
 };

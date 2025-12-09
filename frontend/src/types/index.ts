@@ -527,6 +527,23 @@ export interface TaxReceipt {
   updated_at: string;
 }
 
+export interface SearchResult {
+  id: string;
+  type: 'inventory' | 'asset' | 'purchase_order' | 'supplier' | 'location';
+  title: string;
+  subtitle?: string | null;
+  url: string;
+}
+
+export interface RecentSearch {
+  id: number;
+  query: string;
+  result_type: 'inventory' | 'asset' | 'purchase_order' | 'supplier' | 'location';
+  result_id: string;
+  result_title: string;
+  searched_at: string;
+}
+
 export interface Disposition {
   id: string;
   donation_item: string;

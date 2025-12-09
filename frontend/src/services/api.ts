@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt } from '../types';
+import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -652,6 +652,27 @@ export const donationsAPI = {
       }
     );
   },
+};
+
+// Search API
+export const searchAPI = {
+  globalSearch: (query: string, limit?: number) =>
+    api.get<{ results: SearchResult[] }>('/search/', {
+      params: { q: query, limit },
+    }),
+
+  getRecentSearches: (limit?: number) =>
+    api.get<{ results: RecentSearch[] }>('/search/recent/', {
+      params: { limit },
+    }),
+
+  saveRecentSearch: (data: {
+    query: string;
+    result_type: 'inventory' | 'asset' | 'purchase_order' | 'supplier' | 'location';
+    result_id: string;
+    result_title: string;
+  }) =>
+    api.post<RecentSearch>('/search/recent/save/', data),
 };
 
 export default api;

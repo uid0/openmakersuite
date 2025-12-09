@@ -1,6 +1,7 @@
 /**
  * WorkspaceLayout Component Tests
  */
+import { MantineProvider } from '@mantine/core';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import WorkspaceLayout from '../../components/WorkspaceLayout';
@@ -18,13 +19,25 @@ jest.mock('../../components/Breadcrumbs', () => {
   };
 });
 
+// Mock useCommandPalette hook
+jest.mock('../../hooks/useCommandPalette', () => ({
+  useCommandPalette: () => ({
+    isOpen: false,
+    open: jest.fn(),
+    close: jest.fn(),
+    toggle: jest.fn(),
+  }),
+}));
+
 const renderWithRouter = (path: string) => {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <WorkspaceLayout>
-        <div>Test Content</div>
-      </WorkspaceLayout>
-    </MemoryRouter>
+    <MantineProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <WorkspaceLayout>
+          <div>Test Content</div>
+        </WorkspaceLayout>
+      </MemoryRouter>
+    </MantineProvider>
   );
 };
 

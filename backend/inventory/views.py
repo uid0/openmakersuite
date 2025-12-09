@@ -1664,6 +1664,17 @@ class AssetViewSet(viewsets.ModelViewSet):
         serializer = AssetProblemSerializer(problem)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["get"], permission_classes=[IsAuthenticatedOrReadOnly])
+    def get_problems(self, request, pk=None):
+        """Get list of problems for an asset."""
+        asset = self.get_object()
+        from .models import AssetProblem
+        from .serializers import AssetProblemSerializer
+
+        problems = AssetProblem.objects.filter(asset=asset).order_by("-created_at")
+        serializer = AssetProblemSerializer(problems, many=True)
+        return Response(serializer.data)
+
 
 class AssetPartViewSet(viewsets.ModelViewSet):
     """API endpoint for asset parts/consumables."""

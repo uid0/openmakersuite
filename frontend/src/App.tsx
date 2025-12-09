@@ -5,6 +5,8 @@ import * as Sentry from '@sentry/react';
 import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'react-router-dom';
 import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
+import AssetDetailPage from './pages/AssetDetailPage';
+import AssetFormPage from './pages/AssetFormPage';
 import AssetScanPage from './pages/AssetScanPage';
 import AssetsPage from './pages/AssetsPage';
 import ChecklistCompletionPage from './pages/ChecklistCompletionPage';
@@ -127,6 +129,9 @@ function AppContent() {
 
           {/* Assets Workspace */}
           <Route path="/assets" element={<WorkspaceLayout><AssetsPage /></WorkspaceLayout>} />
+          <Route path="/assets/new" element={<WorkspaceLayout><AssetFormPage /></WorkspaceLayout>} />
+          <Route path="/assets/:id" element={<WorkspaceLayout><AssetDetailPage /></WorkspaceLayout>} />
+          <Route path="/assets/:id/edit" element={<WorkspaceLayout><AssetFormPage /></WorkspaceLayout>} />
 
           {/* Facilities Workspace */}
           <Route path="/facilities/tv-dashboard" element={<TVDashboard />} />

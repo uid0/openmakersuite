@@ -1,0 +1,347 @@
+/**
+ * Tests for AssetFormPage component
+ */
+import { MantineProvider } from '@mantine/core';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
+import AssetFormPage from '../../pages/AssetFormPage';
+import { assetsAPI, inventoryAPI, sigAPI } from '../../services/api';
+import { Asset, Category, InventoryItem, Location, SIG } from '../../types';
+
+jest.mock('../../services/api');
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+  useParams: () => ({}),
+  useNavigate: () => jest.fn(),
+}));
+
+const renderWithMantine = (component: React.ReactElement) => {
+  return render(
+    <MantineProvider>
+      {component}
+    </MantineProvider>
+  );
+};
+
+const mockAssetsAPI = assetsAPI as jest.Mocked<typeof assetsAPI>;
+const mockInventoryAPI = inventoryAPI as jest.Mocked<typeof inventoryAPI>;
+const mockSigAPI = sigAPI as jest.Mocked<typeof sigAPI>;
+
+describe('AssetFormPage', () => {
+  const mockCategories: Category[] = [
+    { id: 1, name: 'Electronics', slug: 'electronics', parent: null, created_at: '', updated_at: '' },
+    { id: 2, name: 'Tools', slug: 'tools', parent: null, created_at: '', updated_at: '' },
+  ];
+
+  const mockLocations: Location[] = [
+    { id: 1, name: 'Workshop A', description: '', created_at: '', updated_at: '' },
+    { id: 2, name: 'Workshop B', description: '', created_at: '', updated_at: '' },
+  ];
+
+  const mockInventoryItems: InventoryItem[] = [
+    {
+      id: 'item-1',
+      name: 'Test Item',
+      description: '',
+      sku: 'ITEM001',
+      current_stock: 10,
+      minimum_stock: 5,
+      reorder_quantity: 20,
+      use_case_based_reorder: false,
+      minimum_cases: null,
+      reorder_cases: null,
+      category: 1,
+      category_name: 'Electronics',
+      location: 1,
+      location_name: 'Workshop A',
+      shelf_position: '',
+      is_hazardous: false,
+      msds_url: '',
+      nfpa_health_hazard: null,
+      nfpa_fire_hazard: null,
+      nfpa_instability_hazard: null,
+      nfpa_special_hazards: '',
+      ownership_type: 'space',
+      is_active: true,
+      notes: '',
+      created_at: '',
+      updated_at: '',
+    },
+  ];
+
+  const mockSIGs: SIG[] = [
+    { id: 1, name: 'SIG 1', member_count: 5, asset_count: 2, inventory_count: 3, admins: [], is_user_admin: false },
+  ];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockInventoryAPI.listCategories.mockResolvedValue({
+      data: { results: mockCategories },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+    mockInventoryAPI.listLocations.mockResolvedValue({
+      data: { results: mockLocations },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+    mockInventoryAPI.listItems.mockResolvedValue({
+      data: { results: mockInventoryItems },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+    mockSigAPI.listMySIGs.mockResolvedValue({
+      data: { results: mockSIGs },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+  });
+
+  it('renders create form', async () => {
+    renderWithMantine(
+      <MemoryRouter>
+        <AssetFormPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Create Asset' })).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText(/Name/i)).toBeInTheDocument();
+  });
+
+  it('submits form with valid data', async () => {
+    const mockNavigate = jest.fn();
+    jest.spyOn(require('react-router-dom'), 'useNavigate').mockReturnValue(mockNavigate);
+
+    const mockCreatedAsset: Asset = {
+      id: 'new-id',
+      name: 'New Asset',
+      description: 'New Description',
+      serial_number: '',
+      asset_tag: 'TAG001',
+      inventory_item: null,
+      inventory_item_name: '',
+      manufacturer: null,
+      manufacturer_name: '',
+      display_manufacturer: '',
+      date_received: null,
+      amount_paid: '0.00',
+      is_donation: false,
+      donor_name: '',
+      acquisition_display: '',
+      category: null,
+      category_name: '',
+      location: null,
+      location_name: '',
+      product_url: '',
+      wiki_page_url: '',
+      maintenance_plan: '',
+      image: null,
+      image_url: null,
+      thumbnail_url: null,
+      manual_pdf: null,
+      manual_pdf_url: null,
+      qr_code: null,
+      qr_code_url: null,
+      qr_code_scan_url: null,
+      status: 'active',
+      condition_notes: '',
+      age_in_days: 0,
+      is_active: true,
+      report_only: false,
+      notes: '',
+      circuit: '',
+      needs_compressed_air: false,
+      needs_ventilation: false,
+      is_chargeable: false,
+      last_scanned_at: null,
+      ownership_type: 'space',
+      owning_group: null,
+      owning_group_name: null,
+      owning_user: null,
+      owning_user_name: null,
+      groups_can_enable: [],
+      is_locked: false,
+      lockout_info: null,
+      can_enable: true,
+      can_unlock: false,
+      operational_status: 'available',
+      created_at: '',
+      updated_at: '',
+    };
+
+    mockAssetsAPI.createAsset.mockResolvedValue({
+      data: mockCreatedAsset,
+      status: 201,
+      statusText: 'Created',
+      headers: {},
+      config: {} as any,
+    });
+
+    renderWithMantine(
+      <MemoryRouter>
+        <AssetFormPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Name/i)).toBeInTheDocument();
+    });
+
+    // Fill in required field (name is required) - use fireEvent like other form tests
+    const nameInputs = screen.getAllByLabelText(/Name/i);
+    expect(nameInputs.length).toBeGreaterThan(0);
+    fireEvent.change(nameInputs[0], { target: { value: 'New Asset' } });
+
+    // Wait for submit button to be available - try to find it by role first
+    await waitFor(() => {
+      const submitButtonByRole = screen.queryByRole('button', { name: /Create Asset/i });
+      const submitButtonsByText = screen.queryAllByText('Create Asset');
+      expect(submitButtonByRole || submitButtonsByText.length > 0).toBeTruthy();
+    });
+
+    // Find the submit button - try multiple methods
+    let submitButton: HTMLElement | null = null;
+    
+    // Method 1: By role
+    submitButton = screen.queryByRole('button', { name: /Create Asset/i });
+    
+    // Method 2: By text and button type
+    if (!submitButton) {
+      const submitButtons = screen.getAllByText('Create Asset');
+      submitButton = submitButtons.find(btn => 
+        btn.tagName === 'BUTTON' && (btn as HTMLButtonElement).type === 'submit'
+      ) || submitButtons.find(btn => btn.tagName === 'BUTTON') || null;
+    }
+    
+    // Method 3: Any button with "Create Asset" text
+    if (!submitButton) {
+      const allButtons = screen.getAllByRole('button');
+      submitButton = allButtons.find(btn => btn.textContent?.includes('Create Asset')) || null;
+    }
+    
+    // Verify button exists and click it
+    expect(submitButton).toBeTruthy();
+    if (submitButton) {
+      fireEvent.click(submitButton);
+
+      // Wait for form submission - API should be called if form is valid
+      await waitFor(() => {
+        expect(mockAssetsAPI.createAsset).toHaveBeenCalled();
+      }, { timeout: 3000 });
+    }
+  });
+
+  it('loads asset data in edit mode', async () => {
+    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({ id: 'test-id' });
+
+    const mockAsset: Asset = {
+      id: 'test-id',
+      name: 'Test Asset',
+      description: 'Test Description',
+      serial_number: 'SN001',
+      asset_tag: 'TAG001',
+      inventory_item: null,
+      inventory_item_name: '',
+      manufacturer: null,
+      manufacturer_name: '',
+      display_manufacturer: '',
+      date_received: '2024-01-01',
+      amount_paid: '100.00',
+      is_donation: false,
+      donor_name: '',
+      acquisition_display: '',
+      category: 1,
+      category_name: 'Electronics',
+      location: 1,
+      location_name: 'Workshop A',
+      product_url: '',
+      wiki_page_url: '',
+      maintenance_plan: '',
+      image: null,
+      image_url: null,
+      thumbnail_url: null,
+      manual_pdf: null,
+      manual_pdf_url: null,
+      qr_code: null,
+      qr_code_url: null,
+      qr_code_scan_url: null,
+      status: 'active',
+      condition_notes: '',
+      age_in_days: 30,
+      is_active: true,
+      report_only: false,
+      notes: '',
+      circuit: '',
+      needs_compressed_air: false,
+      needs_ventilation: false,
+      is_chargeable: false,
+      last_scanned_at: null,
+      ownership_type: 'space',
+      owning_group: null,
+      owning_group_name: null,
+      owning_user: null,
+      owning_user_name: null,
+      groups_can_enable: [],
+      is_locked: false,
+      lockout_info: null,
+      can_enable: true,
+      can_unlock: false,
+      operational_status: 'available',
+      created_at: '',
+      updated_at: '',
+    };
+
+    mockAssetsAPI.getAsset.mockResolvedValue({
+      data: mockAsset,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+
+    renderWithMantine(
+      <MemoryRouter>
+        <AssetFormPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Edit Asset')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Test Asset')).toBeInTheDocument();
+    });
+  });
+
+  it('shows loading state', () => {
+    mockAssetsAPI.getAsset.mockImplementation(
+      () =>
+        new Promise(() => {
+          // Never resolves
+        })
+    );
+
+    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({ id: 'test-id' });
+
+    renderWithMantine(
+      <MemoryRouter>
+        <AssetFormPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
+  });
+});

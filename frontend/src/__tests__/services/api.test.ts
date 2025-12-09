@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import MockAdapter from 'axios-mock-adapter';
-import api, { authAPI, checklistsAPI, inventoryAPI, reorderAPI } from '../../services/api';
+import api, { assetPartsAPI, assetsAPI, authAPI, checklistsAPI, inventoryAPI, reorderAPI } from '../../services/api';
 
 jest.mock('@sentry/react', () => ({
   captureException: jest.fn(),
@@ -561,6 +561,185 @@ describe('API Service', () => {
       const response = await checklistsAPI.completeChecklist('completion-id');
 
       expect(response.data.status).toBe('completed');
+    });
+  });
+
+  describe('Assets API', () => {
+    test('listAssets fetches assets with filters', async () => {
+      const mockAssets = {
+        results: [
+          { id: '1', name: 'Asset 1', status: 'active' },
+          { id: '2', name: 'Asset 2', status: 'maintenance' },
+        ],
+      };
+
+      mock.onGet('/inventory/assets/').reply((config) => {
+        expect(config.params).toEqual({ status: 'active', location: 1 });
+        return [200, mockAssets];
+      });
+
+      const response = await assetsAPI.listAssets({ status: 'active', location: 1 });
+
+      expect(response.data.results).toHaveLength(2);
+      expect(response.status).toBe(200);
+    });
+
+    test('getAsset fetches a single asset', async () => {
+      const mockAsset = {
+        id: 'test-id',
+        name: 'Test Asset',
+        status: 'active',
+      };
+
+      mock.onGet('/inventory/assets/test-id/').reply(200, mockAsset);
+
+      const response = await assetsAPI.getAsset('test-id');
+
+      expect(response.data).toEqual(mockAsset);
+      expect(response.status).toBe(200);
+    });
+
+    test('getAssetProblems fetches problems for an asset', async () => {
+      const mockProblems = [
+        {
+          id: '1',
+          asset: 'test-id',
+          description: 'Test problem',
+          status: 'reported',
+        },
+      ];
+
+      mock.onGet('/inventory/assets/test-id/get_problems/').reply(200, mockProblems);
+
+      const response = await assetsAPI.getAssetProblems('test-id');
+
+      expect(response.data).toEqual(mockProblems);
+      expect(response.status).toBe(200);
+    });
+
+    test('createAsset creates new asset', async () => {
+      const assetData = {
+        name: 'New Asset',
+        status: 'active',
+      };
+
+      const mockResponse = {
+        id: 'new-id',
+        ...assetData,
+      };
+
+      mock.onPost('/inventory/assets/').reply(201, mockResponse);
+
+      const response = await assetsAPI.createAsset(assetData);
+
+      expect(response.data).toEqual(mockResponse);
+      expect(response.status).toBe(201);
+    });
+
+    test('updateAsset updates asset', async () => {
+      const assetData = {
+        name: 'Updated Asset',
+      };
+
+      const mockResponse = {
+        id: 'test-id',
+        ...assetData,
+      };
+
+      mock.onPatch('/inventory/assets/test-id/').reply(200, mockResponse);
+
+      const response = await assetsAPI.updateAsset('test-id', assetData);
+
+      expect(response.data).toEqual(mockResponse);
+    });
+
+    test('lockAsset locks an asset', async () => {
+      const mockResponse = {
+        id: 'test-id',
+        is_locked: true,
+      };
+
+      mock.onPost('/inventory/assets/test-id/lock/').reply(200, mockResponse);
+
+      const response = await assetsAPI.lockAsset('test-id');
+
+      expect(response.data.is_locked).toBe(true);
+    });
+
+    test('unlockAsset unlocks an asset', async () => {
+      const mockResponse = {
+        id: 'test-id',
+        is_locked: false,
+      };
+
+      mock.onPost('/inventory/assets/test-id/unlock/').reply(200, mockResponse);
+
+      const response = await assetsAPI.unlockAsset('test-id');
+
+      expect(response.data.is_locked).toBe(false);
+    });
+
+    test('reportProblem reports a problem', async () => {
+      const mockResponse = {
+        id: '1',
+        asset: 'test-id',
+        description: 'Broken part',
+        status: 'reported',
+      };
+
+      mock.onPost('/inventory/assets/test-id/report_problem/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({ description: 'Broken part' });
+        return [201, mockResponse];
+      });
+
+      const response = await assetsAPI.reportProblem('test-id', 'Broken part');
+
+      expect(response.data.description).toBe('Broken part');
+    });
+
+    test('generateQR generates QR code', async () => {
+      mock.onPost('/inventory/assets/test-id/generate_qr/').reply(200, {});
+
+      const response = await assetsAPI.generateQR('test-id');
+
+      expect(response.status).toBe(200);
+    });
+  });
+
+  describe('Asset Parts API', () => {
+    test('listAssetParts fetches parts for an asset', async () => {
+      const mockParts = {
+        results: [
+          {
+            id: '1',
+            asset: 'test-id',
+            part: 'part-id',
+            part_name: 'Test Part',
+          },
+        ],
+      };
+
+      mock.onGet('/inventory/asset-parts/').reply((config) => {
+        expect(config.params).toEqual({ asset: 'test-id' });
+        return [200, mockParts];
+      });
+
+      const response = await assetPartsAPI.listAssetParts({ asset: 'test-id' });
+
+      expect(response.data.results).toHaveLength(1);
+    });
+
+    test('markReplaced marks a part as replaced', async () => {
+      const mockResponse = {
+        id: '1',
+        last_replaced_at: '2024-01-01T00:00:00Z',
+      };
+
+      mock.onPost('/inventory/asset-parts/1/mark_replaced/').reply(200, mockResponse);
+
+      const response = await assetPartsAPI.markReplaced('1');
+
+      expect(response.data.last_replaced_at).toBeDefined();
     });
   });
 });

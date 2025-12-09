@@ -1,5 +1,5 @@
 .purchase-order-page {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 2rem;
 }
@@ -97,6 +97,25 @@
 
 .po-items {
   margin-top: 2rem;
+}
+
+.po-items h2 {
+  margin-bottom: 1rem;
+}
+
+.btn-add-item {
+  padding: 0.5rem 1rem;
+  background-color: #228be6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.btn-add-item:hover {
+  background-color: #1c7ed6;
 }
 
 .po-items h2 {

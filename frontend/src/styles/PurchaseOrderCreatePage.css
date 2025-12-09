@@ -1,0 +1,57 @@
+.purchase-order-create-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.purchase-order-create-page .loading {
+  text-align: center;
+  padding: 3rem;
+  color: #64748b;
+}
+
+.purchase-order-create-page .error-message {
+  padding: 1rem;
+  background-color: #fee;
+  border: 1px solid #fcc;
+  border-radius: 4px;
+  color: #c33;
+  margin-bottom: 1rem;
+}
+
+.purchase-order-create-page table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.purchase-order-create-page table th {
+  background-color: #f8f9fa;
+  padding: 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.purchase-order-create-page table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.purchase-order-create-page table tr:hover {
+  background-color: #f8f9fa;
+}
+
+.purchase-order-create-page .btn-add-item {
+  padding: 0.5rem 1rem;
+  background-color: #228be6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.purchase-order-create-page .btn-add-item:hover {
+  background-color: #1c7ed6;
+}

@@ -546,3 +546,113 @@ export interface Disposition {
   created_at: string;
   updated_at: string;
 }
+
+// Purchase Order types
+export type PurchaseOrderStatus = 'draft' | 'sent' | 'confirmed' | 'partially_received' | 'received' | 'cancelled';
+
+export interface PurchaseOrderLineItem {
+  id: string;
+  item_type: 'inventory_item' | 'asset' | null;
+  item_details: {
+    id: string;
+    name: string;
+    sku: string;
+    current_stock: number;
+  } | null;
+  asset_details: {
+    id: string;
+    name: string;
+    asset_tag: string;
+    location_name: string | null;
+  } | null;
+  quantity_ordered: number;
+  quantity_received: number;
+  unit_cost_ordered: string;
+  unit_cost_actual: string | null;
+  estimated_cost: string;
+  actual_cost: string | null;
+  expected_shipment_date: string | null;
+  notes: string;
+  is_voided: boolean;
+  voided_at: string | null;
+  void_reason: string;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  po_number: string;
+  supplier: number;
+  supplier_details: string;
+  status: PurchaseOrderStatus;
+  status_label: string;
+  order_date: string;
+  expected_delivery_date: string | null;
+  notes: string;
+  estimated_total: string;
+  actual_total: string | null;
+  created_by: number;
+  created_by_username: string;
+  sent_by: number | null;
+  sent_by_username: string | null;
+  sent_at: string | null;
+  updated_at: string;
+  items: PurchaseOrderLineItem[];
+  total_items: number;
+  total_quantity: number;
+  total_received_quantity: number;
+  is_fully_received: boolean;
+  days_since_ordered: number;
+}
+
+export interface CreatePurchaseOrder {
+  supplier: number;
+  expected_delivery_date?: string;
+  notes?: string;
+  items: Array<{
+    item_supplier_id?: number;
+    asset_id?: string;
+    quantity: number;
+    unit_cost?: number;
+    expected_shipment_date?: string;
+    notes?: string;
+  }>;
+}
+
+export interface DeliveryItem {
+  id: string;
+  delivery: string;
+  purchase_order_item: string;
+  item_details: {
+    id: string;
+    name: string;
+    sku: string;
+  };
+  supplier_details: string;
+  quantity_received: number;
+  is_damaged: boolean;
+  is_expired: boolean;
+  condition_notes: string;
+  scanned_upc: string;
+  scanned_at: string | null;
+  scanned_by: number | null;
+  scanned_by_username: string | null;
+  created_at: string;
+}
+
+export interface OrderDelivery {
+  id: string;
+  purchase_order: number;
+  purchase_order_details: PurchaseOrder;
+  delivery_date: string;
+  tracking_number: string;
+  carrier: string;
+  received_by: number;
+  received_by_username: string;
+  receipt_notes: string;
+  is_complete: boolean;
+  items: DeliveryItem[];
+  total_items_received: number;
+  total_quantity_received: number;
+  created_at: string;
+  updated_at: string;
+}

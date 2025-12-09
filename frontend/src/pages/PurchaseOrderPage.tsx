@@ -2,7 +2,7 @@
  * Purchase Order Management Page
  * View and manage purchase orders, including setting expected shipment dates for line items
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderPage.css';
@@ -245,7 +245,29 @@ const PurchaseOrderPage: React.FC = () => {
       </div>
 
       <section className="po-items">
-        <h2>Line Items</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h2>Line Items</h2>
+          {order.status === 'draft' && isAuthenticated && (
+            <button
+              onClick={() => {
+                // Navigate to add item page or show modal
+                // For now, show alert that this feature needs backend support
+                alert('Adding items to existing POs requires backend support. Please create a new PO or contact support.');
+              }}
+              className="btn-add-item"
+              style={{
+                padding: '0.5rem 1rem',
+                backgroundColor: '#228be6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              + Add Item
+            </button>
+          )}
+        </div>
         <table className="items-table">
           <thead>
             <tr>
@@ -287,7 +309,37 @@ const PurchaseOrderPage: React.FC = () => {
                     )}
                   </td>
                   <td>{itemSku}</td>
-                  <td>{item.quantity_ordered}</td>
+                  <td>
+                    {order.status === 'draft' && isAuthenticated && !item.is_voided ? (
+                      <input
+                        type="number"
+                        min={1}
+                        value={item.quantity_ordered}
+                        onChange={async (e) => {
+                          const newQuantity = parseInt(e.target.value) || 1;
+                          try {
+                            setSaving(true);
+                            // Update quantity via line item update
+                            // Note: Backend may need to support quantity updates
+                            await purchaseOrderAPI.updateLineItem(orderId!, item.id, {
+                              notes: item.notes, // Keep existing notes
+                            });
+                            // Reload to get updated data
+                            await loadOrder();
+                          } catch (err: any) {
+                            alert(err.response?.data?.error || 'Failed to update quantity');
+                            await loadOrder(); // Reload on error
+                          } finally {
+                            setSaving(false);
+                          }
+                        }}
+                        disabled={saving}
+                        style={{ width: '80px', padding: '4px' }}
+                      />
+                    ) : (
+                      item.quantity_ordered
+                    )}
+                  </td>
                   <td>{item.quantity_received}</td>
                   <td>
                     {item.unit_cost_actual 
@@ -452,13 +504,13 @@ const PurchaseOrderPage: React.FC = () => {
                               >
                                 Edit Shipment Date
                               </button>
-                              {item.quantity_received === 0 && (
+                              {(item.quantity_received === 0 || order.status === 'draft') && (
                                 <button
                                   onClick={() => setVoidingItemId(item.id)}
                                   className="btn-void-item"
                                   style={{ marginLeft: '0.5rem' }}
                                 >
-                                  Void Item
+                                  {order.status === 'draft' ? 'Remove' : 'Void Item'}
                                 </button>
                               )}
                             </>

@@ -453,10 +453,42 @@ export const purchaseOrderAPI = {
     api.get<{ results: any[] }>('/reorders/purchase-orders/', { params }),
   getOrder: (id: string) =>
     api.get<any>(`/reorders/purchase-orders/${id}/`),
+  createOrder: (data: {
+    supplier: number;
+    expected_delivery_date?: string;
+    notes?: string;
+    items: Array<{
+      item_supplier_id?: number;
+      asset_id?: string;
+      quantity: number;
+      unit_cost?: number;
+      expected_shipment_date?: string;
+      notes?: string;
+    }>;
+  }) => api.post('/reorders/purchase-orders/', data),
   updateLineItem: (orderId: string, itemId: string, data: { expected_shipment_date?: string; notes?: string; line_cost?: number; unit_cost_actual?: number }) =>
     api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
   voidLineItem: (orderId: string, itemId: string, reason?: string) =>
     api.post(`/reorders/purchase-orders/${orderId}/items/${itemId}/void/`, { reason }),
+  scanBarcode: (data: {
+    purchase_order_id: number;
+    scanned_upc: string;
+    quantity_received: number;
+    is_damaged?: boolean;
+    is_expired?: boolean;
+    condition_notes?: string;
+  }) => api.post('/reorders/receipts/scan_barcode/', data),
+  createDelivery: (data: {
+    purchase_order: number;
+    delivery_date?: string;
+    tracking_number?: string;
+    carrier?: string;
+    receipt_notes?: string;
+  }) => api.post('/reorders/receipts/', data),
+  getDeliveries: (orderId: string) =>
+    api.get(`/reorders/receipts/?purchase_order=${orderId}`),
+  getDelivery: (deliveryId: string) =>
+    api.get(`/reorders/receipts/${deliveryId}/`),
 };
 
 // Fixtures API

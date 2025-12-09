@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt } from '../types';
+import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -311,7 +311,7 @@ export const inventoryAPI = {
 
 // Assets API
 export const assetsAPI = {
-  listAssets: (params?: { status?: string; category?: number; search?: string; owning_group?: number }) =>
+  listAssets: (params?: { status?: string; category?: number; location?: number; search?: string; owning_group?: number }) =>
     api.get<{ results: Asset[] }>('/inventory/assets/', { params }),
 
   getMySIGAssets: () =>
@@ -337,6 +337,9 @@ export const assetsAPI = {
 
   getAssetChecklists: (id: string) =>
     api.get<Checklist[]>(`/inventory/assets/${id}/checklists/`),
+
+  getAssetProblems: (id: string) =>
+    api.get<AssetProblem[]>(`/inventory/assets/${id}/get_problems/`),
 
   enableAsset: (id: string) =>
     api.post<Asset>(`/inventory/assets/${id}/enable/`),
@@ -365,6 +368,15 @@ export const assetsAPI = {
 
   getNotCheckedIn: () =>
     api.get<Asset[]>('/inventory/assets/not_checked_in/'),
+};
+
+// Asset Parts API
+export const assetPartsAPI = {
+  listAssetParts: (params?: { asset?: string }) =>
+    api.get<{ results: AssetPart[] }>('/inventory/asset-parts/', { params }),
+
+  markReplaced: (id: string) =>
+    api.post<AssetPart>(`/inventory/asset-parts/${id}/mark_replaced/`),
 };
 
 // Reorder API

@@ -313,6 +313,22 @@ export interface AssetPart {
   updated_at: string;
 }
 
+export type AssetProblemStatus = 'reported' | 'in_progress' | 'resolved' | 'closed';
+
+export interface AssetProblem {
+  id: string;
+  asset: string;
+  asset_name: string;
+  asset_tag: string;
+  reported_by: string;
+  description: string;
+  status: AssetProblemStatus;
+  resolution_notes: string;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+}
+
 export interface SiteSettings {
   site_name: string;
   site_tagline: string;

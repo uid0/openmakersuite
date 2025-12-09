@@ -1,0 +1,17 @@
+/* Asset Form Page Styles */
+
+/* Most styling is handled by Mantine components */
+/* This file can be used for custom overrides if needed */
+
+.asset-form-page {
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .asset-form-page {
+    padding: 1rem;
+  }
+}

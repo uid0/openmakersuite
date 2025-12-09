@@ -1,60 +1,66 @@
 /**
  * Asset List Component
- * Displays all hard assets with search and status filtering
+ * Displays all hard assets with search and filtering (status, location, SIG)
  */
 import React, { useEffect, useState } from 'react';
-import { assetsAPI } from '../services/api';
-import { Asset } from '../types';
-import AssetDetailModal from './AssetDetailModal';
+import { useNavigate } from 'react-router-dom';
+import { assetsAPI, inventoryAPI, sigAPI } from '../services/api';
 import '../styles/AssetList.css';
+import { Asset, Location, SIG } from '../types';
 
 const AssetList: React.FC = () => {
+  const navigate = useNavigate();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'maintenance' | 'retired'>('all');
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [locationFilter, setLocationFilter] = useState<number | null>(null);
+  const [sigFilter, setSigFilter] = useState<number | null>(null);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [sigs, setSigs] = useState<SIG[]>([]);
 
   useEffect(() => {
-    console.log('AssetList: Component mounted, loading assets...');
+    loadInitialData();
     loadAssets();
-  }, []);
+  }, [statusFilter, locationFilter, sigFilter, searchTerm]);
+
+  const loadInitialData = async () => {
+    try {
+      const [locationsRes, sigsRes] = await Promise.all([
+        inventoryAPI.listLocations(),
+        sigAPI.listMySIGs(),
+      ]);
+      setLocations(locationsRes.data.results || []);
+      setSigs(sigsRes.data.results || []);
+    } catch (err) {
+      console.error('Error loading initial data:', err);
+    }
+  };
 
   const loadAssets = async () => {
     try {
-      console.log('AssetList: Making API call to /inventory/assets/');
       setLoading(true);
-      const response = await assetsAPI.listAssets();
-      console.log('AssetList: API response received:', response.data);
+      const params: any = {};
+      if (statusFilter !== 'all') {
+        params.status = statusFilter;
+      }
+      if (locationFilter) {
+        params.location = locationFilter;
+      }
+      if (sigFilter) {
+        params.owning_group = sigFilter;
+      }
+      if (searchTerm) {
+        params.search = searchTerm;
+      }
+      const response = await assetsAPI.listAssets(params);
       setAssets(response.data.results);
     } catch (err: any) {
       console.error('AssetList: Error loading assets:', err);
-      console.error('AssetList: Error details:', {
-        status: err?.response?.status,
-        statusText: err?.response?.statusText,
-        data: err?.response?.data,
-        message: err?.message,
-      });
     } finally {
       setLoading(false);
     }
   };
-
-  const filteredAssets = assets.filter((asset) => {
-    // Apply search filter
-    const matchesSearch =
-      asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (asset.serial_number && asset.serial_number.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.asset_tag && asset.asset_tag.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.inventory_item_name && asset.inventory_item_name.toLowerCase().includes(searchTerm.toLowerCase()));
-
-    // Apply status filter
-    const matchesStatus =
-      statusFilter === 'all' || asset.status === statusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
 
   const statusCounts = {
     all: assets.length,
@@ -86,13 +92,11 @@ const AssetList: React.FC = () => {
   };
 
   const handleAssetClick = (assetId: string) => {
-    setSelectedAssetId(assetId);
-    setIsModalOpen(true);
+    navigate(`/assets/${assetId}`);
   };
 
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setSelectedAssetId(null);
+  const handleCreateAsset = () => {
+    navigate('/assets/new');
   };
 
   if (loading) {
@@ -103,59 +107,105 @@ const AssetList: React.FC = () => {
     <div className="asset-list-container">
       <div className="asset-header">
         <h2>Makerspace Assets ({assets.length} total)</h2>
-        <div className="asset-stats">
-          {statusCounts.maintenance > 0 && (
-            <span className="stat-badge maintenance">
-              {statusCounts.maintenance} in maintenance
-            </span>
-          )}
+        <div className="asset-header-actions">
+          <button className="create-asset-button" onClick={handleCreateAsset}>
+            + Create Asset
+          </button>
+          <div className="asset-stats">
+            {statusCounts.maintenance > 0 && (
+              <span className="stat-badge maintenance">
+                {statusCounts.maintenance} in maintenance
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="asset-controls">
-        <input
-          type="text"
-          placeholder="Search by name, serial number, or asset tag..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="search-input"
-        />
+        <div className="search-section">
+          <input
+            type="text"
+            placeholder="Search by name, serial number, or asset tag..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="search-input"
+          />
+        </div>
 
-        <div className="filter-buttons">
-          <button
-            className={statusFilter === 'all' ? 'active' : ''}
-            onClick={() => setStatusFilter('all')}
-          >
-            All ({statusCounts.all})
-          </button>
-          <button
-            className={statusFilter === 'active' ? 'active' : ''}
-            onClick={() => setStatusFilter('active')}
-          >
-            Active ({statusCounts.active})
-          </button>
-          <button
-            className={statusFilter === 'maintenance' ? 'active' : ''}
-            onClick={() => setStatusFilter('maintenance')}
-          >
-            Maintenance ({statusCounts.maintenance})
-          </button>
-          <button
-            className={statusFilter === 'retired' ? 'active' : ''}
-            onClick={() => setStatusFilter('retired')}
-          >
-            Retired ({statusCounts.retired})
-          </button>
+        <div className="filters-section">
+          <div className="filter-group">
+            <label>Status:</label>
+            <div className="filter-buttons">
+              <button
+                className={statusFilter === 'all' ? 'active' : ''}
+                onClick={() => setStatusFilter('all')}
+              >
+                All
+              </button>
+              <button
+                className={statusFilter === 'active' ? 'active' : ''}
+                onClick={() => setStatusFilter('active')}
+              >
+                Active
+              </button>
+              <button
+                className={statusFilter === 'maintenance' ? 'active' : ''}
+                onClick={() => setStatusFilter('maintenance')}
+              >
+                Maintenance
+              </button>
+              <button
+                className={statusFilter === 'retired' ? 'active' : ''}
+                onClick={() => setStatusFilter('retired')}
+              >
+                Retired
+              </button>
+            </div>
+          </div>
+
+          <div className="filter-group">
+            <label>Location:</label>
+            <select
+              value={locationFilter || ''}
+              onChange={(e) => setLocationFilter(e.target.value ? Number(e.target.value) : null)}
+              className="filter-select"
+            >
+              <option value="">All Locations</option>
+              {locations.map((loc) => (
+                <option key={loc.id} value={loc.id}>
+                  {loc.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label>SIG:</label>
+            <select
+              value={sigFilter || ''}
+              onChange={(e) => setSigFilter(e.target.value ? Number(e.target.value) : null)}
+              className="filter-select"
+            >
+              <option value="">All SIGs</option>
+              {sigs.map((sig) => (
+                <option key={sig.id} value={sig.id}>
+                  {sig.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
-      {filteredAssets.length === 0 ? (
+      {assets.length === 0 ? (
         <div className="no-results">
-          {searchTerm ? 'No assets match your search.' : 'No assets found.'}
+          {searchTerm || locationFilter || sigFilter || statusFilter !== 'all'
+            ? 'No assets match your filters.'
+            : 'No assets found.'}
         </div>
       ) : (
         <div className="asset-grid">
-          {filteredAssets.map((asset) => (
+          {assets.map((asset) => (
             <div
               key={asset.id}
               className={`asset-card ${getStatusBadgeClass(asset.status)}`}
@@ -237,12 +287,6 @@ const AssetList: React.FC = () => {
           ))}
         </div>
       )}
-
-      <AssetDetailModal
-        assetId={selectedAssetId}
-        isOpen={isModalOpen}
-        onClose={handleCloseModal}
-      />
     </div>
   );
 };

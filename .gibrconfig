@@ -1,5 +1,5 @@
 [DEFAULT]
-branch_name_format = {issue}-{title}
+branch_name_format = uid0/{issue}-{title}
 
 [issue-tracker]
 name = github

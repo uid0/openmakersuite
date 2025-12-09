@@ -210,9 +210,7 @@ class LocationViewSet(viewsets.ModelViewSet):
         # Search functionality
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(
-                Q(name__icontains=search) | Q(description__icontains=search)
-            )
+            queryset = queryset.filter(Q(name__icontains=search) | Q(description__icontains=search))
 
         return queryset
 

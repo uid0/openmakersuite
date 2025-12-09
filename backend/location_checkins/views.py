@@ -236,6 +236,30 @@ class SecurityReportViewSet(viewsets.ModelViewSet):
         # Send webhook notification
         send_security_report_webhook.delay(str(security_report.id))
 
+        # Create notifications for admins about security reports
+        try:
+            from notifications.services import notify_admins
+
+            report_type_display = dict(SecurityReport.REPORT_TYPE_CHOICES).get(
+                report_type, report_type
+            )
+            urgency_text = " (URGENT)" if is_urgent else ""
+            notify_admins(
+                type="warning" if is_urgent else "info",
+                title=f"{report_type_display} Report{urgency_text}",
+                message=f'{report_type_display} concern reported at {location.name}. {description[:100] if description else "No description provided."}',
+                action_url=f"/inventory/scan/location/{location.id}",
+                metadata={
+                    "security_report_id": security_report.id,
+                    "location_id": location.id,
+                    "report_type": report_type,
+                    "is_urgent": is_urgent,
+                },
+            )
+        except Exception:
+            # Don't fail the request if notification creation fails
+            pass
+
         serializer = self.get_serializer(security_report)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 

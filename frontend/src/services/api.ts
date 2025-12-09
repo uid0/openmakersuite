@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings, Supplier, TaxReceipt } from '../types';
+import { Asset, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -252,8 +252,23 @@ export const inventoryAPI = {
   listCategories: () =>
     api.get<{ results: Category[] }>('/inventory/categories/'),
 
-  listSuppliers: () =>
-    api.get<{ results: Supplier[] }>('/inventory/suppliers/'),
+  listSuppliers: (params?: { supplier_type?: string; search?: string }) =>
+    api.get<{ results: Supplier[] }>('/inventory/suppliers/', { params }),
+
+  getSupplier: (id: string) =>
+    api.get<SupplierDetail>(`/inventory/suppliers/${id}/`),
+
+  createSupplier: (data: Partial<Supplier>) =>
+    api.post<Supplier>('/inventory/suppliers/', data),
+
+  updateSupplier: (id: string, data: Partial<Supplier>) =>
+    api.patch<Supplier>(`/inventory/suppliers/${id}/`, data),
+
+  deleteSupplier: (id: string) =>
+    api.delete(`/inventory/suppliers/${id}/`),
+
+  getSupplierAnalytics: (id: string) =>
+    api.get(`/inventory/suppliers/${id}/analytics/`),
 
   createItem: (data: FormData | Partial<InventoryItem>) => {
     if (data instanceof FormData) {

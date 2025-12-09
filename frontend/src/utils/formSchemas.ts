@@ -155,3 +155,17 @@ export const inventoryItemSchema = z
   );
 
 export type InventoryItemFormData = z.infer<typeof inventoryItemSchema>;
+
+// Supplier Form Schema
+export const supplierSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200, 'Name must be 200 characters or less'),
+  supplier_type: z.enum(['local', 'online', 'national'], {
+    required_error: 'Supplier type is required',
+  }),
+  website: z.string().url('Invalid URL').optional().or(z.literal('')),
+  account_number: z.string().max(100, 'Account number must be 100 characters or less').optional(),
+  tax_free_paperwork_filed: z.boolean().default(false),
+  notes: z.string().optional(),
+});
+
+export type SupplierFormData = z.infer<typeof supplierSchema>;

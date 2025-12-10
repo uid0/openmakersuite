@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">1.03% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/96</span>
+                <span class='fraction'>1/97</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/79</span>
+                <span class='fraction'>0/75</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">1.07% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/92</span>
+                <span class='fraction'>1/93</span>
             </div>
         
             
@@ -400,7 +400,9 @@
 <a name='L335'></a><a href='#L335'>335</a>
 <a name='L336'></a><a href='#L336'>336</a>
 <a name='L337'></a><a href='#L337'>337</a>
-<a name='L338'></a><a href='#L338'>338</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L338'></a><a href='#L338'>338</a>
+<a name='L339'></a><a href='#L339'>339</a>
+<a name='L340'></a><a href='#L340'>340</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -411,6 +413,8 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -744,13 +748,15 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useNotifications } from '../hooks/useNotifications';
 import { fixturesAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Fixture, FixtureRefillRequest } from '../types';
 &nbsp;
-const FixtureScanPage: React.FC = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >()</span> =&gt; {</span>
+const FixtureScanPage: React.FC = <span class="fstat-no" title="function not covered" >()</span> =&gt; {
   const { fixtureId } = <span class="cstat-no" title="statement not covered" >useParams&lt;{ fixtureId: string }&gt;();</span>
   const navigate = <span class="cstat-no" title="statement not covered" >useNavigate();</span>
+  const notifications = <span class="cstat-no" title="statement not covered" >useNotifications();</span>
 &nbsp;
   // Authentication state
   const [isLoggedIn] = <span class="cstat-no" title="statement not covered" >useState&lt;boolean&gt;(<span class="fstat-no" title="function not covered" >()</span> =&gt; <span class="cstat-no" title="statement not covered" >!!localStorage.getItem('token'))</span>;</span>
@@ -844,7 +850,7 @@ const FixtureScanPage: React.FC = <span class="cstat-no" title="statement not co
       // Reload fixture to get updated pending requests count
 <span class="cstat-no" title="statement not covered" >      await loadFixture();</span>
     } catch (err: any) {
-<span class="cstat-no" title="statement not covered" >      alert(err.response?.data?.error || 'Failed to submit refill request');</span>
+<span class="cstat-no" title="statement not covered" >      notifications.showError('Failed to submit refill request', err.response?.data?.error);</span>
 <span class="cstat-no" title="statement not covered" >      console.error('Error submitting refill request:', err);</span>
     } finally {
 <span class="cstat-no" title="statement not covered" >      setSubmitting(false);</span>
@@ -868,7 +874,7 @@ const FixtureScanPage: React.FC = <span class="cstat-no" title="statement not co
 <span class="cstat-no" title="statement not covered" >      await loadFixture();</span>
 <span class="cstat-no" title="statement not covered" >      setNotes('');</span>
     } catch (err: any) {
-<span class="cstat-no" title="statement not covered" >      alert(err.response?.data?.error || 'Failed to resolve requests');</span>
+<span class="cstat-no" title="statement not covered" >      notifications.showError('Failed to resolve requests', err.response?.data?.error);</span>
 <span class="cstat-no" title="statement not covered" >      console.error('Error resolving requests:', err);</span>
     } finally {
 <span class="cstat-no" title="statement not covered" >      setResolving(false);</span>
@@ -1081,7 +1087,7 @@ export default FixtureScanPage;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-12-09T00:47:20.713Z
+                at 2025-12-10T04:08:54.070Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

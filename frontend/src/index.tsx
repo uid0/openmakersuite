@@ -2,10 +2,13 @@ import { MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
 import '@mantine/dates/styles.css';
 import '@mantine/dropzone/styles.css';
+import { Notifications } from '@mantine/notifications';
+import '@mantine/notifications/styles.css';
 import * as Sentry from '@sentry/react';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { NotificationProvider } from './contexts/NotificationContext';
 import './styles/index.css';
 
 // Initialize Sentry
@@ -39,7 +42,10 @@ const root = ReactDOM.createRoot(
 root.render(
   <React.StrictMode>
     <MantineProvider>
-      <App />
+      <NotificationProvider>
+        <Notifications />
+        <App />
+      </NotificationProvider>
     </MantineProvider>
   </React.StrictMode>
 );

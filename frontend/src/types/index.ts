@@ -527,6 +527,23 @@ export interface TaxReceipt {
   updated_at: string;
 }
 
+export interface SearchResult {
+  id: string;
+  type: 'inventory' | 'asset' | 'purchase_order' | 'supplier' | 'location';
+  title: string;
+  subtitle?: string | null;
+  url: string;
+}
+
+export interface RecentSearch {
+  id: number;
+  query: string;
+  result_type: 'inventory' | 'asset' | 'purchase_order' | 'supplier' | 'location';
+  result_id: string;
+  result_title: string;
+  searched_at: string;
+}
+
 export interface Disposition {
   id: string;
   donation_item: string;
@@ -545,4 +562,97 @@ export interface Disposition {
   created_asset: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// Report Types
+export interface InventoryStockByCategory {
+  category_id: number | null;
+  category_name: string;
+  total_items: number;
+  total_stock: number;
+  total_value: number;
+  low_stock_count: number;
+}
+
+export interface InventoryReorderFrequency {
+  item_id: string;
+  item_name: string;
+  item_sku: string;
+  category_name: string;
+  reorder_count: number;
+}
+
+export interface InventoryValueByLocation {
+  location_id: number | null;
+  location_name: string;
+  total_items: number;
+  total_stock: number;
+  total_value: number;
+}
+
+export interface PurchasingSpendBySupplier {
+  supplier_id: number;
+  supplier_name: string;
+  total_orders: number;
+  total_spend: number;
+  avg_order_value: number;
+}
+
+export interface PurchasingSpendByCategory {
+  category_id: number | null;
+  category_name: string;
+  total_items: number;
+  total_quantity: number;
+  total_spend: number;
+}
+
+export interface PurchasingLeadTimeAnalysis {
+  supplier_id: number;
+  supplier_name: string;
+  item_name: string;
+  total_orders: number;
+  avg_estimated_lead_time: number;
+  avg_actual_lead_time: number;
+  avg_variance: number;
+  on_time_rate: number;
+}
+
+export interface PurchasingPriceTrends {
+  item_id: string;
+  item_name: string;
+  supplier_name: string;
+  price_changes: number;
+  min_unit_cost: number;
+  max_unit_cost: number;
+  latest_unit_cost: number;
+  price_change_percentage: number | null;
+}
+
+export interface AssetAssetsByStatus {
+  status: string;
+  status_display: string;
+  count: number;
+}
+
+export interface AssetMaintenanceDue {
+  asset_id: string;
+  asset_name: string;
+  asset_tag: string;
+  part_id: string | null;
+  part_name: string | null;
+  part_sku: string | null;
+  maintenance_interval_days: number | null;
+  days_since_replacement: number | null;
+  days_overdue: number | null;
+  last_replaced_at: string | null;
+  status?: string;
+}
+
+export interface AssetUtilization {
+  asset_id: string;
+  asset_name: string;
+  asset_tag: string;
+  total_sessions: number;
+  total_hours: number;
+  avg_hours_per_session: number;
 }

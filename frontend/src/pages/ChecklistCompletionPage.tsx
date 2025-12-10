@@ -4,6 +4,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useNotifications } from '../hooks/useNotifications';
 import { checklistsAPI, inventoryAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Checklist, ChecklistCompletion } from '../types';
@@ -11,6 +12,7 @@ import { Checklist, ChecklistCompletion } from '../types';
 const ChecklistCompletionPage: React.FC = () => {
   const { checklistId, completionId } = useParams<{ checklistId: string; completionId: string }>();
   const navigate = useNavigate();
+  const notifications = useNotifications();
 
   const [checklist, setChecklist] = useState<Checklist | null>(null);
   const [completion, setCompletion] = useState<ChecklistCompletion | null>(null);
@@ -50,7 +52,7 @@ const ChecklistCompletionPage: React.FC = () => {
       // Prompt user to enter code or scan QR
       const code = prompt('Enter the 6-character code or scan QR code:');
       if (!code || code.length !== 6) {
-        alert('Please enter a valid 6-character code');
+        notifications.showWarning('Invalid Code', 'Please enter a valid 6-character code');
         return;
       }
 
@@ -85,7 +87,7 @@ const ChecklistCompletionPage: React.FC = () => {
       }
 
       if (!matches) {
-        alert(`This QR code doesn't match the next step. Please scan the correct item.`);
+        notifications.showWarning('Wrong QR Code', `This QR code doesn't match the next step. Please scan the correct item.`);
         return;
       }
 
@@ -104,11 +106,11 @@ const ChecklistCompletionPage: React.FC = () => {
         if (window.confirm('All required steps are complete! Would you like to finish the checklist?')) {
           await checklistsAPI.completeChecklist(completionId!);
           await loadData();
-          alert('Checklist completed successfully!');
+          notifications.showSuccess('Checklist Completed', 'Checklist completed successfully!');
         }
       }
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to scan code');
+      notifications.showError('Failed to scan code', err.response?.data?.detail);
       console.error('Error scanning code:', err);
     } finally {
       setScanning(false);
@@ -125,9 +127,9 @@ const ChecklistCompletionPage: React.FC = () => {
     try {
       await checklistsAPI.completeChecklist(completionId);
       await loadData();
-      alert('Checklist completed successfully!');
+      notifications.showSuccess('Checklist Completed', 'Checklist completed successfully!');
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to complete checklist');
+      notifications.showError('Failed to complete checklist', err.response?.data?.detail);
       console.error('Error completing checklist:', err);
     }
   };

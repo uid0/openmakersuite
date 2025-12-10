@@ -74,7 +74,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
     def get_item_count(self, obj):
         """Count of items in this category."""
-        return obj.inventoryitem_set.filter(is_active=True).count()
+        return obj.items.filter(is_active=True).count()
 
     def get_children(self, obj):
         """Get child categories."""

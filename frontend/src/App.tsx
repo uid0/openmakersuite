@@ -7,6 +7,7 @@ import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AssetDetailPage from './pages/AssetDetailPage';
 import AssetFormPage from './pages/AssetFormPage';
+import AssetReportPage from './pages/AssetReportPage';
 import AssetScanPage from './pages/AssetScanPage';
 import AssetsPage from './pages/AssetsPage';
 import CategoryFormPage from './pages/CategoryFormPage';
@@ -19,6 +20,7 @@ import HomePage from './pages/HomePage';
 import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
 import InventoryItemFormPage from './pages/InventoryItemFormPage';
 import InventoryListPage from './pages/InventoryListPage';
+import InventoryReportPage from './pages/InventoryReportPage';
 import LocationDetailPage from './pages/LocationDetailPage';
 import LocationFormPage from './pages/LocationFormPage';
 import LocationListPage from './pages/LocationListPage';
@@ -26,6 +28,7 @@ import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
 import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
+import PurchasingReportPage from './pages/PurchasingReportPage';
 import ScanPage from './pages/ScanPage';
 import SIGDashboard from './pages/SIGDashboard';
 import SupplierDetailPage from './pages/SupplierDetailPage';
@@ -154,6 +157,11 @@ function AppContent() {
           {/* SIGs Workspace */}
           <Route path="/sigs/dashboard" element={<WorkspaceLayout><SIGDashboard /></WorkspaceLayout>} />
           <Route path="/sigs/dashboard/:sigId" element={<WorkspaceLayout><SIGDashboard /></WorkspaceLayout>} />
+
+          {/* Reports Workspace */}
+          <Route path="/reports/inventory" element={<WorkspaceLayout><InventoryReportPage /></WorkspaceLayout>} />
+          <Route path="/reports/purchasing" element={<WorkspaceLayout><PurchasingReportPage /></WorkspaceLayout>} />
+          <Route path="/reports/assets" element={<WorkspaceLayout><AssetReportPage /></WorkspaceLayout>} />
 
           {/* Settings Workspace */}
           <Route path="/settings/tax-receipt/lookup" element={<WorkspaceLayout><TaxReceiptLookupPage /></WorkspaceLayout>} />

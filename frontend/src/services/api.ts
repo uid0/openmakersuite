@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, ReorderRequest, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt } from '../types';
+import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -652,6 +652,107 @@ export const donationsAPI = {
       }
     );
   },
+};
+
+// Search API
+export const searchAPI = {
+  globalSearch: (query: string, limit?: number) =>
+    api.get<{ results: SearchResult[] }>('/search/', {
+      params: { q: query, limit },
+    }),
+
+  getRecentSearches: (limit?: number) =>
+    api.get<{ results: RecentSearch[] }>('/search/recent/', {
+      params: { limit },
+    }),
+
+  saveRecentSearch: (data: {
+    query: string;
+    result_type: 'inventory' | 'asset' | 'purchase_order' | 'supplier' | 'location';
+    result_id: string;
+    result_title: string;
+  }) =>
+    api.post<RecentSearch>('/search/recent/save/', data),
+};
+
+// Notifications API
+export interface BackendNotification {
+  id: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+  title: string;
+  message: string;
+  read: boolean;
+  created_at: string;
+  action_url?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export const notificationsAPI = {
+  list: (params?: { read?: boolean }) =>
+    api.get<{ results: BackendNotification[] }>('/notifications/', { params }),
+
+  markAsRead: (id: string) =>
+    api.post(`/notifications/${id}/mark_read/`),
+
+  markAllAsRead: () =>
+    api.post('/notifications/mark_all_read/'),
+
+  delete: (id: string) =>
+    api.delete(`/notifications/${id}/`),
+};
+
+// Reports API
+export const reportsAPI = {
+  // Inventory Reports
+  getInventoryStockByCategory: () =>
+    api.get('/inventory/reports/inventory/stock_by_category/'),
+
+  getInventoryReorderFrequency: (params?: { months?: number }) =>
+    api.get('/inventory/reports/inventory/reorder_frequency/', { params }),
+
+  getInventoryValueByLocation: () =>
+    api.get('/inventory/reports/inventory/value_by_location/'),
+
+  exportInventoryReport: (type: 'stock_by_category' | 'reorder_frequency' | 'value_by_location', params?: { months?: number }) =>
+    api.get('/inventory/reports/inventory/export/', { 
+      params: { type, ...params },
+      responseType: 'blob',
+    }),
+
+  // Purchasing Reports
+  getPurchasingSpendBySupplier: () =>
+    api.get('/reorders/reports/purchasing/spend_by_supplier/'),
+
+  getPurchasingSpendByCategory: () =>
+    api.get('/reorders/reports/purchasing/spend_by_category/'),
+
+  getPurchasingLeadTimeAnalysis: (params?: { months?: number }) =>
+    api.get('/reorders/reports/purchasing/lead_time_analysis/', { params }),
+
+  getPurchasingPriceTrends: (params?: { months?: number }) =>
+    api.get('/reorders/reports/purchasing/price_trends/', { params }),
+
+  exportPurchasingReport: (type: 'spend_by_supplier' | 'spend_by_category' | 'lead_time_analysis' | 'price_trends', params?: { months?: number }) =>
+    api.get('/reorders/reports/purchasing/export/', {
+      params: { type, ...params },
+      responseType: 'blob',
+    }),
+
+  // Asset Reports
+  getAssetAssetsByStatus: () =>
+    api.get('/inventory/reports/assets/assets_by_status/'),
+
+  getAssetMaintenanceDue: () =>
+    api.get('/inventory/reports/assets/maintenance_due/'),
+
+  getAssetUtilization: (params?: { days?: number }) =>
+    api.get('/inventory/reports/assets/utilization/', { params }),
+
+  exportAssetReport: (type: 'assets_by_status' | 'maintenance_due' | 'utilization', params?: { days?: number }) =>
+    api.get('/inventory/reports/assets/export/', {
+      params: { type, ...params },
+      responseType: 'blob',
+    }),
 };
 
 export default api;

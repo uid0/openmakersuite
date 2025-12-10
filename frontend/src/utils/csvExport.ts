@@ -112,3 +112,165 @@ export function exportInventoryItemsToCSV(items: any[]): void {
 
   exportToCSV(csvData, { filename: 'inventory-export', headers });
 }
+
+/**
+ * Export inventory report data to CSV
+ */
+export function exportInventoryReportToCSV(
+  data: any[],
+  reportType: 'stock_by_category' | 'reorder_frequency' | 'value_by_location'
+): void {
+  let headers: string[] = [];
+  let csvData: any[] = [];
+
+  if (reportType === 'stock_by_category') {
+    headers = ['Category', 'Total Items', 'Total Stock', 'Total Value', 'Low Stock Count'];
+    csvData = data.map((item) => ({
+      Category: item.category_name || '',
+      'Total Items': item.total_items || 0,
+      'Total Stock': item.total_stock || 0,
+      'Total Value': item.total_value ? `$${item.total_value.toFixed(2)}` : '$0.00',
+      'Low Stock Count': item.low_stock_count || 0,
+    }));
+  } else if (reportType === 'reorder_frequency') {
+    headers = ['Item Name', 'SKU', 'Category', 'Reorder Count'];
+    csvData = data.map((item) => ({
+      'Item Name': item.item_name || '',
+      SKU: item.item_sku || '',
+      Category: item.category_name || '',
+      'Reorder Count': item.reorder_count || 0,
+    }));
+  } else if (reportType === 'value_by_location') {
+    headers = ['Location', 'Total Items', 'Total Stock', 'Total Value'];
+    csvData = data.map((item) => ({
+      Location: item.location_name || '',
+      'Total Items': item.total_items || 0,
+      'Total Stock': item.total_stock || 0,
+      'Total Value': item.total_value ? `$${item.total_value.toFixed(2)}` : '$0.00',
+    }));
+  }
+
+  exportToCSV(csvData, { filename: `inventory-report-${reportType}`, headers });
+}
+
+/**
+ * Export purchasing report data to CSV
+ */
+export function exportPurchasingReportToCSV(
+  data: any[],
+  reportType: 'spend_by_supplier' | 'spend_by_category' | 'lead_time_analysis' | 'price_trends'
+): void {
+  let headers: string[] = [];
+  let csvData: any[] = [];
+
+  if (reportType === 'spend_by_supplier') {
+    headers = ['Supplier', 'Total Orders', 'Total Spend', 'Avg Order Value'];
+    csvData = data.map((item) => ({
+      Supplier: item.supplier_name || '',
+      'Total Orders': item.total_orders || 0,
+      'Total Spend': item.total_spend ? `$${item.total_spend.toFixed(2)}` : '$0.00',
+      'Avg Order Value': item.avg_order_value ? `$${item.avg_order_value.toFixed(2)}` : '$0.00',
+    }));
+  } else if (reportType === 'spend_by_category') {
+    headers = ['Category', 'Total Items', 'Total Quantity', 'Total Spend'];
+    csvData = data.map((item) => ({
+      Category: item.category_name || '',
+      'Total Items': item.total_items || 0,
+      'Total Quantity': item.total_quantity || 0,
+      'Total Spend': item.total_spend ? `$${item.total_spend.toFixed(2)}` : '$0.00',
+    }));
+  } else if (reportType === 'lead_time_analysis') {
+    headers = [
+      'Supplier',
+      'Item Name',
+      'Total Orders',
+      'Avg Estimated Lead Time (days)',
+      'Avg Actual Lead Time (days)',
+      'Avg Variance (days)',
+      'On-Time Rate (%)',
+    ];
+    csvData = data.map((item) => ({
+      Supplier: item.supplier_name || '',
+      'Item Name': item.item_name || '',
+      'Total Orders': item.total_orders || 0,
+      'Avg Estimated Lead Time (days)': item.avg_estimated_lead_time || 0,
+      'Avg Actual Lead Time (days)': item.avg_actual_lead_time || 0,
+      'Avg Variance (days)': item.avg_variance || 0,
+      'On-Time Rate (%)': item.on_time_rate ? `${item.on_time_rate.toFixed(1)}%` : '0%',
+    }));
+  } else if (reportType === 'price_trends') {
+    headers = [
+      'Item Name',
+      'Supplier',
+      'Price Changes',
+      'Min Unit Cost',
+      'Max Unit Cost',
+      'Latest Unit Cost',
+      'Price Change %',
+    ];
+    csvData = data.map((item) => ({
+      'Item Name': item.item_name || '',
+      Supplier: item.supplier_name || '',
+      'Price Changes': item.price_changes || 0,
+      'Min Unit Cost': item.min_unit_cost ? `$${item.min_unit_cost.toFixed(2)}` : '$0.00',
+      'Max Unit Cost': item.max_unit_cost ? `$${item.max_unit_cost.toFixed(2)}` : '$0.00',
+      'Latest Unit Cost': item.latest_unit_cost ? `$${item.latest_unit_cost.toFixed(2)}` : '$0.00',
+      'Price Change %': item.price_change_percentage
+        ? `${item.price_change_percentage > 0 ? '+' : ''}${item.price_change_percentage.toFixed(2)}%`
+        : 'N/A',
+    }));
+  }
+
+  exportToCSV(csvData, { filename: `purchasing-report-${reportType}`, headers });
+}
+
+/**
+ * Export asset report data to CSV
+ */
+export function exportAssetReportToCSV(
+  data: any[],
+  reportType: 'assets_by_status' | 'maintenance_due' | 'utilization'
+): void {
+  let headers: string[] = [];
+  let csvData: any[] = [];
+
+  if (reportType === 'assets_by_status') {
+    headers = ['Status', 'Count'];
+    csvData = data.map((item) => ({
+      Status: item.status_display || item.status || '',
+      Count: item.count || 0,
+    }));
+  } else if (reportType === 'maintenance_due') {
+    headers = [
+      'Asset Name',
+      'Asset Tag',
+      'Part Name',
+      'Part SKU',
+      'Maintenance Interval (days)',
+      'Days Since Replacement',
+      'Days Overdue',
+      'Last Replaced At',
+    ];
+    csvData = data.map((item) => ({
+      'Asset Name': item.asset_name || '',
+      'Asset Tag': item.asset_tag || '',
+      'Part Name': item.part_name || 'N/A',
+      'Part SKU': item.part_sku || 'N/A',
+      'Maintenance Interval (days)': item.maintenance_interval_days || 'N/A',
+      'Days Since Replacement': item.days_since_replacement || 'N/A',
+      'Days Overdue': item.days_overdue || 0,
+      'Last Replaced At': item.last_replaced_at || 'N/A',
+    }));
+  } else if (reportType === 'utilization') {
+    headers = ['Asset Name', 'Asset Tag', 'Total Sessions', 'Total Hours', 'Avg Hours per Session'];
+    csvData = data.map((item) => ({
+      'Asset Name': item.asset_name || '',
+      'Asset Tag': item.asset_tag || '',
+      'Total Sessions': item.total_sessions || 0,
+      'Total Hours': item.total_hours ? item.total_hours.toFixed(2) : '0.00',
+      'Avg Hours per Session': item.avg_hours_per_session ? item.avg_hours_per_session.toFixed(2) : '0.00',
+    }));
+  }
+
+  exportToCSV(csvData, { filename: `asset-report-${reportType}`, headers });
+}

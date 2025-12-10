@@ -5,6 +5,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useNotifications } from '../hooks/useNotifications';
 import { fixturesAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Fixture, FixtureRefillRequest } from '../types';
@@ -12,6 +13,7 @@ import { Fixture, FixtureRefillRequest } from '../types';
 const FixtureScanPage: React.FC = () => {
   const { fixtureId } = useParams<{ fixtureId: string }>();
   const navigate = useNavigate();
+  const notifications = useNotifications();
 
   // Authentication state
   const [isLoggedIn] = useState<boolean>(() => !!localStorage.getItem('token'));
@@ -105,7 +107,7 @@ const FixtureScanPage: React.FC = () => {
       // Reload fixture to get updated pending requests count
       await loadFixture();
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to submit refill request');
+      notifications.showError('Failed to submit refill request', err.response?.data?.error);
       console.error('Error submitting refill request:', err);
     } finally {
       setSubmitting(false);
@@ -129,7 +131,7 @@ const FixtureScanPage: React.FC = () => {
       await loadFixture();
       setNotes('');
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to resolve requests');
+      notifications.showError('Failed to resolve requests', err.response?.data?.error);
       console.error('Error resolving requests:', err);
     } finally {
       setResolving(false);

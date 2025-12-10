@@ -1,8 +1,11 @@
 /**
  * Tests for ChecklistCompletionPage component
  */
+import { MantineProvider } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { NotificationProvider } from '../../contexts/NotificationContext';
 import ChecklistCompletionPage from '../../pages/ChecklistCompletionPage';
 import * as api from '../../services/api';
 
@@ -80,14 +83,19 @@ describe('ChecklistCompletionPage', () => {
     completionId = 'completion-id'
   ) => {
     const view = render(
-      <MemoryRouter initialEntries={[`/checklist/${checklistId}/complete/${completionId}`]}>
-        <Routes>
-          <Route
-            path="/checklist/:checklistId/complete/:completionId"
-            element={<ChecklistCompletionPage />}
-          />
-        </Routes>
-      </MemoryRouter>
+      <MantineProvider>
+        <NotificationProvider>
+          <Notifications />
+          <MemoryRouter initialEntries={[`/checklist/${checklistId}/complete/${completionId}`]}>
+            <Routes>
+              <Route
+                path="/checklist/:checklistId/complete/:completionId"
+                element={<ChecklistCompletionPage />}
+              />
+            </Routes>
+          </MemoryRouter>
+        </NotificationProvider>
+      </MantineProvider>
     );
     return view;
   };
@@ -218,8 +226,20 @@ describe('ChecklistCompletionPage', () => {
 
     await renderWithRouter();
 
-    await screen.findByText(/checklist completed/i);
-    expect(screen.getByText(/✓ checklist completed/i)).toBeInTheDocument();
+    // Wait for the page to load and find the completed status
+    // The page shows "✓ Checklist Completed" as an h3 heading
+    // Note: There may also be a notification toast, so we use getAllByRole and check for the h3
+    await waitFor(() => {
+      const headings = screen.getAllByRole('heading', { name: /checklist completed/i });
+      // Should have at least the h3 heading (may also have notification toast)
+      expect(headings.length).toBeGreaterThan(0);
+    });
+    
+    // Verify the main h3 heading is present (the page heading, not the notification)
+    const headings = screen.getAllByRole('heading', { name: /checklist completed/i });
+    const pageHeading = headings.find(h => h.tagName === 'H3');
+    expect(pageHeading).toBeInTheDocument();
+    expect(pageHeading).toHaveTextContent(/✓ checklist completed/i);
   });
 });
 

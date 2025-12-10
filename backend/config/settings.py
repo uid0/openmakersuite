@@ -73,6 +73,7 @@ INSTALLED_APPS = [
     "checklists",
     "donations",
     "search",
+    "notifications",
 ]
 
 MIDDLEWARE = [

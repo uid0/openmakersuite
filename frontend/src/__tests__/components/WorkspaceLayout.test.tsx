@@ -2,8 +2,10 @@
  * WorkspaceLayout Component Tests
  */
 import { MantineProvider } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { NotificationProvider } from '../../contexts/NotificationContext';
 import WorkspaceLayout from '../../components/WorkspaceLayout';
 
 // Mock Sidebar and Breadcrumbs
@@ -32,11 +34,14 @@ jest.mock('../../hooks/useCommandPalette', () => ({
 const renderWithRouter = (path: string) => {
   return render(
     <MantineProvider>
-      <MemoryRouter initialEntries={[path]}>
-        <WorkspaceLayout>
-          <div>Test Content</div>
-        </WorkspaceLayout>
-      </MemoryRouter>
+      <NotificationProvider>
+        <Notifications />
+        <MemoryRouter initialEntries={[path]}>
+          <WorkspaceLayout>
+            <div>Test Content</div>
+          </WorkspaceLayout>
+        </MemoryRouter>
+      </NotificationProvider>
     </MantineProvider>
   );
 };

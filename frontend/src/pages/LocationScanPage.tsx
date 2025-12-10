@@ -8,6 +8,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useNotifications } from '../hooks/useNotifications';
 import { checklistsAPI, inventoryAPI, locationCheckinAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Checklist } from '../types';
@@ -24,6 +25,7 @@ type TabType = 'checkin' | 'feedback' | 'security' | 'tasks';
 const LocationScanPage: React.FC = () => {
   const { locationId } = useParams<{ locationId: string }>();
   const navigate = useNavigate();
+  const notifications = useNotifications();
 
   // Authentication state
   const [isLoggedIn] = useState<boolean>(() => !!localStorage.getItem('token'));
@@ -86,7 +88,7 @@ const LocationScanPage: React.FC = () => {
       const completion = await checklistsAPI.startChecklist(checklistId, userName || undefined);
       navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to start checklist');
+      notifications.showError('Failed to start checklist', err.response?.data?.detail);
     }
   };
 
@@ -106,7 +108,7 @@ const LocationScanPage: React.FC = () => {
         setCheckinNotes('');
       }, 3000);
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to check in');
+      notifications.showError('Failed to check in', err.response?.data?.error);
       console.error('Error checking in:', err);
     } finally {
       setSubmitting(false);
@@ -116,7 +118,7 @@ const LocationScanPage: React.FC = () => {
   const handleFeedback = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!location || !feedbackMessage.trim()) {
-      alert('Please enter a feedback message');
+      notifications.showWarning('Validation Error', 'Please enter a feedback message');
       return;
     }
 
@@ -133,7 +135,7 @@ const LocationScanPage: React.FC = () => {
         setFeedbackType('neutral');
       }, 3000);
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to submit feedback');
+      notifications.showError('Failed to submit feedback', err.response?.data?.error);
       console.error('Error submitting feedback:', err);
     } finally {
       setSubmitting(false);
@@ -433,7 +435,7 @@ const LocationTasksTab: React.FC<{ locationId: string }> = ({ locationId }) => {
       await locationCheckinAPI.completeTask(taskId);
       await loadTasks();
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to complete task');
+      notifications.showError('Failed to complete task', err.response?.data?.error);
     } finally {
       setCompleting(null);
     }

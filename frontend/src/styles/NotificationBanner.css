@@ -1,0 +1,122 @@
+.notification-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  border-left: 4px solid;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.notification-banner-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+}
+
+.notification-banner-icon {
+  font-size: 20px;
+  font-weight: bold;
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+
+.notification-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.notification-banner-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.notification-banner-message {
+  display: block;
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.9;
+}
+
+.notification-banner-dismiss {
+  background: none;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  flex-shrink: 0;
+}
+
+.notification-banner-dismiss:hover {
+  opacity: 1;
+}
+
+/* Success banner */
+.notification-banner-success {
+  background-color: #f0f9f4;
+  border-left-color: #22c55e;
+  color: #166534;
+}
+
+.notification-banner-success .notification-banner-icon {
+  color: #22c55e;
+}
+
+/* Error banner */
+.notification-banner-error {
+  background-color: #fef2f2;
+  border-left-color: #ef4444;
+  color: #991b1b;
+}
+
+.notification-banner-error .notification-banner-icon {
+  color: #ef4444;
+}
+
+/* Warning banner */
+.notification-banner-warning {
+  background-color: #fffbeb;
+  border-left-color: #f59e0b;
+  color: #92400e;
+}
+
+.notification-banner-warning .notification-banner-icon {
+  color: #f59e0b;
+}
+
+/* Info banner */
+.notification-banner-info {
+  background-color: #eff6ff;
+  border-left-color: #3b82f6;
+  color: #1e40af;
+}
+
+.notification-banner-info .notification-banner-icon {
+  color: #3b82f6;
+}

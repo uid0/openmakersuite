@@ -675,4 +675,30 @@ export const searchAPI = {
     api.post<RecentSearch>('/search/recent/save/', data),
 };
 
+// Notifications API
+export interface BackendNotification {
+  id: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+  title: string;
+  message: string;
+  read: boolean;
+  created_at: string;
+  action_url?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export const notificationsAPI = {
+  list: (params?: { read?: boolean }) =>
+    api.get<{ results: BackendNotification[] }>('/notifications/', { params }),
+
+  markAsRead: (id: string) =>
+    api.post(`/notifications/${id}/mark_read/`),
+
+  markAllAsRead: () =>
+    api.post('/notifications/mark_all_read/'),
+
+  delete: (id: string) =>
+    api.delete(`/notifications/${id}/`),
+};
+
 export default api;

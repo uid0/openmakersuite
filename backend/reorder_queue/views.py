@@ -101,6 +101,27 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         # Return full details
         instance = ReorderRequest.objects.get(id=serializer.instance.id)
         output_serializer = ReorderRequestSerializer(instance)
+
+        # Create notifications for admins about new reorder request
+        try:
+            from notifications.services import notify_admins
+
+            item = instance.item
+            notify_admins(
+                type="info",
+                title="New Reorder Request",
+                message=f"New reorder request for {item.name} (quantity: {instance.quantity})",
+                action_url="/inventory/admin",
+                metadata={
+                    "reorder_request_id": instance.id,
+                    "item_id": str(item.id),
+                    "priority": instance.priority,
+                },
+            )
+        except Exception:  # nosec B110
+            # Don't fail the request if notification creation fails
+            pass
+
         return Response(output_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     @action(detail=False, methods=["get"])

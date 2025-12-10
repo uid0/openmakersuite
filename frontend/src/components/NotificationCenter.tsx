@@ -88,6 +88,8 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ isOpen, onClose
     ? backendNotifications.filter((n) => !n.read)
     : backendNotifications;
 
+  const allNotifications = filteredNotifications;
+
   return (
     <Drawer
       opened={isOpen}
@@ -159,7 +161,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ isOpen, onClose
               </Text>
             ) : (
               <Stack gap="xs">
-                {filteredNotifications.map((notification) => (
+                {allNotifications.map((notification) => (
                   <div
                     key={notification.id}
                     className={`notification-item ${notification.read ? 'read' : 'unread'}`}

@@ -18,6 +18,7 @@ describe('NotificationBadge Component', () => {
     const { container } = renderBadge(0);
     // Component returns null, but MantineProvider still renders styles
     // Check that the badge button is not in the document
+    // eslint-disable-next-line testing-library/no-container, testing-library/no-node-access
     const badgeButton = container.querySelector('.notification-badge');
     expect(badgeButton).toBeNull();
   });
@@ -36,10 +37,10 @@ describe('NotificationBadge Component', () => {
     const mockOnClick = jest.fn();
     renderBadge(3, mockOnClick);
 
-    const badge = screen.getByText('3').closest('button');
+    const badge = screen.getByRole('button', { name: /3 unread notifications/i });
     expect(badge).toBeInTheDocument();
     
-    badge?.click();
+    badge.click();
     expect(mockOnClick).toHaveBeenCalledTimes(1);
   });
 });

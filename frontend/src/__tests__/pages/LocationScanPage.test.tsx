@@ -1,8 +1,11 @@
 /**
  * Tests for LocationScanPage component
  */
+import { MantineProvider } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { NotificationProvider } from '../../contexts/NotificationContext';
 import LocationScanPage from '../../pages/LocationScanPage';
 import * as api from '../../services/api';
 
@@ -34,11 +37,16 @@ describe('LocationScanPage', () => {
 
   const renderWithRouter = async (locationId = 'test-location-123') => {
     const view = render(
-      <MemoryRouter initialEntries={[`/scan/location/${locationId}`]}>
-        <Routes>
-          <Route path="/scan/location/:locationId" element={<LocationScanPage />} />
-        </Routes>
-      </MemoryRouter>
+      <MantineProvider>
+        <NotificationProvider>
+          <Notifications />
+          <MemoryRouter initialEntries={[`/scan/location/${locationId}`]}>
+            <Routes>
+              <Route path="/scan/location/:locationId" element={<LocationScanPage />} />
+            </Routes>
+          </MemoryRouter>
+        </NotificationProvider>
+      </MantineProvider>
     );
     return view;
   };

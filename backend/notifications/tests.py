@@ -1,6 +1,7 @@
 """
 Tests for notifications app.
 """
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -167,8 +168,8 @@ class NotificationViewSetTest(TestCase):
 
     def test_list_own_notifications(self):
         """Test that users can only see their own notifications."""
-        from rest_framework_simplejwt.tokens import RefreshToken
         from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
 
         client = APIClient()
         refresh = RefreshToken.for_user(self.user)
@@ -183,8 +184,8 @@ class NotificationViewSetTest(TestCase):
 
     def test_mark_as_read(self):
         """Test marking a notification as read."""
-        from rest_framework_simplejwt.tokens import RefreshToken
         from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
 
         client = APIClient()
         refresh = RefreshToken.for_user(self.user)
@@ -197,8 +198,8 @@ class NotificationViewSetTest(TestCase):
 
     def test_mark_all_as_read(self):
         """Test marking all notifications as read."""
-        from rest_framework_simplejwt.tokens import RefreshToken
         from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
 
         # Create another unread notification
         Notification.objects.create(
@@ -222,8 +223,8 @@ class NotificationViewSetTest(TestCase):
 
     def test_delete_notification(self):
         """Test deleting a notification."""
-        from rest_framework_simplejwt.tokens import RefreshToken
         from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
 
         client = APIClient()
         refresh = RefreshToken.for_user(self.user)

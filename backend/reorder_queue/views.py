@@ -111,7 +111,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                 type="info",
                 title="New Reorder Request",
                 message=f"New reorder request for {item.name} (quantity: {instance.quantity})",
-                action_url=f"/inventory/admin",
+                action_url="/inventory/admin",
                 metadata={
                     "reorder_request_id": instance.id,
                     "item_id": str(item.id),

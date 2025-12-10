@@ -6,7 +6,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db import models, transaction
-from django.db.models import Avg, Count, F, Q, Sum
+from django.db.models import Avg, Count, F, Max, Min, Q, Sum
 from django.utils import timezone
 
 from rest_framework import status, viewsets
@@ -1570,3 +1570,333 @@ class WebHookViewSet(viewsets.ModelViewSet):
 
             serializer = WebHookTestResultSerializer(result)
             return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class PurchasingReportViewSet(viewsets.ViewSet):
+    """API endpoint for purchasing reports."""
+
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["get"])
+    def spend_by_supplier(self, request):
+        """Get total spend per supplier from purchase orders."""
+        queryset = (
+            PurchaseOrder.objects.filter(status=PurchaseOrder.RECEIVED)
+            .select_related("supplier")
+            .values("supplier__id", "supplier__name")
+            .annotate(
+                total_orders=Count("id"),
+                total_spend=Sum("actual_total"),
+                avg_order_value=Avg("actual_total"),
+            )
+            .order_by("-total_spend")
+        )
+
+        data = []
+        for item in queryset:
+            data.append(
+                {
+                    "supplier_id": item["supplier__id"],
+                    "supplier_name": item["supplier__name"],
+                    "total_orders": item["total_orders"],
+                    "total_spend": float(item["total_spend"] or 0),
+                    "avg_order_value": float(item["avg_order_value"] or 0),
+                }
+            )
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def spend_by_category(self, request):
+        """Get total spend grouped by item category."""
+        queryset = (
+            PurchaseOrderItem.objects.filter(
+                purchase_order__status=PurchaseOrder.RECEIVED,
+                item_supplier__isnull=False,
+            )
+            .select_related("item_supplier__item__category", "purchase_order")
+            .values("item_supplier__item__category__id", "item_supplier__item__category__name")
+            .annotate(
+                total_items=Count("id"),
+                total_quantity=Sum("quantity_received"),
+                total_spend=Sum(F("quantity_received") * F("unit_cost_actual")),
+            )
+            .order_by("-total_spend")
+        )
+
+        data = []
+        for item in queryset:
+            data.append(
+                {
+                    "category_id": item["item_supplier__item__category__id"],
+                    "category_name": item["item_supplier__item__category__name"] or "Uncategorized",
+                    "total_items": item["total_items"],
+                    "total_quantity": item["total_quantity"] or 0,
+                    "total_spend": float(item["total_spend"] or 0),
+                }
+            )
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def lead_time_analysis(self, request):
+        """Get lead time analysis from LeadTimeLog data."""
+        from datetime import timedelta
+
+        # Get time period from query params (default: last 6 months)
+        months = int(request.query_params.get("months", 6))
+        start_date = timezone.now() - timedelta(days=months * 30)
+
+        queryset = (
+            LeadTimeLog.objects.filter(actual_delivery_date__gte=start_date.date())
+            .select_related("item_supplier__supplier", "item_supplier__item")
+            .values(
+                "item_supplier__supplier__id",
+                "item_supplier__supplier__name",
+                "item_supplier__item__name",
+            )
+            .annotate(
+                total_orders=Count("id"),
+                avg_estimated_lead_time=Avg("estimated_lead_time_days"),
+                avg_actual_lead_time=Avg("actual_lead_time_days"),
+                avg_variance=Avg("variance_days"),
+                on_time_count=Count("id", filter=Q(variance_days__lte=0)),
+            )
+            .order_by("-total_orders")
+        )
+
+        data = []
+        for item in queryset:
+            total = item["total_orders"]
+            on_time_rate = (item["on_time_count"] / total * 100) if total > 0 else 0
+
+            data.append(
+                {
+                    "supplier_id": item["item_supplier__supplier__id"],
+                    "supplier_name": item["item_supplier__supplier__name"],
+                    "item_name": item["item_supplier__item__name"],
+                    "total_orders": total,
+                    "avg_estimated_lead_time": round(item["avg_estimated_lead_time"] or 0, 1),
+                    "avg_actual_lead_time": round(item["avg_actual_lead_time"] or 0, 1),
+                    "avg_variance": round(item["avg_variance"] or 0, 1),
+                    "on_time_rate": round(on_time_rate, 1),
+                }
+            )
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def price_trends(self, request):
+        """Get price trends from PriceHistory data."""
+        from datetime import timedelta
+
+        from inventory.models import PriceHistory
+
+        # Get time period from query params (default: last 12 months)
+        months = int(request.query_params.get("months", 12))
+        start_date = timezone.now() - timedelta(days=months * 30)
+
+        # Get price history grouped by item
+        queryset = (
+            PriceHistory.objects.filter(recorded_at__gte=start_date)
+            .select_related("item_supplier__item", "item_supplier__supplier")
+            .values(
+                "item_supplier__item__id",
+                "item_supplier__item__name",
+                "item_supplier__supplier__id",
+                "item_supplier__supplier__name",
+            )
+            .annotate(
+                price_changes=Count("id"),
+                min_unit_cost=Min("unit_cost"),
+                max_unit_cost=Max("unit_cost"),
+            )
+            .order_by("-price_changes")
+        )
+
+        data = []
+        for item in queryset:
+            # Get the actual latest price
+            latest_price = (
+                PriceHistory.objects.filter(
+                    item_supplier__item__id=item["item_supplier__item__id"],
+                    item_supplier__supplier__id=item.get("item_supplier__supplier__id"),
+                )
+                .order_by("-recorded_at")
+                .first()
+            )
+
+            # Calculate price change percentage if we have multiple records
+            price_change_pct = None
+            if item["price_changes"] > 1:
+                first_price = (
+                    PriceHistory.objects.filter(
+                        item_supplier__item__id=item["item_supplier__item__id"],
+                        item_supplier__supplier__id=item.get("item_supplier__supplier__id"),
+                    )
+                    .order_by("recorded_at")
+                    .first()
+                )
+                if (
+                    first_price
+                    and latest_price
+                    and first_price.unit_cost
+                    and latest_price.unit_cost
+                ):
+                    change = (
+                        (latest_price.unit_cost - first_price.unit_cost) / first_price.unit_cost
+                    ) * 100
+                    price_change_pct = round(change, 2)
+
+            data.append(
+                {
+                    "item_id": str(item["item_supplier__item__id"]),
+                    "item_name": item["item_supplier__item__name"],
+                    "supplier_name": item["item_supplier__supplier__name"],
+                    "price_changes": item["price_changes"],
+                    "min_unit_cost": float(item["min_unit_cost"] or 0),
+                    "max_unit_cost": float(item["max_unit_cost"] or 0),
+                    "latest_unit_cost": float(latest_price.unit_cost or 0) if latest_price else 0,
+                    "price_change_percentage": price_change_pct,
+                }
+            )
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """Export purchasing report data as CSV."""
+        import csv
+
+        from django.http import HttpResponse
+
+        report_type = request.query_params.get("type", "spend_by_supplier")
+
+        if report_type == "spend_by_supplier":
+            response = self.spend_by_supplier(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = (
+                'attachment; filename="purchasing_spend_by_supplier.csv"'
+            )
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=["supplier_name", "total_orders", "total_spend", "avg_order_value"],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "supplier_name": row["supplier_name"],
+                        "total_orders": row["total_orders"],
+                        "total_spend": f"{row['total_spend']:.2f}",
+                        "avg_order_value": f"{row['avg_order_value']:.2f}",
+                    }
+                )
+
+            return response_obj
+        elif report_type == "spend_by_category":
+            response = self.spend_by_category(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = (
+                'attachment; filename="purchasing_spend_by_category.csv"'
+            )
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=["category_name", "total_items", "total_quantity", "total_spend"],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "category_name": row["category_name"],
+                        "total_items": row["total_items"],
+                        "total_quantity": row["total_quantity"],
+                        "total_spend": f"{row['total_spend']:.2f}",
+                    }
+                )
+
+            return response_obj
+        elif report_type == "lead_time_analysis":
+            response = self.lead_time_analysis(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = (
+                'attachment; filename="purchasing_lead_time_analysis.csv"'
+            )
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=[
+                    "supplier_name",
+                    "item_name",
+                    "total_orders",
+                    "avg_estimated_lead_time",
+                    "avg_actual_lead_time",
+                    "avg_variance",
+                    "on_time_rate",
+                ],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "supplier_name": row["supplier_name"],
+                        "item_name": row["item_name"],
+                        "total_orders": row["total_orders"],
+                        "avg_estimated_lead_time": row["avg_estimated_lead_time"],
+                        "avg_actual_lead_time": row["avg_actual_lead_time"],
+                        "avg_variance": row["avg_variance"],
+                        "on_time_rate": f"{row['on_time_rate']:.1f}%",
+                    }
+                )
+
+            return response_obj
+        elif report_type == "price_trends":
+            response = self.price_trends(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = (
+                'attachment; filename="purchasing_price_trends.csv"'
+            )
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=[
+                    "item_name",
+                    "supplier_name",
+                    "price_changes",
+                    "min_unit_cost",
+                    "max_unit_cost",
+                    "latest_unit_cost",
+                    "price_change_percentage",
+                ],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "item_name": row["item_name"],
+                        "supplier_name": row["supplier_name"],
+                        "price_changes": row["price_changes"],
+                        "min_unit_cost": f"{row['min_unit_cost']:.2f}",
+                        "max_unit_cost": f"{row['max_unit_cost']:.2f}",
+                        "latest_unit_cost": f"{row['latest_unit_cost']:.2f}",
+                        "price_change_percentage": (
+                            f"{row['price_change_percentage']:.2f}%"
+                            if row["price_change_percentage"]
+                            else ""
+                        ),
+                    }
+                )
+
+            return response_obj
+
+        return Response({"error": "Invalid report type"}, status=status.HTTP_400_BAD_REQUEST)

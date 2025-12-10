@@ -8,11 +8,13 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AssetPartViewSet,
+    AssetReportViewSet,
     AssetViewSet,
     CategoryViewSet,
     FixtureRefillRequestViewSet,
     FixtureViewSet,
     InventoryItemViewSet,
+    InventoryReportViewSet,
     ItemSupplierViewSet,
     LocationViewSet,
     PriceHistoryViewSet,
@@ -33,6 +35,8 @@ router.register(r"item-suppliers", ItemSupplierViewSet)
 router.register(r"price-history", PriceHistoryViewSet)
 router.register(r"fixtures", FixtureViewSet)
 router.register(r"fixture-refill-requests", FixtureRefillRequestViewSet)
+router.register(r"reports/inventory", InventoryReportViewSet, basename="inventory-reports")
+router.register(r"reports/assets", AssetReportViewSet, basename="asset-reports")
 
 urlpatterns = [
     path("", include(router.urls)),

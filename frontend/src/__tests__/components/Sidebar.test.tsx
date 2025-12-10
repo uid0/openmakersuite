@@ -28,18 +28,27 @@ describe('Sidebar Component', () => {
   it('renders workspace sections', () => {
     renderSidebar();
     // Sections might be collapsed, so check for section headers (buttons)
-    const sectionButtons = screen.getAllByRole('button').filter(btn => 
-      btn.textContent?.match(/inventory|purchasing|assets|facilities|sigs|settings/i)
-    );
+    // The button contains icon + label, so we check for the label text
+    const sectionButtons = screen.getAllByRole('button').filter(btn => {
+      const text = btn.textContent || '';
+      return /inventory|purchasing|assets|facilities|sigs|reports|settings/i.test(text);
+    });
     expect(sectionButtons.length).toBeGreaterThan(0);
     // At least inventory should be visible
-    expect(screen.getByText(/inventory/i)).toBeInTheDocument();
+    const inventoryElements = screen.getAllByText(/inventory/i);
+    expect(inventoryElements.length).toBeGreaterThan(0);
   });
 
   it('expands and collapses sections', () => {
     renderSidebar();
-    const inventorySection = screen.getByText(/inventory/i).closest('button');
-    expect(inventorySection).toBeInTheDocument();
+    // Find the Inventory section button - it contains icon + "Inventory" text
+    const inventorySectionButtons = screen.getAllByRole('button').filter(btn => {
+      const text = btn.textContent || '';
+      // Section header buttons have the section label, not just "Inventory"
+      return text.includes('Inventory') && btn.className.includes('section-header');
+    });
+    const inventorySection = inventorySectionButtons[0];
+    expect(inventorySection).toBeDefined();
     
     if (inventorySection) {
       // Click to expand
@@ -51,7 +60,12 @@ describe('Sidebar Component', () => {
 
   it('shows navigation items when section is expanded', async () => {
     renderSidebar();
-    const inventorySection = screen.getByText(/inventory/i).closest('button');
+    // Find the Inventory section button - it contains icon + "Inventory" text
+    const inventorySectionButtons = screen.getAllByRole('button').filter(btn => {
+      const text = btn.textContent || '';
+      return text.includes('Inventory') && btn.className.includes('section-header');
+    });
+    const inventorySection = inventorySectionButtons[0];
     
     if (inventorySection) {
       inventorySection.click();
@@ -65,7 +79,12 @@ describe('Sidebar Component', () => {
 
   it('hides auth-required items when not logged in', async () => {
     renderSidebar();
-    const inventorySection = screen.getByText(/inventory/i).closest('button');
+    // Find the Inventory section button - it contains icon + "Inventory" text
+    const inventorySectionButtons = screen.getAllByRole('button').filter(btn => {
+      const text = btn.textContent || '';
+      return text.includes('Inventory') && btn.className.includes('section-header');
+    });
+    const inventorySection = inventorySectionButtons[0];
     
     if (inventorySection) {
       inventorySection.click();
@@ -80,7 +99,12 @@ describe('Sidebar Component', () => {
     localStorage.setItem('token', 'test-token');
     renderSidebar();
     
-    const inventorySection = screen.getByText(/inventory/i).closest('button');
+    // Find the Inventory section button - it contains icon + "Inventory" text
+    const inventorySectionButtons = screen.getAllByRole('button').filter(btn => {
+      const text = btn.textContent || '';
+      return text.includes('Inventory') && btn.className.includes('section-header');
+    });
+    const inventorySection = inventorySectionButtons[0];
     if (inventorySection) {
       inventorySection.click();
       await waitFor(() => {

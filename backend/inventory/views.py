@@ -2034,3 +2034,431 @@ def lookup_by_code(request):
         {"error": "Code not found"},
         status=status.HTTP_404_NOT_FOUND,
     )
+
+
+class InventoryReportViewSet(viewsets.ViewSet):
+    """API endpoint for inventory reports."""
+
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["get"])
+    def stock_by_category(self, request):
+        """Get stock levels aggregated by category."""
+        from django.db.models import Count, Sum
+
+        queryset = (
+            InventoryItem.objects.filter(is_active=True)
+            .select_related("category")
+            .values("category__id", "category__name")
+            .annotate(
+                total_items=Count("id"),
+                total_stock=Sum("current_stock"),
+                total_value=Sum(F("current_stock") * F("unit_cost")),
+                low_stock_count=Count("id", filter=Q(current_stock__lte=F("minimum_stock"))),
+            )
+            .order_by("category__name")
+        )
+
+        data = []
+        for item in queryset:
+            data.append(
+                {
+                    "category_id": item["category__id"],
+                    "category_name": item["category__name"] or "Uncategorized",
+                    "total_items": item["total_items"],
+                    "total_stock": item["total_stock"] or 0,
+                    "total_value": float(item["total_value"] or 0),
+                    "low_stock_count": item["low_stock_count"],
+                }
+            )
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def reorder_frequency(self, request):
+        """Get reorder frequency per item with time period filter."""
+        from datetime import timedelta
+
+        from django.db.models import Count
+
+        from reorder_queue.models import ReorderRequest
+
+        # Get time period from query params (default: last 12 months)
+        months = int(request.query_params.get("months", 12))
+        start_date = timezone.now() - timedelta(days=months * 30)
+
+        # Get reorder requests in the time period
+        reorder_requests = (
+            ReorderRequest.objects.filter(requested_at__gte=start_date)
+            .select_related("item", "item__category")
+            .values("item__id", "item__name", "item__sku", "item__category__name")
+            .annotate(reorder_count=Count("id"))
+            .order_by("-reorder_count")
+        )
+
+        data = []
+        for req in reorder_requests:
+            data.append(
+                {
+                    "item_id": str(req["item__id"]),
+                    "item_name": req["item__name"],
+                    "item_sku": req["item__sku"] or "",
+                    "category_name": req["item__category__name"] or "Uncategorized",
+                    "reorder_count": req["reorder_count"],
+                }
+            )
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def value_by_location(self, request):
+        """Get total inventory value grouped by location."""
+        from django.db.models import Count, Sum
+
+        queryset = (
+            InventoryItem.objects.filter(is_active=True)
+            .select_related("location")
+            .values("location__id", "location__name")
+            .annotate(
+                total_items=Count("id"),
+                total_stock=Sum("current_stock"),
+                total_value=Sum(F("current_stock") * F("unit_cost")),
+            )
+            .order_by("-total_value")
+        )
+
+        data = []
+        for item in queryset:
+            data.append(
+                {
+                    "location_id": item["location__id"],
+                    "location_name": item["location__name"] or "No Location",
+                    "total_items": item["total_items"],
+                    "total_stock": item["total_stock"] or 0,
+                    "total_value": float(item["total_value"] or 0),
+                }
+            )
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """Export inventory report data as CSV."""
+        import csv
+
+        report_type = request.query_params.get("type", "stock_by_category")
+
+        if report_type == "stock_by_category":
+            response = self.stock_by_category(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = (
+                'attachment; filename="inventory_stock_by_category.csv"'
+            )
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=[
+                    "category_name",
+                    "total_items",
+                    "total_stock",
+                    "total_value",
+                    "low_stock_count",
+                ],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "category_name": row["category_name"],
+                        "total_items": row["total_items"],
+                        "total_stock": row["total_stock"],
+                        "total_value": f"{row['total_value']:.2f}",
+                        "low_stock_count": row["low_stock_count"],
+                    }
+                )
+
+            return response_obj
+        elif report_type == "reorder_frequency":
+            response = self.reorder_frequency(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = (
+                'attachment; filename="inventory_reorder_frequency.csv"'
+            )
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=["item_name", "item_sku", "category_name", "reorder_count"],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "item_name": row["item_name"],
+                        "item_sku": row["item_sku"],
+                        "category_name": row["category_name"],
+                        "reorder_count": row["reorder_count"],
+                    }
+                )
+
+            return response_obj
+        elif report_type == "value_by_location":
+            response = self.value_by_location(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = (
+                'attachment; filename="inventory_value_by_location.csv"'
+            )
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=["location_name", "total_items", "total_stock", "total_value"],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "location_name": row["location_name"],
+                        "total_items": row["total_items"],
+                        "total_stock": row["total_stock"],
+                        "total_value": f"{row['total_value']:.2f}",
+                    }
+                )
+
+            return response_obj
+
+        return Response({"error": "Invalid report type"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AssetReportViewSet(viewsets.ViewSet):
+    """API endpoint for asset reports."""
+
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["get"])
+    def assets_by_status(self, request):
+        """Get count of assets grouped by status."""
+        from django.db.models import Count
+
+        queryset = Asset.objects.values("status").annotate(count=Count("id")).order_by("status")
+
+        data = []
+        status_choices = dict(Asset.STATUS_CHOICES)
+        for item in queryset:
+            data.append(
+                {
+                    "status": item["status"],
+                    "status_display": status_choices.get(item["status"], item["status"]),
+                    "count": item["count"],
+                }
+            )
+
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def maintenance_due(self, request):
+        """Get assets and parts that need maintenance."""
+        # Get assets with parts that need maintenance
+        maintenance_due_parts = AssetPart.objects.filter(
+            maintenance_interval_days__isnull=False,
+            last_replaced_at__isnull=False,
+        ).select_related("asset", "part")
+
+        maintenance_needed = []
+
+        for part in maintenance_due_parts:
+            if part.needs_replacement:
+                days_since = part.days_since_replacement or 0
+                days_overdue = days_since - (part.maintenance_interval_days or 0)
+
+                maintenance_needed.append(
+                    {
+                        "asset_id": str(part.asset.id),
+                        "asset_name": part.asset.name,
+                        "asset_tag": part.asset.asset_tag or "",
+                        "part_id": str(part.part.id),
+                        "part_name": part.part.name,
+                        "part_sku": part.part.sku or "",
+                        "maintenance_interval_days": part.maintenance_interval_days,
+                        "days_since_replacement": days_since,
+                        "days_overdue": max(0, days_overdue),
+                        "last_replaced_at": (
+                            part.last_replaced_at.isoformat() if part.last_replaced_at else None
+                        ),
+                    }
+                )
+
+        # Also check assets that are in maintenance status
+        assets_in_maintenance = Asset.objects.filter(status=Asset.MAINTENANCE).select_related(
+            "category", "location"
+        )
+
+        for asset in assets_in_maintenance:
+            maintenance_needed.append(
+                {
+                    "asset_id": str(asset.id),
+                    "asset_name": asset.name,
+                    "asset_tag": asset.asset_tag or "",
+                    "part_id": None,
+                    "part_name": None,
+                    "part_sku": None,
+                    "maintenance_interval_days": None,
+                    "days_since_replacement": None,
+                    "days_overdue": None,
+                    "last_replaced_at": None,
+                    "status": "in_maintenance",
+                }
+            )
+
+        # Sort by days overdue (most urgent first)
+        maintenance_needed.sort(key=lambda x: x.get("days_overdue") or 0, reverse=True)
+
+        return Response(maintenance_needed)
+
+    @action(detail=False, methods=["get"])
+    def utilization(self, request):
+        """Get asset utilization statistics from DeviceUsage."""
+        from datetime import timedelta
+
+        from django.db.models import Avg, Count, Sum
+
+        try:
+            from forgekey.models import DeviceUsage
+
+            # Get time period from query params (default: last 30 days)
+            days = int(request.query_params.get("days", 30))
+            start_date = timezone.now() - timedelta(days=days)
+
+            # Get usage statistics per asset
+            usage_stats = (
+                DeviceUsage.objects.filter(started_at__gte=start_date)
+                .select_related("asset")
+                .values("asset__id", "asset__name", "asset__asset_tag")
+                .annotate(
+                    total_sessions=Count("id"),
+                    total_duration_seconds=Sum("duration_seconds"),
+                    avg_duration_seconds=Avg("duration_seconds"),
+                )
+                .order_by("-total_duration_seconds")
+            )
+
+            data = []
+            for stat in usage_stats:
+                total_hours = (stat["total_duration_seconds"] or 0) / 3600
+                avg_hours = (stat["avg_duration_seconds"] or 0) / 3600
+
+                data.append(
+                    {
+                        "asset_id": str(stat["asset__id"]),
+                        "asset_name": stat["asset__name"],
+                        "asset_tag": stat["asset__asset_tag"] or "",
+                        "total_sessions": stat["total_sessions"],
+                        "total_hours": round(total_hours, 2),
+                        "avg_hours_per_session": round(avg_hours, 2),
+                    }
+                )
+
+            return Response(data)
+        except ImportError:
+            return Response(
+                {"error": "DeviceUsage model not available"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """Export asset report data as CSV."""
+        import csv
+
+        report_type = request.query_params.get("type", "assets_by_status")
+
+        if report_type == "assets_by_status":
+            response = self.assets_by_status(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = 'attachment; filename="assets_by_status.csv"'
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=["status", "status_display", "count"],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(row)
+
+            return response_obj
+        elif report_type == "maintenance_due":
+            response = self.maintenance_due(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = (
+                'attachment; filename="assets_maintenance_due.csv"'
+            )
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=[
+                    "asset_name",
+                    "asset_tag",
+                    "part_name",
+                    "part_sku",
+                    "maintenance_interval_days",
+                    "days_since_replacement",
+                    "days_overdue",
+                    "last_replaced_at",
+                ],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "asset_name": row["asset_name"],
+                        "asset_tag": row["asset_tag"],
+                        "part_name": row["part_name"] or "",
+                        "part_sku": row["part_sku"] or "",
+                        "maintenance_interval_days": row["maintenance_interval_days"] or "",
+                        "days_since_replacement": row["days_since_replacement"] or "",
+                        "days_overdue": row["days_overdue"] or 0,
+                        "last_replaced_at": row["last_replaced_at"] or "",
+                    }
+                )
+
+            return response_obj
+        elif report_type == "utilization":
+            response = self.utilization(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = 'attachment; filename="assets_utilization.csv"'
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=[
+                    "asset_name",
+                    "asset_tag",
+                    "total_sessions",
+                    "total_hours",
+                    "avg_hours_per_session",
+                ],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "asset_name": row["asset_name"],
+                        "asset_tag": row["asset_tag"],
+                        "total_sessions": row["total_sessions"],
+                        "total_hours": row["total_hours"],
+                        "avg_hours_per_session": row["avg_hours_per_session"],
+                    }
+                )
+
+            return response_obj
+
+        return Response({"error": "Invalid report type"}, status=status.HTTP_400_BAD_REQUEST)

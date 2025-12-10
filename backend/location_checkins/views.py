@@ -256,7 +256,7 @@ class SecurityReportViewSet(viewsets.ModelViewSet):
                     "is_urgent": is_urgent,
                 },
             )
-        except Exception:
+        except Exception:  # nosec B110
             # Don't fail the request if notification creation fails
             pass
 

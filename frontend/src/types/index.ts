@@ -350,6 +350,7 @@ export interface SiteSettings {
   favicon_url: string | null;
   primary_color: string;
   secondary_color: string;
+  custom_css?: string;
   footer_text: string;
   contact_email: string;
   contact_phone: string;

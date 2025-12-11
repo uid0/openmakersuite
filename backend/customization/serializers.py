@@ -23,6 +23,7 @@ class SiteSettingsSerializer(serializers.ModelSerializer):
             "favicon_url",
             "primary_color",
             "secondary_color",
+            "custom_css",
             "footer_text",
             "contact_email",
             "contact_phone",

@@ -11,6 +11,7 @@ import { useNotifications } from '../hooks/useNotifications';
 import '../styles/WorkspaceLayout.css';
 import Breadcrumbs from './Breadcrumbs';
 import { CommandPalette } from './CommandPalette';
+import { DarkModeToggle } from './DarkModeToggle';
 import NotificationBadge from './NotificationBadge';
 import NotificationBanner from './NotificationBanner';
 import NotificationCenter from './NotificationCenter';
@@ -100,6 +101,7 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
           </Link>
           <Breadcrumbs />
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <DarkModeToggle />
             <ActionIcon
               variant="subtle"
               size="lg"

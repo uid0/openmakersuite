@@ -57,6 +57,10 @@ class SiteSettings(models.Model):
         default="#417690",
         help_text="Secondary brand color (hex code)",
     )
+    custom_css = models.TextField(
+        blank=True,
+        help_text="Custom CSS to inject into the frontend. Use with caution.",
+    )
 
     # Footer and contact
     footer_text = models.TextField(

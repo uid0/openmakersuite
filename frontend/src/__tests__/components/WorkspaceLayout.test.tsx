@@ -5,8 +5,9 @@ import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { NotificationProvider } from '../../contexts/NotificationContext';
 import WorkspaceLayout from '../../components/WorkspaceLayout';
+import { NotificationProvider } from '../../contexts/NotificationContext';
+import { ThemeProvider } from '../../contexts/ThemeContext';
 
 // Mock Sidebar and Breadcrumbs
 jest.mock('../../components/Sidebar', () => {
@@ -33,16 +34,18 @@ jest.mock('../../hooks/useCommandPalette', () => ({
 
 const renderWithRouter = (path: string) => {
   return render(
-    <MantineProvider>
-      <NotificationProvider>
-        <Notifications />
-        <MemoryRouter initialEntries={[path]}>
-          <WorkspaceLayout>
-            <div>Test Content</div>
-          </WorkspaceLayout>
-        </MemoryRouter>
-      </NotificationProvider>
-    </MantineProvider>
+    <ThemeProvider>
+      <MantineProvider>
+        <NotificationProvider>
+          <Notifications />
+          <MemoryRouter initialEntries={[path]}>
+            <WorkspaceLayout>
+              <div>Test Content</div>
+            </WorkspaceLayout>
+          </MemoryRouter>
+        </NotificationProvider>
+      </MantineProvider>
+    </ThemeProvider>
   );
 };
 

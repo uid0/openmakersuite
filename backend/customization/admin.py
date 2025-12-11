@@ -66,6 +66,13 @@ class SiteSettingsAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Custom Styling",
+            {
+                "fields": ("custom_css",),
+                "description": "Custom CSS to inject into the frontend. Use with caution.",
+            },
+        ),
+        (
             "Dashboard Customization",
             {
                 "fields": (

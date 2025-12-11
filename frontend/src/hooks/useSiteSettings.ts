@@ -19,6 +19,7 @@ const defaultSettings: SiteSettings = {
   favicon_url: null,
   primary_color: '#007cba',
   secondary_color: '#417690',
+  custom_css: '',
   footer_text: '',
   contact_email: '',
   contact_phone: '',

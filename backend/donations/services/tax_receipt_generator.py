@@ -184,8 +184,57 @@ class TaxReceiptPDFGenerator:
         pdf_canvas.restoreState()
 
     def _draw_header(self, pdf_canvas: canvas.Canvas, site_settings: SiteSettings) -> float:
-        """Draw header with organization name."""
+        """Draw header with logo (if available) and organization name."""
+        from reportlab.lib.utils import ImageReader
+
         y = self.PAGE_HEIGHT - self.MARGIN
+        logo_height = 0.75 * inch  # Max logo height
+        logo_y = y
+
+        # Draw logo if available
+        if site_settings.logo:
+            try:
+                # Try to get path, fall back to opening file
+                try:
+                    logo_path = site_settings.logo.path
+                except (AttributeError, NotImplementedError):
+                    # For storage backends that don't support .path, open the file
+                    site_settings.logo.open()
+                    logo_path = site_settings.logo
+                    logo_path = ImageReader(logo_path)
+                else:
+                    logo_path = ImageReader(logo_path)
+
+                # Get image dimensions
+                img_width, img_height = logo_path.getSize()
+                # Calculate width maintaining aspect ratio
+                logo_width = (logo_height / img_height) * img_width
+                # Ensure logo doesn't exceed page width (with margins)
+                max_logo_width = self.CONTENT_WIDTH
+                if logo_width > max_logo_width:
+                    logo_width = max_logo_width
+                    logo_height = (logo_width / img_width) * img_height
+
+                # Center logo horizontally
+                logo_x = (self.PAGE_WIDTH - logo_width) / 2
+
+                # Draw logo
+                pdf_canvas.drawImage(
+                    logo_path,
+                    logo_x,
+                    logo_y - logo_height,
+                    width=logo_width,
+                    height=logo_height,
+                    preserveAspectRatio=True,
+                )
+
+                # Adjust y position for organization name below logo
+                y = logo_y - logo_height - 15
+            except Exception as e:
+                logger.warning(f"Could not load logo for tax receipt: {e}")
+                # Fall through to text-only header
+
+        # Draw organization name
         pdf_canvas.setFont("Helvetica-Bold", 16)
         pdf_canvas.drawCentredString(self.PAGE_WIDTH / 2, y, site_settings.site_name)
         return y - 30

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<coverage generated="1765339734231" clover="3.2.0">
-  <project timestamp="1765339734231" name="All files">
-    <metrics statements="4053" coveredstatements="1392" conditionals="3341" coveredconditionals="1048" methods="1137" coveredmethods="359" elements="8531" coveredelements="2799" complexity="0" loc="4053" ncloc="4053" packages="8" files="74" classes="74"/>
+<coverage generated="1765426012285" clover="3.2.0">
+  <project timestamp="1765426012285" name="All files">
+    <metrics statements="4172" coveredstatements="1433" conditionals="3400" coveredconditionals="1066" methods="1161" coveredmethods="368" elements="8733" coveredelements="2867" complexity="0" loc="4172" ncloc="4172" packages="8" files="77" classes="77"/>
     <package name="src">
       <metrics statements="31" coveredstatements="12" conditionals="0" coveredconditionals="0" methods="12" coveredmethods="2"/>
       <file name="App.tsx" path="/workspaces/openmakersuite/frontend/src/App.tsx">
@@ -40,7 +40,7 @@
       </file>
     </package>
     <package name="src.components">
-      <metrics statements="775" coveredstatements="347" conditionals="714" coveredconditionals="288" methods="206" coveredmethods="94"/>
+      <metrics statements="840" coveredstatements="351" conditionals="738" coveredconditionals="293" methods="216" coveredmethods="95"/>
       <file name="AssetDetailModal.tsx" path="/workspaces/openmakersuite/frontend/src/components/AssetDetailModal.tsx">
         <metrics statements="49" coveredstatements="0" conditionals="104" coveredconditionals="0" methods="9" coveredmethods="0"/>
         <line num="16" count="0" type="stmt"/>
@@ -426,6 +426,13 @@
         <line num="357" count="0" type="stmt"/>
         <line num="363" count="0" type="stmt"/>
         <line num="364" count="0" type="stmt"/>
+      </file>
+      <file name="DarkModeToggle.tsx" path="/workspaces/openmakersuite/frontend/src/components/DarkModeToggle.tsx">
+        <metrics statements="4" coveredstatements="4" conditionals="8" coveredconditionals="5" methods="1" coveredmethods="1"/>
+        <line num="17" count="2" type="stmt"/>
+        <line num="21" count="1" type="stmt"/>
+        <line num="22" count="1" type="stmt"/>
+        <line num="24" count="1" type="stmt"/>
       </file>
       <file name="Footer.tsx" path="/workspaces/openmakersuite/frontend/src/components/Footer.tsx">
         <metrics statements="4" coveredstatements="4" conditionals="5" coveredconditionals="5" methods="1" coveredmethods="1"/>
@@ -827,6 +834,70 @@
         <line num="198" count="0" type="stmt"/>
         <line num="210" count="0" type="stmt"/>
       </file>
+      <file name="ThemeProvider.tsx" path="/workspaces/openmakersuite/frontend/src/components/ThemeProvider.tsx">
+        <metrics statements="61" coveredstatements="0" conditionals="16" coveredconditionals="0" methods="9" coveredmethods="0"/>
+        <line num="18" count="0" type="stmt"/>
+        <line num="19" count="0" type="stmt"/>
+        <line num="20" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="21" count="0" type="stmt"/>
+        <line num="23" count="0" type="stmt"/>
+        <line num="35" count="0" type="stmt"/>
+        <line num="36" count="0" type="stmt"/>
+        <line num="37" count="0" type="stmt"/>
+        <line num="40" count="0" type="stmt"/>
+        <line num="46" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="48" count="0" type="stmt"/>
+        <line num="49" count="0" type="stmt"/>
+        <line num="50" count="0" type="stmt"/>
+        <line num="51" count="0" type="stmt"/>
+        <line num="54" count="0" type="stmt"/>
+        <line num="55" count="0" type="stmt"/>
+        <line num="56" count="0" type="stmt"/>
+        <line num="57" count="0" type="stmt"/>
+        <line num="61" count="0" type="stmt"/>
+        <line num="62" count="0" type="stmt"/>
+        <line num="63" count="0" type="stmt"/>
+        <line num="65" count="0" type="stmt"/>
+        <line num="68" count="0" type="stmt"/>
+        <line num="71" count="0" type="stmt"/>
+        <line num="72" count="0" type="stmt"/>
+        <line num="73" count="0" type="stmt"/>
+        <line num="76" count="0" type="stmt"/>
+        <line num="77" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="78" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="81" count="0" type="stmt"/>
+        <line num="82" count="0" type="stmt"/>
+        <line num="84" count="0" type="stmt"/>
+        <line num="96" count="0" type="stmt"/>
+        <line num="97" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="98" count="0" type="stmt"/>
+        <line num="102" count="0" type="stmt"/>
+        <line num="103" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="104" count="0" type="stmt"/>
+        <line num="108" count="0" type="stmt"/>
+        <line num="109" count="0" type="stmt"/>
+        <line num="110" count="0" type="stmt"/>
+        <line num="111" count="0" type="stmt"/>
+        <line num="114" count="0" type="stmt"/>
+        <line num="115" count="0" type="stmt"/>
+        <line num="116" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="117" count="0" type="stmt"/>
+        <line num="123" count="0" type="stmt"/>
+        <line num="124" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="125" count="0" type="stmt"/>
+        <line num="129" count="0" type="stmt"/>
+        <line num="130" count="0" type="stmt"/>
+        <line num="133" count="0" type="stmt"/>
+        <line num="134" count="0" type="stmt"/>
+        <line num="135" count="0" type="stmt"/>
+        <line num="136" count="0" type="stmt"/>
+        <line num="137" count="0" type="stmt"/>
+        <line num="140" count="0" type="stmt"/>
+        <line num="141" count="0" type="stmt"/>
+        <line num="142" count="0" type="stmt"/>
+        <line num="143" count="0" type="stmt"/>
+        <line num="146" count="0" type="stmt"/>
+      </file>
       <file name="TreeView.tsx" path="/workspaces/openmakersuite/frontend/src/components/TreeView.tsx">
         <metrics statements="18" coveredstatements="1" conditionals="19" coveredconditionals="0" methods="8" coveredmethods="0"/>
         <line num="22" count="1" type="stmt"/>
@@ -850,34 +921,34 @@
       </file>
       <file name="WorkspaceLayout.tsx" path="/workspaces/openmakersuite/frontend/src/components/WorkspaceLayout.tsx">
         <metrics statements="28" coveredstatements="19" conditionals="18" coveredconditionals="11" methods="11" coveredmethods="5"/>
-        <line num="23" count="2" type="stmt"/>
-        <line num="24" count="5" type="stmt"/>
+        <line num="24" count="2" type="stmt"/>
         <line num="25" count="5" type="stmt"/>
         <line num="26" count="5" type="stmt"/>
         <line num="27" count="5" type="stmt"/>
         <line num="28" count="5" type="stmt"/>
         <line num="29" count="5" type="stmt"/>
-        <line num="30" count="5" type="cond" truecount="1" falsecount="1"/>
-        <line num="32" count="5" type="stmt"/>
+        <line num="30" count="5" type="stmt"/>
+        <line num="31" count="5" type="cond" truecount="1" falsecount="1"/>
         <line num="33" count="5" type="stmt"/>
-        <line num="36" count="5" type="stmt"/>
+        <line num="34" count="5" type="stmt"/>
         <line num="37" count="5" type="stmt"/>
-        <line num="42" count="5" type="cond" truecount="4" falsecount="0"/>
-        <line num="47" count="5" type="stmt"/>
-        <line num="48" count="0" type="stmt"/>
-        <line num="49" count="0" type="cond" truecount="0" falsecount="2"/>
-        <line num="50" count="0" type="stmt"/>
+        <line num="38" count="5" type="stmt"/>
+        <line num="43" count="5" type="cond" truecount="4" falsecount="0"/>
+        <line num="48" count="5" type="stmt"/>
+        <line num="49" count="0" type="stmt"/>
+        <line num="50" count="0" type="cond" truecount="0" falsecount="2"/>
         <line num="51" count="0" type="stmt"/>
-        <line num="56" count="5" type="stmt"/>
+        <line num="52" count="0" type="stmt"/>
         <line num="57" count="5" type="stmt"/>
-        <line num="60" count="5" type="cond" truecount="2" falsecount="0"/>
-        <line num="61" count="4" type="stmt"/>
-        <line num="67" count="0" type="stmt"/>
-        <line num="79" count="0" type="stmt"/>
-        <line num="85" count="1" type="stmt"/>
-        <line num="106" count="0" type="stmt"/>
-        <line num="119" count="0" type="stmt"/>
-        <line num="132" count="0" type="stmt"/>
+        <line num="58" count="5" type="stmt"/>
+        <line num="61" count="5" type="cond" truecount="2" falsecount="0"/>
+        <line num="62" count="4" type="stmt"/>
+        <line num="68" count="0" type="stmt"/>
+        <line num="80" count="0" type="stmt"/>
+        <line num="86" count="1" type="stmt"/>
+        <line num="108" count="0" type="stmt"/>
+        <line num="121" count="0" type="stmt"/>
+        <line num="134" count="0" type="stmt"/>
       </file>
     </package>
     <package name="src.components.forms">
@@ -1009,7 +1080,7 @@
       </file>
     </package>
     <package name="src.contexts">
-      <metrics statements="58" coveredstatements="34" conditionals="11" coveredconditionals="6" methods="25" coveredmethods="10"/>
+      <metrics statements="112" coveredstatements="71" conditionals="46" coveredconditionals="19" methods="39" coveredmethods="18"/>
       <file name="NotificationContext.tsx" path="/workspaces/openmakersuite/frontend/src/contexts/NotificationContext.tsx">
         <metrics statements="58" coveredstatements="34" conditionals="11" coveredconditionals="6" methods="25" coveredmethods="10"/>
         <line num="53" count="6" type="stmt"/>
@@ -1071,6 +1142,63 @@
         <line num="191" count="24" type="stmt"/>
         <line num="209" count="24" type="stmt"/>
       </file>
+      <file name="ThemeContext.tsx" path="/workspaces/openmakersuite/frontend/src/contexts/ThemeContext.tsx">
+        <metrics statements="54" coveredstatements="37" conditionals="35" coveredconditionals="13" methods="14" coveredmethods="8"/>
+        <line num="16" count="2" type="stmt"/>
+        <line num="18" count="2" type="stmt"/>
+        <line num="23" count="2" type="stmt"/>
+        <line num="24" count="5" type="cond" truecount="1" falsecount="1"/>
+        <line num="25" count="0" type="stmt"/>
+        <line num="27" count="5" type="cond" truecount="1" falsecount="1"/>
+        <line num="33" count="2" type="stmt"/>
+        <line num="34" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="35" count="0" type="stmt"/>
+        <line num="37" count="0" type="stmt"/>
+        <line num="40" count="2" type="stmt"/>
+        <line num="41" count="1" type="stmt"/>
+        <line num="42" count="1" type="cond" truecount="1" falsecount="1"/>
+        <line num="43" count="0" type="stmt"/>
+        <line num="45" count="1" type="stmt"/>
+        <line num="52" count="2" type="stmt"/>
+        <line num="54" count="5" type="stmt"/>
+        <line num="55" count="5" type="cond" truecount="1" falsecount="1"/>
+        <line num="56" count="0" type="stmt"/>
+        <line num="58" count="5" type="stmt"/>
+        <line num="59" count="5" type="cond" truecount="4" falsecount="1"/>
+        <line num="60" count="0" type="stmt"/>
+        <line num="62" count="5" type="stmt"/>
+        <line num="65" count="5" type="stmt"/>
+        <line num="68" count="5" type="cond" truecount="1" falsecount="1"/>
+        <line num="71" count="5" type="stmt"/>
+        <line num="72" count="5" type="cond" truecount="1" falsecount="1"/>
+        <line num="73" count="0" type="stmt"/>
+        <line num="76" count="5" type="stmt"/>
+        <line num="77" count="5" type="stmt"/>
+        <line num="78" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="82" count="5" type="cond" truecount="1" falsecount="1"/>
+        <line num="83" count="5" type="stmt"/>
+        <line num="84" count="5" type="stmt"/>
+        <line num="87" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="88" count="0" type="stmt"/>
+        <line num="89" count="0" type="stmt"/>
+        <line num="94" count="5" type="stmt"/>
+        <line num="95" count="5" type="cond" truecount="1" falsecount="1"/>
+        <line num="96" count="5" type="stmt"/>
+        <line num="101" count="5" type="stmt"/>
+        <line num="102" count="5" type="cond" truecount="1" falsecount="1"/>
+        <line num="103" count="5" type="stmt"/>
+        <line num="104" count="5" type="stmt"/>
+        <line num="105" count="5" type="stmt"/>
+        <line num="109" count="5" type="stmt"/>
+        <line num="110" count="0" type="stmt"/>
+        <line num="113" count="5" type="stmt"/>
+        <line num="114" count="0" type="stmt"/>
+        <line num="115" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="117" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="120" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="124" count="5" type="stmt"/>
+        <line num="131" count="5" type="stmt"/>
+      </file>
     </package>
     <package name="src.hooks">
       <metrics statements="36" coveredstatements="4" conditionals="12" coveredconditionals="0" methods="14" coveredmethods="1"/>
@@ -1104,23 +1232,23 @@
       <file name="useSiteSettings.ts" path="/workspaces/openmakersuite/frontend/src/hooks/useSiteSettings.ts">
         <metrics statements="18" coveredstatements="2" conditionals="2" coveredconditionals="0" methods="3" coveredmethods="0"/>
         <line num="14" count="1" type="stmt"/>
-        <line num="31" count="1" type="stmt"/>
-        <line num="32" count="0" type="stmt"/>
+        <line num="32" count="1" type="stmt"/>
         <line num="33" count="0" type="stmt"/>
         <line num="34" count="0" type="stmt"/>
-        <line num="36" count="0" type="stmt"/>
+        <line num="35" count="0" type="stmt"/>
         <line num="37" count="0" type="stmt"/>
         <line num="38" count="0" type="stmt"/>
         <line num="39" count="0" type="stmt"/>
         <line num="40" count="0" type="stmt"/>
         <line num="41" count="0" type="stmt"/>
         <line num="42" count="0" type="stmt"/>
-        <line num="44" count="0" type="stmt"/>
-        <line num="46" count="0" type="stmt"/>
-        <line num="47" count="0" type="cond" truecount="0" falsecount="2"/>
-        <line num="49" count="0" type="stmt"/>
-        <line num="53" count="0" type="stmt"/>
-        <line num="56" count="0" type="stmt"/>
+        <line num="43" count="0" type="stmt"/>
+        <line num="45" count="0" type="stmt"/>
+        <line num="47" count="0" type="stmt"/>
+        <line num="48" count="0" type="cond" truecount="0" falsecount="2"/>
+        <line num="50" count="0" type="stmt"/>
+        <line num="54" count="0" type="stmt"/>
+        <line num="57" count="0" type="stmt"/>
       </file>
     </package>
     <package name="src.pages">

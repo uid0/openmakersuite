@@ -24,7 +24,7 @@ const CategoryListPage: React.FC = () => {
     try {
       setLoading(true);
       const response = await inventoryAPI.listCategories();
-      setCategories(response.data);
+      setCategories(response.data.results);
       setError(null);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load categories');

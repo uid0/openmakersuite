@@ -42,7 +42,7 @@ const CategoryFormPage: React.FC = () => {
   const loadCategories = async () => {
     try {
       const response = await inventoryAPI.listCategories();
-      setCategories(response.data);
+      setCategories(response.data.results);
     } catch (err) {
       console.error('Error loading categories:', err);
     }
@@ -54,7 +54,7 @@ const CategoryFormPage: React.FC = () => {
     try {
       setLoading(true);
       const response = await inventoryAPI.listCategories();
-      const category = response.data.find((c) => c.id.toString() === id);
+      const category = response.data.results.find((c) => c.id.toString() === id);
       
       if (category) {
         setFormData({

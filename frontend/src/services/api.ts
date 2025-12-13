@@ -247,10 +247,10 @@ export const inventoryAPI = {
     api.get<Checklist[]>(`/inventory/items/${id}/checklists/`),
 
   listLocations: () =>
-    api.get<Location[]>('/inventory/locations/'),
+    api.get<{ results: Location[] }>('/inventory/locations/'),
 
   listCategories: () =>
-    api.get<Category[]>('/inventory/categories/'),
+    api.get<{ results: Category[] }>('/inventory/categories/'),
 
   listSuppliers: (params?: { supplier_type?: string; search?: string }) =>
     api.get<{ results: Supplier[] }>('/inventory/suppliers/', { params }),

@@ -72,3 +72,4 @@ frontend/coverage/lcov-report
 # OS
 .DS_Store
 Thumbs.db
+.devcontainer/devcontainer.json

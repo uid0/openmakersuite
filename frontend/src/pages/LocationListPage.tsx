@@ -27,7 +27,7 @@ const LocationListPage: React.FC = () => {
     try {
       setLoading(true);
       const response = await inventoryAPI.listLocations();
-      setLocations(response.data);
+      setLocations(response.data.results);
       setError(null);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load locations');

@@ -41,7 +41,7 @@ const LocationFormPage: React.FC = () => {
   const loadLocations = async () => {
     try {
       const response = await inventoryAPI.listLocations();
-      setLocations(response.data);
+      setLocations(response.data.results);
     } catch (err) {
       console.error('Error loading locations:', err);
     }

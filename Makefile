@@ -116,7 +116,7 @@ lint-frontend:  ## Lint frontend code
 
 install:  ## Install dependencies
 	$(DOCKER_COMPOSE) run backend pip install -r requirements.txt
-	$(DOCKER_COMPOSE) run frontend npm install
+	$(DOCKER_COMPOSE) run frontend npm ci || $(DOCKER_COMPOSE) run frontend npm install
 
 setup:  ## Initial project setup
 	@echo "Setting up project..."

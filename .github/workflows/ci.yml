@@ -122,6 +122,19 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Verify package-lock.json is in sync
+        run: |
+          cd frontend
+          # Check if package-lock.json exists
+          if [ ! -f "package-lock.json" ]; then
+            echo "❌ Error: package-lock.json not found"
+            exit 1
+          fi
+          # Verify sync by running npm ci in dry-run mode
+          echo "🔍 Verifying package-lock.json is in sync with package.json..."
+          npm ci --dry-run || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
+          echo "✅ package-lock.json is in sync"
+
       - name: Install dependencies
         run: |
           cd frontend

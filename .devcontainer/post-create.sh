@@ -18,7 +18,13 @@ cd ..
 # Install Node.js dependencies for frontend
 echo "📦 Installing Node.js dependencies..."
 cd frontend
-npm install
+# Use npm ci for reproducible installs, fall back to npm install if lock file is missing
+if [ -f "package-lock.json" ]; then
+    npm ci || (echo "⚠️  npm ci failed, trying npm install..." && npm install)
+else
+    echo "⚠️  package-lock.json not found, using npm install..."
+    npm install
+fi
 cd ..
 
 # Set up environment file for development

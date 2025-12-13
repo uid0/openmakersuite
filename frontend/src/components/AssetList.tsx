@@ -30,10 +30,8 @@ const AssetList: React.FC = () => {
         inventoryAPI.listLocations(),
         sigAPI.listMySIGs(),
       ]);
-      const locations: Location[] = locationsRes.data.results || [];
-      setLocations(locations);
-      const sigs: SIG[] = sigsRes.data.results || [];
-      setSigs(sigs);
+      setLocations(locationsRes.data.results || []);
+      setSigs(sigsRes.data.results || []);
     } catch (err) {
       console.error('Error loading initial data:', err);
     }

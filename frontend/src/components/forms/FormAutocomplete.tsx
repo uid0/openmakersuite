@@ -119,10 +119,10 @@ export function FormAutocomplete<T extends FieldValues>({
               if (option) {
                 field.onChange(option.value);
               } else {
-                field.onChange(value);
+                // User is typing, not selecting - update search but don't change field value
+                // The field value will be set when an option is actually selected
               }
             }}
-            onSearchChange={setSearchValue}
             data={filteredOptions}
             label={label}
             description={description}

@@ -42,13 +42,6 @@ const AssetScanPage: React.FC = () => {
     }
   }, [assetId]);
 
-  useEffect(() => {
-    if (assetId) {
-      loadAsset();
-      loadChecklists();
-    }
-  }, [assetId, loadAsset, loadChecklists]);
-
   const loadChecklists = useCallback(async () => {
     if (!assetId) return;
     try {
@@ -59,6 +52,13 @@ const AssetScanPage: React.FC = () => {
       console.error('Error loading checklists:', err);
     }
   }, [assetId]);
+
+  useEffect(() => {
+    if (assetId) {
+      loadAsset();
+      loadChecklists();
+    }
+  }, [assetId, loadAsset, loadChecklists]);
 
   const handleStartChecklist = async (checklistId: string) => {
     try {

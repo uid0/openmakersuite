@@ -2,7 +2,7 @@
  * Purchase Order Management Page
  * View and manage purchase orders, including setting expected shipment dates for line items
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderPage.css';

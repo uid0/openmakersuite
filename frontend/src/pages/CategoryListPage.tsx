@@ -41,8 +41,6 @@ const CategoryListPage: React.FC = () => {
     // First pass: create all nodes
     items.forEach((item) => {
       itemMap.set(item.id, {
-        id: item.id,
-        name: item.name,
         ...item,
       });
     });

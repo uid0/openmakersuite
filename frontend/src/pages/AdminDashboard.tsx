@@ -33,11 +33,6 @@ const AdminDashboard: React.FC = () => {
     }
   }, [filter]);
 
-  useEffect(() => {
-    loadRequests();
-    loadNotCheckedInAssets();
-  }, [loadRequests, loadNotCheckedInAssets]);
-
   const loadNotCheckedInAssets = useCallback(async () => {
     try {
       setLoadingAssets(true);
@@ -49,6 +44,11 @@ const AdminDashboard: React.FC = () => {
       setLoadingAssets(false);
     }
   }, []);
+
+  useEffect(() => {
+    loadRequests();
+    loadNotCheckedInAssets();
+  }, [loadRequests, loadNotCheckedInAssets]);
 
   const loadSupplierGroups = async () => {
     try {

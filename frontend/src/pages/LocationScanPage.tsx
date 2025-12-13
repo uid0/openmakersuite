@@ -409,6 +409,7 @@ const LocationScanPage: React.FC = () => {
 
 // Tasks tab component for authenticated users
 const LocationTasksTab: React.FC<{ locationId: string }> = ({ locationId }) => {
+  const notifications = useNotifications();
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState<string | null>(null);

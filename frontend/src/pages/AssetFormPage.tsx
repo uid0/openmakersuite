@@ -214,9 +214,9 @@ const AssetFormPage: React.FC = () => {
       // Save asset
       let savedAsset: Asset;
       if (isEditMode && id) {
-        savedAsset = (await assetsAPI.updateAsset(id, formData)).data;
+        savedAsset = (await assetsAPI.updateAsset(id, formData as any)).data;
       } else {
-        savedAsset = (await assetsAPI.createAsset(formData)).data;
+        savedAsset = (await assetsAPI.createAsset(formData as any)).data;
       }
 
       navigate(`/assets/${savedAsset.id}`);

@@ -153,9 +153,11 @@ const PriceTrendChart: React.FC<PriceTrendChartProps> = ({ priceTrends }) => {
               tickFormatter={(value) => `$${value.toFixed(2)}`}
             />
             <Tooltip
-              formatter={(value: number | null) => {
-                if (value === null) return 'N/A';
-                return `$${value.toFixed(2)}`;
+              formatter={(value: any) => {
+                if (value === null || value === undefined) return 'N/A';
+                const numValue = typeof value === 'number' ? value : parseFloat(value);
+                if (isNaN(numValue)) return 'N/A';
+                return `$${numValue.toFixed(2)}`;
               }}
               labelFormatter={(label) => `Date: ${new Date(label).toLocaleDateString()}`}
             />

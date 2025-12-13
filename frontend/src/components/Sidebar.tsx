@@ -27,9 +27,10 @@ interface WorkspaceSection {
 
 interface SidebarProps {
   isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false }) => {
+const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, onToggleCollapse }) => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [isStaff, setIsStaff] = useState<boolean>(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
@@ -151,7 +152,9 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false }) => {
   }, [location.pathname, workspaceSections]);
 
   const toggleCollapse = () => {
-    setIsCollapsed(!isCollapsed);
+    if (onToggleCollapse) {
+      onToggleCollapse();
+    }
   };
 
   const toggleSection = (sectionId: string) => {

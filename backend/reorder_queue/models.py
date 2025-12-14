@@ -11,7 +11,6 @@ from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
-
 from inventory.models import InventoryItem, ItemSupplier, Supplier
 
 User = get_user_model()
@@ -61,9 +60,12 @@ class ReorderRequest(models.Model):
     item = models.ForeignKey(
         InventoryItem, on_delete=models.CASCADE, related_name="reorder_requests"
     )
-    quantity = models.PositiveIntegerField(help_text="Quantity requested to reorder")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="normal")
+    quantity = models.PositiveIntegerField(
+        help_text="Quantity requested to reorder")
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="pending")
+    priority = models.CharField(
+        max_length=20, choices=PRIORITY_CHOICES, default="normal")
 
     # Request information
     requested_by = models.CharField(
@@ -88,7 +90,8 @@ class ReorderRequest(models.Model):
     estimated_delivery = models.DateField(null=True, blank=True)
     actual_delivery = models.DateField(null=True, blank=True)
     order_number = models.CharField(max_length=100, blank=True)
-    actual_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    actual_cost = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True)
 
     # Transparency tracking (public information)
     invoice_number = models.CharField(
@@ -97,11 +100,13 @@ class ReorderRequest(models.Model):
     invoice_url = models.URLField(
         blank=True, help_text="Link to invoice/receipt (if publicly available)"
     )
-    purchase_order_url = models.URLField(blank=True, help_text="Link to purchase order document")
+    purchase_order_url = models.URLField(
+        blank=True, help_text="Link to purchase order document")
     delivery_tracking_url = models.URLField(
         blank=True, help_text="Link to shipping/delivery tracking"
     )
-    supplier_url = models.URLField(blank=True, help_text="Link to supplier item page")
+    supplier_url = models.URLField(
+        blank=True, help_text="Link to supplier item page")
     public_notes = models.TextField(
         blank=True, help_text="Public notes visible in transparency view"
     )
@@ -186,8 +191,10 @@ class PurchaseOrder(models.Model):
         null=True,
         help_text="Purchase Order Number",
     )
-    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name="purchase_orders")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=DRAFT)
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.CASCADE, related_name="purchase_orders")
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=DRAFT)
 
     # Order details
     order_date = models.DateTimeField(auto_now_add=True)
@@ -210,7 +217,8 @@ class PurchaseOrder(models.Model):
     )
 
     # User tracking
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="created_orders")
+    created_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="created_orders")
     sent_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -269,7 +277,8 @@ class PurchaseOrder(models.Model):
 
     def calculate_estimated_total(self) -> Decimal:
         """Calculate estimated total cost from all line items."""
-        total = sum((item.estimated_cost for item in self.items.all()), start=Decimal("0.00"))
+        total = sum((item.estimated_cost for item in self.items.all()),
+                    start=Decimal("0.00"))
         self.estimated_total = total
         return total
 
@@ -279,7 +288,8 @@ class PurchaseOrder(models.Model):
             # Format: PO-YYYY-NNNN
             year = timezone.now().year
             last_po = (
-                PurchaseOrder.objects.filter(po_number__startswith=f"PO-{year}-")
+                PurchaseOrder.objects.filter(
+                    po_number__startswith=f"PO-{year}-")
                 .order_by("-po_number")
                 .first()
             )
@@ -377,7 +387,8 @@ class PurchaseOrderItem(models.Model):
         related_name="voided_purchase_order_items",
         help_text="User who voided this line item",
     )
-    void_reason = models.TextField(blank=True, help_text="Reason for voiding this line item")
+    void_reason = models.TextField(
+        blank=True, help_text="Reason for voiding this line item")
 
     # Notes
     notes = models.TextField(blank=True)
@@ -387,7 +398,8 @@ class PurchaseOrderItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["purchase_order", "item_supplier__item__name", "asset__name"]
+        ordering = ["purchase_order",
+                    "item_supplier__item__name", "asset__name"]
         unique_together = [
             ["purchase_order", "item_supplier"],
             ["purchase_order", "asset"],
@@ -520,7 +532,8 @@ class DeliveryItem(models.Model):
     Used for barcode scanning and inventory updates.
     """
 
-    delivery = models.ForeignKey(OrderDelivery, on_delete=models.CASCADE, related_name="items")
+    delivery = models.ForeignKey(
+        OrderDelivery, on_delete=models.CASCADE, related_name="items")
     purchase_order_item = models.ForeignKey(
         PurchaseOrderItem, on_delete=models.CASCADE, related_name="deliveries"
     )
@@ -591,8 +604,10 @@ class LeadTimeLog(models.Model):
 
     # Time tracking
     order_date = models.DateTimeField(help_text="When the order was placed")
-    expected_delivery_date = models.DateField(help_text="When delivery was expected")
-    actual_delivery_date = models.DateField(help_text="When delivery actually occurred")
+    expected_delivery_date = models.DateField(
+        help_text="When delivery was expected")
+    actual_delivery_date = models.DateField(
+        help_text="When delivery actually occurred")
 
     # Lead time calculations (in business days)
     estimated_lead_time_days = models.PositiveIntegerField(
@@ -711,8 +726,10 @@ class WebHook(models.Model):
     ]
 
     # Core fields
-    name = models.CharField(max_length=200, help_text="Descriptive name for this webhook")
-    url = models.URLField(help_text="Webhook endpoint URL to POST notifications to")
+    name = models.CharField(
+        max_length=200, help_text="Descriptive name for this webhook")
+    url = models.URLField(
+        help_text="Webhook endpoint URL to POST notifications to")
     event_type = models.CharField(
         max_length=50,
         choices=EVENT_TYPE_CHOICES,
@@ -735,7 +752,8 @@ class WebHook(models.Model):
     )
 
     # Metadata
-    description = models.TextField(blank=True, help_text="Description of what this webhook does")
+    description = models.TextField(
+        blank=True, help_text="Description of what this webhook does")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -759,6 +777,9 @@ class WebHook(models.Model):
             models.Index(fields=["event_type", "is_active"]),
             models.Index(fields=["is_active", "-last_triggered_at"]),
         ]
+        permissions = [
+            ("manage_webhooks", "Can manage webhooks"),
+        ]
 
     def __str__(self) -> str:
         status = "✓" if self.is_active else "✗"
@@ -777,11 +798,13 @@ class WebHook(models.Model):
         self.success_count += 1
         self.last_triggered_at = timezone.now()
         self.last_error = ""
-        self.save(update_fields=["success_count", "last_triggered_at", "last_error"])
+        self.save(update_fields=["success_count",
+                  "last_triggered_at", "last_error"])
 
     def record_failure(self, error_message: str) -> None:
         """Record a failed webhook delivery."""
         self.failure_count += 1
         self.last_triggered_at = timezone.now()
         self.last_error = error_message[:1000]  # Limit error message length
-        self.save(update_fields=["failure_count", "last_triggered_at", "last_error"])
+        self.save(update_fields=["failure_count",
+                  "last_triggered_at", "last_error"])

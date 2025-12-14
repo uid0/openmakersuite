@@ -127,6 +127,7 @@ api.interceptors.response.use(
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('username');
         localStorage.removeItem('is_staff');
+        localStorage.removeItem('can_manage_webhooks');
         isRefreshing = false;
         processQueue(error, null);
         return Promise.reject(error);
@@ -159,6 +160,7 @@ api.interceptors.response.use(
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('username');
         localStorage.removeItem('is_staff');
+        localStorage.removeItem('can_manage_webhooks');
         isRefreshing = false;
         processQueue(refreshError, null);
         // Return the original error if refresh failed, as it's more informative

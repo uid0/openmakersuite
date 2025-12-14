@@ -13,6 +13,7 @@ interface NavItem {
   icon?: string;
   requiresAuth?: boolean;
   requiresStaff?: boolean;
+  requiresWebhookPermission?: boolean;
   external?: boolean;
 }
 
@@ -33,6 +34,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, onToggleCollapse }) => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [isStaff, setIsStaff] = useState<boolean>(false);
+  const [canManageWebhooks, setCanManageWebhooks] = useState<boolean>(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const location = useLocation();
 
@@ -41,15 +43,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, onToggleCollapse
     const checkAuth = () => {
       const token = localStorage.getItem('token');
       const staffStatus = localStorage.getItem('is_staff');
+      const webhookPermission = localStorage.getItem('can_manage_webhooks');
       
       setIsLoggedIn(!!token);
       setIsStaff(staffStatus === 'true');
+      setCanManageWebhooks(webhookPermission === 'true');
     };
 
     checkAuth();
 
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'token' || e.key === 'is_staff') {
+      if (e.key === 'token' || e.key === 'is_staff' || e.key === 'can_manage_webhooks') {
         checkAuth();
       }
     };
@@ -132,7 +136,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, onToggleCollapse
       icon: '⚙️',
       items: [
         { path: '/settings/tax-receipt/lookup', label: 'Tax Receipt Lookup', icon: '🧾' },
-        { path: '/settings/webhooks', label: 'Webhooks', icon: '🔗', requiresAuth: true },
+        { path: '/settings/webhooks', label: 'Webhooks', icon: '🔗', requiresAuth: true, requiresWebhookPermission: true },
         { path: '/admin', label: 'Django Admin', icon: '🔧', requiresStaff: true, external: true },
       ],
     },
@@ -183,6 +187,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, onToggleCollapse
   const shouldShowItem = (item: NavItem): boolean => {
     if (item.requiresStaff && !isStaff) return false;
     if (item.requiresAuth && !isLoggedIn) return false;
+    if (item.requiresWebhookPermission && !canManageWebhooks) return false;
     return true;
   };
 

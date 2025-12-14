@@ -47,6 +47,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       localStorage.setItem('refresh_token', response.data.refresh);
       localStorage.setItem('username', loginUsername);
       localStorage.setItem('is_staff', String(response.data.is_staff || false));
+      localStorage.setItem('can_manage_webhooks', String(response.data.can_manage_webhooks || false));
 
       setIsLoggedIn(true);
       setUsername(loginUsername);
@@ -87,6 +88,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       localStorage.setItem('refresh_token', loginResponse.data.refresh);
       localStorage.setItem('username', registerUsername);
       localStorage.setItem('is_staff', String(loginResponse.data.is_staff || false));
+    localStorage.setItem('can_manage_webhooks', String(loginResponse.data.can_manage_webhooks || false));
 
       setIsLoggedIn(true);
       setUsername(registerUsername);
@@ -109,6 +111,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('username');
     localStorage.removeItem('is_staff');
+    localStorage.removeItem('can_manage_webhooks');
     setIsLoggedIn(false);
     setUsername('');
     onAuthChange(false);

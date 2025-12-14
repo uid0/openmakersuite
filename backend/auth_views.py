@@ -2,18 +2,17 @@
 Custom authentication views for makerspace users.
 """
 
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework import status
+from membership.utils import get_user_managed_sigs
+from config.tokens import CustomRefreshToken
 import re
 
 from django.contrib.auth import authenticate, get_user_model
 
 User = get_user_model()
-
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-
-from config.tokens import CustomRefreshToken
 
 
 @api_view(["POST"])
@@ -25,7 +24,8 @@ def register_user(request):
     """
     username = request.data.get("username", "").strip()
     email = request.data.get("email", "").strip()
-    password = request.data.get("password", "makerspace123")  # Default password
+    password = request.data.get(
+        "password", "makerspace123")  # Default password
 
     # Basic validation
     if not username:
@@ -53,7 +53,8 @@ def register_user(request):
 
     try:
         # Create the user
-        user = User.objects.create_user(username=username, email=email, password=password)
+        user = User.objects.create_user(
+            username=username, email=email, password=password)
         user.save()
 
         # Generate tokens for immediate login
@@ -112,12 +113,21 @@ def login_user(request):
     refresh = CustomRefreshToken.for_user(user)
     access = refresh.access_token
 
+    # Check if user can manage webhooks
+    can_manage_webhooks = (
+        user.is_staff
+        or user.is_superuser
+        or get_user_managed_sigs(user).exists()
+        or user.has_perm("reorder_queue.manage_webhooks")
+    )
+
     return Response(
         {
             "access": str(access),
             "refresh": str(refresh),
             "username": user.username,
             "is_staff": user.is_staff,
+            "can_manage_webhooks": can_manage_webhooks,
         }
     )
 
@@ -155,7 +165,6 @@ def create_test_membership(request):
     Only available in DEBUG mode for E2E testing.
     """
     from django.conf import settings
-
     from membership.models import Membership
 
     if not settings.DEBUG:

@@ -5,9 +5,9 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assetsAPI, checklistsAPI } from '../services/api';
+import { assetsAPI, assetPartsAPI, checklistsAPI } from '../services/api';
 import '../styles/ScanPage.css';
-import { Asset, Checklist } from '../types';
+import { Asset, AssetPart, Checklist } from '../types';
 
 const AssetScanPage: React.FC = () => {
   const { assetId } = useParams<{ assetId: string }>();
@@ -21,9 +21,12 @@ const AssetScanPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [checklists, setChecklists] = useState<Checklist[]>([]);
+  const [assetParts, setAssetParts] = useState<AssetPart[]>([]);
 
   // Form state (authenticated users)
   const [problemDescription, setProblemDescription] = useState('');
+  const [selectedPartsForRepair, setSelectedPartsForRepair] = useState<Set<string>>(new Set());
+  const [repairDescription, setRepairDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
@@ -32,7 +35,21 @@ const AssetScanPage: React.FC = () => {
       setLoading(true);
       // Call scan endpoint which updates last_scanned_at and returns asset data
       const assetResponse = await assetsAPI.scanAsset(assetId!);
-      setAsset(assetResponse.data);
+      const assetData = assetResponse.data;
+      setAsset(assetData);
+      // Use parts from asset response if available, otherwise load separately
+      if (assetData.parts && assetData.parts.length > 0) {
+        setAssetParts(assetData.parts);
+      } else {
+        // Fallback: load parts separately if not in response
+        try {
+          const partsResponse = await assetPartsAPI.listAssetParts({ asset: assetId! });
+          setAssetParts(partsResponse.data.results || []);
+        } catch (err: any) {
+          // Silently fail - parts are optional
+          console.error('Error loading asset parts:', err);
+        }
+      }
       setError(null);
     } catch (err: any) {
       setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to load asset');
@@ -41,13 +58,6 @@ const AssetScanPage: React.FC = () => {
       setLoading(false);
     }
   }, [assetId]);
-
-  useEffect(() => {
-    if (assetId) {
-      loadAsset();
-      loadChecklists();
-    }
-  }, [assetId, loadAsset, loadChecklists]);
 
   const loadChecklists = useCallback(async () => {
     if (!assetId) return;
@@ -59,6 +69,24 @@ const AssetScanPage: React.FC = () => {
       console.error('Error loading checklists:', err);
     }
   }, [assetId]);
+
+  const loadAssetParts = useCallback(async () => {
+    if (!assetId) return;
+    try {
+      const partsResponse = await assetPartsAPI.listAssetParts({ asset: assetId });
+      setAssetParts(partsResponse.data.results || []);
+    } catch (err: any) {
+      // Silently fail - parts are optional
+      console.error('Error loading asset parts:', err);
+    }
+  }, [assetId]);
+
+  useEffect(() => {
+    if (assetId) {
+      loadAsset();
+      loadChecklists();
+    }
+  }, [assetId, loadAsset, loadChecklists]);
 
   const handleStartChecklist = async (checklistId: string) => {
     try {
@@ -172,6 +200,60 @@ const AssetScanPage: React.FC = () => {
     }
   };
 
+  const handlePartRepairToggle = (partId: string) => {
+    setSelectedPartsForRepair((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(partId)) {
+        newSet.delete(partId);
+      } else {
+        newSet.add(partId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleRequestRepair = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!asset || selectedPartsForRepair.size === 0) {
+      alert('Please select at least one part that needs repair');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      
+      // Build description with selected parts
+      const selectedParts = assetParts.filter((part) => selectedPartsForRepair.has(part.id));
+      let description = 'Repair request for the following parts:\n\n';
+      selectedParts.forEach((part) => {
+        description += `- ${part.part_name}${part.part_sku ? ` (SKU: ${part.part_sku})` : ''}`;
+        if (part.quantity_needed > 1) {
+          description += ` - Quantity: ${part.quantity_needed}`;
+        }
+        description += '\n';
+        if (part.notes) {
+          description += `  Notes: ${part.notes}\n`;
+        }
+      });
+      
+      if (repairDescription.trim()) {
+        description += `\nAdditional details:\n${repairDescription}`;
+      }
+
+      await assetsAPI.reportProblem(asset.id, description);
+      setSelectedPartsForRepair(new Set());
+      setRepairDescription('');
+      setActionSuccess('Repair request submitted successfully');
+      setTimeout(() => setActionSuccess(null), 3000);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to submit repair request');
+      console.error('Error submitting repair request:', err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="scan-page">
@@ -255,6 +337,106 @@ const AssetScanPage: React.FC = () => {
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Asset Parts Repair Request Section - Available to all users */}
+        {assetParts.length > 0 && (
+          <div className="parts-repair-section" style={{ marginTop: '20px', padding: '15px', border: '1px solid #ddd', borderRadius: '5px', backgroundColor: '#f9f9f9' }}>
+            <h3>🔧 Request Part Repair</h3>
+            <p>Select the parts that need repair:</p>
+            <form onSubmit={handleRequestRepair} style={{ marginTop: '15px' }}>
+              <div style={{ marginBottom: '15px' }}>
+                {assetParts.map((part) => (
+                  <label
+                    key={part.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      padding: '10px',
+                      marginBottom: '8px',
+                      backgroundColor: selectedPartsForRepair.has(part.id) ? '#e3f2fd' : 'white',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.2s',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedPartsForRepair.has(part.id)}
+                      onChange={() => handlePartRepairToggle(part.id)}
+                      disabled={submitting}
+                      style={{ marginRight: '10px', marginTop: '4px', cursor: 'pointer' }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{part.part_name}</div>
+                      {part.part_sku && (
+                        <div style={{ fontSize: '0.9em', color: '#666', marginBottom: '2px' }}>SKU: {part.part_sku}</div>
+                      )}
+                      {part.quantity_needed > 1 && (
+                        <div style={{ fontSize: '0.9em', color: '#666', marginBottom: '2px' }}>
+                          Quantity needed: {part.quantity_needed}
+                        </div>
+                      )}
+                      <div style={{ marginTop: '4px' }}>
+                        {part.is_required && (
+                          <span style={{ fontSize: '0.85em', color: '#d32f2f', fontWeight: 'bold', marginRight: '10px' }}>
+                            Required
+                          </span>
+                        )}
+                        {part.needs_replacement && (
+                          <span style={{ fontSize: '0.85em', color: '#f57c00', fontWeight: 'bold' }}>
+                            ⚠️ Needs Replacement
+                          </span>
+                        )}
+                      </div>
+                      {part.notes && (
+                        <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px', fontStyle: 'italic' }}>
+                          {part.notes}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                  Additional Details (optional):
+                </label>
+                <textarea
+                  value={repairDescription}
+                  onChange={(e) => setRepairDescription(e.target.value)}
+                  placeholder="Describe what needs to be repaired or any additional information..."
+                  rows={3}
+                  disabled={submitting}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    fontFamily: 'inherit',
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={submitting || selectedPartsForRepair.size === 0}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: selectedPartsForRepair.size === 0 ? '#ccc' : '#28a745',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: selectedPartsForRepair.size === 0 ? 'not-allowed' : 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '1em',
+                }}
+              >
+                {submitting ? 'Submitting...' : 'Request Repair'}
+              </button>
+            </form>
           </div>
         )}
 

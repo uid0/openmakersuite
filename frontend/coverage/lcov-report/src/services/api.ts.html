@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">38.36% </span>
+                <span class="strong">38.03% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>89/232</span>
+                <span class='fraction'>89/234</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">38.36% </span>
+                <span class="strong">38.03% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>89/232</span>
+                <span class='fraction'>89/234</span>
             </div>
         
             
@@ -842,7 +842,9 @@
 <a name='L777'></a><a href='#L777'>777</a>
 <a name='L778'></a><a href='#L778'>778</a>
 <a name='L779'></a><a href='#L779'>779</a>
-<a name='L780'></a><a href='#L780'>780</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L780'></a><a href='#L780'>780</a>
+<a name='L781'></a><a href='#L781'>781</a>
+<a name='L782'></a><a href='#L782'>782</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -974,31 +976,33 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -1750,6 +1754,7 @@ api.interceptors.response.use(
 <span class="cstat-no" title="statement not covered" >        localStorage.removeItem('refresh_token');</span>
 <span class="cstat-no" title="statement not covered" >        localStorage.removeItem('username');</span>
 <span class="cstat-no" title="statement not covered" >        localStorage.removeItem('is_staff');</span>
+<span class="cstat-no" title="statement not covered" >        localStorage.removeItem('can_manage_webhooks');</span>
 <span class="cstat-no" title="statement not covered" >        isRefreshing = false;</span>
 <span class="cstat-no" title="statement not covered" >        processQueue(error, null);</span>
 <span class="cstat-no" title="statement not covered" >        return Promise.reject(error);</span>
@@ -1782,6 +1787,7 @@ api.interceptors.response.use(
 <span class="cstat-no" title="statement not covered" >        localStorage.removeItem('refresh_token');</span>
 <span class="cstat-no" title="statement not covered" >        localStorage.removeItem('username');</span>
 <span class="cstat-no" title="statement not covered" >        localStorage.removeItem('is_staff');</span>
+<span class="cstat-no" title="statement not covered" >        localStorage.removeItem('can_manage_webhooks');</span>
 <span class="cstat-no" title="statement not covered" >        isRefreshing = false;</span>
 <span class="cstat-no" title="statement not covered" >        processQueue(refreshError, null);</span>
         // Return the original error if refresh failed, as it's more informative
@@ -2407,7 +2413,7 @@ export default api;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-12-14T05:44:14.032Z
+                at 2025-12-14T05:47:54.949Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

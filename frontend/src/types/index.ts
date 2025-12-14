@@ -656,3 +656,58 @@ export interface AssetUtilization {
   total_hours: number;
   avg_hours_per_session: number;
 }
+
+// Webhook types
+export type WebHookEventType =
+  | 'reorder_request_created'
+  | 'reorder_request_approved'
+  | 'reorder_request_ordered'
+  | 'reorder_request_received'
+  | 'item_low_stock'
+  | 'purchase_order_created'
+  | 'delivery_received'
+  | 'fixture_refill_requested'
+  | 'location_checkin'
+  | 'location_feedback'
+  | 'security_report';
+
+export interface WebHook {
+  id: number;
+  name: string;
+  description: string;
+  url: string;
+  event_type: WebHookEventType;
+  event_type_display: string;
+  is_active: boolean;
+  secret?: string; // Only returned when creating/editing, not in list
+  headers: Record<string, string> | null;
+  last_triggered_at: string | null;
+  success_count: number;
+  failure_count: number;
+  success_rate: number | null;
+  total_triggers: number;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebHookTestResult {
+  webhook_id: number;
+  webhook_name: string;
+  success: boolean;
+  status_code?: number | null;
+  response_time_ms?: number | null;
+  error_message?: string;
+  response_body?: string;
+  tested_at: string;
+}
+
+export interface CreateWebHookData {
+  name: string;
+  description?: string;
+  url: string;
+  event_type: WebHookEventType;
+  is_active?: boolean;
+  secret?: string;
+  headers?: Record<string, string>;
+}

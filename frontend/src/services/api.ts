@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog } from '../types';
+import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, CreateWebHookData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, WebHook, WebHookTestResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -699,6 +699,27 @@ export const notificationsAPI = {
 
   delete: (id: string) =>
     api.delete(`/notifications/${id}/`),
+};
+
+// Webhooks API
+export const webhooksAPI = {
+  listWebhooks: () =>
+    api.get<{ results: WebHook[] }>('/reorders/webhooks/'),
+
+  getWebhook: (id: string) =>
+    api.get<WebHook>(`/reorders/webhooks/${id}/`),
+
+  createWebhook: (data: CreateWebHookData) =>
+    api.post<WebHook>('/reorders/webhooks/', data),
+
+  updateWebhook: (id: string, data: Partial<CreateWebHookData>) =>
+    api.patch<WebHook>(`/reorders/webhooks/${id}/`, data),
+
+  deleteWebhook: (id: string) =>
+    api.delete(`/reorders/webhooks/${id}/`),
+
+  testWebhook: (id: string) =>
+    api.post<WebHookTestResult>(`/reorders/webhooks/${id}/test/`),
 };
 
 // Reports API

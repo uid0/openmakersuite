@@ -1,0 +1,10 @@
+.webhook-list-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.webhook-list-page h1 {
+  color: #333;
+  margin-bottom: 0.5rem;
+}

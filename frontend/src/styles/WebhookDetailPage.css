@@ -1,0 +1,18 @@
+.webhook-detail-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.webhook-detail-page .statistics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 768px) {
+  .webhook-detail-page .statistics-grid {
+    grid-template-columns: 1fr;
+  }
+}

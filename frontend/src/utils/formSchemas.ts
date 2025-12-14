@@ -170,6 +170,31 @@ export const supplierSchema = z.object({
 
 export type SupplierFormData = z.infer<typeof supplierSchema>;
 
+// Webhook Form Schema
+export const webhookSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200, 'Name must be 200 characters or less'),
+  description: z.string().optional(),
+  url: z.string().url('Invalid URL format').min(1, 'URL is required'),
+  event_type: z.enum([
+    'reorder_request_created',
+    'reorder_request_approved',
+    'reorder_request_ordered',
+    'reorder_request_received',
+    'item_low_stock',
+    'purchase_order_created',
+    'delivery_received',
+    'fixture_refill_requested',
+    'location_checkin',
+    'location_feedback',
+    'security_report',
+  ]),
+  is_active: z.boolean().default(true),
+  secret: z.string().optional(),
+  headers: z.string().optional(), // JSON string, will be parsed
+});
+
+export type WebhookFormData = z.infer<typeof webhookSchema>;
+
 // Asset Form Schema
 export const assetFormSchema = z
   .object({

@@ -38,6 +38,9 @@ import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
 import TVDashboard from './pages/TVDashboard';
+import WebhookDetailPage from './pages/WebhookDetailPage';
+import WebhookFormPage from './pages/WebhookFormPage';
+import WebhookListPage from './pages/WebhookListPage';
 import './styles/App.css';
 
 // Wrap routes with Sentry for better error tracking
@@ -165,6 +168,10 @@ function AppContent() {
 
           {/* Settings Workspace */}
           <Route path="/settings/tax-receipt/lookup" element={<WorkspaceLayout><TaxReceiptLookupPage /></WorkspaceLayout>} />
+          <Route path="/settings/webhooks" element={<WorkspaceLayout><WebhookListPage /></WorkspaceLayout>} />
+          <Route path="/settings/webhooks/new" element={<WorkspaceLayout><WebhookFormPage /></WorkspaceLayout>} />
+          <Route path="/settings/webhooks/:id" element={<WorkspaceLayout><WebhookDetailPage /></WorkspaceLayout>} />
+          <Route path="/settings/webhooks/:id/edit" element={<WorkspaceLayout><WebhookFormPage /></WorkspaceLayout>} />
 
           {/* Legacy routes - redirect to new workspace routes */}
           <Route path="/orderadmin" element={<Navigate to="/inventory/admin" replace />} />

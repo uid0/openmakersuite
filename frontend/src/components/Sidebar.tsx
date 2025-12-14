@@ -132,6 +132,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, onToggleCollapse
       icon: '⚙️',
       items: [
         { path: '/settings/tax-receipt/lookup', label: 'Tax Receipt Lookup', icon: '🧾' },
+        { path: '/settings/webhooks', label: 'Webhooks', icon: '🔗', requiresAuth: true },
         { path: '/admin', label: 'Django Admin', icon: '🔧', requiresStaff: true, external: true },
       ],
     },

@@ -132,7 +132,7 @@ jobs:
           fi
           # Verify sync by running npm ci in dry-run mode
           echo "🔍 Verifying package-lock.json is in sync with package.json..."
-          npm ci --dry-run || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
+          npm ci --ignore-scripts --dry-run || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
           echo "✅ package-lock.json is in sync"
 
       - name: Install dependencies

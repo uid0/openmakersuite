@@ -219,11 +219,12 @@ jobs:
             ALL_HEALTHY=true
 
             for SERVICE in $SERVICES; do
-              CONTAINER_ID=$(docker compose ps -q "$SERVICE")
+              CONTAINER_ID=$(docker compose ps -a -q "$SERVICE")
               if [ -z "$CONTAINER_ID" ]; then
                 echo "❌ No container found for service '$SERVICE'"
-                ALL_HEALTHY=false
-                break
+                docker compose ps -a
+                docker compose logs "$SERVICE" || true
+                exit 1
               fi
 
               STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER_ID")
@@ -232,10 +233,16 @@ jobs:
                 continue
               elif [ "$STATUS" = "starting" ] || [ "$STATUS" = "running" ]; then
                 ALL_HEALTHY=false
-                break
+                continue
+              elif [ "$STATUS" = "exited" ] || [ "$STATUS" = "dead" ]; then
+                echo "❌ Service '$SERVICE' container exited (status: $STATUS)"
+                docker compose ps -a "$SERVICE"
+                docker compose logs "$SERVICE" || true
+                exit 1
               else
                 echo "❌ Service '$SERVICE' is in status '$STATUS'"
-                docker compose ps
+                docker compose ps -a "$SERVICE"
+                docker compose logs "$SERVICE" || true
                 exit 1
               fi
             done

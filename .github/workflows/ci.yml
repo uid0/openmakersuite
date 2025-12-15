@@ -208,7 +208,53 @@ jobs:
             exit 1
           fi
 
-          timeout 300 sh -c "docker compose wait $SERVICES"
+          # GitHub's compose build may hang when a service never transitions to healthy.
+          # Poll health manually with a bounded timeout so failures surface quickly.
+          MAX_WAIT=300
+          INTERVAL=5
+          ELAPSED=0
+
+          echo "Polling service health for up to ${MAX_WAIT}s..."
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            ALL_HEALTHY=true
+
+            for SERVICE in $SERVICES; do
+              CONTAINER_ID=$(docker compose ps -q "$SERVICE")
+              if [ -z "$CONTAINER_ID" ]; then
+                echo "❌ No container found for service '$SERVICE'"
+                ALL_HEALTHY=false
+                break
+              fi
+
+              STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER_ID")
+
+              if [ "$STATUS" = "healthy" ]; then
+                continue
+              elif [ "$STATUS" = "starting" ] || [ "$STATUS" = "running" ]; then
+                ALL_HEALTHY=false
+                break
+              else
+                echo "❌ Service '$SERVICE' is in status '$STATUS'"
+                docker compose ps
+                exit 1
+              fi
+            done
+
+            if [ "$ALL_HEALTHY" = true ]; then
+              echo "✅ All services are healthy"
+              break
+            fi
+
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+            echo "...still waiting (${ELAPSED}s/${MAX_WAIT}s)"
+          done
+
+          if [ "$ALL_HEALTHY" != true ]; then
+            echo "❌ Services did not become healthy within ${MAX_WAIT}s"
+            docker compose ps
+            exit 1
+          fi
 
           # Run migrations
           docker compose exec -T backend python manage.py migrate --no-input

@@ -132,7 +132,7 @@ jobs:
           fi
           # Verify sync by running npm ci in dry-run mode
           echo "🔍 Verifying package-lock.json is in sync with package.json..."
-          npm ci --dry-run || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
+          npm ci --ignore-scripts --dry-run || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
           echo "✅ package-lock.json is in sync"
 
       - name: Install dependencies
@@ -196,8 +196,19 @@ jobs:
           # Start services
           docker compose up -d --build
 
-          # Wait for services to be healthy
-          timeout 300 bash -c 'while [[ "$(docker compose ps -q | xargs docker inspect -f "{{.State.Health.Status}}" 2>/dev/null | grep -v healthy | wc -l)" != "0" ]]; do sleep 5; done'
+          echo "Waiting for containers to report healthy..."
+          # Use native compose waiting so health checks gate the test run
+          docker compose ps
+          # GitHub Actions runners ship Compose without the --timeout flag, so wrap with coreutils timeout
+          # Compose requires explicit service names; enumerate them to ensure wait checks all containers
+          SERVICES=$(docker compose config --services)
+          if [ -z "$SERVICES" ]; then
+            echo "❌ No services found in docker compose config"
+            docker compose config
+            exit 1
+          fi
+
+          timeout 300 sh -c "docker compose wait $SERVICES"
 
           # Run migrations
           docker compose exec -T backend python manage.py migrate --no-input

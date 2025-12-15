@@ -32,6 +32,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     command: python manage.py runserver 0.0.0.0:8000
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('localhost', 8000), 3)\""]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
     volumes:
       - ./backend:/app
       - static_volume:/app/staticfiles
@@ -56,6 +62,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     command: celery -A config worker -l info
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME -t 5"]
+      interval: 15s
+      timeout: 10s
+      start_period: 20s
+      retries: 8
     volumes:
       - ./backend:/app
       - media_volume:/app/media
@@ -77,6 +89,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     command: celery -A config flower --port=5555 --broker=redis://redis:6379/0 --broker_api=redis://redis:6379/0
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('localhost', 5555), 3)\""]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
     volumes:
       - ./backend:/app
     environment:
@@ -101,6 +119,12 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000', res => process.exit(res.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
     ports:
       - "3000:3000"
     environment:

@@ -199,7 +199,8 @@ jobs:
           echo "Waiting for containers to report healthy..."
           # Use native compose waiting so health checks gate the test run
           docker compose ps
-          docker compose wait --timeout 300
+          # GitHub Actions runners ship Compose without the --timeout flag, so wrap with coreutils timeout
+          timeout 300 docker compose wait
 
           # Run migrations
           docker compose exec -T backend python manage.py migrate --no-input

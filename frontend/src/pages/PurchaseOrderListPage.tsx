@@ -114,6 +114,9 @@ const PurchaseOrderListPage: React.FC = () => {
           </p>
         </div>
         <div className="po-list-actions">
+          <Link to="/purchasing/orders/new" className="create-po-link">
+            + Create Purchase Order
+          </Link>
           <Link to="/inventory/transparency" className="transparency-link">
             View Financial Transparency →
           </Link>

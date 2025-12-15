@@ -54,9 +54,9 @@ export function getQuickActions(navigate: (path: string) => void): QuickAction[]
       id: 'create-po',
       label: 'Create Purchase Order',
       description: 'Create a new purchase order',
-      keywords: ['create', 'new', 'add', 'purchase', 'order', 'po'],
+      keywords: ['create', 'new', 'add', 'purchase', 'order', 'po', 'buy', 'reorder'],
       category: 'create',
-      action: () => navigate('/purchasing/orders'),
+      action: () => navigate('/purchasing/orders/new'),
     },
     // Navigation actions
     {

@@ -26,6 +26,7 @@ import LocationFormPage from './pages/LocationFormPage';
 import LocationListPage from './pages/LocationListPage';
 import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
+import PurchaseOrderFormPage from './pages/PurchaseOrderFormPage';
 import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import PurchasingReportPage from './pages/PurchasingReportPage';
@@ -140,6 +141,7 @@ function AppContent() {
 
           {/* Purchasing Workspace */}
           <Route path="/purchasing/orders" element={<WorkspaceLayout><PurchaseOrderListPage /></WorkspaceLayout>} />
+          <Route path="/purchasing/orders/new" element={<WorkspaceLayout><PurchaseOrderFormPage /></WorkspaceLayout>} />
           <Route path="/purchasing/orders/:orderId" element={<WorkspaceLayout><PurchaseOrderPage /></WorkspaceLayout>} />
 
           {/* Assets Workspace */}

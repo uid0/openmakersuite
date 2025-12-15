@@ -448,11 +448,76 @@ export const analyticsAPI = {
 };
 
 // Purchase Order API
+export interface ReorderDataItem {
+  item_supplier_id: number;
+  item_id: string;
+  item_name: string;
+  item_sku: string;
+  current_stock: number;
+  minimum_stock: number;
+  reorder_quantity: number;
+  suggested_quantity: number;
+  unit_cost: string;
+  package_cost: string | null;
+  quantity_per_package: number;
+  lead_time_days: number;
+  supplier_sku: string;
+  supplier_url: string;
+  is_primary: boolean;
+  line_total: string;
+}
+
+export interface ReorderDataAsset {
+  id: string;
+  name: string;
+  asset_tag: string;
+  serial_number: string;
+  product_url: string;
+}
+
+export interface ReorderDataSupplier {
+  id: number;
+  name: string;
+  supplier_type: string;
+  website: string;
+  items: ReorderDataItem[];
+  assets: ReorderDataAsset[];
+  total_items: number;
+  estimated_total: string;
+  avg_lead_time: number;
+}
+
+export interface ReorderDataResponse {
+  suppliers: ReorderDataSupplier[];
+  total_suppliers: number;
+  total_low_stock_items: number;
+}
+
+export interface CreatePurchaseOrderItem {
+  item_supplier_id?: number;
+  asset_id?: string;
+  description?: string;
+  quantity: number;
+  unit_cost?: number;
+  notes?: string;
+}
+
+export interface CreatePurchaseOrderData {
+  supplier: number;
+  expected_delivery_date?: string;
+  notes?: string;
+  items: CreatePurchaseOrderItem[];
+}
+
 export const purchaseOrderAPI = {
   listOrders: (params?: { status?: string }) =>
     api.get<{ results: any[] }>('/reorders/purchase-orders/', { params }),
   getOrder: (id: string) =>
     api.get<any>(`/reorders/purchase-orders/${id}/`),
+  getReorderData: () =>
+    api.get<ReorderDataResponse>('/reorders/purchase-orders/reorder_data/'),
+  createOrder: (data: CreatePurchaseOrderData) =>
+    api.post<any>('/reorders/purchase-orders/', data),
   updateLineItem: (orderId: string, itemId: string, data: { expected_shipment_date?: string; notes?: string; line_cost?: number; unit_cost_actual?: number }) =>
     api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
   voidLineItem: (orderId: string, itemId: string, reason?: string) =>

@@ -102,6 +102,7 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "purchase_order",
             "item_supplier",
             "asset",
+            "description",
             "item_supplier_details",
             "item_details",
             "asset_details",
@@ -135,11 +136,13 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
         return None
 
     def get_item_type(self, obj):
-        """Return whether this is an inventory item or asset."""
+        """Return whether this is an inventory item, asset, or freeform."""
         if obj.item_supplier:
             return "inventory_item"
         elif obj.asset:
             return "asset"
+        elif obj.description:
+            return "freeform"
         return None
 
 
@@ -200,9 +203,10 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
     items = serializers.ListField(
         child=serializers.DictField(),
         write_only=True,
-        help_text="List of items or assets to order with quantities. Format: "
-        '[{"item_supplier_id": 1, "quantity": 10}, ...] or '
-        '[{"asset_id": "uuid", "quantity": 1, "unit_cost": 100.00}, ...]',
+        help_text="List of items to order. Supports three formats: "
+        '[{"item_supplier_id": 1, "quantity": 10}, ...] for inventory items, '
+        '[{"asset_id": "uuid", "quantity": 1, "unit_cost": 100.00}, ...] for assets, '
+        '[{"description": "Custom item", "quantity": 1, "unit_cost": 50.00}, ...] for freeform items',
     )
 
     class Meta:
@@ -215,7 +219,7 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
-        """Create purchase order with line items (inventory items or assets)."""
+        """Create purchase order with line items (inventory items, assets, or freeform)."""
         items_data = validated_data.pop("items")
 
         # Generate PO number before creating
@@ -297,9 +301,35 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
                 except Asset.DoesNotExist:
                     raise serializers.ValidationError(f"Asset with id {asset_id} does not exist")
 
+            # Handle freeform line items
+            elif "description" in item_data:
+                description = item_data["description"]
+                unit_cost = item_data.get("unit_cost")
+
+                if not description:
+                    raise serializers.ValidationError(
+                        "Freeform items must have a non-empty description"
+                    )
+
+                if unit_cost is None:
+                    raise serializers.ValidationError(
+                        f"unit_cost is required for freeform item: {description}"
+                    )
+
+                # Create the freeform line item
+                line_item = PurchaseOrderItem.objects.create(
+                    purchase_order=purchase_order,
+                    description=description,
+                    quantity_ordered=quantity,
+                    unit_cost_ordered=unit_cost,
+                    notes=notes,
+                )
+
+                total_cost += line_item.estimated_cost
+
             else:
                 raise serializers.ValidationError(
-                    "Each item must have either 'item_supplier_id' or 'asset_id'"
+                    "Each item must have 'item_supplier_id', 'asset_id', or 'description'"
                 )
 
         # Update estimated total

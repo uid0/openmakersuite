@@ -310,9 +310,10 @@ class PurchaseOrderItem(models.Model):
     Represents a specific item or asset ordered from a supplier.
     Tracks received quantities and costs.
 
-    Can be either:
+    Can be one of:
     - An inventory item (via item_supplier)
     - An asset (via asset)
+    - A freeform item (via description, when neither item_supplier nor asset is set)
     """
 
     purchase_order = models.ForeignKey(
@@ -332,6 +333,11 @@ class PurchaseOrderItem(models.Model):
         blank=True,
         related_name="purchase_order_items",
         help_text="Asset being purchased (for asset purchases)",
+    )
+    description = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Freeform description for line items not linked to inventory items or assets",
     )
 
     # Order quantities

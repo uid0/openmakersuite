@@ -480,6 +480,160 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=False, methods=["get"])
+    def reorder_data(self, request):
+        """
+        Get data for PO creation: low stock items grouped by supplier with pricing.
+
+        Returns all suppliers that have items needing reorder, along with
+        assets where the supplier is the manufacturer.
+        """
+        from inventory.models import Asset, ItemSupplier, Supplier
+
+        # Get items that need reordering (current_stock <= minimum_stock)
+        low_stock_items = (
+            InventoryItem.objects.filter(
+                current_stock__lte=F("minimum_stock"),
+                is_active=True,
+            )
+            .select_related("category", "location")
+            .prefetch_related("item_suppliers__supplier")
+        )
+
+        # Build supplier data with their available items
+        supplier_data = {}
+
+        for item in low_stock_items:
+            # Get all active, non-discontinued suppliers for this item
+            item_suppliers = item.item_suppliers.filter(
+                is_active=True,
+                is_discontinued=False,
+            ).select_related("supplier")
+
+            for item_supplier in item_suppliers:
+                supplier = item_supplier.supplier
+                supplier_id = supplier.id
+
+                if supplier_id not in supplier_data:
+                    supplier_data[supplier_id] = {
+                        "id": supplier_id,
+                        "name": supplier.name,
+                        "supplier_type": supplier.supplier_type,
+                        "website": supplier.website,
+                        "items": [],
+                        "assets": [],
+                        "total_items": 0,
+                        "estimated_total": Decimal("0.00"),
+                        "avg_lead_time": 0,
+                    }
+
+                # Calculate suggested quantity
+                shortage = max(0, item.minimum_stock - item.current_stock)
+                suggested_qty = max(shortage, item.reorder_quantity)
+
+                # Adjust for package quantities
+                if item_supplier.quantity_per_package and item_supplier.quantity_per_package > 1:
+                    packages_needed = (
+                        suggested_qty + item_supplier.quantity_per_package - 1
+                    ) // item_supplier.quantity_per_package
+                    suggested_qty = packages_needed * item_supplier.quantity_per_package
+
+                unit_cost = item_supplier.unit_cost or Decimal("0.00")
+                line_total = unit_cost * suggested_qty
+
+                supplier_data[supplier_id]["items"].append({
+                    "item_supplier_id": item_supplier.id,
+                    "item_id": str(item.id),
+                    "item_name": item.name,
+                    "item_sku": item.sku,
+                    "current_stock": item.current_stock,
+                    "minimum_stock": item.minimum_stock,
+                    "reorder_quantity": item.reorder_quantity,
+                    "suggested_quantity": suggested_qty,
+                    "unit_cost": str(unit_cost),
+                    "package_cost": str(item_supplier.package_cost) if item_supplier.package_cost else None,
+                    "quantity_per_package": item_supplier.quantity_per_package,
+                    "lead_time_days": item_supplier.average_lead_time,
+                    "supplier_sku": item_supplier.supplier_sku,
+                    "supplier_url": item_supplier.supplier_url,
+                    "is_primary": item_supplier.is_primary,
+                    "line_total": str(line_total),
+                })
+
+                supplier_data[supplier_id]["total_items"] += 1
+                supplier_data[supplier_id]["estimated_total"] += line_total
+
+        # Add assets for each supplier (where supplier is the manufacturer)
+        for supplier_id, data in supplier_data.items():
+            assets = Asset.objects.filter(
+                manufacturer_id=supplier_id,
+                is_active=True,
+                status__in=[Asset.ACTIVE, Asset.MAINTENANCE, Asset.IMPLEMENTING, Asset.TESTING],
+            ).values("id", "name", "asset_tag", "serial_number", "product_url")
+
+            data["assets"] = [
+                {
+                    "id": str(asset["id"]),
+                    "name": asset["name"],
+                    "asset_tag": asset["asset_tag"],
+                    "serial_number": asset["serial_number"],
+                    "product_url": asset["product_url"],
+                }
+                for asset in assets
+            ]
+
+            # Calculate average lead time for supplier
+            lead_times = [item["lead_time_days"] for item in data["items"] if item["lead_time_days"]]
+            data["avg_lead_time"] = sum(lead_times) / len(lead_times) if lead_times else 0
+            data["estimated_total"] = str(data["estimated_total"])
+
+        # Also include suppliers that have assets but no low-stock items
+        suppliers_with_assets = Supplier.objects.filter(
+            manufactured_assets__is_active=True,
+            manufactured_assets__status__in=[Asset.ACTIVE, Asset.MAINTENANCE, Asset.IMPLEMENTING, Asset.TESTING],
+        ).exclude(id__in=supplier_data.keys()).distinct()
+
+        for supplier in suppliers_with_assets:
+            assets = Asset.objects.filter(
+                manufacturer=supplier,
+                is_active=True,
+                status__in=[Asset.ACTIVE, Asset.MAINTENANCE, Asset.IMPLEMENTING, Asset.TESTING],
+            ).values("id", "name", "asset_tag", "serial_number", "product_url")
+
+            supplier_data[supplier.id] = {
+                "id": supplier.id,
+                "name": supplier.name,
+                "supplier_type": supplier.supplier_type,
+                "website": supplier.website,
+                "items": [],
+                "assets": [
+                    {
+                        "id": str(asset["id"]),
+                        "name": asset["name"],
+                        "asset_tag": asset["asset_tag"],
+                        "serial_number": asset["serial_number"],
+                        "product_url": asset["product_url"],
+                    }
+                    for asset in assets
+                ],
+                "total_items": 0,
+                "estimated_total": "0.00",
+                "avg_lead_time": 0,
+            }
+
+        # Convert to list and sort by estimated total (highest first)
+        suppliers_list = sorted(
+            supplier_data.values(),
+            key=lambda x: Decimal(x["estimated_total"]),
+            reverse=True,
+        )
+
+        return Response({
+            "suppliers": suppliers_list,
+            "total_suppliers": len(suppliers_list),
+            "total_low_stock_items": low_stock_items.count(),
+        })
+
     def _find_best_supplier(self, item):
         """Find the best supplier for an item based on cost, availability, and lead time."""
         suppliers = item.item_suppliers.filter(is_active=True, is_discontinued=False)

@@ -196,8 +196,10 @@ jobs:
           # Start services
           docker compose up -d --build
 
-          # Wait for services to be healthy
-          timeout 300 bash -c 'while [[ "$(docker compose ps -q | xargs docker inspect -f "{{.State.Health.Status}}" 2>/dev/null | grep -v healthy | wc -l)" != "0" ]]; do sleep 5; done'
+          echo "Waiting for containers to report healthy..."
+          # Use native compose waiting so health checks gate the test run
+          docker compose ps
+          docker compose wait --timeout 300
 
           # Run migrations
           docker compose exec -T backend python manage.py migrate --no-input

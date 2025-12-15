@@ -132,7 +132,7 @@ jobs:
           fi
           # Verify sync by running npm ci in dry-run mode
           echo "🔍 Verifying package-lock.json is in sync with package.json..."
-          npm ci --dry-run || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
+          npm ci --ignore-scripts --dry-run || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
           echo "✅ package-lock.json is in sync"
 
       - name: Install dependencies
@@ -196,8 +196,72 @@ jobs:
           # Start services
           docker compose up -d --build
 
-          # Wait for services to be healthy
-          timeout 300 bash -c 'while [[ "$(docker compose ps -q | xargs docker inspect -f "{{.State.Health.Status}}" 2>/dev/null | grep -v healthy | wc -l)" != "0" ]]; do sleep 5; done'
+          echo "Waiting for containers to report healthy..."
+          # Use native compose waiting so health checks gate the test run
+          docker compose ps
+          # GitHub Actions runners ship Compose without the --timeout flag, so wrap with coreutils timeout
+          # Compose requires explicit service names; enumerate them to ensure wait checks all containers
+          SERVICES=$(docker compose config --services)
+          if [ -z "$SERVICES" ]; then
+            echo "❌ No services found in docker compose config"
+            docker compose config
+            exit 1
+          fi
+
+          # GitHub's compose build may hang when a service never transitions to healthy.
+          # Poll health manually with a bounded timeout so failures surface quickly.
+          MAX_WAIT=300
+          INTERVAL=5
+          ELAPSED=0
+
+          echo "Polling service health for up to ${MAX_WAIT}s..."
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            ALL_HEALTHY=true
+
+            for SERVICE in $SERVICES; do
+              CONTAINER_ID=$(docker compose ps -a -q "$SERVICE")
+              if [ -z "$CONTAINER_ID" ]; then
+                echo "❌ No container found for service '$SERVICE'"
+                docker compose ps -a
+                docker compose logs "$SERVICE" || true
+                exit 1
+              fi
+
+              STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER_ID")
+
+              if [ "$STATUS" = "healthy" ]; then
+                continue
+              elif [ "$STATUS" = "starting" ] || [ "$STATUS" = "running" ]; then
+                ALL_HEALTHY=false
+                continue
+              elif [ "$STATUS" = "exited" ] || [ "$STATUS" = "dead" ]; then
+                echo "❌ Service '$SERVICE' container exited (status: $STATUS)"
+                docker compose ps -a "$SERVICE"
+                docker compose logs "$SERVICE" || true
+                exit 1
+              else
+                echo "❌ Service '$SERVICE' is in status '$STATUS'"
+                docker compose ps -a "$SERVICE"
+                docker compose logs "$SERVICE" || true
+                exit 1
+              fi
+            done
+
+            if [ "$ALL_HEALTHY" = true ]; then
+              echo "✅ All services are healthy"
+              break
+            fi
+
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+            echo "...still waiting (${ELAPSED}s/${MAX_WAIT}s)"
+          done
+
+          if [ "$ALL_HEALTHY" != true ]; then
+            echo "❌ Services did not become healthy within ${MAX_WAIT}s"
+            docker compose ps
+            exit 1
+          fi
 
           # Run migrations
           docker compose exec -T backend python manage.py migrate --no-input

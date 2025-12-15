@@ -64,7 +64,10 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         return ReorderRequestSerializer
 
     def get_permissions(self):
-        """Allow anyone to create reorder requests and view pending, but require auth for admin actions."""
+        """
+        Allow anyone to create reorder requests and view pending.
+        Require authentication for admin actions.
+        """
         # Public actions that don't require authentication
         if self.action in ["create", "list", "retrieve", "pending"]:
             return [AllowAny()]
@@ -86,7 +89,10 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                     if not can_create_reorder_request(user, item):
                         return Response(
                             {
-                                "detail": "You do not have permission to create reorder requests for this item."
+                                "detail": (
+                                    "You do not have permission to create reorder "
+                                    "requests for this item."
+                                )
                             },
                             status=status.HTTP_403_FORBIDDEN,
                         )
@@ -155,7 +161,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
             )
             return Response(
                 {
-                    "detail": "Error serializing data. Some items may be missing supplier information."
+                    "detail": (
+                        "Error serializing data. Some items may be missing supplier information."
+                    )
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
@@ -476,8 +484,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "recommendations": recommendations,
                 "total_suppliers": len(recommendations),
                 "total_estimated_cost": sum(r["estimated_total"] for r in recommendations),
-                "message": "Order recommendations generated. Review and confirm to create purchase orders.",
-            }
+                "message": (
+                    "Order recommendations generated. Review and confirm to create purchase orders."
+                ),
+            },
         )
 
     def _find_best_supplier(self, item):
@@ -635,7 +645,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 if quantity <= 0:
                     return Response(
                         {
-                            "error": "Cannot calculate unit cost: quantity ordered must be greater than 0"
+                            "error": (
+                                "Cannot calculate unit cost: quantity ordered must be "
+                                "greater than 0"
+                            )
                         },
                         status=status.HTTP_400_BAD_REQUEST,
                     )
@@ -867,7 +880,11 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         if quantity_received > remaining_quantity:
             return Response(
                 {
-                    "error": f"Cannot receive {quantity_received} items. Only {remaining_quantity} remaining to receive.",
+                    "error": (
+                        "Cannot receive "
+                        f"{quantity_received} items. Only {remaining_quantity} remaining to "
+                        "receive."
+                    ),
                     "quantity_ordered": po_item.quantity_ordered,
                     "quantity_already_received": po_item.quantity_received,
                     "quantity_remaining": remaining_quantity,
@@ -919,7 +936,9 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         return Response(
             {
                 "success": True,
-                "message": f"Successfully received {quantity_received} units of {po_item.item.name}",
+                "message": (
+                    f"Successfully received {quantity_received} units of " f"{po_item.item.name}"
+                ),
                 "item_name": po_item.item.name,
                 "quantity_received": quantity_received,
                 "total_received": po_item.quantity_received,
@@ -1279,7 +1298,10 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 "total_purchase_orders": len(po_transparency_data),
                 "total_po_amount_spent": float(po_total_spent),
                 "last_updated": timezone.now().isoformat(),
-                "transparency_note": "Dallas Makerspace operates with full financial transparency. All purchase information is publicly available.",
+                "transparency_note": (
+                    "Dallas Makerspace operates with full financial transparency. All purchase "
+                    "information is publicly available."
+                ),
             }
 
             return Response(
@@ -1288,7 +1310,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     "orders": transparency_data,
                     "ledger": ledger_entries,
                     "purchase_orders": po_transparency_data,
-                }
+                },
             )
 
         except Exception as e:

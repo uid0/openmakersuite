@@ -488,7 +488,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         Returns all suppliers that have items needing reorder, along with
         assets where the supplier is the manufacturer.
         """
-        from inventory.models import Asset, ItemSupplier, Supplier
+        from inventory.models import Asset, Supplier
 
         # Get items that need reordering (current_stock <= minimum_stock)
         low_stock_items = (
@@ -541,24 +541,28 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 unit_cost = item_supplier.unit_cost or Decimal("0.00")
                 line_total = unit_cost * suggested_qty
 
-                supplier_data[supplier_id]["items"].append({
-                    "item_supplier_id": item_supplier.id,
-                    "item_id": str(item.id),
-                    "item_name": item.name,
-                    "item_sku": item.sku,
-                    "current_stock": item.current_stock,
-                    "minimum_stock": item.minimum_stock,
-                    "reorder_quantity": item.reorder_quantity,
-                    "suggested_quantity": suggested_qty,
-                    "unit_cost": str(unit_cost),
-                    "package_cost": str(item_supplier.package_cost) if item_supplier.package_cost else None,
-                    "quantity_per_package": item_supplier.quantity_per_package,
-                    "lead_time_days": item_supplier.average_lead_time,
-                    "supplier_sku": item_supplier.supplier_sku,
-                    "supplier_url": item_supplier.supplier_url,
-                    "is_primary": item_supplier.is_primary,
-                    "line_total": str(line_total),
-                })
+                supplier_data[supplier_id]["items"].append(
+                    {
+                        "item_supplier_id": item_supplier.id,
+                        "item_id": str(item.id),
+                        "item_name": item.name,
+                        "item_sku": item.sku,
+                        "current_stock": item.current_stock,
+                        "minimum_stock": item.minimum_stock,
+                        "reorder_quantity": item.reorder_quantity,
+                        "suggested_quantity": suggested_qty,
+                        "unit_cost": str(unit_cost),
+                        "package_cost": (
+                            str(item_supplier.package_cost) if item_supplier.package_cost else None
+                        ),
+                        "quantity_per_package": item_supplier.quantity_per_package,
+                        "lead_time_days": item_supplier.average_lead_time,
+                        "supplier_sku": item_supplier.supplier_sku,
+                        "supplier_url": item_supplier.supplier_url,
+                        "is_primary": item_supplier.is_primary,
+                        "line_total": str(line_total),
+                    }
+                )
 
                 supplier_data[supplier_id]["total_items"] += 1
                 supplier_data[supplier_id]["estimated_total"] += line_total
@@ -583,15 +587,26 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             ]
 
             # Calculate average lead time for supplier
-            lead_times = [item["lead_time_days"] for item in data["items"] if item["lead_time_days"]]
+            lead_times = [
+                item["lead_time_days"] for item in data["items"] if item["lead_time_days"]
+            ]
             data["avg_lead_time"] = sum(lead_times) / len(lead_times) if lead_times else 0
             data["estimated_total"] = str(data["estimated_total"])
 
         # Also include suppliers that have assets but no low-stock items
-        suppliers_with_assets = Supplier.objects.filter(
-            manufactured_assets__is_active=True,
-            manufactured_assets__status__in=[Asset.ACTIVE, Asset.MAINTENANCE, Asset.IMPLEMENTING, Asset.TESTING],
-        ).exclude(id__in=supplier_data.keys()).distinct()
+        suppliers_with_assets = (
+            Supplier.objects.filter(
+                manufactured_assets__is_active=True,
+                manufactured_assets__status__in=[
+                    Asset.ACTIVE,
+                    Asset.MAINTENANCE,
+                    Asset.IMPLEMENTING,
+                    Asset.TESTING,
+                ],
+            )
+            .exclude(id__in=supplier_data.keys())
+            .distinct()
+        )
 
         for supplier in suppliers_with_assets:
             assets = Asset.objects.filter(
@@ -628,11 +643,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             reverse=True,
         )
 
-        return Response({
-            "suppliers": suppliers_list,
-            "total_suppliers": len(suppliers_list),
-            "total_low_stock_items": low_stock_items.count(),
-        })
+        return Response(
+            {
+                "suppliers": suppliers_list,
+                "total_suppliers": len(suppliers_list),
+                "total_low_stock_items": low_stock_items.count(),
+            }
+        )
 
     def _find_best_supplier(self, item):
         """Find the best supplier for an item based on cost, availability, and lead time."""

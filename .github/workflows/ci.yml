@@ -200,7 +200,15 @@ jobs:
           # Use native compose waiting so health checks gate the test run
           docker compose ps
           # GitHub Actions runners ship Compose without the --timeout flag, so wrap with coreutils timeout
-          timeout 300 docker compose wait
+          # Compose requires explicit service names; enumerate them to ensure wait checks all containers
+          SERVICES=$(docker compose config --services)
+          if [ -z "$SERVICES" ]; then
+            echo "❌ No services found in docker compose config"
+            docker compose config
+            exit 1
+          fi
+
+          timeout 300 sh -c "docker compose wait $SERVICES"
 
           # Run migrations
           docker compose exec -T backend python manage.py migrate --no-input

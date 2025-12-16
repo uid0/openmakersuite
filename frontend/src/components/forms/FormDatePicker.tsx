@@ -26,7 +26,8 @@ export function FormDatePicker<T extends FieldValues>({
       name={name}
       control={control}
       render={({ field, fieldState: { error } }) => {
-        const value = field.value ? (field.value instanceof Date ? field.value : dayjs(field.value).toDate()) : null;
+        const fieldValue = field.value as unknown;
+        const value = fieldValue ? (fieldValue instanceof Date ? fieldValue : dayjs(fieldValue as string | number | Date).toDate()) : null;
         
         return (
           <DatePickerInput

@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt } from '../types';
+import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -325,7 +325,7 @@ export const inventoryAPI = {
 
 // Assets API
 export const assetsAPI = {
-  listAssets: (params?: { status?: string; category?: number; location?: number; search?: string; owning_group?: number }) =>
+  listAssets: (params?: { status?: string; category?: number; location?: number; search?: string; owning_group?: number; inventory_item?: string }) =>
     api.get<{ results: Asset[] }>('/inventory/assets/', { params }),
 
   getMySIGAssets: () =>
@@ -334,11 +334,27 @@ export const assetsAPI = {
   getAsset: (id: string) =>
     api.get<Asset>(`/inventory/assets/${id}/`),
 
-  createAsset: (data: Partial<Asset>) =>
-    api.post<Asset>('/inventory/assets/', data),
+  createAsset: (data: FormData | Partial<Asset>) => {
+    if (data instanceof FormData) {
+      return api.post<Asset>('/inventory/assets/', data, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+    }
+    return api.post<Asset>('/inventory/assets/', data);
+  },
 
-  updateAsset: (id: string, data: Partial<Asset>) =>
-    api.patch<Asset>(`/inventory/assets/${id}/`, data),
+  updateAsset: (id: string, data: FormData | Partial<Asset>) => {
+    if (data instanceof FormData) {
+      return api.patch<Asset>(`/inventory/assets/${id}/`, data, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+    }
+    return api.patch<Asset>(`/inventory/assets/${id}/`, data);
+  },
 
   deleteAsset: (id: string) =>
     api.delete(`/inventory/assets/${id}/`),

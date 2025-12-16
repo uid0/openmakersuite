@@ -150,10 +150,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false }) => {
     });
   }, [location.pathname, workspaceSections]);
 
-  const toggleCollapse = () => {
-    setIsCollapsed(!isCollapsed);
-  };
-
   const toggleSection = (sectionId: string) => {
     setExpandedSections((prev) => {
       const newSet = new Set(prev);

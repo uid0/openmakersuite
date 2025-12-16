@@ -2,10 +2,10 @@
  * Admin Dashboard
  * Manage reorder queue, view pending requests, and access supplier cart links
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { assetsAPI, reorderAPI } from '../services/api';
-import { Asset, ReorderRequest } from '../types';
 import '../styles/AdminDashboard.css';
+import { Asset, ReorderRequest } from '../types';
 
 const AdminDashboard: React.FC = () => {
   const [requests, setRequests] = useState<ReorderRequest[]>([]);
@@ -33,11 +33,6 @@ const AdminDashboard: React.FC = () => {
     }
   }, [filter]);
 
-  useEffect(() => {
-    loadRequests();
-    loadNotCheckedInAssets();
-  }, [loadRequests, loadNotCheckedInAssets]);
-
   const loadNotCheckedInAssets = useCallback(async () => {
     try {
       setLoadingAssets(true);
@@ -49,6 +44,11 @@ const AdminDashboard: React.FC = () => {
       setLoadingAssets(false);
     }
   }, []);
+
+  useEffect(() => {
+    loadRequests();
+    loadNotCheckedInAssets();
+  }, [loadRequests, loadNotCheckedInAssets]);
 
   const loadSupplierGroups = async () => {
     try {

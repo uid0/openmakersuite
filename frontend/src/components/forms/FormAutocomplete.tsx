@@ -2,7 +2,7 @@
  * FormAutocomplete - Reusable autocomplete component with async data fetching
  * Supports suppliers, categories, and locations
  */
-import { Autocomplete, AutocompleteProps } from '@mantine/core';
+import { Autocomplete, AutocompleteProps, Loader } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { Control, Controller, FieldPath, FieldValues } from 'react-hook-form';
@@ -122,13 +122,13 @@ export function FormAutocomplete<T extends FieldValues>({
                 field.onChange(value);
               }
             }}
-            onSearchChange={setSearchValue}
             data={filteredOptions}
             label={label}
             description={description}
             required={required}
             error={error?.message}
-            loading={loading}
+            rightSection={loading ? <Loader size="xs" /> : null}
+            disabled={loading}
           />
         );
       }}

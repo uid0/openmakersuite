@@ -11,7 +11,7 @@ export interface FormSection {
 }
 
 export interface FormLayoutProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   sections?: FormSection[];
   spacing?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   columns?: number;

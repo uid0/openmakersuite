@@ -12,7 +12,7 @@ export interface FormNumberInputProps<T extends FieldValues> extends Omit<Number
   required?: boolean;
   min?: number;
   max?: number;
-  precision?: number;
+  decimalScale?: number;
 }
 
 export function FormNumberInput<T extends FieldValues>({
@@ -23,7 +23,7 @@ export function FormNumberInput<T extends FieldValues>({
   required,
   min,
   max,
-  precision,
+  decimalScale,
   ...numberInputProps
 }: FormNumberInputProps<T>) {
   return (
@@ -43,7 +43,7 @@ export function FormNumberInput<T extends FieldValues>({
           required={required}
           min={min}
           max={max}
-          precision={precision}
+          decimalScale={decimalScale}
           error={error?.message}
         />
       )}

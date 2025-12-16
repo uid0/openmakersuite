@@ -3,6 +3,7 @@ Serializers for reorder queue API.
 """
 
 from django.db import transaction
+
 from rest_framework import serializers
 
 from inventory.models import ItemSupplier
@@ -222,7 +223,9 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
     def validate_items(self, value):
         """Validate that items list is not empty."""
         if not value or len(value) == 0:
-            raise serializers.ValidationError("At least one item is required to create a purchase order.")
+            raise serializers.ValidationError(
+                "At least one item is required to create a purchase order."
+            )
         return value
 
     @transaction.atomic
@@ -232,15 +235,19 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
 
         # Validate items list is not empty
         if not items_data or len(items_data) == 0:
-            raise serializers.ValidationError({"items": "At least one item is required to create a purchase order."})
+            raise serializers.ValidationError(
+                {"items": "At least one item is required to create a purchase order."}
+            )
 
         # Ensure request context is available
         if "request" not in self.context:
             raise serializers.ValidationError("Request context is missing.")
-        
+
         user = self.context["request"].user
         if not user or not user.is_authenticated:
-            raise serializers.ValidationError("User must be authenticated to create a purchase order.")
+            raise serializers.ValidationError(
+                "User must be authenticated to create a purchase order."
+            )
 
         # Generate PO number before creating
         temp_po = PurchaseOrder(created_by=user, **validated_data)
@@ -258,7 +265,7 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         for idx, item_data in enumerate(items_data):
             quantity = item_data.get("quantity", 1)
             notes = item_data.get("notes", "")
-            
+
             # Validate quantity
             if not isinstance(quantity, (int, float)) or quantity <= 0:
                 raise serializers.ValidationError(

@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">38.76% </span>
+                <span class="strong">38.96% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>88/227</span>
+                <span class='fraction'>90/231</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">38.18% </span>
+                <span class="strong">38.98% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>21/55</span>
+                <span class='fraction'>23/59</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">38.76% </span>
+                <span class="strong">38.96% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>88/227</span>
+                <span class='fraction'>90/231</span>
             </div>
         
             
@@ -886,7 +886,23 @@
 <a name='L821'></a><a href='#L821'>821</a>
 <a name='L822'></a><a href='#L822'>822</a>
 <a name='L823'></a><a href='#L823'>823</a>
-<a name='L824'></a><a href='#L824'>824</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L824'></a><a href='#L824'>824</a>
+<a name='L825'></a><a href='#L825'>825</a>
+<a name='L826'></a><a href='#L826'>826</a>
+<a name='L827'></a><a href='#L827'>827</a>
+<a name='L828'></a><a href='#L828'>828</a>
+<a name='L829'></a><a href='#L829'>829</a>
+<a name='L830'></a><a href='#L830'>830</a>
+<a name='L831'></a><a href='#L831'>831</a>
+<a name='L832'></a><a href='#L832'>832</a>
+<a name='L833'></a><a href='#L833'>833</a>
+<a name='L834'></a><a href='#L834'>834</a>
+<a name='L835'></a><a href='#L835'>835</a>
+<a name='L836'></a><a href='#L836'>836</a>
+<a name='L837'></a><a href='#L837'>837</a>
+<a name='L838'></a><a href='#L838'>838</a>
+<a name='L839'></a><a href='#L839'>839</a>
+<a name='L840'></a><a href='#L840'>840</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1224,9 +1240,25 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -1714,7 +1746,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt } from '../types';
+import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog } from '../types';
 &nbsp;
 /**
  * Resolves the API base URL based on environment.
@@ -2036,7 +2068,7 @@ export const inventoryAPI = {
 &nbsp;
 // Assets API
 export const assetsAPI = {
-  listAssets: (params?: { status?: string; category?: number; location?: number; search?: string; owning_group?: number }) =&gt;
+  listAssets: (params?: { status?: string; category?: number; location?: number; search?: string; owning_group?: number; inventory_item?: string }) =&gt;
     api.get&lt;{ results: Asset[] }&gt;('/inventory/assets/', { params }),
 &nbsp;
   getMySIGAssets: <span class="fstat-no" title="function not covered" >()</span> =&gt;
@@ -2045,11 +2077,27 @@ export const assetsAPI = {
   getAsset: (id: string) =&gt;
     api.get&lt;Asset&gt;(`/inventory/assets/${id}/`),
 &nbsp;
-  createAsset: (data: Partial&lt;Asset&gt;) =&gt;
-    api.post&lt;Asset&gt;('/inventory/assets/', data),
+  createAsset: (data: FormData | Partial&lt;Asset&gt;) =&gt; {
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (data instanceof FormData) {
+<span class="cstat-no" title="statement not covered" >      return api.post&lt;Asset&gt;('/inventory/assets/', data, {</span>
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+    }
+    return api.post&lt;Asset&gt;('/inventory/assets/', data);
+  },
 &nbsp;
-  updateAsset: (id: string, data: Partial&lt;Asset&gt;) =&gt;
-    api.patch&lt;Asset&gt;(`/inventory/assets/${id}/`, data),
+  updateAsset: (id: string, data: FormData | Partial&lt;Asset&gt;) =&gt; {
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (data instanceof FormData) {
+<span class="cstat-no" title="statement not covered" >      return api.patch&lt;Asset&gt;(`/inventory/assets/${id}/`, data, {</span>
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+    }
+    return api.patch&lt;Asset&gt;(`/inventory/assets/${id}/`, data);
+  },
 &nbsp;
   deleteAsset: <span class="fstat-no" title="function not covered" >(i</span>d: string) =&gt;
 <span class="cstat-no" title="statement not covered" >    api.delete(`/inventory/assets/${id}/`),</span>
@@ -2539,7 +2587,7 @@ export default api;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-12-16T00:10:45.857Z
+                at 2025-12-16T05:31:08.314Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

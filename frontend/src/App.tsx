@@ -126,6 +126,7 @@ function AppContent() {
           <Route path="/inventory/admin" element={<WorkspaceLayout><AdminDashboard /></WorkspaceLayout>} />
           <Route path="/inventory/code-entry" element={<WorkspaceLayout><CodeEntryPage /></WorkspaceLayout>} />
           <Route path="/inventory/transparency" element={<WorkspaceLayout><TransparencyPage /></WorkspaceLayout>} />
+          <Route path="/inventory/scan" element={<WorkspaceLayout><CodeEntryPage /></WorkspaceLayout>} />
           <Route path="/inventory/scan/:itemId" element={<WorkspaceLayout><ScanPage /></WorkspaceLayout>} />
           <Route path="/inventory/scan/fixture/:fixtureId" element={<WorkspaceLayout><FixtureScanPage /></WorkspaceLayout>} />
           <Route path="/inventory/scan/asset/:assetId" element={<WorkspaceLayout><AssetScanPage /></WorkspaceLayout>} />

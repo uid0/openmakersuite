@@ -6,8 +6,9 @@ records referencing it does not cause a foreign key constraint violation.
 The part field in AssetProblem should be set to NULL when the AssetPart is deleted.
 """
 
+from django.db import IntegrityError
+
 import pytest
-from django.db import IntegrityError, transaction
 
 from inventory.models import AssetPart, AssetProblem
 from inventory.tests.factories import (
@@ -41,7 +42,6 @@ class TestAssetPartDeletionWithAssetProblems:
         assert problem.part_id == asset_part.id
 
         # Delete the AssetPart - this should succeed and set problem.part to NULL
-        asset_part_id = asset_part.id
         asset_part.delete()
 
         # Refresh the problem from the database
@@ -193,12 +193,14 @@ class TestAssetPartDeletionWithAssetProblems:
         asset = AssetFactory()
         part_item = InventoryItemFactory()
         asset_part = AssetPartFactory(asset=asset, part=part_item)
-        problem = AssetProblemFactory(asset=asset, part=asset_part)
+        # Create a problem to ensure the constraint exists (we don't need to use it)
+        AssetProblemFactory(asset=asset, part=asset_part)
 
         # Verify the constraint exists and is SET NULL
         with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT 
+            cursor.execute(
+                """
+                SELECT
                     tc.constraint_name,
                     rc.delete_rule
                 FROM information_schema.table_constraints tc
@@ -209,7 +211,8 @@ class TestAssetPartDeletionWithAssetProblems:
                 WHERE tc.table_name = 'inventory_assetproblem'
                     AND tc.constraint_type = 'FOREIGN KEY'
                     AND kcu.column_name = 'part_id'
-            """)
+            """
+            )
             result = cursor.fetchone()
 
             assert result is not None, "Foreign key constraint should exist"
@@ -231,9 +234,7 @@ class TestAssetPartDeletionWithAssetProblems:
         part_field = AssetProblem._meta.get_field("part")
 
         assert isinstance(part_field, models.ForeignKey), "part field should be a ForeignKey"
-        assert (
-            part_field.remote_field.on_delete == models.SET_NULL
-        ), (
+        assert part_field.remote_field.on_delete == models.SET_NULL, (
             "part field's on_delete should be SET_NULL, not "
             f"{part_field.remote_field.on_delete}. "
             "This would cause foreign key constraint violations when deleting AssetPart."
@@ -252,9 +253,7 @@ class TestAssetPartDeletionWithAssetProblems:
         asset_part = AssetPartFactory(asset=asset, part=part_item)
 
         # Create multiple problems referencing the part
-        problems = [
-            AssetProblemFactory(asset=asset, part=asset_part) for _ in range(3)
-        ]
+        problems = [AssetProblemFactory(asset=asset, part=asset_part) for _ in range(3)]
 
         # This should NOT raise IntegrityError
         # If it does, the constraint is wrong (likely CASCADE, RESTRICT, or PROTECT)

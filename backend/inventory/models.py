@@ -1461,6 +1461,14 @@ class AssetProblem(models.Model):
         related_name="problems",
         help_text="The asset with the problem",
     )
+    part = models.ForeignKey(
+        AssetPart,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="part_problems",
+        help_text="Optional: The specific part associated with this problem (if applicable)",
+    )
     reported_by = models.CharField(
         max_length=200,
         blank=True,

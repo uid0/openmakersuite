@@ -6,85 +6,77 @@ import django.db.models.deletion
 
 def update_part_field_constraint(apps, schema_editor):
     """
-    Update the part field constraint to SET_NULL if it exists, or add the field if it doesn't.
-    This handles both cases:
-    1. Field exists with wrong constraint - update it
-    2. Field doesn't exist - add it with correct constraint
+    Update the part field constraint to SET_NULL if it exists in PostgreSQL.
+    For SQLite and other databases, Django's AddField will handle it correctly.
     """
-    db_alias = schema_editor.connection.alias
-    with schema_editor.connection.cursor() as cursor:
-        # Check if the part_id column exists
-        cursor.execute("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='inventory_assetproblem' 
-            AND column_name='part_id'
-        """)
-        field_exists = cursor.fetchone() is not None
-        
-        if field_exists:
-            # Field exists, need to drop old constraint and recreate with SET_NULL
-            # First, find and drop the old foreign key constraint
-            cursor.execute("""
-                SELECT tc.constraint_name
-                FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage kcu
-                    ON tc.constraint_name = kcu.constraint_name
-                WHERE tc.table_name = 'inventory_assetproblem'
-                    AND tc.constraint_type = 'FOREIGN KEY'
-                    AND kcu.column_name = 'part_id'
-            """)
-            constraint_result = cursor.fetchone()
-            if constraint_result:
-                constraint_name = constraint_result[0]
-                # Drop the old constraint
-                cursor.execute(
-                    f'ALTER TABLE inventory_assetproblem DROP CONSTRAINT IF EXISTS "{constraint_name}"'
-                )
-            
-            # Ensure the column is nullable
-            cursor.execute(
-                "ALTER TABLE inventory_assetproblem ALTER COLUMN part_id DROP NOT NULL"
-            )
-            
-            # Recreate the foreign key with SET_NULL behavior
-            cursor.execute("""
-                ALTER TABLE inventory_assetproblem 
-                ADD CONSTRAINT inventory_assetproblem_part_id_fk 
-                FOREIGN KEY (part_id) 
-                REFERENCES inventory_assetpart(id) 
-                ON DELETE SET NULL
-            """)
-        else:
-            # Field doesn't exist, add it
-            cursor.execute("""
-                ALTER TABLE inventory_assetproblem 
-                ADD COLUMN part_id BIGINT NULL
-            """)
-            
-            # Add the foreign key constraint with SET_NULL
-            cursor.execute("""
-                ALTER TABLE inventory_assetproblem 
-                ADD CONSTRAINT inventory_assetproblem_part_id_fk 
-                FOREIGN KEY (part_id) 
-                REFERENCES inventory_assetpart(id) 
-                ON DELETE SET NULL
-            """)
+    connection = schema_editor.connection
+    
+    # Only handle PostgreSQL explicitly - other databases will be handled by AddField
+    if connection.vendor == 'postgresql':
+        try:
+            with connection.cursor() as cursor:
+                # Check if the part_id column exists
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name='inventory_assetproblem' 
+                    AND column_name='part_id'
+                """)
+                field_exists = cursor.fetchone() is not None
+                
+                if field_exists:
+                    # Field exists, need to drop old constraint and recreate with SET_NULL
+                    # Find and drop the old foreign key constraint
+                    cursor.execute("""
+                        SELECT tc.constraint_name
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage kcu
+                            ON tc.constraint_name = kcu.constraint_name
+                        WHERE tc.table_name = 'inventory_assetproblem'
+                            AND tc.constraint_type = 'FOREIGN KEY'
+                            AND kcu.column_name = 'part_id'
+                    """)
+                    constraint_result = cursor.fetchone()
+                    if constraint_result:
+                        constraint_name = constraint_result[0]
+                        # Drop the old constraint
+                        cursor.execute(
+                            f'ALTER TABLE inventory_assetproblem DROP CONSTRAINT IF EXISTS "{constraint_name}"'
+                        )
+                    
+                    # Ensure the column is nullable
+                    cursor.execute(
+                        "ALTER TABLE inventory_assetproblem ALTER COLUMN part_id DROP NOT NULL"
+                    )
+                    
+                    # Recreate the foreign key with SET_NULL behavior
+                    cursor.execute("""
+                        ALTER TABLE inventory_assetproblem 
+                        ADD CONSTRAINT inventory_assetproblem_part_id_fk 
+                        FOREIGN KEY (part_id) 
+                        REFERENCES inventory_assetpart(id) 
+                        ON DELETE SET NULL
+                    """)
+        except Exception:
+            # If anything fails, let Django's AddField handle it
+            pass
 
 
 def reverse_update_part_field_constraint(apps, schema_editor):
     """
-    Reverse migration: drop the field if it was added by this migration.
-    Note: We can't easily restore the old constraint, so we'll just drop the field.
+    Reverse migration: drop the constraint if it was added by this migration.
+    Note: We don't drop the column in reverse to avoid data loss.
     """
-    with schema_editor.connection.cursor() as cursor:
-        # Drop the constraint first
-        cursor.execute("""
-            ALTER TABLE inventory_assetproblem 
-            DROP CONSTRAINT IF EXISTS inventory_assetproblem_part_id_fk
-        """)
-        # Note: We don't drop the column in reverse to avoid data loss
-        # The field will remain but without the constraint
+    connection = schema_editor.connection
+    if connection.vendor == 'postgresql':
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    ALTER TABLE inventory_assetproblem 
+                    DROP CONSTRAINT IF EXISTS inventory_assetproblem_part_id_fk
+                """)
+        except Exception:
+            pass
 
 
 class Migration(migrations.Migration):
@@ -94,26 +86,22 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(
-                    update_part_field_constraint,
-                    reverse_update_part_field_constraint,
-                ),
-            ],
-            state_operations=[
-                migrations.AddField(
-                    model_name="assetproblem",
-                    name="part",
-                    field=models.ForeignKey(
-                        blank=True,
-                        help_text="Optional: The specific part associated with this problem (if applicable)",
-                        null=True,
-                        on_delete=django.db.models.deletion.SET_NULL,
-                        related_name="part_problems",
-                        to="inventory.assetpart",
-                    ),
-                ),
-            ],
+        # First, add the field normally (Django will handle it for all databases)
+        migrations.AddField(
+            model_name="assetproblem",
+            name="part",
+            field=models.ForeignKey(
+                blank=True,
+                help_text="Optional: The specific part associated with this problem (if applicable)",
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="part_problems",
+                to="inventory.assetpart",
+            ),
+        ),
+        # Then, if the field already existed in PostgreSQL, update its constraint
+        migrations.RunPython(
+            update_part_field_constraint,
+            reverse_update_part_field_constraint,
         ),
     ]

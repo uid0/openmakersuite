@@ -9,7 +9,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .models import DashboardConfig, DashboardMessage
+from .models import DashboardConfig, DashboardMessage, DashboardWidget
+from .serializers import DashboardWidgetSerializer
 
 
 @api_view(["GET"])
@@ -277,3 +278,383 @@ def dashboard_health(request):
         )
     except Exception as e:
         return JsonResponse({"status": "error", "error": str(e)}, status=500)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_user_widgets(request):
+    """
+    Get user's dashboard widget layout.
+
+    Returns all widgets for the authenticated user, creating defaults if none exist.
+    """
+    try:
+        user = request.user
+        widgets = DashboardWidget.objects.filter(user=user, is_visible=True).order_by(
+            "order", "position_y", "position_x"
+        )
+
+        # If user has no widgets, create defaults
+        if not widgets.exists():
+            DashboardWidget.create_default_widgets(user)
+            widgets = DashboardWidget.objects.filter(user=user, is_visible=True).order_by(
+                "order", "position_y", "position_x"
+            )
+
+        serializer = DashboardWidgetSerializer(widgets, many=True)
+        return Response(serializer.data)
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def save_user_widgets(request):
+    """
+    Save/update user's dashboard widget layout.
+
+    Accepts a list of widget configurations and updates or creates them.
+    """
+    try:
+        user = request.user
+        widgets_data = request.data.get("widgets", [])
+
+        if not isinstance(widgets_data, list):
+            return Response({"error": "widgets must be a list"}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_widgets = []
+        for widget_data in widgets_data:
+            widget_id = widget_data.get("id")
+            widget_type = widget_data.get("widget_type")
+
+            if not widget_type:
+                continue
+
+            if widget_id:
+                # Update existing widget
+                try:
+                    widget = DashboardWidget.objects.get(id=widget_id, user=user)
+                    serializer = DashboardWidgetSerializer(widget, data=widget_data, partial=True)
+                    if serializer.is_valid():
+                        serializer.save()
+                        updated_widgets.append(serializer.data)
+                except DashboardWidget.DoesNotExist:
+                    continue
+            else:
+                # Create new widget
+                widget_data["user"] = user.id
+                serializer = DashboardWidgetSerializer(data=widget_data)
+                if serializer.is_valid():
+                    widget = serializer.save(user=user)
+                    updated_widgets.append(serializer.data)
+
+        return Response({"widgets": updated_widgets})
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_low_stock_data(request):
+    """
+    Get low stock items data for widget.
+
+    Returns items where current_stock <= minimum_stock.
+    """
+    try:
+        from django.db.models import F
+        from django.utils import timezone
+
+        from inventory.models import InventoryItem
+
+        items_query = InventoryItem.objects.filter(
+            is_active=True, current_stock__lte=F("minimum_stock")
+        ).select_related("category", "location")
+
+        # Apply SIG filtering if user is not staff/logistics
+        user = request.user
+        if user.is_authenticated and not (user.is_superuser or user.is_staff):
+            from membership.utils import get_user_managed_sigs, is_logistics_member
+
+            if not is_logistics_member(user):
+                user_sigs = get_user_managed_sigs(user)
+                if user_sigs.exists():
+                    items_query = items_query.filter(owning_group__in=user_sigs)
+                else:
+                    # Regular users see space-owned items only
+                    items_query = items_query.filter(owning_group__isnull=True)
+
+        items = items_query.order_by("current_stock")[:50].values(
+            "id",
+            "name",
+            "current_stock",
+            "minimum_stock",
+            "reorder_quantity",
+            "category__name",
+            "location__name",
+        )
+
+        return Response(
+            {
+                "count": items_query.count(),
+                "items": list(items),
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_pending_reorders_data(request):
+    """
+    Get pending reorder requests data for widget.
+
+    Returns reorder requests with status='pending'.
+    """
+    try:
+        from django.utils import timezone
+
+        from reorder_queue.models import ReorderRequest
+
+        pending = ReorderRequest.objects.filter(status="pending").select_related(
+            "item", "item__category", "item__location", "reviewed_by"
+        )
+
+        # Apply SIG filtering
+        user = request.user
+        if user.is_authenticated and not (user.is_superuser or user.is_staff):
+            from membership.utils import get_user_managed_sigs, is_logistics_member
+
+            if not is_logistics_member(user):
+                user_sigs = get_user_managed_sigs(user)
+                if user_sigs.exists():
+                    pending = pending.filter(item__owning_group__in=user_sigs)
+                else:
+                    pending = pending.filter(item__owning_group__isnull=True)
+
+        pending = pending.order_by("-priority", "requested_at")[:50]
+
+        data = []
+        for req in pending:
+            data.append(
+                {
+                    "id": req.id,
+                    "item_id": str(req.item.id),
+                    "item_name": req.item.name,
+                    "quantity": req.quantity,
+                    "priority": req.priority,
+                    "requested_by": req.requested_by,
+                    "requested_at": req.requested_at.isoformat(),
+                    "category": req.item.category.name if req.item.category else None,
+                }
+            )
+
+        return Response(
+            {
+                "count": pending.count(),
+                "requests": data,
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_asset_problems_data(request):
+    """
+    Get asset problems data for widget.
+
+    Returns asset problems with status in ('reported', 'in_progress').
+    """
+    try:
+        from django.utils import timezone
+
+        from inventory.models import AssetProblem
+
+        problems = AssetProblem.objects.filter(
+            status__in=["reported", "in_progress"]
+        ).select_related("asset", "part")
+
+        # Apply SIG filtering
+        user = request.user
+        if user.is_authenticated and not (user.is_superuser or user.is_staff):
+            from membership.utils import get_user_managed_sigs, is_logistics_member
+
+            if not is_logistics_member(user):
+                user_sigs = get_user_managed_sigs(user)
+                if user_sigs.exists():
+                    problems = problems.filter(asset__owning_group__in=user_sigs)
+                else:
+                    problems = problems.filter(asset__owning_group__isnull=True)
+
+        problems = problems.order_by("-created_at")[:50]
+
+        data = []
+        for problem in problems:
+            data.append(
+                {
+                    "id": str(problem.id),
+                    "asset_id": str(problem.asset.id),
+                    "asset_name": problem.asset.name,
+                    "asset_tag": problem.asset.asset_tag,
+                    "status": problem.status,
+                    "reported_by": problem.reported_by,
+                    "description": problem.description[:200],  # Truncate for widget
+                    "created_at": problem.created_at.isoformat(),
+                }
+            )
+
+        return Response(
+            {
+                "count": problems.count(),
+                "problems": data,
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_qr_scans_data(request):
+    """
+    Get recent QR scan activity data for widget.
+
+    Returns assets and inventory items scanned in the last 30 days, aggregated by date.
+    """
+    try:
+        from collections import defaultdict
+        from datetime import timedelta
+
+        from django.db.models import Count
+        from django.db.models.functions import TruncDate
+        from django.utils import timezone
+
+        from inventory.models import Asset, InventoryItem
+
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+
+        # Get asset scans
+        asset_scans = (
+            Asset.objects.filter(
+                last_scanned_at__gte=thirty_days_ago, last_scanned_at__isnull=False
+            )
+            .annotate(scan_date=TruncDate("last_scanned_at"))
+            .values("scan_date")
+            .annotate(count=Count("id"))
+            .order_by("scan_date")
+        )
+
+        # Get inventory item scans
+        item_scans = (
+            InventoryItem.objects.filter(
+                last_scanned_at__gte=thirty_days_ago, last_scanned_at__isnull=False
+            )
+            .annotate(scan_date=TruncDate("last_scanned_at"))
+            .values("scan_date")
+            .annotate(count=Count("id"))
+            .order_by("scan_date")
+        )
+
+        # Aggregate by date
+        scan_data = defaultdict(lambda: {"assets": 0, "items": 0, "total": 0})
+        for scan in asset_scans:
+            date_str = scan["scan_date"].isoformat()
+            scan_data[date_str]["assets"] = scan["count"]
+            scan_data[date_str]["total"] += scan["count"]
+
+        for scan in item_scans:
+            date_str = scan["scan_date"].isoformat()
+            scan_data[date_str]["items"] = scan["count"]
+            scan_data[date_str]["total"] += scan["count"]
+
+        # Convert to list format
+        daily_scans = [{"date": date, **data} for date, data in sorted(scan_data.items())]
+
+        # Get total counts
+        total_asset_scans = Asset.objects.filter(
+            last_scanned_at__gte=thirty_days_ago, last_scanned_at__isnull=False
+        ).count()
+        total_item_scans = InventoryItem.objects.filter(
+            last_scanned_at__gte=thirty_days_ago, last_scanned_at__isnull=False
+        ).count()
+
+        return Response(
+            {
+                "total_scans": total_asset_scans + total_item_scans,
+                "asset_scans": total_asset_scans,
+                "item_scans": total_item_scans,
+                "daily_scans": daily_scans[-30:],  # Last 30 days
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_deliveries_data(request):
+    """
+    Get recent deliveries data for widget.
+
+    Returns deliveries from the last 30 days with delivery items.
+    """
+    try:
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from reorder_queue.models import OrderDelivery
+
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+
+        deliveries = (
+            OrderDelivery.objects.filter(delivery_date__gte=thirty_days_ago)
+            .select_related("purchase_order__supplier", "received_by")
+            .prefetch_related("items__purchase_order_item__item")
+            .order_by("-delivery_date")[:50]
+        )
+
+        data = []
+        for delivery in deliveries:
+            items_count = delivery.items.count()
+            total_quantity = sum(item.quantity_received for item in delivery.items.all())
+
+            data.append(
+                {
+                    "id": delivery.id,
+                    "delivery_date": delivery.delivery_date.isoformat(),
+                    "supplier_name": (
+                        delivery.purchase_order.supplier.name
+                        if delivery.purchase_order.supplier
+                        else None
+                    ),
+                    "received_by": delivery.received_by.username if delivery.received_by else None,
+                    "items_count": items_count,
+                    "total_quantity": total_quantity,
+                    "purchase_order_id": delivery.purchase_order.id,
+                }
+            )
+
+        return Response(
+            {
+                "count": deliveries.count(),
+                "deliveries": data,
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

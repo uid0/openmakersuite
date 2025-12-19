@@ -5,7 +5,7 @@ Django admin configuration for dashboard management.
 from django.contrib import admin
 from django.utils.html import format_html
 
-from .models import DashboardConfig, DashboardMessage
+from .models import DashboardConfig, DashboardMessage, DashboardWidget
 
 
 @admin.register(DashboardMessage)
@@ -135,3 +135,51 @@ class DashboardConfigAdmin(admin.ModelAdmin):
             # Delete any existing configs (shouldn't happen, but safety check)
             DashboardConfig.objects.all().delete()
         super().save_model(request, obj, form, change)
+
+
+@admin.register(DashboardWidget)
+class DashboardWidgetAdmin(admin.ModelAdmin):
+    """Admin interface for dashboard widgets."""
+
+    list_display = [
+        "user",
+        "widget_type",
+        "position_x",
+        "position_y",
+        "width",
+        "height",
+        "is_visible",
+        "order",
+        "created_at",
+    ]
+    list_filter = ["widget_type", "is_visible", "created_at"]
+    search_fields = ["user__username", "user__email"]
+    ordering = ["user", "order", "position_y", "position_x"]
+    readonly_fields = ["created_at", "updated_at"]
+
+    fieldsets = (
+        (
+            "Widget Configuration",
+            {
+                "fields": ("user", "widget_type", "is_visible", "order"),
+            },
+        ),
+        (
+            "Layout",
+            {
+                "fields": ("position_x", "position_y", "width", "height"),
+                "description": "Grid position and size",
+            },
+        ),
+        (
+            "Settings",
+            {
+                "fields": ("settings",),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Timestamps",
+            {"fields": ("created_at", "updated_at"), "classes": ("collapse",)},
+        ),
+    )

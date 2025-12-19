@@ -72,7 +72,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false }) => {
       label: 'Inventory',
       icon: '📦',
       items: [
-        { path: '/inventory', label: 'Dashboard', icon: '🏠' },
+        { path: '/dashboard', label: 'Dashboard', icon: '📊', requiresAuth: true },
+        { path: '/inventory', label: 'Inventory Home', icon: '🏠' },
         { path: '/inventory/assets', label: 'Assets', icon: '📋' },
         { path: '/inventory/locations', label: 'Locations', icon: '📍', requiresStaff: true },
         { path: '/inventory/categories', label: 'Categories', icon: '📁', requiresStaff: true },

@@ -656,3 +656,91 @@ export interface AssetUtilization {
   total_hours: number;
   avg_hours_per_session: number;
 }
+
+// Dashboard Widget Types
+export type WidgetType = 'low_stock' | 'pending_reorders' | 'asset_problems' | 'qr_scans' | 'deliveries';
+
+export interface DashboardWidget {
+  id: number;
+  widget_type: WidgetType;
+  position_x: number;
+  position_y: number;
+  width: number;
+  height: number;
+  is_visible: boolean;
+  order: number;
+  settings: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LowStockData {
+  count: number;
+  items: Array<{
+    id: string;
+    name: string;
+    current_stock: number;
+    minimum_stock: number;
+    reorder_quantity: number;
+    category__name: string | null;
+    location__name: string | null;
+  }>;
+  timestamp: string;
+}
+
+export interface PendingReordersData {
+  count: number;
+  requests: Array<{
+    id: number;
+    item_id: string;
+    item_name: string;
+    quantity: number;
+    priority: string;
+    requested_by: string;
+    requested_at: string;
+    category: string | null;
+  }>;
+  timestamp: string;
+}
+
+export interface AssetProblemsData {
+  count: number;
+  problems: Array<{
+    id: string;
+    asset_id: string;
+    asset_name: string;
+    asset_tag: string;
+    status: string;
+    reported_by: string;
+    description: string;
+    created_at: string;
+  }>;
+  timestamp: string;
+}
+
+export interface QRScansData {
+  total_scans: number;
+  asset_scans: number;
+  item_scans: number;
+  daily_scans: Array<{
+    date: string;
+    assets: number;
+    items: number;
+    total: number;
+  }>;
+  timestamp: string;
+}
+
+export interface DeliveriesData {
+  count: number;
+  deliveries: Array<{
+    id: number;
+    delivery_date: string;
+    supplier_name: string | null;
+    received_by: string | null;
+    items_count: number;
+    total_quantity: number;
+    purchase_order_id: number;
+  }>;
+  timestamp: string;
+}

@@ -14,6 +14,7 @@ import CategoryFormPage from './pages/CategoryFormPage';
 import CategoryListPage from './pages/CategoryListPage';
 import ChecklistCompletionPage from './pages/ChecklistCompletionPage';
 import CodeEntryPage from './pages/CodeEntryPage';
+import DashboardPage from './pages/DashboardPage';
 import DonationItemScanPage from './pages/DonationItemScanPage';
 import FixtureScanPage from './pages/FixtureScanPage';
 import HomePage from './pages/HomePage';
@@ -114,6 +115,7 @@ function AppContent() {
 
           {/* Inventory Workspace */}
           <Route path="/inventory" element={<WorkspaceLayout><HomePage /></WorkspaceLayout>} />
+          <Route path="/dashboard" element={<WorkspaceLayout><DashboardPage /></WorkspaceLayout>} />
           <Route path="/inventory/items" element={<WorkspaceLayout><InventoryListPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/new" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/:id" element={<WorkspaceLayout><InventoryItemDetailPage /></WorkspaceLayout>} />

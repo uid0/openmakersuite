@@ -37,6 +37,7 @@ db.sqlite3-journal
 backend/media
 backend/.coverage
 backend/bandit-report.json
+backend/coverage.xml
 /staticfiles
 /static
 

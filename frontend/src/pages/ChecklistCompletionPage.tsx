@@ -4,6 +4,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import QRScanner from '../components/QRScanner';
 import { useNotifications } from '../hooks/useNotifications';
 import { checklistsAPI, inventoryAPI } from '../services/api';
 import '../styles/ScanPage.css';
@@ -19,6 +20,7 @@ const ChecklistCompletionPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!checklistId || !completionId) return;
@@ -44,20 +46,21 @@ const ChecklistCompletionPage: React.FC = () => {
     loadData();
   }, [loadData]);
 
-  const handleScanCode = async () => {
+  const processScannedCode = async (code: string) => {
     if (!completion) return;
 
     try {
       setScanning(true);
-      // Prompt user to enter code or scan QR
-      const code = prompt('Enter the 6-character code or scan QR code:');
-      if (!code || code.length !== 6) {
-        notifications.showWarning('Invalid Code', 'Please enter a valid 6-character code');
-        return;
+      // Extract code from URL if it's a full URL
+      let codeToUse = code;
+      if (code.includes('/')) {
+        // Extract the last part of the URL path
+        const urlParts = code.split('/');
+        codeToUse = urlParts[urlParts.length - 1];
       }
 
       // Look up the code
-      const lookupResponse = await inventoryAPI.lookupByCode(code.toUpperCase());
+      const lookupResponse = await inventoryAPI.lookupByCode(codeToUse.toUpperCase());
       const { type, id } = lookupResponse.data;
 
       // Find the current step that needs to be scanned
@@ -117,6 +120,27 @@ const ChecklistCompletionPage: React.FC = () => {
     }
   };
 
+  const handleScanCode = () => {
+    setShowScanner(true);
+    // Prevent body scroll when scanner is open
+    document.body.classList.add('qr-scanner-open');
+  };
+
+  const handleScanSuccess = (decodedText: string) => {
+    setShowScanner(false);
+    document.body.classList.remove('qr-scanner-open');
+    processScannedCode(decodedText);
+  };
+
+  const handleScanError = (error: string) => {
+    notifications.showError('Scan Error', error);
+  };
+
+  const handleCloseScanner = () => {
+    setShowScanner(false);
+    document.body.classList.remove('qr-scanner-open');
+  };
+
   const handleCompleteChecklist = async () => {
     if (!completionId) return;
 
@@ -158,8 +182,16 @@ const ChecklistCompletionPage: React.FC = () => {
   const allRequiredComplete = completion.required_steps_completed >= completion.required_steps_total;
 
   return (
-    <div className="scan-page">
-      <div className="item-card">
+    <>
+      {showScanner && (
+        <QRScanner
+          onScanSuccess={handleScanSuccess}
+          onScanError={handleScanError}
+          onClose={handleCloseScanner}
+        />
+      )}
+      <div className="scan-page">
+        <div className="item-card">
         <div className="item-header">
           <div className="item-title-section">
             <h1>{checklist.name}</h1>
@@ -282,7 +314,8 @@ const ChecklistCompletionPage: React.FC = () => {
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 };
 

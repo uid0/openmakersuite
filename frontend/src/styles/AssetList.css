@@ -36,11 +36,21 @@
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.3s;
+  transition: background-color 0.3s, transform 0.1s;
+  min-height: 44px;
+  min-width: 44px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
 }
 
 .create-asset-button:hover {
   background-color: #0056b3;
+}
+
+.create-asset-button:active {
+  transform: scale(0.98);
+  background-color: #004085;
 }
 
 .asset-stats {
@@ -80,6 +90,8 @@
   border-radius: 8px;
   font-size: 1rem;
   transition: border-color 0.3s;
+  min-height: 44px;
+  touch-action: manipulation;
 }
 
 .search-input:focus {
@@ -115,6 +127,8 @@
   cursor: pointer;
   transition: border-color 0.3s;
   min-width: 200px;
+  min-height: 44px;
+  touch-action: manipulation;
 }
 
 .filter-select:focus {
@@ -136,7 +150,12 @@
   cursor: pointer;
   font-size: 0.875rem;
   font-weight: 600;
-  transition: all 0.3s;
+  transition: all 0.3s, transform 0.1s;
+  min-height: 44px;
+  min-width: 44px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: rgba(0, 123, 255, 0.1);
 }
 
 .filter-buttons button:hover {
@@ -144,10 +163,18 @@
   background-color: #f8f9fa;
 }
 
+.filter-buttons button:active {
+  transform: scale(0.95);
+}
+
 .filter-buttons button.active {
   background-color: #007bff;
   color: white;
   border-color: #007bff;
+}
+
+.filter-buttons button.active:active {
+  background-color: #0056b3;
 }
 
 .asset-grid {
@@ -161,13 +188,44 @@
   border: 2px solid #e0e0e0;
   border-radius: 12px;
   overflow: hidden;
-  transition: all 0.3s;
+  transition: all 0.3s, transform 0.1s;
   cursor: pointer;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.05);
+  /* Ensure entire card is touchable */
+  min-height: 44px;
+  position: relative;
 }
 
 .asset-card:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   transform: translateY(-2px);
+}
+
+.asset-card:active {
+  transform: scale(0.98);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Swipe indicator hints (optional, can be shown on mobile) */
+@media (max-width: 768px) {
+  .asset-card::before {
+    content: '← Swipe for actions';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 0.7rem;
+    color: #999;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .asset-card:first-child::before {
+    opacity: 0.5;
+  }
 }
 
 .asset-card.status-maintenance {
@@ -355,28 +413,114 @@
 
   .asset-grid {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
 
   .asset-controls {
     flex-direction: column;
     align-items: stretch;
+    gap: 1rem;
   }
 
   .search-input {
     width: 100%;
+    max-width: 100%;
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+
+  .filters-section {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .filter-group {
+    width: 100%;
+  }
+
+  .filter-select {
+    width: 100%;
+    min-width: 0;
   }
 
   .filter-buttons {
     width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
   }
 
   .filter-buttons button {
     flex: 1;
     min-width: 0;
+    padding: 0.875rem 1rem;
+    font-size: 0.875rem;
   }
 
   .asset-header {
     flex-direction: column;
     align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .asset-header-actions {
+    width: 100%;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .create-asset-button {
+    width: 100%;
+    padding: 1rem;
+    font-size: 1rem;
+  }
+
+  /* Mobile card optimizations */
+  .asset-card {
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .asset-image {
+    height: 180px;
+  }
+
+  .asset-details {
+    padding: 1rem;
+  }
+
+  .asset-name {
+    font-size: 1.125rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .asset-type {
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .asset-meta {
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .asset-info {
+    margin: 0.75rem 0;
+    padding: 0.625rem;
+  }
+
+  .info-row {
+    margin-bottom: 0.375rem;
+    font-size: 0.875rem;
+  }
+
+  /* Sticky header for filters on mobile */
+  .asset-controls {
+    position: sticky;
+    top: 60px;
+    background: #f5f5f5;
+    padding: 1rem;
+    margin: -1rem -1rem 1rem -1rem;
+    z-index: 10;
+    border-bottom: 1px solid #e0e0e0;
   }
 }

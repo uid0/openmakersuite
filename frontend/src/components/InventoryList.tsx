@@ -3,11 +3,14 @@
  * Displays all active inventory items with search and filtering
  */
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useSwipeable } from 'react-swipeable';
 import { indexCardsAPI, inventoryAPI } from '../services/api';
-import { InventoryItem } from '../types';
 import '../styles/InventoryList.css';
+import { InventoryItem } from '../types';
 
 const InventoryList: React.FC = () => {
+  const navigate = useNavigate();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -48,6 +51,19 @@ const InventoryList: React.FC = () => {
   });
 
   const lowStockCount = items.filter((item) => item.needs_reorder).length;
+
+  const handleItemClick = (itemId: string) => {
+    navigate(`/inventory/items/${itemId}`);
+  };
+
+  const handleSwipeLeft = (itemId: string) => {
+    handleItemClick(itemId);
+  };
+
+  const handleSwipeRight = (itemId: string) => {
+    // Swipe right for quick reorder action
+    navigate(`/inventory/items/${itemId}?action=reorder`);
+  };
 
   const generateTestSheet = async () => {
     if (filteredItems.length === 0) {
@@ -134,8 +150,21 @@ const InventoryList: React.FC = () => {
         </div>
       ) : (
         <div className="inventory-grid">
-          {filteredItems.map((item) => (
-            <div key={item.id} className={`inventory-card ${item.needs_reorder ? 'low-stock' : ''}`}>
+          {filteredItems.map((item) => {
+            const swipeHandlers = useSwipeable({
+              onSwipedLeft: () => handleSwipeLeft(item.id),
+              onSwipedRight: () => handleSwipeRight(item.id),
+              delta: 50,
+              trackMouse: false,
+            });
+
+            return (
+              <div
+                key={item.id}
+                {...swipeHandlers}
+                className={`inventory-card ${item.needs_reorder ? 'low-stock' : ''}`}
+                onClick={() => handleItemClick(item.id)}
+              >
               {item.thumbnail && (
                 <div className="item-image">
                   <img src={item.thumbnail} alt={item.name} />
@@ -219,7 +248,8 @@ const InventoryList: React.FC = () => {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

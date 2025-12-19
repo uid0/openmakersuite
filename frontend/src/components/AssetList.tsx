@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useSwipeable } from 'react-swipeable';
 import { assetsAPI, inventoryAPI, sigAPI } from '../services/api';
 import '../styles/AssetList.css';
 import { Asset, Location, SIG } from '../types';
@@ -97,6 +98,17 @@ const AssetList: React.FC = () => {
 
   const handleCreateAsset = () => {
     navigate('/assets/new');
+  };
+
+  const handleSwipeLeft = (assetId: string) => {
+    // Swipe left to view details
+    handleAssetClick(assetId);
+  };
+
+  const handleSwipeRight = (assetId: string) => {
+    // Swipe right to report issue or quick action
+    // For now, navigate to asset detail page where user can report issues
+    navigate(`/assets/${assetId}?action=report`);
   };
 
   if (loading) {
@@ -205,12 +217,21 @@ const AssetList: React.FC = () => {
         </div>
       ) : (
         <div className="asset-grid">
-          {assets.map((asset) => (
-            <div
-              key={asset.id}
-              className={`asset-card ${getStatusBadgeClass(asset.status)}`}
-              onClick={() => handleAssetClick(asset.id)}
-            >
+          {assets.map((asset) => {
+            const swipeHandlers = useSwipeable({
+              onSwipedLeft: () => handleSwipeLeft(asset.id),
+              onSwipedRight: () => handleSwipeRight(asset.id),
+              delta: 50, // Minimum swipe distance
+              trackMouse: false,
+            });
+
+            return (
+              <div
+                key={asset.id}
+                {...swipeHandlers}
+                className={`asset-card ${getStatusBadgeClass(asset.status)}`}
+                onClick={() => handleAssetClick(asset.id)}
+              >
               {asset.image_url && (
                 <div className="asset-image">
                   <img src={asset.thumbnail_url || asset.image_url} alt={asset.name} />
@@ -284,7 +305,8 @@ const AssetList: React.FC = () => {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

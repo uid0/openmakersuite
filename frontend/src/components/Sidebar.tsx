@@ -27,9 +27,13 @@ interface WorkspaceSection {
 
 interface SidebarProps {
   isCollapsed?: boolean;
+  isMobileOpen?: boolean;
+  onClose?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false }) => {
+const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = false, onClose }) => {
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const [touchEnd, setTouchEnd] = useState<number | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [isStaff, setIsStaff] = useState<boolean>(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
@@ -179,8 +183,51 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false }) => {
     return true;
   };
 
+  // Swipe to close handlers
+  const minSwipeDistance = 50;
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    if (isLeftSwipe && isMobileOpen && onClose) {
+      onClose();
+    }
+  };
+
+  // Close sidebar when clicking a nav item on mobile
+  const handleNavClick = () => {
+    if (isMobileOpen && onClose) {
+      onClose();
+    }
+  };
+
   return (
-    <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
+    <aside
+      className={`sidebar ${isCollapsed ? 'collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
+      {/* Mobile close button */}
+      {isMobileOpen && (
+        <button
+          className="sidebar-close-button"
+          onClick={onClose}
+          aria-label="Close sidebar"
+        >
+          ✕
+        </button>
+      )}
       <nav className="sidebar-nav">
         {workspaceSections.map((section) => {
           if (!shouldShowSection(section)) return null;
@@ -224,6 +271,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false }) => {
                           target="_blank"
                           rel="noopener noreferrer"
                           className={`nav-item ${itemIsActive ? 'active' : ''}`}
+                          onClick={handleNavClick}
                         >
                           {item.icon && <span className="item-icon">{item.icon}</span>}
                           {!isCollapsed && <span className="item-label">{item.label}</span>}
@@ -236,6 +284,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false }) => {
                         key={item.path}
                         to={item.path}
                         className={`nav-item ${itemIsActive ? 'active' : ''}`}
+                        onClick={handleNavClick}
                       >
                         {item.icon && <span className="item-icon">{item.icon}</span>}
                         {!isCollapsed && <span className="item-label">{item.label}</span>}

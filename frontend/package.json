@@ -91,6 +91,9 @@
         "statements": 21
       }
     },
+    "moduleNameMapper": {
+      "\\.(css|less|scss|sass)$": "<rootDir>/src/__mocks__/styleMock.js"
+    },
     "transformIgnorePatterns": [
       "node_modules/(?!(axios)/)"
     ]
@@ -98,6 +101,7 @@
   "devDependencies": {
     "@playwright/test": "^1.56.1",
     "iconv-lite": "^0.7.0",
+    "identity-obj-proxy": "^3.0.0",
     "patch-package": "^8.0.1",
     "playwright": "^1.56.1",
     "postinstall-postinstall": "^2.1.0"

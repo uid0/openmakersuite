@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import TransparencyPage from '../../pages/TransparencyPage';
 import { analyticsAPI } from '../../services/api';
 
@@ -19,6 +19,7 @@ const mockTransparencyData = {
   orders: [
     {
       id: 1,
+      item_id: 'test-item-id-1',
       item_name: 'Laser Cutter Belt',
       item_category: 'Machinery',
       quantity_ordered: 2,
@@ -43,6 +44,7 @@ const mockTransparencyData = {
   ledger: [
     {
       id: 1,
+      item_id: 'test-item-id-1',
       item_name: 'Laser Cutter Belt',
       supplier_name: 'Makersupply Co.',
       quantity: 2,
@@ -67,7 +69,11 @@ describe('TransparencyPage', () => {
     const getTransparencyLedgerMock = analyticsAPI.getTransparencyLedger as jest.Mock;
     getTransparencyLedgerMock.mockResolvedValue({ data: mockTransparencyData });
 
-    render(<TransparencyPage />);
+    render(
+      <MemoryRouter>
+        <TransparencyPage />
+      </MemoryRouter>
+    );
 
     await waitFor(() => {
       expect(getTransparencyLedgerMock).toHaveBeenCalledTimes(1);

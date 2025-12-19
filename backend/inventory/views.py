@@ -1300,8 +1300,18 @@ class AssetViewSet(viewsets.ModelViewSet):
                 Q(last_scanned_at__lt=three_months_ago) | Q(last_scanned_at__isnull=True)
             )
             .filter(is_active=True)
-            .select_related("category", "location", "manufacturer")
+            .select_related("category", "location", "manufacturer", "inventory_item")
         )
+
+        # Filter by status if specified
+        status = request.query_params.get("status")
+        if status:
+            assets = assets.filter(status=status)
+
+        # Filter by inventory_item if specified
+        inventory_item = request.query_params.get("inventory_item")
+        if inventory_item:
+            assets = assets.filter(inventory_item_id=inventory_item)
 
         serializer = self.get_serializer(assets, many=True)
         return Response(serializer.data)

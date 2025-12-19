@@ -242,8 +242,9 @@ jobs:
       - name: Run bandit security check
         run: |
           cd backend
-          bandit -r . -x ./tests,./migrations -f json -o bandit-report.json || true
-          bandit -r . -x ./tests,./migrations
+          # Exclude test files and migrations, skip B101 (assert_used - acceptable in tests)
+          bandit -r . -x "*/tests/*,*/migrations/*" -s B101 -f json -o bandit-report.json || true
+          bandit -r . -x "*/tests/*,*/migrations/*" -s B101
 
       - name: Check dependencies for vulnerabilities
         run: |

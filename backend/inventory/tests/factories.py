@@ -15,6 +15,8 @@ from PIL import Image
 
 from inventory.models import (
     Asset,
+    AssetPart,
+    AssetProblem,
     Category,
     Fixture,
     InventoryItem,
@@ -235,3 +237,31 @@ class AssetFactory(DjangoModelFactory):
     needs_compressed_air = False
     needs_ventilation = False
     is_chargeable = False
+
+
+class AssetPartFactory(DjangoModelFactory):
+    """Factory for creating AssetPart instances."""
+
+    class Meta:
+        model = AssetPart
+
+    asset = SubFactory(AssetFactory)
+    part = SubFactory(InventoryItemFactory)
+    quantity_needed = Faker("random_int", min=1, max=5)
+    is_required = True
+    maintenance_interval_days = Faker("random_int", min=30, max=365)
+    notes = Faker("text", max_nb_chars=100)
+
+
+class AssetProblemFactory(DjangoModelFactory):
+    """Factory for creating AssetProblem instances."""
+
+    class Meta:
+        model = AssetProblem
+
+    asset = SubFactory(AssetFactory)
+    part = None  # Optional, can be set explicitly in tests
+    reported_by = Faker("user_name")
+    description = Faker("text", max_nb_chars=200)
+    status = AssetProblem.REPORTED
+    resolution_notes = ""

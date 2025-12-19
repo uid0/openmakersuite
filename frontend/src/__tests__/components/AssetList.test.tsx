@@ -9,9 +9,10 @@ import { assetsAPI, inventoryAPI, sigAPI } from '../../services/api';
 import { Asset, Location, SIG } from '../../types';
 
 jest.mock('../../services/api');
+const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
-  useNavigate: () => jest.fn(),
+  useNavigate: () => mockNavigate,
 }));
 
 const mockAssetsAPI = assetsAPI as jest.Mocked<typeof assetsAPI>;

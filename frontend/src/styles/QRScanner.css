@@ -1,0 +1,241 @@
+/**
+ * QR Scanner Styles
+ * Mobile-optimized styles for QR code scanning
+ */
+
+.qr-scanner-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #000;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  color: white;
+}
+
+.qr-scanner-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background-color: rgba(0, 0, 0, 0.8);
+  z-index: 10001;
+}
+
+.qr-scanner-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: white;
+}
+
+.qr-scanner-close {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  color: white;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+.qr-scanner-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.qr-scanner-close:active {
+  transform: scale(0.9);
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.qr-scanner-error {
+  padding: 1rem;
+  background-color: rgba(220, 53, 69, 0.9);
+  color: white;
+  text-align: center;
+  z-index: 10001;
+}
+
+.qr-scanner-error p {
+  margin: 0 0 0.5rem 0;
+}
+
+.qr-scanner-error button {
+  background: white;
+  color: #dc3545;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+.qr-scanner-viewport {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.qr-scanner-element {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Override html5-qrcode styles for mobile */
+.qr-scanner-element video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+}
+
+.qr-scanner-element #qr-shaded-region {
+  border: 2px solid #00ff00 !important;
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+}
+
+.qr-scanner-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  z-index: 10002;
+}
+
+.qr-scanner-loading p {
+  color: white;
+  font-size: 1.125rem;
+}
+
+.qr-scanner-controls {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem;
+  background-color: rgba(0, 0, 0, 0.8);
+  flex-wrap: wrap;
+  justify-content: center;
+  z-index: 10001;
+}
+
+.qr-scanner-button {
+  flex: 1;
+  min-width: 120px;
+  padding: 1rem;
+  background-color: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  color: white;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+  transition: all 0.2s;
+}
+
+.qr-scanner-button:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.qr-scanner-button:active {
+  transform: scale(0.95);
+  background-color: rgba(255, 255, 255, 0.4);
+}
+
+.qr-scanner-instructions {
+  padding: 0.75rem 1rem;
+  text-align: center;
+  background-color: rgba(0, 0, 0, 0.8);
+  z-index: 10001;
+}
+
+.qr-scanner-instructions p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.875rem;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  .qr-scanner-container {
+    /* Full screen on mobile */
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
+
+  .qr-scanner-header {
+    padding: 0.75rem;
+  }
+
+  .qr-scanner-header h2 {
+    font-size: 1.125rem;
+  }
+
+  .qr-scanner-controls {
+    padding: 0.75rem;
+    gap: 0.5rem;
+  }
+
+  .qr-scanner-button {
+    min-width: 100px;
+    padding: 0.875rem;
+    font-size: 0.875rem;
+  }
+
+  .qr-scanner-instructions {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .qr-scanner-instructions p {
+    font-size: 0.8125rem;
+  }
+}
+
+/* Landscape orientation */
+@media (max-width: 768px) and (orientation: landscape) {
+  .qr-scanner-header {
+    padding: 0.5rem;
+  }
+
+  .qr-scanner-controls {
+    padding: 0.5rem;
+    flex-direction: row;
+  }
+
+  .qr-scanner-button {
+    min-width: 80px;
+    padding: 0.75rem;
+    font-size: 0.8125rem;
+  }
+}
+
+/* Prevent body scroll when scanner is open */
+body.qr-scanner-open {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+  height: 100%;
+}

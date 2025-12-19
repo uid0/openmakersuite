@@ -32,10 +32,41 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
   const [hasInteracted, setHasInteracted] = useState<boolean>(() => {
     return localStorage.getItem('menuInteracted') === 'true';
   });
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('sidebarCollapsed', JSON.stringify(isCollapsed));
   }, [isCollapsed]);
+
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    if (isMobile) {
+      setIsMobileOpen(false);
+    }
+  }, [location.pathname, isMobile]);
+
+  // Prevent body scroll when mobile sidebar is open
+  useEffect(() => {
+    if (isMobile && isMobileOpen) {
+      document.body.classList.add('sidebar-open');
+    } else {
+      document.body.classList.remove('sidebar-open');
+    }
+    return () => {
+      document.body.classList.remove('sidebar-open');
+    };
+  }, [isMobile, isMobileOpen]);
 
   // Hide sidebar on TV dashboards
   const shouldHideSidebar = 
@@ -45,11 +76,19 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
     location.pathname.startsWith('/tv-logistics');
 
   const toggleSidebar = () => {
-    setIsCollapsed(!isCollapsed);
-    if (!hasInteracted) {
-      setHasInteracted(true);
-      localStorage.setItem('menuInteracted', 'true');
+    if (isMobile) {
+      setIsMobileOpen(!isMobileOpen);
+    } else {
+      setIsCollapsed(!isCollapsed);
+      if (!hasInteracted) {
+        setHasInteracted(true);
+        localStorage.setItem('menuInteracted', 'true');
+      }
     }
+  };
+
+  const closeMobileSidebar = () => {
+    setIsMobileOpen(false);
   };
 
   // Load notifications on mount
@@ -84,13 +123,25 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
 
   return (
     <div className="workspace-layout">
-      <Sidebar isCollapsed={isCollapsed} />
+      {/* Mobile backdrop */}
+      {isMobile && isMobileOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={closeMobileSidebar}
+          aria-hidden="true"
+        />
+      )}
+      <Sidebar
+        isCollapsed={isCollapsed}
+        isMobileOpen={isMobileOpen}
+        onClose={closeMobileSidebar}
+      />
       <div className="workspace-content">
         <div className="workspace-header">
           <button
             className={`menu-toggle ${!hasInteracted ? 'shimmer' : ''}`}
             onClick={toggleSidebar}
-            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={isMobile ? (isMobileOpen ? 'Close sidebar' : 'Open sidebar') : (isCollapsed ? 'Expand sidebar' : 'Collapse sidebar')}
           >
             ☰
           </button>

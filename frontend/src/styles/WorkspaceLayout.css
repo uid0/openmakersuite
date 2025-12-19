@@ -45,19 +45,26 @@
   cursor: pointer;
   padding: 8px 12px;
   color: #667eea;
-  transition: all 0.3s ease;
+  transition: all 0.3s ease, transform 0.1s;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   min-width: 44px;
   min-height: 44px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: rgba(102, 126, 234, 0.2);
 }
 
 .menu-toggle:hover {
   background-color: #667eea;
   color: #fff;
   transform: scale(1.05);
+}
+
+.menu-toggle:active {
+  transform: scale(0.95);
 }
 
 .menu-toggle.shimmer {
@@ -141,14 +148,21 @@
 @media (max-width: 768px) {
   .workspace-content {
     margin-left: 0;
+    width: 100%;
   }
 
-  .sidebar.collapsed ~ .workspace-content {
+  .sidebar.collapsed ~ .workspace-content,
+  .sidebar ~ .workspace-content {
     margin-left: 0;
   }
 
   .workspace-main {
     padding: 12px;
+  }
+
+  /* Prevent body scroll when mobile sidebar is open */
+  body.sidebar-open {
+    overflow: hidden;
   }
 }
 

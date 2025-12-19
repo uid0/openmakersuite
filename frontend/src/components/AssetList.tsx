@@ -4,9 +4,116 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSwipeable } from 'react-swipeable';
 import { assetsAPI, inventoryAPI, sigAPI } from '../services/api';
 import '../styles/AssetList.css';
 import { Asset, Location, SIG } from '../types';
+
+interface AssetCardProps {
+  asset: Asset;
+  onClick: (assetId: string) => void;
+  onSwipeLeft: (assetId: string) => void;
+  onSwipeRight: (assetId: string) => void;
+  getStatusBadgeClass: (status: string) => string;
+  getStatusLabel: (status: string) => string;
+}
+
+const AssetCard: React.FC<AssetCardProps> = ({
+  asset,
+  onClick,
+  onSwipeLeft,
+  onSwipeRight,
+  getStatusBadgeClass,
+  getStatusLabel,
+}) => {
+  const swipeHandlers = useSwipeable({
+    onSwipedLeft: () => onSwipeLeft(asset.id),
+    onSwipedRight: () => onSwipeRight(asset.id),
+    delta: 50,
+    trackMouse: false,
+  });
+
+  return (
+    <div
+      {...swipeHandlers}
+      className={`asset-card ${getStatusBadgeClass(asset.status)}`}
+      onClick={() => onClick(asset.id)}
+    >
+      {asset.image_url && (
+        <div className="asset-image">
+          <img src={asset.thumbnail_url || asset.image_url} alt={asset.name} />
+        </div>
+      )}
+
+      <div className="asset-details">
+        <h3 className="asset-name">{asset.name}</h3>
+
+        {asset.inventory_item_name && (
+          <p className="asset-type">Type: {asset.inventory_item_name}</p>
+        )}
+
+        <div className="asset-meta">
+          {asset.asset_tag && (
+            <p className="asset-tag">Tag: {asset.asset_tag}</p>
+          )}
+          {asset.serial_number && (
+            <p className="asset-serial">S/N: {asset.serial_number}</p>
+          )}
+        </div>
+
+        <span className={`status-badge ${getStatusBadgeClass(asset.status)}`}>
+          {getStatusLabel(asset.status)}
+        </span>
+
+        {asset.category_name && (
+          <span className="asset-category">{asset.category_name}</span>
+        )}
+
+        <div className="asset-info">
+          {asset.display_manufacturer && (
+            <div className="info-row">
+              <span className="info-label">Manufacturer:</span>
+              <span className="info-value">{asset.display_manufacturer}</span>
+            </div>
+          )}
+
+          {asset.acquisition_display && (
+            <div className="info-row">
+              <span className="info-label">Acquired:</span>
+              <span className="info-value">{asset.acquisition_display}</span>
+            </div>
+          )}
+
+          {asset.location_name && (
+            <div className="info-row">
+              <span className="info-label">Location:</span>
+              <span className="info-value">📍 {asset.location_name}</span>
+            </div>
+          )}
+
+          {asset.age_in_days !== undefined && (
+            <div className="info-row">
+              <span className="info-label">Age:</span>
+              <span className="info-value">{Math.floor(asset.age_in_days / 365)} years</span>
+            </div>
+          )}
+        </div>
+
+        {asset.maintenance_plan && (
+          <div className="maintenance-badge">
+            🔧 Has maintenance plan
+          </div>
+        )}
+
+        {asset.wiki_page_url && (
+          <div className="wiki-badge">
+            📖 Wiki available
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const AssetList: React.FC = () => {
   const navigate = useNavigate();
@@ -110,6 +217,17 @@ const AssetList: React.FC = () => {
 
   const handleCreateAsset = () => {
     navigate('/assets/new');
+  };
+
+  const handleSwipeLeft = (assetId: string) => {
+    // Swipe left to view details
+    handleAssetClick(assetId);
+  };
+
+  const handleSwipeRight = (assetId: string) => {
+    // Swipe right to report issue or quick action
+    // For now, navigate to asset detail page where user can report issues
+    navigate(`/assets/${assetId}?action=report`);
   };
 
   if (loading) {
@@ -244,84 +362,15 @@ const AssetList: React.FC = () => {
       ) : (
         <div className="asset-grid">
           {assets.map((asset) => (
-            <div
+            <AssetCard
               key={asset.id}
-              className={`asset-card ${getStatusBadgeClass(asset.status)}`}
-              onClick={() => handleAssetClick(asset.id)}
-            >
-              {asset.image_url && (
-                <div className="asset-image">
-                  <img src={asset.thumbnail_url || asset.image_url} alt={asset.name} />
-                </div>
-              )}
-
-              <div className="asset-details">
-                <h3 className="asset-name">{asset.name}</h3>
-
-                {asset.inventory_item_name && (
-                  <p className="asset-type">Type: {asset.inventory_item_name}</p>
-                )}
-
-                <div className="asset-meta">
-                  {asset.asset_tag && (
-                    <p className="asset-tag">Tag: {asset.asset_tag}</p>
-                  )}
-                  {asset.serial_number && (
-                    <p className="asset-serial">S/N: {asset.serial_number}</p>
-                  )}
-                </div>
-
-                <span className={`status-badge ${getStatusBadgeClass(asset.status)}`}>
-                  {getStatusLabel(asset.status)}
-                </span>
-
-                {asset.category_name && (
-                  <span className="asset-category">{asset.category_name}</span>
-                )}
-
-                <div className="asset-info">
-                  {asset.display_manufacturer && (
-                    <div className="info-row">
-                      <span className="info-label">Manufacturer:</span>
-                      <span className="info-value">{asset.display_manufacturer}</span>
-                    </div>
-                  )}
-
-                  {asset.acquisition_display && (
-                    <div className="info-row">
-                      <span className="info-label">Acquired:</span>
-                      <span className="info-value">{asset.acquisition_display}</span>
-                    </div>
-                  )}
-
-                  {asset.location_name && (
-                    <div className="info-row">
-                      <span className="info-label">Location:</span>
-                      <span className="info-value">📍 {asset.location_name}</span>
-                    </div>
-                  )}
-
-                  {asset.age_in_days !== undefined && (
-                    <div className="info-row">
-                      <span className="info-label">Age:</span>
-                      <span className="info-value">{Math.floor(asset.age_in_days / 365)} years</span>
-                    </div>
-                  )}
-                </div>
-
-                {asset.maintenance_plan && (
-                  <div className="maintenance-badge">
-                    🔧 Has maintenance plan
-                  </div>
-                )}
-
-                {asset.wiki_page_url && (
-                  <div className="wiki-badge">
-                    📖 Wiki available
-                  </div>
-                )}
-              </div>
-            </div>
+              asset={asset}
+              onClick={handleAssetClick}
+              onSwipeLeft={handleSwipeLeft}
+              onSwipeRight={handleSwipeRight}
+              getStatusBadgeClass={getStatusBadgeClass}
+              getStatusLabel={getStatusLabel}
+            />
           ))}
         </div>
       )}

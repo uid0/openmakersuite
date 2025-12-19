@@ -5,6 +5,7 @@
  */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import QRScanner from '../components/QRScanner';
 import { inventoryAPI } from '../services/api';
 import '../styles/ScanPage.css';
 
@@ -13,6 +14,7 @@ const CodeEntryPage: React.FC = () => {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showScanner, setShowScanner] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,14 +56,86 @@ const CodeEntryPage: React.FC = () => {
     setError(null);
   };
 
+  const processScannedCode = async (scannedText: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Extract code from URL if it's a full URL
+      let codeToUse = scannedText;
+      if (scannedText.includes('/')) {
+        const urlParts = scannedText.split('/');
+        codeToUse = urlParts[urlParts.length - 1];
+      }
+
+      const response = await inventoryAPI.lookupByCode(codeToUse.toUpperCase());
+      const { url } = response.data;
+      
+      if (url) {
+        const urlObj = new URL(url);
+        navigate(urlObj.pathname);
+      } else {
+        setError('Invalid response from server');
+      }
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.error || 'Code not found. Please check and try again.';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleScanSuccess = (decodedText: string) => {
+    setShowScanner(false);
+    document.body.classList.remove('qr-scanner-open');
+    processScannedCode(decodedText);
+  };
+
+  const handleScanError = (error: string) => {
+    // Error handling is done in the scanner component
+  };
+
+  const handleOpenScanner = () => {
+    setShowScanner(true);
+    document.body.classList.add('qr-scanner-open');
+  };
+
+  const handleCloseScanner = () => {
+    setShowScanner(false);
+    document.body.classList.remove('qr-scanner-open');
+  };
+
   return (
-    <div className="scan-page">
-      <div className="scan-container">
-        <h1>Enter Access Code</h1>
-        <p className="scan-description">
-          If you prefer not to scan a QR code, you can enter the 6-character code
-          shown below the QR code to access the item.
-        </p>
+    <>
+      {showScanner && (
+        <QRScanner
+          onScanSuccess={handleScanSuccess}
+          onScanError={handleScanError}
+          onClose={handleCloseScanner}
+        />
+      )}
+      <div className="scan-page">
+        <div className="scan-container">
+          <h1>Enter Access Code</h1>
+          <p className="scan-description">
+            Scan a QR code or enter the 6-character code manually to access the item.
+          </p>
+
+          <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+            <button
+              onClick={handleOpenScanner}
+              className="submit-button"
+              style={{
+                padding: '1rem 2rem',
+                fontSize: '1.2rem',
+                backgroundColor: '#28a745',
+                marginBottom: '1rem',
+              }}
+            >
+              📱 Scan QR Code
+            </button>
+            <p style={{ color: '#666', fontSize: '0.9rem' }}>or</p>
+          </div>
 
         <form onSubmit={handleSubmit} className="code-entry-form">
           <div className="code-input-group">
@@ -113,7 +187,8 @@ const CodeEntryPage: React.FC = () => {
           </button>
         </form>
       </div>
-    </div>
+      </div>
+    </>
   );
 };
 

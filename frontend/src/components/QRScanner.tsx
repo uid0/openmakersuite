@@ -131,15 +131,14 @@ const QRScanner: React.FC<QRScannerProps> = ({
     if (!html5QrCodeRef.current || !currentCameraId) return;
 
     try {
-      const track = await html5QrCodeRef.current.getRunningTrack();
-      if (track && 'getCapabilities' in track) {
-        const capabilities = (track as any).getCapabilities();
-        if (capabilities.torch) {
-          await (track as any).applyConstraints({
-            advanced: [{ torch: !torchEnabled }],
-          });
-          setTorchEnabled(!torchEnabled);
-        }
+      const capabilities = html5QrCodeRef.current.getRunningTrackCapabilities();
+      // Type assertion needed as torch is not in standard MediaTrackCapabilities type
+      const torchCapable = capabilities && (capabilities as any).torch === true;
+      if (torchCapable) {
+        await html5QrCodeRef.current.applyVideoConstraints({
+          advanced: [{ torch: !torchEnabled } as any],
+        });
+        setTorchEnabled(!torchEnabled);
       }
     } catch (err) {
       console.error('Error toggling torch:', err);

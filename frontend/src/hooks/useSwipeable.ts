@@ -8,7 +8,6 @@ export interface SwipeableConfig {
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
   threshold?: number; // Minimum distance in pixels to trigger swipe
-  preventDefaultTouchmoveEvent?: boolean;
   trackMouse?: boolean;
 }
 
@@ -17,7 +16,6 @@ export const useSwipeableActions = (config: SwipeableConfig) => {
     onSwipeLeft,
     onSwipeRight,
     threshold = 50,
-    preventDefaultTouchmoveEvent = false,
     trackMouse = false,
   } = config;
 
@@ -25,7 +23,6 @@ export const useSwipeableActions = (config: SwipeableConfig) => {
     onSwipedLeft: onSwipeLeft,
     onSwipedRight: onSwipeRight,
     delta: threshold,
-    preventDefaultTouchmoveEvent,
     trackMouse,
   });
 

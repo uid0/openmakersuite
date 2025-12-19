@@ -37,7 +37,6 @@ const AssetFormPage: React.FC = () => {
   const {
     control,
     handleSubmit,
-    formState: { errors },
     watch,
     setValue,
     reset,

@@ -396,8 +396,8 @@ export const assetsAPI = {
       responseType: 'blob',
     }),
 
-  getNotCheckedIn: () =>
-    api.get<Asset[]>('/inventory/assets/not_checked_in/'),
+  getNotCheckedIn: (params?: { status?: string; inventory_item?: string }) =>
+    api.get<Asset[]>('/inventory/assets/not_checked_in/', { params }),
 };
 
 // Asset Parts API

@@ -190,6 +190,23 @@
   font-weight: 600;
 }
 
+.inventory-item-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #007bff;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  transition: color 0.3s;
+}
+
+.inventory-item-link:hover {
+  color: #0056b3;
+  text-decoration: none;
+}
+
 /* Status Badges */
 .status-badge {
   display: inline-block;

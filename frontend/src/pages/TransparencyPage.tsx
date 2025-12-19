@@ -3,11 +3,13 @@
  * Dedicated to makerspace transparency and community trust
  */
 import React, { useEffect, useState } from 'react';
-import '../styles/TransparencyPage.css';
+import { Link } from 'react-router-dom';
 import { analyticsAPI } from '../services/api';
+import '../styles/TransparencyPage.css';
 
 interface TransparencyOrder {
   id: number;
+  item_id: string;
   item_name: string;
   item_category: string | null;
   quantity_ordered: number;
@@ -38,6 +40,7 @@ interface TransparencySummary {
 
 interface LedgerEntry {
   id: number;
+  item_id: string;
   item_name: string;
   supplier_name: string | null;
   quantity: number;
@@ -190,13 +193,36 @@ const TransparencyPage: React.FC = () => {
                     <td>{formatDate(entry.ordered_at)}</td>
                     <td>{formatDate(entry.delivered_at)}</td>
                     <td>
-                      <div className="ledger-item-name">{entry.item_name}</div>
+                      <div className="ledger-item-name">
+                        <Link 
+                          to={`/inventory/items/${entry.item_id}`}
+                          style={{ color: '#0066cc', textDecoration: 'none' }}
+                          onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                          onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+                        >
+                          {entry.item_name}
+                        </Link>
+                      </div>
                       {(entry.order_number || entry.invoice_number) && (
                         <div className="ledger-item-meta">
                           {entry.order_number && <span>Order #{entry.order_number}</span>}
                           {entry.invoice_number && <span>Invoice #{entry.invoice_number}</span>}
                         </div>
                       )}
+                      <div style={{ marginTop: '0.25rem' }}>
+                        <Link
+                          to={`/inventory/assets?inventory_item=${entry.item_id}`}
+                          style={{ 
+                            color: '#0066cc', 
+                            textDecoration: 'none', 
+                            fontSize: '0.875rem' 
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                          onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+                        >
+                          View Related Assets →
+                        </Link>
+                      </div>
                     </td>
                     <td>{entry.quantity}</td>
                     <td>{entry.supplier_name || 'N/A'}</td>
@@ -220,7 +246,16 @@ const TransparencyPage: React.FC = () => {
           {data.orders.map((order) => (
             <div key={order.id} className="order-card">
               <div className="order-header">
-                <h3>{order.item_name}</h3>
+                <h3>
+                  <Link 
+                    to={`/inventory/items/${order.item_id}`}
+                    style={{ color: 'inherit', textDecoration: 'none' }}
+                    onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                    onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+                  >
+                    {order.item_name}
+                  </Link>
+                </h3>
                 <span className={`status-badge status-${order.status}`}>
                   {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                 </span>
@@ -243,6 +278,20 @@ const TransparencyPage: React.FC = () => {
                     <span className="value">{order.supplier_name}</span>
                   </div>
                 )}
+                <div className="detail-row" style={{ marginTop: '0.5rem' }}>
+                  <Link
+                    to={`/inventory/assets?inventory_item=${order.item_id}`}
+                    style={{ 
+                      color: '#0066cc', 
+                      textDecoration: 'none',
+                      fontSize: '0.875rem'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                    onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+                  >
+                    View Related Assets →
+                  </Link>
+                </div>
               </div>
 
               <div className="financial-info">

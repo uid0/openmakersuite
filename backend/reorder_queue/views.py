@@ -1342,6 +1342,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 # Public transparency information
                 order_data = {
                     "id": order.id,
+                    "item_id": str(order.item.id),
                     "item_name": order.item.name,
                     "item_category": (order.item.category.name if order.item.category else None),
                     "quantity_ordered": order.quantity,
@@ -1380,6 +1381,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 ledger_entries.append(
                     {
                         "id": order.id,
+                        "item_id": str(order.item.id),
                         "item_name": order.item.name,
                         "supplier_name": supplier_name,
                         "quantity": order.quantity,

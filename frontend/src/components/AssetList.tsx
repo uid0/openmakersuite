@@ -11,19 +11,29 @@ import { Asset, Location, SIG } from '../types';
 
 const AssetList: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [locationFilter, setLocationFilter] = useState<number | null>(null);
   const [sigFilter, setSigFilter] = useState<number | null>(null);
+  const [inventoryItemFilter, setInventoryItemFilter] = useState<string | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [sigs, setSigs] = useState<SIG[]>([]);
 
   useEffect(() => {
+    // Check URL params for inventory_item filter
+    const inventoryItemParam = searchParams.get('inventory_item');
+    if (inventoryItemParam) {
+      setInventoryItemFilter(inventoryItemParam);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     loadInitialData();
     loadAssets();
-  }, [statusFilter, locationFilter, sigFilter, searchTerm]);
+  }, [statusFilter, locationFilter, sigFilter, inventoryItemFilter, searchTerm]);
 
   const loadInitialData = async () => {
     try {
@@ -50,6 +60,9 @@ const AssetList: React.FC = () => {
       }
       if (sigFilter) {
         params.owning_group = sigFilter;
+      }
+      if (inventoryItemFilter) {
+        params.inventory_item = inventoryItemFilter;
       }
       if (searchTerm) {
         params.search = searchTerm;
@@ -207,6 +220,31 @@ const AssetList: React.FC = () => {
             </select>
           </div>
         </div>
+        {inventoryItemFilter && (
+          <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#f0f0f0', borderRadius: '4px' }}>
+            <span>Filtered by Inventory Item. </span>
+            <button
+              onClick={() => {
+                setInventoryItemFilter(null);
+                const newSearchParams = new URLSearchParams(searchParams);
+                newSearchParams.delete('inventory_item');
+                const newUrl = newSearchParams.toString() 
+                  ? `/inventory/assets?${newSearchParams.toString()}`
+                  : '/inventory/assets';
+                navigate(newUrl, { replace: true });
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#0066cc',
+                cursor: 'pointer',
+                textDecoration: 'underline'
+              }}
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
       </div>
 
       {assets.length === 0 ? (

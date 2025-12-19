@@ -264,7 +264,19 @@ const AssetDetailPage: React.FC = () => {
             {asset.inventory_item_name && (
               <div className="info-item">
                 <span className="info-label">Type:</span>
-                <span className="info-value">{asset.inventory_item_name}</span>
+                <span className="info-value">
+                  {asset.inventory_item ? (
+                    <button
+                      className="inventory-item-link"
+                      onClick={() => navigate(`/inventory/items/${asset.inventory_item}`)}
+                      type="button"
+                    >
+                      {asset.inventory_item_name}
+                    </button>
+                  ) : (
+                    asset.inventory_item_name
+                  )}
+                </span>
               </div>
             )}
             {asset.display_manufacturer && (

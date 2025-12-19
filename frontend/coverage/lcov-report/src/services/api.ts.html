@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">38.96% </span>
+                <span class="strong">38.07% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>90/231</span>
+                <span class='fraction'>91/239</span>
             </div>
         
             
@@ -37,16 +37,16 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">31.65% </span>
+                <span class="strong">30.13% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>44/139</span>
+                <span class='fraction'>44/146</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">38.96% </span>
+                <span class="strong">38.07% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>90/231</span>
+                <span class='fraction'>91/239</span>
             </div>
         
             
@@ -902,7 +902,31 @@
 <a name='L837'></a><a href='#L837'>837</a>
 <a name='L838'></a><a href='#L838'>838</a>
 <a name='L839'></a><a href='#L839'>839</a>
-<a name='L840'></a><a href='#L840'>840</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L840'></a><a href='#L840'>840</a>
+<a name='L841'></a><a href='#L841'>841</a>
+<a name='L842'></a><a href='#L842'>842</a>
+<a name='L843'></a><a href='#L843'>843</a>
+<a name='L844'></a><a href='#L844'>844</a>
+<a name='L845'></a><a href='#L845'>845</a>
+<a name='L846'></a><a href='#L846'>846</a>
+<a name='L847'></a><a href='#L847'>847</a>
+<a name='L848'></a><a href='#L848'>848</a>
+<a name='L849'></a><a href='#L849'>849</a>
+<a name='L850'></a><a href='#L850'>850</a>
+<a name='L851'></a><a href='#L851'>851</a>
+<a name='L852'></a><a href='#L852'>852</a>
+<a name='L853'></a><a href='#L853'>853</a>
+<a name='L854'></a><a href='#L854'>854</a>
+<a name='L855'></a><a href='#L855'>855</a>
+<a name='L856'></a><a href='#L856'>856</a>
+<a name='L857'></a><a href='#L857'>857</a>
+<a name='L858'></a><a href='#L858'>858</a>
+<a name='L859'></a><a href='#L859'>859</a>
+<a name='L860'></a><a href='#L860'>860</a>
+<a name='L861'></a><a href='#L861'>861</a>
+<a name='L862'></a><a href='#L862'>862</a>
+<a name='L863'></a><a href='#L863'>863</a>
+<a name='L864'></a><a href='#L864'>864</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1741,12 +1765,36 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
  * API service for communicating with the Django backend
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog } from '../types';
 &nbsp;
 /**
  * Resolves the API base URL based on environment.
@@ -2139,8 +2187,8 @@ export const assetsAPI = {
       responseType: 'blob',
     }),
 &nbsp;
-  getNotCheckedIn: <span class="fstat-no" title="function not covered" >()</span> =&gt;
-<span class="cstat-no" title="statement not covered" >    api.get&lt;Asset[]&gt;('/inventory/assets/not_checked_in/'),</span>
+  getNotCheckedIn: <span class="fstat-no" title="function not covered" >(p</span>arams?: { status?: string; inventory_item?: string }) =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;Asset[]&gt;('/inventory/assets/not_checked_in/', { params }),</span>
 };
 &nbsp;
 // Asset Parts API
@@ -2579,6 +2627,30 @@ export const reportsAPI = {
     }),
 };
 &nbsp;
+// Dashboard API
+export const dashboardAPI = {
+  getWidgets: <span class="fstat-no" title="function not covered" >()</span> =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;DashboardWidget[]&gt;('/dashboard/widgets/'),</span>
+&nbsp;
+  saveWidgets: <span class="fstat-no" title="function not covered" >(w</span>idgets: Partial&lt;DashboardWidget&gt;[]) =&gt;
+<span class="cstat-no" title="statement not covered" >    api.post&lt;{ widgets: DashboardWidget[] }&gt;('/dashboard/widgets/save/', { widgets }),</span>
+&nbsp;
+  getLowStockData: <span class="fstat-no" title="function not covered" >()</span> =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;LowStockData&gt;('/dashboard/widget-data/low-stock/'),</span>
+&nbsp;
+  getPendingReordersData: <span class="fstat-no" title="function not covered" >()</span> =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;PendingReordersData&gt;('/dashboard/widget-data/pending-reorders/'),</span>
+&nbsp;
+  getAssetProblemsData: <span class="fstat-no" title="function not covered" >()</span> =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;AssetProblemsData&gt;('/dashboard/widget-data/asset-problems/'),</span>
+&nbsp;
+  getQRScansData: <span class="fstat-no" title="function not covered" >()</span> =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;QRScansData&gt;('/dashboard/widget-data/qr-scans/'),</span>
+&nbsp;
+  getDeliveriesData: <span class="fstat-no" title="function not covered" >()</span> =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;DeliveriesData&gt;('/dashboard/widget-data/deliveries/'),</span>
+};
+&nbsp;
 export default api;
 &nbsp;</pre></td></tr></table></pre>
 
@@ -2587,7 +2659,7 @@ export default api;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-12-16T05:31:08.314Z
+                at 2025-12-19T07:20:47.531Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

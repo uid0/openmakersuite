@@ -2,12 +2,12 @@
 Integration tests for dashboard API views.
 """
 
-import pytest
 from django.contrib.auth import get_user_model
+
+import pytest
 from rest_framework import status
 
-from dashboard.models import DashboardWidget
-from dashboard.tests.factories import DashboardWidgetFactory, UserFactory
+from dashboard.tests.factories import DashboardWidgetFactory
 from inventory.tests.factories import InventoryItemFactory
 from reorder_queue.tests.factories import ReorderRequestFactory
 
@@ -154,8 +154,10 @@ class TestDashboardWidgetDataViews:
     def test_get_qr_scans_data(self, authenticated_client):
         """Test getting QR scans data."""
         client, user = authenticated_client
-        from django.utils import timezone
         from datetime import timedelta
+
+        from django.utils import timezone
+
         from inventory.tests.factories import AssetFactory
 
         # Create asset with recent scan
@@ -175,16 +177,17 @@ class TestDashboardWidgetDataViews:
     def test_get_deliveries_data(self, authenticated_client):
         """Test getting deliveries data."""
         client, user = authenticated_client
-        from django.utils import timezone
         from datetime import timedelta
-        from reorder_queue.models import OrderDelivery, PurchaseOrder
-        from reorder_queue.tests.factories import ReorderRequestFactory
+
+        from django.utils import timezone
+
         from inventory.tests.factories import SupplierFactory
+        from reorder_queue.models import OrderDelivery, PurchaseOrder
 
         # Create a purchase order and delivery
         supplier = SupplierFactory()
         po = PurchaseOrder.objects.create(supplier=supplier, status=PurchaseOrder.ORDERED)
-        delivery = OrderDelivery.objects.create(
+        OrderDelivery.objects.create(
             purchase_order=po,
             delivery_date=timezone.now() - timedelta(days=1),
             received_by=user,

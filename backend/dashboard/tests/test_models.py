@@ -53,11 +53,13 @@ class TestDashboardWidgetModel:
 
     def test_widget_unique_together(self):
         """Test that user and widget_type combination is unique."""
+        from django.db import IntegrityError
+
         user = UserFactory()
         DashboardWidgetFactory(user=user, widget_type="low_stock")
 
         # Creating another widget with same user and type should fail
-        with pytest.raises(Exception):  # IntegrityError or similar
+        with pytest.raises(IntegrityError):
             DashboardWidget.objects.create(
                 user=user,
                 widget_type="low_stock",

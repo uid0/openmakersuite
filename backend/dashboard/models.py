@@ -107,21 +107,11 @@ class DashboardWidget(models.Model):
         choices=WIDGET_TYPES,
         help_text="Type of widget",
     )
-    position_x = models.PositiveIntegerField(
-        default=0, help_text="X position in grid (0-based)"
-    )
-    position_y = models.PositiveIntegerField(
-        default=0, help_text="Y position in grid (0-based)"
-    )
-    width = models.PositiveIntegerField(
-        default=2, help_text="Width in grid units"
-    )
-    height = models.PositiveIntegerField(
-        default=2, help_text="Height in grid units"
-    )
-    is_visible = models.BooleanField(
-        default=True, help_text="Whether this widget is visible"
-    )
+    position_x = models.PositiveIntegerField(default=0, help_text="X position in grid (0-based)")
+    position_y = models.PositiveIntegerField(default=0, help_text="Y position in grid (0-based)")
+    width = models.PositiveIntegerField(default=2, help_text="Width in grid units")
+    height = models.PositiveIntegerField(default=2, help_text="Height in grid units")
+    is_visible = models.BooleanField(default=True, help_text="Whether this widget is visible")
     order = models.PositiveIntegerField(
         default=0, help_text="Display order (lower numbers shown first)"
     )

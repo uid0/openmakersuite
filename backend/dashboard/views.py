@@ -321,9 +321,7 @@ def save_user_widgets(request):
         widgets_data = request.data.get("widgets", [])
 
         if not isinstance(widgets_data, list):
-            return Response(
-                {"error": "widgets must be a list"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "widgets must be a list"}, status=status.HTTP_400_BAD_REQUEST)
 
         updated_widgets = []
         for widget_data in widgets_data:
@@ -337,9 +335,7 @@ def save_user_widgets(request):
                 # Update existing widget
                 try:
                     widget = DashboardWidget.objects.get(id=widget_id, user=user)
-                    serializer = DashboardWidgetSerializer(
-                        widget, data=widget_data, partial=True
-                    )
+                    serializer = DashboardWidgetSerializer(widget, data=widget_data, partial=True)
                     if serializer.is_valid():
                         serializer.save()
                         updated_widgets.append(serializer.data)
@@ -540,7 +536,7 @@ def get_qr_scans_data(request):
         from collections import defaultdict
         from datetime import timedelta
 
-        from django.db.models import Count, Q, TruncDate
+        from django.db.models import Count, TruncDate
         from django.utils import timezone
 
         from inventory.models import Asset, InventoryItem
@@ -582,9 +578,7 @@ def get_qr_scans_data(request):
             scan_data[date_str]["total"] += scan["count"]
 
         # Convert to list format
-        daily_scans = [
-            {"date": date, **data} for date, data in sorted(scan_data.items())
-        ]
+        daily_scans = [{"date": date, **data} for date, data in sorted(scan_data.items())]
 
         # Get total counts
         total_asset_scans = Asset.objects.filter(
@@ -641,12 +635,12 @@ def get_deliveries_data(request):
                 {
                     "id": delivery.id,
                     "delivery_date": delivery.delivery_date.isoformat(),
-                    "supplier_name": delivery.purchase_order.supplier.name
-                    if delivery.purchase_order.supplier
-                    else None,
-                    "received_by": delivery.received_by.username
-                    if delivery.received_by
-                    else None,
+                    "supplier_name": (
+                        delivery.purchase_order.supplier.name
+                        if delivery.purchase_order.supplier
+                        else None
+                    ),
+                    "received_by": delivery.received_by.username if delivery.received_by else None,
                     "items_count": items_count,
                     "total_quantity": total_quantity,
                     "purchase_order_id": delivery.purchase_order.id,

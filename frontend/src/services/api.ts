@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, Category, Checklist, ChecklistCompletion, CreateReorderRequest, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -834,6 +834,30 @@ export const reportsAPI = {
       params: { type, ...params },
       responseType: 'blob',
     }),
+};
+
+// Dashboard API
+export const dashboardAPI = {
+  getWidgets: () =>
+    api.get<DashboardWidget[]>('/dashboard/widgets/'),
+
+  saveWidgets: (widgets: Partial<DashboardWidget>[]) =>
+    api.post<{ widgets: DashboardWidget[] }>('/dashboard/widgets/save/', { widgets }),
+
+  getLowStockData: () =>
+    api.get<LowStockData>('/dashboard/widget-data/low-stock/'),
+
+  getPendingReordersData: () =>
+    api.get<PendingReordersData>('/dashboard/widget-data/pending-reorders/'),
+
+  getAssetProblemsData: () =>
+    api.get<AssetProblemsData>('/dashboard/widget-data/asset-problems/'),
+
+  getQRScansData: () =>
+    api.get<QRScansData>('/dashboard/widget-data/qr-scans/'),
+
+  getDeliveriesData: () =>
+    api.get<DeliveriesData>('/dashboard/widget-data/deliveries/'),
 };
 
 export default api;

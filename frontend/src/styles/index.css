@@ -95,3 +95,22 @@ select {
   touch-action: manipulation;
   -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
 }
+
+/* Keyboard navigation styles for table rows */
+tr[data-focused="true"],
+tr.keyboard-focused-row {
+  outline: 2px solid #007bff !important;
+  outline-offset: -2px !important;
+  background-color: rgba(0, 123, 255, 0.1) !important;
+}
+
+/* Ensure focused rows are visible */
+tr[data-focused="true"] td,
+tr.keyboard-focused-row td {
+  position: relative;
+}
+
+/* Smooth transitions for focus changes */
+tr {
+  transition: background-color 0.15s ease, outline 0.15s ease;
+}

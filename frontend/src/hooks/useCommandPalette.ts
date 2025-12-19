@@ -1,30 +1,11 @@
 /**
- * Hook for managing command palette state and keyboard shortcuts
+ * Hook for managing command palette state
+ * Note: Keyboard shortcuts (Cmd+K, Escape) are now handled by useKeyboardShortcuts
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 export function useCommandPalette() {
   const [isOpen, setIsOpen] = useState(false);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Check for Cmd+K (Mac) or Ctrl+K (Windows/Linux)
-      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
-        event.preventDefault();
-        setIsOpen((prev) => !prev);
-      }
-
-      // Close on Escape
-      if (event.key === 'Escape' && isOpen) {
-        setIsOpen(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isOpen]);
 
   return {
     isOpen,

@@ -7,6 +7,7 @@ import { IconBell } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useCommandPalette } from '../hooks/useCommandPalette';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useNotifications } from '../hooks/useNotifications';
 import '../styles/WorkspaceLayout.css';
 import Breadcrumbs from './Breadcrumbs';
@@ -95,6 +96,9 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
   useEffect(() => {
     notifications.loadNotifications();
   }, [notifications]);
+
+  // Setup keyboard shortcuts
+  useKeyboardShortcuts(commandPalette.isOpen, commandPalette.toggle);
 
   if (shouldHideSidebar) {
     return (

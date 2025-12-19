@@ -20,6 +20,7 @@ import {
 import { IconDownload, IconQrcode, IconSearch, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 import { indexCardsAPI, inventoryAPI } from '../services/api';
 import { Category, InventoryItem, Location } from '../types';
 import { exportInventoryItemsToCSV } from '../utils/csvExport';
@@ -150,6 +151,15 @@ const InventoryListPage: React.FC = () => {
 
     return filtered;
   }, [items, searchTerm, selectedCategory, selectedLocation, lowStockFilter, sortField, sortDirection, locations]);
+
+  // Table navigation - must be after sortedAndFilteredItems is defined
+  const { getRowProps, setTableRef } = useTableNavigation<InventoryItem>({
+    rows: sortedAndFilteredItems,
+    onRowActivate: (item) => {
+      navigate(`/inventory/items/${item.id}`);
+    },
+    enabled: !editingStock, // Disable navigation when editing stock
+  });
 
   const handleSelectAll = () => {
     if (selectedItems.size === sortedAndFilteredItems.length) {
@@ -339,7 +349,7 @@ const InventoryListPage: React.FC = () => {
 
       {/* Table */}
       <Paper withBorder>
-        <Table.ScrollContainer minWidth={800}>
+        <Table.ScrollContainer minWidth={800} ref={setTableRef}>
           <Table highlightOnHover>
             <Table.Thead>
               <Table.Tr>
@@ -391,12 +401,17 @@ const InventoryListPage: React.FC = () => {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {sortedAndFilteredItems.map((item) => (
+              {sortedAndFilteredItems.map((item, index) => {
+                const rowProps = getRowProps(index);
+                return (
                 <Table.Tr
                   key={item.id}
+                  {...rowProps}
                   style={{
                     backgroundColor: selectedItems.has(item.id) ? '#e7f5ff' : undefined,
                     cursor: 'pointer',
+                    outline: rowProps['data-focused'] === 'true' ? '2px solid var(--mantine-color-blue-6)' : undefined,
+                    outlineOffset: '-2px',
                   }}
                   onClick={() => navigate(`/inventory/items/${item.id}`)}
                 >
@@ -479,7 +494,8 @@ const InventoryListPage: React.FC = () => {
                     </Group>
                   </Table.Td>
                 </Table.Tr>
-              ))}
+                );
+              })}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>

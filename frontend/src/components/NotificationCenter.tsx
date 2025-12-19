@@ -6,6 +6,7 @@ import { ActionIcon, Badge, Button, Drawer, Group, ScrollArea, Stack, Text } fro
 import { IconBell, IconTrash } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useModalManager } from '../hooks/useModalManager';
 import { useNotifications } from '../hooks/useNotifications';
 import '../styles/NotificationCenter.css';
 import NotificationBanner from './NotificationBanner';
@@ -29,6 +30,9 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ isOpen, onClose
     clearBanners,
   } = useNotifications();
   const [filter, setFilter] = useState<'all' | 'unread'>('unread');
+
+  // Register with modal manager (medium priority)
+  useModalManager('notification-center', isOpen, onClose, 50);
 
   useEffect(() => {
     if (isOpen) {

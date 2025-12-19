@@ -6,6 +6,7 @@ import { Box, Divider, Group, Modal, ScrollArea, Stack, Text, TextInput } from '
 import { IconSearch, IconX } from '@tabler/icons-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useModalManager } from '../hooks/useModalManager';
 import { debounce, getRecentSearches, saveRecentSearch, searchGlobal } from '../services/searchService';
 import '../styles/CommandPalette.css';
 import { RecentSearch, SearchResult } from '../types';
@@ -48,6 +49,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Register with modal manager (highest priority)
+  useModalManager('command-palette', isOpen, onClose, 100);
 
   // Get quick actions
   const quickActions = useMemo(() => getQuickActions(navigate), [navigate]);

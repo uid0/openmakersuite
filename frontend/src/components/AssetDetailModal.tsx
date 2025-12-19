@@ -3,9 +3,10 @@
  * Displays full details about an asset including cost, maintenance, and other information
  */
 import React, { useCallback, useEffect, useState } from 'react';
+import { useModalManager } from '../hooks/useModalManager';
 import { assetsAPI } from '../services/api';
-import { Asset } from '../types';
 import '../styles/AssetDetailModal.css';
+import { Asset } from '../types';
 
 interface AssetDetailModalProps {
   assetId: string | null;
@@ -17,6 +18,9 @@ const AssetDetailModal: React.FC<AssetDetailModalProps> = ({ assetId, isOpen, on
   const [asset, setAsset] = useState<Asset | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Register with modal manager (low priority)
+  useModalManager('asset-detail-modal', isOpen, onClose, 10);
 
   const loadAssetDetails = useCallback(async () => {
     if (!assetId) return;

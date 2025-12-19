@@ -2,8 +2,9 @@
  * Public Purchase Order List Page
  * Shows all active and settled purchase orders for transparency
  */
-import React, { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useTableNavigation } from '../hooks/useTableNavigation';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderListPage.css';
 
@@ -23,10 +24,20 @@ interface PurchaseOrder {
 }
 
 const PurchaseOrderListPage: React.FC = () => {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const tableContainerRef = useRef<HTMLElement | null>(null);
+
+  // Table navigation
+  const { getRowProps, setTableRef } = useTableNavigation<PurchaseOrder>({
+    rows: orders,
+    onRowActivate: (order) => {
+      navigate(`/purchasing/orders/${order.id}`);
+    },
+  });
 
   const loadOrders = useCallback(async () => {
     try {
@@ -169,7 +180,10 @@ const PurchaseOrderListPage: React.FC = () => {
         </div>
       </div>
 
-      <section className="po-list-table">
+      <section className="po-list-table" ref={(node) => {
+        tableContainerRef.current = node;
+        setTableRef(node);
+      }}>
         {orders.length === 0 ? (
           <div className="no-orders">
             <p>No purchase orders found matching the selected criteria.</p>
@@ -190,8 +204,19 @@ const PurchaseOrderListPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {orders.map((order) => (
-                <tr key={order.id}>
+              {orders.map((order, index) => {
+                const rowProps = getRowProps(index);
+                return (
+                <tr
+                  key={order.id}
+                  {...rowProps}
+                  style={{
+                    outline: rowProps['data-focused'] === 'true' ? '2px solid var(--mantine-color-blue-6)' : undefined,
+                    outlineOffset: '-2px',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => navigate(`/purchasing/orders/${order.id}`)}
+                >
                   <td className="po-number">{order.po_number}</td>
                   <td>{order.supplier_details}</td>
                   <td>
@@ -222,7 +247,8 @@ const PurchaseOrderListPage: React.FC = () => {
                     </Link>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         )}

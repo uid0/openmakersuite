@@ -186,7 +186,9 @@ class TestDashboardWidgetDataViews:
 
         # Create a purchase order and delivery
         supplier = SupplierFactory()
-        po = PurchaseOrder.objects.create(supplier=supplier, status=PurchaseOrder.SENT, created_by=user)
+        po = PurchaseOrder.objects.create(
+            supplier=supplier, status=PurchaseOrder.SENT, created_by=user
+        )
         OrderDelivery.objects.create(
             purchase_order=po,
             delivery_date=timezone.now() - timedelta(days=1),

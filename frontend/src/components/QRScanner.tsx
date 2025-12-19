@@ -112,6 +112,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
     return () => {
       stopScanning();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentCameraId, fps, aspectRatio, onScanSuccess, onScanError]);
 
   const stopScanning = async () => {

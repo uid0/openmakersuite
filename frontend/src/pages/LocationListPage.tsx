@@ -3,7 +3,7 @@
  * Display locations in hierarchical tree structure
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import TreeView, { TreeNode } from '../components/TreeView';
 import { inventoryAPI } from '../services/api';
 import '../styles/LocationListPage.css';
@@ -15,7 +15,6 @@ const LocationListPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isStaff, setIsStaff] = useState(false);
-  const navigate = useNavigate();
 
   useEffect(() => {
     const staffStatus = localStorage.getItem('is_staff');

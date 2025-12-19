@@ -3,9 +3,9 @@
  * Manage reorder queue, view pending requests, and access supplier cart links
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { assetsAPI, reorderAPI } from '../services/api';
+import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/AdminDashboard.css';
-import { Asset, ReorderRequest } from '../types';
+import { Asset, InventoryItem, ReorderRequest } from '../types';
 
 const AdminDashboard: React.FC = () => {
   const [requests, setRequests] = useState<ReorderRequest[]>([]);
@@ -14,6 +14,9 @@ const AdminDashboard: React.FC = () => {
   const [supplierGroups, setSupplierGroups] = useState<any>(null);
   const [notCheckedInAssets, setNotCheckedInAssets] = useState<Asset[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
+  const [assetStatusFilter, setAssetStatusFilter] = useState<string>('all');
+  const [assetInventoryItemFilter, setAssetInventoryItemFilter] = useState<string | null>(null);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
 
   const loadRequests = useCallback(async () => {
     try {
@@ -36,19 +39,42 @@ const AdminDashboard: React.FC = () => {
   const loadNotCheckedInAssets = useCallback(async () => {
     try {
       setLoadingAssets(true);
-      const response = await assetsAPI.getNotCheckedIn();
+      const params: { status?: string; inventory_item?: string } = {};
+      if (assetStatusFilter !== 'all') {
+        params.status = assetStatusFilter;
+      }
+      if (assetInventoryItemFilter) {
+        params.inventory_item = assetInventoryItemFilter;
+      }
+      const response = await assetsAPI.getNotCheckedIn(params);
       setNotCheckedInAssets(response.data);
     } catch (err) {
       console.error('Error loading assets not checked in:', err);
     } finally {
       setLoadingAssets(false);
     }
-  }, []);
+  }, [assetStatusFilter, assetInventoryItemFilter]);
 
   useEffect(() => {
     loadRequests();
+  }, [loadRequests]);
+
+  useEffect(() => {
     loadNotCheckedInAssets();
-  }, [loadRequests, loadNotCheckedInAssets]);
+  }, [loadNotCheckedInAssets]);
+
+  useEffect(() => {
+    // Load inventory items that have assets for the filter dropdown
+    const loadInventoryItems = async () => {
+      try {
+        const response = await inventoryAPI.listItems();
+        setInventoryItems(response.data.results);
+      } catch (err) {
+        console.error('Error loading inventory items:', err);
+      }
+    };
+    loadInventoryItems();
+  }, []);
 
   const loadSupplierGroups = async () => {
     try {
@@ -401,6 +427,46 @@ const AdminDashboard: React.FC = () => {
       {/* Assets Not Checked In Section */}
       <div className="assets-section">
         <h2>Assets Not Checked In (3+ Months)</h2>
+        
+        {/* Asset Filters */}
+        <div className="asset-filters" style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="filter-group">
+            <label htmlFor="asset-status-filter" style={{ marginRight: '0.5rem' }}>Status:</label>
+            <select
+              id="asset-status-filter"
+              value={assetStatusFilter}
+              onChange={(e) => setAssetStatusFilter(e.target.value)}
+              style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #ccc' }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="implementing">Implementing</option>
+              <option value="testing">Testing</option>
+              <option value="active">Active</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="retired">Retired</option>
+              <option value="lost">Lost</option>
+              <option value="donated_out">Donated Out</option>
+            </select>
+          </div>
+          
+          <div className="filter-group">
+            <label htmlFor="asset-inventory-item-filter" style={{ marginRight: '0.5rem' }}>Inventory Item:</label>
+            <select
+              id="asset-inventory-item-filter"
+              value={assetInventoryItemFilter || ''}
+              onChange={(e) => setAssetInventoryItemFilter(e.target.value || null)}
+              style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #ccc', minWidth: '200px' }}
+            >
+              <option value="">All Items</option>
+              {inventoryItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         {loadingAssets ? (
           <div className="loading">Loading assets...</div>
         ) : (

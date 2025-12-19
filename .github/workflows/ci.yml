@@ -243,6 +243,7 @@ jobs:
         run: |
           cd backend
           # Exclude test files and migrations, skip B101 (assert_used - acceptable in tests)
+          # Pattern */tests/* matches all test directories, */migrations/* matches all migration directories
           bandit -r . -x "*/tests/*,*/migrations/*" -s B101 -f json -o bandit-report.json || true
           bandit -r . -x "*/tests/*,*/migrations/*" -s B101
 

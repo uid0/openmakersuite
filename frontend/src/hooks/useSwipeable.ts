@@ -8,7 +8,6 @@ export interface SwipeableConfig {
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
   threshold?: number; // Minimum distance in pixels to trigger swipe
-  preventDefaultTouchmoveEvent?: boolean;
   trackMouse?: boolean;
 }
 

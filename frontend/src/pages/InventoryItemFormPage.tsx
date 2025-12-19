@@ -32,16 +32,15 @@ const InventoryItemFormPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [itemSuppliers, setItemSuppliers] = useState<ItemSupplier[]>([]);
+  const [_itemSuppliers, setItemSuppliers] = useState<ItemSupplier[]>([]);
   const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
-  const [newLocationName, setNewLocationName] = useState('');
+  const [_newLocationName, setNewLocationName] = useState('');
   const [supplierRelationships, setSupplierRelationships] = useState<SupplierRelationship[]>([]);
 
   const {
     control,
     handleSubmit,
-    formState: { errors },
     watch,
     setValue,
     reset,

@@ -3,7 +3,7 @@
  * Display categories in tree view with color picker and item counts
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import TreeView, { TreeNode } from '../components/TreeView';
 import { inventoryAPI } from '../services/api';
 import '../styles/CategoryListPage.css';
@@ -14,7 +14,6 @@ const CategoryListPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const navigate = useNavigate();
 
   useEffect(() => {
     loadCategories();

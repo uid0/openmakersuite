@@ -89,6 +89,16 @@ repos:
         pass_filenames: false
         always_run: false
 
+  - repo: local
+    hooks:
+      - id: typescript-check
+        name: TypeScript compilation check
+        entry: bash -c 'cd frontend && CI=true npm run build 2>&1 | grep -q "Compiled successfully" || (echo "❌ TypeScript compilation failed. Run cd frontend && npm run build" && exit 1)'
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx)$
+        pass_filenames: false
+        always_run: false
+
   # Frontend: Run tests (optional - can be slow, comment out if needed)
   - repo: local
     hooks:
@@ -99,15 +109,14 @@ repos:
         files: ^frontend/src/.*\.(ts|tsx|js|jsx)$
         pass_filenames: false
         always_run: false
-        stages: [manual]  # Only run manually, not on every commit
 
 # CI configuration
 ci:
   autofix_commit_msg: |
     [pre-commit.ci] auto fixes from pre-commit hooks
   autofix_prs: true
-  autoupdate_branch: ''
-  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_branch: ""
+  autoupdate_commit_msg: "[pre-commit.ci] pre-commit autoupdate"
   autoupdate_schedule: weekly
   skip: []
   submodules: false

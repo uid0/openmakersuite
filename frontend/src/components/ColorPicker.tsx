@@ -18,7 +18,7 @@ const ColorPicker: React.FC<ColorPickerProps> = ({
   label,
   showPreview = true,
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  // Removed unused state - was intended for future dropdown feature
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onChange(e.target.value);

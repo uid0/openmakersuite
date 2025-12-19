@@ -98,7 +98,7 @@ Before running Playwright tests, ensure:
    npm start
    # Should be accessible at http://localhost:3000
    ```
-   
+
    Note: Playwright config has `webServer` configured, so it will automatically start the frontend if not running (unless `CI=true`).
 
 3. **Database is set up**
@@ -355,4 +355,3 @@ npx playwright test e2e/asset-scan.spec.ts
 # Run tests matching pattern
 npx playwright test -g "authenticated"
 ```
-

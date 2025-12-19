@@ -45,6 +45,12 @@ class ChecklistViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
 
+        # Public actions (start, get_detail) can access public checklists
+        if self.action in ["start", "get_detail"]:
+            # Allow access to public checklists for these actions
+            # get_object() will handle permission checks within the action
+            return queryset
+
         # For list action, filter by active status
         if self.action == "list":
             queryset = queryset.filter(is_active=True)
@@ -148,7 +154,7 @@ class ChecklistViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=["get"], permission_classes=[AllowAny], url_path="detail")
-    def get_detail(self, request, pk=None):
+    def get_detail(self, request, **kwargs):
         """Get full checklist details (public if is_public=True)."""
         checklist = self.get_object()
         user = request.user
@@ -176,7 +182,7 @@ class ChecklistViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"], permission_classes=[AllowAny])
-    def start(self, request, pk=None):
+    def start(self, request, **kwargs):
         """Start a new checklist completion."""
         checklist = self.get_object()
         user = request.user
@@ -210,6 +216,11 @@ class ChecklistViewSet(viewsets.ModelViewSet):
         user_name = request.data.get("user_name", "")
         if not isinstance(user_name, str):
             user_name = ""
+
+        # If user is authenticated and no user_name provided, use their display name
+        if user.is_authenticated and not user_name:
+            # Prefer handle over username for display
+            user_name = user.handle or user.username
 
         completion = ChecklistCompletion.objects.create(
             checklist=checklist,

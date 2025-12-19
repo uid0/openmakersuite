@@ -270,7 +270,7 @@ class LocationViewSet(viewsets.ModelViewSet):
 
     def _get_client_ip(self, request):
         """Get client IP address from request."""
-        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        x_forwarded_for = request.headers.get("x-forwarded-for")
         if x_forwarded_for:
             ip = x_forwarded_for.split(",")[0]
         else:
@@ -604,7 +604,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
     def _get_client_ip(self, request):
         """Get client IP address from request."""
-        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        x_forwarded_for = request.headers.get("x-forwarded-for")
         if x_forwarded_for:
             ip = x_forwarded_for.split(",")[0]
         else:
@@ -1240,7 +1240,7 @@ class AssetViewSet(viewsets.ModelViewSet):
 
     def _get_client_ip(self, request):
         """Get client IP address from request."""
-        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        x_forwarded_for = request.headers.get("x-forwarded-for")
         if x_forwarded_for:
             ip = x_forwarded_for.split(",")[0]
         else:

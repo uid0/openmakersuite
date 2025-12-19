@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-All versions are supported at this time.  Once we hit version 2.0, we'll support current version minus 1.  
+All versions are supported at this time.  Once we hit version 2.0, we'll support current version minus 1.
 
 ## Reporting a Vulnerability
 

@@ -139,6 +139,53 @@ class TestChecklistAPI:
         assert response.status_code == status.HTTP_201_CREATED
         completion = ChecklistCompletion.objects.get(id=response.data["id"])
         assert completion.user == user
+        # When authenticated and no user_name provided, should use username
+        assert completion.user_name == user.username
+
+    def test_start_checklist_authenticated_with_handle(self, authenticated_client):
+        """Test starting a checklist when authenticated with a handle uses handle."""
+        client, user = authenticated_client
+        # Set a handle for the user
+        user.handle = "MyDisplayName"
+        user.save()
+        checklist = ChecklistFactory(is_public=True, is_active=True)
+
+        url = f"/api/checklists/checklists/{checklist.id}/start/"
+        response = client.post(url, {})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        completion = ChecklistCompletion.objects.get(id=response.data["id"])
+        assert completion.user == user
+        # Should prefer handle over username
+        assert completion.user_name == "MyDisplayName"
+
+    def test_start_checklist_authenticated_with_explicit_user_name(self, authenticated_client):
+        """Test that explicit user_name is respected even when authenticated."""
+        client, user = authenticated_client
+        user.handle = "MyDisplayName"
+        user.save()
+        checklist = ChecklistFactory(is_public=True, is_active=True)
+
+        url = f"/api/checklists/checklists/{checklist.id}/start/"
+        response = client.post(url, {"user_name": "Custom Name"})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        completion = ChecklistCompletion.objects.get(id=response.data["id"])
+        assert completion.user == user
+        # Explicit user_name should be used
+        assert completion.user_name == "Custom Name"
+
+    def test_start_checklist_unauthenticated_without_name(self, api_client):
+        """Test that unauthenticated users can start checklists without providing a name."""
+        checklist = ChecklistFactory(is_public=True, is_active=True)
+
+        url = f"/api/checklists/checklists/{checklist.id}/start/"
+        response = api_client.post(url, {})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        completion = ChecklistCompletion.objects.get(id=response.data["id"])
+        assert completion.user is None
+        assert completion.user_name == ""  # Empty string when not provided
 
     def test_start_checklist_inactive_fails(self, api_client):
         """Test starting an inactive checklist fails."""

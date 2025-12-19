@@ -37,7 +37,7 @@ case "$1" in
     "all-tests")
         echo "🚀 Running all CI tests (backend, frontend, security, code quality)..."
         echo ""
-        
+
         # Code quality checks (matching CI workflow)
         echo "📋 Running code quality checks..."
         echo "  → Checking code formatting with black..."
@@ -50,7 +50,7 @@ case "$1" in
         # Run 'npm run lint' separately if you want to check frontend code quality
         echo "✅ Code quality checks passed"
         echo ""
-        
+
         # Security tests
         echo "🔒 Running security tests..."
         echo "  → Running bandit security check..."
@@ -70,19 +70,19 @@ case "$1" in
         fi
         echo "✅ Security tests passed"
         echo ""
-        
+
         # Backend tests
         echo "🧪 Running backend tests with coverage..."
         cd "${BACKEND_DIR}" && python -m pytest --cov=inventory --cov=reorder_queue --cov=config --cov=membership --cov=forgekey --cov=notifications --cov-report=term -v || { echo "❌ Backend tests failed"; exit 1; }
         echo "✅ Backend tests passed"
         echo ""
-        
+
         # Frontend tests
         echo "🧪 Running frontend tests with coverage..."
         cd "${FRONTEND_DIR}" && npm test -- --coverage --ci --watchAll=false || { echo "❌ Frontend tests failed"; exit 1; }
         echo "✅ Frontend tests passed"
         echo ""
-        
+
         echo "✅ All tests passed!"
         ;;
     "security-tests")

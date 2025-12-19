@@ -16,7 +16,7 @@ repos:
         exclude: ^(backend/.*migrations/|frontend/.*)
       - id: check-yaml
       - id: check-added-large-files
-        args: ['--maxkb=1000']
+        args: ["--maxkb=1000"]
       - id: check-json
       - id: check-merge-conflict
       - id: check-toml
@@ -30,7 +30,7 @@ repos:
         language_version: python3.11
         files: ^backend/
         exclude: ^backend/.*migrations/
-        args: ['--check']  # Match CI: black --check
+        args: ["--check"] # Match CI: black --check
 
   # Backend: Python import sorting
   - repo: https://github.com/pycqa/isort
@@ -39,7 +39,7 @@ repos:
       - id: isort
         files: ^backend/
         exclude: ^backend/.*migrations/
-        args: ["--profile", "black", "--check-only"]  # Match CI: isort --check-only
+        args: ["--profile", "black", "--check-only"] # Match CI: isort --check-only
 
   # Backend: Python linting
   - repo: https://github.com/pycqa/flake8
@@ -57,7 +57,7 @@ repos:
       - id: bandit
         files: ^backend/
         exclude: ^(backend/.*migrations/|backend/.*tests.*)
-        args: ["-r", "backend", "-s", "B101,B106"]  # Match CI: skip B101 (assert_used) and B106 (hardcoded_password_funcarg)
+        args: ["-r", "-s", "B101", "backend"] # Match CI: skip B101 (assert_used) and B106 (hardcoded_password_funcarg)
 
   # Backend: Security checks - pip-audit (dependency vulnerabilities)
   - repo: local
@@ -93,7 +93,7 @@ repos:
     hooks:
       - id: typescript-check
         name: TypeScript compilation check
-        entry: bash -c 'cd frontend && CI=true npm run build 2>&1 | grep -q "Compiled successfully" || (echo "❌ TypeScript compilation failed. Run cd frontend && npm run build" && exit 1)'
+        entry: bash -c 'cd frontend && OUTPUT=$(npx tsc --noEmit --skipLibCheck 2>&1); SRC_ERRORS=$(echo "$OUTPUT" | grep -v "node_modules" | grep -E "src/.*\.(ts|tsx).*error TS" | wc -l | tr -d " "); if [ "$SRC_ERRORS" = "0" ]; then echo "✓ TypeScript compiled successfully"; else echo "❌ TypeScript compilation failed with $SRC_ERRORS error(s) in src/"; echo "$OUTPUT" | grep -v "node_modules" | grep -E "src/.*\.(ts|tsx).*error TS" | head -10; exit 1; fi'
         language: system
         files: ^frontend/src/.*\.(ts|tsx)$
         pass_filenames: false

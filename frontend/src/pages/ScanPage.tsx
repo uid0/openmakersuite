@@ -101,8 +101,15 @@ const ScanPage: React.FC = () => {
 
   const handleStartChecklist = async (checklistId: string) => {
     try {
-      const userName = prompt('Enter your name (optional):') || '';
-      const completion = await checklistsAPI.startChecklist(checklistId, userName || undefined);
+      // If logged in, use the username from localStorage; otherwise prompt
+      let userName: string | undefined;
+      if (isLoggedIn) {
+        userName = localStorage.getItem('username') || undefined;
+      } else {
+        const promptResult = prompt('Enter your name (optional):');
+        userName = promptResult || undefined;
+      }
+      const completion = await checklistsAPI.startChecklist(checklistId, userName);
       navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to start checklist');

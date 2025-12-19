@@ -536,7 +536,8 @@ def get_qr_scans_data(request):
         from collections import defaultdict
         from datetime import timedelta
 
-        from django.db.models import Count, TruncDate
+        from django.db.models import Count
+        from django.db.models.functions import TruncDate
         from django.utils import timezone
 
         from inventory.models import Asset, InventoryItem

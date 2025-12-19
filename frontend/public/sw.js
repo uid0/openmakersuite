@@ -5,7 +5,7 @@
 
 const CACHE_NAME = 'dms-inventory-v1';
 const STATIC_CACHE_NAME = 'dms-inventory-static-v1';
-const API_CACHE_NAME = 'dms-inventory-api-v1';
+const DATA_CACHE_NAME = 'dms-inventory-data-v1';
 
 // Assets to cache immediately on install
 const STATIC_ASSETS = [
@@ -40,7 +40,7 @@ self.addEventListener('activate', (event) => {
           if (
             cacheName !== CACHE_NAME &&
             cacheName !== STATIC_CACHE_NAME &&
-            cacheName !== API_CACHE_NAME
+            cacheName !== DATA_CACHE_NAME
           ) {
             console.log('[Service Worker] Deleting old cache:', cacheName);
             return caches.delete(cacheName);
@@ -103,7 +103,7 @@ async function networkFirstStrategy(request) {
     
     // Cache successful responses
     if (networkResponse.ok) {
-      const cache = await caches.open(API_CACHE_NAME);
+      const cache = await caches.open(DATA_CACHE_NAME);
       cache.put(request, responseClone);
     }
     

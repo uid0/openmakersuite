@@ -1,0 +1,113 @@
+# Pre-commit hooks configuration
+# Mirrors the checks performed in .github/workflows/ci.yml
+# See https://pre-commit.com for more information
+#
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # General file cleanups
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(backend/.*migrations/|frontend/.*)
+      - id: end-of-file-fixer
+        exclude: ^(backend/.*migrations/|frontend/.*)
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: detect-private-key
+
+  # Backend: Python code formatting
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        language_version: python3.11
+        files: ^backend/
+        exclude: ^backend/.*migrations/
+        args: ['--check']  # Match CI: black --check
+
+  # Backend: Python import sorting
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        files: ^backend/
+        exclude: ^backend/.*migrations/
+        args: ["--profile", "black", "--check-only"]  # Match CI: isort --check-only
+
+  # Backend: Python linting
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        files: ^backend/
+        exclude: ^backend/.*migrations/
+        args: ["--config=backend/.flake8"]
+
+  # Backend: Security checks - Bandit
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.6
+    hooks:
+      - id: bandit
+        files: ^backend/
+        exclude: ^(backend/.*migrations/|backend/.*tests.*)
+        args: ["-r", "backend", "-s", "B101,B106"]  # Match CI: skip B101 (assert_used) and B106 (hardcoded_password_funcarg)
+
+  # Backend: Security checks - pip-audit (dependency vulnerabilities)
+  - repo: local
+    hooks:
+      - id: pip-audit
+        name: pip-audit
+        entry: bash -c 'cd backend && pip-audit --desc || echo "⚠️  pip-audit not available, skipping..."'
+        language: system
+        files: ^backend/requirements.*\.txt$
+        pass_filenames: false
+        always_run: false
+
+  # Backend: Django-specific checks
+  - repo: https://github.com/adamchainz/django-upgrade
+    rev: 1.16.0
+    hooks:
+      - id: django-upgrade
+        files: ^backend/
+        args: ["--target-version", "4.2"]
+
+  # Frontend: Verify package-lock.json is in sync
+  - repo: local
+    hooks:
+      - id: npm-lock-check
+        name: npm package-lock.json sync check
+        entry: bash -c 'cd frontend && npm ci --dry-run || (echo "package-lock.json is out of sync. Run cd frontend && npm install" && exit 1)'
+        language: system
+        files: ^frontend/package\.json$
+        pass_filenames: false
+        always_run: false
+
+  # Frontend: Run tests (optional - can be slow, comment out if needed)
+  - repo: local
+    hooks:
+      - id: npm-test
+        name: npm test
+        entry: bash -c 'cd frontend && npm test -- --coverage --ci --watchAll=false'
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
+        always_run: false
+        stages: [manual]  # Only run manually, not on every commit
+
+# CI configuration
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false

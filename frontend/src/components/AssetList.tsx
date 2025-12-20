@@ -3,7 +3,7 @@
  * Displays all hard assets with search and filtering (status, location, SIG)
  * Supports both Card view and Table view with smart client/server-side mode switching
  */
-import { Button, Group, SegmentedControl } from '@mantine/core';
+import { Button, Group } from '@mantine/core';
 import { IconLayoutGrid, IconTable } from '@tabler/icons-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -441,14 +441,24 @@ const AssetList: React.FC = () => {
         <h2>Makerspace Assets ({displayCount} total)</h2>
         <div className="asset-header-actions">
           <Group gap="md">
-            <SegmentedControl
-              value={viewMode}
-              onChange={(value) => setViewMode(value as 'card' | 'table')}
-              data={[
-                { label: 'Card View', value: 'card', icon: <IconLayoutGrid size={16} /> },
-                { label: 'Table View', value: 'table', icon: <IconTable size={16} /> },
-              ]}
-            />
+            <Group gap={0}>
+              <Button
+                variant={viewMode === 'card' ? 'filled' : 'default'}
+                onClick={() => setViewMode('card')}
+                leftSection={<IconLayoutGrid size={16} />}
+                style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+              >
+                Card View
+              </Button>
+              <Button
+                variant={viewMode === 'table' ? 'filled' : 'default'}
+                onClick={() => setViewMode('table')}
+                leftSection={<IconTable size={16} />}
+                style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, marginLeft: -1 }}
+              >
+                Table View
+              </Button>
+            </Group>
             <Button onClick={handleCreateAsset}>
               + Create Asset
             </Button>

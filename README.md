@@ -11,6 +11,13 @@ Open Maker Suite isn't just one component or one application. It's a few things:
 1. A device management system that allows you to enable or disable a device via MQTT, along with disabling a device for safety or maintenance reasons.
 1. A QR code reporting system that allows members to report issues with restrooms, lobbies, or equipment.
 
+With that said, there are a few things that Open Maker Suite isn't:
+
+* An ERP.  There are better solutions for small (or big!) makerspaces, and let's be honest, an ERP system isn't one of them.  I'm not responsible for finance at my Makerspace, but, I am responsible for being a prudent spender of my member's fees to keep the place running smoothly.  I track the prices of items so that I can evaluate the price vs time balance that I frequently have to ask myself about.
+* An Inventory Tracking Solution.  A makerspace has a LOT of different personalities, a lot of various degrees of technical ability, and some users don't have smartphones...so, this isn't designed to hold inventory of commonly used items.  Items that a specific team (like a Facilities/Logistics team) may only use can be inventory controlled for assets, but, if you want an exact count of the number of toilet paper rolls that you have remaining, this isn't the solution for you.
+* A member management solution.
+
+
 ## Features
 
 - **📦 Inventory Management**: Track items, quantities, locations, and suppliers
@@ -327,6 +334,8 @@ OpenMakerSuite integrates with Sentry for:
 - **📱 Release Tracking**: Associate errors with specific releases
 - **🔔 Alerting**: Real-time notifications for critical issues
 
+To set this up for use in your own environment, please update the `SENTRY_DSN` variable in the .env file.  
+
 ### Metrics Dashboard
 
 The admin dashboard provides:
@@ -344,7 +353,7 @@ The admin dashboard provides:
 - **📖 Documentation**: Check the docs folder for detailed guides
 - **🐛 Issues**: Report bugs on GitHub Issues
 - **💬 Discussions**: Join GitHub Discussions for questions
-- **📧 Security**: Email security issues to security@yourdomain.com
+- **📧 Security**: Email security issues to me AT ianwilson DOT org.  
 
 ### Community
 

@@ -775,3 +775,48 @@ export interface NotificationPreferences {
   created_at: string;
   updated_at: string;
 }
+
+// Webhook types
+export type WebhookEventType =
+  | 'reorder_request_created'
+  | 'reorder_request_approved'
+  | 'reorder_request_ordered'
+  | 'reorder_request_received'
+  | 'item_low_stock'
+  | 'purchase_order_created'
+  | 'delivery_received'
+  | 'fixture_refill_requested'
+  | 'location_checkin'
+  | 'location_feedback'
+  | 'security_report';
+
+export interface Webhook {
+  id: number;
+  name: string;
+  description: string;
+  url: string;
+  event_type: WebhookEventType;
+  event_type_display: string;
+  is_active: boolean;
+  secret?: string; // Only returned on create/update, not in list
+  headers: Record<string, string> | null;
+  last_triggered_at: string | null;
+  success_count: number;
+  failure_count: number;
+  success_rate: number | null;
+  total_triggers: number;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebhookTestResult {
+  webhook_id: number;
+  webhook_name: string;
+  success: boolean;
+  status_code?: number | null;
+  response_time_ms?: number | null;
+  error_message?: string;
+  response_body?: string;
+  tested_at: string;
+}

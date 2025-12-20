@@ -1,0 +1,11 @@
+.webhook-list-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+@media (max-width: 768px) {
+  .webhook-list-page {
+    padding: 0.5rem;
+  }
+}

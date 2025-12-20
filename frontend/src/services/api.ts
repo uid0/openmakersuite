@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -904,6 +904,27 @@ export const dashboardAPI = {
 
   getDeliveriesData: () =>
     api.get<DeliveriesData>('/dashboard/widget-data/deliveries/'),
+};
+
+// Webhooks API
+export const webhooksAPI = {
+  listWebhooks: () =>
+    api.get<{ results: Webhook[] }>('/reorders/webhooks/'),
+
+  getWebhook: (id: number) =>
+    api.get<Webhook>(`/reorders/webhooks/${id}/`),
+
+  createWebhook: (data: Partial<Webhook>) =>
+    api.post<Webhook>('/reorders/webhooks/', data),
+
+  updateWebhook: (id: number, data: Partial<Webhook>) =>
+    api.patch<Webhook>(`/reorders/webhooks/${id}/`, data),
+
+  deleteWebhook: (id: number) =>
+    api.delete(`/reorders/webhooks/${id}/`),
+
+  testWebhook: (id: number) =>
+    api.post<WebhookTestResult>(`/reorders/webhooks/${id}/test/`),
 };
 
 export default api;

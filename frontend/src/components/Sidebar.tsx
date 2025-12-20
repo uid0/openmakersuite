@@ -141,6 +141,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
       items: [
         { path: '/settings/profile', label: 'Profile', icon: '👤', requiresAuth: true },
         { path: '/settings/site', label: 'Site Settings', icon: '🎨', requiresSuperuser: true },
+        { path: '/settings/webhooks', label: 'Webhooks', icon: '🔗', requiresAuth: true },
         { path: '/settings/tax-receipt/lookup', label: 'Tax Receipt Lookup', icon: '🧾' },
         { path: '/admin', label: 'Django Admin', icon: '🔧', requiresStaff: true, external: true },
       ],

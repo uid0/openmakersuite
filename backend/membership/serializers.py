@@ -132,3 +132,47 @@ class UserSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
         ]
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    """Serializer for user profile editing."""
+
+    signature_image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "handle",
+            "discord_username",
+            "discourse_username",
+            "signature_image_url",
+        ]
+        read_only_fields = ["id", "username", "signature_image_url"]
+
+    def get_signature_image_url(self, obj):
+        """Return the URL of the signature image if it exists."""
+        if obj.signature_image:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.signature_image.url)
+            return obj.signature_image.url
+        return None
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Serializer for password change."""
+
+    old_password = serializers.CharField(required=True, write_only=True)
+    new_password = serializers.CharField(required=True, write_only=True, min_length=8)
+    new_password2 = serializers.CharField(required=True, write_only=True)
+
+    def validate(self, attrs):
+        """Validate that new passwords match."""
+        if attrs["new_password"] != attrs["new_password2"]:
+            raise serializers.ValidationError({"new_password2": "New passwords do not match."})
+        return attrs

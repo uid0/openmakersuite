@@ -40,6 +40,7 @@ import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
 import TVDashboard from './pages/TVDashboard';
+import UserProfilePage from './pages/UserProfilePage';
 import './styles/App.css';
 
 // Wrap routes with Sentry for better error tracking
@@ -169,6 +170,7 @@ function AppContent() {
           <Route path="/reports/assets" element={<WorkspaceLayout><AssetReportPage /></WorkspaceLayout>} />
 
           {/* Settings Workspace */}
+          <Route path="/settings/profile" element={<WorkspaceLayout><UserProfilePage /></WorkspaceLayout>} />
           <Route path="/settings/tax-receipt/lookup" element={<WorkspaceLayout><TaxReceiptLookupPage /></WorkspaceLayout>} />
 
           {/* Legacy routes - redirect to new workspace routes */}

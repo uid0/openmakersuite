@@ -2,15 +2,23 @@
 Views for membership and SIG management API.
 """
 
+from django.contrib.auth import authenticate
 from django.contrib.auth.models import Group
 
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import SIGAdmin, User
-from .serializers import SIGAdminSerializer, SIGMemberSerializer, SIGSerializer, UserSerializer
+from .serializers import (
+    ChangePasswordSerializer,
+    SIGAdminSerializer,
+    SIGMemberSerializer,
+    SIGSerializer,
+    UserProfileSerializer,
+    UserSerializer,
+)
 from .utils import get_user_managed_sigs, is_sig_admin
 
 
@@ -234,3 +242,60 @@ class SIGAdminViewSet(viewsets.ModelViewSet):
         if not (self.request.user.is_superuser or self.request.user.is_staff):
             raise PermissionError("Only superusers and staff can delete SIG admins.")
         instance.delete()
+
+
+class UserProfileViewSet(viewsets.ViewSet):
+    """
+    ViewSet for user profile management.
+
+    Users can view and update their own profile.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["get"])
+    def me(self, request):
+        """Get current user's profile."""
+        serializer = UserProfileSerializer(request.user, context={"request": request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["put", "patch"])
+    def update_me(self, request):
+        """Update current user's profile."""
+        serializer = UserProfileSerializer(
+            request.user, data=request.data, context={"request": request}, partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """
+    Change user password.
+
+    Requires old password verification and new password confirmation.
+    """
+    serializer = ChangePasswordSerializer(data=request.data)
+    if serializer.is_valid():
+        user = request.user
+        old_password = serializer.validated_data["old_password"]
+        new_password = serializer.validated_data["new_password"]
+
+        # Verify old password
+        if not authenticate(username=user.username, password=old_password):
+            return Response(
+                {"old_password": ["Invalid password."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Set new password
+        user.set_password(new_password)
+        user.save()
+
+        return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

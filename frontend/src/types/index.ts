@@ -744,3 +744,34 @@ export interface DeliveriesData {
   }>;
   timestamp: string;
 }
+
+// User Profile types
+export interface UserProfile {
+  id: number;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  handle: string | null;
+  discord_username: string | null;
+  discourse_username: string | null;
+  signature_image_url: string | null;
+}
+
+export interface ChangePasswordRequest {
+  old_password: string;
+  new_password: string;
+  new_password2: string;
+}
+
+export interface NotificationPreferences {
+  id: number;
+  email_enabled: boolean;
+  in_app_enabled: boolean;
+  supply_alerts: boolean;
+  maintenance_alerts: boolean;
+  order_updates: boolean;
+  system_notifications: boolean;
+  created_at: string;
+  updated_at: string;
+}

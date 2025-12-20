@@ -2,6 +2,7 @@
 Views for inventory API.
 """
 
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
@@ -1053,6 +1054,63 @@ class AssetViewSet(viewsets.ModelViewSet):
         if asset_status:
             queryset = queryset.filter(status=asset_status)
 
+        # Filter by inventory_item if specified
+        inventory_item = self.request.query_params.get("inventory_item")
+        if inventory_item:
+            queryset = queryset.filter(inventory_item_id=inventory_item)
+
+        # Filter by manufacturer if specified
+        manufacturer = self.request.query_params.get("manufacturer")
+        if manufacturer:
+            queryset = queryset.filter(manufacturer_id=manufacturer)
+
+        # Filter by owning_group if specified
+        owning_group = self.request.query_params.get("owning_group")
+        if owning_group:
+            queryset = queryset.filter(owning_group_id=owning_group)
+
+        # Filter by date_received range
+        date_received_after = self.request.query_params.get("date_received_after")
+        if date_received_after:
+            try:
+                from datetime import datetime
+
+                date_obj = datetime.fromisoformat(date_received_after.replace("Z", "+00:00")).date()
+                queryset = queryset.filter(date_received__gte=date_obj)
+            except (ValueError, AttributeError):
+                pass  # Invalid date format, ignore filter
+
+        date_received_before = self.request.query_params.get("date_received_before")
+        if date_received_before:
+            try:
+                from datetime import datetime
+
+                date_obj = datetime.fromisoformat(
+                    date_received_before.replace("Z", "+00:00")
+                ).date()
+                queryset = queryset.filter(date_received__lte=date_obj)
+            except (ValueError, AttributeError):
+                pass  # Invalid date format, ignore filter
+
+        # Filter by age (days since date_received)
+        age_min_days = self.request.query_params.get("age_min_days")
+        if age_min_days:
+            try:
+                min_days = int(age_min_days)
+                cutoff_date = date.today() - timedelta(days=min_days)
+                queryset = queryset.filter(date_received__lte=cutoff_date)
+            except (ValueError, TypeError):
+                pass  # Invalid value, ignore filter
+
+        age_max_days = self.request.query_params.get("age_max_days")
+        if age_max_days:
+            try:
+                max_days = int(age_max_days)
+                cutoff_date = date.today() - timedelta(days=max_days)
+                queryset = queryset.filter(date_received__gte=cutoff_date)
+            except (ValueError, TypeError):
+                pass  # Invalid value, ignore filter
+
         # Search functionality
         search = self.request.query_params.get("search")
         if search:
@@ -1069,7 +1127,45 @@ class AssetViewSet(viewsets.ModelViewSet):
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == "true")
 
-        return queryset.order_by("name")
+        # Ordering support
+        ordering = self.request.query_params.get("ordering", "name")
+        # Validate ordering field to prevent SQL injection
+        # Only allow ordering by direct fields or related fields that are select_related
+        valid_ordering_fields = {
+            "name",
+            "-name",
+            "asset_tag",
+            "-asset_tag",
+            "serial_number",
+            "-serial_number",
+            "status",
+            "-status",
+            "date_received",
+            "-date_received",
+            "created_at",
+            "-created_at",
+            "is_active",
+            "-is_active",
+            "location__name",
+            "-location__name",
+            "category__name",
+            "-category__name",
+            "manufacturer__name",
+            "-manufacturer__name",
+            "manufacturer_name",
+            "-manufacturer_name",
+            "inventory_item__name",
+            "-inventory_item__name",
+            "owning_group__name",
+            "-owning_group__name",
+        }
+        if ordering in valid_ordering_fields:
+            queryset = queryset.order_by(ordering)
+        else:
+            # Default ordering
+            queryset = queryset.order_by("name")
+
+        return queryset
 
     def create(self, request, *args, **kwargs):
         """Create a new asset with permission checks."""

@@ -274,3 +274,83 @@ export function exportAssetReportToCSV(
 
   exportToCSV(csvData, { filename: `asset-report-${reportType}`, headers });
 }
+
+/**
+ * Format age in days to readable string
+ */
+function formatAge(ageInDays: number | undefined): string {
+  if (ageInDays === undefined || ageInDays === null) return 'N/A';
+  const years = Math.floor(ageInDays / 365);
+  const days = ageInDays % 365;
+  if (years > 0) {
+    return `${years}y ${days}d`;
+  }
+  return `${days}d`;
+}
+
+/**
+ * Format date string to readable format
+ */
+function formatDate(dateString: string | null | undefined): string {
+  if (!dateString) return 'N/A';
+  try {
+    return new Date(dateString).toLocaleDateString();
+  } catch {
+    return 'N/A';
+  }
+}
+
+/**
+ * Export assets to CSV with standard columns
+ */
+export function exportAssetsToCSV(assets: any[]): void {
+  const headers = [
+    'Name',
+    'Asset Tag',
+    'Serial Number',
+    'Status',
+    'Location',
+    'Category',
+    'Manufacturer',
+    'Age',
+    'Date Received',
+    'Inventory Item',
+    'Owning Group',
+    'Operational Status',
+    'Is Active',
+    'Description',
+    'Amount Paid',
+    'Is Donation',
+    'Donor Name',
+    'Product URL',
+    'Wiki Page URL',
+    'Created At',
+    'Updated At',
+  ];
+
+  const csvData = assets.map((asset) => ({
+    Name: asset.name || '',
+    'Asset Tag': asset.asset_tag || '',
+    'Serial Number': asset.serial_number || '',
+    Status: asset.status || '',
+    Location: asset.location_name || '',
+    Category: asset.category_name || '',
+    Manufacturer: asset.display_manufacturer || asset.manufacturer_name || '',
+    Age: formatAge(asset.age_in_days),
+    'Date Received': formatDate(asset.date_received),
+    'Inventory Item': asset.inventory_item_name || '',
+    'Owning Group': asset.owning_group_name || '',
+    'Operational Status': asset.operational_status || '',
+    'Is Active': asset.is_active ? 'Yes' : 'No',
+    Description: asset.description || '',
+    'Amount Paid': asset.amount_paid || '',
+    'Is Donation': asset.is_donation ? 'Yes' : 'No',
+    'Donor Name': asset.donor_name || '',
+    'Product URL': asset.product_url || '',
+    'Wiki Page URL': asset.wiki_page_url || '',
+    'Created At': formatDate(asset.created_at),
+    'Updated At': formatDate(asset.updated_at),
+  }));
+
+  exportToCSV(csvData, { filename: 'assets-export', headers });
+}

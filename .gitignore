@@ -53,7 +53,7 @@ yarn-error.log*
 frontend/build
 frontend/test-results/
 frontend/playwright-report/
-frontend/coverage/lcov-report
+frontend/coverage/**
 .DS_Store
 .env.local
 .env.development.local

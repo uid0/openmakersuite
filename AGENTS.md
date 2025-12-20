@@ -20,6 +20,8 @@
 - Always use black, isort, flake8 for python code to make sure that your code is complianct with the tools that we Lint and CI with.
 
 ## Backend
+
+- **Django Version**: Currently using Django 5.1.14 (upgraded from 4.2.27 in December 2025)
 - Use `python manage.py startapp` to create new apps within your project
 - Keep models in `models.py` and register them in `admin.py` for admin interface
 - Use Django's ORM instead of raw SQL queries
@@ -51,8 +53,30 @@ class ActiveUserManager(models.Manager):
 - Use Django's built-in authentication system
 - Store settings in environment variables and access via `settings.py`
 
+### Django 5.1 Upgrade Notes (December 2025)
+
+The project was successfully upgraded from Django 4.2.27 to Django 5.1.14. Key points:
+
+- **All tests pass**: 389 passed, 2 skipped with Django 5.1.14
+- **No breaking changes**: All custom admin filters (`DeliveryPerformanceFilter`, `ReceiptStatusFilter` in `reorder_queue/admin.py`) work correctly
+- **Package compatibility**:
+  - `django-passkey-auth==0.2.0` works with Django 5.1 (no explicit support but tested and functional)
+  - All third-party packages updated to Django 5.1-compatible versions
+- **No deprecation warnings**: Clean upgrade with no deprecated features in use
+- **Database**: PostgreSQL 15 meets Django 5.1 requirements (13+)
+- **Migrations**: All migrations run cleanly, no issues detected
+
+Updated packages:
+
+- Django: 4.2.27 → 5.1.14
+- djangorestframework: 3.15.2 → 3.16.1
+- django-cors-headers: 4.6.0 → 4.9.0
+- django-redis: 5.4.0 → 6.0.0
+- django-celery-results: 2.5.1 → 2.6.0
+- drf-spectacular: 0.27.2 → 0.29.0
 
 ## Frontend
+
 - Use functional components with hooks
 - Follow a consistent folder structure (components, screens, navigation, services, hooks, utils)
 - Use React Navigation for screen navigation

@@ -47,6 +47,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       localStorage.setItem('refresh_token', response.data.refresh);
       localStorage.setItem('username', loginUsername);
       localStorage.setItem('is_staff', String(response.data.is_staff || false));
+      localStorage.setItem('is_superuser', String(response.data.is_superuser || false));
 
       setIsLoggedIn(true);
       setUsername(loginUsername);
@@ -87,6 +88,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       localStorage.setItem('refresh_token', loginResponse.data.refresh);
       localStorage.setItem('username', registerUsername);
       localStorage.setItem('is_staff', String(loginResponse.data.is_staff || false));
+      localStorage.setItem('is_superuser', String(loginResponse.data.is_superuser || false));
 
       setIsLoggedIn(true);
       setUsername(registerUsername);
@@ -109,6 +111,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('username');
     localStorage.removeItem('is_staff');
+    localStorage.removeItem('is_superuser');
     setIsLoggedIn(false);
     setUsername('');
     onAuthChange(false);

@@ -622,6 +622,12 @@ export const userAPI = {
 export const customizationAPI = {
   getSiteSettings: () =>
     api.get<SiteSettings>('/customization/settings/'),
+  updateSiteSettings: (data: FormData) =>
+    api.put<SiteSettings>('/customization/settings/', data, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }),
 };
 
 // Location Check-in API

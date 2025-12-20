@@ -13,6 +13,7 @@ interface NavItem {
   icon?: string;
   requiresAuth?: boolean;
   requiresStaff?: boolean;
+  requiresSuperuser?: boolean;
   external?: boolean;
 }
 
@@ -36,6 +37,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
   const [touchEnd, setTouchEnd] = useState<number | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [isStaff, setIsStaff] = useState<boolean>(false);
+  const [isSuperuser, setIsSuperuser] = useState<boolean>(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const location = useLocation();
 
@@ -44,15 +46,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
     const checkAuth = () => {
       const token = localStorage.getItem('token');
       const staffStatus = localStorage.getItem('is_staff');
+      const superuserStatus = localStorage.getItem('is_superuser');
       
       setIsLoggedIn(!!token);
       setIsStaff(staffStatus === 'true');
+      setIsSuperuser(superuserStatus === 'true');
     };
 
     checkAuth();
 
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'token' || e.key === 'is_staff') {
+      if (e.key === 'token' || e.key === 'is_staff' || e.key === 'is_superuser') {
         checkAuth();
       }
     };
@@ -136,6 +140,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
       icon: '⚙️',
       items: [
         { path: '/settings/profile', label: 'Profile', icon: '👤', requiresAuth: true },
+        { path: '/settings/site', label: 'Site Settings', icon: '🎨', requiresSuperuser: true },
         { path: '/settings/tax-receipt/lookup', label: 'Tax Receipt Lookup', icon: '🧾' },
         { path: '/admin', label: 'Django Admin', icon: '🔧', requiresStaff: true, external: true },
       ],
@@ -179,6 +184,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
   };
 
   const shouldShowItem = (item: NavItem): boolean => {
+    if (item.requiresSuperuser && !isSuperuser) return false;
     if (item.requiresStaff && !isStaff) return false;
     if (item.requiresAuth && !isLoggedIn) return false;
     return true;

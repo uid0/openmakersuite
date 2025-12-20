@@ -33,6 +33,7 @@ import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import PurchasingReportPage from './pages/PurchasingReportPage';
 import ScanPage from './pages/ScanPage';
 import SIGDashboard from './pages/SIGDashboard';
+import SiteSettingsPage from './pages/SiteSettingsPage';
 import SupplierDetailPage from './pages/SupplierDetailPage';
 import SupplierFormPage from './pages/SupplierFormPage';
 import SupplierListPage from './pages/SupplierListPage';
@@ -171,6 +172,7 @@ function AppContent() {
 
           {/* Settings Workspace */}
           <Route path="/settings/profile" element={<WorkspaceLayout><UserProfilePage /></WorkspaceLayout>} />
+          <Route path="/settings/site" element={<WorkspaceLayout><SiteSettingsPage /></WorkspaceLayout>} />
           <Route path="/settings/tax-receipt/lookup" element={<WorkspaceLayout><TaxReceiptLookupPage /></WorkspaceLayout>} />
 
           {/* Legacy routes - redirect to new workspace routes */}

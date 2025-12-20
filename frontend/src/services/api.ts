@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -591,6 +591,33 @@ export const authAPI = {
     api.post('/auth/refresh/', { refresh: refreshToken }),
 };
 
+// User Profile API
+export const userAPI = {
+  getProfile: () =>
+    api.get<UserProfile>('/membership/profile/me/'),
+
+  updateProfile: (data: Partial<UserProfile>) =>
+    api.put<UserProfile>('/membership/profile/update_me/', data),
+
+  changePassword: (data: ChangePasswordRequest) =>
+    api.post<{ message: string }>('/membership/change-password/', data),
+
+  uploadSignature: (file: File, password: string) => {
+    const formData = new FormData();
+    formData.append('signature', file);
+    formData.append('password', password);
+    return api.post<{ message: string; signature_url: string | null }>(
+      '/donations/upload-signature/',
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      }
+    );
+  },
+};
+
 // Customization API
 export const customizationAPI = {
   getSiteSettings: () =>
@@ -780,6 +807,12 @@ export const notificationsAPI = {
 
   delete: (id: string) =>
     api.delete(`/notifications/${id}/`),
+
+  getPreferences: () =>
+    api.get<NotificationPreferences>('/notifications/preferences/'),
+
+  updatePreferences: (data: Partial<NotificationPreferences>) =>
+    api.put<NotificationPreferences>('/notifications/preferences/', data),
 };
 
 // Reports API

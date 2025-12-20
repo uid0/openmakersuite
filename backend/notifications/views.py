@@ -2,14 +2,18 @@
 Views for notification API.
 """
 
-from rest_framework import viewsets
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from .models import Notification
-from .serializers import NotificationCreateSerializer, NotificationSerializer
+from .models import Notification, NotificationPreference
+from .serializers import (
+    NotificationCreateSerializer,
+    NotificationPreferenceSerializer,
+    NotificationSerializer,
+)
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
@@ -57,3 +61,30 @@ class NotificationViewSet(viewsets.ModelViewSet):
         """Mark all notifications for the current user as read."""
         updated = Notification.objects.filter(user=request.user, read=False).update(read=True)
         return Response({"status": "marked all as read", "updated": updated})
+
+
+class NotificationPreferenceViewSet(viewsets.ViewSet):
+    """
+    ViewSet for managing user notification preferences.
+
+    Auto-creates preferences on first access with default values.
+    """
+
+    authentication_classes = (JWTAuthentication,)
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationPreferenceSerializer
+
+    def retrieve(self, request):
+        """Get current user's notification preferences."""
+        preferences, created = NotificationPreference.objects.get_or_create(user=request.user)
+        serializer = self.get_serializer(preferences)
+        return Response(serializer.data)
+
+    def update(self, request):
+        """Update current user's notification preferences."""
+        preferences, created = NotificationPreference.objects.get_or_create(user=request.user)
+        serializer = self.get_serializer(preferences, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

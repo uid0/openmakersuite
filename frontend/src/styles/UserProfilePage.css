@@ -1,0 +1,9 @@
+/**
+ * User Profile Page Styles
+ * Minimal styles - most styling handled by Mantine components
+ */
+
+.user-profile-page {
+  max-width: 1200px;
+  margin: 0 auto;
+}

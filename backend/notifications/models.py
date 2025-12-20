@@ -78,3 +78,57 @@ class Notification(models.Model):
         """Mark this notification as read."""
         self.read = True
         self.save(update_fields=["read"])
+
+
+class NotificationPreference(models.Model):
+    """
+    User notification preferences model.
+
+    Stores user preferences for different types of notifications.
+    Auto-created on first access with default values.
+    """
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="notification_preferences",
+        help_text="User who owns these preferences",
+    )
+    email_enabled = models.BooleanField(
+        default=True,
+        help_text="Enable email notifications",
+    )
+    in_app_enabled = models.BooleanField(
+        default=True,
+        help_text="Enable in-app notifications",
+    )
+    supply_alerts = models.BooleanField(
+        default=True,
+        help_text="Receive alerts about low supplies",
+    )
+    maintenance_alerts = models.BooleanField(
+        default=True,
+        help_text="Receive alerts about maintenance needs",
+    )
+    order_updates = models.BooleanField(
+        default=True,
+        help_text="Receive updates about order status",
+    )
+    system_notifications = models.BooleanField(
+        default=True,
+        help_text="Receive system notifications",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the preferences were created",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="When the preferences were last updated",
+    )
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"Notification preferences for {self.user.username}"

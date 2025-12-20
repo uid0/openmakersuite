@@ -118,6 +118,7 @@ def login_user(request):
             "refresh": str(refresh),
             "username": user.username,
             "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
         }
     )
 

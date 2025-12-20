@@ -1,13 +1,17 @@
 /**
  * Asset List Component
  * Displays all hard assets with search and filtering (status, location, SIG)
+ * Supports both Card view and Table view with smart client/server-side mode switching
  */
-import React, { useEffect, useState } from 'react';
+import { Button, Group, SegmentedControl } from '@mantine/core';
+import { IconLayoutGrid, IconTable } from '@tabler/icons-react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
 import { assetsAPI, inventoryAPI, sigAPI } from '../services/api';
 import '../styles/AssetList.css';
 import { Asset, Location, SIG } from '../types';
+import AssetTableView from './AssetTableView';
 
 interface AssetCardProps {
   asset: Asset;
@@ -115,6 +119,8 @@ const AssetCard: React.FC<AssetCardProps> = ({
   );
 };
 
+const CLIENT_SIDE_THRESHOLD = 250;
+
 const AssetList: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -127,6 +133,14 @@ const AssetList: React.FC = () => {
   const [inventoryItemFilter, setInventoryItemFilter] = useState<string | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [sigs, setSigs] = useState<SIG[]>([]);
+  
+  // View mode and pagination state
+  const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
+  const [serverMode, setServerMode] = useState(false);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [sortField, setSortField] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     // Check URL params for inventory_item filter
@@ -138,8 +152,16 @@ const AssetList: React.FC = () => {
 
   useEffect(() => {
     loadInitialData();
-    loadAssets();
+  }, []);
+
+  // Reset to page 1 when filters or search change
+  useEffect(() => {
+    setCurrentPage(1);
   }, [statusFilter, locationFilter, sigFilter, inventoryItemFilter, searchTerm]);
+
+  useEffect(() => {
+    loadAssets();
+  }, [statusFilter, locationFilter, sigFilter, inventoryItemFilter, searchTerm, currentPage, sortField, sortDirection]);
 
   const loadInitialData = async () => {
     try {
@@ -173,8 +195,68 @@ const AssetList: React.FC = () => {
       if (searchTerm) {
         params.search = searchTerm;
       }
+      
+      // Add sorting
+      const backendSortField = getBackendSortField();
+      if (backendSortField) {
+        params.ordering = backendSortField;
+      }
+      
+      // For initial load or server mode, use pagination
+      if (serverMode || currentPage > 1) {
+        params.page = currentPage;
+      }
+      
       const response = await assetsAPI.listAssets(params);
-      setAssets(response.data.results);
+      const responseData = response.data;
+      
+      // Check if we should switch modes
+      const count = responseData.count ?? responseData.results.length;
+      setTotalCount(count);
+      
+      // Determine mode on first load or when filters change significantly
+      const shouldUseServerMode = count >= CLIENT_SIDE_THRESHOLD;
+      
+      if (shouldUseServerMode && !serverMode) {
+        // Switch to server mode
+        setServerMode(true);
+        setCurrentPage(1); // Reset to first page
+        setAssets(responseData.results);
+      } else if (!shouldUseServerMode && serverMode) {
+        // Switch to client mode - fetch all pages
+        setServerMode(false);
+        setCurrentPage(1);
+        const allAssets: Asset[] = [...responseData.results];
+        let page = 2;
+        while (responseData.next && page <= Math.ceil(count / 50)) {
+          params.page = page;
+          const nextResponse = await assetsAPI.listAssets(params);
+          allAssets.push(...nextResponse.data.results);
+          if (!nextResponse.data.next) break;
+          page++;
+        }
+        setAssets(allAssets);
+      } else if (serverMode) {
+        // Server mode: just use current page results
+        setAssets(responseData.results);
+      } else {
+        // Client-side mode: fetch all pages if needed
+        if (count > responseData.results.length && responseData.next) {
+          // Need to fetch all pages
+          const allAssets: Asset[] = [...responseData.results];
+          let page = 2;
+          while (responseData.next && page <= Math.ceil(count / 50)) {
+            params.page = page;
+            const nextResponse = await assetsAPI.listAssets(params);
+            allAssets.push(...nextResponse.data.results);
+            if (!nextResponse.data.next) break;
+            page++;
+          }
+          setAssets(allAssets);
+        } else {
+          setAssets(responseData.results);
+        }
+      }
     } catch (err: any) {
       console.error('AssetList: Error loading assets:', err);
     } finally {
@@ -182,12 +264,34 @@ const AssetList: React.FC = () => {
     }
   };
 
-  const statusCounts = {
-    all: assets.length,
-    active: assets.filter(a => a.status === 'active').length,
-    maintenance: assets.filter(a => a.status === 'maintenance').length,
-    retired: assets.filter(a => a.status === 'retired').length,
-  };
+  // Client-side filtering for card view when in client mode
+  const filteredAssets = useMemo(() => {
+    if (serverMode || viewMode === 'table') {
+      // Server-side filtering or table view handles its own display
+      return assets;
+    }
+    // Client-side mode: apply filters locally (though they're already applied server-side)
+    return assets;
+  }, [assets, serverMode, viewMode]);
+
+  const statusCounts = useMemo(() => {
+    if (serverMode) {
+      // In server mode, we can't calculate accurate counts without fetching all data
+      // For now, just use the current page's counts
+      return {
+        all: totalCount,
+        active: assets.filter(a => a.status === 'active').length,
+        maintenance: assets.filter(a => a.status === 'maintenance').length,
+        retired: assets.filter(a => a.status === 'retired').length,
+      };
+    }
+    return {
+      all: assets.length,
+      active: assets.filter(a => a.status === 'active').length,
+      maintenance: assets.filter(a => a.status === 'maintenance').length,
+      retired: assets.filter(a => a.status === 'retired').length,
+    };
+  }, [assets, serverMode, totalCount]);
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
@@ -230,18 +334,125 @@ const AssetList: React.FC = () => {
     navigate(`/assets/${assetId}?action=report`);
   };
 
-  if (loading) {
-    return <div className="loading">Loading assets...</div>;
-  }
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+    // Reset to first page when sorting changes
+    setCurrentPage(1);
+  };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    // Scroll to top when page changes
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Map table sort fields to backend ordering fields
+  const mapSortFieldToBackend = (field: string): string => {
+    const fieldMap: Record<string, string> = {
+      'name': 'name',
+      'asset_tag': 'asset_tag',
+      'serial_number': 'serial_number',
+      'status': 'status',
+      'location_name': 'location__name',
+      'category_name': 'category__name',
+      'display_manufacturer': 'manufacturer__name',
+      'date_received': 'date_received',
+      'age_in_days': 'date_received', // Age is calculated from date_received, we'll handle direction separately
+      'inventory_item_name': 'inventory_item__name',
+      'owning_group_name': 'owning_group__name',
+      'operational_status': 'operational_status',
+      'is_active': 'is_active',
+    };
+    return fieldMap[field] || field;
+  };
+
+  // Get the backend sort field for API calls
+  const getBackendSortField = (): string | null => {
+    if (!sortField) return null;
+    const backendField = mapSortFieldToBackend(sortField);
+    // Remove leading minus if present (we'll add it based on direction)
+    const fieldWithoutMinus = backendField.startsWith('-') ? backendField.slice(1) : backendField;
+    
+    // Special handling for age_in_days: older assets (higher age) = earlier date_received
+    // So ascending age = descending date_received, and vice versa
+    if (sortField === 'age_in_days') {
+      return sortDirection === 'asc' ? `-${fieldWithoutMinus}` : fieldWithoutMinus;
+    }
+    
+    return sortDirection === 'desc' ? `-${fieldWithoutMinus}` : fieldWithoutMinus;
+  };
+
+  // Export function to fetch all assets for CSV export
+  const handleExportAllAssets = async (): Promise<Asset[]> => {
+    const params: any = {};
+    if (statusFilter !== 'all') {
+      params.status = statusFilter;
+    }
+    if (locationFilter) {
+      params.location = locationFilter;
+    }
+    if (sigFilter) {
+      params.owning_group = sigFilter;
+    }
+    if (inventoryItemFilter) {
+      params.inventory_item = inventoryItemFilter;
+    }
+    if (searchTerm) {
+      params.search = searchTerm;
+    }
+    
+    // Add sorting
+    const backendSortField = getBackendSortField();
+    if (backendSortField) {
+      params.ordering = backendSortField;
+    }
+
+    // Fetch all pages
+    const allAssets: Asset[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      params.page = page;
+      const response = await assetsAPI.listAssets(params);
+      const responseData = response.data;
+      allAssets.push(...responseData.results);
+      
+      if (!responseData.next || responseData.results.length === 0) {
+        hasMore = false;
+      } else {
+        page++;
+      }
+    }
+
+    return allAssets;
+  };
+
+  const displayCount = serverMode ? totalCount : assets.length;
 
   return (
     <div className="asset-list-container">
       <div className="asset-header">
-        <h2>Makerspace Assets ({assets.length} total)</h2>
+        <h2>Makerspace Assets ({displayCount} total)</h2>
         <div className="asset-header-actions">
-          <button className="create-asset-button" onClick={handleCreateAsset}>
-            + Create Asset
-          </button>
+          <Group gap="md">
+            <SegmentedControl
+              value={viewMode}
+              onChange={(value) => setViewMode(value as 'card' | 'table')}
+              data={[
+                { label: 'Card View', value: 'card', icon: <IconLayoutGrid size={16} /> },
+                { label: 'Table View', value: 'table', icon: <IconTable size={16} /> },
+              ]}
+            />
+            <Button onClick={handleCreateAsset}>
+              + Create Asset
+            </Button>
+          </Group>
           <div className="asset-stats">
             {statusCounts.maintenance > 0 && (
               <span className="stat-badge maintenance">
@@ -353,26 +564,44 @@ const AssetList: React.FC = () => {
         )}
       </div>
 
-      {assets.length === 0 ? (
-        <div className="no-results">
-          {searchTerm || locationFilter || sigFilter || statusFilter !== 'all'
-            ? 'No assets match your filters.'
-            : 'No assets found.'}
-        </div>
+      {viewMode === 'table' ? (
+        <AssetTableView
+          assets={filteredAssets}
+          loading={loading}
+          totalCount={totalCount}
+          currentPage={currentPage}
+          pageSize={50}
+          onPageChange={handlePageChange}
+          sortField={sortField}
+          sortDirection={sortDirection}
+          onSort={handleSort}
+          serverMode={serverMode}
+          onExport={handleExportAllAssets}
+        />
       ) : (
-        <div className="asset-grid">
-          {assets.map((asset) => (
-            <AssetCard
-              key={asset.id}
-              asset={asset}
-              onClick={handleAssetClick}
-              onSwipeLeft={handleSwipeLeft}
-              onSwipeRight={handleSwipeRight}
-              getStatusBadgeClass={getStatusBadgeClass}
-              getStatusLabel={getStatusLabel}
-            />
-          ))}
-        </div>
+        <>
+          {filteredAssets.length === 0 ? (
+            <div className="no-results">
+              {searchTerm || locationFilter || sigFilter || statusFilter !== 'all'
+                ? 'No assets match your filters.'
+                : 'No assets found.'}
+            </div>
+          ) : (
+            <div className="asset-grid">
+              {filteredAssets.map((asset) => (
+                <AssetCard
+                  key={asset.id}
+                  asset={asset}
+                  onClick={handleAssetClick}
+                  onSwipeLeft={handleSwipeLeft}
+                  onSwipeRight={handleSwipeRight}
+                  getStatusBadgeClass={getStatusBadgeClass}
+                  getStatusLabel={getStatusLabel}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

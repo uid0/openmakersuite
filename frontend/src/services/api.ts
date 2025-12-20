@@ -325,8 +325,24 @@ export const inventoryAPI = {
 
 // Assets API
 export const assetsAPI = {
-  listAssets: (params?: { status?: string; category?: number; location?: number; search?: string; owning_group?: number; inventory_item?: string }) =>
-    api.get<{ results: Asset[] }>('/inventory/assets/', { params }),
+  listAssets: (params?: {
+    status?: string;
+    category?: number;
+    location?: number;
+    search?: string;
+    owning_group?: number;
+    inventory_item?: string;
+    manufacturer?: number;
+    is_active?: boolean;
+    date_received_after?: string;
+    date_received_before?: string;
+    age_min_days?: number;
+    age_max_days?: number;
+    ordering?: string;
+    page?: number;
+    page_size?: number;
+  }) =>
+    api.get<{ count: number; next: string | null; previous: string | null; results: Asset[] }>('/inventory/assets/', { params }),
 
   getMySIGAssets: () =>
     api.get<Asset[]>('/inventory/assets/my_sig_assets/'),

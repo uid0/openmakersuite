@@ -21,7 +21,7 @@
 
 ## Backend
 
-- **Django Version**: Currently using Django 5.1.14 (upgraded from 4.2.27 in December 2025)
+- **Django Version**: Currently using Django 5.1.15 (upgraded from 4.2.27 in December 2025, security update to 5.1.15 in January 2026)
 - Use `python manage.py startapp` to create new apps within your project
 - Keep models in `models.py` and register them in `admin.py` for admin interface
 - Use Django's ORM instead of raw SQL queries
@@ -55,9 +55,9 @@ class ActiveUserManager(models.Manager):
 
 ### Django 5.1 Upgrade Notes (December 2025)
 
-The project was successfully upgraded from Django 4.2.27 to Django 5.1.14. Key points:
+The project was successfully upgraded from Django 4.2.27 to Django 5.1.14, then to 5.1.15 for security. Key points:
 
-- **All tests pass**: 389 passed, 2 skipped with Django 5.1.14
+- **All tests pass**: 389 passed, 2 skipped with Django 5.1.15
 - **No breaking changes**: All custom admin filters (`DeliveryPerformanceFilter`, `ReceiptStatusFilter` in `reorder_queue/admin.py`) work correctly
 - **Package compatibility**:
   - `django-passkey-auth==0.2.0` works with Django 5.1 (no explicit support but tested and functional)
@@ -68,7 +68,7 @@ The project was successfully upgraded from Django 4.2.27 to Django 5.1.14. Key p
 
 Updated packages:
 
-- Django: 4.2.27 → 5.1.14
+- Django: 4.2.27 → 5.1.14 → 5.1.15 (security fix for XML deserialization DoS vulnerability)
 - djangorestframework: 3.15.2 → 3.16.1
 - django-cors-headers: 4.6.0 → 4.9.0
 - django-redis: 5.4.0 → 6.0.0

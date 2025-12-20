@@ -1701,6 +1701,52 @@ class AssetViewSet(viewsets.ModelViewSet):
         serializer = AssetProblemSerializer(problems, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def resolve_problem(self, request, pk=None):
+        """Resolve a problem for an asset."""
+        asset = self.get_object()
+        from .models import AssetProblem
+        from .serializers import AssetProblemSerializer
+
+        problem_id = request.data.get("problem_id")
+        if not problem_id:
+            return Response(
+                {"error": "problem_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            problem = AssetProblem.objects.get(id=problem_id, asset=asset)
+        except AssetProblem.DoesNotExist:
+            return Response(
+                {"error": "Problem not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Update problem status and resolution details
+        new_status = request.data.get("status", AssetProblem.RESOLVED)
+        if new_status not in [AssetProblem.RESOLVED, AssetProblem.CLOSED]:
+            return Response(
+                {
+                    "error": f"Invalid status. Must be '{AssetProblem.RESOLVED}' or '{AssetProblem.CLOSED}'"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        problem.status = new_status
+        problem.resolution_notes = request.data.get(
+            "resolution_notes", problem.resolution_notes or ""
+        )
+
+        # Set resolved_at if resolving for the first time
+        if new_status in [AssetProblem.RESOLVED, AssetProblem.CLOSED] and not problem.resolved_at:
+            problem.resolved_at = timezone.now()
+
+        problem.save()
+
+        serializer = AssetProblemSerializer(problem)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 class AssetPartViewSet(viewsets.ModelViewSet):
     """API endpoint for asset parts/consumables."""

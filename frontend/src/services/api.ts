@@ -386,6 +386,13 @@ export const assetsAPI = {
   reportProblem: (id: string, description: string) =>
     api.post(`/inventory/assets/${id}/report_problem/`, { description }),
 
+  resolveProblem: (id: string, problemId: string, resolutionNotes?: string, status?: string) =>
+    api.post(`/inventory/assets/${id}/resolve_problem/`, {
+      problem_id: problemId,
+      resolution_notes: resolutionNotes,
+      status: status || 'resolved',
+    }),
+
   downloadLabel: (id: string) =>
     api.get(`/inventory/assets/${id}/download_label/`, {
       responseType: 'blob',

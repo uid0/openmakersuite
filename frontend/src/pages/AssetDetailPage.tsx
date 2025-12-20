@@ -17,6 +17,13 @@ const AssetDetailPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [problemStatusFilter, setProblemStatusFilter] = useState<string>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [showReportForm, setShowReportForm] = useState<boolean>(false);
+  const [problemDescription, setProblemDescription] = useState<string>('');
+  const [submittingProblem, setSubmittingProblem] = useState<boolean>(false);
+  const [resolvingProblemId, setResolvingProblemId] = useState<string | null>(null);
+  const [resolutionNotes, setResolutionNotes] = useState<string>('');
+  const [resolvingStatus, setResolvingStatus] = useState<string>('resolved');
 
   const loadAssetDetails = useCallback(async () => {
     if (!id) return;
@@ -43,6 +50,32 @@ const AssetDetailPage: React.FC = () => {
       loadAssetDetails();
     }
   }, [id, loadAssetDetails]);
+
+  useEffect(() => {
+    // Check authentication status
+    const checkAuth = () => {
+      const token = localStorage.getItem('token');
+      setIsLoggedIn(!!token);
+    };
+
+    checkAuth();
+
+    // Listen for auth changes
+    const handleAuthChange = () => {
+      checkAuth();
+    };
+
+    window.addEventListener('authChange', handleAuthChange);
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'token') {
+        checkAuth();
+      }
+    });
+
+    return () => {
+      window.removeEventListener('authChange', handleAuthChange);
+    };
+  }, []);
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return 'N/A';
@@ -170,6 +203,57 @@ const AssetDetailPage: React.FC = () => {
     if (id) {
       navigate(`/assets/${id}/edit`);
     }
+  };
+
+  const handleReportProblem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || !problemDescription.trim()) {
+      alert('Please provide a description of the problem');
+      return;
+    }
+
+    try {
+      setSubmittingProblem(true);
+      await assetsAPI.reportProblem(id, problemDescription);
+      setProblemDescription('');
+      setShowReportForm(false);
+      await loadAssetDetails();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to report problem');
+      console.error('Error reporting problem:', err);
+    } finally {
+      setSubmittingProblem(false);
+    }
+  };
+
+  const handleResolveProblem = async (problemId: string) => {
+    if (!id) return;
+
+    try {
+      setActionLoading(`resolve-${problemId}`);
+      await assetsAPI.resolveProblem(id, problemId, resolutionNotes, resolvingStatus);
+      setResolvingProblemId(null);
+      setResolutionNotes('');
+      setResolvingStatus('resolved');
+      await loadAssetDetails();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to resolve problem');
+      console.error('Error resolving problem:', err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const startResolving = (problemId: string) => {
+    setResolvingProblemId(problemId);
+    setResolutionNotes('');
+    setResolvingStatus('resolved');
+  };
+
+  const cancelResolving = () => {
+    setResolvingProblemId(null);
+    setResolutionNotes('');
+    setResolvingStatus('resolved');
   };
 
   const filteredProblems = problems.filter((problem) => {
@@ -429,7 +513,57 @@ const AssetDetailPage: React.FC = () => {
 
         {/* Problem History */}
         <section className="asset-detail-section">
-          <h2>Problem History</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2>Problem History</h2>
+            {isLoggedIn && (
+              <button
+                className="action-button"
+                onClick={() => setShowReportForm(!showReportForm)}
+                style={{ padding: '0.5rem 1rem' }}
+              >
+                {showReportForm ? 'Cancel' : '+ Report Problem'}
+              </button>
+            )}
+          </div>
+
+          {/* Report Problem Form */}
+          {isLoggedIn && showReportForm && (
+            <div className="problem-form" style={{ marginBottom: '1.5rem', padding: '1rem', border: '1px solid #ddd', borderRadius: '4px' }}>
+              <h3>Report a Problem</h3>
+              <form onSubmit={handleReportProblem}>
+                <textarea
+                  value={problemDescription}
+                  onChange={(e) => setProblemDescription(e.target.value)}
+                  placeholder="Describe the problem with this asset..."
+                  rows={4}
+                  required
+                  disabled={submittingProblem}
+                  style={{ width: '100%', padding: '0.5rem', marginBottom: '0.5rem', fontFamily: 'inherit' }}
+                />
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="submit"
+                    className="action-button"
+                    disabled={submittingProblem || !problemDescription.trim()}
+                  >
+                    {submittingProblem ? 'Submitting...' : 'Submit Problem'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReportForm(false);
+                      setProblemDescription('');
+                    }}
+                    disabled={submittingProblem}
+                    style={{ padding: '0.5rem 1rem', background: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
           <div className="problem-filters">
             <label htmlFor="problem-status-filter">Filter by Status:</label>
             <select
@@ -470,6 +604,70 @@ const AssetDetailPage: React.FC = () => {
                     )}
                     {problem.resolved_at && (
                       <p className="problem-resolved-date">Resolved: {formatDateTime(problem.resolved_at)}</p>
+                    )}
+
+                    {/* Resolve Problem UI */}
+                    {isLoggedIn && resolvingProblemId === problem.id ? (
+                      <div className="resolve-problem-form" style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9' }}>
+                        <h4>Resolve Problem</h4>
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <label htmlFor={`resolve-status-${problem.id}`} style={{ display: 'block', marginBottom: '0.25rem' }}>
+                            Status:
+                          </label>
+                          <select
+                            id={`resolve-status-${problem.id}`}
+                            value={resolvingStatus}
+                            onChange={(e) => setResolvingStatus(e.target.value)}
+                            style={{ width: '100%', padding: '0.5rem' }}
+                          >
+                            <option value="resolved">Resolved</option>
+                            <option value="closed">Closed</option>
+                          </select>
+                        </div>
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <label htmlFor={`resolution-notes-${problem.id}`} style={{ display: 'block', marginBottom: '0.25rem' }}>
+                            Resolution Notes (optional):
+                          </label>
+                          <textarea
+                            id={`resolution-notes-${problem.id}`}
+                            value={resolutionNotes}
+                            onChange={(e) => setResolutionNotes(e.target.value)}
+                            placeholder="Add notes about how this problem was resolved..."
+                            rows={3}
+                            style={{ width: '100%', padding: '0.5rem', fontFamily: 'inherit' }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            className="action-button"
+                            onClick={() => handleResolveProblem(problem.id)}
+                            disabled={actionLoading === `resolve-${problem.id}`}
+                          >
+                            {actionLoading === `resolve-${problem.id}` ? 'Resolving...' : 'Resolve'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelResolving}
+                            disabled={actionLoading === `resolve-${problem.id}`}
+                            style={{ padding: '0.5rem 1rem', background: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      isLoggedIn && problem.status !== 'resolved' && problem.status !== 'closed' && (
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <button
+                            className="action-button"
+                            onClick={() => startResolving(problem.id)}
+                            disabled={!!actionLoading}
+                            style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
+                          >
+                            Resolve Problem
+                          </button>
+                        </div>
+                      )
                     )}
                   </div>
                 </div>

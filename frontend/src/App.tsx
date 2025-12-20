@@ -42,6 +42,9 @@ import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
 import TVDashboard from './pages/TVDashboard';
 import UserProfilePage from './pages/UserProfilePage';
+import WebhookDetailPage from './pages/WebhookDetailPage';
+import WebhookFormPage from './pages/WebhookFormPage';
+import WebhookListPage from './pages/WebhookListPage';
 import './styles/App.css';
 
 // Wrap routes with Sentry for better error tracking
@@ -174,6 +177,10 @@ function AppContent() {
           <Route path="/settings/profile" element={<WorkspaceLayout><UserProfilePage /></WorkspaceLayout>} />
           <Route path="/settings/site" element={<WorkspaceLayout><SiteSettingsPage /></WorkspaceLayout>} />
           <Route path="/settings/tax-receipt/lookup" element={<WorkspaceLayout><TaxReceiptLookupPage /></WorkspaceLayout>} />
+          <Route path="/settings/webhooks" element={<WorkspaceLayout><WebhookListPage /></WorkspaceLayout>} />
+          <Route path="/settings/webhooks/new" element={<WorkspaceLayout><WebhookFormPage /></WorkspaceLayout>} />
+          <Route path="/settings/webhooks/:id" element={<WorkspaceLayout><WebhookDetailPage /></WorkspaceLayout>} />
+          <Route path="/settings/webhooks/:id/edit" element={<WorkspaceLayout><WebhookFormPage /></WorkspaceLayout>} />
 
           {/* Legacy routes - redirect to new workspace routes */}
           <Route path="/orderadmin" element={<Navigate to="/inventory/admin" replace />} />

@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">36.65% </span>
+                <span class="strong">36.04% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>92/251</span>
+                <span class='fraction'>93/258</span>
             </div>
         
             
@@ -37,16 +37,16 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">28.57% </span>
+                <span class="strong">27.5% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>44/154</span>
+                <span class='fraction'>44/160</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">36.65% </span>
+                <span class="strong">36.04% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>92/251</span>
+                <span class='fraction'>93/258</span>
             </div>
         
             
@@ -972,7 +972,28 @@
 <a name='L907'></a><a href='#L907'>907</a>
 <a name='L908'></a><a href='#L908'>908</a>
 <a name='L909'></a><a href='#L909'>909</a>
-<a name='L910'></a><a href='#L910'>910</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L910'></a><a href='#L910'>910</a>
+<a name='L911'></a><a href='#L911'>911</a>
+<a name='L912'></a><a href='#L912'>912</a>
+<a name='L913'></a><a href='#L913'>913</a>
+<a name='L914'></a><a href='#L914'>914</a>
+<a name='L915'></a><a href='#L915'>915</a>
+<a name='L916'></a><a href='#L916'>916</a>
+<a name='L917'></a><a href='#L917'>917</a>
+<a name='L918'></a><a href='#L918'>918</a>
+<a name='L919'></a><a href='#L919'>919</a>
+<a name='L920'></a><a href='#L920'>920</a>
+<a name='L921'></a><a href='#L921'>921</a>
+<a name='L922'></a><a href='#L922'>922</a>
+<a name='L923'></a><a href='#L923'>923</a>
+<a name='L924'></a><a href='#L924'>924</a>
+<a name='L925'></a><a href='#L925'>925</a>
+<a name='L926'></a><a href='#L926'>926</a>
+<a name='L927'></a><a href='#L927'>927</a>
+<a name='L928'></a><a href='#L928'>928</a>
+<a name='L929'></a><a href='#L929'>929</a>
+<a name='L930'></a><a href='#L930'>930</a>
+<a name='L931'></a><a href='#L931'>931</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1881,12 +1902,33 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
  * API service for communicating with the Django backend
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult } from '../types';
 &nbsp;
 /**
  * Resolves the API base URL based on environment.
@@ -2789,6 +2831,27 @@ export const dashboardAPI = {
 <span class="cstat-no" title="statement not covered" >    api.get&lt;DeliveriesData&gt;('/dashboard/widget-data/deliveries/'),</span>
 };
 &nbsp;
+// Webhooks API
+export const webhooksAPI = {
+  listWebhooks: <span class="fstat-no" title="function not covered" >()</span> =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;{ results: Webhook[] }&gt;('/reorders/webhooks/'),</span>
+&nbsp;
+  getWebhook: <span class="fstat-no" title="function not covered" >(i</span>d: number) =&gt;
+<span class="cstat-no" title="statement not covered" >    api.get&lt;Webhook&gt;(`/reorders/webhooks/${id}/`),</span>
+&nbsp;
+  createWebhook: <span class="fstat-no" title="function not covered" >(d</span>ata: Partial&lt;Webhook&gt;) =&gt;
+<span class="cstat-no" title="statement not covered" >    api.post&lt;Webhook&gt;('/reorders/webhooks/', data),</span>
+&nbsp;
+  updateWebhook: <span class="fstat-no" title="function not covered" >(i</span>d: number, data: Partial&lt;Webhook&gt;) =&gt;
+<span class="cstat-no" title="statement not covered" >    api.patch&lt;Webhook&gt;(`/reorders/webhooks/${id}/`, data),</span>
+&nbsp;
+  deleteWebhook: <span class="fstat-no" title="function not covered" >(i</span>d: number) =&gt;
+<span class="cstat-no" title="statement not covered" >    api.delete(`/reorders/webhooks/${id}/`),</span>
+&nbsp;
+  testWebhook: <span class="fstat-no" title="function not covered" >(i</span>d: number) =&gt;
+<span class="cstat-no" title="statement not covered" >    api.post&lt;WebhookTestResult&gt;(`/reorders/webhooks/${id}/test/`),</span>
+};
+&nbsp;
 export default api;
 &nbsp;</pre></td></tr></table></pre>
 
@@ -2797,7 +2860,7 @@ export default api;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-12-20T04:31:57.016Z
+                at 2025-12-20T04:55:10.043Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

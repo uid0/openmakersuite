@@ -1,0 +1,11 @@
+.webhook-form-page {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+@media (max-width: 768px) {
+  .webhook-form-page {
+    padding: 0.5rem;
+  }
+}

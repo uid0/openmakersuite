@@ -1,0 +1,11 @@
+.webhook-detail-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+@media (max-width: 768px) {
+  .webhook-detail-page {
+    padding: 0.5rem;
+  }
+}

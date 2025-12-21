@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { notificationsAPI } from '../services/api';
 import '../styles/RecentPages.css';
 
 interface RecentPage {
@@ -12,11 +13,12 @@ interface RecentPage {
   timestamp: number;
 }
 
-const MAX_RECENT_PAGES = 8;
+const DEFAULT_RECENT_PAGES_LIMIT = 8;
 const STORAGE_KEY = 'recentPages';
 
 const RecentPages: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed = false }) => {
   const [recentPages, setRecentPages] = useState<RecentPage[]>([]);
+  const [displayLimit, setDisplayLimit] = useState<number>(DEFAULT_RECENT_PAGES_LIMIT);
   const location = useLocation();
 
   // Route to label mapping for display
@@ -72,6 +74,30 @@ const RecentPages: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed = false 
         console.error('Failed to parse recent pages:', e);
       }
     }
+
+    // Load user preference for recent pages limit
+    const loadPreferences = async () => {
+      try {
+        const response = await notificationsAPI.getPreferences();
+        if (response.data.recent_pages_limit) {
+          setDisplayLimit(response.data.recent_pages_limit);
+        }
+      } catch (err) {
+        console.error('Error loading preferences:', err);
+        // Use default if preference loading fails
+      }
+    };
+    loadPreferences();
+
+    // Listen for preference updates
+    const handlePreferencesUpdate = () => {
+      loadPreferences();
+    };
+    window.addEventListener('preferencesUpdated', handlePreferencesUpdate);
+
+    return () => {
+      window.removeEventListener('preferencesUpdated', handlePreferencesUpdate);
+    };
   }, []);
 
   useEffect(() => {
@@ -103,10 +129,11 @@ const RecentPages: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed = false 
     };
 
     // Remove if already exists and add to front
+    // Store up to 50 pages, but display will be limited by user preference
     const updatedPages = [
       newPage,
       ...currentPages.filter((page) => page.path !== location.pathname),
-    ].slice(0, MAX_RECENT_PAGES);
+    ].slice(0, 50); // Store more than display limit to allow user to adjust preference
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedPages));
     setRecentPages(updatedPages);
@@ -116,20 +143,31 @@ const RecentPages: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed = false 
     return null;
   }
 
+  // Limit displayed pages based on user preference
+  const displayedPages = recentPages.slice(0, displayLimit);
+  const hasMorePages = recentPages.length > displayLimit;
+
   return (
     <div className="recent-pages">
       {!isCollapsed && <h3 className="recent-pages-title">Recent</h3>}
-      <ul className="recent-pages-list">
-        {recentPages.map((page) => (
-          <li key={`${page.path}-${page.timestamp}`} className="recent-page-item">
-            <Link to={page.path} className="recent-page-link">
-              {!isCollapsed && <span className="recent-page-icon">🕒</span>}
-              {!isCollapsed && <span className="recent-page-label">{page.label}</span>}
-              {isCollapsed && <span className="recent-page-icon" title={page.label}>🕒</span>}
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <div className="recent-pages-scroll-container">
+        <ul className="recent-pages-list">
+          {displayedPages.map((page) => (
+            <li key={`${page.path}-${page.timestamp}`} className="recent-page-item">
+              <Link to={page.path} className="recent-page-link">
+                {!isCollapsed && <span className="recent-page-icon">🕒</span>}
+                {!isCollapsed && <span className="recent-page-label">{page.label}</span>}
+                {isCollapsed && <span className="recent-page-icon" title={page.label}>🕒</span>}
+              </Link>
+            </li>
+          ))}
+        </ul>
+        {hasMorePages && !isCollapsed && (
+          <div className="recent-pages-more-indicator">
+            {recentPages.length - displayLimit} more
+          </div>
+        )}
+      </div>
     </div>
   );
 };

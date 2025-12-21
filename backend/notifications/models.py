@@ -5,6 +5,7 @@ Models for notification management.
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 User = get_user_model()
@@ -117,6 +118,11 @@ class NotificationPreference(models.Model):
     system_notifications = models.BooleanField(
         default=True,
         help_text="Receive system notifications",
+    )
+    recent_pages_limit = models.PositiveIntegerField(
+        default=8,
+        validators=[MinValueValidator(1), MaxValueValidator(50)],
+        help_text="Maximum number of recent pages to display in sidebar (1-50)",
     )
     created_at = models.DateTimeField(
         auto_now_add=True,

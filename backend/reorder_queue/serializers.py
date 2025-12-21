@@ -231,6 +231,10 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def to_representation(self, instance):
+        """Return full purchase order details after creation."""
+        return PurchaseOrderSerializer(instance, context=self.context).data
+
     @transaction.atomic
     def create(self, validated_data):
         """Create purchase order with line items (inventory items, assets, or freeform)."""

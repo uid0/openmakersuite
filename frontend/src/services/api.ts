@@ -504,6 +504,8 @@ export interface ReorderDataItem {
   supplier_url: string;
   is_primary: boolean;
   line_total: string;
+  has_active_reorder_request?: boolean;
+  reorder_request_id?: number | null;
 }
 
 export interface ReorderDataAsset {
@@ -530,6 +532,7 @@ export interface ReorderDataResponse {
   suppliers: ReorderDataSupplier[];
   total_suppliers: number;
   total_low_stock_items: number;
+  items_with_requests?: number;
 }
 
 export interface CreatePurchaseOrderItem {

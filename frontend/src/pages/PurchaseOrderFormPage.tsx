@@ -383,7 +383,14 @@ const PurchaseOrderFormPage: React.FC = () => {
                           </td>
                           <td>
                             <div className="item-info">
-                              <span className="item-name">{item.item_name}</span>
+                              <div className="item-name-row">
+                                <span className="item-name">{item.item_name}</span>
+                                {item.has_active_reorder_request && (
+                                  <span className="reorder-badge" title="This item has an active reorder request">
+                                    Reorder Request
+                                  </span>
+                                )}
+                              </div>
                               <span className="item-sku">{item.supplier_sku}</span>
                             </div>
                           </td>

@@ -1834,9 +1834,12 @@ class AssetViewSet(viewsets.ModelViewSet):
             "resolution_notes", problem.resolution_notes or ""
         )
 
-        # Set resolved_at if resolving for the first time
+        # Set resolved_at and resolved_by if resolving for the first time
         if new_status in [AssetProblem.RESOLVED, AssetProblem.CLOSED] and not problem.resolved_at:
             problem.resolved_at = timezone.now()
+            # Set resolved_by using handle or username
+            if request.user.is_authenticated:
+                problem.resolved_by = request.user.handle or request.user.username
 
         problem.save()
 

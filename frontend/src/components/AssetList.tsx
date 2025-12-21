@@ -120,6 +120,29 @@ const AssetCard: React.FC<AssetCardProps> = ({
 };
 
 const CLIENT_SIDE_THRESHOLD = 250;
+const ASSET_VIEW_MODE_KEY = 'assetViewMode';
+
+// Helper function to get view mode from localStorage
+const getStoredViewMode = (): 'card' | 'table' => {
+  try {
+    const stored = localStorage.getItem(ASSET_VIEW_MODE_KEY);
+    if (stored === 'card' || stored === 'table') {
+      return stored;
+    }
+  } catch (error) {
+    console.error('Error reading view mode from localStorage:', error);
+  }
+  return 'card'; // Default to card view
+};
+
+// Helper function to save view mode to localStorage
+const saveViewMode = (mode: 'card' | 'table'): void => {
+  try {
+    localStorage.setItem(ASSET_VIEW_MODE_KEY, mode);
+  } catch (error) {
+    console.error('Error saving view mode to localStorage:', error);
+  }
+};
 
 const AssetList: React.FC = () => {
   const navigate = useNavigate();
@@ -134,8 +157,8 @@ const AssetList: React.FC = () => {
   const [locations, setLocations] = useState<Location[]>([]);
   const [sigs, setSigs] = useState<SIG[]>([]);
   
-  // View mode and pagination state
-  const [viewMode, setViewMode] = useState<'card' | 'table'>('card');
+  // View mode and pagination state - initialize from localStorage
+  const [viewMode, setViewMode] = useState<'card' | 'table'>(getStoredViewMode());
   const [serverMode, setServerMode] = useState(false);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -444,7 +467,10 @@ const AssetList: React.FC = () => {
             <Group gap={0}>
               <Button
                 variant={viewMode === 'card' ? 'filled' : 'default'}
-                onClick={() => setViewMode('card')}
+                onClick={() => {
+                  setViewMode('card');
+                  saveViewMode('card');
+                }}
                 leftSection={<IconLayoutGrid size={16} />}
                 style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
               >
@@ -452,7 +478,10 @@ const AssetList: React.FC = () => {
               </Button>
               <Button
                 variant={viewMode === 'table' ? 'filled' : 'default'}
-                onClick={() => setViewMode('table')}
+                onClick={() => {
+                  setViewMode('table');
+                  saveViewMode('table');
+                }}
                 leftSection={<IconTable size={16} />}
                 style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, marginLeft: -1 }}
               >

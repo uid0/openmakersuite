@@ -772,6 +772,7 @@ export interface NotificationPreferences {
   maintenance_alerts: boolean;
   order_updates: boolean;
   system_notifications: boolean;
+  recent_pages_limit: number;
   created_at: string;
   updated_at: string;
 }

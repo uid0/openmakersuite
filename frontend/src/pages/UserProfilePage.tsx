@@ -3,7 +3,7 @@
  * Allows users to view and edit their profile, change password, upload signature, and manage notification preferences
  */
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Alert, Button, Group, Image, Paper, PasswordInput, Stack, Switch, Tabs, Text, Title } from '@mantine/core';
+import { Alert, Button, Group, Image, Paper, PasswordInput, Slider, Stack, Switch, Tabs, Text, Title } from '@mantine/core';
 import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
@@ -194,13 +194,15 @@ const UserProfilePage: React.FC = () => {
     }
   };
 
-  const onPreferencesChange = async (field: keyof NotificationPreferences, value: boolean) => {
+  const onPreferencesChange = async (field: keyof NotificationPreferences, value: boolean | number) => {
     if (!preferences) return;
 
     try {
       const updated = { ...preferences, [field]: value };
       const response = await notificationsAPI.updatePreferences({ [field]: value });
       setPreferences(response.data);
+      // Dispatch custom event to notify other components (e.g., RecentPages)
+      window.dispatchEvent(new CustomEvent('preferencesUpdated'));
     } catch (err: any) {
       console.error('Error updating preferences:', err);
       setError('Failed to update notification preferences');
@@ -430,6 +432,31 @@ const UserProfilePage: React.FC = () => {
                     checked={preferences.system_notifications}
                     onChange={(e) => onPreferencesChange('system_notifications', e.currentTarget.checked)}
                   />
+                  <div>
+                    <Text size="sm" fw={500} mb="xs">
+                      Recent Pages Limit
+                    </Text>
+                    <Text size="xs" c="dimmed" mb="md">
+                      Maximum number of recent pages to display in the sidebar (1-50)
+                    </Text>
+                    <Slider
+                      value={preferences.recent_pages_limit}
+                      onChange={(value) => onPreferencesChange('recent_pages_limit', value)}
+                      min={1}
+                      max={50}
+                      step={1}
+                      marks={[
+                        { value: 1, label: '1' },
+                        { value: 10, label: '10' },
+                        { value: 25, label: '25' },
+                        { value: 50, label: '50' },
+                      ]}
+                      mb="md"
+                    />
+                    <Text size="xs" c="dimmed" ta="center">
+                      Current: {preferences.recent_pages_limit} pages
+                    </Text>
+                  </div>
                 </Stack>
               ) : (
                 <Text size="sm" c="dimmed">Loading preferences...</Text>

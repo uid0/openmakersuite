@@ -53,6 +53,7 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
             "maintenance_alerts",
             "order_updates",
             "system_notifications",
+            "recent_pages_limit",
             "created_at",
             "updated_at",
         ]

@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   CreatePurchaseOrderData,
   CreatePurchaseOrderItem,
+  inventoryAPI,
   purchaseOrderAPI,
   ReorderDataAsset,
   ReorderDataItem,
@@ -18,6 +19,8 @@ import '../styles/PurchaseOrderFormPage.css';
 interface SelectedItem extends ReorderDataItem {
   selected: boolean;
   quantity: number;
+  unit_cost_override?: string;
+  expected_shipment_date?: string;
 }
 
 interface SelectedAsset extends ReorderDataAsset {
@@ -50,6 +53,11 @@ const PurchaseOrderFormPage: React.FC = () => {
   const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
   const [selectedAssets, setSelectedAssets] = useState<SelectedAsset[]>([]);
   const [freeformItems, setFreeformItems] = useState<FreeformItem[]>([]);
+
+  // Manual product entry state
+  const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [productBarcode, setProductBarcode] = useState('');
+  const [searchingProduct, setSearchingProduct] = useState(false);
 
   // Submission state
   const [submitting, setSubmitting] = useState(false);
@@ -124,6 +132,24 @@ const PurchaseOrderFormPage: React.FC = () => {
     );
   };
 
+  // Update item price override
+  const updateItemPrice = (itemSupplierId: number, unitCostOverride: string) => {
+    setSelectedItems((prev) =>
+      prev.map((item) =>
+        item.item_supplier_id === itemSupplierId ? { ...item, unit_cost_override: unitCostOverride } : item
+      )
+    );
+  };
+
+  // Update item expected shipment date
+  const updateItemShipmentDate = (itemSupplierId: number, expectedShipmentDate: string) => {
+    setSelectedItems((prev) =>
+      prev.map((item) =>
+        item.item_supplier_id === itemSupplierId ? { ...item, expected_shipment_date: expectedShipmentDate } : item
+      )
+    );
+  };
+
   // Toggle asset selection
   const toggleAssetSelection = (assetId: string) => {
     setSelectedAssets((prev) =>
@@ -163,10 +189,129 @@ const PurchaseOrderFormPage: React.FC = () => {
     setFreeformItems((prev) => prev.filter((item) => item.id !== id));
   };
 
+  // Handle product search or barcode scan
+  const handleProductSearch = async () => {
+    if (!selectedSupplierId) {
+      setError('Please select a supplier first');
+      return;
+    }
+
+    setSearchingProduct(true);
+    setError(null);
+
+    try {
+      let inventoryItem;
+      let itemId: string;
+
+      // Try barcode lookup first if barcode is provided
+      if (productBarcode.trim()) {
+        try {
+          const lookupResponse = await inventoryAPI.lookupByCode(productBarcode.trim().toUpperCase());
+          if (lookupResponse.data.type === 'item') {
+            itemId = lookupResponse.data.id;
+          } else {
+            setError('Barcode does not match an inventory item');
+            setSearchingProduct(false);
+            return;
+          }
+        } catch (err: any) {
+          setError(err.response?.data?.error || 'Barcode not found');
+          setSearchingProduct(false);
+          return;
+        }
+      } else if (productSearchTerm.trim()) {
+        // Search by name or SKU
+        const searchResponse = await inventoryAPI.listItems({ search: productSearchTerm.trim() });
+        const items = searchResponse.data.results;
+        if (items.length === 0) {
+          setError('No products found matching your search');
+          setSearchingProduct(false);
+          return;
+        }
+        if (items.length > 1) {
+          setError(`Multiple products found. Please be more specific or use barcode scan.`);
+          setSearchingProduct(false);
+          return;
+        }
+        itemId = items[0].id;
+      } else {
+        setError('Please enter a product name/SKU or scan a barcode');
+        setSearchingProduct(false);
+        return;
+      }
+
+      // Get the inventory item details
+      const itemResponse = await inventoryAPI.getItem(itemId);
+      inventoryItem = itemResponse.data;
+
+      // Get item suppliers for this item
+      const suppliersResponse = await inventoryAPI.getItemSuppliers(itemId);
+      const itemSuppliers = suppliersResponse.data.results;
+
+      // Find the item_supplier for the selected supplier
+      const matchingItemSupplier = itemSuppliers.find(
+        (is: any) => is.supplier === selectedSupplierId && is.is_active && !(is as any).is_discontinued
+      );
+
+      if (!matchingItemSupplier) {
+        setError(
+          `This product is not available from the selected supplier. Please add it as a freeform item or select a different supplier.`
+        );
+        setSearchingProduct(false);
+        return;
+      }
+
+      // Check if item is already in the list
+      const existingItem = selectedItems.find(
+        (item) => item.item_supplier_id === matchingItemSupplier.id
+      );
+
+      if (existingItem) {
+        setError('This item is already in the list');
+        setSearchingProduct(false);
+        return;
+      }
+
+      // Add the item to selectedItems
+      const newItem: SelectedItem = {
+        item_supplier_id: matchingItemSupplier.id,
+        item_id: inventoryItem.id,
+        item_name: inventoryItem.name,
+        item_sku: inventoryItem.sku || '',
+        current_stock: inventoryItem.current_stock || 0,
+        minimum_stock: inventoryItem.minimum_stock || 0,
+        reorder_quantity: inventoryItem.reorder_quantity || 0,
+        suggested_quantity: matchingItemSupplier.quantity_per_package || 1,
+        unit_cost: matchingItemSupplier.unit_cost?.toString() || '0',
+        package_cost: matchingItemSupplier.package_cost?.toString() || null,
+        quantity_per_package: matchingItemSupplier.quantity_per_package || 1,
+        lead_time_days: matchingItemSupplier.average_lead_time || 7,
+        supplier_sku: matchingItemSupplier.supplier_sku || '',
+        supplier_url: matchingItemSupplier.supplier_url || '',
+        is_primary: matchingItemSupplier.is_primary || false,
+        line_total: (parseFloat(matchingItemSupplier.unit_cost?.toString() || '0') * (matchingItemSupplier.quantity_per_package || 1)).toString(),
+        selected: true,
+        quantity: matchingItemSupplier.quantity_per_package || 1,
+      };
+
+      setSelectedItems((prev) => [...prev, newItem]);
+      setProductSearchTerm('');
+      setProductBarcode('');
+    } catch (err: any) {
+      console.error('Error searching for product:', err);
+      setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Failed to find product');
+    } finally {
+      setSearchingProduct(false);
+    }
+  };
+
   // Calculate totals
   const itemsTotal = selectedItems
     .filter((item) => item.selected)
-    .reduce((sum, item) => sum + parseFloat(item.unit_cost) * item.quantity, 0);
+    .reduce((sum, item) => {
+      const unitCost = item.unit_cost_override ? parseFloat(item.unit_cost_override) : parseFloat(item.unit_cost);
+      return sum + (isNaN(unitCost) ? 0 : unitCost) * item.quantity;
+    }, 0);
 
   const assetsTotal = selectedAssets
     .filter((asset) => asset.selected && asset.unit_cost)
@@ -211,10 +356,22 @@ const PurchaseOrderFormPage: React.FC = () => {
       selectedItems
         .filter((item) => item.selected)
         .forEach((item) => {
-          items.push({
+          const itemData: CreatePurchaseOrderItem = {
             item_supplier_id: item.item_supplier_id,
             quantity: item.quantity,
-          });
+          };
+          // Add unit_cost override if provided
+          if (item.unit_cost_override && item.unit_cost_override.trim()) {
+            const overrideCost = parseFloat(item.unit_cost_override);
+            if (!isNaN(overrideCost) && overrideCost >= 0) {
+              itemData.unit_cost = overrideCost;
+            }
+          }
+          // Add expected_shipment_date if provided
+          if (item.expected_shipment_date && item.expected_shipment_date.trim()) {
+            itemData.expected_shipment_date = item.expected_shipment_date;
+          }
+          items.push(itemData);
         });
 
       // Add selected assets
@@ -365,6 +522,7 @@ const PurchaseOrderFormPage: React.FC = () => {
                         <th className="col-quantity">Quantity</th>
                         <th className="col-cost">Unit Cost</th>
                         <th className="col-lead">Lead Time</th>
+                        <th className="col-shipment">Expected Shipment</th>
                         <th className="col-total">Line Total</th>
                       </tr>
                     </thead>
@@ -410,19 +568,92 @@ const PurchaseOrderFormPage: React.FC = () => {
                               disabled={!item.selected}
                             />
                           </td>
-                          <td className="col-cost">{formatCurrency(item.unit_cost)}</td>
+                          <td className="col-cost">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder={item.unit_cost}
+                              value={item.unit_cost_override || ''}
+                              onChange={(e) => updateItemPrice(item.item_supplier_id, e.target.value)}
+                              disabled={!item.selected}
+                              className="input-cost"
+                            />
+                          </td>
                           <td className="col-lead">{item.lead_time_days} days</td>
+                          <td className="col-shipment">
+                            <input
+                              type="date"
+                              value={item.expected_shipment_date || ''}
+                              onChange={(e) => updateItemShipmentDate(item.item_supplier_id, e.target.value)}
+                              disabled={!item.selected}
+                              className="input-date"
+                            />
+                          </td>
                           <td className="col-total">
                             {item.selected
-                              ? formatCurrency(parseFloat(item.unit_cost) * item.quantity)
+                              ? formatCurrency(
+                                  (item.unit_cost_override ? parseFloat(item.unit_cost_override) : parseFloat(item.unit_cost)) * item.quantity
+                                )
                               : '—'}
                           </td>
                         </tr>
                       ))}
+                      {/* Blank line for manual product entry */}
+                      <tr className="row-add-product">
+                        <td colSpan={2}>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <input
+                              type="text"
+                              placeholder="Search by product name or SKU..."
+                              value={productSearchTerm}
+                              onChange={(e) => {
+                                setProductSearchTerm(e.target.value);
+                                setProductBarcode('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleProductSearch();
+                                }
+                              }}
+                              className="input-search"
+                              style={{ flex: 1 }}
+                            />
+                            <span style={{ margin: '0 4px' }}>or</span>
+                            <input
+                              type="text"
+                              placeholder="Scan barcode..."
+                              value={productBarcode}
+                              onChange={(e) => {
+                                setProductBarcode(e.target.value);
+                                setProductSearchTerm('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleProductSearch();
+                                }
+                              }}
+                              className="input-barcode"
+                              style={{ flex: 1 }}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleProductSearch}
+                              disabled={searchingProduct || (!productSearchTerm.trim() && !productBarcode.trim())}
+                              className="btn-add-product"
+                            >
+                              {searchingProduct ? 'Searching...' : 'Add'}
+                            </button>
+                          </div>
+                        </td>
+                        <td colSpan={6}></td>
+                      </tr>
                     </tbody>
                     <tfoot>
                       <tr>
-                        <td colSpan={6} className="subtotal-label">
+                        <td colSpan={7} className="subtotal-label">
                           Items Subtotal ({selectedItemCount} items)
                         </td>
                         <td className="subtotal-value">{formatCurrency(itemsTotal)}</td>

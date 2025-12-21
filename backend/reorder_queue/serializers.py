@@ -206,7 +206,8 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         child=serializers.DictField(),
         write_only=True,
         help_text="List of items to order. Supports three formats: "
-        '[{"item_supplier_id": 1, "quantity": 10}, ...] for inventory items, '
+        '[{"item_supplier_id": 1, "quantity": 10, "unit_cost": 5.00, "expected_shipment_date": "2024-01-15"}, ...] for inventory items '
+        "(unit_cost and expected_shipment_date are optional), "
         '[{"asset_id": "uuid", "quantity": 1, "unit_cost": 100.00}, ...] for assets, '
         '[{"description": "Custom item", "quantity": 1, "unit_cost": 50.00}, ...] for freeform items',
     )
@@ -299,14 +300,26 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
                         else 0
                     )
 
+                    # Get unit_cost override if provided, otherwise use item_supplier.unit_cost
+                    unit_cost_override = item_data.get("unit_cost")
+                    unit_cost_ordered = (
+                        unit_cost_override
+                        if unit_cost_override is not None
+                        else (item_supplier.unit_cost or 0)
+                    )
+
+                    # Get expected_shipment_date if provided
+                    expected_shipment_date = item_data.get("expected_shipment_date")
+
                     # Create the line item
                     line_item = PurchaseOrderItem.objects.create(
                         purchase_order=purchase_order,
                         item_supplier=item_supplier,
                         quantity_ordered=quantity,
-                        unit_cost_ordered=item_supplier.unit_cost or 0,
+                        unit_cost_ordered=unit_cost_ordered,
                         order_in_packages=order_in_packages,
                         notes=notes,
+                        expected_shipment_date=expected_shipment_date,
                     )
 
                     total_cost += line_item.estimated_cost

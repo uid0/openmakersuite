@@ -284,12 +284,21 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
                             f"Item supplier {item_supplier_id} does not belong to selected supplier"
                         )
 
+                    # Calculate order_in_packages
+                    quantity_per_package = item_supplier.quantity_per_package or 1
+                    order_in_packages = (
+                        (int(quantity) + quantity_per_package - 1) // quantity_per_package
+                        if quantity_per_package > 0
+                        else 0
+                    )
+
                     # Create the line item
                     line_item = PurchaseOrderItem.objects.create(
                         purchase_order=purchase_order,
                         item_supplier=item_supplier,
                         quantity_ordered=quantity,
                         unit_cost_ordered=item_supplier.unit_cost or 0,
+                        order_in_packages=order_in_packages,
                         notes=notes,
                     )
 
@@ -320,12 +329,13 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
                             f"Asset {asset_id} manufacturer does not match selected supplier"
                         )
 
-                    # Create the line item
+                    # Create the line item (assets don't have package information)
                     line_item = PurchaseOrderItem.objects.create(
                         purchase_order=purchase_order,
                         asset=asset,
                         quantity_ordered=quantity,
                         unit_cost_ordered=unit_cost,
+                        order_in_packages=0,  # Assets don't have package information
                         notes=notes,
                     )
 
@@ -349,12 +359,13 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
                         f"unit_cost is required for freeform item: {description}"
                     )
 
-                # Create the freeform line item
+                # Create the freeform line item (freeform items don't have package information)
                 line_item = PurchaseOrderItem.objects.create(
                     purchase_order=purchase_order,
                     description=description,
                     quantity_ordered=quantity,
                     unit_cost_ordered=unit_cost,
+                    order_in_packages=0,  # Freeform items don't have package information
                     notes=notes,
                 )
 

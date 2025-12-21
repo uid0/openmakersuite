@@ -347,6 +347,10 @@ class PurchaseOrderItem(models.Model):
     quantity_received = models.PositiveIntegerField(
         default=0, help_text="Quantity actually received"
     )
+    order_in_packages = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of packages ordered (calculated from quantity_ordered / quantity_per_package for inventory items)",
+    )
 
     # Pricing
     unit_cost_ordered = models.DecimalField(

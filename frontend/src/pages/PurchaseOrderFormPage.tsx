@@ -58,6 +58,7 @@ const PurchaseOrderFormPage: React.FC = () => {
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [productBarcode, setProductBarcode] = useState('');
   const [searchingProduct, setSearchingProduct] = useState(false);
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
 
   // Submission state
   const [submitting, setSubmitting] = useState(false);
@@ -111,6 +112,26 @@ const PurchaseOrderFormPage: React.FC = () => {
       setFreeformItems([]);
     }
   }, [selectedSupplierId, suppliers]);
+
+  // Debounce search term for automatic search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(productSearchTerm);
+    }, 500); // 500ms debounce delay
+
+    return () => clearTimeout(timer);
+  }, [productSearchTerm]);
+
+  // Auto-search when debounced term changes (and barcode is empty)
+  useEffect(() => {
+    if (debouncedSearchTerm.trim() && !productBarcode.trim() && selectedSupplierId && !searchingProduct) {
+      handleProductSearch(debouncedSearchTerm, '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearchTerm, selectedSupplierId]);
+
+  // Note: Barcode search is triggered on Enter key or blur event in the input field
+  // This is handled in the onKeyDown and onBlur handlers below
 
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
 
@@ -190,9 +211,18 @@ const PurchaseOrderFormPage: React.FC = () => {
   };
 
   // Handle product search or barcode scan
-  const handleProductSearch = async () => {
+  const handleProductSearch = async (searchTerm?: string, barcode?: string) => {
     if (!selectedSupplierId) {
       setError('Please select a supplier first');
+      return;
+    }
+
+    // Use provided parameters or state values
+    const termToSearch = searchTerm !== undefined ? searchTerm : productSearchTerm;
+    const barcodeToSearch = barcode !== undefined ? barcode : productBarcode;
+
+    // Don't search if both are empty
+    if (!termToSearch.trim() && !barcodeToSearch.trim()) {
       return;
     }
 
@@ -204,9 +234,9 @@ const PurchaseOrderFormPage: React.FC = () => {
       let itemId: string;
 
       // Try barcode lookup first if barcode is provided
-      if (productBarcode.trim()) {
+      if (barcodeToSearch.trim()) {
         try {
-          const lookupResponse = await inventoryAPI.lookupByCode(productBarcode.trim().toUpperCase());
+          const lookupResponse = await inventoryAPI.lookupByCode(barcodeToSearch.trim().toUpperCase());
           if (lookupResponse.data.type === 'item') {
             itemId = lookupResponse.data.id;
           } else {
@@ -219,23 +249,33 @@ const PurchaseOrderFormPage: React.FC = () => {
           setSearchingProduct(false);
           return;
         }
-      } else if (productSearchTerm.trim()) {
+      } else if (termToSearch.trim()) {
         // Search by name or SKU
-        const searchResponse = await inventoryAPI.listItems({ search: productSearchTerm.trim() });
+        const searchResponse = await inventoryAPI.listItems({ search: termToSearch.trim() });
         const items = searchResponse.data.results;
         if (items.length === 0) {
+          // Don't show error for empty results during auto-search, only clear the field if it was manual
+          if (searchTerm === undefined) {
+            // This was an auto-search, silently fail
+            setSearchingProduct(false);
+            return;
+          }
           setError('No products found matching your search');
           setSearchingProduct(false);
           return;
         }
         if (items.length > 1) {
+          // For auto-search, don't show error for multiple results - user can continue typing
+          if (searchTerm === undefined) {
+            setSearchingProduct(false);
+            return;
+          }
           setError(`Multiple products found. Please be more specific or use barcode scan.`);
           setSearchingProduct(false);
           return;
         }
         itemId = items[0].id;
       } else {
-        setError('Please enter a product name/SKU or scan a barcode');
         setSearchingProduct(false);
         return;
       }
@@ -297,9 +337,13 @@ const PurchaseOrderFormPage: React.FC = () => {
       setSelectedItems((prev) => [...prev, newItem]);
       setProductSearchTerm('');
       setProductBarcode('');
+      setDebouncedSearchTerm(''); // Clear debounced term after successful add
     } catch (err: any) {
       console.error('Error searching for product:', err);
-      setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Failed to find product');
+      // Only show error if this was a manual search (not auto-search)
+      if (searchTerm !== undefined || barcode !== undefined) {
+        setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Failed to find product');
+      }
     } finally {
       setSearchingProduct(false);
     }
@@ -632,7 +676,13 @@ const PurchaseOrderFormPage: React.FC = () => {
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
                                   e.preventDefault();
-                                  handleProductSearch();
+                                  handleProductSearch('', productBarcode);
+                                }
+                              }}
+                              onBlur={() => {
+                                // Auto-search when barcode field loses focus (typical after scanning)
+                                if (productBarcode.trim() && selectedSupplierId && !searchingProduct) {
+                                  handleProductSearch('', productBarcode);
                                 }
                               }}
                               className="input-barcode"
@@ -640,7 +690,7 @@ const PurchaseOrderFormPage: React.FC = () => {
                             />
                             <button
                               type="button"
-                              onClick={handleProductSearch}
+                              onClick={() => handleProductSearch(productSearchTerm, productBarcode)}
                               disabled={searchingProduct || (!productSearchTerm.trim() && !productBarcode.trim())}
                               className="btn-add-product"
                             >

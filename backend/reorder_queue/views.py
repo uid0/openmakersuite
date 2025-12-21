@@ -483,27 +483,44 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def reorder_data(self, request):
         """
-        Get data for PO creation: low stock items grouped by supplier with pricing.
+        Get data for PO creation: items with active reorder requests prioritized,
+        then low stock items grouped by supplier with pricing.
 
         Returns all suppliers that have items needing reorder, along with
         assets where the supplier is the manufacturer.
         """
         from inventory.models import Asset, Supplier
 
-        # Get items that need reordering (current_stock <= minimum_stock)
+        # First, get items with active reorder requests (pending or approved)
+        items_with_requests = (
+            InventoryItem.objects.filter(
+                reorder_requests__status__in=[ReorderRequest.PENDING, ReorderRequest.APPROVED],
+                is_active=True,
+            )
+            .distinct()
+            .select_related("category", "location")
+            .prefetch_related("item_suppliers__supplier", "reorder_requests")
+        )
+
+        # Also get items that need reordering (current_stock <= minimum_stock)
+        # but exclude those already in items_with_requests
         low_stock_items = (
             InventoryItem.objects.filter(
                 current_stock__lte=F("minimum_stock"),
                 is_active=True,
             )
+            .exclude(id__in=items_with_requests.values_list("id", flat=True))
             .select_related("category", "location")
             .prefetch_related("item_suppliers__supplier")
         )
 
+        # Combine both sets, prioritizing items with requests
+        all_items = list(items_with_requests) + list(low_stock_items)
+
         # Build supplier data with their available items
         supplier_data = {}
 
-        for item in low_stock_items:
+        for item in all_items:
             # Get all active, non-discontinued suppliers for this item
             item_suppliers = item.item_suppliers.filter(
                 is_active=True,
@@ -528,8 +545,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     }
 
                 # Calculate suggested quantity
-                shortage = max(0, item.minimum_stock - item.current_stock)
-                suggested_qty = max(shortage, item.reorder_quantity)
+                # If item has an active reorder request, use that quantity
+                active_request = item.get_active_reorder_request()
+                if active_request:
+                    suggested_qty = active_request.quantity
+                else:
+                    shortage = max(0, item.minimum_stock - item.current_stock)
+                    suggested_qty = max(shortage, item.reorder_quantity)
 
                 # Adjust for package quantities
                 if item_supplier.quantity_per_package and item_supplier.quantity_per_package > 1:
@@ -540,6 +562,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
                 unit_cost = item_supplier.unit_cost or Decimal("0.00")
                 line_total = unit_cost * suggested_qty
+
+                # Check if item has an active reorder request
+                has_active_request = active_request is not None
+                reorder_request_id = active_request.id if active_request else None
 
                 supplier_data[supplier_id]["items"].append(
                     {
@@ -561,6 +587,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "supplier_url": item_supplier.supplier_url,
                         "is_primary": item_supplier.is_primary,
                         "line_total": str(line_total),
+                        "has_active_reorder_request": has_active_request,
+                        "reorder_request_id": reorder_request_id,
                     }
                 )
 
@@ -647,7 +675,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             {
                 "suppliers": suppliers_list,
                 "total_suppliers": len(suppliers_list),
-                "total_low_stock_items": low_stock_items.count(),
+                "total_low_stock_items": len(all_items),
+                "items_with_requests": items_with_requests.count(),
             }
         )
 
@@ -720,6 +749,80 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         return base_quantity
 
+    def _update_reorder_requests_from_po(self, purchase_order):
+        """
+        Update associated ReorderRequest objects when a PurchaseOrder is finalized.
+
+        Updates requests with:
+        - order_number (PO number)
+        - actual_cost (from PO line items)
+        - estimated_delivery (calculated from expected_delivery_date or lead time)
+        - ordered_at (when PO was sent)
+        - status = "ordered"
+        """
+        # Find all inventory items in this PO
+        po_items = purchase_order.items.filter(item_supplier__isnull=False).select_related(
+            "item_supplier__item"
+        )
+
+        for po_item in po_items:
+            item = po_item.item_supplier.item
+
+            # Find active reorder requests for this item (pending or approved)
+            active_requests = ReorderRequest.objects.filter(
+                item=item,
+                status__in=[ReorderRequest.PENDING, ReorderRequest.APPROVED],
+            )
+
+            # Calculate estimated delivery date
+            estimated_delivery = None
+            if purchase_order.expected_delivery_date:
+                estimated_delivery = purchase_order.expected_delivery_date
+            elif po_item.item_supplier.average_lead_time:
+                # Calculate from lead time in business days
+                order_date = (
+                    purchase_order.sent_at.date()
+                    if purchase_order.sent_at
+                    else timezone.now().date()
+                )
+                lead_time_days = po_item.item_supplier.average_lead_time
+                estimated_delivery = self._add_business_days(order_date, lead_time_days)
+
+            # Update each active request
+            for reorder_request in active_requests:
+                reorder_request.status = ReorderRequest.ORDERED
+                reorder_request.order_number = purchase_order.po_number
+                reorder_request.ordered_at = purchase_order.sent_at or timezone.now()
+                reorder_request.estimated_delivery = estimated_delivery
+
+                # Set actual cost if not already set
+                if not reorder_request.actual_cost:
+                    # Calculate cost per unit from PO
+                    if po_item.quantity_ordered > 0 and po_item.unit_cost_ordered:
+                        cost_per_unit = po_item.unit_cost_ordered
+                        reorder_request.actual_cost = cost_per_unit * reorder_request.quantity
+                    else:
+                        # Fallback to estimated cost from line item
+                        reorder_request.actual_cost = po_item.estimated_cost
+
+                reorder_request.save()
+
+    def _add_business_days(self, start_date, business_days):
+        """Add business days to a date (excluding weekends)."""
+        if isinstance(start_date, timezone.datetime):
+            start_date = start_date.date()
+
+        current_date = start_date
+        days_added = 0
+
+        while days_added < business_days:
+            current_date += timedelta(days=1)
+            # Monday = 0, Sunday = 6
+            if current_date.weekday() < 5:  # Monday to Friday
+                days_added += 1
+
+        return current_date
+
     @action(detail=True, methods=["post"])
     def send_to_supplier(self, request, pk=None):
         """Mark purchase order as sent to supplier."""
@@ -735,6 +838,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         purchase_order.sent_by = request.user
         purchase_order.sent_at = timezone.now()
         purchase_order.save()
+
+        # Update associated ReorderRequest objects
+        self._update_reorder_requests_from_po(purchase_order)
 
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)

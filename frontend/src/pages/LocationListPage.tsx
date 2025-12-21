@@ -2,7 +2,7 @@
  * Location List Page
  * Display locations in hierarchical tree structure
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import TreeView, { TreeNode } from '../components/TreeView';
 import { inventoryAPI } from '../services/api';
@@ -16,13 +16,7 @@ const LocationListPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isStaff, setIsStaff] = useState(false);
 
-  useEffect(() => {
-    const staffStatus = localStorage.getItem('is_staff');
-    setIsStaff(staffStatus === 'true');
-    loadLocations();
-  }, []);
-
-  const loadLocations = async () => {
+  const loadLocations = useCallback(async () => {
     try {
       setLoading(true);
       const response = await inventoryAPI.listLocations();
@@ -31,42 +25,64 @@ const LocationListPage: React.FC = () => {
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load locations');
       console.error('Error loading locations:', err);
+      // Re-throw to trigger Sentry error boundary if it's a critical error
+      if (!err.response) {
+        throw err;
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const staffStatus = localStorage.getItem('is_staff');
+    setIsStaff(staffStatus === 'true');
+    loadLocations();
+  }, [loadLocations]);
 
   const buildTree = (items: Location[]): TreeNode[] => {
-    const itemMap = new Map<number, TreeNode>();
-    const roots: TreeNode[] = [];
+    try {
+      const itemMap = new Map<number, TreeNode>();
+      const roots: TreeNode[] = [];
 
-    // First pass: create all nodes
-    items.forEach((item) => {
-      itemMap.set(item.id, {
-        ...item,
+      // First pass: create all nodes
+      items.forEach((item) => {
+        itemMap.set(item.id, {
+          id: item.id,
+          name: item.name,
+          ...item,
+        });
       });
-    });
 
-    // Second pass: build tree structure
-    items.forEach((item) => {
-      const node = itemMap.get(item.id)!;
-      if (item.parent === null) {
-        roots.push(node);
-      } else {
-        const parent = itemMap.get(item.parent);
-        if (parent) {
-          if (!parent.children) {
-            parent.children = [];
-          }
-          parent.children.push(node);
-        } else {
-          // Parent not found, treat as root
-          roots.push(node);
+      // Second pass: build tree structure
+      items.forEach((item) => {
+        const node = itemMap.get(item.id);
+        if (!node) {
+          console.warn(`Node with id ${item.id} not found in map`);
+          return;
         }
-      }
-    });
+        
+        if (item.parent === null) {
+          roots.push(node);
+        } else {
+          const parent = itemMap.get(item.parent);
+          if (parent) {
+            if (!parent.children) {
+              parent.children = [];
+            }
+            parent.children.push(node);
+          } else {
+            // Parent not found, treat as root
+            roots.push(node);
+          }
+        }
+      });
 
-    return roots;
+      return roots;
+    } catch (err) {
+      console.error('Error building tree:', err);
+      throw err;
+    }
   };
 
   const filteredLocations = useMemo(() => {

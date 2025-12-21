@@ -149,6 +149,8 @@ describe('AssetList', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Clear localStorage before each test
+    localStorage.clear();
     mockAssetsAPI.listAssets.mockResolvedValue({
       data: {
         count: mockAssets.length,
@@ -358,6 +360,26 @@ describe('AssetList', () => {
     await userEvent.click(tableViewButton);
 
     // Should show table view
+    await waitFor(() => {
+      expect(screen.getByText('Name')).toBeInTheDocument();
+      expect(screen.getByText('Asset Tag')).toBeInTheDocument();
+    });
+
+    // Verify preference was saved to localStorage
+    expect(localStorage.getItem('assetViewMode')).toBe('table');
+  });
+
+  it('loads view mode preference from localStorage', async () => {
+    // Set preference to table view
+    localStorage.setItem('assetViewMode', 'table');
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Asset 1')).toBeInTheDocument();
+    });
+
+    // Should show table view by default
     await waitFor(() => {
       expect(screen.getByText('Name')).toBeInTheDocument();
       expect(screen.getByText('Asset Tag')).toBeInTheDocument();

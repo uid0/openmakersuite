@@ -61,9 +61,8 @@ const LocationListPage: React.FC = () => {
       // First pass: create all nodes
       validItems.forEach((item) => {
         itemMap.set(item.id, {
-          id: item.id,
-          name: item.name || 'Unnamed Location',
           ...item,
+          name: item.name || 'Unnamed Location',
         } as TreeNode);
       });
 

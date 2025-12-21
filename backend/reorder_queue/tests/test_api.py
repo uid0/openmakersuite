@@ -12,7 +12,7 @@ from django.utils import timezone
 import pytest
 from rest_framework import status
 
-from inventory.tests.factories import InventoryItemFactory, SupplierFactory
+from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 from reorder_queue.tests.factories import ReorderRequestFactory
 
@@ -233,6 +233,7 @@ class TestReorderRequestAPI:
             quantity_ordered=10,
             quantity_received=2,
             unit_cost_ordered=Decimal("12.50"),
+            order_in_packages=0,  # Default value for existing items
         )
 
         url = reverse("analytics-logistics-dashboard")
@@ -331,3 +332,166 @@ class TestReorderRequestAPI:
         assert "grainger" in response.data
         assert len(response.data["amazon"]["items"]) == 1
         assert len(response.data["grainger"]["items"]) == 1
+
+
+@pytest.mark.integration
+class TestPurchaseOrderAPI:
+    """Tests for PurchaseOrder API endpoints."""
+
+    def test_create_purchase_order_with_inventory_item_calculates_order_in_packages(
+        self, authenticated_client
+    ):
+        """Test that order_in_packages is calculated correctly when creating a purchase order."""
+        client, user = authenticated_client
+
+        # Create supplier and item with quantity_per_package = 12
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(
+            supplier=supplier, quantity_per_package=12, unit_cost=Decimal("2.50")
+        )
+
+        # Create purchase order with quantity_ordered = 25
+        # Expected: order_in_packages = ceil(25 / 12) = 3
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {
+                    "item_supplier_id": item_supplier.id,
+                    "quantity": 25,
+                }
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["po_number"] is not None
+
+        # Verify the purchase order item was created with correct order_in_packages
+        po_id = response.data["id"]
+        purchase_order = PurchaseOrder.objects.get(id=po_id)
+        po_item = purchase_order.items.first()
+
+        assert po_item is not None
+        assert po_item.quantity_ordered == 25
+        assert po_item.order_in_packages == 3  # ceil(25 / 12) = 3
+
+    def test_create_purchase_order_with_exact_package_quantity(self, authenticated_client):
+        """Test order_in_packages calculation when quantity is exactly divisible by quantity_per_package."""
+        client, user = authenticated_client
+
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(
+            supplier=supplier, quantity_per_package=10, unit_cost=Decimal("5.00")
+        )
+
+        # Create purchase order with quantity_ordered = 30 (exactly 3 packages)
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {
+                    "item_supplier_id": item_supplier.id,
+                    "quantity": 30,
+                }
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        po_id = response.data["id"]
+        purchase_order = PurchaseOrder.objects.get(id=po_id)
+        po_item = purchase_order.items.first()
+
+        assert po_item.order_in_packages == 3  # 30 / 10 = 3 exactly
+
+    def test_create_purchase_order_with_asset_sets_order_in_packages_to_zero(
+        self, authenticated_client
+    ):
+        """Test that assets have order_in_packages set to 0."""
+        client, user = authenticated_client
+
+        from inventory.tests.factories import AssetFactory
+
+        supplier = SupplierFactory()
+        asset = AssetFactory(manufacturer=supplier)
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {
+                    "asset_id": str(asset.id),
+                    "quantity": 2,
+                    "unit_cost": 100.00,
+                }
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        po_id = response.data["id"]
+        purchase_order = PurchaseOrder.objects.get(id=po_id)
+        po_item = purchase_order.items.first()
+
+        assert po_item.order_in_packages == 0  # Assets don't have package information
+
+    def test_create_purchase_order_with_freeform_item_sets_order_in_packages_to_zero(
+        self, authenticated_client
+    ):
+        """Test that freeform items have order_in_packages set to 0."""
+        client, user = authenticated_client
+
+        supplier = SupplierFactory()
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {
+                    "description": "Custom item",
+                    "quantity": 5,
+                    "unit_cost": 25.00,
+                }
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        po_id = response.data["id"]
+        purchase_order = PurchaseOrder.objects.get(id=po_id)
+        po_item = purchase_order.items.first()
+
+        assert po_item.order_in_packages == 0  # Freeform items don't have package information
+
+    def test_create_purchase_order_with_quantity_per_package_one(self, authenticated_client):
+        """Test order_in_packages when quantity_per_package is 1."""
+        client, user = authenticated_client
+
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(
+            supplier=supplier, quantity_per_package=1, unit_cost=Decimal("1.00")
+        )
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {
+                    "item_supplier_id": item_supplier.id,
+                    "quantity": 7,
+                }
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        po_id = response.data["id"]
+        purchase_order = PurchaseOrder.objects.get(id=po_id)
+        po_item = purchase_order.items.first()
+
+        assert po_item.order_in_packages == 7  # 7 / 1 = 7

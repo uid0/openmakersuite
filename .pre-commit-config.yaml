@@ -42,14 +42,12 @@ repos:
         args: ["--profile", "black", "--check-only"] # Match CI: isort --check-only
 
   # Backend: Python linting
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.0.0
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.12
     hooks:
-      - id: flake8
-        files: ^backend/
-        exclude: ^backend/.*migrations/
-        args: ["--config=backend/.flake8"]
-
+    -   id: ruff
+        alias: autoformat
+        args: [--fix]
   # Backend: Security checks - Bandit
   - repo: https://github.com/PyCQA/bandit
     rev: 1.7.6

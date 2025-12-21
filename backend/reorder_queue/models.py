@@ -347,6 +347,10 @@ class PurchaseOrderItem(models.Model):
     quantity_received = models.PositiveIntegerField(
         default=0, help_text="Quantity actually received"
     )
+    order_in_packages = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of packages ordered (calculated from quantity_ordered / quantity_per_package for inventory items)",
+    )
 
     # Pricing
     unit_cost_ordered = models.DecimalField(
@@ -407,6 +411,10 @@ class PurchaseOrderItem(models.Model):
                 check=(
                     models.Q(item_supplier__isnull=False, asset__isnull=True)
                     | models.Q(item_supplier__isnull=True, asset__isnull=False)
+                    | (
+                        models.Q(item_supplier__isnull=True, asset__isnull=True)
+                        & ~models.Q(description="")
+                    )
                 ),
                 name="purchase_order_item_must_have_item_or_asset",
             ),

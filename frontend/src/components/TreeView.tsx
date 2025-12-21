@@ -26,7 +26,11 @@ const TreeView: React.FC<TreeViewProps> = ({
   onNodeClick,
 }) => {
   const [expandedNodes, setExpandedNodes] = useState<Set<number | string>>(
-    new Set(defaultExpanded ? nodes.map((n) => n.id) : [])
+    new Set(
+      defaultExpanded && nodes && Array.isArray(nodes)
+        ? nodes.filter((n) => n && n.id !== undefined && n.id !== null).map((n) => n.id)
+        : []
+    )
   );
 
   const toggleNode = (nodeId: number | string) => {
@@ -42,8 +46,23 @@ const TreeView: React.FC<TreeViewProps> = ({
   };
 
   const renderTree = (nodeList: TreeNode[], level: number = 0): React.ReactNode => {
-    return nodeList.map((node) => {
-      const hasChildren = node.children && node.children.length > 0;
+    if (!nodeList || !Array.isArray(nodeList)) {
+      console.warn('TreeView: Invalid nodeList provided', nodeList);
+      return null;
+    }
+
+    return nodeList.map((node, index) => {
+      // Defensive checks for node validity
+      if (!node || node.id === undefined || node.id === null) {
+        console.warn('TreeView: Invalid node detected', node);
+        return (
+          <div key={`invalid-${index}`} className="tree-node error">
+            <div className="tree-node-content">Invalid node data</div>
+          </div>
+        );
+      }
+
+      const hasChildren = node.children && Array.isArray(node.children) && node.children.length > 0;
       const isExpanded = expandedNodes.has(node.id);
 
       return (
@@ -75,6 +94,11 @@ const TreeView: React.FC<TreeViewProps> = ({
       );
     });
   };
+
+  if (!nodes || !Array.isArray(nodes)) {
+    console.warn('TreeView: Invalid nodes prop provided', nodes);
+    return <div className="tree-view error">Invalid tree data</div>;
+  }
 
   return <div className="tree-view">{renderTree(nodes)}</div>;
 };

@@ -35,7 +35,7 @@ paho-mqtt==2.1.0
 PyJWT==2.9.0
 
 # Error Tracking
-sentry-sdk[django]==2.42.1
+sentry-sdk[django]==2.44.0
 
 # Testing and Code Coverage
 coverage==7.6.4

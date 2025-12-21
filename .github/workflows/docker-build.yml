@@ -51,16 +51,16 @@ jobs:
           if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" =~ ^refs/tags/v ]]; then
             VERSION_TAG="${{ github.ref_name }}"
             echo "🏷️ Git tag detected: $VERSION_TAG"
-            
+
             BACKEND_TAGS="$REGISTRY/backend:$VERSION_TAG,$REGISTRY/backend:latest"
             FRONTEND_TAGS="$REGISTRY/frontend:$VERSION_TAG,$REGISTRY/frontend:latest"
-            
+
           # Check if this is main branch
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "🏷️ Main branch detected - tagging as latest"
             BACKEND_TAGS="$REGISTRY/backend:latest"
             FRONTEND_TAGS="$REGISTRY/frontend:latest"
-            
+
           # Check if this is a feature branch (extract issue number after slash)
           elif [[ "${{ github.ref }}" =~ ^refs/heads/.*/([0-9]+)- ]]; then
             ISSUE_NUM=$(echo "${{ github.ref }}" | sed -n 's|.*/\([0-9]*\)-.*|\1|p')

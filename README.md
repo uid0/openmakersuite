@@ -334,7 +334,7 @@ OpenMakerSuite integrates with Sentry for:
 - **📱 Release Tracking**: Associate errors with specific releases
 - **🔔 Alerting**: Real-time notifications for critical issues
 
-To set this up for use in your own environment, please update the `SENTRY_DSN` variable in the .env file.  
+To set this up for use in your own environment, please update the `SENTRY_DSN` variable in the .env file.
 
 ### Metrics Dashboard
 
@@ -353,7 +353,7 @@ The admin dashboard provides:
 - **📖 Documentation**: Check the docs folder for detailed guides
 - **🐛 Issues**: Report bugs on GitHub Issues
 - **💬 Discussions**: Join GitHub Discussions for questions
-- **📧 Security**: Email security issues to me AT ianwilson DOT org.  
+- **📧 Security**: Email security issues to me AT ianwilson DOT org.
 
 ### Community
 

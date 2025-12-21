@@ -21,7 +21,7 @@ def create_locations_from_existing_data(apps, schema_editor):
         if loc_name:  # Skip empty strings
             location, created = Location.objects.get_or_create(
                 name=loc_name,
-                defaults={"description": f"Auto-created from existing data"},
+                defaults={"description": "Auto-created from existing data"},
             )
             location_map[loc_name] = location
 

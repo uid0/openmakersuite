@@ -411,6 +411,11 @@ class PurchaseOrderItem(models.Model):
                 check=(
                     models.Q(item_supplier__isnull=False, asset__isnull=True)
                     | models.Q(item_supplier__isnull=True, asset__isnull=False)
+                    | models.Q(
+                        item_supplier__isnull=True,
+                        asset__isnull=True,
+                        description__gt="",
+                    )
                 ),
                 name="purchase_order_item_must_have_item_or_asset",
             ),

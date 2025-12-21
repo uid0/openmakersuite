@@ -214,11 +214,14 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchaseOrder
         fields = [
+            "id",
+            "po_number",
             "supplier",
             "expected_delivery_date",
             "notes",
             "items",
         ]
+        read_only_fields = ["id", "po_number"]
 
     def validate_items(self, value):
         """Validate that items list is not empty."""

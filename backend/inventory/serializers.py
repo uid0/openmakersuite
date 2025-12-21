@@ -964,6 +964,7 @@ class AssetProblemSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "resolved_at",
+            "resolved_by",
         ]
         read_only_fields = ["created_at", "updated_at", "resolved_at"]
 

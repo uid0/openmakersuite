@@ -603,7 +603,10 @@ const AssetDetailPage: React.FC = () => {
                       </div>
                     )}
                     {problem.resolved_at && (
-                      <p className="problem-resolved-date">Resolved: {formatDateTime(problem.resolved_at)}</p>
+                      <p className="problem-resolved-date">
+                        Resolved: {formatDateTime(problem.resolved_at)}
+                        {problem.resolved_by && ` by ${problem.resolved_by}`}
+                      </p>
                     )}
 
                     {/* Resolve Problem UI */}

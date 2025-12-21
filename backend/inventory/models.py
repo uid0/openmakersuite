@@ -1494,6 +1494,11 @@ class AssetProblem(models.Model):
         blank=True,
         help_text="When the problem was resolved",
     )
+    resolved_by = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Username or identifier of person who resolved the problem",
+    )
 
     class Meta:
         ordering = ["-created_at"]

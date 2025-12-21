@@ -340,6 +340,7 @@ export interface AssetProblem {
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
+  resolved_by: string;
 }
 
 export interface SiteSettings {

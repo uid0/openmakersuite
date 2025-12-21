@@ -96,13 +96,18 @@ const AssetFormPage: React.FC = () => {
         inventoryAPI.listItems(),
         sigAPI.listMySIGs(),
       ]);
-      setCategories(categoriesRes.data.results);
-      setLocations(locationsRes.data.results);
-      setInventoryItems(itemsRes.data.results);
-      setSigs(sigsRes.data.results);
+      setCategories(categoriesRes.data.results || []);
+      setLocations(locationsRes.data.results || []);
+      setInventoryItems(itemsRes.data.results || []);
+      setSigs(sigsRes.data.results || []);
     } catch (err) {
       console.error('Error loading initial data:', err);
       setError('Failed to load form data. Please refresh the page.');
+      // Ensure arrays remain empty arrays even on error
+      setCategories([]);
+      setLocations([]);
+      setInventoryItems([]);
+      setSigs([]);
     }
   };
 

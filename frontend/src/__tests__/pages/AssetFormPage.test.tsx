@@ -344,4 +344,209 @@ describe('AssetFormPage', () => {
 
     expect(screen.getByText('Loading...')).toBeInTheDocument();
   });
+
+  it('handles API responses with missing results property gracefully', async () => {
+    // Ensure useParams returns an empty object (for create mode)
+    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({});
+
+    // Mock API responses where results is missing or undefined
+    // This simulates the bug where .map() would be called on undefined
+    // The fix ensures arrays are always arrays (empty if results is missing)
+    mockInventoryAPI.listCategories.mockResolvedValue({
+      data: {} as any, // Missing results property
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+    mockInventoryAPI.listLocations.mockResolvedValue({
+      data: { results: undefined } as any, // results is explicitly undefined
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+    mockInventoryAPI.listItems.mockResolvedValue({
+      data: {} as any, // Missing results property
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+    mockSigAPI.listMySIGs.mockResolvedValue({
+      data: { results: undefined } as any, // results is explicitly undefined
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+
+    // Component should render without crashing (no error thrown)
+    renderWithMantine(
+      <MemoryRouter>
+        <AssetFormPage />
+      </MemoryRouter>
+    );
+
+    // Should render the form (not crash) - arrays should be empty, not undefined
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Create Asset' })).toBeInTheDocument();
+    });
+
+    // Form fields should be accessible (arrays should be empty, not undefined)
+    expect(screen.getByLabelText(/Name/i)).toBeInTheDocument();
+    
+    // No error message should be shown since API calls succeeded (just missing results)
+    expect(screen.queryByText(/Failed to load form data/i)).not.toBeInTheDocument();
+  });
+
+  it('handles API errors gracefully without crashing on .map() calls', async () => {
+    // Ensure useParams returns an empty object (for create mode)
+    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({});
+
+    // Mock API calls that reject/fail
+    mockInventoryAPI.listCategories.mockRejectedValue(new Error('Network error'));
+    mockInventoryAPI.listLocations.mockRejectedValue(new Error('Network error'));
+    mockInventoryAPI.listItems.mockRejectedValue(new Error('Network error'));
+    mockSigAPI.listMySIGs.mockRejectedValue(new Error('Network error'));
+
+    // Component should render without crashing
+    renderWithMantine(
+      <MemoryRouter>
+        <AssetFormPage />
+      </MemoryRouter>
+    );
+
+    // Should show error message
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load form data/i)).toBeInTheDocument();
+    });
+
+    // Should still render the form (not crash)
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Create Asset' })).toBeInTheDocument();
+    });
+
+    // Form fields should be accessible (arrays should be empty, not undefined)
+    expect(screen.getByLabelText(/Name/i)).toBeInTheDocument();
+  });
+
+  it('handles edit mode with missing API results', async () => {
+    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({ id: 'test-id' });
+
+    // Mock API responses with missing results
+    mockInventoryAPI.listCategories.mockResolvedValue({
+      data: {} as any,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+    mockInventoryAPI.listLocations.mockResolvedValue({
+      data: { results: undefined } as any,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+    mockInventoryAPI.listItems.mockResolvedValue({
+      data: {} as any,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+    mockSigAPI.listMySIGs.mockResolvedValue({
+      data: { results: undefined } as any,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+
+    const mockAsset: Asset = {
+      id: 'test-id',
+      name: 'Test Asset',
+      description: 'Test Description',
+      serial_number: 'SN001',
+      asset_tag: 'TAG001',
+      inventory_item: null,
+      inventory_item_name: '',
+      manufacturer: null,
+      manufacturer_name: '',
+      display_manufacturer: '',
+      date_received: '2024-01-01',
+      amount_paid: '100.00',
+      is_donation: false,
+      donor_name: '',
+      acquisition_display: '',
+      category: 1,
+      category_name: 'Electronics',
+      location: 1,
+      location_name: 'Workshop A',
+      product_url: '',
+      wiki_page_url: '',
+      maintenance_plan: '',
+      image: null,
+      image_url: null,
+      thumbnail_url: null,
+      manual_pdf: null,
+      manual_pdf_url: null,
+      qr_code: null,
+      qr_code_url: null,
+      qr_code_scan_url: null,
+      status: 'active',
+      condition_notes: '',
+      age_in_days: 30,
+      is_active: true,
+      report_only: false,
+      notes: '',
+      circuit: '',
+      needs_compressed_air: false,
+      needs_ventilation: false,
+      is_chargeable: false,
+      last_scanned_at: null,
+      ownership_type: 'space',
+      owning_group: null,
+      owning_group_name: null,
+      owning_user: null,
+      owning_user_name: null,
+      groups_can_enable: [],
+      is_locked: false,
+      lockout_info: null,
+      can_enable: true,
+      can_unlock: false,
+      operational_status: 'available',
+      created_at: '',
+      updated_at: '',
+    };
+
+    mockAssetsAPI.getAsset.mockResolvedValue({
+      data: mockAsset,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
+
+    // Component should render without crashing
+    renderWithMantine(
+      <MemoryRouter>
+        <AssetFormPage />
+      </MemoryRouter>
+    );
+
+    // Should render the edit form (not crash) - arrays should be empty, not undefined
+    await waitFor(() => {
+      expect(screen.getByText('Edit Asset')).toBeInTheDocument();
+    });
+
+    // Asset data should still be loaded
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Test Asset')).toBeInTheDocument();
+    });
+
+    // No error message should be shown since API calls succeeded (just missing results)
+    expect(screen.queryByText(/Failed to load form data/i)).not.toBeInTheDocument();
+  });
 });

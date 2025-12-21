@@ -541,6 +541,7 @@ export interface CreatePurchaseOrderItem {
   description?: string;
   quantity: number;
   unit_cost?: number;
+  expected_shipment_date?: string;
   notes?: string;
 }
 

@@ -3,6 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'react-router-dom';
+import ErrorFallback from './components/ErrorFallback';
 import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AssetDetailPage from './pages/AssetDetailPage';
@@ -100,14 +101,10 @@ function AppContent() {
   return (
     <div className="App">
       <Sentry.ErrorBoundary
-        fallback={({ error, resetError }) => (
-          <div style={{ padding: '20px', textAlign: 'center' }}>
-            <h1>Something went wrong</h1>
-            <p>{error.message}</p>
-            <button onClick={resetError}>Try again</button>
-          </div>
+        fallback={({ error, resetError, eventId }) => (
+          <ErrorFallback error={error} resetError={resetError} eventId={eventId} />
         )}
-        showDialog
+        showDialog={false}
       >
         <SentryRoutes>
           {/* Home/Landing */}

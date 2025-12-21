@@ -51,7 +51,7 @@ const LocationListPage: React.FC = () => {
           id: item.id,
           name: item.name,
           ...item,
-        });
+        } as TreeNode);
       });
 
       // Second pass: build tree structure

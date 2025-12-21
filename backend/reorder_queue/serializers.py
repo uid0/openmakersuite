@@ -207,7 +207,7 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         write_only=True,
         help_text="List of items to order. Supports three formats: "
         '[{"item_supplier_id": 1, "quantity": 10, "unit_cost": 5.00, "expected_shipment_date": "2024-01-15"}, ...] for inventory items '
-        '(unit_cost and expected_shipment_date are optional), '
+        "(unit_cost and expected_shipment_date are optional), "
         '[{"asset_id": "uuid", "quantity": 1, "unit_cost": 100.00}, ...] for assets, '
         '[{"description": "Custom item", "quantity": 1, "unit_cost": 50.00}, ...] for freeform items',
     )

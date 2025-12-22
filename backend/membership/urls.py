@@ -12,6 +12,8 @@ from .views import (
     SIGViewSet,
     UserProfileViewSet,
     change_password,
+    register_user_with_token,
+    validate_registration_token,
 )
 
 router = DefaultRouter()
@@ -22,5 +24,15 @@ router.register(r"profile", UserProfileViewSet, basename="profile")
 
 urlpatterns = [
     path("change-password/", change_password, name="change-password"),
+    path(
+        "register/validate-token/",
+        validate_registration_token,
+        name="validate-registration-token",
+    ),
+    path(
+        "register/complete/",
+        register_user_with_token,
+        name="register-user-with-token",
+    ),
     path("", include(router.urls)),
 ]

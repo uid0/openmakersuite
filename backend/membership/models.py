@@ -2,9 +2,13 @@
 Models for membership management.
 """
 
+import secrets
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, Group
 from django.db import models
+from django.utils import timezone
 
 
 class Membership(models.Model):
@@ -230,3 +234,113 @@ class SIGAdmin(models.Model):
         return User.objects.filter(
             sig_admin_roles__group=group, sig_admin_roles__is_active=True
         ).distinct()
+
+
+class UserRegistrationToken(models.Model):
+    """
+    One-time use token for user registration via QR code.
+
+    Allows admins to create users with a token that can be used once
+    to set up the user's password and complete account setup.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="registration_token",
+        help_text="User account associated with this token",
+    )
+    token = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Unique token for registration",
+    )
+    used = models.BooleanField(
+        default=False,
+        help_text="Whether this token has been used",
+    )
+    used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this token was used",
+    )
+    expires_at = models.DateTimeField(
+        help_text="When this token expires",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_registration_tokens",
+        help_text="Admin user who created this token",
+    )
+
+    class Meta:
+        db_table = "membership_user_registration_token"
+        verbose_name = "User Registration Token"
+        verbose_name_plural = "User Registration Tokens"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["token", "used"]),
+            models.Index(fields=["expires_at", "used"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Registration token for {self.user.username} ({'used' if self.used else 'active'})"
+
+    @classmethod
+    def generate_token(cls) -> str:
+        """Generate a secure random token."""
+        return secrets.token_urlsafe(48)
+
+    @classmethod
+    def create_for_user(
+        cls,
+        user,
+        created_by=None,
+        expiration_days: int = 7,
+    ) -> "UserRegistrationToken":
+        """
+        Create a registration token for a user.
+
+        Args:
+            user: User instance to create token for
+            created_by: Admin user creating the token
+            expiration_days: Number of days until token expires (default 7)
+
+        Returns:
+            UserRegistrationToken instance
+        """
+        token = cls.generate_token()
+        expires_at = timezone.now() + timedelta(days=expiration_days)
+
+        registration_token = cls.objects.create(
+            user=user,
+            token=token,
+            expires_at=expires_at,
+            created_by=created_by,
+        )
+
+        return registration_token
+
+    def is_valid(self) -> bool:
+        """Check if token is valid (not used and not expired)."""
+        if self.used:
+            return False
+        if timezone.now() > self.expires_at:
+            return False
+        return True
+
+    def mark_as_used(self) -> None:
+        """Mark token as used."""
+        self.used = True
+        self.used_at = timezone.now()
+        self.save(update_fields=["used", "used_at"])
+
+    def get_registration_url(self) -> str:
+        """Get the registration URL for this token."""
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        return f"{frontend_url}/register/{self.token}"

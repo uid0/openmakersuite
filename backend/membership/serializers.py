@@ -6,7 +6,7 @@ from django.contrib.auth.models import Group
 
 from rest_framework import serializers
 
-from .models import SIGAdmin, User
+from .models import SIGAdmin, User, UserRegistrationToken
 
 
 class SIGAdminSerializer(serializers.ModelSerializer):
@@ -176,3 +176,115 @@ class ChangePasswordSerializer(serializers.Serializer):
         if attrs["new_password"] != attrs["new_password2"]:
             raise serializers.ValidationError({"new_password2": "New passwords do not match."})
         return attrs
+
+
+class UserRegistrationTokenSerializer(serializers.ModelSerializer):
+    """Serializer for user registration token."""
+
+    user = UserSerializer(read_only=True)
+    registration_url = serializers.SerializerMethodField()
+    is_valid = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserRegistrationToken
+        fields = [
+            "id",
+            "user",
+            "token",
+            "registration_url",
+            "is_valid",
+            "used",
+            "used_at",
+            "expires_at",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "user",
+            "token",
+            "registration_url",
+            "is_valid",
+            "used",
+            "used_at",
+            "expires_at",
+            "created_at",
+        ]
+
+    def get_registration_url(self, obj):
+        """Get the registration URL."""
+        return obj.get_registration_url()
+
+    def get_is_valid(self, obj):
+        """Check if token is valid."""
+        return obj.is_valid()
+
+
+class TokenValidationSerializer(serializers.Serializer):
+    """Serializer for token validation."""
+
+    token = serializers.CharField(required=True)
+
+    def validate_token(self, value):
+        """Validate that token exists and is valid."""
+        try:
+            registration_token = UserRegistrationToken.objects.get(token=value)
+        except UserRegistrationToken.DoesNotExist:
+            raise serializers.ValidationError("Invalid registration token.")
+
+        if not registration_token.is_valid():
+            if registration_token.used:
+                raise serializers.ValidationError("This registration token has already been used.")
+            else:
+                raise serializers.ValidationError("This registration token has expired.")
+
+        return value
+
+
+class UserRegistrationSerializer(serializers.Serializer):
+    """Serializer for user registration with token."""
+
+    token = serializers.CharField(required=True)
+    password = serializers.CharField(required=True, write_only=True, min_length=8)
+    password2 = serializers.CharField(required=True, write_only=True)
+
+    def validate(self, attrs):
+        """Validate registration data."""
+        # Validate token
+        token = attrs.get("token")
+        try:
+            registration_token = UserRegistrationToken.objects.get(token=token)
+        except UserRegistrationToken.DoesNotExist:
+            raise serializers.ValidationError({"token": "Invalid registration token."})
+
+        if not registration_token.is_valid():
+            if registration_token.used:
+                raise serializers.ValidationError(
+                    {"token": "This registration token has already been used."}
+                )
+            else:
+                raise serializers.ValidationError({"token": "This registration token has expired."})
+
+        # Validate passwords match
+        password = attrs.get("password")
+        password2 = attrs.get("password2")
+        if password != password2:
+            raise serializers.ValidationError({"password2": "Passwords do not match."})
+
+        return attrs
+
+    def save(self):
+        """Complete user registration by setting password."""
+        token = self.validated_data["token"]
+        password = self.validated_data["password"]
+
+        registration_token = UserRegistrationToken.objects.get(token=token)
+        user = registration_token.user
+
+        # Set password
+        user.set_password(password)
+        user.save()
+
+        # Mark token as used
+        registration_token.mark_as_used()
+
+        return user

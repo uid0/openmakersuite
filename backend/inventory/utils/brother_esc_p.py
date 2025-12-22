@@ -182,16 +182,16 @@ class BrotherESCPGenerator:
         commands = BytesIO()
 
         # Initialize printer
-        commands.write(b"\x1B@")  # ESC @ - Initialize printer
+        commands.write(b"\x1b@")  # ESC @ - Initialize printer
 
         # Set media type: 62mm continuous tape
         # ESC i a - Set media type
         # a = 0x01 for 62mm width
-        commands.write(b"\x1Bi\x01")
+        commands.write(b"\x1bi\x01")
 
         # Set print quality and mode
-        commands.write(b"\x1Bia\x01")  # Auto cut enabled
-        commands.write(b"\x1Bic\x00")  # No special tape
+        commands.write(b"\x1bia\x01")  # Auto cut enabled
+        commands.write(b"\x1bic\x00")  # No special tape
 
         # Convert image to raster format
         # Brother expects data in rows, 8 pixels per byte
@@ -211,13 +211,13 @@ class BrotherESCPGenerator:
             # m = 0x01 (raster graphics mode)
             # n1, n2 = row width in bytes (little-endian, 2 bytes)
             row_bytes = len(row_data)
-            commands.write(b"\x1Bi\x01")  # ESC i 0x01 (raster mode)
+            commands.write(b"\x1bi\x01")  # ESC i 0x01 (raster mode)
             commands.write(bytes([row_bytes & 0xFF, (row_bytes >> 8) & 0xFF]))
             commands.write(bytes(row_data))
 
         # Feed and cut label
-        commands.write(b"\x1Bi\x01")  # Auto cut
-        commands.write(b"\x0A")  # Line feed
+        commands.write(b"\x1bi\x01")  # Auto cut
+        commands.write(b"\x0a")  # Line feed
 
         return commands.getvalue()
 

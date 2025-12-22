@@ -10,13 +10,15 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import SIGAdmin, User
+from .models import SIGAdmin, User, UserRegistrationToken
 from .serializers import (
     ChangePasswordSerializer,
     SIGAdminSerializer,
     SIGMemberSerializer,
     SIGSerializer,
+    TokenValidationSerializer,
     UserProfileSerializer,
+    UserRegistrationSerializer,
     UserSerializer,
 )
 from .utils import get_user_managed_sigs, is_sig_admin
@@ -298,4 +300,50 @@ def change_password(request):
 
         return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
 
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+@permission_classes([])  # Public endpoint
+def validate_registration_token(request):
+    """
+    Validate a registration token.
+
+    This endpoint allows checking if a token is valid before attempting registration.
+    """
+    serializer = TokenValidationSerializer(data=request.data)
+    if serializer.is_valid():
+        token = serializer.validated_data["token"]
+        registration_token = UserRegistrationToken.objects.get(token=token)
+        user_serializer = UserSerializer(registration_token.user)
+        return Response(
+            {
+                "valid": True,
+                "user": user_serializer.data,
+                "expires_at": registration_token.expires_at.isoformat(),
+            },
+            status=status.HTTP_200_OK,
+        )
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+@permission_classes([])  # Public endpoint
+def register_user_with_token(request):
+    """
+    Complete user registration using a registration token.
+
+    This endpoint allows users to set their password using a one-time registration token.
+    """
+    serializer = UserRegistrationSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.save()
+        user_serializer = UserSerializer(user)
+        return Response(
+            {
+                "message": "Registration completed successfully.",
+                "user": user_serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

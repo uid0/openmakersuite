@@ -149,6 +149,12 @@ class User(AbstractUser):
         blank=True,
         help_text="When the signature was uploaded",
     )
+    signature_line_offset = models.IntegerField(
+        null=True,
+        blank=True,
+        default=0,
+        help_text="Y-axis offset for signature line position in PDFs",
+    )
 
     class Meta:
         db_table = "auth_user"  # Keep using the same table name for compatibility

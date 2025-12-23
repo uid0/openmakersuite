@@ -74,8 +74,14 @@ class NotificationPreferenceViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = NotificationPreferenceSerializer
 
-    def retrieve(self, request):
+    def list(self, request):
         """Get current user's notification preferences."""
+        preferences, created = NotificationPreference.objects.get_or_create(user=request.user)
+        serializer = self.get_serializer(preferences)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        """Get current user's notification preferences (alias for list)."""
         preferences, created = NotificationPreference.objects.get_or_create(user=request.user)
         serializer = self.get_serializer(preferences)
         return Response(serializer.data)

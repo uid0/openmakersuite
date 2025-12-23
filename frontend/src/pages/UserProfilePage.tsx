@@ -5,7 +5,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Alert, Button, Group, Image, Paper, PasswordInput, Slider, Stack, Switch, Tabs, Text, Title } from '@mantine/core';
 import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { FormImageUpload } from '../components/forms/FormImageUpload';
@@ -49,6 +49,8 @@ const UserProfilePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string | null>('profile');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [preferences, setPreferences] = useState<NotificationPreferences | null>(null);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
   const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
 
   // Profile form
@@ -83,12 +85,7 @@ const UserProfilePage: React.FC = () => {
     },
   });
 
-  useEffect(() => {
-    loadProfile();
-    loadPreferences();
-  }, []);
-
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     try {
       setLoading(true);
       const response = await userAPI.getProfile();
@@ -111,17 +108,28 @@ const UserProfilePage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [profileForm]);
 
-  const loadPreferences = async () => {
+  const loadPreferences = useCallback(async () => {
     try {
+      setPreferencesLoading(true);
+      setPreferencesError(null);
       const response = await notificationsAPI.getPreferences();
       setPreferences(response.data);
     } catch (err: any) {
       console.error('Error loading preferences:', err);
-      // Preferences will be auto-created on first access
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to load notification preferences';
+      setPreferencesError(errorMessage);
+      setError(`Failed to load notification preferences: ${errorMessage}`);
+    } finally {
+      setPreferencesLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadProfile();
+    loadPreferences();
+  }, [loadProfile, loadPreferences]);
 
   const onProfileSubmit = async (data: ProfileFormData) => {
     try {
@@ -198,7 +206,6 @@ const UserProfilePage: React.FC = () => {
     if (!preferences) return;
 
     try {
-      const updated = { ...preferences, [field]: value };
       const response = await notificationsAPI.updatePreferences({ [field]: value });
       setPreferences(response.data);
       // Dispatch custom event to notify other components (e.g., RecentPages)
@@ -394,7 +401,17 @@ const UserProfilePage: React.FC = () => {
               <Text size="sm" c="dimmed">
                 Manage your notification preferences. Changes are saved automatically.
               </Text>
-              {preferences ? (
+              {preferencesError && (
+                <Alert icon={<IconAlertCircle size={16} />} title="Error Loading Preferences" color="red" onClose={() => setPreferencesError(null)} withCloseButton>
+                  {preferencesError}
+                  <Button size="xs" mt="xs" onClick={loadPreferences}>
+                    Retry
+                  </Button>
+                </Alert>
+              )}
+              {preferencesLoading ? (
+                <Text size="sm" c="dimmed">Loading preferences...</Text>
+              ) : preferences ? (
                 <Stack gap="md">
                   <Switch
                     label="Email Notifications"
@@ -459,7 +476,9 @@ const UserProfilePage: React.FC = () => {
                   </div>
                 </Stack>
               ) : (
-                <Text size="sm" c="dimmed">Loading preferences...</Text>
+                <Text size="sm" c="dimmed">
+                  {preferencesError ? 'Failed to load preferences. Please try again.' : 'No preferences available.'}
+                </Text>
               )}
             </Stack>
           </Paper>

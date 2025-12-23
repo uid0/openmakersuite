@@ -228,14 +228,23 @@ def run_webhook_test(webhook_id: int) -> Dict[str, Any]:
         webhook_id: ID of the WebHook to test
 
     Returns:
-        Test result with status
+        Test result with status, including webhook metadata
     """
+    import time
+
     from .models import WebHook
+
+    start_time = time.time()
 
     try:
         webhook = WebHook.objects.get(id=webhook_id)
     except WebHook.DoesNotExist:
-        return {"success": False, "error": "Webhook not found"}
+        return {
+            "success": False,
+            "error": "Webhook not found",
+            "webhook_id": webhook_id,
+            "tested_at": timezone.now().isoformat(),
+        }
 
     # Prepare test payload
     test_payload = {
@@ -275,18 +284,39 @@ def run_webhook_test(webhook_id: int) -> Dict[str, Any]:
         # Send test webhook
         response = requests.post(webhook.url, data=json_payload, headers=headers, timeout=30)
 
+        response_time_ms = (time.time() - start_time) * 1000
         response.raise_for_status()
 
         return {
             "success": True,
+            "webhook_id": webhook.id,
+            "webhook_name": webhook.name,
             "status_code": response.status_code,
+            "response_time_ms": round(response_time_ms, 2),
             "response_body": response.text[:500],  # First 500 chars of response
+            "tested_at": timezone.now().isoformat(),
         }
 
     except requests.exceptions.RequestException as e:
-        return {"success": False, "error": str(e)}
+        response_time_ms = (time.time() - start_time) * 1000
+        return {
+            "success": False,
+            "webhook_id": webhook.id,
+            "webhook_name": webhook.name,
+            "error_message": str(e),
+            "response_time_ms": round(response_time_ms, 2),
+            "tested_at": timezone.now().isoformat(),
+        }
     except Exception as e:
-        return {"success": False, "error": f"Unexpected error: {str(e)}"}
+        response_time_ms = (time.time() - start_time) * 1000
+        return {
+            "success": False,
+            "webhook_id": webhook.id,
+            "webhook_name": webhook.name,
+            "error_message": f"Unexpected error: {str(e)}",
+            "response_time_ms": round(response_time_ms, 2),
+            "tested_at": timezone.now().isoformat(),
+        }
 
 
 @shared_task

@@ -1,3 +1,4 @@
+
 /**
  * User Profile Page
  * Allows users to view and edit their profile, change password, upload signature, and manage notification preferences

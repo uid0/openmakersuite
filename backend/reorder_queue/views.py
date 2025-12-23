@@ -1749,106 +1749,150 @@ class WebHookViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="test", url_name="test")
     def test(self, request, pk=None):
         """
-        Test a webhook by sending a test payload.
+        Test a webhook by sending a test payload via Celery task.
 
-        This sends a test webhook notification immediately and returns the result.
+        This queues a Celery task to send the webhook and returns the task ID
+        for status tracking.
         """
-        import hashlib
-        import hmac
-        import json
-        import time
+        from celery import current_app
 
-        import requests
+        from .tasks import run_webhook_test
 
         webhook = self.get_object()
 
-        # Prepare test payload
-        test_payload = {
-            "event": webhook.event_type,
-            "test": True,
-            "timestamp": timezone.now().isoformat(),
-            "data": {
-                "message": "This is a test webhook notification",
+        # Queue the webhook test task
+        if current_app.conf.task_always_eager:
+            # In eager mode (tests), run synchronously
+            task_result = run_webhook_test.run(webhook.id)
+            result = {
                 "webhook_id": webhook.id,
                 "webhook_name": webhook.name,
-            },
-        }
+                "task_id": None,
+                "task_status": "SUCCESS" if task_result.get("success") else "FAILURE",
+                "success": task_result.get("success", False),
+                "status_code": task_result.get("status_code"),
+                "response_time_ms": task_result.get("response_time_ms"),
+                "response_body": task_result.get("response_body"),
+                "error_message": task_result.get("error_message"),
+                "tested_at": task_result.get("tested_at", timezone.now().isoformat()),
+            }
+        else:
+            # In production, queue the task
+            task = run_webhook_test.delay(webhook.id)
+            result = {
+                "webhook_id": webhook.id,
+                "webhook_name": webhook.name,
+                "task_id": task.id,
+                "task_status": "PENDING",
+                "success": None,
+                "status_code": None,
+                "response_time_ms": None,
+                "response_body": None,
+                "error_message": None,
+                "tested_at": None,
+            }
 
-        start_time = time.time()
+        serializer = WebHookTestResultSerializer(result)
+        return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=["get"], url_path="test-status", url_name="test-status")
+    def test_status(self, request):
+        """
+        Get the status of a webhook test task.
+
+        Query parameter: task_id - The Celery task ID to check
+
+        Returns the task result when available, or task status if still pending.
+        """
+        from celery.result import AsyncResult
+        from django_celery_results.models import TaskResult
+
+        task_id = request.query_params.get("task_id")
+        if not task_id:
+            return Response(
+                {"error": "task_id query parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
-            # Prepare request
-            headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "DMS-Inventory-Webhook/1.0",
+            # Try to get result from database first (more reliable)
+            try:
+                task_result = TaskResult.objects.get(task_id=task_id)
+                task_state = task_result.status
+                if task_result.result:
+                    import json
+
+                    try:
+                        result_data = (
+                            json.loads(task_result.result)
+                            if isinstance(task_result.result, str)
+                            else task_result.result
+                        )
+                    except (json.JSONDecodeError, TypeError):
+                        result_data = task_result.result
+                else:
+                    result_data = None
+            except TaskResult.DoesNotExist:
+                # Fallback to AsyncResult if not in database yet
+                async_result = AsyncResult(task_id)
+                task_state = async_result.state
+                result_data = async_result.result if async_result.ready() else None
+
+            # Map Celery states to our status
+            status_mapping = {
+                "PENDING": "PENDING",
+                "STARTED": "PENDING",
+                "RETRY": "PENDING",
+                "SUCCESS": "SUCCESS",
+                "FAILURE": "FAILURE",
+                "REVOKED": "FAILURE",
             }
+            task_status = status_mapping.get(task_state, "UNKNOWN")
 
-            # Add custom headers
-            if webhook.headers:
-                headers.update(webhook.headers)
-
-            # Prepare payload
-            json_payload = json.dumps(test_payload)
-
-            # Add HMAC signature if configured
-            if webhook.secret:
-                signature = hmac.new(
-                    webhook.secret.encode("utf-8"),
-                    json_payload.encode("utf-8"),
-                    hashlib.sha256,
-                ).hexdigest()
-                headers["X-Webhook-Signature"] = f"sha256={signature}"
-
-            # Send test webhook
-            response = requests.post(webhook.url, data=json_payload, headers=headers, timeout=30)
-
-            response_time_ms = (time.time() - start_time) * 1000
-
-            response.raise_for_status()
-
-            # Record success (but don't update statistics for test)
-            result = {
-                "webhook_id": webhook.id,
-                "webhook_name": webhook.name,
-                "success": True,
-                "status_code": response.status_code,
-                "response_time_ms": round(response_time_ms, 2),
-                "response_body": response.text[:500],  # First 500 chars
-                "tested_at": timezone.now(),
-            }
-
-            serializer = WebHookTestResultSerializer(result)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except requests.exceptions.RequestException as e:
-            response_time_ms = (time.time() - start_time) * 1000
-            result = {
-                "webhook_id": webhook.id,
-                "webhook_name": webhook.name,
-                "success": False,
-                "status_code": None,
-                "response_time_ms": round(response_time_ms, 2),
-                "error_message": str(e),
-                "tested_at": timezone.now(),
-            }
+            # If task is complete, format the result
+            if task_state in ["SUCCESS", "FAILURE"] and result_data:
+                if isinstance(result_data, dict):
+                    result = {
+                        "webhook_id": result_data.get("webhook_id"),
+                        "webhook_name": result_data.get("webhook_name"),
+                        "task_id": task_id,
+                        "task_status": task_status,
+                        "success": result_data.get("success", False),
+                        "status_code": result_data.get("status_code"),
+                        "response_time_ms": result_data.get("response_time_ms"),
+                        "response_body": result_data.get("response_body"),
+                        "error_message": result_data.get("error_message"),
+                        "tested_at": result_data.get("tested_at"),
+                    }
+                else:
+                    # Handle unexpected result format
+                    result = {
+                        "task_id": task_id,
+                        "task_status": task_status,
+                        "success": False,
+                        "error_message": f"Unexpected result format: {type(result_data)}",
+                    }
+            else:
+                # Task still pending
+                result = {
+                    "task_id": task_id,
+                    "task_status": task_status,
+                    "success": None,
+                    "status_code": None,
+                    "response_time_ms": None,
+                    "response_body": None,
+                    "error_message": None,
+                    "tested_at": None,
+                }
 
             serializer = WebHookTestResultSerializer(result)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         except Exception as e:
-            response_time_ms = (time.time() - start_time) * 1000
-            result = {
-                "webhook_id": webhook.id,
-                "webhook_name": webhook.name,
-                "success": False,
-                "status_code": None,
-                "response_time_ms": round(response_time_ms, 2),
-                "error_message": f"Unexpected error: {str(e)}",
-                "tested_at": timezone.now(),
-            }
-
-            serializer = WebHookTestResultSerializer(result)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(
+                {"error": f"Failed to get task status: {str(e)}", "task_id": task_id},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class PurchasingReportViewSet(viewsets.ViewSet):

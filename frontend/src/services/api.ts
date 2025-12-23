@@ -945,6 +945,9 @@ export const webhooksAPI = {
 
   testWebhook: (id: number) =>
     api.post<WebhookTestResult>(`/reorders/webhooks/${id}/test/`),
+
+  getTestStatus: (taskId: string) =>
+    api.get<WebhookTestResult>(`/reorders/webhooks/test-status/`, { params: { task_id: taskId } }),
 };
 
 export default api;

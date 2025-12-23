@@ -813,12 +813,14 @@ export interface Webhook {
 }
 
 export interface WebhookTestResult {
-  webhook_id: number;
-  webhook_name: string;
-  success: boolean;
+  webhook_id?: number | null;
+  webhook_name?: string | null;
+  task_id?: string | null;
+  task_status?: string | null;
+  success?: boolean | null;
   status_code?: number | null;
   response_time_ms?: number | null;
-  error_message?: string;
-  response_body?: string;
-  tested_at: string;
+  error_message?: string | null;
+  response_body?: string | null;
+  tested_at?: string | null;
 }

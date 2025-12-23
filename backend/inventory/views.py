@@ -5,7 +5,7 @@ Views for inventory API.
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import F, Q
 from django.http import HttpResponse
 from django.utils import timezone
@@ -2199,27 +2199,47 @@ class InventoryReportViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def stock_by_category(self, request):
         """Get stock levels aggregated by category."""
-        from django.db.models import Count, Sum
+        from django.db.models import Count, OuterRef, Q, Subquery, Sum, Value
+        from django.db.models.functions import Coalesce
+
+        from inventory.models import ItemSupplier
+
+        # Subquery to get unit_cost from primary ItemSupplier
+        primary_supplier = ItemSupplier.objects.filter(
+            item=OuterRef("pk"), is_primary=True, is_active=True, unit_cost__isnull=False
+        ).order_by("unit_cost")[:1]
 
         queryset = (
             InventoryItem.objects.filter(is_active=True)
             .select_related("category")
-            .values("category__id", "category__name")
+            .annotate(
+                category_id_coalesced=Coalesce("category__id", Value(0)),
+                category_name_coalesced=Coalesce("category__name", Value("Uncategorized")),
+                unit_cost_value=Subquery(primary_supplier.values("unit_cost")),
+            )
+            .values("category_id_coalesced", "category_name_coalesced")
             .annotate(
                 total_items=Count("id"),
                 total_stock=Sum("current_stock"),
-                total_value=Sum(F("current_stock") * F("unit_cost")),
+                total_value=Sum(
+                    F("current_stock") * Coalesce("unit_cost_value", Value(0)),
+                    output_field=models.DecimalField(max_digits=20, decimal_places=2),
+                ),
                 low_stock_count=Count("id", filter=Q(current_stock__lte=F("minimum_stock"))),
             )
-            .order_by("category__name")
+            .order_by("category_name_coalesced")
         )
 
         data = []
         for item in queryset:
             data.append(
                 {
-                    "category_id": item["category__id"],
-                    "category_name": item["category__name"] or "Uncategorized",
+                    "category_id": (
+                        item["category_id_coalesced"]
+                        if item["category_id_coalesced"] != 0
+                        else None
+                    ),
+                    "category_name": item["category_name_coalesced"],
                     "total_items": item["total_items"],
                     "total_stock": item["total_stock"] or 0,
                     "total_value": float(item["total_value"] or 0),
@@ -2268,16 +2288,32 @@ class InventoryReportViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def value_by_location(self, request):
         """Get total inventory value grouped by location."""
-        from django.db.models import Count, Sum
+        from django.db.models import Count, OuterRef, Subquery, Sum, Value
+        from django.db.models.functions import Coalesce
+
+        from inventory.models import ItemSupplier
+
+        # Subquery to get unit_cost from primary ItemSupplier
+        primary_supplier = ItemSupplier.objects.filter(
+            item=OuterRef("pk"), is_primary=True, is_active=True, unit_cost__isnull=False
+        ).order_by("unit_cost")[:1]
 
         queryset = (
             InventoryItem.objects.filter(is_active=True)
             .select_related("location")
-            .values("location__id", "location__name")
+            .annotate(
+                location_id_coalesced=Coalesce("location__id", Value(0)),
+                location_name_coalesced=Coalesce("location__name", Value("No Location")),
+                unit_cost_value=Subquery(primary_supplier.values("unit_cost")),
+            )
+            .values("location_id_coalesced", "location_name_coalesced")
             .annotate(
                 total_items=Count("id"),
                 total_stock=Sum("current_stock"),
-                total_value=Sum(F("current_stock") * F("unit_cost")),
+                total_value=Sum(
+                    F("current_stock") * Coalesce("unit_cost_value", Value(0)),
+                    output_field=models.DecimalField(max_digits=20, decimal_places=2),
+                ),
             )
             .order_by("-total_value")
         )
@@ -2286,8 +2322,12 @@ class InventoryReportViewSet(viewsets.ViewSet):
         for item in queryset:
             data.append(
                 {
-                    "location_id": item["location__id"],
-                    "location_name": item["location__name"] or "No Location",
+                    "location_id": (
+                        item["location_id_coalesced"]
+                        if item["location_id_coalesced"] != 0
+                        else None
+                    ),
+                    "location_name": item["location_name_coalesced"],
                     "total_items": item["total_items"],
                     "total_stock": item["total_stock"] or 0,
                     "total_value": float(item["total_value"] or 0),

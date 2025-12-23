@@ -71,8 +71,14 @@ const WebhookDetailPage: React.FC = () => {
       setTesting(true);
       setTestResult(null);
       const response = await webhooksAPI.testWebhook(Number(id));
-      setTestResult(response.data);
+      const initialResult = response.data;
+      setTestResult(initialResult);
       setTestModalOpen(true);
+
+      // If we got a task_id, poll for the result
+      if (initialResult.task_id && initialResult.task_status === 'PENDING') {
+        pollTaskStatus(initialResult.task_id);
+      }
     } catch (err: any) {
       console.error('Error testing webhook:', err);
       setTestResult({
@@ -86,6 +92,47 @@ const WebhookDetailPage: React.FC = () => {
     } finally {
       setTesting(false);
     }
+  };
+
+  const pollTaskStatus = async (taskId: string, maxAttempts: number = 30) => {
+    let attempts = 0;
+    const pollInterval = 1000; // Poll every second
+
+    const poll = async () => {
+      if (attempts >= maxAttempts) {
+        setTestResult((prev) => ({
+          ...prev!,
+          task_status: 'FAILURE',
+          success: false,
+          error_message: 'Task status check timed out after 30 seconds',
+        }));
+        return;
+      }
+
+      try {
+        const response = await webhooksAPI.getTestStatus(taskId);
+        const statusResult = response.data;
+        setTestResult(statusResult);
+
+        // Continue polling if task is still pending
+        if (statusResult.task_status === 'PENDING') {
+          attempts++;
+          setTimeout(poll, pollInterval);
+        }
+        // Task completed (success or failure), stop polling
+      } catch (err: any) {
+        console.error('Error polling task status:', err);
+        setTestResult((prev) => ({
+          ...prev!,
+          task_status: 'FAILURE',
+          success: false,
+          error_message: `Failed to check task status: ${err.response?.data?.error || err.message}`,
+        }));
+      }
+    };
+
+    // Start polling after a short delay
+    setTimeout(poll, pollInterval);
   };
 
   const handleDelete = async () => {
@@ -406,7 +453,11 @@ const WebhookDetailPage: React.FC = () => {
       >
         {testResult && (
           <Stack gap="md">
-            {testResult.success ? (
+            {testResult.task_status === 'PENDING' ? (
+              <Alert color="blue" title="Testing Webhook">
+                <Text size="sm">The webhook test is in progress. Please wait...</Text>
+              </Alert>
+            ) : testResult.success ? (
               <Alert color="green" title="Test Successful">
                 <Text size="sm">The webhook was delivered successfully.</Text>
               </Alert>
@@ -418,14 +469,38 @@ const WebhookDetailPage: React.FC = () => {
 
             <Table>
               <Table.Tbody>
+                {testResult.task_status && (
+                  <Table.Tr>
+                    <Table.Td>
+                      <Text fw={500}>Task Status</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge
+                        color={
+                          testResult.task_status === 'SUCCESS'
+                            ? 'green'
+                            : testResult.task_status === 'FAILURE'
+                            ? 'red'
+                            : 'blue'
+                        }
+                      >
+                        {testResult.task_status}
+                      </Badge>
+                    </Table.Td>
+                  </Table.Tr>
+                )}
                 <Table.Tr>
                   <Table.Td>
                     <Text fw={500}>Status</Text>
                   </Table.Td>
                   <Table.Td>
-                    <Badge color={testResult.success ? 'green' : 'red'}>
-                      {testResult.success ? 'Success' : 'Failed'}
-                    </Badge>
+                    {testResult.success === null ? (
+                      <Badge color="blue">Pending</Badge>
+                    ) : (
+                      <Badge color={testResult.success ? 'green' : 'red'}>
+                        {testResult.success ? 'Success' : 'Failed'}
+                      </Badge>
+                    )}
                   </Table.Td>
                 </Table.Tr>
                 {testResult.status_code && (

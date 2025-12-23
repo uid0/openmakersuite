@@ -683,10 +683,13 @@ class WebHookCreateSerializer(serializers.ModelSerializer):
 class WebHookTestResultSerializer(serializers.Serializer):
     """Serializer for webhook test results."""
 
-    webhook_id = serializers.IntegerField()
-    webhook_name = serializers.CharField()
-    success = serializers.BooleanField()
+    webhook_id = serializers.IntegerField(required=False, allow_null=True)
+    webhook_name = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    task_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    task_status = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    success = serializers.BooleanField(required=False, allow_null=True)
     status_code = serializers.IntegerField(required=False, allow_null=True)
     response_time_ms = serializers.FloatField(required=False, allow_null=True)
-    error_message = serializers.CharField(required=False, allow_blank=True)
-    tested_at = serializers.DateTimeField()
+    error_message = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    response_body = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    tested_at = serializers.DateTimeField(required=False, allow_null=True)

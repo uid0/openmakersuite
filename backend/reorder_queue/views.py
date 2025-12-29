@@ -49,7 +49,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     Admin actions require JWT authentication.
     """
 
-    authentication_classes = (JWTAuthentication,)  # Only JWT, no session auth needed
+    # Only JWT, no session auth needed
+    authentication_classes = (JWTAuthentication,)
     queryset = (
         ReorderRequest.objects.select_related(
             "item", "item__category", "item__location", "reviewed_by"
@@ -130,7 +131,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         try:
             # Return all pending requests without pagination for admin dashboard
             # Use the base queryset to ensure all prefetching is maintained
-            pending = self.queryset.filter(status="pending").order_by("-priority", "requested_at")
+            pending = self.queryset.filter(status="pending").order_by(
+                "-priority", "requested_at")
 
             # Filter by SIG ownership for SIG admins
             user = request.user
@@ -142,7 +144,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                     # SIG admins can only see requests for their SIG's inventory
                     user_sigs = get_user_managed_sigs(user)
                     if user_sigs.exists():
-                        pending = pending.filter(item__owning_group__in=user_sigs)
+                        pending = pending.filter(
+                            item__owning_group__in=user_sigs)
 
             serializer = self.get_serializer(pending, many=True)
             return Response(serializer.data)
@@ -151,7 +154,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
             logger = logging.getLogger(__name__)
             logger.exception(
-                "AttributeError in pending endpoint (likely missing supplier data): %s", str(e)
+                "AttributeError in pending endpoint (likely missing supplier data): %s", str(
+                    e)
             )
             return Response(
                 {
@@ -213,10 +217,12 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                     "item_count": 0,
                 }
 
-            suppliers[supplier_name]["requests"].append(ReorderRequestSerializer(req).data)
+            suppliers[supplier_name]["requests"].append(
+                ReorderRequestSerializer(req).data)
             suppliers[supplier_name]["item_count"] += 1
             if req.estimated_cost:
-                suppliers[supplier_name]["total_estimated_cost"] += float(req.estimated_cost)
+                suppliers[supplier_name]["total_estimated_cost"] += float(
+                    req.estimated_cost)
 
         return Response(list(suppliers.values()))
 
@@ -227,7 +233,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         reorder.status = "approved"
         reorder.reviewed_by = request.user
         reorder.reviewed_at = timezone.now()
-        reorder.admin_notes = request.data.get("admin_notes", reorder.admin_notes)
+        reorder.admin_notes = request.data.get(
+            "admin_notes", reorder.admin_notes)
         reorder.save()
 
         serializer = self.get_serializer(reorder)
@@ -257,7 +264,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         """Mark a request as received and update inventory."""
         reorder = self.get_object()
         reorder.status = "received"
-        reorder.actual_delivery = request.data.get("actual_delivery", timezone.now().date())
+        reorder.actual_delivery = request.data.get(
+            "actual_delivery", timezone.now().date())
         reorder.save()
 
         # Update inventory stock
@@ -275,7 +283,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         reorder.status = "cancelled"
         reorder.reviewed_by = request.user
         reorder.reviewed_at = timezone.now()
-        reorder.admin_notes = request.data.get("admin_notes", reorder.admin_notes)
+        reorder.admin_notes = request.data.get(
+            "admin_notes", reorder.admin_notes)
         reorder.save()
 
         serializer = self.get_serializer(reorder)
@@ -434,7 +443,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     }
 
                 # Calculate optimal quantity (considering package sizes)
-                optimal_qty = self._calculate_optimal_quantity(item, best_supplier)
+                optimal_qty = self._calculate_optimal_quantity(
+                    item, best_supplier)
 
                 supplier_groups[supplier_id]["items"].append(
                     {
@@ -494,7 +504,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # First, get items with active reorder requests (pending or approved)
         items_with_requests = (
             InventoryItem.objects.filter(
-                reorder_requests__status__in=[ReorderRequest.PENDING, ReorderRequest.APPROVED],
+                reorder_requests__status__in=[
+                    ReorderRequest.PENDING, ReorderRequest.APPROVED],
                 is_active=True,
             )
             .distinct()
@@ -600,7 +611,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             assets = Asset.objects.filter(
                 manufacturer_id=supplier_id,
                 is_active=True,
-                status__in=[Asset.ACTIVE, Asset.MAINTENANCE, Asset.IMPLEMENTING, Asset.TESTING],
+                status__in=[Asset.ACTIVE, Asset.MAINTENANCE,
+                            Asset.IMPLEMENTING, Asset.TESTING],
             ).values("id", "name", "asset_tag", "serial_number", "product_url")
 
             data["assets"] = [
@@ -618,7 +630,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             lead_times = [
                 item["lead_time_days"] for item in data["items"] if item["lead_time_days"]
             ]
-            data["avg_lead_time"] = sum(lead_times) / len(lead_times) if lead_times else 0
+            data["avg_lead_time"] = sum(
+                lead_times) / len(lead_times) if lead_times else 0
             data["estimated_total"] = str(data["estimated_total"])
 
         # Also include suppliers that have assets but no low-stock items
@@ -640,7 +653,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             assets = Asset.objects.filter(
                 manufacturer=supplier,
                 is_active=True,
-                status__in=[Asset.ACTIVE, Asset.MAINTENANCE, Asset.IMPLEMENTING, Asset.TESTING],
+                status__in=[Asset.ACTIVE, Asset.MAINTENANCE,
+                            Asset.IMPLEMENTING, Asset.TESTING],
             ).values("id", "name", "asset_tag", "serial_number", "product_url")
 
             supplier_data[supplier.id] = {
@@ -682,7 +696,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
     def _find_best_supplier(self, item):
         """Find the best supplier for an item based on cost, availability, and lead time."""
-        suppliers = item.item_suppliers.filter(is_active=True, is_discontinued=False)
+        suppliers = item.item_suppliers.filter(
+            is_active=True, is_discontinued=False)
 
         if not suppliers.exists():
             return None
@@ -715,7 +730,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             # Lead time factor (30% weight) - shorter lead time is better
             if supplier.average_lead_time:
                 # Normalize lead time (assuming max reasonable lead time of 30 days)
-                lead_time_factor = max(0, (30 - supplier.average_lead_time) / 30)
+                lead_time_factor = max(
+                    0, (30 - supplier.average_lead_time) / 30)
                 score += lead_time_factor * 0.3
 
             # Primary supplier bonus (20% weight)
@@ -786,7 +802,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     else timezone.now().date()
                 )
                 lead_time_days = po_item.item_supplier.average_lead_time
-                estimated_delivery = self._add_business_days(order_date, lead_time_days)
+                estimated_delivery = self._add_business_days(
+                    order_date, lead_time_days)
 
             # Update each active request
             for reorder_request in active_requests:
@@ -857,7 +874,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             )
 
         purchase_order.status = PurchaseOrder.CONFIRMED
-        purchase_order.expected_delivery_date = request.data.get("expected_delivery_date")
+        purchase_order.expected_delivery_date = request.data.get(
+            "expected_delivery_date")
         purchase_order.save()
 
         serializer = self.get_serializer(purchase_order)
@@ -868,7 +886,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         """Update a specific line item in a purchase order."""
         purchase_order = self.get_object()
         try:
-            line_item = PurchaseOrderItem.objects.get(id=item_id, purchase_order=purchase_order)
+            line_item = PurchaseOrderItem.objects.get(
+                id=item_id, purchase_order=purchase_order)
         except PurchaseOrderItem.DoesNotExist:
             return Response({"error": "Line item not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -930,7 +949,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             from decimal import Decimal, InvalidOperation
 
             try:
-                unit_cost_actual = Decimal(str(request.data["unit_cost_actual"]))
+                unit_cost_actual = Decimal(
+                    str(request.data["unit_cost_actual"]))
                 if unit_cost_actual < 0:
                     return Response(
                         {"error": "Unit cost cannot be negative"},
@@ -955,7 +975,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         """Void a specific line item in a purchase order (e.g., item discontinued)."""
         purchase_order = self.get_object()
         try:
-            line_item = PurchaseOrderItem.objects.get(id=item_id, purchase_order=purchase_order)
+            line_item = PurchaseOrderItem.objects.get(
+                id=item_id, purchase_order=purchase_order)
         except PurchaseOrderItem.DoesNotExist:
             return Response({"error": "Line item not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -979,7 +1000,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         line_item.is_voided = True
         line_item.voided_at = timezone.now()
         line_item.voided_by = request.user
-        line_item.void_reason = request.data.get("reason", "Item discontinued by supplier")
+        line_item.void_reason = request.data.get(
+            "reason", "Item discontinued by supplier")
 
         # If this is an item_supplier relationship, mark it as discontinued
         if line_item.item_supplier:
@@ -1003,21 +1025,24 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             draft=Count("id", filter=Q(status=PurchaseOrder.DRAFT)),
             sent=Count("id", filter=Q(status=PurchaseOrder.SENT)),
             confirmed=Count("id", filter=Q(status=PurchaseOrder.CONFIRMED)),
-            partially_received=Count("id", filter=Q(status=PurchaseOrder.PARTIALLY_RECEIVED)),
+            partially_received=Count("id", filter=Q(
+                status=PurchaseOrder.PARTIALLY_RECEIVED)),
             received=Count("id", filter=Q(status=PurchaseOrder.RECEIVED)),
         )
 
         # Financial metrics
         financial_metrics = PurchaseOrder.objects.aggregate(
             total_value=Sum("estimated_total"),
-            received_value=Sum("actual_total", filter=Q(status=PurchaseOrder.RECEIVED)),
+            received_value=Sum("actual_total", filter=Q(
+                status=PurchaseOrder.RECEIVED)),
         )
 
         # Recent activity (this week)
         week_ago = timezone.now() - timedelta(days=7)
         recent_activity = PurchaseOrder.objects.filter(order_date__gte=week_ago).aggregate(
             orders_created=Count("id"),
-            orders_received=Count("id", filter=Q(status=PurchaseOrder.RECEIVED)),
+            orders_received=Count("id", filter=Q(
+                status=PurchaseOrder.RECEIVED)),
         )
 
         # Items metrics
@@ -1044,7 +1069,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         on_time_rate = 0
         if lead_time_data["total_deliveries"] > 0:
             on_time_rate = (
-                lead_time_data["on_time_count"] / lead_time_data["total_deliveries"]
+                lead_time_data["on_time_count"] /
+                lead_time_data["total_deliveries"]
             ) * 100
 
         metrics = OrderMetricsSerializer(
@@ -1157,7 +1183,8 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
             delivery, created = OrderDelivery.objects.get_or_create(
                 purchase_order=purchase_order,
                 delivery_date__date=timezone.now().date(),
-                defaults={"received_by": request.user, "delivery_date": timezone.now()},
+                defaults={"received_by": request.user,
+                          "delivery_date": timezone.now()},
             )
 
             # Create delivery item
@@ -1220,7 +1247,8 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         )
 
         estimated_lead_time = po_item.item_supplier.average_lead_time or 14
-        actual_lead_time = LeadTimeLog.calculate_business_days(order_date, actual_delivery_date)
+        actual_lead_time = LeadTimeLog.calculate_business_days(
+            order_date, actual_delivery_date)
 
         LeadTimeLog.objects.create(
             item_supplier=po_item.item_supplier,
@@ -1290,35 +1318,46 @@ class AnalyticsViewSet(viewsets.ViewSet):
         # Get all suppliers with orders
         from inventory.models import Supplier
 
-        suppliers = Supplier.objects.filter(purchase_orders__isnull=False).distinct()
+        suppliers = Supplier.objects.filter(
+            purchase_orders__isnull=False).distinct()
 
         for supplier in suppliers:
             # Order metrics
             orders = supplier.purchase_orders.all()
             total_orders = orders.count()
-            completed_orders = orders.filter(status=PurchaseOrder.RECEIVED).count()
+            completed_orders = orders.filter(
+                status=PurchaseOrder.RECEIVED).count()
             active_orders = orders.exclude(
                 status__in=[PurchaseOrder.RECEIVED, PurchaseOrder.CANCELLED]
             ).count()
 
             # Lead time metrics
-            lead_time_logs = LeadTimeLog.objects.filter(item_supplier__supplier=supplier)
+            lead_time_logs = LeadTimeLog.objects.filter(
+                item_supplier__supplier=supplier)
 
-            avg_lead_time = lead_time_logs.aggregate(avg=Avg("actual_lead_time_days"))["avg"] or 0
+            avg_lead_time = lead_time_logs.aggregate(
+                avg=Avg("actual_lead_time_days"))["avg"] or 0
 
             total_deliveries = lead_time_logs.count()
-            on_time_deliveries = lead_time_logs.filter(variance_days__lte=0).count()
-            early_deliveries = lead_time_logs.filter(variance_days__lt=0).count()
-            late_deliveries = lead_time_logs.filter(variance_days__gt=0).count()
+            on_time_deliveries = lead_time_logs.filter(
+                variance_days__lte=0).count()
+            early_deliveries = lead_time_logs.filter(
+                variance_days__lt=0).count()
+            late_deliveries = lead_time_logs.filter(
+                variance_days__gt=0).count()
 
             on_time_rate = (
-                (on_time_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0
+                (on_time_deliveries / total_deliveries *
+                 100) if total_deliveries > 0 else 0
             )
-            early_rate = (early_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0
-            late_rate = (late_deliveries / total_deliveries * 100) if total_deliveries > 0 else 0
+            early_rate = (early_deliveries / total_deliveries *
+                          100) if total_deliveries > 0 else 0
+            late_rate = (late_deliveries / total_deliveries *
+                         100) if total_deliveries > 0 else 0
 
             # Financial metrics
-            total_value = orders.aggregate(total=Sum("estimated_total"))["total"] or 0
+            total_value = orders.aggregate(
+                total=Sum("estimated_total"))["total"] or 0
 
             # Quality metrics
             delivered_items = DeliveryItem.objects.filter(
@@ -1327,7 +1366,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
             total_items_delivered = delivered_items.count()
             damaged_items = delivered_items.filter(is_damaged=True).count()
             damage_rate = (
-                (damaged_items / total_items_delivered * 100) if total_items_delivered > 0 else 0
+                (damaged_items / total_items_delivered *
+                 100) if total_items_delivered > 0 else 0
             )
 
             # Recent activity
@@ -1371,7 +1411,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
         from django.db.models import Extract
 
         monthly_data = (
-            LeadTimeLog.objects.filter(actual_delivery_date__gte=six_months_ago.date())
+            LeadTimeLog.objects.filter(
+                actual_delivery_date__gte=six_months_ago.date())
             .annotate(
                 month=Extract("actual_delivery_date", "month"),
                 year=Extract("actual_delivery_date", "year"),
@@ -1388,7 +1429,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         trend_data = []
         for data in monthly_data:
-            on_time_rate = (data["on_time_deliveries"] / data["total_deliveries"]) * 100
+            on_time_rate = (data["on_time_deliveries"] /
+                            data["total_deliveries"]) * 100
             trend_data.append(
                 {
                     "month": f"{data['year']}-{data['month']:02d}",
@@ -1498,7 +1540,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
                         ),
                         "actual_cost": (float(order.actual_cost) if order.actual_cost else None),
                         "estimated_cost": (
-                            float(order.estimated_cost) if order.estimated_cost else None
+                            float(
+                                order.estimated_cost) if order.estimated_cost else None
                         ),
                         "status": order.status,
                         "order_number": order.order_number,
@@ -1531,7 +1574,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 # Count items (excluding voided)
                 active_items = po.items.filter(is_voided=False)
                 total_items = active_items.count()
-                total_quantity = sum(item.quantity_ordered for item in active_items)
+                total_quantity = sum(
+                    item.quantity_ordered for item in active_items)
 
                 po_data = {
                     "id": str(po.id),
@@ -1572,7 +1616,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         except Exception as e:
             return Response(
-                {"error": "Unable to fetch transparency data", "message": str(e)},
+                {"error": "Unable to fetch transparency data",
+                    "message": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -1618,7 +1663,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
         )
 
         locations_with_feedback = (
-            LocationFeedback.objects.filter(feedback_type="negative", is_resolved=False)
+            LocationFeedback.objects.filter(
+                feedback_type="negative", is_resolved=False)
             .values_list("location_id", flat=True)
             .distinct()
         )
@@ -1890,7 +1936,8 @@ class WebHookViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             return Response(
-                {"error": f"Failed to get task status: {str(e)}", "task_id": task_id},
+                {"error": f"Failed to get task status: {str(e)}",
+                 "task_id": task_id},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -1942,7 +1989,8 @@ class PurchasingReportViewSet(viewsets.ViewSet):
             .annotate(
                 total_items=Count("id"),
                 total_quantity=Sum("quantity_received"),
-                total_spend=Sum(F("quantity_received") * F("unit_cost_actual")),
+                total_spend=Sum(F("quantity_received")
+                                * F("unit_cost_actual")),
             )
             .order_by("-total_spend")
         )
@@ -1967,11 +2015,16 @@ class PurchasingReportViewSet(viewsets.ViewSet):
         from datetime import timedelta
 
         # Get time period from query params (default: last 6 months)
-        months = int(request.query_params.get("months", 6))
+        try:
+            months = int(request.query_params.get("months", 6))
+        except (ValueError, TypeError):
+            months = 6
+
         start_date = timezone.now() - timedelta(days=months * 30)
 
         queryset = (
-            LeadTimeLog.objects.filter(actual_delivery_date__gte=start_date.date())
+            LeadTimeLog.objects.filter(
+                actual_delivery_date__gte=start_date.date())
             .select_related("item_supplier__supplier", "item_supplier__item")
             .values(
                 "item_supplier__supplier__id",
@@ -1991,13 +2044,14 @@ class PurchasingReportViewSet(viewsets.ViewSet):
         data = []
         for item in queryset:
             total = item["total_orders"]
-            on_time_rate = (item["on_time_count"] / total * 100) if total > 0 else 0
+            on_time_rate = (item["on_time_count"] /
+                            total * 100) if total > 0 else 0
 
             data.append(
                 {
                     "supplier_id": item["item_supplier__supplier__id"],
-                    "supplier_name": item["item_supplier__supplier__name"],
-                    "item_name": item["item_supplier__item__name"],
+                    "supplier_name": item["item_supplier__supplier__name"] or "Unknown Supplier",
+                    "item_name": item["item_supplier__item__name"] or "Unknown Item",
                     "total_orders": total,
                     "avg_estimated_lead_time": round(item["avg_estimated_lead_time"] or 0, 1),
                     "avg_actual_lead_time": round(item["avg_actual_lead_time"] or 0, 1),
@@ -2043,7 +2097,8 @@ class PurchasingReportViewSet(viewsets.ViewSet):
             latest_price = (
                 PriceHistory.objects.filter(
                     item_supplier__item__id=item["item_supplier__item__id"],
-                    item_supplier__supplier__id=item.get("item_supplier__supplier__id"),
+                    item_supplier__supplier__id=item.get(
+                        "item_supplier__supplier__id"),
                 )
                 .order_by("-recorded_at")
                 .first()
@@ -2055,7 +2110,8 @@ class PurchasingReportViewSet(viewsets.ViewSet):
                 first_price = (
                     PriceHistory.objects.filter(
                         item_supplier__item__id=item["item_supplier__item__id"],
-                        item_supplier__supplier__id=item.get("item_supplier__supplier__id"),
+                        item_supplier__supplier__id=item.get(
+                            "item_supplier__supplier__id"),
                     )
                     .order_by("recorded_at")
                     .first()
@@ -2067,7 +2123,8 @@ class PurchasingReportViewSet(viewsets.ViewSet):
                     and latest_price.unit_cost
                 ):
                     change = (
-                        (latest_price.unit_cost - first_price.unit_cost) / first_price.unit_cost
+                        (latest_price.unit_cost - first_price.unit_cost) /
+                        first_price.unit_cost
                     ) * 100
                     price_change_pct = round(change, 2)
 
@@ -2106,7 +2163,8 @@ class PurchasingReportViewSet(viewsets.ViewSet):
 
             writer = csv.DictWriter(
                 response_obj,
-                fieldnames=["supplier_name", "total_orders", "total_spend", "avg_order_value"],
+                fieldnames=["supplier_name", "total_orders",
+                            "total_spend", "avg_order_value"],
             )
             writer.writeheader()
             for row in data:
@@ -2131,7 +2189,8 @@ class PurchasingReportViewSet(viewsets.ViewSet):
 
             writer = csv.DictWriter(
                 response_obj,
-                fieldnames=["category_name", "total_items", "total_quantity", "total_spend"],
+                fieldnames=["category_name", "total_items",
+                            "total_quantity", "total_spend"],
             )
             writer.writeheader()
             for row in data:

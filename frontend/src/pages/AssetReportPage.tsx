@@ -5,7 +5,6 @@
 import {
   Button,
   Group,
-  NumberInput,
   Paper,
   Stack,
   Table,
@@ -13,7 +12,9 @@ import {
   Text,
   Title,
 } from '@mantine/core';
+import { DatePickerInput, DatesRangeValue } from '@mantine/dates';
 import { IconDownload } from '@tabler/icons-react';
+import dayjs from 'dayjs';
 import React, { useEffect, useMemo, useState } from 'react';
 import { reportsAPI } from '../services/api';
 import {
@@ -26,13 +27,20 @@ import { exportAssetReportToCSV } from '../utils/csvExport';
 type SortField = string;
 type SortDirection = 'asc' | 'desc';
 
+// Default to last 30 days
+const getDefaultDateRange = (): DatesRangeValue => {
+  const endDate = new Date();
+  const startDate = dayjs().subtract(30, 'day').toDate();
+  return [startDate, endDate];
+};
+
 const AssetReportPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('assets_by_status');
   const [loading, setLoading] = useState(false);
   const [assetsByStatus, setAssetsByStatus] = useState<AssetAssetsByStatus[]>([]);
   const [maintenanceDue, setMaintenanceDue] = useState<AssetMaintenanceDue[]>([]);
   const [utilization, setUtilization] = useState<AssetUtilization[]>([]);
-  const [utilizationDays, setUtilizationDays] = useState<number>(30);
+  const [dateRange, setDateRange] = useState<DatesRangeValue>(getDefaultDateRange);
   const [sortField, setSortField] = useState<SortField>('');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
@@ -46,7 +54,8 @@ const AssetReportPage: React.FC = () => {
     } else if (activeTab === 'utilization') {
       loadUtilization();
     }
-  }, [activeTab, utilizationDays]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, dateRange]);
 
   const loadAssetsByStatus = async () => {
     try {
@@ -73,9 +82,13 @@ const AssetReportPage: React.FC = () => {
   };
 
   const loadUtilization = async () => {
+    if (!dateRange[0] || !dateRange[1]) return;
     try {
       setLoading(true);
-      const response = await reportsAPI.getAssetUtilization({ days: utilizationDays });
+      const response = await reportsAPI.getAssetUtilization({
+        start_date: dayjs(dateRange[0]).format('YYYY-MM-DD'),
+        end_date: dayjs(dateRange[1]).format('YYYY-MM-DD'),
+      });
       setUtilization(response.data);
     } catch (err) {
       console.error('Error loading utilization:', err);
@@ -257,13 +270,16 @@ const AssetReportPage: React.FC = () => {
         <Tabs.Panel value="utilization" pt="md">
           <Stack gap="md">
             <Group>
-              <NumberInput
-                label="Time Period (days)"
-                value={utilizationDays}
-                onChange={(value) => setUtilizationDays(Number(value) || 30)}
-                min={1}
-                max={365}
-                style={{ width: 200 }}
+              <DatePickerInput
+                type="range"
+                label="Date Range"
+                placeholder="Select date range"
+                value={dateRange}
+                onChange={setDateRange}
+                allowSingleDateInRange
+                clearable
+                maxDate={new Date()}
+                style={{ minWidth: 280 }}
               />
             </Group>
             <Paper withBorder>

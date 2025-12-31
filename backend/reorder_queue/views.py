@@ -49,7 +49,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     Admin actions require JWT authentication.
     """
 
-    authentication_classes = (JWTAuthentication,)  # Only JWT, no session auth needed
+    # Only JWT, no session auth needed
+    authentication_classes = (JWTAuthentication,)
     queryset = (
         ReorderRequest.objects.select_related(
             "item", "item__category", "item__location", "reviewed_by"
@@ -1964,14 +1965,31 @@ class PurchasingReportViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def lead_time_analysis(self, request):
         """Get lead time analysis from LeadTimeLog data."""
-        from datetime import timedelta
+        from datetime import datetime, timedelta
 
-        # Get time period from query params (default: last 6 months)
-        months = int(request.query_params.get("months", 6))
-        start_date = timezone.now() - timedelta(days=months * 30)
+        # Get date range from query params (default: last 6 months)
+        start_date_str = request.query_params.get("start_date")
+        end_date_str = request.query_params.get("end_date")
+
+        if start_date_str and end_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+                end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                # Fall back to default if date parsing fails
+                start_date = (timezone.now() - timedelta(days=6 * 30)).date()
+                end_date = timezone.now().date()
+        else:
+            # Fall back to months parameter for backward compatibility
+            months = int(request.query_params.get("months", 6))
+            start_date = (timezone.now() - timedelta(days=months * 30)).date()
+            end_date = timezone.now().date()
 
         queryset = (
-            LeadTimeLog.objects.filter(actual_delivery_date__gte=start_date.date())
+            LeadTimeLog.objects.filter(
+                actual_delivery_date__gte=start_date,
+                actual_delivery_date__lte=end_date,
+            )
             .select_related("item_supplier__supplier", "item_supplier__item")
             .values(
                 "item_supplier__supplier__id",
@@ -2011,17 +2029,34 @@ class PurchasingReportViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def price_trends(self, request):
         """Get price trends from PriceHistory data."""
-        from datetime import timedelta
+        from datetime import datetime, timedelta
 
         from inventory.models import PriceHistory
 
-        # Get time period from query params (default: last 12 months)
-        months = int(request.query_params.get("months", 12))
-        start_date = timezone.now() - timedelta(days=months * 30)
+        # Get date range from query params (default: last 12 months)
+        start_date_str = request.query_params.get("start_date")
+        end_date_str = request.query_params.get("end_date")
+
+        if start_date_str and end_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+                end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                # Fall back to default if date parsing fails
+                start_date = (timezone.now() - timedelta(days=12 * 30)).date()
+                end_date = timezone.now().date()
+        else:
+            # Fall back to months parameter for backward compatibility
+            months = int(request.query_params.get("months", 12))
+            start_date = (timezone.now() - timedelta(days=months * 30)).date()
+            end_date = timezone.now().date()
 
         # Get price history grouped by item
         queryset = (
-            PriceHistory.objects.filter(recorded_at__gte=start_date)
+            PriceHistory.objects.filter(
+                recorded_at__date__gte=start_date,
+                recorded_at__date__lte=end_date,
+            )
             .select_related("item_supplier__item", "item_supplier__supplier")
             .values(
                 "item_supplier__item__id",

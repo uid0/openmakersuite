@@ -5,7 +5,6 @@
 import {
   Button,
   Group,
-  NumberInput,
   Paper,
   Stack,
   Table,
@@ -13,7 +12,9 @@ import {
   Text,
   Title,
 } from '@mantine/core';
+import { DatePickerInput, DatesRangeValue } from '@mantine/dates';
 import { IconDownload } from '@tabler/icons-react';
+import dayjs from 'dayjs';
 import React, { useEffect, useMemo, useState } from 'react';
 import { reportsAPI } from '../services/api';
 import {
@@ -28,13 +29,20 @@ import {
 type SortField = string;
 type SortDirection = 'asc' | 'desc';
 
+// Default to last 12 months
+const getDefaultDateRange = (): DatesRangeValue => {
+  const endDate = new Date();
+  const startDate = dayjs().subtract(12, 'month').toDate();
+  return [startDate, endDate];
+};
+
 const InventoryReportPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('stock_by_category');
   const [loading, setLoading] = useState(false);
   const [stockByCategory, setStockByCategory] = useState<InventoryStockByCategory[]>([]);
   const [reorderFrequency, setReorderFrequency] = useState<InventoryReorderFrequency[]>([]);
   const [valueByLocation, setValueByLocation] = useState<InventoryValueByLocation[]>([]);
-  const [reorderMonths, setReorderMonths] = useState<number>(12);
+  const [dateRange, setDateRange] = useState<DatesRangeValue>(getDefaultDateRange);
   const [sortField, setSortField] = useState<SortField>('');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
@@ -48,7 +56,8 @@ const InventoryReportPage: React.FC = () => {
     } else if (activeTab === 'value_by_location') {
       loadValueByLocation();
     }
-  }, [activeTab, reorderMonths]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, dateRange]);
 
   const loadStockByCategory = async () => {
     try {
@@ -63,9 +72,13 @@ const InventoryReportPage: React.FC = () => {
   };
 
   const loadReorderFrequency = async () => {
+    if (!dateRange[0] || !dateRange[1]) return;
     try {
       setLoading(true);
-      const response = await reportsAPI.getInventoryReorderFrequency({ months: reorderMonths });
+      const response = await reportsAPI.getInventoryReorderFrequency({
+        start_date: dayjs(dateRange[0]).format('YYYY-MM-DD'),
+        end_date: dayjs(dateRange[1]).format('YYYY-MM-DD'),
+      });
       setReorderFrequency(response.data);
     } catch (err) {
       console.error('Error loading reorder frequency:', err);
@@ -232,13 +245,16 @@ const InventoryReportPage: React.FC = () => {
         <Tabs.Panel value="reorder_frequency" pt="md">
           <Stack gap="md">
             <Group>
-              <NumberInput
-                label="Time Period (months)"
-                value={reorderMonths}
-                onChange={(value) => setReorderMonths(Number(value) || 12)}
-                min={1}
-                max={60}
-                style={{ width: 200 }}
+              <DatePickerInput
+                type="range"
+                label="Date Range"
+                placeholder="Select date range"
+                value={dateRange}
+                onChange={setDateRange}
+                allowSingleDateInRange
+                clearable
+                maxDate={new Date()}
+                style={{ minWidth: 280 }}
               />
             </Group>
             <Paper withBorder>

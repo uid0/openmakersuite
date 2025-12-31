@@ -2252,19 +2252,36 @@ class InventoryReportViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def reorder_frequency(self, request):
         """Get reorder frequency per item with time period filter."""
-        from datetime import timedelta
+        from datetime import datetime, timedelta
 
         from django.db.models import Count
 
         from reorder_queue.models import ReorderRequest
 
-        # Get time period from query params (default: last 12 months)
-        months = int(request.query_params.get("months", 12))
-        start_date = timezone.now() - timedelta(days=months * 30)
+        # Get date range from query params (default: last 12 months)
+        start_date_str = request.query_params.get("start_date")
+        end_date_str = request.query_params.get("end_date")
+
+        if start_date_str and end_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+                end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                # Fall back to default if date parsing fails
+                start_date = (timezone.now() - timedelta(days=12 * 30)).date()
+                end_date = timezone.now().date()
+        else:
+            # Fall back to months parameter for backward compatibility
+            months = int(request.query_params.get("months", 12))
+            start_date = (timezone.now() - timedelta(days=months * 30)).date()
+            end_date = timezone.now().date()
 
         # Get reorder requests in the time period
         reorder_requests = (
-            ReorderRequest.objects.filter(requested_at__gte=start_date)
+            ReorderRequest.objects.filter(
+                requested_at__date__gte=start_date,
+                requested_at__date__lte=end_date,
+            )
             .select_related("item", "item__category")
             .values("item__id", "item__name", "item__sku", "item__category__name")
             .annotate(reorder_count=Count("id"))
@@ -2517,20 +2534,37 @@ class AssetReportViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def utilization(self, request):
         """Get asset utilization statistics from DeviceUsage."""
-        from datetime import timedelta
+        from datetime import datetime, timedelta
 
         from django.db.models import Avg, Count, Sum
 
         try:
             from forgekey.models import DeviceUsage
 
-            # Get time period from query params (default: last 30 days)
-            days = int(request.query_params.get("days", 30))
-            start_date = timezone.now() - timedelta(days=days)
+            # Get date range from query params (default: last 30 days)
+            start_date_str = request.query_params.get("start_date")
+            end_date_str = request.query_params.get("end_date")
+
+            if start_date_str and end_date_str:
+                try:
+                    start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+                    end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+                except ValueError:
+                    # Fall back to default if date parsing fails
+                    start_date = (timezone.now() - timedelta(days=30)).date()
+                    end_date = timezone.now().date()
+            else:
+                # Fall back to days parameter for backward compatibility
+                days = int(request.query_params.get("days", 30))
+                start_date = (timezone.now() - timedelta(days=days)).date()
+                end_date = timezone.now().date()
 
             # Get usage statistics per asset
             usage_stats = (
-                DeviceUsage.objects.filter(started_at__gte=start_date)
+                DeviceUsage.objects.filter(
+                    started_at__date__gte=start_date,
+                    started_at__date__lte=end_date,
+                )
                 .select_related("asset")
                 .values("asset__id", "asset__name", "asset__asset_tag")
                 .annotate(

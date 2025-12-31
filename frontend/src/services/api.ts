@@ -848,19 +848,22 @@ export const notificationsAPI = {
     api.put<NotificationPreferences>('/notifications/preferences/', data),
 };
 
+// Date range params type for reports
+type DateRangeParams = { start_date?: string; end_date?: string };
+
 // Reports API
 export const reportsAPI = {
   // Inventory Reports
   getInventoryStockByCategory: () =>
     api.get('/inventory/reports/inventory/stock_by_category/'),
 
-  getInventoryReorderFrequency: (params?: { months?: number }) =>
+  getInventoryReorderFrequency: (params?: DateRangeParams) =>
     api.get('/inventory/reports/inventory/reorder_frequency/', { params }),
 
   getInventoryValueByLocation: () =>
     api.get('/inventory/reports/inventory/value_by_location/'),
 
-  exportInventoryReport: (type: 'stock_by_category' | 'reorder_frequency' | 'value_by_location', params?: { months?: number }) =>
+  exportInventoryReport: (type: 'stock_by_category' | 'reorder_frequency' | 'value_by_location', params?: DateRangeParams) =>
     api.get('/inventory/reports/inventory/export/', { 
       params: { type, ...params },
       responseType: 'blob',
@@ -873,13 +876,13 @@ export const reportsAPI = {
   getPurchasingSpendByCategory: () =>
     api.get('/reorders/reports/purchasing/spend_by_category/'),
 
-  getPurchasingLeadTimeAnalysis: (params?: { months?: number }) =>
+  getPurchasingLeadTimeAnalysis: (params?: DateRangeParams) =>
     api.get('/reorders/reports/purchasing/lead_time_analysis/', { params }),
 
-  getPurchasingPriceTrends: (params?: { months?: number }) =>
+  getPurchasingPriceTrends: (params?: DateRangeParams) =>
     api.get('/reorders/reports/purchasing/price_trends/', { params }),
 
-  exportPurchasingReport: (type: 'spend_by_supplier' | 'spend_by_category' | 'lead_time_analysis' | 'price_trends', params?: { months?: number }) =>
+  exportPurchasingReport: (type: 'spend_by_supplier' | 'spend_by_category' | 'lead_time_analysis' | 'price_trends', params?: DateRangeParams) =>
     api.get('/reorders/reports/purchasing/export/', {
       params: { type, ...params },
       responseType: 'blob',
@@ -892,10 +895,10 @@ export const reportsAPI = {
   getAssetMaintenanceDue: () =>
     api.get('/inventory/reports/assets/maintenance_due/'),
 
-  getAssetUtilization: (params?: { days?: number }) =>
+  getAssetUtilization: (params?: DateRangeParams) =>
     api.get('/inventory/reports/assets/utilization/', { params }),
 
-  exportAssetReport: (type: 'assets_by_status' | 'maintenance_due' | 'utilization', params?: { days?: number }) =>
+  exportAssetReport: (type: 'assets_by_status' | 'maintenance_due' | 'utilization', params?: DateRangeParams) =>
     api.get('/inventory/reports/assets/export/', {
       params: { type, ...params },
       responseType: 'blob',

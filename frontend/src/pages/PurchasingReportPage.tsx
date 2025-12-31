@@ -5,7 +5,6 @@
 import {
   Button,
   Group,
-  NumberInput,
   Paper,
   Stack,
   Table,
@@ -13,7 +12,9 @@ import {
   Text,
   Title,
 } from '@mantine/core';
+import { DatePickerInput, DatesRangeValue } from '@mantine/dates';
 import { IconDownload } from '@tabler/icons-react';
+import dayjs from 'dayjs';
 import React, { useEffect, useMemo, useState } from 'react';
 import { reportsAPI } from '../services/api';
 import {
@@ -27,6 +28,13 @@ import { exportPurchasingReportToCSV } from '../utils/csvExport';
 type SortField = string;
 type SortDirection = 'asc' | 'desc';
 
+// Default to last 6 months
+const getDefaultDateRange = (): DatesRangeValue => {
+  const endDate = new Date();
+  const startDate = dayjs().subtract(6, 'month').toDate();
+  return [startDate, endDate];
+};
+
 const PurchasingReportPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('spend_by_supplier');
   const [loading, setLoading] = useState(false);
@@ -34,7 +42,7 @@ const PurchasingReportPage: React.FC = () => {
   const [spendByCategory, setSpendByCategory] = useState<PurchasingSpendByCategory[]>([]);
   const [leadTimeAnalysis, setLeadTimeAnalysis] = useState<PurchasingLeadTimeAnalysis[]>([]);
   const [priceTrends, setPriceTrends] = useState<PurchasingPriceTrends[]>([]);
-  const [timePeriodMonths, setTimePeriodMonths] = useState<number>(6);
+  const [dateRange, setDateRange] = useState<DatesRangeValue>(getDefaultDateRange);
   const [sortField, setSortField] = useState<SortField>('');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
@@ -50,7 +58,8 @@ const PurchasingReportPage: React.FC = () => {
     } else if (activeTab === 'price_trends') {
       loadPriceTrends();
     }
-  }, [activeTab, timePeriodMonths]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, dateRange]);
 
   const loadSpendBySupplier = async () => {
     try {
@@ -77,9 +86,13 @@ const PurchasingReportPage: React.FC = () => {
   };
 
   const loadLeadTimeAnalysis = async () => {
+    if (!dateRange[0] || !dateRange[1]) return;
     try {
       setLoading(true);
-      const response = await reportsAPI.getPurchasingLeadTimeAnalysis({ months: timePeriodMonths });
+      const response = await reportsAPI.getPurchasingLeadTimeAnalysis({
+        start_date: dayjs(dateRange[0]).format('YYYY-MM-DD'),
+        end_date: dayjs(dateRange[1]).format('YYYY-MM-DD'),
+      });
       setLeadTimeAnalysis(response.data);
     } catch (err) {
       console.error('Error loading lead time analysis:', err);
@@ -89,9 +102,13 @@ const PurchasingReportPage: React.FC = () => {
   };
 
   const loadPriceTrends = async () => {
+    if (!dateRange[0] || !dateRange[1]) return;
     try {
       setLoading(true);
-      const response = await reportsAPI.getPurchasingPriceTrends({ months: timePeriodMonths });
+      const response = await reportsAPI.getPurchasingPriceTrends({
+        start_date: dayjs(dateRange[0]).format('YYYY-MM-DD'),
+        end_date: dayjs(dateRange[1]).format('YYYY-MM-DD'),
+      });
       setPriceTrends(response.data);
     } catch (err) {
       console.error('Error loading price trends:', err);
@@ -265,13 +282,16 @@ const PurchasingReportPage: React.FC = () => {
         <Tabs.Panel value="lead_time_analysis" pt="md">
           <Stack gap="md">
             <Group>
-              <NumberInput
-                label="Time Period (months)"
-                value={timePeriodMonths}
-                onChange={(value) => setTimePeriodMonths(Number(value) || 6)}
-                min={1}
-                max={60}
-                style={{ width: 200 }}
+              <DatePickerInput
+                type="range"
+                label="Date Range"
+                placeholder="Select date range"
+                value={dateRange}
+                onChange={setDateRange}
+                allowSingleDateInRange
+                clearable
+                maxDate={new Date()}
+                style={{ minWidth: 280 }}
               />
             </Group>
             <Paper withBorder>
@@ -338,13 +358,16 @@ const PurchasingReportPage: React.FC = () => {
         <Tabs.Panel value="price_trends" pt="md">
           <Stack gap="md">
             <Group>
-              <NumberInput
-                label="Time Period (months)"
-                value={timePeriodMonths}
-                onChange={(value) => setTimePeriodMonths(Number(value) || 6)}
-                min={1}
-                max={60}
-                style={{ width: 200 }}
+              <DatePickerInput
+                type="range"
+                label="Date Range"
+                placeholder="Select date range"
+                value={dateRange}
+                onChange={setDateRange}
+                allowSingleDateInRange
+                clearable
+                maxDate={new Date()}
+                style={{ minWidth: 280 }}
               />
             </Group>
             <Paper withBorder>

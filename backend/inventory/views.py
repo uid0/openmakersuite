@@ -9,6 +9,7 @@ from django.db import models, transaction
 from django.db.models import F, Q
 from django.http import HttpResponse
 from django.utils import timezone
+
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import (
@@ -74,8 +75,7 @@ class SupplierViewSet(viewsets.ModelViewSet):
         # Search functionality
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(
-                Q(name__icontains=search) | Q(notes__icontains=search))
+            queryset = queryset.filter(Q(name__icontains=search) | Q(notes__icontains=search))
 
         return queryset.order_by("name")
 
@@ -90,11 +90,11 @@ class SupplierViewSet(viewsets.ModelViewSet):
 
             from django.db.models import Avg, Count, Max, Min, Sum
             from django.utils import timezone
+
             from reorder_queue.models import LeadTimeLog, PurchaseOrder
 
             # Lead time analytics
-            lead_time_logs = LeadTimeLog.objects.filter(
-                item_supplier__supplier=supplier)
+            lead_time_logs = LeadTimeLog.objects.filter(item_supplier__supplier=supplier)
 
             lead_time_stats = {}
             if lead_time_logs.exists():
@@ -106,8 +106,7 @@ class SupplierViewSet(viewsets.ModelViewSet):
                     total_orders=Count("id"),
                 )
 
-                on_time_count = lead_time_logs.filter(
-                    variance_days__lte=0).count()
+                on_time_count = lead_time_logs.filter(variance_days__lte=0).count()
                 on_time_percentage = (
                     (on_time_count / stats["total_orders"] * 100)
                     if stats["total_orders"] > 0
@@ -116,19 +115,16 @@ class SupplierViewSet(viewsets.ModelViewSet):
 
                 lead_time_stats = {
                     "average_lead_time": (
-                        float(stats["avg_lead_time"]
-                              ) if stats["avg_lead_time"] else None
+                        float(stats["avg_lead_time"]) if stats["avg_lead_time"] else None
                     ),
                     "min_lead_time": stats["min_lead_time"],
                     "max_lead_time": stats["max_lead_time"],
                     "average_variance": (
-                        float(stats["avg_variance"]
-                              ) if stats["avg_variance"] else None
+                        float(stats["avg_variance"]) if stats["avg_variance"] else None
                     ),
                     "total_orders": stats["total_orders"],
                     "on_time_percentage": (
-                        float(
-                            on_time_percentage) if on_time_percentage is not None else None
+                        float(on_time_percentage) if on_time_percentage is not None else None
                     ),
                 }
 
@@ -190,8 +186,7 @@ class SupplierViewSet(viewsets.ModelViewSet):
 class CategoryViewSet(viewsets.ModelViewSet):
     """API endpoint for categories."""
 
-    queryset = Category.objects.select_related(
-        "parent").prefetch_related("children").all()
+    queryset = Category.objects.select_related("parent").prefetch_related("children").all()
     serializer_class = CategorySerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
@@ -208,8 +203,7 @@ class LocationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter queryset based on user permissions."""
-        queryset = Location.objects.select_related(
-            "parent").prefetch_related("fixtures")
+        queryset = Location.objects.select_related("parent").prefetch_related("fixtures")
         # Public users only see active locations
         if not self.request.user.is_authenticated or not self.request.user.is_staff:
             queryset = queryset.filter(is_active=True)
@@ -217,8 +211,7 @@ class LocationViewSet(viewsets.ModelViewSet):
         # Search functionality
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(
-                Q(name__icontains=search) | Q(description__icontains=search))
+            queryset = queryset.filter(Q(name__icontains=search) | Q(description__icontains=search))
 
         return queryset
 
@@ -295,8 +288,7 @@ class LocationViewSet(viewsets.ModelViewSet):
 
         from django.http import HttpResponse
 
-        response = HttpResponse(location.qr_code.read(),
-                                content_type="image/png")
+        response = HttpResponse(location.qr_code.read(), content_type="image/png")
         response["Content-Disposition"] = f'inline; filename="qr_{location.id}.png"'
         return response
 
@@ -317,8 +309,7 @@ class LocationViewSet(viewsets.ModelViewSet):
         from checklists.serializers import ChecklistListSerializer
 
         # Get checklists that have steps associated with this location
-        checklists = Checklist.objects.filter(
-            steps__location=location, is_active=True).distinct()
+        checklists = Checklist.objects.filter(steps__location=location, is_active=True).distinct()
 
         # Filter by public access
         user = request.user
@@ -435,6 +426,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             )
 
         from django.contrib.auth.models import Group
+
         from membership.utils import is_logistics_member, is_sig_admin
 
         # Check ownership_type if provided
@@ -495,11 +487,8 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             )
 
         from django.contrib.auth.models import Group
-        from membership.utils import (
-            can_manage_sig_inventory,
-            is_logistics_member,
-            is_sig_admin,
-        )
+
+        from membership.utils import can_manage_sig_inventory, is_logistics_member, is_sig_admin
 
         if not can_manage_sig_inventory(user, item):
             return Response(
@@ -607,8 +596,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 {
                     "status": "QR code generated successfully",
                     "qr_code_url": (
-                        request.build_absolute_uri(
-                            item.qr_code.url) if item.qr_code else None
+                        request.build_absolute_uri(item.qr_code.url) if item.qr_code else None
                     ),
                 }
             )
@@ -653,8 +641,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         from checklists.serializers import ChecklistListSerializer
 
         # Get checklists that have steps associated with this item
-        checklists = Checklist.objects.filter(
-            steps__inventory_item=item, is_active=True).distinct()
+        checklists = Checklist.objects.filter(steps__inventory_item=item, is_active=True).distinct()
 
         # Filter by public access
         user = request.user
@@ -775,8 +762,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         notes = request.data.get("notes", "")
 
         # Create usage log
-        usage_log = UsageLog.objects.create(
-            item=item, quantity_used=quantity, notes=notes)
+        usage_log = UsageLog.objects.create(item=item, quantity_used=quantity, notes=notes)
 
         # Update stock
         if item.current_stock >= quantity:
@@ -804,13 +790,10 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             return
 
         cost_data = self._process_cost_data(data)
-        lead_time = self._process_lead_time_value(
-            data.get("average_lead_time"))
-        quantity = self._process_quantity_value(
-            data.get("quantity_per_package"))
+        lead_time = self._process_lead_time_value(data.get("average_lead_time"))
+        quantity = self._process_quantity_value(data.get("quantity_per_package"))
 
-        self._create_supplier_relationship(
-            item, supplier, data, cost_data, lead_time, quantity)
+        self._create_supplier_relationship(item, supplier, data, cost_data, lead_time, quantity)
 
     def _validate_supplier(self, supplier_id):
         """Validate and return supplier or None if invalid."""
@@ -925,8 +908,7 @@ class ItemSupplierViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(supplier_id=supplier_id)
 
         # Filter to only active suppliers if requested
-        active_only = self.request.query_params.get(
-            "active_only", "false").lower() == "true"
+        active_only = self.request.query_params.get("active_only", "false").lower() == "true"
         if active_only:
             queryset = queryset.filter(is_active=True, is_discontinued=False)
 
@@ -1029,8 +1011,7 @@ class AssetViewSet(viewsets.ModelViewSet):
     """API endpoint for hard assets."""
 
     queryset = (
-        Asset.objects.select_related(
-            "inventory_item", "category", "location", "manufacturer")
+        Asset.objects.select_related("inventory_item", "category", "location", "manufacturer")
         .prefetch_related("asset_parts__part", "asset_parts__part__category")
         .all()
     )
@@ -1089,20 +1070,17 @@ class AssetViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(owning_group_id=owning_group)
 
         # Filter by date_received range
-        date_received_after = self.request.query_params.get(
-            "date_received_after")
+        date_received_after = self.request.query_params.get("date_received_after")
         if date_received_after:
             try:
                 from datetime import datetime
 
-                date_obj = datetime.fromisoformat(
-                    date_received_after.replace("Z", "+00:00")).date()
+                date_obj = datetime.fromisoformat(date_received_after.replace("Z", "+00:00")).date()
                 queryset = queryset.filter(date_received__gte=date_obj)
             except (ValueError, AttributeError):
                 pass  # Invalid date format, ignore filter
 
-        date_received_before = self.request.query_params.get(
-            "date_received_before")
+        date_received_before = self.request.query_params.get("date_received_before")
         if date_received_before:
             try:
                 from datetime import datetime
@@ -1208,6 +1186,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         if ownership_type == "group" and owning_group_id:
             # Check if user is admin of the specified group
             from django.contrib.auth.models import Group
+
             from membership.utils import is_sig_admin
 
             try:
@@ -1254,6 +1233,7 @@ class AssetViewSet(viewsets.ModelViewSet):
             owning_group_id = request.data.get("owning_group")
             if owning_group_id:
                 from django.contrib.auth.models import Group
+
                 from membership.utils import is_logistics_member, is_sig_admin
 
                 try:
@@ -1413,8 +1393,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         # Assets that have never been scanned or were scanned more than 3 months ago
         assets = (
             Asset.objects.filter(
-                Q(last_scanned_at__lt=three_months_ago) | Q(
-                    last_scanned_at__isnull=True)
+                Q(last_scanned_at__lt=three_months_ago) | Q(last_scanned_at__isnull=True)
             )
             .filter(is_active=True)
             .select_related("category", "location", "manufacturer", "inventory_item")
@@ -1446,8 +1425,7 @@ class AssetViewSet(viewsets.ModelViewSet):
             identifier = asset.asset_tag or str(asset.id)[:8]
             filename = f"asset_label_{identifier}.escp"
 
-            response = HttpResponse(
-                escp_bytes, content_type="application/octet-stream")
+            response = HttpResponse(escp_bytes, content_type="application/octet-stream")
             response["Content-Disposition"] = f'attachment; filename="{filename}"'
             return response
         except Exception as e:
@@ -1465,8 +1443,7 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         try:
             generator = BrotherESCPGenerator()
-            png_bytes = generator.generate_label_file(
-                asset, output_format="png")
+            png_bytes = generator.generate_label_file(asset, output_format="png")
             identifier = asset.asset_tag or str(asset.id)[:8]
             filename = f"asset_label_{identifier}_preview.png"
 
@@ -1537,8 +1514,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         from checklists.serializers import ChecklistListSerializer
 
         # Get checklists that have steps associated with this asset
-        checklists = Checklist.objects.filter(
-            steps__asset=asset, is_active=True).distinct()
+        checklists = Checklist.objects.filter(steps__asset=asset, is_active=True).distinct()
 
         # Filter by public access
         user = request.user
@@ -1680,8 +1656,7 @@ class AssetViewSet(viewsets.ModelViewSet):
             )
 
         # Get active lockouts
-        active_lockouts = DeviceLockout.objects.filter(
-            asset=asset, is_active=True)
+        active_lockouts = DeviceLockout.objects.filter(asset=asset, is_active=True)
 
         if not active_lockouts.exists():
             return Response({"error": "Asset is not locked"}, status=status.HTTP_400_BAD_REQUEST)
@@ -1706,8 +1681,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         unlockable_lockout.save()
 
         # Check if there are other active lockouts
-        remaining_lockouts = DeviceLockout.objects.filter(
-            asset=asset, is_active=True)
+        remaining_lockouts = DeviceLockout.objects.filter(asset=asset, is_active=True)
 
         # If no more active lockouts, update operational mode
         if not remaining_lockouts.exists():
@@ -1725,6 +1699,7 @@ class AssetViewSet(viewsets.ModelViewSet):
     def _get_user_lockout_level(self, user, asset):
         """Determine the lockout level for a user."""
         from django.contrib.auth.models import Group
+
         from forgekey.models import LockoutLevel
 
         # Check for COO
@@ -1804,8 +1779,7 @@ class AssetViewSet(viewsets.ModelViewSet):
             import logging
 
             logger = logging.getLogger(__name__)
-            logger.warning(
-                f"Failed to send asset problem webhook: {e}", exc_info=True)
+            logger.warning(f"Failed to send asset problem webhook: {e}", exc_info=True)
 
         from .serializers import AssetProblemSerializer
 
@@ -1819,8 +1793,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         from .models import AssetProblem
         from .serializers import AssetProblemSerializer
 
-        problems = AssetProblem.objects.filter(
-            asset=asset).order_by("-created_at")
+        problems = AssetProblem.objects.filter(asset=asset).order_by("-created_at")
         serializer = AssetProblemSerializer(problems, many=True)
         return Response(serializer.data)
 
@@ -1877,8 +1850,7 @@ class AssetViewSet(viewsets.ModelViewSet):
 class AssetPartViewSet(viewsets.ModelViewSet):
     """API endpoint for asset parts/consumables."""
 
-    queryset = AssetPart.objects.select_related(
-        "asset", "part", "part__category").all()
+    queryset = AssetPart.objects.select_related("asset", "part", "part__category").all()
     serializer_class = AssetPartSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
@@ -1898,8 +1870,7 @@ class AssetPartViewSet(viewsets.ModelViewSet):
         # Filter by required status if specified
         is_required = self.request.query_params.get("is_required")
         if is_required is not None:
-            queryset = queryset.filter(
-                is_required=is_required.lower() == "true")
+            queryset = queryset.filter(is_required=is_required.lower() == "true")
 
         # Note: needs_replacement filter is a calculated property, so we can't filter
         # efficiently in the database. If needed, this would require evaluating the queryset.
@@ -2025,8 +1996,7 @@ class FixtureViewSet(viewsets.ModelViewSet):
             import logging
 
             logger = logging.getLogger(__name__)
-            logger.warning(
-                f"Failed to send fixture refill webhook: {e}", exc_info=True)
+            logger.warning(f"Failed to send fixture refill webhook: {e}", exc_info=True)
 
         serializer = FixtureRefillRequestSerializer(refill_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2130,8 +2100,7 @@ def lookup_by_code(request):
     Accepts GET or POST with 'code' parameter.
     Returns the appropriate item with its type and redirect URL.
     """
-    code = request.data.get("code") or request.query_params.get(
-        "code", "").strip().upper()
+    code = request.data.get("code") or request.query_params.get("code", "").strip().upper()
 
     if not code:
         return Response(
@@ -2232,6 +2201,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
         """Get stock levels aggregated by category."""
         from django.db.models import Count, OuterRef, Q, Subquery, Sum, Value
         from django.db.models.functions import Coalesce
+
         from inventory.models import ItemSupplier
 
         # Subquery to get unit_cost from primary ItemSupplier
@@ -2244,8 +2214,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
             .select_related("category")
             .annotate(
                 category_id_coalesced=Coalesce("category__id", Value(0)),
-                category_name_coalesced=Coalesce(
-                    "category__name", Value("Uncategorized")),
+                category_name_coalesced=Coalesce("category__name", Value("Uncategorized")),
                 unit_cost_value=Subquery(primary_supplier.values("unit_cost")),
             )
             .values("category_id_coalesced", "category_name_coalesced")
@@ -2254,11 +2223,9 @@ class InventoryReportViewSet(viewsets.ViewSet):
                 total_stock=Sum("current_stock"),
                 total_value=Sum(
                     F("current_stock") * Coalesce("unit_cost_value", Value(0)),
-                    output_field=models.DecimalField(
-                        max_digits=20, decimal_places=2),
+                    output_field=models.DecimalField(max_digits=20, decimal_places=2),
                 ),
-                low_stock_count=Count("id", filter=Q(
-                    current_stock__lte=F("minimum_stock"))),
+                low_stock_count=Count("id", filter=Q(current_stock__lte=F("minimum_stock"))),
             )
             .order_by("category_name_coalesced")
         )
@@ -2288,6 +2255,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
         from datetime import datetime, timedelta
 
         from django.db.models import Count
+
         from reorder_queue.models import ReorderRequest
 
         # Get date range from query params (default: last 12 months)
@@ -2296,8 +2264,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
 
         if start_date_str and end_date_str:
             try:
-                start_date = datetime.strptime(
-                    start_date_str, "%Y-%m-%d").date()
+                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
                 end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
             except ValueError:
                 # Fall back to default if date parsing fails
@@ -2340,6 +2307,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
         """Get total inventory value grouped by location."""
         from django.db.models import Count, OuterRef, Subquery, Sum, Value
         from django.db.models.functions import Coalesce
+
         from inventory.models import ItemSupplier
 
         # Subquery to get unit_cost from primary ItemSupplier
@@ -2352,8 +2320,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
             .select_related("location")
             .annotate(
                 location_id_coalesced=Coalesce("location__id", Value(0)),
-                location_name_coalesced=Coalesce(
-                    "location__name", Value("No Location")),
+                location_name_coalesced=Coalesce("location__name", Value("No Location")),
                 unit_cost_value=Subquery(primary_supplier.values("unit_cost")),
             )
             .values("location_id_coalesced", "location_name_coalesced")
@@ -2362,8 +2329,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
                 total_stock=Sum("current_stock"),
                 total_value=Sum(
                     F("current_stock") * Coalesce("unit_cost_value", Value(0)),
-                    output_field=models.DecimalField(
-                        max_digits=20, decimal_places=2),
+                    output_field=models.DecimalField(max_digits=20, decimal_places=2),
                 ),
             )
             .order_by("-total_value")
@@ -2437,8 +2403,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
 
             writer = csv.DictWriter(
                 response_obj,
-                fieldnames=["item_name", "item_sku",
-                            "category_name", "reorder_count"],
+                fieldnames=["item_name", "item_sku", "category_name", "reorder_count"],
             )
             writer.writeheader()
             for row in data:
@@ -2463,8 +2428,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
 
             writer = csv.DictWriter(
                 response_obj,
-                fieldnames=["location_name", "total_items",
-                            "total_stock", "total_value"],
+                fieldnames=["location_name", "total_items", "total_stock", "total_value"],
             )
             writer.writeheader()
             for row in data:
@@ -2492,8 +2456,7 @@ class AssetReportViewSet(viewsets.ViewSet):
         """Get count of assets grouped by status."""
         from django.db.models import Count
 
-        queryset = Asset.objects.values("status").annotate(
-            count=Count("id")).order_by("status")
+        queryset = Asset.objects.values("status").annotate(count=Count("id")).order_by("status")
 
         data = []
         status_choices = dict(Asset.STATUS_CHOICES)
@@ -2522,8 +2485,7 @@ class AssetReportViewSet(viewsets.ViewSet):
         for part in maintenance_due_parts:
             if part.needs_replacement:
                 days_since = part.days_since_replacement or 0
-                days_overdue = days_since - \
-                    (part.maintenance_interval_days or 0)
+                days_overdue = days_since - (part.maintenance_interval_days or 0)
 
                 maintenance_needed.append(
                     {
@@ -2565,8 +2527,7 @@ class AssetReportViewSet(viewsets.ViewSet):
             )
 
         # Sort by days overdue (most urgent first)
-        maintenance_needed.sort(key=lambda x: x.get(
-            "days_overdue") or 0, reverse=True)
+        maintenance_needed.sort(key=lambda x: x.get("days_overdue") or 0, reverse=True)
 
         return Response(maintenance_needed)
 
@@ -2586,10 +2547,8 @@ class AssetReportViewSet(viewsets.ViewSet):
 
             if start_date_str and end_date_str:
                 try:
-                    start_date = datetime.strptime(
-                        start_date_str, "%Y-%m-%d").date()
-                    end_date = datetime.strptime(
-                        end_date_str, "%Y-%m-%d").date()
+                    start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+                    end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
                 except ValueError:
                     # Fall back to default if date parsing fails
                     start_date = (timezone.now() - timedelta(days=30)).date()

@@ -43,6 +43,16 @@ export const resolveApiBaseUrl = () => {
 
 const API_BASE_URL = resolveApiBaseUrl();
 
+const normalizeResults = <T>(data: { results?: T[] } | T[]): { results: T[] } => {
+  if (Array.isArray(data)) {
+    return { results: data };
+  }
+  if (data && Array.isArray(data.results)) {
+    return { results: data.results };
+  }
+  return { results: [] };
+};
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -247,7 +257,11 @@ export const inventoryAPI = {
     api.get<Checklist[]>(`/inventory/items/${id}/checklists/`),
 
   listLocations: () =>
-    api.get<{ results: Location[] }>('/inventory/locations/'),
+    api.get<{ results?: Location[] } | Location[]>('/inventory/locations/')
+      .then((response) => ({
+        ...response,
+        data: normalizeResults<Location>(response.data),
+      })),
 
   listCategories: () =>
     api.get<{ results: Category[] }>('/inventory/categories/'),

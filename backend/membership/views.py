@@ -10,9 +10,18 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import SIGAdmin, User, UserRegistrationToken
+from .models import (
+    Committee,
+    CommitteeChair,
+    SIGAdmin,
+    SIGCommittee,
+    User,
+    UserRegistrationToken,
+)
 from .serializers import (
     ChangePasswordSerializer,
+    CommitteeSerializer,
+    CreateSIGSerializer,
     SIGAdminSerializer,
     SIGMemberSerializer,
     SIGSerializer,
@@ -24,11 +33,30 @@ from .serializers import (
 from .utils import get_user_managed_sigs, is_sig_admin
 
 
+class CommitteeViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for Committee operations.
+
+    Lists committees with their SIGs. All authenticated users can view committees.
+    """
+
+    queryset = Committee.objects.filter(is_active=True)
+    serializer_class = CommitteeSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_context(self):
+        """Add request to serializer context."""
+        context = super().get_serializer_context()
+        context["request"] = self.request
+        return context
+
+
 class SIGViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for SIG (Special Interest Group) operations.
 
     Allows SIG admins to view their SIGs and get details.
+    Committee Chairs can create new SIGs for their committees.
     """
 
     queryset = Group.objects.all()
@@ -36,12 +64,22 @@ class SIGViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        """Return SIGs that the user administers."""
+        """Return SIGs that the user administers or can see."""
         user = self.request.user
 
         # Superusers and staff can see all SIGs
         if user.is_superuser or user.is_staff:
             return Group.objects.all()
+
+        # Committee Chairs can see SIGs in their committees
+        user_committees = CommitteeChair.get_user_committees(user)
+        if user_committees.exists():
+            sigs_from_committees = Group.objects.filter(
+                committee_membership__committee__in=user_committees
+            )
+            # Also include SIGs they administer
+            user_managed = get_user_managed_sigs(user)
+            return (sigs_from_committees | user_managed).distinct()
 
         # Regular users see only SIGs they administer
         return get_user_managed_sigs(user)
@@ -51,6 +89,41 @@ class SIGViewSet(viewsets.ReadOnlyModelViewSet):
         context = super().get_serializer_context()
         context["request"] = self.request
         return context
+
+    @action(detail=False, methods=["post"])
+    def create_sig(self, request):
+        """
+        Create a new SIG for a committee.
+
+        Only Committee Chairs can create SIGs for their committees.
+        """
+        serializer = CreateSIGSerializer(data=request.data, context={"request": request})
+        if serializer.is_valid():
+            name = serializer.validated_data["name"]
+            committee_id = serializer.validated_data["committee_id"]
+
+            try:
+                committee = Committee.objects.get(pk=committee_id, is_active=True)
+            except Committee.DoesNotExist:
+                return Response(
+                    {"detail": "Committee not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # Create the Group (SIG)
+            sig = Group.objects.create(name=name)
+
+            # Link SIG to committee
+            SIGCommittee.objects.create(group=sig, committee=committee)
+
+            # Make the creator a SIG admin
+            SIGAdmin.objects.create(user=request.user, group=sig, is_active=True)
+
+            # Return the created SIG
+            sig_serializer = self.get_serializer(sig)
+            return Response(sig_serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=["get"])
     def details(self, request, pk=None):
@@ -65,10 +138,22 @@ class SIGViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Check if user is admin of this SIG
-        if not (
-            request.user.is_superuser or request.user.is_staff or is_sig_admin(request.user, sig)
-        ):
+        # Check if user is admin of this SIG or chair of the committee
+        user_can_view = False
+        if request.user.is_superuser or request.user.is_staff:
+            user_can_view = True
+        elif is_sig_admin(request.user, sig):
+            user_can_view = True
+        else:
+            # Check if user is a chair of the committee this SIG belongs to
+            try:
+                sig_committee = SIGCommittee.objects.get(group=sig)
+                if CommitteeChair.is_committee_chair(request.user, sig_committee.committee):
+                    user_can_view = True
+            except SIGCommittee.DoesNotExist:
+                pass
+
+        if not user_can_view:
             return Response(
                 {"detail": "You do not have permission to view this SIG."},
                 status=status.HTTP_403_FORBIDDEN,

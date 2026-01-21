@@ -14,7 +14,14 @@ from django.utils.html import format_html
 
 from inventory.services.qr_code_service import QRCodeService
 
-from .models import Membership, SIGAdmin, UserRegistrationToken
+from .models import (
+    Committee,
+    CommitteeChair,
+    Membership,
+    SIGAdmin,
+    SIGCommittee,
+    UserRegistrationToken,
+)
 
 User = get_user_model()
 
@@ -505,3 +512,33 @@ class UserRegistrationTokenAdmin(admin.ModelAdmin):
                 qr_url,
             )
         return format_html('<span style="color: gray;">Token is not active</span>')
+
+
+@admin.register(Committee)
+class CommitteeAdmin(admin.ModelAdmin):
+    """Admin interface for Committee model."""
+
+    list_display = ["name", "is_active", "sig_count", "created_at"]
+    list_filter = ["is_active", "created_at"]
+    search_fields = ["name", "description"]
+    readonly_fields = ["created_at", "updated_at"]
+
+
+@admin.register(CommitteeChair)
+class CommitteeChairAdmin(admin.ModelAdmin):
+    """Admin interface for CommitteeChair model."""
+
+    list_display = ["user", "committee", "is_active", "created_at"]
+    list_filter = ["is_active", "committee", "created_at"]
+    search_fields = ["user__username", "user__email", "committee__name"]
+    readonly_fields = ["created_at", "updated_at"]
+
+
+@admin.register(SIGCommittee)
+class SIGCommitteeAdmin(admin.ModelAdmin):
+    """Admin interface for SIGCommittee model."""
+
+    list_display = ["group", "committee", "created_at"]
+    list_filter = ["committee", "created_at"]
+    search_fields = ["group__name", "committee__name"]
+    readonly_fields = ["created_at", "updated_at"]

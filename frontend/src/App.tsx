@@ -14,6 +14,7 @@ import AssetsPage from './pages/AssetsPage';
 import CategoryFormPage from './pages/CategoryFormPage';
 import CategoryListPage from './pages/CategoryListPage';
 import ChecklistCompletionPage from './pages/ChecklistCompletionPage';
+import CommitteeListPage from './pages/CommitteeListPage';
 import CodeEntryPage from './pages/CodeEntryPage';
 import DashboardPage from './pages/DashboardPage';
 import DonationItemScanPage from './pages/DonationItemScanPage';
@@ -165,6 +166,7 @@ function AppContent() {
           <Route path="/sigs" element={<Navigate to="/sigs/dashboard" replace />} />
           <Route path="/sigs/dashboard" element={<WorkspaceLayout><SIGDashboard /></WorkspaceLayout>} />
           <Route path="/sigs/dashboard/:sigId" element={<WorkspaceLayout><SIGDashboard /></WorkspaceLayout>} />
+          <Route path="/sigs/committees" element={<WorkspaceLayout><CommitteeListPage /></WorkspaceLayout>} />
 
           {/* Reports Workspace */}
           <Route path="/reports/inventory" element={<WorkspaceLayout><InventoryReportPage /></WorkspaceLayout>} />

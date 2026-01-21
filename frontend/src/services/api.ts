@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, Committee, CreateReorderRequest, CreateSIGRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -618,6 +618,18 @@ export const sigAPI = {
 
   removeSIGMember: (sigId: number, userId: number) =>
     api.delete(`/membership/sigs/${sigId}/members/${userId}/`),
+
+  createSIG: (data: CreateSIGRequest) =>
+    api.post<SIG>('/membership/sigs/create_sig/', data),
+};
+
+// Committee API
+export const committeeAPI = {
+  listCommittees: () =>
+    api.get<{ results: Committee[] }>('/membership/committees/'),
+
+  getCommittee: (id: number) =>
+    api.get<Committee>(`/membership/committees/${id}/`),
 };
 
 // Auth API

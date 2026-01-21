@@ -242,6 +242,150 @@ class SIGAdmin(models.Model):
         ).distinct()
 
 
+class Committee(models.Model):
+    """
+    Committee model for makerspace committees.
+
+    Committees are organizational structures that contain Special Interest Groups (SIGs).
+    Each committee can have one or more chairs who can create and manage SIGs within that committee.
+    """
+
+    name = models.CharField(
+        max_length=200,
+        unique=True,
+        help_text="Name of the committee",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Description of the committee's purpose and responsibilities",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this committee is currently active",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Committee"
+        verbose_name_plural = "Committees"
+        indexes = [
+            models.Index(fields=["is_active", "name"]),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def sig_count(self):
+        """Get the number of SIGs in this committee."""
+        return self.sigs.count()
+
+
+class CommitteeChair(models.Model):
+    """
+    Tracks which users are chairs of which committees.
+
+    Committee Chairs can create and manage Special Interest Groups (SIGs)
+    within their committee.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="committee_chair_roles",
+        help_text="User who is a chair of this committee",
+    )
+    committee = models.ForeignKey(
+        Committee,
+        on_delete=models.CASCADE,
+        related_name="chairs",
+        help_text="Committee this user chairs",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Is this chair role active?",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [["user", "committee"]]
+        ordering = ["committee", "user"]
+        indexes = [
+            models.Index(fields=["user", "is_active"]),
+            models.Index(fields=["committee", "is_active"]),
+        ]
+        verbose_name = "Committee Chair"
+        verbose_name_plural = "Committee Chairs"
+
+    def __str__(self) -> str:
+        return f"{self.user.username} - {self.committee.name}"
+
+    @classmethod
+    def is_committee_chair(cls, user, committee):
+        """Check if a user is a chair of a specific committee."""
+        if not user or not user.is_authenticated or not committee:
+            return False
+        return cls.objects.filter(user=user, committee=committee, is_active=True).exists()
+
+    @classmethod
+    def get_user_committees(cls, user):
+        """Get all committees that a user chairs."""
+        if not user or not user.is_authenticated:
+            return Committee.objects.none()
+        return Committee.objects.filter(
+            chairs__user=user, chairs__is_active=True
+        ).distinct()
+
+    @classmethod
+    def get_committee_chairs(cls, committee):
+        """Get all chair users for a specific committee."""
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        if not committee:
+            return User.objects.none()
+        return User.objects.filter(
+            committee_chair_roles__committee=committee, committee_chair_roles__is_active=True
+        ).distinct()
+
+
+class SIGCommittee(models.Model):
+    """
+    Links a SIG (Group) to a Committee.
+
+    This model creates the relationship between Special Interest Groups (represented as Django Groups)
+    and Committees. Each SIG belongs to one committee.
+    """
+
+    group = models.OneToOneField(
+        Group,
+        on_delete=models.CASCADE,
+        related_name="committee_membership",
+        help_text="SIG (Group) that belongs to this committee",
+    )
+    committee = models.ForeignKey(
+        Committee,
+        on_delete=models.CASCADE,
+        related_name="sigs",
+        help_text="Committee this SIG belongs to",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "SIG Committee Membership"
+        verbose_name_plural = "SIG Committee Memberships"
+        indexes = [
+            models.Index(fields=["committee", "group"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.group.name} - {self.committee.name}"
+
+
 class UserRegistrationToken(models.Model):
     """
     One-time use token for user registration via QR code.

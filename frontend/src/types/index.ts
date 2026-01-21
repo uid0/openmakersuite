@@ -404,6 +404,10 @@ export interface SIG {
   inventory_count: number;
   admins: SIGAdmin[];
   is_user_admin: boolean;
+  parent_committee: {
+    id: number;
+    name: string;
+  } | null;
 }
 
 export interface SIGAdmin {
@@ -419,6 +423,33 @@ export interface SIGMember {
   email: string;
   handle: string;
   is_sig_admin: boolean;
+}
+
+// Committee types
+export interface Committee {
+  id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
+  sig_count: number;
+  sigs: SIG[];
+  chairs: CommitteeChair[];
+  is_user_chair: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommitteeChair {
+  id: number;
+  username: string;
+  email: string;
+  handle: string;
+}
+
+export interface CreateSIGRequest {
+  name: string;
+  committee_id: number;
+  description?: string;
 }
 
 // Checklist types

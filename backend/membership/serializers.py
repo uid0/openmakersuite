@@ -6,7 +6,14 @@ from django.contrib.auth.models import Group
 
 from rest_framework import serializers
 
-from .models import SIGAdmin, User, UserRegistrationToken
+from .models import (
+    Committee,
+    CommitteeChair,
+    SIGAdmin,
+    SIGCommittee,
+    User,
+    UserRegistrationToken,
+)
 
 
 class SIGAdminSerializer(serializers.ModelSerializer):
@@ -56,6 +63,84 @@ class SIGMemberSerializer(serializers.Serializer):
         return SIGAdmin.is_sig_admin(obj, group)
 
 
+class CommitteeSerializer(serializers.ModelSerializer):
+    """Serializer for Committee model."""
+
+    sig_count = serializers.IntegerField(read_only=True)
+    sigs = serializers.SerializerMethodField()
+    chairs = serializers.SerializerMethodField()
+    is_user_chair = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Committee
+        fields = [
+            "id",
+            "name",
+            "description",
+            "is_active",
+            "sig_count",
+            "sigs",
+            "chairs",
+            "is_user_chair",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def get_sigs(self, obj):
+        """Get list of SIGs in this committee."""
+        sigs = Group.objects.filter(committee_membership__committee=obj)
+        serializer = SIGSerializer(sigs, many=True, context=self.context)
+        return serializer.data
+
+    def get_chairs(self, obj):
+        """Get list of chair users for this committee."""
+        chairs = CommitteeChair.get_committee_chairs(obj)
+        return [
+            {
+                "id": chair.id,
+                "username": chair.username,
+                "email": chair.email,
+                "handle": chair.handle,
+            }
+            for chair in chairs
+        ]
+
+    def get_is_user_chair(self, obj):
+        """Check if the current user is a chair of this committee."""
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return CommitteeChair.is_committee_chair(request.user, obj)
+
+
+class CommitteeChairSerializer(serializers.ModelSerializer):
+    """Serializer for CommitteeChair model."""
+
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    username = serializers.CharField(source="user.username", read_only=True)
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    committee_id = serializers.IntegerField(source="committee.id", read_only=True)
+    committee_name = serializers.CharField(source="committee.name", read_only=True)
+
+    class Meta:
+        model = CommitteeChair
+        fields = [
+            "id",
+            "user",
+            "user_id",
+            "username",
+            "user_email",
+            "committee",
+            "committee_id",
+            "committee_name",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+
 class SIGSerializer(serializers.ModelSerializer):
     """Serializer for SIG (Group) with metadata."""
 
@@ -64,6 +149,7 @@ class SIGSerializer(serializers.ModelSerializer):
     inventory_count = serializers.SerializerMethodField()
     admins = serializers.SerializerMethodField()
     is_user_admin = serializers.SerializerMethodField()
+    parent_committee = serializers.SerializerMethodField()
 
     class Meta:
         model = Group
@@ -75,6 +161,7 @@ class SIGSerializer(serializers.ModelSerializer):
             "inventory_count",
             "admins",
             "is_user_admin",
+            "parent_committee",
         ]
 
     def get_member_count(self, obj):
@@ -116,6 +203,17 @@ class SIGSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return False
         return SIGAdmin.is_sig_admin(request.user, obj)
+
+    def get_parent_committee(self, obj):
+        """Get the parent committee for this SIG."""
+        try:
+            sig_committee = SIGCommittee.objects.get(group=obj)
+            return {
+                "id": sig_committee.committee.id,
+                "name": sig_committee.committee.name,
+            }
+        except SIGCommittee.DoesNotExist:
+            return None
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -236,6 +334,43 @@ class TokenValidationSerializer(serializers.Serializer):
                 raise serializers.ValidationError("This registration token has already been used.")
             else:
                 raise serializers.ValidationError("This registration token has expired.")
+
+        return value
+
+
+class CreateSIGSerializer(serializers.Serializer):
+    """Serializer for creating a new SIG by a Committee Chair."""
+
+    name = serializers.CharField(required=True, max_length=150)
+    committee_id = serializers.IntegerField(required=True)
+    description = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_name(self, value):
+        """Validate that the SIG name is unique."""
+        if Group.objects.filter(name=value).exists():
+            raise serializers.ValidationError("A SIG with this name already exists.")
+        return value
+
+    def validate_committee_id(self, value):
+        """Validate that the committee exists and user is a chair."""
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError("Authentication required.")
+
+        try:
+            committee = Committee.objects.get(pk=value, is_active=True)
+        except Committee.DoesNotExist:
+            raise serializers.ValidationError("Committee not found or inactive.")
+
+        # Check if user is a chair of this committee, or is staff/superuser
+        if not (
+            request.user.is_staff
+            or request.user.is_superuser
+            or CommitteeChair.is_committee_chair(request.user, committee)
+        ):
+            raise serializers.ValidationError(
+                "You must be a chair of this committee to create SIGs."
+            )
 
         return value
 

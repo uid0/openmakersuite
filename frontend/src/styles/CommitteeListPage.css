@@ -1,0 +1,213 @@
+.committee-list-page {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.committee-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.committee-list-header h1 {
+  margin: 0;
+  font-size: 2rem;
+  color: #333;
+}
+
+.btn-create-sig {
+  padding: 10px 20px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background-color 0.2s;
+}
+
+.btn-create-sig:hover {
+  background-color: #0056b3;
+}
+
+.create-sig-form {
+  background-color: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 30px;
+  border: 1px solid #dee2e6;
+}
+
+.create-sig-form h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #333;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 500;
+  color: #555;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.form-actions {
+  margin-top: 20px;
+}
+
+.form-actions button {
+  padding: 10px 20px;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background-color 0.2s;
+}
+
+.form-actions button:hover:not(:disabled) {
+  background-color: #218838;
+}
+
+.form-actions button:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
+
+.committees-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.committee-card {
+  background-color: white;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.committee-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.committee-header h2 {
+  margin: 0;
+  color: #333;
+  font-size: 1.5rem;
+}
+
+.chair-badge {
+  background-color: #ffc107;
+  color: #333;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.committee-description {
+  color: #666;
+  margin-bottom: 15px;
+  line-height: 1.5;
+}
+
+.committee-stats {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 15px;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.sigs-list {
+  margin-top: 15px;
+}
+
+.sigs-list h3 {
+  margin: 0 0 10px 0;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.sigs-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sig-item {
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  border-left: 3px solid #007bff;
+}
+
+.sig-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sig-name {
+  font-weight: 500;
+  color: #333;
+  font-size: 1rem;
+}
+
+.sig-stats {
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.no-sigs {
+  color: #999;
+  font-style: italic;
+  padding: 10px;
+}
+
+.no-committees {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+  font-size: 1.1rem;
+}
+
+.committee-list-loading,
+.committee-list-error {
+  text-align: center;
+  padding: 40px;
+  font-size: 1.1rem;
+}
+
+.committee-list-error {
+  color: #dc3545;
+}

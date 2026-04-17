@@ -1511,6 +1511,209 @@ class AssetProblem(models.Model):
         return f"{self.asset.name} - {self.get_status_display()} ({self.created_at.date()})"
 
 
+class MaintenanceItem(models.Model):
+    """
+    A recurring preventive maintenance (PM) task for a physical asset.
+
+    Each item defines what needs to be done, how often, and what materials are needed.
+    When a user scans an asset QR code, outstanding PM tasks are shown with
+    step-by-step instructions.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="maintenance_items",
+        help_text="The asset this maintenance task belongs to",
+    )
+    title = models.CharField(max_length=200, help_text="Brief title for this maintenance task")
+    description = models.TextField(
+        blank=True,
+        help_text="Detailed description of why this maintenance is needed",
+    )
+    instructions = models.TextField(
+        blank=True,
+        help_text="Step-by-step instructions for performing the maintenance",
+    )
+    estimated_time_minutes = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Estimated time to complete in minutes",
+    )
+    estimated_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Estimated total cost for materials and labor",
+    )
+    interval_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="How often this task should be performed (in days). Null means one-time or as-needed.",
+    )
+    last_completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this task was last completed",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive tasks are hidden from the scan page",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["asset", "title"]
+        indexes = [
+            models.Index(fields=["asset", "is_active"], name="maintenanceitem_asset_active_idx"),
+            models.Index(fields=["last_completed_at"], name="maintenanceitem_last_completed_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.asset.name} — {self.title}"
+
+    @property
+    def next_due_at(self) -> Optional[Any]:
+        """Calculate when this task is next due based on interval and last completion."""
+        if not self.interval_days:
+            return None
+        if self.last_completed_at:
+            from datetime import timedelta
+
+            return self.last_completed_at + timedelta(days=self.interval_days)
+        return None
+
+    @property
+    def is_overdue(self) -> bool:
+        """Return True if the task is past its due date or has never been completed.
+
+        A task with interval_days set but no last_completed_at is considered overdue
+        immediately — it needs to be done at least once before a schedule can begin.
+        Tasks without interval_days (one-time or as-needed) are never considered overdue.
+        """
+        from django.utils import timezone
+
+        if not self.interval_days:
+            return False
+        next_due = self.next_due_at
+        if next_due is None:
+            return True
+        return timezone.now() >= next_due
+
+    @property
+    def days_overdue(self) -> Optional[int]:
+        """Return how many days overdue the task is, or None if not overdue."""
+        from django.utils import timezone
+
+        if not self.is_overdue:
+            return None
+        next_due = self.next_due_at
+        if next_due is None:
+            return None
+        delta = timezone.now() - next_due
+        return max(0, delta.days)
+
+
+class MaintenanceMaterial(models.Model):
+    """
+    A material or supply needed to complete a MaintenanceItem.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    maintenance_item = models.ForeignKey(
+        MaintenanceItem,
+        on_delete=models.CASCADE,
+        related_name="materials",
+        help_text="The maintenance task that requires this material",
+    )
+    name = models.CharField(max_length=200, help_text="Name of the material or supply")
+    quantity = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("1.00"),
+        help_text="Quantity needed",
+    )
+    unit = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Unit of measurement (e.g., pieces, oz, ml, feet)",
+    )
+    estimated_cost_per_unit = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Estimated cost per unit",
+    )
+    notes = models.TextField(blank=True, help_text="Notes about sourcing or usage")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.quantity} {self.unit})"
+
+    @property
+    def total_estimated_cost(self) -> Decimal:
+        """Calculate total estimated cost for this material."""
+        return self.quantity * self.estimated_cost_per_unit
+
+
+class MaintenanceLog(models.Model):
+    """
+    A record of a completed maintenance task.
+
+    Created when a user marks a MaintenanceItem as completed.
+    Updates the MaintenanceItem's last_completed_at timestamp.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    maintenance_item = models.ForeignKey(
+        MaintenanceItem,
+        on_delete=models.CASCADE,
+        related_name="logs",
+        help_text="The maintenance task that was completed",
+    )
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="maintenance_logs",
+        help_text="The user who completed the task",
+    )
+    completed_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the task was completed",
+    )
+    time_spent_minutes = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Actual time spent in minutes",
+    )
+    cost_incurred = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Actual cost incurred for materials and labor",
+    )
+    notes = models.TextField(blank=True, help_text="Notes about what was done or observed")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-completed_at"]
+        indexes = [
+            models.Index(fields=["maintenance_item", "completed_at"], name="maintenancelog_item_completed_idx"),
+        ]
+
+    def __str__(self) -> str:
+        completed_by = self.completed_by.get_full_name() if self.completed_by else "Unknown"
+        return f"{self.maintenance_item.title} — completed by {completed_by} at {self.completed_at}"
+
+
 class Fixture(models.Model):
     """
     Fixed assets that require periodic refilling (e.g., soap dispensers, paper towel holders).

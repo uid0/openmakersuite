@@ -5,9 +5,9 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assetsAPI, checklistsAPI } from '../services/api';
+import { assetsAPI, checklistsAPI, maintenanceAPI } from '../services/api';
 import '../styles/ScanPage.css';
-import { Asset, Checklist } from '../types';
+import { Asset, Checklist, MaintenanceItem } from '../types';
 
 const AssetScanPage: React.FC = () => {
   const { assetId } = useParams<{ assetId: string }>();
@@ -21,6 +21,10 @@ const AssetScanPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [checklists, setChecklists] = useState<Checklist[]>([]);
+  const [maintenanceItems, setMaintenanceItems] = useState<MaintenanceItem[]>([]);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const [completingTask, setCompletingTask] = useState<string | null>(null);
+  const [completionNotes, setCompletionNotes] = useState('');
 
   // Form state (authenticated users)
   const [problemDescription, setProblemDescription] = useState('');
@@ -53,12 +57,41 @@ const AssetScanPage: React.FC = () => {
     }
   }, [assetId]);
 
+  const loadMaintenanceItems = useCallback(async () => {
+    if (!assetId) return;
+    try {
+      const response = await assetsAPI.getMaintenanceItems(assetId);
+      setMaintenanceItems(response.data);
+    } catch (err: any) {
+      // Silently fail - maintenance items are optional
+      console.error('Error loading maintenance items:', err);
+    }
+  }, [assetId]);
+
   useEffect(() => {
     if (assetId) {
       loadAsset();
       loadChecklists();
+      loadMaintenanceItems();
     }
-  }, [assetId, loadAsset, loadChecklists]);
+  }, [assetId, loadAsset, loadChecklists, loadMaintenanceItems]);
+
+  const handleCompleteTask = async (taskId: string) => {
+    try {
+      setCompletingTask(taskId);
+      await maintenanceAPI.completeItem(taskId, { notes: completionNotes });
+      setCompletionNotes('');
+      setExpandedTask(null);
+      await loadMaintenanceItems();
+      setActionSuccess('Maintenance task marked complete');
+      setTimeout(() => setActionSuccess(null), 3000);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to log completion');
+      console.error('Error completing maintenance task:', err);
+    } finally {
+      setCompletingTask(null);
+    }
+  };
 
   const handleStartChecklist = async (checklistId: string) => {
     try {
@@ -261,6 +294,132 @@ const AssetScanPage: React.FC = () => {
                   )}
                 </li>
               ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Maintenance Tasks Section */}
+        {maintenanceItems.length > 0 && (
+          <div className="maintenance-tasks-section" style={{ marginTop: '20px', padding: '15px', border: '2px solid #ff8c00', borderRadius: '5px', backgroundColor: '#fff8f0' }}>
+            <h3 style={{ color: '#cc5500', marginTop: 0 }}>🔧 Maintenance Tasks</h3>
+            <p style={{ color: '#666', marginBottom: '15px' }}>
+              {maintenanceItems.filter(t => t.is_overdue).length > 0
+                ? `⚠️ ${maintenanceItems.filter(t => t.is_overdue).length} task(s) overdue`
+                : 'All tasks on schedule'}
+            </p>
+            <ul style={{ listStyle: 'none', padding: 0 }}>
+              {maintenanceItems
+                .sort((a, b) => (b.is_overdue ? 1 : 0) - (a.is_overdue ? 1 : 0))
+                .map((task) => (
+                  <li key={task.id} style={{ marginBottom: '12px', border: '1px solid #ddd', borderRadius: '4px', overflow: 'hidden' }}>
+                    <button
+                      onClick={() => {
+                        const next = expandedTask === task.id ? null : task.id;
+                        setExpandedTask(next);
+                        setCompletionNotes('');
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        backgroundColor: task.is_overdue ? '#ffe0cc' : '#f5f5f5',
+                        border: 'none',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <span>
+                        {task.is_overdue && <span style={{ color: '#cc0000', fontWeight: 'bold' }}>⚠️ </span>}
+                        <strong>{task.title}</strong>
+                        {task.days_overdue != null && (
+                          <span style={{ color: '#cc0000', marginLeft: '8px', fontSize: '0.85em' }}>
+                            ({task.days_overdue}d overdue)
+                          </span>
+                        )}
+                        {task.next_due_at && !task.is_overdue && (
+                          <span style={{ color: '#888', marginLeft: '8px', fontSize: '0.85em' }}>
+                            Due: {new Date(task.next_due_at).toLocaleDateString()}
+                          </span>
+                        )}
+                      </span>
+                      <span>{expandedTask === task.id ? '▲' : '▼'}</span>
+                    </button>
+
+                    {expandedTask === task.id && (
+                      <div style={{ padding: '12px', backgroundColor: '#fff' }}>
+                        {task.description && (
+                          <p style={{ color: '#444', marginBottom: '10px' }}>{task.description}</p>
+                        )}
+
+                        {task.instructions && (
+                          <div style={{ marginBottom: '12px' }}>
+                            <strong>Instructions:</strong>
+                            <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: '8px 0 0', padding: '10px', backgroundColor: '#f8f8f8', borderRadius: '4px', fontSize: '0.9em' }}>
+                              {task.instructions}
+                            </pre>
+                          </div>
+                        )}
+
+                        {task.materials.length > 0 && (
+                          <div style={{ marginBottom: '12px' }}>
+                            <strong>Materials needed:</strong>
+                            <ul style={{ margin: '8px 0 0', paddingLeft: '20px' }}>
+                              {task.materials.map((mat) => (
+                                <li key={mat.id} style={{ fontSize: '0.9em', marginBottom: '4px' }}>
+                                  {mat.name} — {mat.quantity}{mat.unit ? ` ${mat.unit}` : ''}
+                                  {parseFloat(mat.estimated_cost_per_unit) > 0 && (
+                                    <span style={{ color: '#666' }}> (~${mat.total_estimated_cost})</span>
+                                  )}
+                                  {mat.notes && <span style={{ color: '#888', display: 'block', paddingLeft: '12px' }}>{mat.notes}</span>}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div style={{ display: 'flex', gap: '12px', fontSize: '0.85em', color: '#666', marginBottom: '12px' }}>
+                          {task.estimated_time_minutes && (
+                            <span>⏱ ~{task.estimated_time_minutes} min</span>
+                          )}
+                          {parseFloat(task.estimated_cost) > 0 && (
+                            <span>💰 Est. ${task.estimated_cost}</span>
+                          )}
+                          {task.last_completed_at && (
+                            <span>✓ Last done: {new Date(task.last_completed_at).toLocaleDateString()}</span>
+                          )}
+                        </div>
+
+                        {isLoggedIn && (
+                          <div>
+                            <textarea
+                              value={completionNotes}
+                              onChange={(e) => setCompletionNotes(e.target.value)}
+                              placeholder="Notes (optional)..."
+                              rows={2}
+                              style={{ width: '100%', padding: '6px', boxSizing: 'border-box', marginBottom: '8px' }}
+                            />
+                            <button
+                              onClick={() => handleCompleteTask(task.id)}
+                              disabled={completingTask === task.id}
+                              style={{
+                                padding: '8px 16px',
+                                backgroundColor: '#28a745',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {completingTask === task.id ? 'Saving...' : '✓ Mark Complete'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                ))}
             </ul>
           </div>
         )}

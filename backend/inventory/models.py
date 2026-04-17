@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from typing import Any, Optional
+from datetime import datetime
+from typing import Optional
 
 from django.conf import settings
 from django.contrib.auth.models import Group
@@ -1575,7 +1576,7 @@ class MaintenanceItem(models.Model):
         return f"{self.asset.name} — {self.title}"
 
     @property
-    def next_due_at(self) -> Optional[Any]:
+    def next_due_at(self) -> Optional[datetime]:
         """Calculate when this task is next due based on interval and last completion."""
         if not self.interval_days:
             return None

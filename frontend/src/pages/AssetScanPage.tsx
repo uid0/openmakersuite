@@ -308,7 +308,7 @@ const AssetScanPage: React.FC = () => {
                 : 'All tasks on schedule'}
             </p>
             <ul style={{ listStyle: 'none', padding: 0 }}>
-              {maintenanceItems
+              {[...maintenanceItems]
                 .sort((a, b) => (b.is_overdue ? 1 : 0) - (a.is_overdue ? 1 : 0))
                 .map((task) => (
                   <li key={task.id} style={{ marginBottom: '12px', border: '1px solid #ddd', borderRadius: '4px', overflow: 'hidden' }}>

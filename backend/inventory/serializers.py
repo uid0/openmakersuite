@@ -1056,7 +1056,7 @@ class MaintenanceLogSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
         ]
-        read_only_fields = ["completed_at", "created_at", "completed_by_name"]
+        read_only_fields = ["completed_at", "created_at", "completed_by", "completed_by_name"]
 
     def get_completed_by_name(self, obj):
         if obj.completed_by:

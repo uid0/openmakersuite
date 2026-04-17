@@ -104,13 +104,13 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="maintenanceitem",
             index=models.Index(
-                fields=["asset", "is_active"], name="maintenanceitem_asset_active_idx"
+                fields=["asset", "is_active"], name="mi_asset_active_idx"
             ),
         ),
         migrations.AddIndex(
             model_name="maintenanceitem",
             index=models.Index(
-                fields=["last_completed_at"], name="maintenanceitem_last_completed_idx"
+                fields=["last_completed_at"], name="mi_last_completed_idx"
             ),
         ),
         migrations.CreateModel(
@@ -237,7 +237,7 @@ class Migration(migrations.Migration):
             model_name="maintenancelog",
             index=models.Index(
                 fields=["maintenance_item", "completed_at"],
-                name="maintenancelog_item_completed_idx",
+                name="ml_item_completed_idx",
             ),
         ),
     ]

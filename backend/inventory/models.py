@@ -1567,8 +1567,8 @@ class MaintenanceItem(models.Model):
     class Meta:
         ordering = ["asset", "title"]
         indexes = [
-            models.Index(fields=["asset", "is_active"], name="maintenanceitem_asset_active_idx"),
-            models.Index(fields=["last_completed_at"], name="maintenanceitem_last_completed_idx"),
+            models.Index(fields=["asset", "is_active"], name="mi_asset_active_idx"),
+            models.Index(fields=["last_completed_at"], name="mi_last_completed_idx"),
         ]
 
     def __str__(self) -> str:
@@ -1708,7 +1708,7 @@ class MaintenanceLog(models.Model):
         indexes = [
             models.Index(
                 fields=["maintenance_item", "completed_at"],
-                name="maintenancelog_item_completed_idx",
+                name="ml_item_completed_idx",
             ),
         ]
 

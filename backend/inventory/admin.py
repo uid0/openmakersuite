@@ -20,6 +20,9 @@ from .models import (
     InventoryItem,
     ItemSupplier,
     Location,
+    MaintenanceItem,
+    MaintenanceLog,
+    MaintenanceMaterial,
     PriceHistory,
     Supplier,
     UsageLog,
@@ -1329,3 +1332,57 @@ class AssetProblemAdmin(admin.ModelAdmin):
             f"{count} problem(s) marked as closed.",
             level=messages.SUCCESS,
         )
+
+
+class MaintenanceMaterialInline(admin.TabularInline):
+    model = MaintenanceMaterial
+    extra = 1
+    fields = ["name", "quantity", "unit", "estimated_cost_per_unit", "notes"]
+
+
+@admin.register(MaintenanceItem)
+class MaintenanceItemAdmin(admin.ModelAdmin):
+    list_display = [
+        "title",
+        "asset",
+        "interval_days",
+        "last_completed_at",
+        "is_overdue",
+        "is_active",
+    ]
+    list_filter = ["is_active", "asset__category"]
+    search_fields = ["title", "description", "asset__name", "asset__asset_tag"]
+    autocomplete_fields = ["asset"]
+    inlines = [MaintenanceMaterialInline]
+    readonly_fields = ["is_overdue", "days_overdue", "next_due_at", "created_at", "updated_at"]
+    fieldsets = [
+        (None, {"fields": ["asset", "title", "description", "is_active"]}),
+        ("Instructions", {"fields": ["instructions"]}),
+        (
+            "Schedule & Cost",
+            {
+                "fields": [
+                    "interval_days",
+                    "estimated_time_minutes",
+                    "estimated_cost",
+                    "last_completed_at",
+                ]
+            },
+        ),
+        ("Computed", {"fields": ["is_overdue", "days_overdue", "next_due_at"]}),
+        ("Timestamps", {"fields": ["created_at", "updated_at"]}),
+    ]
+
+
+@admin.register(MaintenanceLog)
+class MaintenanceLogAdmin(admin.ModelAdmin):
+    list_display = [
+        "maintenance_item",
+        "completed_by",
+        "completed_at",
+        "time_spent_minutes",
+        "cost_incurred",
+    ]
+    list_filter = ["completed_at"]
+    search_fields = ["maintenance_item__title", "maintenance_item__asset__name", "notes"]
+    readonly_fields = ["completed_at", "created_at"]

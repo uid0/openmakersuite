@@ -14,6 +14,9 @@ from .models import (
     InventoryItem,
     ItemSupplier,
     Location,
+    MaintenanceItem,
+    MaintenanceLog,
+    MaintenanceMaterial,
     PriceHistory,
     Supplier,
     UsageLog,
@@ -967,6 +970,102 @@ class AssetProblemSerializer(serializers.ModelSerializer):
             "resolved_by",
         ]
         read_only_fields = ["created_at", "updated_at", "resolved_at"]
+
+
+class MaintenanceMaterialSerializer(serializers.ModelSerializer):
+    """Serializer for materials needed for a maintenance task."""
+
+    total_estimated_cost = serializers.ReadOnlyField()
+
+    class Meta:
+        model = MaintenanceMaterial
+        fields = [
+            "id",
+            "maintenance_item",
+            "name",
+            "quantity",
+            "unit",
+            "estimated_cost_per_unit",
+            "total_estimated_cost",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = ["total_estimated_cost", "created_at"]
+
+
+class MaintenanceItemSerializer(serializers.ModelSerializer):
+    """Serializer for preventive maintenance tasks associated with an asset."""
+
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    asset_tag = serializers.CharField(source="asset.asset_tag", read_only=True)
+    materials = MaintenanceMaterialSerializer(many=True, read_only=True)
+    is_overdue = serializers.ReadOnlyField()
+    days_overdue = serializers.ReadOnlyField()
+    next_due_at = serializers.ReadOnlyField()
+
+    class Meta:
+        model = MaintenanceItem
+        fields = [
+            "id",
+            "asset",
+            "asset_name",
+            "asset_tag",
+            "title",
+            "description",
+            "instructions",
+            "estimated_time_minutes",
+            "estimated_cost",
+            "interval_days",
+            "last_completed_at",
+            "is_active",
+            "is_overdue",
+            "days_overdue",
+            "next_due_at",
+            "materials",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "is_overdue",
+            "days_overdue",
+            "next_due_at",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class MaintenanceLogSerializer(serializers.ModelSerializer):
+    """Serializer for maintenance completion records."""
+
+    completed_by_name = serializers.SerializerMethodField()
+    maintenance_item_title = serializers.CharField(
+        source="maintenance_item.title", read_only=True
+    )
+    asset_name = serializers.CharField(
+        source="maintenance_item.asset.name", read_only=True
+    )
+
+    class Meta:
+        model = MaintenanceLog
+        fields = [
+            "id",
+            "maintenance_item",
+            "maintenance_item_title",
+            "asset_name",
+            "completed_by",
+            "completed_by_name",
+            "completed_at",
+            "time_spent_minutes",
+            "cost_incurred",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = ["completed_at", "created_at", "completed_by_name"]
+
+    def get_completed_by_name(self, obj):
+        if obj.completed_by:
+            return obj.completed_by.get_full_name() or obj.completed_by.username
+        return None
 
 
 class FixtureSerializer(serializers.ModelSerializer):

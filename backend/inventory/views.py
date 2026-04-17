@@ -29,6 +29,9 @@ from .models import (
     InventoryItem,
     ItemSupplier,
     Location,
+    MaintenanceItem,
+    MaintenanceLog,
+    MaintenanceMaterial,
     PriceHistory,
     Supplier,
     UsageLog,
@@ -44,6 +47,9 @@ from .serializers import (
     InventoryItemSerializer,
     ItemSupplierSerializer,
     LocationSerializer,
+    MaintenanceItemSerializer,
+    MaintenanceLogSerializer,
+    MaintenanceMaterialSerializer,
     PriceHistorySerializer,
     SupplierDetailSerializer,
     SupplierSerializer,
@@ -1506,6 +1512,17 @@ class AssetViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def maintenance_items(self, request, pk=None):
+        """Get active maintenance items for this asset, ordered by urgency."""
+        asset = self.get_object()
+        items = (
+            MaintenanceItem.objects.filter(asset=asset, is_active=True)
+            .prefetch_related("materials")
+        )
+        serializer = MaintenanceItemSerializer(items, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
     def checklists(self, request, pk=None):
         """Get checklists associated with this asset."""
         asset = self.get_object()
@@ -2444,6 +2461,80 @@ class InventoryReportViewSet(viewsets.ViewSet):
             return response_obj
 
         return Response({"error": "Invalid report type"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class MaintenanceItemViewSet(viewsets.ModelViewSet):
+    """API endpoint for asset maintenance items (PM tasks)."""
+
+    queryset = MaintenanceItem.objects.prefetch_related("materials").select_related("asset").all()
+    serializer_class = MaintenanceItemSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            queryset = queryset.filter(asset_id=asset_id)
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == "true")
+        return queryset
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def complete(self, request, pk=None):
+        """Log completion of a maintenance task and update its last_completed_at."""
+        item = self.get_object()
+        data = request.data.copy()
+        data["maintenance_item"] = str(item.id)
+
+        serializer = MaintenanceLogSerializer(data=data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        log = serializer.save(completed_by=request.user)
+
+        # Update the item's last_completed_at timestamp
+        item.last_completed_at = log.completed_at
+        item.save(update_fields=["last_completed_at"])
+
+        return Response(MaintenanceLogSerializer(log).data, status=status.HTTP_201_CREATED)
+
+
+class MaintenanceMaterialViewSet(viewsets.ModelViewSet):
+    """API endpoint for maintenance materials."""
+
+    queryset = MaintenanceMaterial.objects.select_related("maintenance_item__asset").all()
+    serializer_class = MaintenanceMaterialSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        maintenance_item = self.request.query_params.get("maintenance_item")
+        if maintenance_item:
+            queryset = queryset.filter(maintenance_item_id=maintenance_item)
+        return queryset
+
+
+class MaintenanceLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """API endpoint for maintenance completion logs (read-only list/detail)."""
+
+    queryset = (
+        MaintenanceLog.objects.select_related(
+            "maintenance_item__asset", "completed_by"
+        ).all()
+    )
+    serializer_class = MaintenanceLogSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        maintenance_item = self.request.query_params.get("maintenance_item")
+        if maintenance_item:
+            queryset = queryset.filter(maintenance_item_id=maintenance_item)
+        asset = self.request.query_params.get("asset")
+        if asset:
+            queryset = queryset.filter(maintenance_item__asset_id=asset)
+        return queryset
 
 
 class AssetReportViewSet(viewsets.ViewSet):

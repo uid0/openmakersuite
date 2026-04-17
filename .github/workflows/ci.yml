@@ -192,6 +192,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Pre-cleanup stale volumes
+        run: |
+          docker compose down -v 2>/dev/null || true
+          docker volume rm openmakersuite_media_volume openmakersuite_static_volume openmakersuite_postgres_data 2>/dev/null || true
+
       - name: Build and test with docker compose
         run: |
           # Start services

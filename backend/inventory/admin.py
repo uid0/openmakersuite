@@ -1342,7 +1342,14 @@ class MaintenanceMaterialInline(admin.TabularInline):
 
 @admin.register(MaintenanceItem)
 class MaintenanceItemAdmin(admin.ModelAdmin):
-    list_display = ["title", "asset", "interval_days", "last_completed_at", "is_overdue", "is_active"]
+    list_display = [
+        "title",
+        "asset",
+        "interval_days",
+        "last_completed_at",
+        "is_overdue",
+        "is_active",
+    ]
     list_filter = ["is_active", "asset__category"]
     search_fields = ["title", "description", "asset__name", "asset__asset_tag"]
     autocomplete_fields = ["asset"]
@@ -1351,7 +1358,17 @@ class MaintenanceItemAdmin(admin.ModelAdmin):
     fieldsets = [
         (None, {"fields": ["asset", "title", "description", "is_active"]}),
         ("Instructions", {"fields": ["instructions"]}),
-        ("Schedule & Cost", {"fields": ["interval_days", "estimated_time_minutes", "estimated_cost", "last_completed_at"]}),
+        (
+            "Schedule & Cost",
+            {
+                "fields": [
+                    "interval_days",
+                    "estimated_time_minutes",
+                    "estimated_cost",
+                    "last_completed_at",
+                ]
+            },
+        ),
         ("Computed", {"fields": ["is_overdue", "days_overdue", "next_due_at"]}),
         ("Timestamps", {"fields": ["created_at", "updated_at"]}),
     ]
@@ -1359,7 +1376,13 @@ class MaintenanceItemAdmin(admin.ModelAdmin):
 
 @admin.register(MaintenanceLog)
 class MaintenanceLogAdmin(admin.ModelAdmin):
-    list_display = ["maintenance_item", "completed_by", "completed_at", "time_spent_minutes", "cost_incurred"]
+    list_display = [
+        "maintenance_item",
+        "completed_by",
+        "completed_at",
+        "time_spent_minutes",
+        "cost_incurred",
+    ]
     list_filter = ["completed_at"]
     search_fields = ["maintenance_item__title", "maintenance_item__asset__name", "notes"]
     readonly_fields = ["completed_at", "created_at"]

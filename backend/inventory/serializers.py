@@ -1038,12 +1038,8 @@ class MaintenanceLogSerializer(serializers.ModelSerializer):
     """Serializer for maintenance completion records."""
 
     completed_by_name = serializers.SerializerMethodField()
-    maintenance_item_title = serializers.CharField(
-        source="maintenance_item.title", read_only=True
-    )
-    asset_name = serializers.CharField(
-        source="maintenance_item.asset.name", read_only=True
-    )
+    maintenance_item_title = serializers.CharField(source="maintenance_item.title", read_only=True)
+    asset_name = serializers.CharField(source="maintenance_item.asset.name", read_only=True)
 
     class Meta:
         model = MaintenanceLog

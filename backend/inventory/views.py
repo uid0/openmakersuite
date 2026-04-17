@@ -1515,9 +1515,8 @@ class AssetViewSet(viewsets.ModelViewSet):
     def maintenance_items(self, request, pk=None):
         """Get active maintenance items for this asset, ordered by urgency."""
         asset = self.get_object()
-        items = (
-            MaintenanceItem.objects.filter(asset=asset, is_active=True)
-            .prefetch_related("materials")
+        items = MaintenanceItem.objects.filter(asset=asset, is_active=True).prefetch_related(
+            "materials"
         )
         serializer = MaintenanceItemSerializer(items, many=True)
         return Response(serializer.data)
@@ -2518,11 +2517,9 @@ class MaintenanceMaterialViewSet(viewsets.ModelViewSet):
 class MaintenanceLogViewSet(viewsets.ReadOnlyModelViewSet):
     """API endpoint for maintenance completion logs (read-only list/detail)."""
 
-    queryset = (
-        MaintenanceLog.objects.select_related(
-            "maintenance_item__asset", "completed_by"
-        ).all()
-    )
+    queryset = MaintenanceLog.objects.select_related(
+        "maintenance_item__asset", "completed_by"
+    ).all()
     serializer_class = MaintenanceLogSerializer
     permission_classes = [IsAuthenticated]
 

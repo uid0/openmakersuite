@@ -1706,7 +1706,10 @@ class MaintenanceLog(models.Model):
     class Meta:
         ordering = ["-completed_at"]
         indexes = [
-            models.Index(fields=["maintenance_item", "completed_at"], name="maintenancelog_item_completed_idx"),
+            models.Index(
+                fields=["maintenance_item", "completed_at"],
+                name="maintenancelog_item_completed_idx",
+            ),
         ]
 
     def __str__(self) -> str:

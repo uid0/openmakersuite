@@ -128,6 +128,13 @@ describe('AssetDetailPage', () => {
       headers: {},
       config: {} as any,
     });
+    mockAssetsAPI.getMaintenanceItems.mockResolvedValue({
+      data: [],
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
   });
 
   it('renders asset details', async () => {

@@ -23,9 +23,14 @@ from .models import (
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
+    MaintenanceTask,
     PriceHistory,
     Supplier,
     UsageLog,
+    WorkOrder,
+    WorkOrderMaterialUsage,
+    WorkOrderPhoto,
+    WorkOrderTaskCompletion,
 )
 
 
@@ -1340,6 +1345,13 @@ class MaintenanceMaterialInline(admin.TabularInline):
     fields = ["name", "quantity", "unit", "estimated_cost_per_unit", "notes"]
 
 
+class MaintenanceTaskInline(admin.TabularInline):
+    model = MaintenanceTask
+    extra = 1
+    fields = ["order", "title", "description", "is_required"]
+    ordering = ["order"]
+
+
 @admin.register(MaintenanceItem)
 class MaintenanceItemAdmin(admin.ModelAdmin):
     list_display = [
@@ -1353,7 +1365,7 @@ class MaintenanceItemAdmin(admin.ModelAdmin):
     list_filter = ["is_active", "asset__category"]
     search_fields = ["title", "description", "asset__name", "asset__asset_tag"]
     autocomplete_fields = ["asset"]
-    inlines = [MaintenanceMaterialInline]
+    inlines = [MaintenanceMaterialInline, MaintenanceTaskInline]
     readonly_fields = ["is_overdue", "days_overdue", "next_due_at", "created_at", "updated_at"]
     fieldsets = [
         (None, {"fields": ["asset", "title", "description", "is_active"]}),
@@ -1386,3 +1398,63 @@ class MaintenanceLogAdmin(admin.ModelAdmin):
     list_filter = ["completed_at"]
     search_fields = ["maintenance_item__title", "maintenance_item__asset__name", "notes"]
     readonly_fields = ["completed_at", "created_at"]
+
+
+@admin.register(MaintenanceTask)
+class MaintenanceTaskAdmin(admin.ModelAdmin):
+    list_display = ["maintenance_item", "order", "title", "is_required", "created_at"]
+    list_filter = ["is_required"]
+    search_fields = ["title", "maintenance_item__title", "maintenance_item__asset__name"]
+    ordering = ["maintenance_item", "order"]
+
+
+class WorkOrderTaskCompletionInline(admin.TabularInline):
+    model = WorkOrderTaskCompletion
+    extra = 0
+    fields = [
+        "task_order",
+        "task_title",
+        "is_required",
+        "is_completed",
+        "completed_by",
+        "completed_at",
+        "notes",
+    ]
+    readonly_fields = ["task_order", "task_title", "is_required", "completed_at"]
+
+
+class WorkOrderMaterialUsageInline(admin.TabularInline):
+    model = WorkOrderMaterialUsage
+    extra = 0
+    fields = ["material_name", "quantity_planned", "unit", "was_used"]
+    readonly_fields = ["material_name", "quantity_planned", "unit"]
+
+
+class WorkOrderPhotoInline(admin.TabularInline):
+    model = WorkOrderPhoto
+    extra = 0
+    fields = ["image", "caption", "uploaded_by", "uploaded_at"]
+    readonly_fields = ["uploaded_at"]
+
+
+@admin.register(WorkOrder)
+class WorkOrderAdmin(admin.ModelAdmin):
+    list_display = [
+        "short_id",
+        "maintenance_item",
+        "status",
+        "due_date",
+        "assigned_to",
+        "completed_by_name",
+        "is_overdue",
+        "created_at",
+    ]
+    list_filter = ["status", "due_date"]
+    search_fields = [
+        "maintenance_item__title",
+        "maintenance_item__asset__name",
+        "completed_by_name",
+        "notes",
+    ]
+    readonly_fields = ["short_id", "is_overdue", "created_at", "updated_at"]
+    inlines = [WorkOrderTaskCompletionInline, WorkOrderMaterialUsageInline, WorkOrderPhotoInline]

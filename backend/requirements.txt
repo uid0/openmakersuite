@@ -15,7 +15,7 @@ flower==2.0.1
 # QR Code and PDF generation
 qrcode[pil]==7.4.2
 reportlab==4.2.0
-Pillow==10.4.0
+Pillow==12.1.1
 pyzbar==0.1.9  # Optional: for QR code validation (requires system zbar library)
 
 # Authentication

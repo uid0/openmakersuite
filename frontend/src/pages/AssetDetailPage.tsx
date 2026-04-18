@@ -4,7 +4,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assetPartsAPI, assetsAPI, maintenanceAPI } from '../services/api';
+import { assetPartsAPI, assetsAPI } from '../services/api';
 import '../styles/AssetDetailPage.css';
 import { Asset, AssetProblem, MaintenanceItem } from '../types';
 

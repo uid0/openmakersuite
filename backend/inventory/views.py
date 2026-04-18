@@ -38,7 +38,6 @@ from .models import (
     UsageLog,
     WorkOrder,
     WorkOrderMaterialUsage,
-    WorkOrderPhoto,
     WorkOrderTaskCompletion,
 )
 from .serializers import (
@@ -2565,8 +2564,6 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def pdf(self, request, pk=None):
         """Generate a printable PDF work order form."""
-        from django.conf import settings as django_settings
-
         from .utils.work_order_pdf import generate_work_order_pdf
 
         work_order = self.get_object()

@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -435,6 +435,42 @@ export const assetsAPI = {
 
   getNotCheckedIn: (params?: { status?: string; inventory_item?: string }) =>
     api.get<Asset[]>('/inventory/assets/not_checked_in/', { params }),
+
+  getMaintenanceItems: (assetId: string) =>
+    api.get<MaintenanceItem[]>(`/inventory/assets/${assetId}/maintenance_items/`),
+};
+
+// Maintenance API
+export const maintenanceAPI = {
+  listItems: (params?: { asset?: string; is_active?: boolean }) =>
+    api.get<{ results: MaintenanceItem[] }>('/inventory/maintenance-items/', { params }),
+
+  getItem: (id: string) =>
+    api.get<MaintenanceItem>(`/inventory/maintenance-items/${id}/`),
+
+  createItem: (data: Partial<MaintenanceItem>) =>
+    api.post<MaintenanceItem>('/inventory/maintenance-items/', data),
+
+  updateItem: (id: string, data: Partial<MaintenanceItem>) =>
+    api.patch<MaintenanceItem>(`/inventory/maintenance-items/${id}/`, data),
+
+  deleteItem: (id: string) =>
+    api.delete(`/inventory/maintenance-items/${id}/`),
+
+  completeItem: (id: string, data: { time_spent_minutes?: number; cost_incurred?: string; notes?: string }) =>
+    api.post<MaintenanceLog>(`/inventory/maintenance-items/${id}/complete/`, data),
+
+  listMaterials: (maintenanceItemId: string) =>
+    api.get<{ results: MaintenanceMaterial[] }>('/inventory/maintenance-materials/', { params: { maintenance_item: maintenanceItemId } }),
+
+  createMaterial: (data: Partial<MaintenanceMaterial>) =>
+    api.post<MaintenanceMaterial>('/inventory/maintenance-materials/', data),
+
+  deleteMaterial: (id: string) =>
+    api.delete(`/inventory/maintenance-materials/${id}/`),
+
+  listLogs: (params?: { maintenance_item?: string; asset?: string }) =>
+    api.get<{ results: MaintenanceLog[] }>('/inventory/maintenance-logs/', { params }),
 };
 
 // Asset Parts API

@@ -343,6 +343,53 @@ export interface AssetProblem {
   resolved_by: string;
 }
 
+export interface MaintenanceMaterial {
+  id: string;
+  maintenance_item: string;
+  name: string;
+  quantity: string;
+  unit: string;
+  estimated_cost_per_unit: string;
+  total_estimated_cost: string;
+  notes: string;
+  created_at: string;
+}
+
+export interface MaintenanceItem {
+  id: string;
+  asset: string;
+  asset_name: string;
+  asset_tag: string;
+  title: string;
+  description: string;
+  instructions: string;
+  estimated_time_minutes: number | null;
+  estimated_cost: string;
+  interval_days: number | null;
+  last_completed_at: string | null;
+  is_active: boolean;
+  is_overdue: boolean;
+  days_overdue: number | null;
+  next_due_at: string | null;
+  materials: MaintenanceMaterial[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaintenanceLog {
+  id: string;
+  maintenance_item: string;
+  maintenance_item_title: string;
+  asset_name: string;
+  completed_by: number | null;
+  completed_by_name: string | null;
+  completed_at: string;
+  time_spent_minutes: number | null;
+  cost_incurred: string | null;
+  notes: string;
+  created_at: string;
+}
+
 export interface SiteSettings {
   site_name: string;
   site_tagline: string;

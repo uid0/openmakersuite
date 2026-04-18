@@ -27,6 +27,7 @@ import { MaintenanceMaterial } from '../types';
 import { MaintenanceItemFormData, maintenanceItemFormSchema } from '../utils/formSchemas';
 
 interface PendingMaterial {
+  localId: string;
   id?: string;
   name: string;
   quantity: number;
@@ -46,6 +47,7 @@ const MaintenanceItemFormPage: React.FC = () => {
   const [materials, setMaterials] = useState<PendingMaterial[]>([]);
   const [originalMaterialIds, setOriginalMaterialIds] = useState<string[]>([]);
   const [newMaterial, setNewMaterial] = useState<PendingMaterial>({
+    localId: '',
     name: '',
     quantity: 1,
     unit: '',
@@ -89,6 +91,7 @@ const MaintenanceItemFormPage: React.FC = () => {
         is_active: item.is_active,
       });
       const loaded = item.materials.map((m: MaintenanceMaterial) => ({
+        localId: m.id,
         id: m.id,
         name: m.name,
         quantity: parseFloat(m.quantity),
@@ -108,8 +111,8 @@ const MaintenanceItemFormPage: React.FC = () => {
 
   const addMaterial = () => {
     if (!newMaterial.name.trim()) return;
-    setMaterials([...materials, { ...newMaterial }]);
-    setNewMaterial({ name: '', quantity: 1, unit: '', estimated_cost_per_unit: 0, notes: '' });
+    setMaterials([...materials, { ...newMaterial, localId: crypto.randomUUID() }]);
+    setNewMaterial({ localId: '', name: '', quantity: 1, unit: '', estimated_cost_per_unit: 0, notes: '' });
   };
 
   const removeMaterial = (index: number) => {
@@ -269,11 +272,11 @@ const MaintenanceItemFormPage: React.FC = () => {
                 </Table.Thead>
                 <Table.Tbody>
                   {materials.map((m, i) => (
-                    <Table.Tr key={i}>
+                    <Table.Tr key={m.localId}>
                       <Table.Td>{m.name}</Table.Td>
                       <Table.Td>{m.quantity}</Table.Td>
                       <Table.Td>{m.unit}</Table.Td>
-                      <Table.Td>${m.estimated_cost_per_unit}</Table.Td>
+                      <Table.Td>${m.estimated_cost_per_unit.toFixed(2)}</Table.Td>
                       <Table.Td>
                         <ActionIcon
                           color="red"

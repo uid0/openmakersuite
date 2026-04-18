@@ -291,17 +291,6 @@ export const webhookSchema = z.object({
 
 export type WebhookFormData = z.infer<typeof webhookSchema>;
 
-// Maintenance Material Form Schema
-export const maintenanceMaterialFormSchema = z.object({
-  name: z.string().min(1, 'Material name is required').max(200),
-  quantity: z.number().min(0.01, 'Quantity must be greater than 0'),
-  unit: z.string().max(50).optional().default(''),
-  estimated_cost_per_unit: z.number().min(0, 'Cost must be zero or greater').default(0),
-  notes: z.string().optional().default(''),
-});
-
-export type MaintenanceMaterialFormData = z.infer<typeof maintenanceMaterialFormSchema>;
-
 // Maintenance Item Form Schema
 export const maintenanceItemFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),

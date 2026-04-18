@@ -17,9 +17,14 @@ from .models import (
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
+    MaintenanceTask,
     PriceHistory,
     Supplier,
     UsageLog,
+    WorkOrder,
+    WorkOrderMaterialUsage,
+    WorkOrderPhoto,
+    WorkOrderTaskCompletion,
 )
 
 
@@ -999,6 +1004,7 @@ class MaintenanceItemSerializer(serializers.ModelSerializer):
     asset_name = serializers.CharField(source="asset.name", read_only=True)
     asset_tag = serializers.CharField(source="asset.asset_tag", read_only=True)
     materials = MaintenanceMaterialSerializer(many=True, read_only=True)
+    tasks = MaintenanceTaskSerializer(many=True, read_only=True)
     is_overdue = serializers.ReadOnlyField()
     days_overdue = serializers.ReadOnlyField()
     next_due_at = serializers.ReadOnlyField()
@@ -1022,6 +1028,7 @@ class MaintenanceItemSerializer(serializers.ModelSerializer):
             "days_overdue",
             "next_due_at",
             "materials",
+            "tasks",
             "created_at",
             "updated_at",
         ]
@@ -1170,3 +1177,209 @@ class FixtureDetailSerializer(FixtureSerializer):
         if "recent_refill_requests" in data:
             data["recent_refill_requests"] = data["recent_refill_requests"][:10]
         return data
+
+
+class MaintenanceTaskSerializer(serializers.ModelSerializer):
+    """Serializer for ordered sub-task steps within a maintenance item."""
+
+    class Meta:
+        model = MaintenanceTask
+        fields = [
+            "id",
+            "maintenance_item",
+            "order",
+            "title",
+            "description",
+            "is_required",
+            "created_at",
+        ]
+        read_only_fields = ["created_at"]
+
+
+class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):
+    """Serializer for task completion records within a work order."""
+
+    completed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WorkOrderTaskCompletion
+        fields = [
+            "id",
+            "work_order",
+            "task",
+            "task_title",
+            "task_order",
+            "is_required",
+            "is_completed",
+            "completed_by",
+            "completed_by_name",
+            "completed_at",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = ["created_at", "completed_by_name", "task_title", "task_order"]
+
+    def get_completed_by_name(self, obj):
+        if obj.completed_by:
+            return obj.completed_by.get_full_name() or obj.completed_by.username
+        return None
+
+
+class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
+    """Serializer for material usage tracking within a work order."""
+
+    class Meta:
+        model = WorkOrderMaterialUsage
+        fields = [
+            "id",
+            "work_order",
+            "material",
+            "material_name",
+            "quantity_planned",
+            "unit",
+            "was_used",
+            "created_at",
+        ]
+        read_only_fields = ["created_at", "material_name", "quantity_planned", "unit"]
+
+
+class WorkOrderPhotoSerializer(serializers.ModelSerializer):
+    """Serializer for photos attached to a work order."""
+
+    uploaded_by_name = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WorkOrderPhoto
+        fields = [
+            "id",
+            "work_order",
+            "image",
+            "image_url",
+            "caption",
+            "uploaded_by",
+            "uploaded_by_name",
+            "uploaded_at",
+        ]
+        read_only_fields = ["uploaded_at", "uploaded_by_name", "image_url"]
+
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by:
+            return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
+        return None
+
+    def get_image_url(self, obj):
+        request = self.context.get("request")
+        if obj.image and request:
+            return request.build_absolute_uri(obj.image.url)
+        return None
+
+
+class WorkOrderSerializer(serializers.ModelSerializer):
+    """Full serializer for a work order, including nested completions and photos."""
+
+    maintenance_item_title = serializers.CharField(
+        source="maintenance_item.title", read_only=True
+    )
+    asset_name = serializers.CharField(
+        source="maintenance_item.asset.name", read_only=True
+    )
+    asset_tag = serializers.CharField(
+        source="maintenance_item.asset.asset_tag", read_only=True
+    )
+    asset_id = serializers.UUIDField(
+        source="maintenance_item.asset.id", read_only=True
+    )
+    assigned_to_name = serializers.SerializerMethodField()
+    short_id = serializers.ReadOnlyField()
+    is_overdue = serializers.ReadOnlyField()
+    task_completions = WorkOrderTaskCompletionSerializer(many=True, read_only=True)
+    material_usage = WorkOrderMaterialUsageSerializer(many=True, read_only=True)
+    photos = WorkOrderPhotoSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = WorkOrder
+        fields = [
+            "id",
+            "short_id",
+            "maintenance_item",
+            "maintenance_item_title",
+            "asset_name",
+            "asset_tag",
+            "asset_id",
+            "status",
+            "due_date",
+            "assigned_to",
+            "assigned_to_name",
+            "completed_by_name",
+            "completed_at",
+            "notes",
+            "is_overdue",
+            "task_completions",
+            "material_usage",
+            "photos",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "short_id",
+            "is_overdue",
+            "created_at",
+            "updated_at",
+            "task_completions",
+            "material_usage",
+            "photos",
+        ]
+
+    def get_assigned_to_name(self, obj):
+        if obj.assigned_to:
+            return obj.assigned_to.get_full_name() or obj.assigned_to.username
+        return None
+
+
+class WorkOrderListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for work order list views."""
+
+    maintenance_item_title = serializers.CharField(
+        source="maintenance_item.title", read_only=True
+    )
+    asset_name = serializers.CharField(
+        source="maintenance_item.asset.name", read_only=True
+    )
+    asset_tag = serializers.CharField(
+        source="maintenance_item.asset.asset_tag", read_only=True
+    )
+    asset_id = serializers.UUIDField(
+        source="maintenance_item.asset.id", read_only=True
+    )
+    short_id = serializers.ReadOnlyField()
+    is_overdue = serializers.ReadOnlyField()
+    task_completion_count = serializers.SerializerMethodField()
+    task_total_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WorkOrder
+        fields = [
+            "id",
+            "short_id",
+            "maintenance_item",
+            "maintenance_item_title",
+            "asset_name",
+            "asset_tag",
+            "asset_id",
+            "status",
+            "due_date",
+            "is_overdue",
+            "completed_by_name",
+            "completed_at",
+            "task_completion_count",
+            "task_total_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_task_completion_count(self, obj):
+        return obj.task_completions.filter(is_completed=True).count()
+
+    def get_task_total_count(self, obj):
+        return obj.task_completions.count()

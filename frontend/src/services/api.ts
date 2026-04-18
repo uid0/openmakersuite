@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -471,6 +471,70 @@ export const maintenanceAPI = {
 
   listLogs: (params?: { maintenance_item?: string; asset?: string }) =>
     api.get<{ results: MaintenanceLog[] }>('/inventory/maintenance-logs/', { params }),
+};
+
+// Maintenance Task API (sub-task steps within a MaintenanceItem)
+export const maintenanceTaskAPI = {
+  listTasks: (maintenanceItemId: string) =>
+    api.get<{ results: MaintenanceTask[] }>('/inventory/maintenance-tasks/', {
+      params: { maintenance_item: maintenanceItemId },
+    }),
+
+  createTask: (data: Partial<MaintenanceTask>) =>
+    api.post<MaintenanceTask>('/inventory/maintenance-tasks/', data),
+
+  updateTask: (id: string, data: Partial<MaintenanceTask>) =>
+    api.patch<MaintenanceTask>(`/inventory/maintenance-tasks/${id}/`, data),
+
+  deleteTask: (id: string) => api.delete(`/inventory/maintenance-tasks/${id}/`),
+};
+
+// Work Order API
+export const workOrderAPI = {
+  listWorkOrders: (params?: { asset?: string; maintenance_item?: string; status?: string }) =>
+    api.get<{ results: WorkOrder[] }>('/inventory/work-orders/', { params }),
+
+  getWorkOrder: (id: string) => api.get<WorkOrder>(`/inventory/work-orders/${id}/`),
+
+  createWorkOrder: (data: Partial<WorkOrder>) =>
+    api.post<WorkOrder>('/inventory/work-orders/', data),
+
+  updateWorkOrder: (id: string, data: Partial<WorkOrder>) =>
+    api.patch<WorkOrder>(`/inventory/work-orders/${id}/`, data),
+
+  getPdfUrl: (id: string) => `/inventory/work-orders/${id}/pdf/`,
+
+  generateWorkOrder: (maintenanceItemId: string, data?: { due_date?: string; notes?: string }) =>
+    api.post<WorkOrder>(`/inventory/maintenance-items/${maintenanceItemId}/generate_work_order/`, data || {}),
+
+  generateBulkWorkOrders: () =>
+    api.post<{ created: number; work_order_ids: string[] }>(
+      '/inventory/maintenance-items/generate_work_orders_bulk/',
+      {}
+    ),
+
+  completeTask: (workOrderId: string, taskCompletionId: string, data: { is_completed: boolean; notes?: string }) =>
+    api.patch<WorkOrderTaskCompletion>(
+      `/inventory/work-orders/${workOrderId}/tasks/${taskCompletionId}/complete/`,
+      data
+    ),
+
+  toggleMaterial: (workOrderId: string, materialUsageId: string, wasUsed: boolean) =>
+    api.patch(
+      `/inventory/work-orders/${workOrderId}/materials/${materialUsageId}/toggle/`,
+      { was_used: wasUsed }
+    ),
+
+  addPhoto: (workOrderId: string, formData: FormData) =>
+    api.post<WorkOrderPhoto>(`/inventory/work-orders/${workOrderId}/add_photo/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+
+  getDueThisWeek: () =>
+    api.get<MaintenanceItem[]>('/inventory/maintenance-items/due_this_week/'),
+
+  getDueThisMonth: () =>
+    api.get<MaintenanceItem[]>('/inventory/maintenance-items/due_this_month/'),
 };
 
 // Asset Parts API

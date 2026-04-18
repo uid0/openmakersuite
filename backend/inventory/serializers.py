@@ -1278,18 +1278,10 @@ class WorkOrderPhotoSerializer(serializers.ModelSerializer):
 class WorkOrderSerializer(serializers.ModelSerializer):
     """Full serializer for a work order, including nested completions and photos."""
 
-    maintenance_item_title = serializers.CharField(
-        source="maintenance_item.title", read_only=True
-    )
-    asset_name = serializers.CharField(
-        source="maintenance_item.asset.name", read_only=True
-    )
-    asset_tag = serializers.CharField(
-        source="maintenance_item.asset.asset_tag", read_only=True
-    )
-    asset_id = serializers.UUIDField(
-        source="maintenance_item.asset.id", read_only=True
-    )
+    maintenance_item_title = serializers.CharField(source="maintenance_item.title", read_only=True)
+    asset_name = serializers.CharField(source="maintenance_item.asset.name", read_only=True)
+    asset_tag = serializers.CharField(source="maintenance_item.asset.asset_tag", read_only=True)
+    asset_id = serializers.UUIDField(source="maintenance_item.asset.id", read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
     short_id = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
@@ -1340,18 +1332,10 @@ class WorkOrderSerializer(serializers.ModelSerializer):
 class WorkOrderListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for work order list views."""
 
-    maintenance_item_title = serializers.CharField(
-        source="maintenance_item.title", read_only=True
-    )
-    asset_name = serializers.CharField(
-        source="maintenance_item.asset.name", read_only=True
-    )
-    asset_tag = serializers.CharField(
-        source="maintenance_item.asset.asset_tag", read_only=True
-    )
-    asset_id = serializers.UUIDField(
-        source="maintenance_item.asset.id", read_only=True
-    )
+    maintenance_item_title = serializers.CharField(source="maintenance_item.title", read_only=True)
+    asset_name = serializers.CharField(source="maintenance_item.asset.name", read_only=True)
+    asset_tag = serializers.CharField(source="maintenance_item.asset.asset_tag", read_only=True)
+    asset_id = serializers.UUIDField(source="maintenance_item.asset.id", read_only=True)
     short_id = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
     task_completion_count = serializers.SerializerMethodField()

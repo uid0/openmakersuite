@@ -143,13 +143,9 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
 
     location_name = asset.location.name if asset.location else "—"
     manufacturer_name = (
-        asset.manufacturer.name
-        if asset.manufacturer
-        else (asset.manufacturer_name or "—")
+        asset.manufacturer.name if asset.manufacturer else (asset.manufacturer_name or "—")
     )
-    date_received = (
-        asset.date_received.strftime("%B %d, %Y") if asset.date_received else "—"
-    )
+    date_received = asset.date_received.strftime("%B %d, %Y") if asset.date_received else "—"
     amount_paid = f"${asset.amount_paid:.2f}" if asset.amount_paid else "—"
 
     asset_data = [
@@ -159,19 +155,23 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
         ["Category", asset.category.name if asset.category else "—", "Purchase Price", amount_paid],
     ]
     if work_order.due_date:
-        asset_data.append([
-            "Work Order Due",
-            work_order.due_date.strftime("%B %d, %Y"),
-            "WO Status",
-            work_order.get_status_display(),
-        ])
+        asset_data.append(
+            [
+                "Work Order Due",
+                work_order.due_date.strftime("%B %d, %Y"),
+                "WO Status",
+                work_order.get_status_display(),
+            ]
+        )
     else:
-        asset_data.append([
-            "Work Order Created",
-            work_order.created_at.strftime("%B %d, %Y"),
-            "WO Status",
-            work_order.get_status_display(),
-        ])
+        asset_data.append(
+            [
+                "Work Order Created",
+                work_order.created_at.strftime("%B %d, %Y"),
+                "WO Status",
+                work_order.get_status_display(),
+            ]
+        )
 
     asset_table = Table(
         asset_data,
@@ -257,9 +257,7 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
         story.append(Spacer(1, 8))
 
     # ── Task steps checklist ──────────────────────────────────────────────────
-    task_completions = list(
-        work_order.task_completions.order_by("task_order", "task_title")
-    )
+    task_completions = list(work_order.task_completions.order_by("task_order", "task_title"))
 
     if task_completions:
         story.append(Paragraph("Task Steps", subheading_style))
@@ -299,9 +297,7 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
             )
         )
         story.append(task_table)
-        story.append(
-            Paragraph("✱ = Required step", small_style)
-        )
+        story.append(Paragraph("✱ = Required step", small_style))
         story.append(Spacer(1, 8))
     elif item.instructions:
         # Fall back to instructions text if no structured tasks

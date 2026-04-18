@@ -1411,7 +1411,15 @@ class MaintenanceTaskAdmin(admin.ModelAdmin):
 class WorkOrderTaskCompletionInline(admin.TabularInline):
     model = WorkOrderTaskCompletion
     extra = 0
-    fields = ["task_order", "task_title", "is_required", "is_completed", "completed_by", "completed_at", "notes"]
+    fields = [
+        "task_order",
+        "task_title",
+        "is_required",
+        "is_completed",
+        "completed_by",
+        "completed_at",
+        "notes",
+    ]
     readonly_fields = ["task_order", "task_title", "is_required", "completed_at"]
 
 

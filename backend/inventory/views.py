@@ -2526,18 +2526,22 @@ class MaintenanceTaskViewSet(viewsets.ModelViewSet):
 class WorkOrderViewSet(viewsets.ModelViewSet):
     """API endpoint for preventive maintenance work orders."""
 
-    queryset = WorkOrder.objects.select_related(
-        "maintenance_item__asset__location",
-        "maintenance_item__asset__manufacturer",
-        "maintenance_item__asset__category",
-        "assigned_to",
-    ).prefetch_related(
-        "task_completions__completed_by",
-        "task_completions__task",
-        "material_usage__material",
-        "photos__uploaded_by",
-        "maintenance_item__materials",
-    ).all()
+    queryset = (
+        WorkOrder.objects.select_related(
+            "maintenance_item__asset__location",
+            "maintenance_item__asset__manufacturer",
+            "maintenance_item__asset__category",
+            "assigned_to",
+        )
+        .prefetch_related(
+            "task_completions__completed_by",
+            "task_completions__task",
+            "material_usage__material",
+            "photos__uploaded_by",
+            "maintenance_item__materials",
+        )
+        .all()
+    )
     permission_classes = [IsAuthenticated]
 
     def get_serializer_class(self):
@@ -2571,18 +2575,14 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         short_id = work_order.short_id.replace(" ", "-")
-        response["Content-Disposition"] = (
-            f'inline; filename="work-order-{short_id}.pdf"'
-        )
+        response["Content-Disposition"] = f'inline; filename="work-order-{short_id}.pdf"'
         return response
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def add_photo(self, request, pk=None):
         """Upload a photo to this work order."""
         work_order = self.get_object()
-        serializer = WorkOrderPhotoSerializer(
-            data=request.data, context={"request": request}
-        )
+        serializer = WorkOrderPhotoSerializer(data=request.data, context={"request": request})
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         serializer.save(work_order=work_order, uploaded_by=request.user)
@@ -2650,7 +2650,9 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 class MaintenanceItemViewSet(viewsets.ModelViewSet):
     """API endpoint for asset maintenance items (PM tasks)."""
 
-    queryset = MaintenanceItem.objects.prefetch_related("materials", "tasks").select_related("asset").all()
+    queryset = (
+        MaintenanceItem.objects.prefetch_related("materials", "tasks").select_related("asset").all()
+    )
     serializer_class = MaintenanceItemSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 

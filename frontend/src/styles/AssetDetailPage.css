@@ -524,6 +524,76 @@
   font-style: italic;
 }
 
+.section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.section-header-row h2 {
+  margin: 0;
+}
+
+.add-button {
+  padding: 0.4rem 1rem;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.add-button:hover {
+  background-color: #0056b3;
+}
+
+.edit-link-button {
+  padding: 0.2rem 0.6rem;
+  background: none;
+  border: 1px solid #adb5bd;
+  border-radius: 4px;
+  color: #495057;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.edit-link-button:hover {
+  background-color: #f1f3f5;
+}
+
+.maintenance-status-badge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.maintenance-status-badge.status-overdue {
+  background-color: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+}
+
+.maintenance-status-badge.status-upcoming {
+  background-color: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #17a2b8;
+}
+
+.maintenance-status-badge.status-asneeded {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  border: 1px solid #dee2e6;
+}
+
+.maintenance-meta {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: #868e96;
+}
+
 /* QR Code */
 .qr-code-section {
   display: flex;

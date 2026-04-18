@@ -1647,6 +1647,19 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         overdue_maintenance_count = len(overdue_asset_ids)
 
+        # Also count MaintenanceItems that are overdue or due this week
+        from inventory.models import MaintenanceItem
+
+        now_dt = timezone.now()
+        week_out = now_dt + timedelta(days=7)
+        pm_due_this_week = 0
+        pm_overdue = 0
+        for mi in MaintenanceItem.objects.filter(is_active=True, interval_days__isnull=False):
+            if mi.is_overdue:
+                pm_overdue += 1
+            elif mi.next_due_at and mi.next_due_at <= week_out:
+                pm_due_this_week += 1
+
         # 4. QR Code Scans in last 7 days with daily breakdown
         # Note: We count unique assets and inventory items scanned per day
         # If an item is scanned multiple times in a day, we only count it once for that day
@@ -1722,6 +1735,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 "open_item_requests": open_item_requests,
                 "open_locations_with_problems": open_locations_with_problems,
                 "assets_overdue_maintenance": overdue_maintenance_count,
+                "pm_overdue": pm_overdue,
+                "pm_due_this_week": pm_due_this_week,
                 "qr_scans_total": total_qr_scans,
                 "qr_scans_by_day": qr_scans_by_day,
                 "last_updated": timezone.now().isoformat(),

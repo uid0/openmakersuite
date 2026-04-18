@@ -1717,6 +1717,271 @@ class MaintenanceLog(models.Model):
         return f"{self.maintenance_item.title} — completed by {completed_by} at {self.completed_at}"
 
 
+class MaintenanceTask(models.Model):
+    """
+    An ordered sub-task (line item) within a MaintenanceItem.
+
+    Allows a single maintenance item to have a numbered checklist of steps,
+    e.g., Task 1: "Disconnect Power", Task 2: "Lock Out Equipment".
+    These appear on both printed work order forms and the digital interface.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    maintenance_item = models.ForeignKey(
+        MaintenanceItem,
+        on_delete=models.CASCADE,
+        related_name="tasks",
+        help_text="The maintenance task this step belongs to",
+    )
+    order = models.PositiveIntegerField(
+        default=0,
+        help_text="Display order (lower numbers appear first)",
+    )
+    title = models.CharField(max_length=200, help_text="Short title for this step")
+    description = models.TextField(blank=True, help_text="Detailed instructions for this step")
+    is_required = models.BooleanField(
+        default=True,
+        help_text="Required steps must be completed before the work order can close",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "title"]
+        indexes = [
+            models.Index(fields=["maintenance_item", "order"], name="mt_item_order_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.maintenance_item.title} — Step {self.order}: {self.title}"
+
+
+class WorkOrder(models.Model):
+    """
+    A scheduled or generated work order for a preventive maintenance item.
+
+    Work orders can be printed as PDF forms for non-technical users or
+    completed digitally by technical users. Both paths feed back into the
+    maintenance history.
+    """
+
+    STATUS_OPEN = "open"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_BLOCKED = "blocked"
+    STATUS_COMPLETED = "completed"
+
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_PROGRESS, "In Progress"),
+        (STATUS_BLOCKED, "Blocked"),
+        (STATUS_COMPLETED, "Completed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    maintenance_item = models.ForeignKey(
+        MaintenanceItem,
+        on_delete=models.CASCADE,
+        related_name="work_orders",
+        help_text="The maintenance task this work order is for",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_OPEN,
+        help_text="Current status of this work order",
+    )
+    due_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Date by which this work order should be completed",
+    )
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_work_orders",
+        help_text="User assigned to complete this work order",
+    )
+    completed_by_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Name of person who completed the work (for paper form tracking)",
+    )
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this work order was marked complete",
+    )
+    notes = models.TextField(blank=True, help_text="Notes about this work order")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["maintenance_item", "status"], name="wo_item_status_idx"),
+            models.Index(fields=["due_date", "status"], name="wo_due_status_idx"),
+            models.Index(fields=["status", "-created_at"], name="wo_status_created_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"WO-{str(self.id)[:8].upper()} — {self.maintenance_item.title} ({self.get_status_display()})"
+
+    @property
+    def is_overdue(self) -> bool:
+        """Return True if this open work order is past its due date."""
+        from django.utils import timezone
+
+        if self.status == self.STATUS_COMPLETED:
+            return False
+        if not self.due_date:
+            return False
+        return timezone.now().date() > self.due_date
+
+    @property
+    def short_id(self) -> str:
+        """Return a short human-readable identifier for this work order."""
+        return f"WO-{str(self.id)[:8].upper()}"
+
+
+class WorkOrderTaskCompletion(models.Model):
+    """
+    Tracks completion of an individual task step within a work order.
+
+    Created for each MaintenanceTask when a WorkOrder is generated,
+    allowing granular tracking of which steps have been completed.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.CASCADE,
+        related_name="task_completions",
+        help_text="The work order this task completion belongs to",
+    )
+    task = models.ForeignKey(
+        MaintenanceTask,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="completions",
+        help_text="The task step (null if task was deleted after WO creation)",
+    )
+    task_title = models.CharField(
+        max_length=200,
+        help_text="Denormalized task title (preserved if task is later deleted)",
+    )
+    task_order = models.PositiveIntegerField(
+        default=0,
+        help_text="Display order (denormalized from task at creation time)",
+    )
+    is_required = models.BooleanField(
+        default=True,
+        help_text="Whether this step is required",
+    )
+    is_completed = models.BooleanField(default=False)
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="completed_work_order_tasks",
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["task_order", "task_title"]
+        indexes = [
+            models.Index(fields=["work_order", "is_completed"], name="wotc_wo_completed_idx"),
+        ]
+
+    def __str__(self) -> str:
+        status = "✓" if self.is_completed else "○"
+        return f"{status} {self.task_title} (WO {self.work_order.short_id})"
+
+
+class WorkOrderMaterialUsage(models.Model):
+    """
+    Tracks which materials were actually used when completing a work order.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.CASCADE,
+        related_name="material_usage",
+        help_text="The work order this material usage belongs to",
+    )
+    material = models.ForeignKey(
+        MaintenanceMaterial,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="usage_records",
+        help_text="The material specification (null if deleted after WO creation)",
+    )
+    material_name = models.CharField(
+        max_length=200,
+        help_text="Denormalized material name",
+    )
+    quantity_planned = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("1.00"),
+        help_text="Planned quantity from the maintenance item spec",
+    )
+    unit = models.CharField(max_length=50, blank=True)
+    was_used = models.BooleanField(
+        default=False,
+        help_text="Whether this material was actually used",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["material_name"]
+
+    def __str__(self) -> str:
+        status = "used" if self.was_used else "not used"
+        return f"{self.material_name} ({status}) — WO {self.work_order.short_id}"
+
+
+class WorkOrderPhoto(models.Model):
+    """
+    A photo attached to a work order by a technician.
+
+    Used for documenting wear, damage, or completed work.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.CASCADE,
+        related_name="photos",
+        help_text="The work order this photo belongs to",
+    )
+    image = models.ImageField(
+        upload_to="work_order_photos/%Y/%m/",
+        help_text="Photo of the asset or work performed",
+    )
+    caption = models.CharField(max_length=500, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_order_photos",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+
+    def __str__(self) -> str:
+        return f"Photo for WO {self.work_order.short_id} ({self.uploaded_at.date()})"
+
+
 class Fixture(models.Model):
     """
     Fixed assets that require periodic refilling (e.g., soap dispensers, paper towel holders).

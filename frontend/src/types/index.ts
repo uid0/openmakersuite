@@ -372,6 +372,7 @@ export interface MaintenanceItem {
   days_overdue: number | null;
   next_due_at: string | null;
   materials: MaintenanceMaterial[];
+  tasks: MaintenanceTask[];
   created_at: string;
   updated_at: string;
 }
@@ -388,6 +389,80 @@ export interface MaintenanceLog {
   cost_incurred: string | null;
   notes: string;
   created_at: string;
+}
+
+export interface MaintenanceTask {
+  id: string;
+  maintenance_item: string;
+  order: number;
+  title: string;
+  description: string;
+  is_required: boolean;
+  created_at: string;
+}
+
+export type WorkOrderStatus = 'open' | 'in_progress' | 'blocked' | 'completed';
+
+export interface WorkOrderTaskCompletion {
+  id: string;
+  work_order: string;
+  task: string | null;
+  task_title: string;
+  task_order: number;
+  is_required: boolean;
+  is_completed: boolean;
+  completed_by: number | null;
+  completed_by_name: string | null;
+  completed_at: string | null;
+  notes: string;
+  created_at: string;
+}
+
+export interface WorkOrderMaterialUsage {
+  id: string;
+  work_order: string;
+  material: string | null;
+  material_name: string;
+  quantity_planned: string;
+  unit: string;
+  was_used: boolean;
+  created_at: string;
+}
+
+export interface WorkOrderPhoto {
+  id: string;
+  work_order: string;
+  image: string;
+  image_url: string | null;
+  caption: string;
+  uploaded_by: number | null;
+  uploaded_by_name: string | null;
+  uploaded_at: string;
+}
+
+export interface WorkOrder {
+  id: string;
+  short_id: string;
+  maintenance_item: string;
+  maintenance_item_title: string;
+  asset_name: string;
+  asset_tag: string;
+  asset_id: string;
+  status: WorkOrderStatus;
+  due_date: string | null;
+  assigned_to: number | null;
+  assigned_to_name: string | null;
+  completed_by_name: string;
+  completed_at: string | null;
+  notes: string;
+  is_overdue: boolean;
+  task_completions: WorkOrderTaskCompletion[];
+  material_usage: WorkOrderMaterialUsage[];
+  photos: WorkOrderPhoto[];
+  task_completion_count?: number;
+  task_total_count?: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SiteSettings {

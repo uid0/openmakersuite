@@ -6,13 +6,14 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { assetPartsAPI, assetsAPI } from '../services/api';
 import '../styles/AssetDetailPage.css';
-import { Asset, AssetProblem } from '../types';
+import { Asset, AssetProblem, MaintenanceItem } from '../types';
 
 const AssetDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [asset, setAsset] = useState<Asset | null>(null);
   const [problems, setProblems] = useState<AssetProblem[]>([]);
+  const [maintenanceItems, setMaintenanceItems] = useState<MaintenanceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [problemStatusFilter, setProblemStatusFilter] = useState<string>('all');
@@ -31,12 +32,14 @@ const AssetDetailPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const [assetResponse, problemsResponse] = await Promise.all([
+      const [assetResponse, problemsResponse, maintenanceResponse] = await Promise.all([
         assetsAPI.getAsset(id),
         assetsAPI.getAssetProblems(id),
+        assetsAPI.getMaintenanceItems(id),
       ]);
       setAsset(assetResponse.data);
       setProblems(problemsResponse.data);
+      setMaintenanceItems(maintenanceResponse.data);
     } catch (err: any) {
       console.error('Error loading asset details:', err);
       setError(err.response?.data?.detail || 'Failed to load asset details');
@@ -676,6 +679,66 @@ const AssetDetailPage: React.FC = () => {
                 </div>
               ))}
             </div>
+          )}
+        </section>
+
+        {/* Preventive Maintenance Tasks */}
+        <section className="asset-detail-section">
+          <div className="section-header-row">
+            <h2>Preventive Maintenance</h2>
+            {isLoggedIn && (
+              <button
+                className="add-button"
+                onClick={() => navigate(`/assets/${id}/maintenance/new`)}
+              >
+                + Add PM Task
+              </button>
+            )}
+          </div>
+          {maintenanceItems.length === 0 ? (
+            <p className="no-maintenance-plan">No preventive maintenance tasks defined.</p>
+          ) : (
+            <ul className="maintenance-list">
+              {maintenanceItems.map((item) => (
+                <li key={item.id} className="maintenance-item">
+                  <div className="maintenance-item-header">
+                    <span className="maintenance-part-name">{item.title}</span>
+                    <span
+                      className={`maintenance-status-badge ${
+                        item.is_overdue ? 'status-overdue' : item.next_due_at ? 'status-upcoming' : 'status-asneeded'
+                      }`}
+                    >
+                      {item.is_overdue
+                        ? item.days_overdue
+                          ? `Overdue ${item.days_overdue}d`
+                          : 'Overdue'
+                        : item.next_due_at
+                        ? `Due ${new Date(item.next_due_at).toLocaleDateString()}`
+                        : 'As needed'}
+                    </span>
+                    {isLoggedIn && (
+                      <button
+                        className="edit-link-button"
+                        onClick={() => navigate(`/assets/${id}/maintenance/${item.id}/edit`)}
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                  {item.description && (
+                    <div className="maintenance-notes">{item.description}</div>
+                  )}
+                  {item.estimated_time_minutes && (
+                    <div className="maintenance-meta">
+                      Est. time: {item.estimated_time_minutes} min
+                      {item.estimated_cost && parseFloat(item.estimated_cost) > 0
+                        ? ` · Est. cost: $${parseFloat(item.estimated_cost).toFixed(2)}`
+                        : ''}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
         </section>
 

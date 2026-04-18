@@ -117,7 +117,7 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
         [
             Paragraph(item.title, subheading_style),
             Paragraph(
-                f"<font size='7' color='#666666'>Scan to open digital version</font>",
+                "<font size='7' color='#666666'>Scan to open digital version</font>",
                 small_style,
             ),
         ],

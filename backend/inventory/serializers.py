@@ -998,6 +998,23 @@ class MaintenanceMaterialSerializer(serializers.ModelSerializer):
         read_only_fields = ["total_estimated_cost", "created_at"]
 
 
+class MaintenanceTaskSerializer(serializers.ModelSerializer):
+    """Serializer for ordered sub-task steps within a maintenance item."""
+
+    class Meta:
+        model = MaintenanceTask
+        fields = [
+            "id",
+            "maintenance_item",
+            "order",
+            "title",
+            "description",
+            "is_required",
+            "created_at",
+        ]
+        read_only_fields = ["created_at"]
+
+
 class MaintenanceItemSerializer(serializers.ModelSerializer):
     """Serializer for preventive maintenance tasks associated with an asset."""
 
@@ -1177,23 +1194,6 @@ class FixtureDetailSerializer(FixtureSerializer):
         if "recent_refill_requests" in data:
             data["recent_refill_requests"] = data["recent_refill_requests"][:10]
         return data
-
-
-class MaintenanceTaskSerializer(serializers.ModelSerializer):
-    """Serializer for ordered sub-task steps within a maintenance item."""
-
-    class Meta:
-        model = MaintenanceTask
-        fields = [
-            "id",
-            "maintenance_item",
-            "order",
-            "title",
-            "description",
-            "is_required",
-            "created_at",
-        ]
-        read_only_fields = ["created_at"]
 
 
 class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):

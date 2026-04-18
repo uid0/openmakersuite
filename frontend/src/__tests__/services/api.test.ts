@@ -54,6 +54,19 @@ describe('API Service', () => {
       expect(response.status).toBe(200);
     });
 
+    test('listLocations normalizes array responses', async () => {
+      const mockLocations = [
+        { id: 1, name: 'Main Workshop' },
+        { id: 2, name: 'Electronics Lab' },
+      ];
+
+      mock.onGet('/inventory/locations/').reply(200, mockLocations);
+
+      const response = await inventoryAPI.listLocations();
+
+      expect(response.data.results).toEqual(mockLocations);
+    });
+
     test('getLowStockItems fetches low stock items', async () => {
       const mockItems = [
         { id: '1', name: 'Low Stock Item', current_stock: 2 },

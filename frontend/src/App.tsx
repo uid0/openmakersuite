@@ -162,6 +162,7 @@ function AppContent() {
           <Route path="/facilities/checklist/:checklistId/complete/:completionId" element={<WorkspaceLayout><ChecklistCompletionPage /></WorkspaceLayout>} />
 
           {/* SIGs Workspace */}
+          <Route path="/sigs" element={<Navigate to="/sigs/dashboard" replace />} />
           <Route path="/sigs/dashboard" element={<WorkspaceLayout><SIGDashboard /></WorkspaceLayout>} />
           <Route path="/sigs/dashboard/:sigId" element={<WorkspaceLayout><SIGDashboard /></WorkspaceLayout>} />
 

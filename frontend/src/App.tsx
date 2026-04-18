@@ -8,6 +8,7 @@ import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AssetDetailPage from './pages/AssetDetailPage';
 import AssetFormPage from './pages/AssetFormPage';
+import MaintenanceItemFormPage from './pages/MaintenanceItemFormPage';
 import AssetReportPage from './pages/AssetReportPage';
 import AssetScanPage from './pages/AssetScanPage';
 import AssetsPage from './pages/AssetsPage';
@@ -154,6 +155,8 @@ function AppContent() {
           <Route path="/assets/new" element={<WorkspaceLayout><AssetFormPage /></WorkspaceLayout>} />
           <Route path="/assets/:id" element={<WorkspaceLayout><AssetDetailPage /></WorkspaceLayout>} />
           <Route path="/assets/:id/edit" element={<WorkspaceLayout><AssetFormPage /></WorkspaceLayout>} />
+          <Route path="/assets/:assetId/maintenance/new" element={<WorkspaceLayout><MaintenanceItemFormPage /></WorkspaceLayout>} />
+          <Route path="/assets/:assetId/maintenance/:id/edit" element={<WorkspaceLayout><MaintenanceItemFormPage /></WorkspaceLayout>} />
 
           {/* Facilities Workspace */}
           <Route path="/facilities/tv-dashboard" element={<TVDashboard />} />

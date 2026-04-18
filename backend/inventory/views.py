@@ -32,9 +32,13 @@ from .models import (
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
+    MaintenanceTask,
     PriceHistory,
     Supplier,
     UsageLog,
+    WorkOrder,
+    WorkOrderMaterialUsage,
+    WorkOrderTaskCompletion,
 )
 from .serializers import (
     AssetPartSerializer,
@@ -50,10 +54,16 @@ from .serializers import (
     MaintenanceItemSerializer,
     MaintenanceLogSerializer,
     MaintenanceMaterialSerializer,
+    MaintenanceTaskSerializer,
     PriceHistorySerializer,
     SupplierDetailSerializer,
     SupplierSerializer,
     UsageLogSerializer,
+    WorkOrderListSerializer,
+    WorkOrderMaterialUsageSerializer,
+    WorkOrderPhotoSerializer,
+    WorkOrderSerializer,
+    WorkOrderTaskCompletionSerializer,
 )
 
 
@@ -2462,43 +2472,6 @@ class InventoryReportViewSet(viewsets.ViewSet):
         return Response({"error": "Invalid report type"}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class MaintenanceItemViewSet(viewsets.ModelViewSet):
-    """API endpoint for asset maintenance items (PM tasks)."""
-
-    queryset = MaintenanceItem.objects.prefetch_related("materials").select_related("asset").all()
-    serializer_class = MaintenanceItemSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        asset_id = self.request.query_params.get("asset")
-        if asset_id:
-            queryset = queryset.filter(asset_id=asset_id)
-        is_active = self.request.query_params.get("is_active")
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active.lower() == "true")
-        return queryset
-
-    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
-    def complete(self, request, pk=None):
-        """Log completion of a maintenance task and update its last_completed_at."""
-        item = self.get_object()
-        data = request.data.copy()
-        data["maintenance_item"] = str(item.id)
-
-        serializer = MaintenanceLogSerializer(data=data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        log = serializer.save(completed_by=request.user)
-
-        # Update the item's last_completed_at timestamp
-        item.last_completed_at = log.completed_at
-        item.save(update_fields=["last_completed_at"])
-
-        return Response(MaintenanceLogSerializer(log).data, status=status.HTTP_201_CREATED)
-
-
 class MaintenanceMaterialViewSet(viewsets.ModelViewSet):
     """API endpoint for maintenance materials."""
 
@@ -2532,6 +2505,309 @@ class MaintenanceLogViewSet(viewsets.ReadOnlyModelViewSet):
         if asset:
             queryset = queryset.filter(maintenance_item__asset_id=asset)
         return queryset
+
+
+class MaintenanceTaskViewSet(viewsets.ModelViewSet):
+    """API endpoint for maintenance task steps (line items within a MaintenanceItem)."""
+
+    queryset = MaintenanceTask.objects.select_related("maintenance_item__asset").all()
+    serializer_class = MaintenanceTaskSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        maintenance_item = self.request.query_params.get("maintenance_item")
+        if maintenance_item:
+            queryset = queryset.filter(maintenance_item_id=maintenance_item)
+        return queryset
+
+
+class WorkOrderViewSet(viewsets.ModelViewSet):
+    """API endpoint for preventive maintenance work orders."""
+
+    queryset = (
+        WorkOrder.objects.select_related(
+            "maintenance_item__asset__location",
+            "maintenance_item__asset__manufacturer",
+            "maintenance_item__asset__category",
+            "assigned_to",
+        )
+        .prefetch_related(
+            "task_completions__completed_by",
+            "task_completions__task",
+            "material_usage__material",
+            "photos__uploaded_by",
+            "maintenance_item__materials",
+        )
+        .all()
+    )
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return WorkOrderListSerializer
+        return WorkOrderSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        maintenance_item = self.request.query_params.get("maintenance_item")
+        if maintenance_item:
+            queryset = queryset.filter(maintenance_item_id=maintenance_item)
+        asset = self.request.query_params.get("asset")
+        if asset:
+            queryset = queryset.filter(maintenance_item__asset_id=asset)
+        wo_status = self.request.query_params.get("status")
+        if wo_status:
+            queryset = queryset.filter(status=wo_status)
+        return queryset
+
+    @action(detail=True, methods=["get"])
+    def pdf(self, request, pk=None):
+        """Generate a printable PDF work order form."""
+        from .utils.work_order_pdf import generate_work_order_pdf
+
+        work_order = self.get_object()
+        base_url = request.build_absolute_uri("/").rstrip("/")
+        pdf_bytes = generate_work_order_pdf(work_order, base_url=base_url)
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        short_id = work_order.short_id.replace(" ", "-")
+        response["Content-Disposition"] = f'inline; filename="work-order-{short_id}.pdf"'
+        return response
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def add_photo(self, request, pk=None):
+        """Upload a photo to this work order."""
+        work_order = self.get_object()
+        serializer = WorkOrderPhotoSerializer(data=request.data, context={"request": request})
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save(work_order=work_order, uploaded_by=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["patch"], url_path="tasks/(?P<task_id>[^/.]+)/complete")
+    def complete_task(self, request, pk=None, task_id=None):
+        """Toggle completion of a specific task step within this work order."""
+        work_order = self.get_object()
+        try:
+            tc = work_order.task_completions.get(id=task_id)
+        except WorkOrderTaskCompletion.DoesNotExist:
+            return Response(
+                {"detail": "Task completion record not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        is_completed = request.data.get("is_completed")
+        if is_completed is None:
+            return Response(
+                {"detail": "is_completed is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tc.is_completed = bool(is_completed)
+        if tc.is_completed and not tc.completed_at:
+            tc.completed_at = timezone.now()
+            tc.completed_by = request.user
+        elif not tc.is_completed:
+            tc.completed_at = None
+            tc.completed_by = None
+        if "notes" in request.data:
+            tc.notes = request.data["notes"]
+        tc.save()
+
+        # Update work order status to in_progress if any task is completed
+        if tc.is_completed and work_order.status == WorkOrder.STATUS_OPEN:
+            work_order.status = WorkOrder.STATUS_IN_PROGRESS
+            work_order.save(update_fields=["status", "updated_at"])
+
+        return Response(WorkOrderTaskCompletionSerializer(tc).data)
+
+    @action(detail=True, methods=["patch"], url_path="materials/(?P<material_id>[^/.]+)/toggle")
+    def toggle_material(self, request, pk=None, material_id=None):
+        """Toggle whether a material was used in this work order."""
+        work_order = self.get_object()
+        try:
+            usage = work_order.material_usage.get(id=material_id)
+        except WorkOrderMaterialUsage.DoesNotExist:
+            return Response(
+                {"detail": "Material usage record not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        was_used = request.data.get("was_used")
+        if was_used is None:
+            return Response(
+                {"detail": "was_used is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        usage.was_used = bool(was_used)
+        usage.save(update_fields=["was_used"])
+        return Response(WorkOrderMaterialUsageSerializer(usage).data)
+
+
+class MaintenanceItemViewSet(viewsets.ModelViewSet):
+    """API endpoint for asset maintenance items (PM tasks)."""
+
+    queryset = (
+        MaintenanceItem.objects.prefetch_related("materials", "tasks").select_related("asset").all()
+    )
+    serializer_class = MaintenanceItemSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            queryset = queryset.filter(asset_id=asset_id)
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == "true")
+        return queryset
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def complete(self, request, pk=None):
+        """Log completion of a maintenance task and update its last_completed_at."""
+        item = self.get_object()
+        data = request.data.copy()
+        data["maintenance_item"] = str(item.id)
+
+        serializer = MaintenanceLogSerializer(data=data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        log = serializer.save(completed_by=request.user)
+
+        # Update the item's last_completed_at timestamp
+        item.last_completed_at = log.completed_at
+        item.save(update_fields=["last_completed_at"])
+
+        return Response(MaintenanceLogSerializer(log).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"])
+    def due_this_week(self, request):
+        """Return maintenance items due within the next 7 days."""
+        now = timezone.now()
+        week_out = now + timedelta(days=7)
+        items = []
+        qs = (
+            self.get_queryset()
+            .filter(is_active=True, interval_days__isnull=False)
+            .select_related("asset__location")
+        )
+        for item in qs:
+            next_due = item.next_due_at
+            if next_due is None or next_due <= week_out:
+                items.append(item)
+        serializer = MaintenanceItemSerializer(items, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def due_this_month(self, request):
+        """Return maintenance items due within the next 30 days."""
+        now = timezone.now()
+        month_out = now + timedelta(days=30)
+        items = []
+        qs = (
+            self.get_queryset()
+            .filter(is_active=True, interval_days__isnull=False)
+            .select_related("asset__location")
+        )
+        for item in qs:
+            next_due = item.next_due_at
+            if next_due is None or next_due <= month_out:
+                items.append(item)
+        serializer = MaintenanceItemSerializer(items, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def generate_work_order(self, request, pk=None):
+        """Create a work order for this maintenance item, pre-populated with tasks and materials."""
+        item = self.get_object()
+
+        with transaction.atomic():
+            due_date = request.data.get("due_date") or (
+                item.next_due_at.date() if item.next_due_at else None
+            )
+            wo = WorkOrder.objects.create(
+                maintenance_item=item,
+                due_date=due_date,
+                notes=request.data.get("notes", ""),
+            )
+
+            # Create task completion records for all tasks
+            tasks = list(item.tasks.order_by("order", "title"))
+            for task in tasks:
+                WorkOrderTaskCompletion.objects.create(
+                    work_order=wo,
+                    task=task,
+                    task_title=task.title,
+                    task_order=task.order,
+                    is_required=task.is_required,
+                )
+
+            # Create material usage records for all materials
+            materials = list(item.materials.all())
+            for mat in materials:
+                WorkOrderMaterialUsage.objects.create(
+                    work_order=wo,
+                    material=mat,
+                    material_name=mat.name,
+                    quantity_planned=mat.quantity,
+                    unit=mat.unit,
+                )
+
+        serializer = WorkOrderSerializer(wo, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
+    def generate_work_orders_bulk(self, request):
+        """Generate work orders for all overdue or due-this-week maintenance items."""
+        now = timezone.now()
+        week_out = now + timedelta(days=7)
+        created = []
+        qs = self.get_queryset().filter(is_active=True, interval_days__isnull=False)
+
+        with transaction.atomic():
+            for item in qs:
+                next_due = item.next_due_at
+                is_due = next_due is None or next_due <= week_out
+
+                if not is_due:
+                    continue
+
+                # Skip if there's already an open/in-progress WO for this item
+                existing = item.work_orders.filter(
+                    status__in=[WorkOrder.STATUS_OPEN, WorkOrder.STATUS_IN_PROGRESS]
+                ).exists()
+                if existing:
+                    continue
+
+                due_date = next_due.date() if next_due else now.date()
+                wo = WorkOrder.objects.create(
+                    maintenance_item=item,
+                    due_date=due_date,
+                )
+                for task in item.tasks.order_by("order", "title"):
+                    WorkOrderTaskCompletion.objects.create(
+                        work_order=wo,
+                        task=task,
+                        task_title=task.title,
+                        task_order=task.order,
+                        is_required=task.is_required,
+                    )
+                for mat in item.materials.all():
+                    WorkOrderMaterialUsage.objects.create(
+                        work_order=wo,
+                        material=mat,
+                        material_name=mat.name,
+                        quantity_planned=mat.quantity,
+                        unit=mat.unit,
+                    )
+                created.append(str(wo.id))
+
+        return Response(
+            {"created": len(created), "work_order_ids": created},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class AssetReportViewSet(viewsets.ViewSet):

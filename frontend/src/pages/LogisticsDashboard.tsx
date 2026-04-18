@@ -16,6 +16,8 @@ interface LogisticsDashboardResponse {
   open_item_requests: number;
   open_locations_with_problems: number;
   assets_overdue_maintenance: number;
+  pm_overdue: number;
+  pm_due_this_week: number;
   qr_scans_total: number;
   qr_scans_by_day: QRScanDay[];
   last_updated: string;
@@ -51,6 +53,8 @@ const LogisticsDashboard: React.FC = () => {
         open_item_requests: Number(rawData.open_item_requests) || 0,
         open_locations_with_problems: Number(rawData.open_locations_with_problems) || 0,
         assets_overdue_maintenance: Number(rawData.assets_overdue_maintenance) || 0,
+        pm_overdue: Number(rawData.pm_overdue) || 0,
+        pm_due_this_week: Number(rawData.pm_due_this_week) || 0,
         qr_scans_total: Number(rawData.qr_scans_total) || 0,
         qr_scans_by_day: Array.isArray(rawData.qr_scans_by_day) ? rawData.qr_scans_by_day : [],
         last_updated: rawData.last_updated || new Date().toISOString(),
@@ -362,6 +366,22 @@ const LogisticsDashboard: React.FC = () => {
           <div className="metric-label">Assets Overdue Maintenance</div>
           <div className="metric-value">
             {typeof data.assets_overdue_maintenance === 'number' ? data.assets_overdue_maintenance : 0}
+          </div>
+        </div>
+
+        {/* PM Items Overdue */}
+        <div className={`metric-card${data.pm_overdue > 0 ? ' metric-card--alert' : ''}`}>
+          <div className="metric-label">PM Tasks Overdue</div>
+          <div className="metric-value" style={{ color: data.pm_overdue > 0 ? '#fa5252' : 'inherit' }}>
+            {typeof data.pm_overdue === 'number' ? data.pm_overdue : 0}
+          </div>
+        </div>
+
+        {/* PM Items Due This Week */}
+        <div className="metric-card">
+          <div className="metric-label">PM Due This Week</div>
+          <div className="metric-value">
+            {typeof data.pm_due_this_week === 'number' ? data.pm_due_this_week : 0}
           </div>
         </div>
 

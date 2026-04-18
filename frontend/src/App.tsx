@@ -29,6 +29,8 @@ import LocationFormPage from './pages/LocationFormPage';
 import LocationListPage from './pages/LocationListPage';
 import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
+import MaintenanceDashboard from './pages/MaintenanceDashboard';
+import WorkOrderPage from './pages/WorkOrderPage';
 import PurchaseOrderFormPage from './pages/PurchaseOrderFormPage';
 import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
@@ -162,6 +164,10 @@ function AppContent() {
           <Route path="/facilities/tv-dashboard" element={<TVDashboard />} />
           <Route path="/facilities/tv-dashboard/:location" element={<TVDashboard />} />
           <Route path="/facilities/logistics" element={<LogisticsDashboard />} />
+
+          {/* Preventive Maintenance */}
+          <Route path="/maintenance/dashboard" element={<WorkspaceLayout><MaintenanceDashboard /></WorkspaceLayout>} />
+          <Route path="/maintenance/work-orders/:id" element={<WorkspaceLayout><WorkOrderPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist/:checklistId/complete/:completionId" element={<WorkspaceLayout><ChecklistCompletionPage /></WorkspaceLayout>} />
 
           {/* SIGs Workspace */}

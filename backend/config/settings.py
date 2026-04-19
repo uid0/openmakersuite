@@ -231,6 +231,12 @@ if DEVELOPMENT_MODE:
 
 FRONTEND_URL = config("FRONTEND_URL", default="http://192.168.1.36:3000")
 
+# Postmark inbound webhook shared secret. The inbound work-order endpoint is
+# unauthenticated (Postmark does not ship a request signature), so this token
+# must match the `?token=` query param or the `X-Postmark-Webhook-Token` header
+# that Postmark is configured to send. If empty, the endpoint returns 503.
+POSTMARK_INBOUND_TOKEN = config("POSTMARK_INBOUND_TOKEN", default="")
+
 # Redis configuration
 REDIS_URL = config("REDIS_URL", default="redis://192.168.1.36:6379/0")
 

@@ -30,6 +30,7 @@ from .models import (
     WorkOrder,
     WorkOrderMaterialUsage,
     WorkOrderPhoto,
+    WorkOrderSubmission,
     WorkOrderTaskCompletion,
 )
 
@@ -1458,3 +1459,17 @@ class WorkOrderAdmin(admin.ModelAdmin):
     ]
     readonly_fields = ["short_id", "is_overdue", "created_at", "updated_at"]
     inlines = [WorkOrderTaskCompletionInline, WorkOrderMaterialUsageInline, WorkOrderPhotoInline]
+
+
+@admin.register(WorkOrderSubmission)
+class WorkOrderSubmissionAdmin(admin.ModelAdmin):
+    list_display = ["id", "work_order", "status", "from_email", "received_at"]
+    list_filter = ["status"]
+    search_fields = ["from_email", "subject", "postmark_message_id", "work_order__id"]
+    readonly_fields = [
+        "id",
+        "received_at",
+        "parsed_fields",
+        "parse_error",
+        "postmark_message_id",
+    ]

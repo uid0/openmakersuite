@@ -38,6 +38,7 @@ from .models import (
     UsageLog,
     WorkOrder,
     WorkOrderMaterialUsage,
+    WorkOrderSubmission,
     WorkOrderTaskCompletion,
 )
 from .serializers import (
@@ -3055,3 +3056,108 @@ class AssetReportViewSet(viewsets.ViewSet):
             return response_obj
 
         return Response({"error": "Invalid report type"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Postmark inbound webhook: emailed completed work-order PDFs
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _pick_pdf_attachment(attachments):
+    """Return (filename, raw_bytes) for the first PDF attachment, or (None, None)."""
+    import base64
+
+    for att in attachments or []:
+        name = att.get("Name", "") or ""
+        content_type = (att.get("ContentType") or "").lower()
+        is_pdf = content_type == "application/pdf" or name.lower().endswith(".pdf")
+        if not is_pdf:
+            continue
+        raw = att.get("Content") or ""
+        try:
+            data = base64.b64decode(raw)
+        except (ValueError, TypeError):
+            continue
+        return name or "work-order.pdf", data
+    return None, None
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def postmark_inbound_work_order(request):
+    """
+    Inbound webhook for Postmark: accepts a JSON body describing an email with
+    a completed work-order PDF attachment, stores the submission, and applies
+    the embedded checkbox state to the referenced WorkOrder.
+
+    The endpoint is intentionally unauthenticated (Postmark posts without any
+    standard auth scheme), but is gated by a shared secret delivered in the
+    `X-Postmark-Webhook-Token` header or `?token=` query string. The secret
+    is configured via the `POSTMARK_INBOUND_TOKEN` env var.
+    """
+    from django.conf import settings as django_settings
+    from django.core.files.base import ContentFile
+
+    from .services.work_order_ingest import apply_submission
+
+    expected = getattr(django_settings, "POSTMARK_INBOUND_TOKEN", "") or ""
+    if not expected:
+        # Refuse to run without a configured secret — prevents accidental open
+        # ingestion when the env var is missing in production.
+        return Response(
+            {"detail": "Postmark inbound is not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    provided = request.headers.get("X-Postmark-Webhook-Token") or request.GET.get("token") or ""
+    if provided != expected:
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    message_id = payload.get("MessageID", "") or ""
+    if message_id:
+        existing = WorkOrderSubmission.objects.filter(postmark_message_id=message_id).first()
+        if existing:
+            return Response(
+                {
+                    "id": str(existing.id),
+                    "status": existing.status,
+                    "duplicate": True,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+    filename, pdf_bytes = _pick_pdf_attachment(payload.get("Attachments") or [])
+    if not pdf_bytes:
+        return Response(
+            {"detail": "No PDF attachment found on inbound message."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    submission = WorkOrderSubmission(
+        from_email=(payload.get("FromFull") or {}).get("Email") or payload.get("From") or "",
+        subject=(payload.get("Subject") or "")[:500],
+        postmark_message_id=message_id[:200],
+        status=WorkOrderSubmission.STATUS_RECEIVED,
+    )
+    submission.attachment.save(filename, ContentFile(pdf_bytes), save=False)
+    submission.save()
+
+    try:
+        apply_submission(submission)
+    except Exception:  # noqa: BLE001 - webhook must never 500 back to Postmark
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "Failed to apply inbound work order submission %s", submission.id
+        )
+        submission.refresh_from_db()
+
+    return Response(
+        {
+            "id": str(submission.id),
+            "status": submission.status,
+            "work_order_id": (str(submission.work_order_id) if submission.work_order_id else None),
+            "parse_error": submission.parse_error or None,
+        },
+        status=status.HTTP_200_OK,
+    )

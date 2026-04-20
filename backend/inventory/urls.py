@@ -26,6 +26,7 @@ from .views import (
     UsageLogViewSet,
     WorkOrderViewSet,
     lookup_by_code,
+    postmark_inbound_work_order,
 )
 
 router = DefaultRouter()
@@ -51,4 +52,9 @@ router.register(r"reports/assets", AssetReportViewSet, basename="asset-reports")
 urlpatterns = [
     path("", include(router.urls)),
     path("lookup-code/", lookup_by_code, name="lookup-by-code"),
+    path(
+        "webhooks/postmark-inbound-work-order/",
+        postmark_inbound_work_order,
+        name="postmark-inbound-work-order",
+    ),
 ]

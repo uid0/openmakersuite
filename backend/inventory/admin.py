@@ -1343,7 +1343,15 @@ class AssetProblemAdmin(admin.ModelAdmin):
 class MaintenanceMaterialInline(admin.TabularInline):
     model = MaintenanceMaterial
     extra = 1
-    fields = ["name", "quantity", "unit", "estimated_cost_per_unit", "notes"]
+    fields = [
+        "inventory_item",
+        "name",
+        "quantity",
+        "unit",
+        "estimated_cost_per_unit",
+        "notes",
+    ]
+    autocomplete_fields = ["inventory_item"]
 
 
 class MaintenanceTaskInline(admin.TabularInline):
@@ -1370,7 +1378,6 @@ class MaintenanceItemAdmin(admin.ModelAdmin):
     readonly_fields = ["is_overdue", "days_overdue", "next_due_at", "created_at", "updated_at"]
     fieldsets = [
         (None, {"fields": ["asset", "title", "description", "is_active"]}),
-        ("Instructions", {"fields": ["instructions"]}),
         (
             "Schedule & Cost",
             {

@@ -295,7 +295,6 @@ export type WebhookFormData = z.infer<typeof webhookSchema>;
 export const maintenanceItemFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   description: z.string().optional().default(''),
-  instructions: z.string().optional().default(''),
   estimated_time_minutes: z.number().int().min(1).nullable().optional(),
   estimated_cost: z.number().min(0, 'Cost must be zero or greater').default(0),
   interval_days: z.number().int().min(1).nullable().optional(),

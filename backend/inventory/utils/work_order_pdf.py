@@ -346,11 +346,6 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
         story.append(task_table)
         story.append(Paragraph("✱ = Required step", small_style))
         story.append(Spacer(1, 8))
-    elif item.instructions:
-        # Fall back to instructions text if no structured tasks
-        story.append(Paragraph("Instructions", subheading_style))
-        story.append(Paragraph(item.instructions, normal_style))
-        story.append(Spacer(1, 8))
 
     story.append(HRFlowable(width="100%", thickness=1, color=colors.black))
 

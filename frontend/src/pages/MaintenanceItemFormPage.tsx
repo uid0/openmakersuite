@@ -60,7 +60,6 @@ const MaintenanceItemFormPage: React.FC = () => {
     defaultValues: {
       title: '',
       description: '',
-      instructions: '',
       estimated_time_minutes: null,
       estimated_cost: 0,
       interval_days: null,
@@ -84,7 +83,6 @@ const MaintenanceItemFormPage: React.FC = () => {
       reset({
         title: item.title,
         description: item.description || '',
-        instructions: item.instructions || '',
         estimated_time_minutes: item.estimated_time_minutes ?? null,
         estimated_cost: parseFloat(item.estimated_cost) || 0,
         interval_days: item.interval_days ?? null,
@@ -210,13 +208,6 @@ const MaintenanceItemFormPage: React.FC = () => {
                       control={control}
                       label="Description"
                       placeholder="Why this maintenance is needed"
-                    />
-                    <FormTextarea
-                      name="instructions"
-                      control={control}
-                      label="Instructions"
-                      placeholder="Step-by-step instructions"
-                      minRows={4}
                     />
                   </>
                 ),

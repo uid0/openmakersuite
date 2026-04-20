@@ -2,7 +2,7 @@
 Views for inventory API.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import models, transaction
@@ -745,9 +745,9 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         pdf_bytes = renderer.render_preview(item, blank_card=True)
 
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
-        response["Content-Disposition"] = (
-            f'attachment; filename="blank_card_{item.sku or item.id}.pdf"'
-        )
+        response[
+            "Content-Disposition"
+        ] = f'attachment; filename="blank_card_{item.sku or item.id}.pdf"'
         return response
 
     @action(detail=False, methods=["get"])
@@ -1531,6 +1531,90 @@ class AssetViewSet(viewsets.ModelViewSet):
         )
         serializer = MaintenanceItemSerializer(items, many=True)
         return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="clone-maintenance",
+        permission_classes=[IsAuthenticated],
+    )
+    def clone_maintenance(self, request, pk=None):
+        """
+        Clone every maintenance item (with its tasks and materials) from a
+        source asset onto this asset.
+
+        Request body:
+            {"source_asset": "<uuid>", "reset_schedule": true|false}
+
+        reset_schedule (default True) clears ``last_completed_at`` on the clones
+        so the new asset's PM schedule starts fresh.
+        """
+        destination = self.get_object()
+        source_id = request.data.get("source_asset")
+        if not source_id:
+            return Response(
+                {"detail": "source_asset is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            source = Asset.objects.get(pk=source_id)
+        except Asset.DoesNotExist:
+            return Response(
+                {"detail": f"Source asset {source_id} not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if source.pk == destination.pk:
+            return Response(
+                {"detail": "Source and destination must be different assets."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reset_schedule = request.data.get("reset_schedule", True)
+        cloned_ids = []
+        with transaction.atomic():
+            src_items = MaintenanceItem.objects.filter(asset=source).prefetch_related(
+                "materials", "tasks"
+            )
+            for src in src_items:
+                new_item = MaintenanceItem.objects.create(
+                    asset=destination,
+                    title=src.title,
+                    description=src.description,
+                    estimated_time_minutes=src.estimated_time_minutes,
+                    estimated_cost=src.estimated_cost,
+                    interval_days=src.interval_days,
+                    is_active=src.is_active,
+                    last_completed_at=None if reset_schedule else src.last_completed_at,
+                )
+                for task in src.tasks.all():
+                    MaintenanceTask.objects.create(
+                        maintenance_item=new_item,
+                        order=task.order,
+                        title=task.title,
+                        description=task.description,
+                        is_required=task.is_required,
+                    )
+                for mat in src.materials.all():
+                    MaintenanceMaterial.objects.create(
+                        maintenance_item=new_item,
+                        inventory_item=mat.inventory_item,
+                        name=mat.name,
+                        quantity=mat.quantity,
+                        unit=mat.unit,
+                        estimated_cost_per_unit=mat.estimated_cost_per_unit,
+                        notes=mat.notes,
+                    )
+                cloned_ids.append(str(new_item.id))
+
+        return Response(
+            {
+                "source_asset": str(source.pk),
+                "destination_asset": str(destination.pk),
+                "cloned_count": len(cloned_ids),
+                "cloned_maintenance_item_ids": cloned_ids,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["get"], permission_classes=[AllowAny])
     def checklists(self, request, pk=None):
@@ -2392,9 +2476,9 @@ class InventoryReportViewSet(viewsets.ViewSet):
             data = response.data
 
             response_obj = HttpResponse(content_type="text/csv")
-            response_obj["Content-Disposition"] = (
-                'attachment; filename="inventory_stock_by_category.csv"'
-            )
+            response_obj[
+                "Content-Disposition"
+            ] = 'attachment; filename="inventory_stock_by_category.csv"'
 
             writer = csv.DictWriter(
                 response_obj,
@@ -2424,9 +2508,9 @@ class InventoryReportViewSet(viewsets.ViewSet):
             data = response.data
 
             response_obj = HttpResponse(content_type="text/csv")
-            response_obj["Content-Disposition"] = (
-                'attachment; filename="inventory_reorder_frequency.csv"'
-            )
+            response_obj[
+                "Content-Disposition"
+            ] = 'attachment; filename="inventory_reorder_frequency.csv"'
 
             writer = csv.DictWriter(
                 response_obj,
@@ -2449,9 +2533,9 @@ class InventoryReportViewSet(viewsets.ViewSet):
             data = response.data
 
             response_obj = HttpResponse(content_type="text/csv")
-            response_obj["Content-Disposition"] = (
-                'attachment; filename="inventory_value_by_location.csv"'
-            )
+            response_obj[
+                "Content-Disposition"
+            ] = 'attachment; filename="inventory_value_by_location.csv"'
 
             writer = csv.DictWriter(
                 response_obj,
@@ -2836,6 +2920,111 @@ class AssetReportViewSet(viewsets.ViewSet):
 
         return Response(data)
 
+    @action(detail=False, methods=["get"], url_path="maintenance-rollup")
+    def maintenance_rollup(self, request):
+        """
+        Roll-up of completed preventive maintenance activity.
+
+        Query params:
+            start_date, end_date (YYYY-MM-DD) — default: last 90 days
+            asset — restrict to a single asset UUID
+
+        Returns totals plus a breakdown by asset.
+        """
+        from django.db.models import Count, Sum
+
+        start_str = request.query_params.get("start_date")
+        end_str = request.query_params.get("end_date")
+        asset_id = request.query_params.get("asset")
+
+        end_date = timezone.now().date()
+        start_date = end_date - timedelta(days=90)
+        if start_str:
+            try:
+                start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+            except ValueError:
+                return Response(
+                    {"detail": "start_date must be YYYY-MM-DD."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        if end_str:
+            try:
+                end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+            except ValueError:
+                return Response(
+                    {"detail": "end_date must be YYYY-MM-DD."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        logs = MaintenanceLog.objects.filter(
+            completed_at__date__gte=start_date,
+            completed_at__date__lte=end_date,
+        ).select_related("maintenance_item__asset", "completed_by")
+        if asset_id:
+            logs = logs.filter(maintenance_item__asset_id=asset_id)
+
+        totals = logs.aggregate(
+            total_completions=Count("id"),
+            total_minutes=Sum("time_spent_minutes"),
+            total_cost=Sum("cost_incurred"),
+        )
+
+        per_asset = (
+            logs.values(
+                "maintenance_item__asset__id",
+                "maintenance_item__asset__name",
+                "maintenance_item__asset__asset_tag",
+            )
+            .annotate(
+                completions=Count("id"),
+                total_minutes=Sum("time_spent_minutes"),
+                total_cost=Sum("cost_incurred"),
+            )
+            .order_by("-completions")
+        )
+
+        per_task = (
+            logs.values(
+                "maintenance_item__id",
+                "maintenance_item__title",
+                "maintenance_item__asset__name",
+            )
+            .annotate(completions=Count("id"))
+            .order_by("-completions")
+        )
+
+        return Response(
+            {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "totals": {
+                    "completions": totals["total_completions"] or 0,
+                    "minutes": totals["total_minutes"] or 0,
+                    "cost": str(totals["total_cost"] or 0),
+                },
+                "by_asset": [
+                    {
+                        "asset_id": str(row["maintenance_item__asset__id"]),
+                        "asset_name": row["maintenance_item__asset__name"],
+                        "asset_tag": row["maintenance_item__asset__asset_tag"] or "",
+                        "completions": row["completions"],
+                        "minutes": row["total_minutes"] or 0,
+                        "cost": str(row["total_cost"] or 0),
+                    }
+                    for row in per_asset
+                ],
+                "by_task": [
+                    {
+                        "maintenance_item_id": str(row["maintenance_item__id"]),
+                        "title": row["maintenance_item__title"],
+                        "asset_name": row["maintenance_item__asset__name"],
+                        "completions": row["completions"],
+                    }
+                    for row in per_task
+                ],
+            }
+        )
+
     @action(detail=False, methods=["get"])
     def maintenance_due(self, request):
         """Get assets and parts that need maintenance."""
@@ -2991,9 +3180,9 @@ class AssetReportViewSet(viewsets.ViewSet):
             data = response.data
 
             response_obj = HttpResponse(content_type="text/csv")
-            response_obj["Content-Disposition"] = (
-                'attachment; filename="assets_maintenance_due.csv"'
-            )
+            response_obj[
+                "Content-Disposition"
+            ] = 'attachment; filename="assets_maintenance_due.csv"'
 
             writer = csv.DictWriter(
                 response_obj,

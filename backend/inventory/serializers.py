@@ -981,13 +981,26 @@ class MaintenanceMaterialSerializer(serializers.ModelSerializer):
     """Serializer for materials needed for a maintenance task."""
 
     total_estimated_cost = serializers.ReadOnlyField()
+    display_name = serializers.ReadOnlyField()
+    inventory_item_name = serializers.CharField(source="inventory_item.name", read_only=True)
+    inventory_item_sku = serializers.CharField(source="inventory_item.sku", read_only=True)
+    inventory_current_stock = serializers.ReadOnlyField()
+    inventory_reorder_status = serializers.ReadOnlyField()
+    has_pending_reorder = serializers.ReadOnlyField()
 
     class Meta:
         model = MaintenanceMaterial
         fields = [
             "id",
             "maintenance_item",
+            "inventory_item",
+            "inventory_item_name",
+            "inventory_item_sku",
+            "inventory_current_stock",
+            "inventory_reorder_status",
+            "has_pending_reorder",
             "name",
+            "display_name",
             "quantity",
             "unit",
             "estimated_cost_per_unit",
@@ -995,7 +1008,28 @@ class MaintenanceMaterialSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
         ]
-        read_only_fields = ["total_estimated_cost", "created_at"]
+        read_only_fields = [
+            "total_estimated_cost",
+            "display_name",
+            "inventory_item_name",
+            "inventory_item_sku",
+            "inventory_current_stock",
+            "inventory_reorder_status",
+            "has_pending_reorder",
+            "created_at",
+        ]
+
+    def validate(self, attrs):
+        """Require either inventory_item or name to identify the material."""
+        inv = (
+            attrs.get("inventory_item")
+            if "inventory_item" in attrs
+            else getattr(self.instance, "inventory_item", None)
+        )
+        name = attrs.get("name") if "name" in attrs else getattr(self.instance, "name", "")
+        if not inv and not (name or "").strip():
+            raise serializers.ValidationError("Either inventory_item or name must be provided.")
+        return attrs
 
 
 class MaintenanceTaskSerializer(serializers.ModelSerializer):
@@ -1035,7 +1069,6 @@ class MaintenanceItemSerializer(serializers.ModelSerializer):
             "asset_tag",
             "title",
             "description",
-            "instructions",
             "estimated_time_minutes",
             "estimated_cost",
             "interval_days",

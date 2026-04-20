@@ -1532,10 +1532,6 @@ class MaintenanceItem(models.Model):
         blank=True,
         help_text="Detailed description of why this maintenance is needed",
     )
-    instructions = models.TextField(
-        blank=True,
-        help_text="Step-by-step instructions for performing the maintenance",
-    )
     estimated_time_minutes = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -1628,7 +1624,25 @@ class MaintenanceMaterial(models.Model):
         related_name="materials",
         help_text="The maintenance task that requires this material",
     )
-    name = models.CharField(max_length=200, help_text="Name of the material or supply")
+    inventory_item = models.ForeignKey(
+        "InventoryItem",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="maintenance_material_usages",
+        help_text=(
+            "The tracked inventory item used for this material. "
+            "Links maintenance to stock so we can verify supplies are on hand."
+        ),
+    )
+    name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text=(
+            "Display name for the material. Falls back to inventory_item.name when blank. "
+            "Kept for legacy rows; new rows should use inventory_item."
+        ),
+    )
     quantity = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -1653,7 +1667,34 @@ class MaintenanceMaterial(models.Model):
         ordering = ["name"]
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.quantity} {self.unit})"
+        return f"{self.display_name} ({self.quantity} {self.unit})"
+
+    @property
+    def display_name(self) -> str:
+        """Resolve the best display name — prefer linked inventory item."""
+        if self.inventory_item_id and self.inventory_item:
+            return self.inventory_item.name
+        return self.name
+
+    @property
+    def has_pending_reorder(self) -> bool:
+        """True if the linked inventory item has an active reorder request."""
+        if self.inventory_item_id and self.inventory_item:
+            return self.inventory_item.has_pending_reorder()
+        return False
+
+    @property
+    def inventory_reorder_status(self) -> Optional[str]:
+        """Pass through the linked inventory item's reorder status, if any."""
+        if self.inventory_item_id and self.inventory_item:
+            return self.inventory_item.reorder_status
+        return None
+
+    @property
+    def inventory_current_stock(self) -> Optional[int]:
+        if self.inventory_item_id and self.inventory_item:
+            return self.inventory_item.current_stock
+        return None
 
     @property
     def total_estimated_cost(self) -> Decimal:
@@ -1833,8 +1874,28 @@ class WorkOrder(models.Model):
             models.Index(fields=["status", "-created_at"], name="wo_status_created_idx"),
         ]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._initial_status = self.status
+
     def __str__(self) -> str:
         return f"WO-{str(self.id)[:8].upper()} — {self.maintenance_item.title} ({self.get_status_display()})"
+
+    def save(self, *args, **kwargs):
+        from django.utils import timezone
+
+        became_complete = (
+            self.status == self.STATUS_COMPLETED and self._initial_status != self.STATUS_COMPLETED
+        )
+        if became_complete and not self.completed_at:
+            self.completed_at = timezone.now()
+        super().save(*args, **kwargs)
+        if became_complete:
+            item = self.maintenance_item
+            if not item.last_completed_at or item.last_completed_at < self.completed_at:
+                item.last_completed_at = self.completed_at
+                item.save(update_fields=["last_completed_at"])
+        self._initial_status = self.status
 
     @property
     def is_overdue(self) -> bool:

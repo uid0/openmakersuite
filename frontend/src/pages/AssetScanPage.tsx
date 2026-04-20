@@ -353,24 +353,25 @@ const AssetScanPage: React.FC = () => {
                           <p style={{ color: '#444', marginBottom: '10px' }}>{task.description}</p>
                         )}
 
-                        {task.instructions && (
-                          <div style={{ marginBottom: '12px' }}>
-                            <strong>Instructions:</strong>
-                            <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: '8px 0 0', padding: '10px', backgroundColor: '#f8f8f8', borderRadius: '4px', fontSize: '0.9em' }}>
-                              {task.instructions}
-                            </pre>
-                          </div>
-                        )}
-
                         {task.materials.length > 0 && (
                           <div style={{ marginBottom: '12px' }}>
                             <strong>Materials needed:</strong>
                             <ul style={{ margin: '8px 0 0', paddingLeft: '20px' }}>
                               {task.materials.map((mat) => (
                                 <li key={mat.id} style={{ fontSize: '0.9em', marginBottom: '4px' }}>
-                                  {mat.name} — {mat.quantity}{mat.unit ? ` ${mat.unit}` : ''}
+                                  {mat.display_name || mat.name} — {mat.quantity}{mat.unit ? ` ${mat.unit}` : ''}
                                   {parseFloat(mat.estimated_cost_per_unit) > 0 && (
                                     <span style={{ color: '#666' }}> (~${mat.total_estimated_cost})</span>
+                                  )}
+                                  {mat.inventory_item && mat.inventory_current_stock !== null && (
+                                    <span style={{ color: '#666' }}>
+                                      {' '}• stock: {mat.inventory_current_stock}
+                                    </span>
+                                  )}
+                                  {mat.has_pending_reorder && (
+                                    <span style={{ color: '#c97a00', fontWeight: 600 }}>
+                                      {' '}⚠ reorder pending
+                                    </span>
                                   )}
                                   {mat.notes && <span style={{ color: '#888', display: 'block', paddingLeft: '12px' }}>{mat.notes}</span>}
                                 </li>

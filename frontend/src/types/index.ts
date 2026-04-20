@@ -346,7 +346,14 @@ export interface AssetProblem {
 export interface MaintenanceMaterial {
   id: string;
   maintenance_item: string;
+  inventory_item: string | null;
+  inventory_item_name: string | null;
+  inventory_item_sku: string | null;
+  inventory_current_stock: number | null;
+  inventory_reorder_status: string | null;
+  has_pending_reorder: boolean;
   name: string;
+  display_name: string;
   quantity: string;
   unit: string;
   estimated_cost_per_unit: string;
@@ -362,7 +369,6 @@ export interface MaintenanceItem {
   asset_tag: string;
   title: string;
   description: string;
-  instructions: string;
   estimated_time_minutes: number | null;
   estimated_cost: string;
   interval_days: number | null;

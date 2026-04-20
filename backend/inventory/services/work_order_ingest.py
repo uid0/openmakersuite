@@ -31,12 +31,7 @@ from django.utils import timezone
 
 from pypdf import PdfReader
 
-from ..models import (
-    MaintenanceLog,
-    WorkOrder,
-    WorkOrderMaterialUsage,
-    WorkOrderSubmission,
-)
+from ..models import MaintenanceLog, WorkOrder, WorkOrderMaterialUsage, WorkOrderSubmission
 
 logger = logging.getLogger(__name__)
 

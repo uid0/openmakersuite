@@ -27,10 +27,7 @@ from inventory.models import (
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
 )
-from inventory.services.work_order_ingest import (
-    apply_submission,
-    parse_work_order_pdf,
-)
+from inventory.services.work_order_ingest import apply_submission, parse_work_order_pdf
 from inventory.tests.factories import AssetFactory
 from inventory.utils.work_order_pdf import generate_work_order_pdf
 

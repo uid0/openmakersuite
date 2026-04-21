@@ -425,6 +425,77 @@ deploy-production:
 2. **Multi-stage builds** for smaller images
 3. **Pre-built base images** for common dependencies
 
+## Disaster Recovery
+
+The postgres data volume holds all inventory data. If that volume is lost
+(disk failure, accidental `docker volume rm`, ransomware), data cannot be
+recovered without a backup. Two scripts under `scripts/` cover the manual
+backup and restore paths; off-site replication and point-in-time recovery
+are not yet in scope.
+
+### Prerequisites
+
+The scripts shell into the `db` service via `docker compose exec`, so the
+compose stack must be running. `POSTGRES_USER` and `POSTGRES_DB` are read
+from the environment and default to the compose values (`makerspace` /
+`makerspace_inventory`). Override them if you point the scripts at a
+non-default deployment.
+
+### Taking a backup
+
+```bash
+./scripts/backup-db.sh
+```
+
+Writes a gzipped `pg_dump` to `./db-backups/backup-YYYYMMDD-HHMMSS.sql.gz`
+(override the directory with `BACKUP_DIR`). The script also prunes any
+`backup-*.sql.gz` older than 30 days in the same directory.
+
+Verify a backup is well-formed without decompressing it fully:
+
+```bash
+gunzip -t ./db-backups/backup-20260421-020000.sql.gz
+```
+
+### Nightly backups via cron
+
+Suggested crontab entry for a host running the stack out of `/opt/oms`:
+
+```
+0 2 * * * cd /opt/oms && ./scripts/backup-db.sh >> ./db-backups/backup.log 2>&1
+```
+
+### Restoring from a backup
+
+**Restoring causes downtime.** It drops the database, recreates it, and
+replays the dump — active connections will error out. Schedule a window
+and stop the backend before running it.
+
+```bash
+./scripts/restore-db.sh ./db-backups/backup-20260421-020000.sql.gz
+```
+
+The script prompts for literal `YES` before dropping anything. Any other
+input aborts without touching the database.
+
+### Retention
+
+Local retention is 30 days, enforced by `backup-db.sh` on every run. Moving
+archives off-box (S3, B2, etc.) and point-in-time recovery via WAL
+archiving are tracked as follow-up work.
+
+### Verifying a restore
+
+After restoring, sanity-check that row counts match the source:
+
+```bash
+docker compose exec db psql -U makerspace -d makerspace_inventory \
+  -c "SELECT count(*) FROM inventory_item;"
+```
+
+Compare against the same query run on the source database before the
+backup was taken.
+
 ## Maintenance
 
 ### Weekly Tasks

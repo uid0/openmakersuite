@@ -9,13 +9,7 @@ from django.urls import include, path
 
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from auth_views import (
-    create_test_membership,
-    login_user,
-    logout_user,
-    refresh_token,
-    register_user,
-)
+from auth_views import create_test_membership, login_user, logout_user, refresh_token, register_user
 
 urlpatterns = [
     path("admin/", admin.site.urls),

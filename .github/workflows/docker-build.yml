@@ -197,6 +197,66 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  upload-sourcemaps:
+    name: 📤 Upload Frontend Source Maps to Sentry
+    runs-on: ubuntu-latest
+    needs: [determine-tags, build-frontend]
+    if: |
+      needs.determine-tags.outputs.should_build == 'true' &&
+      (github.ref == 'refs/heads/main' ||
+       (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main'))
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Get git hash
+        id: git
+        run: |
+          GIT_HASH=$(git rev-parse --short HEAD)
+          echo "hash=$GIT_HASH" >> $GITHUB_OUTPUT
+          echo "🔍 Git hash: $GIT_HASH"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend (with source maps)
+        working-directory: frontend
+        env:
+          REACT_APP_API_URL: /api
+          REACT_APP_SENTRY_DSN: ${{ secrets.REACT_APP_SENTRY_DSN }}
+          REACT_APP_SENTRY_ENVIRONMENT: production
+          REACT_APP_GIT_HASH: ${{ steps.git.outputs.hash }}
+          REACT_APP_GITHUB_URL: https://github.com/${{ github.repository }}
+          GENERATE_SOURCEMAP: "true"
+        run: npm run build
+
+      - name: Upload source maps to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          GIT_HASH: ${{ steps.git.outputs.hash }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ] || [ -z "$SENTRY_ORG" ] || [ -z "$SENTRY_PROJECT" ]; then
+            echo "⚠️  Sentry secrets not configured (SENTRY_AUTH_TOKEN / SENTRY_ORG / SENTRY_PROJECT) — skipping source map upload."
+            exit 0
+          fi
+          npm install -g @sentry/cli
+          sentry-cli releases new "$GIT_HASH"
+          sentry-cli releases files "$GIT_HASH" upload-sourcemaps ./frontend/build/static/js --url-prefix '~/static/js' --rewrite
+          sentry-cli releases finalize "$GIT_HASH"
+          echo "✅ Source maps uploaded for release $GIT_HASH"
+
   build-complete:
     name: ✅ Build Complete
     runs-on: ubuntu-latest

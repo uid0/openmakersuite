@@ -1813,6 +1813,15 @@ class WorkOrder(models.Model):
         help_text="When this work order was marked complete",
     )
     notes = models.TextField(blank=True, help_text="Notes about this work order")
+    completed_scan = models.FileField(
+        upload_to="work_orders/scans/%Y/%m/",
+        null=True,
+        blank=True,
+        help_text=(
+            "Completed work order PDF (attached when a paper form is scanned/emailed in "
+            "via the Postmark inbound webhook)."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1980,6 +1989,72 @@ class WorkOrderPhoto(models.Model):
 
     def __str__(self) -> str:
         return f"Photo for WO {self.work_order.short_id} ({self.uploaded_at.date()})"
+
+
+class WorkOrderSubmission(models.Model):
+    """
+    An inbound, emailed copy of a completed work order PDF.
+
+    Created when Postmark delivers an email with a PDF attachment to our inbound
+    webhook. The PDF is parsed for its embedded Work Order ID and AcroForm
+    checkbox values; on success, the corresponding WorkOrderTaskCompletion rows
+    are marked complete and the PDF is attached to the WorkOrder's maintenance
+    history.
+    """
+
+    STATUS_RECEIVED = "received"
+    STATUS_APPLIED = "applied"
+    STATUS_FAILED = "failed"
+
+    STATUS_CHOICES = [
+        (STATUS_RECEIVED, "Received"),
+        (STATUS_APPLIED, "Applied"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submissions",
+        help_text="Resolved work order (null until the PDF has been parsed)",
+    )
+    received_at = models.DateTimeField(auto_now_add=True)
+    from_email = models.EmailField(blank=True)
+    subject = models.CharField(max_length=500, blank=True)
+    attachment = models.FileField(
+        upload_to="work_orders/submissions/%Y/%m/",
+        help_text="The raw PDF attachment as received from the email",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_RECEIVED,
+    )
+    parse_error = models.TextField(blank=True)
+    parsed_fields = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Snapshot of checkbox values extracted from the PDF",
+    )
+    postmark_message_id = models.CharField(
+        max_length=200,
+        blank=True,
+        db_index=True,
+        help_text="Postmark MessageID header; used for idempotency",
+    )
+
+    class Meta:
+        ordering = ["-received_at"]
+        indexes = [
+            models.Index(fields=["status", "-received_at"], name="wos_status_received_idx"),
+        ]
+
+    def __str__(self) -> str:
+        wo = self.work_order.short_id if self.work_order else "unresolved"
+        return f"WorkOrderSubmission({wo}) from {self.from_email or 'unknown'} [{self.status}]"
 
 
 class Fixture(models.Model):

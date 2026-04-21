@@ -18,6 +18,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
+    Flowable,
     HRFlowable,
     Image,
     Paragraph,
@@ -29,6 +30,37 @@ from reportlab.platypus import (
 
 if TYPE_CHECKING:
     from inventory.models import WorkOrder
+
+
+class AcroCheckbox(Flowable):
+    """
+    A PDF AcroForm checkbox rendered as a platypus flowable.
+
+    Registers an interactive checkbox field on the PDF so that the filled-in
+    value can be read back out of the saved PDF via pypdf. The field name is
+    used to route the value back to a specific record on ingest.
+    """
+
+    def __init__(self, name: str, size: float = 10.0):
+        super().__init__()
+        self.name = name
+        self.size = size
+        self.width = size
+        self.height = size
+
+    def draw(self) -> None:
+        self.canv.acroForm.checkbox(
+            name=self.name,
+            x=0,
+            y=0,
+            size=self.size,
+            borderWidth=0.75,
+            borderColor=colors.black,
+            fillColor=colors.white,
+            textColor=colors.black,
+            forceBorder=True,
+            tooltip=self.name,
+        )
 
 
 def _make_qr_image(url: str, size_inches: float = 1.5) -> Image:
@@ -215,25 +247,40 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#cccccc")))
 
     # ── Materials checklist ───────────────────────────────────────────────────
-    materials = list(item.materials.all())
-    if materials:
+    # Prefer per-WorkOrder material-usage rows when present (they carry their
+    # own UUIDs we can map back on ingest); fall back to the MaintenanceItem's
+    # material spec for work orders created before usage rows were introduced.
+    material_usage_rows = list(work_order.material_usage.select_related("material").all())
+    if material_usage_rows:
+        material_checklist = [
+            (f"material_{mu.id}", mu.material_name, mu.quantity_planned, mu.unit, "")
+            for mu in material_usage_rows
+        ]
+    else:
+        material_checklist = [
+            (f"materialspec_{mat.id}", mat.name, mat.quantity, mat.unit, mat.notes or "")
+            for mat in item.materials.all()
+        ]
+
+    if material_checklist:
         story.append(Paragraph("Materials Required", subheading_style))
         mat_header = [
-            Paragraph("☐", label_style),
+            Paragraph("✓", label_style),
             Paragraph("Material", label_style),
             Paragraph("Qty", label_style),
             Paragraph("Unit", label_style),
             Paragraph("Notes", label_style),
         ]
         mat_rows = [mat_header]
-        for mat in materials:
+        for field_name, name, qty, unit, notes in material_checklist:
+            qty_str = str(qty).rstrip("0").rstrip(".") if qty is not None else "—"
             mat_rows.append(
                 [
-                    "☐",
-                    Paragraph(mat.name, normal_style),
-                    str(mat.quantity).rstrip("0").rstrip("."),
-                    mat.unit or "—",
-                    Paragraph(mat.notes or "", small_style),
+                    AcroCheckbox(name=field_name),
+                    Paragraph(name, normal_style),
+                    qty_str,
+                    unit or "—",
+                    Paragraph(notes, small_style),
                 ]
             )
         mat_table = Table(
@@ -262,7 +309,7 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
     if task_completions:
         story.append(Paragraph("Task Steps", subheading_style))
         task_header = [
-            Paragraph("☐", label_style),
+            Paragraph("✓", label_style),
             Paragraph("#", label_style),
             Paragraph("Step", label_style),
             Paragraph("Req.", label_style),
@@ -272,7 +319,7 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
             req_marker = "✱" if tc.is_required else ""
             task_rows.append(
                 [
-                    "☐",
+                    AcroCheckbox(name=f"task_{tc.id}"),
                     str(i),
                     Paragraph(tc.task_title, normal_style),
                     req_marker,

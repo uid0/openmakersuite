@@ -17,6 +17,7 @@ qrcode[pil]==7.4.2
 reportlab==4.2.0
 Pillow==12.1.1
 pyzbar==0.1.9  # Optional: for QR code validation (requires system zbar library)
+pypdf==5.1.0   # PDF text/form extraction for inbound work-order ingestion
 
 # Authentication
 djangorestframework-simplejwt==5.5.1

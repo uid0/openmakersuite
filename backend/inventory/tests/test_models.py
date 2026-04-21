@@ -15,6 +15,8 @@ from inventory.tests.factories import (
     UsageLogFactory,
 )
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestSupplierModel:

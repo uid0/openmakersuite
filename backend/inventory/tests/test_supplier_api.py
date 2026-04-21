@@ -12,6 +12,8 @@ from rest_framework import status
 from inventory.models import Supplier
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.integration
 class TestSupplierAPI:

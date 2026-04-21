@@ -74,3 +74,9 @@ frontend/coverage/**
 .DS_Store
 Thumbs.db
 .devcontainer/devcontainer.json
+
+# Gas Town / Polecat runtime files
+.runtime/
+.claude/
+CLAUDE.md
+.beads/redirect

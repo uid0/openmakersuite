@@ -20,6 +20,15 @@ const SIGDashboard: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [reorderRequests, setReorderRequests] = useState<ReorderRequest[]>([]);
   const [members, setMembers] = useState<any[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newSIGName, setNewSIGName] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const isStaff = typeof window !== 'undefined' && (
+    localStorage.getItem('is_staff') === 'true' ||
+    localStorage.getItem('is_superuser') === 'true'
+  );
 
   useEffect(() => {
     loadSIGs();
@@ -45,6 +54,42 @@ const SIGDashboard: React.FC = () => {
       console.error('Error loading SIGs:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openCreateModal = () => {
+    setNewSIGName('');
+    setCreateError(null);
+    setShowCreateModal(true);
+  };
+
+  const closeCreateModal = () => {
+    setShowCreateModal(false);
+    setNewSIGName('');
+    setCreateError(null);
+  };
+
+  const handleCreateSIG = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newSIGName.trim();
+    if (!name) {
+      setCreateError('SIG name is required.');
+      return;
+    }
+    try {
+      setCreating(true);
+      setCreateError(null);
+      await sigAPI.createSIG({ name });
+      closeCreateModal();
+      await loadSIGs();
+    } catch (err: any) {
+      const detail =
+        err?.response?.data?.name?.[0] ||
+        err?.response?.data?.detail ||
+        'Failed to create SIG.';
+      setCreateError(detail);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -80,11 +125,55 @@ const SIGDashboard: React.FC = () => {
     return <div className="sig-dashboard-loading">Loading SIGs...</div>;
   }
 
+  const createModal = showCreateModal && (
+    <div className="sig-create-modal">
+      <div className="modal-content">
+        <div className="modal-header">
+          <h2>Create SIG</h2>
+          <button onClick={closeCreateModal} className="close-btn" aria-label="Close">
+            ✗
+          </button>
+        </div>
+        <form onSubmit={handleCreateSIG} className="modal-body">
+          <label htmlFor="new-sig-name">Name</label>
+          <input
+            id="new-sig-name"
+            type="text"
+            value={newSIGName}
+            onChange={(e) => setNewSIGName(e.target.value)}
+            placeholder="SIG name"
+            autoFocus
+            disabled={creating}
+          />
+          {createError && <p className="error-message" role="alert">{createError}</p>}
+          <div className="modal-actions">
+            <button type="button" onClick={closeCreateModal} disabled={creating}>
+              Cancel
+            </button>
+            <button type="submit" disabled={creating || !newSIGName.trim()}>
+              {creating ? 'Creating…' : 'Create'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+
   if (sigs.length === 0) {
     return (
       <div className="sig-dashboard-empty">
         <h1>SIG Dashboard</h1>
-        <p>You are not an admin of any SIGs.</p>
+        {isStaff ? (
+          <>
+            <p>No SIGs exist yet.</p>
+            <button className="create-sig-btn" onClick={openCreateModal}>
+              Create SIG
+            </button>
+          </>
+        ) : (
+          <p>You are not an admin of any SIGs.</p>
+        )}
+        {createModal}
       </div>
     );
   }
@@ -108,6 +197,11 @@ const SIGDashboard: React.FC = () => {
               </option>
             ))}
           </select>
+        )}
+        {isStaff && (
+          <button className="create-sig-btn" onClick={openCreateModal}>
+            Create SIG
+          </button>
         )}
       </div>
 
@@ -254,6 +348,7 @@ const SIGDashboard: React.FC = () => {
           </div>
         </>
       )}
+      {createModal}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 /**
  * Unit tests for SIG Dashboard component
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import SIGDashboard from '../pages/SIGDashboard';
 import * as sigAPI from '../services/api';
@@ -12,6 +12,7 @@ jest.mock('../services/api', () => ({
     listMySIGs: jest.fn(),
     getSIGMembers: jest.fn(),
     getSIGDetails: jest.fn(),
+    createSIG: jest.fn(),
   },
   assetsAPI: {
     listAssets: jest.fn(),
@@ -47,6 +48,7 @@ const MockedSIGDashboard = () => (
 describe('SIGDashboard', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    localStorage.clear();
   });
 
   it('should show loading state initially', () => {
@@ -128,6 +130,110 @@ describe('SIGDashboard', () => {
     expect(screen.getByText('Members')).toBeInTheDocument();
     expect(screen.getByText('Assets')).toBeInTheDocument();
     expect(screen.getByText('Inventory Items')).toBeInTheDocument();
+  });
+
+  it('should hide Create SIG button for non-staff users', async () => {
+    (sigAPI.sigAPI.listMySIGs as jest.Mock).mockResolvedValue({
+      data: { results: mockSIGs },
+    });
+    (sigAPI.assetsAPI.listAssets as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    (sigAPI.inventoryAPI.listItems as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    (sigAPI.reorderAPI.getSIGPendingRequests as jest.Mock).mockResolvedValue({ data: [] });
+    (sigAPI.sigAPI.getSIGMembers as jest.Mock).mockResolvedValue({ data: [] });
+
+    render(<MockedSIGDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByText('SIG Dashboard')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('button', { name: /Create SIG/i })).not.toBeInTheDocument();
+  });
+
+  it('should show Create SIG button for staff users and create a SIG', async () => {
+    localStorage.setItem('is_staff', 'true');
+
+    (sigAPI.sigAPI.listMySIGs as jest.Mock)
+      .mockResolvedValueOnce({ data: { results: mockSIGs } })
+      .mockResolvedValueOnce({
+        data: {
+          results: [
+            ...mockSIGs,
+            {
+              id: 2,
+              name: 'Created SIG',
+              member_count: 0,
+              asset_count: 0,
+              inventory_count: 0,
+              admins: [],
+              is_user_admin: false,
+            },
+          ],
+        },
+      });
+    (sigAPI.assetsAPI.listAssets as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    (sigAPI.inventoryAPI.listItems as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    (sigAPI.reorderAPI.getSIGPendingRequests as jest.Mock).mockResolvedValue({ data: [] });
+    (sigAPI.sigAPI.getSIGMembers as jest.Mock).mockResolvedValue({ data: [] });
+    (sigAPI.sigAPI.createSIG as jest.Mock).mockResolvedValue({
+      data: { id: 2, name: 'Created SIG' },
+    });
+
+    render(<MockedSIGDashboard />);
+
+    const createBtn = await screen.findByRole('button', { name: /Create SIG/i });
+    fireEvent.click(createBtn);
+
+    const nameInput = await screen.findByLabelText(/Name/i);
+    fireEvent.change(nameInput, { target: { value: 'Created SIG' } });
+
+    const submitBtn = screen.getByRole('button', { name: /^Create$/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(sigAPI.sigAPI.createSIG).toHaveBeenCalledWith({ name: 'Created SIG' });
+    });
+
+    await waitFor(() => {
+      expect(sigAPI.sigAPI.listMySIGs).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('should show Create SIG button on empty state for staff', async () => {
+    localStorage.setItem('is_superuser', 'true');
+    (sigAPI.sigAPI.listMySIGs as jest.Mock).mockResolvedValue({ data: { results: [] } });
+
+    render(<MockedSIGDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/No SIGs exist yet/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /Create SIG/i })).toBeInTheDocument();
+  });
+
+  it('should surface backend error when create fails', async () => {
+    localStorage.setItem('is_staff', 'true');
+    (sigAPI.sigAPI.listMySIGs as jest.Mock).mockResolvedValue({ data: { results: mockSIGs } });
+    (sigAPI.assetsAPI.listAssets as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    (sigAPI.inventoryAPI.listItems as jest.Mock).mockResolvedValue({ data: { results: [] } });
+    (sigAPI.reorderAPI.getSIGPendingRequests as jest.Mock).mockResolvedValue({ data: [] });
+    (sigAPI.sigAPI.getSIGMembers as jest.Mock).mockResolvedValue({ data: [] });
+    (sigAPI.sigAPI.createSIG as jest.Mock).mockRejectedValue({
+      response: { data: { name: ['A SIG with this name already exists.'] } },
+    });
+
+    render(<MockedSIGDashboard />);
+
+    const createBtn = await screen.findByRole('button', { name: /Create SIG/i });
+    fireEvent.click(createBtn);
+
+    const nameInput = await screen.findByLabelText(/Name/i);
+    fireEvent.change(nameInput, { target: { value: 'Duplicate' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/already exists/i);
+    });
   });
 
   it('should switch between tabs', async () => {

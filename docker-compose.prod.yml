@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:15-alpine
+    # Digest pinned from `docker pull postgres:15-alpine` on 2026-04-21 (resolved to postgres 15.17).
+    # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
+    image: postgres:15.17-alpine@sha256:1c52f5ad23db5d7648a63634444af76de48e63b860fccbe3e3a5458b2812eaed
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -10,7 +12,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-makerspace}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-makerspace}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-makerspace} -d ${POSTGRES_DB:-makerspace_inventory}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -19,7 +21,9 @@ services:
       - app-network
 
   redis:
-    image: redis:7-alpine
+    # Digest pinned from `docker pull redis:7-alpine` on 2026-04-21 (resolved to Redis 7.4.8).
+    # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
+    image: redis:7.4.8-alpine@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -55,6 +59,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/dashboard/health/', timeout=5)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
     networks:
       - app-network
@@ -94,6 +108,12 @@ services:
         - REACT_APP_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
     volumes:
       - frontend_build:/app/frontend
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/frontend/index.html"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
     networks:
       - app-network
@@ -143,8 +163,16 @@ services:
       - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-}
       - LETSENCRYPT_DOMAINS=${LETSENCRYPT_DOMAINS:-dallas.openmakersuite.net}
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     networks:
       - app-network

@@ -44,6 +44,9 @@ import SupplierListPage from './pages/SupplierListPage';
 import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
+import KioskDisplayPage from './pages/KioskDisplayPage';
+import ScreenEditPage from './pages/ScreenEditPage';
+import ScreensListPage from './pages/ScreensListPage';
 import TVDashboard from './pages/TVDashboard';
 import UserProfilePage from './pages/UserProfilePage';
 import WebhookDetailPage from './pages/WebhookDetailPage';
@@ -163,6 +166,9 @@ function AppContent() {
           {/* Facilities Workspace */}
           <Route path="/facilities/tv-dashboard" element={<TVDashboard />} />
           <Route path="/facilities/tv-dashboard/:location" element={<TVDashboard />} />
+          <Route path="/facilities/screens" element={<WorkspaceLayout><ScreensListPage /></WorkspaceLayout>} />
+          <Route path="/facilities/screens/:slug" element={<WorkspaceLayout><ScreenEditPage /></WorkspaceLayout>} />
+          <Route path="/kiosk/:slug" element={<KioskDisplayPage />} />
           <Route path="/facilities/logistics" element={<LogisticsDashboard />} />
 
           {/* Preventive Maintenance */}

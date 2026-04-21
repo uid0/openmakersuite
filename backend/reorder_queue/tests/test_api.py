@@ -18,6 +18,8 @@ from reorder_queue.tests.factories import ReorderRequestFactory
 
 User = get_user_model()
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.integration
 class TestReorderRequestAPI:

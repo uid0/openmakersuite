@@ -10,6 +10,8 @@ from inventory.tasks import generate_index_card, generate_qr_code, update_averag
 from inventory.tests.factories import InventoryItemFactory
 from reorder_queue.tests.factories import ReorderRequestFactory
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestInventoryTasks:

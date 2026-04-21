@@ -25,6 +25,24 @@ CI fails on `isort`, `black`, and `flake8` — all three must be green locally b
 pip install pre-commit && pre-commit install
 ```
 
+### Polecat rig setup (gt worktrees)
+
+Gas Town polecats run `pre-commit install` automatically via a setup hook in
+`.runtime/setup-hooks/` when a worktree is spawned. `.runtime/` is gitignored
+and gets rebuilt from scratch by `gt rig add oms` / rig rebuilds, so the
+tracked source of truth lives in `scripts/polecat-hooks/`.
+
+After `gt rig add oms` (or any rig rebuild), re-install the hook:
+
+```
+cp scripts/polecat-hooks/* .runtime/setup-hooks/
+chmod +x .runtime/setup-hooks/*
+```
+
+Source of truth is `scripts/polecat-hooks/`; `.runtime/` is rebuilt state. Do
+not edit the copies under `.runtime/setup-hooks/` — edit the tracked script
+and re-copy.
+
 ## "Tests pass" means more than pytest
 
 A green `pytest` run is necessary but not sufficient. Before declaring a task done:

@@ -10,11 +10,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from screens.models import Screen, ScreenContentBlock, ScreenHeartbeat, SystemMessage
-from screens.tests.factories import (
-    ScreenContentBlockFactory,
-    ScreenFactory,
-    SystemMessageFactory,
-)
+from screens.tests.factories import ScreenContentBlockFactory, ScreenFactory, SystemMessageFactory
 
 User = get_user_model()
 

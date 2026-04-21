@@ -40,9 +40,10 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "test": "react-scripts test",
-    "test:coverage": "react-scripts test --coverage --watchAll=false",
-    "test:ci": "CI=true react-scripts test --coverage --watchAll=false",
+    "test": "react-scripts test --maxWorkers=4",
+    "test:coverage": "react-scripts test --maxWorkers=4 --coverage --watchAll=false",
+    "test:ci": "CI=true react-scripts test --maxWorkers=4 --watchAll=false",
+    "test:ci:coverage": "CI=true react-scripts test --maxWorkers=4 --coverage --watchAll=false",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

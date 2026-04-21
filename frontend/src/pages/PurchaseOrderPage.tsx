@@ -58,6 +58,10 @@ const PurchaseOrderPage: React.FC = () => {
   const [voidingItemId, setVoidingItemId] = useState<string | null>(null);
   const [voidReason, setVoidReason] = useState<string>('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [markingDelivered, setMarkingDelivered] = useState(false);
+  const [deliveryDate, setDeliveryDate] = useState<string>('');
+  const [deliveryTracking, setDeliveryTracking] = useState<string>('');
+  const [deliveryCarrier, setDeliveryCarrier] = useState<string>('');
 
   const loadOrder = useCallback(async () => {
     try {
@@ -176,6 +180,47 @@ const PurchaseOrderPage: React.FC = () => {
     }
   };
 
+  const handleOpenMarkDelivered = () => {
+    const today = new Date().toISOString().split('T')[0];
+    setDeliveryDate(today);
+    setDeliveryTracking('');
+    setDeliveryCarrier('');
+    setMarkingDelivered(true);
+  };
+
+  const handleCancelMarkDelivered = () => {
+    setMarkingDelivered(false);
+    setDeliveryDate('');
+    setDeliveryTracking('');
+    setDeliveryCarrier('');
+  };
+
+  const handleSubmitMarkDelivered = async () => {
+    if (!deliveryDate) {
+      alert('Please select a delivery date');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await purchaseOrderAPI.markDelivered(orderId!, {
+        delivery_date: deliveryDate,
+        tracking_number: deliveryTracking || undefined,
+        carrier: deliveryCarrier || undefined,
+      });
+      await loadOrder();
+      handleCancelMarkDelivered();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to mark purchase order as delivered');
+      console.error('Error marking delivered:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const canMarkDelivered = (po: PurchaseOrder) =>
+    isAuthenticated && ['sent', 'confirmed', 'partially_received'].includes(po.status);
+
   const formatDate = (dateString: string | null) => {
     if (!dateString) return '—';
     const date = new Date(dateString);
@@ -226,8 +271,73 @@ const PurchaseOrderPage: React.FC = () => {
         </div>
         <div className="po-status">
           <span className={`status-badge status-${order.status}`}>{order.status_label}</span>
+          {canMarkDelivered(order) && !markingDelivered && (
+            <button
+              type="button"
+              className="btn-primary mark-delivered-button"
+              onClick={handleOpenMarkDelivered}
+            >
+              Mark as Delivered
+            </button>
+          )}
         </div>
       </header>
+
+      {markingDelivered && (
+        <section className="mark-delivered-panel" aria-label="Mark purchase order as delivered">
+          <h2>Mark as Delivered</h2>
+          <div className="mark-delivered-fields">
+            <label htmlFor="mark-delivered-date">
+              Delivery Date
+              <input
+                id="mark-delivered-date"
+                type="date"
+                value={deliveryDate}
+                onChange={(e) => setDeliveryDate(e.target.value)}
+                required
+              />
+            </label>
+            <label htmlFor="mark-delivered-tracking">
+              Tracking Number (optional)
+              <input
+                id="mark-delivered-tracking"
+                type="text"
+                value={deliveryTracking}
+                onChange={(e) => setDeliveryTracking(e.target.value)}
+                placeholder="e.g. 1Z999AA10123456784"
+              />
+            </label>
+            <label htmlFor="mark-delivered-carrier">
+              Carrier (optional)
+              <input
+                id="mark-delivered-carrier"
+                type="text"
+                value={deliveryCarrier}
+                onChange={(e) => setDeliveryCarrier(e.target.value)}
+                placeholder="e.g. UPS"
+              />
+            </label>
+          </div>
+          <div className="mark-delivered-actions">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleSubmitMarkDelivered}
+              disabled={saving || !deliveryDate}
+            >
+              {saving ? 'Saving…' : 'Confirm Delivery'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleCancelMarkDelivered}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
+      )}
 
       <div className="po-info">
         <div className="info-item">

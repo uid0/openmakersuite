@@ -682,6 +682,10 @@ export const purchaseOrderAPI = {
     api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
   voidLineItem: (orderId: string, itemId: string, reason?: string) =>
     api.post(`/reorders/purchase-orders/${orderId}/items/${itemId}/void/`, { reason }),
+  markDelivered: (
+    orderId: string,
+    data: { delivery_date: string; tracking_number?: string; carrier?: string; receipt_notes?: string },
+  ) => api.post<any>(`/reorders/purchase-orders/${orderId}/mark-delivered/`, data),
 };
 
 // Fixtures API

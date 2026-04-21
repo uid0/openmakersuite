@@ -637,3 +637,150 @@ class TestPurchaseOrderAPI:
         assert r1.status_code == status.HTTP_201_CREATED
         assert r2.status_code == status.HTTP_201_CREATED
         assert r1.data["po_number"] != r2.data["po_number"]
+
+
+@pytest.mark.integration
+class TestPurchaseOrderMarkDelivered:
+    """Tests for manual PurchaseOrder mark-delivered flow (AC-1, AC-2, AC-5)."""
+
+    def _create_sent_po(self, user, *, sent_at=None, quantity_ordered=5):
+        """Create a SENT purchase order with one item_supplier line."""
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(
+            supplier=supplier, quantity_per_package=1, average_lead_time=10
+        )
+        purchase_order = PurchaseOrder.objects.create(
+            po_number=f"PO-MD-{item_supplier.id}",
+            supplier=supplier,
+            status=PurchaseOrder.SENT,
+            created_by=user,
+            sent_by=user,
+            sent_at=sent_at or (timezone.now() - timedelta(days=7)),
+            estimated_total=Decimal("50.00"),
+        )
+        po_item = PurchaseOrderItem.objects.create(
+            purchase_order=purchase_order,
+            item_supplier=item_supplier,
+            quantity_ordered=quantity_ordered,
+            quantity_received=0,
+            unit_cost_ordered=Decimal("10.00"),
+            order_in_packages=quantity_ordered,
+        )
+        return purchase_order, po_item, item_supplier
+
+    def test_mark_delivered_creates_order_delivery(self, authenticated_client):
+        """AC-1: POST mark-delivered creates an OrderDelivery and returns 200."""
+        client, user = authenticated_client
+        purchase_order, po_item, _ = self._create_sent_po(user)
+
+        url = reverse("purchaseorder-mark-delivered", kwargs={"pk": purchase_order.pk})
+        delivery_date = (timezone.now() - timedelta(days=1)).date()
+        response = client.post(
+            url,
+            {
+                "delivery_date": delivery_date.isoformat(),
+                "tracking_number": "1ZABC",
+                "carrier": "UPS",
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+
+        purchase_order.refresh_from_db()
+        po_item.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.RECEIVED
+        assert po_item.quantity_received == po_item.quantity_ordered
+        assert purchase_order.deliveries.count() == 1
+
+        delivery = purchase_order.deliveries.first()
+        assert delivery.delivery_date.date() == delivery_date
+        assert delivery.tracking_number == "1ZABC"
+        assert delivery.carrier == "UPS"
+        assert delivery.received_by == user
+        assert delivery.items.count() == 1
+
+    def test_mark_delivered_populates_lead_time_analysis(self, authenticated_client):
+        """AC-2 + AC-5: Lead Time Analysis returns the (supplier, item) row."""
+        client, user = authenticated_client
+        sent_at = timezone.now() - timedelta(days=10)
+        purchase_order, po_item, item_supplier = self._create_sent_po(user, sent_at=sent_at)
+
+        delivery_date = sent_at.date() + timedelta(days=5)
+        mark_url = reverse("purchaseorder-mark-delivered", kwargs={"pk": purchase_order.pk})
+        resp = client.post(
+            mark_url,
+            {"delivery_date": delivery_date.isoformat()},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_200_OK
+
+        report_url = reverse("purchasing-reports-lead-time-analysis")
+        report_resp = client.get(
+            report_url,
+            {
+                "start_date": (delivery_date - timedelta(days=1)).isoformat(),
+                "end_date": (delivery_date + timedelta(days=1)).isoformat(),
+            },
+        )
+        assert report_resp.status_code == status.HTTP_200_OK
+
+        rows = [
+            row
+            for row in report_resp.data
+            if row["supplier_id"] == item_supplier.supplier.id
+            and row["item_name"] == item_supplier.item.name
+        ]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["total_orders"] == 1
+        # 5 calendar days between sent_at and delivery_date; business-day count
+        # ranges from 3 to 5 depending on weekday alignment. Just assert we got
+        # a positive lead time (i.e. the row wasn't empty/zero-filled).
+        assert row["avg_actual_lead_time"] > 0
+
+    def test_mark_delivered_missing_delivery_date_returns_400(self, authenticated_client):
+        """AC-5: missing delivery_date returns 400."""
+        client, user = authenticated_client
+        purchase_order, _, _ = self._create_sent_po(user)
+
+        url = reverse("purchaseorder-mark-delivered", kwargs={"pk": purchase_order.pk})
+        response = client.post(url, {}, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "delivery_date" in response.data
+
+    def test_mark_delivered_requires_authentication(self, api_client):
+        """AC-1: unauthenticated request must be rejected."""
+        user = User.objects.create_user(username="po-owner", password="pw12345678")
+        supplier = SupplierFactory()
+        purchase_order = PurchaseOrder.objects.create(
+            po_number="PO-MD-AUTH",
+            supplier=supplier,
+            status=PurchaseOrder.SENT,
+            created_by=user,
+            sent_at=timezone.now(),
+        )
+
+        url = reverse("purchaseorder-mark-delivered", kwargs={"pk": purchase_order.pk})
+        response = api_client.post(
+            url,
+            {"delivery_date": timezone.now().date().isoformat()},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_mark_delivered_rejects_non_sendable_status(self, authenticated_client):
+        """Draft/cancelled/received orders cannot be re-delivered."""
+        client, user = authenticated_client
+        purchase_order, _, _ = self._create_sent_po(user)
+        purchase_order.status = PurchaseOrder.DRAFT
+        purchase_order.save()
+
+        url = reverse("purchaseorder-mark-delivered", kwargs={"pk": purchase_order.pk})
+        response = client.post(
+            url,
+            {"delivery_date": timezone.now().date().isoformat()},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST

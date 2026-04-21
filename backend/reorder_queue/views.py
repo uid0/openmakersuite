@@ -28,6 +28,7 @@ from .models import (
 )
 from .serializers import (
     BarcodeReceiptSerializer,
+    MarkDeliveredSerializer,
     OrderDeliverySerializer,
     OrderMetricsSerializer,
     PurchaseOrderCreateSerializer,
@@ -39,6 +40,37 @@ from .serializers import (
     WebHookSerializer,
     WebHookTestResultSerializer,
 )
+
+
+def _create_lead_time_log(po_item, delivery_date):
+    """Create a LeadTimeLog entry when a PO item is fully received.
+
+    No-op if the PO was never sent or if the item has no item_supplier
+    (e.g. asset-only lines).
+    """
+    purchase_order = po_item.purchase_order
+
+    if not purchase_order.sent_at or not po_item.item_supplier:
+        return
+
+    order_date = purchase_order.sent_at
+    actual_delivery_date = delivery_date.date() if hasattr(delivery_date, "date") else delivery_date
+
+    estimated_lead_time = po_item.item_supplier.average_lead_time or 14
+    actual_lead_time = LeadTimeLog.calculate_business_days(order_date, actual_delivery_date)
+
+    LeadTimeLog.objects.create(
+        item_supplier=po_item.item_supplier,
+        purchase_order=purchase_order,
+        order_date=order_date,
+        expected_delivery_date=purchase_order.expected_delivery_date
+        or (order_date.date() + timedelta(days=estimated_lead_time)),
+        actual_delivery_date=actual_delivery_date,
+        estimated_lead_time_days=estimated_lead_time,
+        actual_lead_time_days=actual_lead_time,
+        quantity_ordered=po_item.quantity_ordered,
+        quantity_received=po_item.quantity_received,
+    )
 
 
 class ReorderRequestViewSet(viewsets.ModelViewSet):
@@ -864,6 +896,88 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["post"], url_path="mark-delivered")
+    def mark_delivered(self, request, pk=None):
+        """Manually mark a purchase order as delivered on a given date.
+
+        Creates an OrderDelivery covering all pending quantities, updates
+        inventory stock, advances the PO status, and records LeadTimeLog
+        entries so the Lead Time Analysis report has data even when barcode
+        scanning isn't used at receipt.
+        """
+        from datetime import datetime
+
+        purchase_order = self.get_object()
+
+        if purchase_order.status not in [
+            PurchaseOrder.SENT,
+            PurchaseOrder.CONFIRMED,
+            PurchaseOrder.PARTIALLY_RECEIVED,
+        ]:
+            return Response(
+                {
+                    "error": (
+                        "Purchase order must be sent, confirmed, or partially "
+                        "received to mark as delivered"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = MarkDeliveredSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        pending_items = [item for item in purchase_order.items.all() if not item.is_fully_received]
+        if not pending_items:
+            return Response(
+                {"error": "All items in this purchase order are already fully received"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        delivery_datetime = timezone.make_aware(
+            datetime.combine(data["delivery_date"], datetime.min.time())
+        )
+
+        with transaction.atomic():
+            delivery = OrderDelivery.objects.create(
+                purchase_order=purchase_order,
+                delivery_date=delivery_datetime,
+                tracking_number=data.get("tracking_number", ""),
+                carrier=data.get("carrier", ""),
+                received_by=request.user,
+                receipt_notes=data.get("receipt_notes", ""),
+                is_complete=True,
+            )
+
+            for po_item in pending_items:
+                remaining = po_item.quantity_pending
+                DeliveryItem.objects.create(
+                    delivery=delivery,
+                    purchase_order_item=po_item,
+                    quantity_received=remaining,
+                )
+
+                po_item.quantity_received += remaining
+                po_item.save()
+
+                inventory_item = po_item.item
+                if inventory_item is not None:
+                    inventory_item.current_stock += remaining
+                    inventory_item.save()
+
+                if po_item.is_fully_received:
+                    _create_lead_time_log(po_item, delivery.delivery_date)
+
+            if purchase_order.is_fully_received:
+                purchase_order.status = PurchaseOrder.RECEIVED
+            else:
+                purchase_order.status = PurchaseOrder.PARTIALLY_RECEIVED
+            purchase_order.save()
+
+        response_serializer = self.get_serializer(purchase_order)
+        return Response(response_serializer.data)
+
     @action(detail=True, methods=["patch"], url_path="items/(?P<item_id>[^/.]+)")
     def update_item(self, request, pk=None, item_id=None):
         """Update a specific line item in a purchase order."""
@@ -1209,32 +1323,7 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
 
     def _create_lead_time_log(self, po_item, delivery_date):
         """Create a lead time log entry when an item is fully received."""
-        purchase_order = po_item.purchase_order
-
-        if not purchase_order.sent_at:
-            return  # Can't calculate lead time without send date
-
-        # Calculate business days
-        order_date = purchase_order.sent_at
-        actual_delivery_date = (
-            delivery_date.date() if hasattr(delivery_date, "date") else delivery_date
-        )
-
-        estimated_lead_time = po_item.item_supplier.average_lead_time or 14
-        actual_lead_time = LeadTimeLog.calculate_business_days(order_date, actual_delivery_date)
-
-        LeadTimeLog.objects.create(
-            item_supplier=po_item.item_supplier,
-            purchase_order=purchase_order,
-            order_date=order_date,
-            expected_delivery_date=purchase_order.expected_delivery_date
-            or (order_date.date() + timedelta(days=estimated_lead_time)),
-            actual_delivery_date=actual_delivery_date,
-            estimated_lead_time_days=estimated_lead_time,
-            actual_lead_time_days=actual_lead_time,
-            quantity_ordered=po_item.quantity_ordered,
-            quantity_received=po_item.quantity_received,
-        )
+        _create_lead_time_log(po_item, delivery_date)
 
     @action(detail=False, methods=["get"])
     def pending_orders(self, request):

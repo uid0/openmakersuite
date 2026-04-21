@@ -9,7 +9,7 @@ from typing import Optional
 
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from inventory.models import InventoryItem, ItemSupplier, Supplier
@@ -297,10 +297,28 @@ class PurchaseOrder(models.Model):
         return self.po_number
 
     def save(self, *args, **kwargs) -> None:
-        """Ensure a PO number exists before saving."""
-        if not self.po_number:
-            self.auto_generate_po_number()
-        super().save(*args, **kwargs)
+        """Ensure a PO number exists before saving.
+
+        Concurrent creates can read the same "last" po_number and race to insert
+        duplicates; retry with a fresh number on uniqueness collisions.
+        """
+        if self.po_number and self.pk:
+            super().save(*args, **kwargs)
+            return
+
+        auto_assigned = not self.po_number
+        max_retries = 5
+        for attempt in range(max_retries):
+            if auto_assigned:
+                self.po_number = None
+                self.auto_generate_po_number()
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                if not auto_assigned or attempt == max_retries - 1:
+                    raise
 
 
 class PurchaseOrderItem(models.Model):

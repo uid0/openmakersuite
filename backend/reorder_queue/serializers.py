@@ -2,6 +2,7 @@
 Serializers for reorder queue API.
 """
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 
 from rest_framework import serializers
@@ -225,11 +226,33 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "po_number"]
 
     def validate_items(self, value):
-        """Validate that items list is not empty."""
+        """Validate items list: non-empty and no duplicate item_supplier_id/asset_id."""
         if not value or len(value) == 0:
             raise serializers.ValidationError(
                 "At least one item is required to create a purchase order."
             )
+
+        seen_item_suppliers = set()
+        seen_assets = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if "item_supplier_id" in item:
+                key = item["item_supplier_id"]
+                if key in seen_item_suppliers:
+                    raise serializers.ValidationError(
+                        f"Item supplier {key} appears more than once. "
+                        "Combine the quantities into a single line."
+                    )
+                seen_item_suppliers.add(key)
+            if "asset_id" in item:
+                key = item["asset_id"]
+                if key in seen_assets:
+                    raise serializers.ValidationError(
+                        f"Asset {key} appears more than once. "
+                        "Combine the quantities into a single line."
+                    )
+                seen_assets.add(key)
         return value
 
     def to_representation(self, instance):
@@ -257,14 +280,10 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
                 "User must be authenticated to create a purchase order."
             )
 
-        # Generate PO number before creating
-        temp_po = PurchaseOrder(created_by=user, **validated_data)
-        temp_po.auto_generate_po_number()
-
-        # Create the purchase order with PO number already set
+        # Create the purchase order; PurchaseOrder.save() auto-generates the
+        # po_number and retries on uniqueness collisions (concurrent-create race).
         purchase_order = PurchaseOrder.objects.create(
             created_by=user,
-            po_number=temp_po.po_number,
             **validated_data,
         )
 
@@ -324,7 +343,7 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
 
                     total_cost += line_item.estimated_cost
 
-                except ItemSupplier.DoesNotExist:
+                except (ItemSupplier.DoesNotExist, ValueError, TypeError):
                     raise serializers.ValidationError(
                         f"ItemSupplier with id {item_supplier_id} does not exist"
                     )
@@ -361,8 +380,8 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
 
                     total_cost += line_item.estimated_cost
 
-                except Asset.DoesNotExist:
-                    raise serializers.ValidationError(f"Asset with id {asset_id} does not exist")
+                except (Asset.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+                    raise serializers.ValidationError(f"Invalid asset id: {asset_id}")
 
             # Handle freeform line items
             elif "description" in item_data:

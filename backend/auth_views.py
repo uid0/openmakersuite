@@ -1,10 +1,16 @@
 """
 Custom authentication views for makerspace users.
+
+The login/register endpoints issue JWT tokens for API clients *and* establish a
+Django session, so a single sign-in authenticates the user across the REST API,
+the DRF browsable API, and the Django admin.
 """
 
 import re
 
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth import login as django_login
+from django.contrib.auth import logout as django_logout
 
 User = get_user_model()
 
@@ -14,6 +20,30 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from config.tokens import CustomRefreshToken
+
+
+def _tokens_for(user):
+    """Return (access, refresh) JWTs for the given user."""
+    refresh = CustomRefreshToken.for_user(user)
+    return str(refresh.access_token), str(refresh)
+
+
+def _issue_session_and_tokens(request, user):
+    """
+    Create a Django session for ``user`` and return a login payload that also
+    includes JWT tokens. A single call logs the user into the frontend (JWT),
+    the DRF browsable API (session), and the Django admin (session).
+    """
+    django_login(request, user)
+    access, refresh = _tokens_for(user)
+    return {
+        "access": access,
+        "refresh": refresh,
+        "username": user.username,
+        "email": user.email,
+        "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
+    }
 
 
 @api_view(["POST"])
@@ -52,23 +82,12 @@ def register_user(request):
         )
 
     try:
-        # Create the user
         user = User.objects.create_user(username=username, email=email, password=password)
         user.save()
 
-        # Generate tokens for immediate login
-        refresh = CustomRefreshToken.for_user(user)
-        access = refresh.access_token
-
-        return Response(
-            {
-                "detail": "User created successfully",
-                "username": username,
-                "access": str(access),
-                "refresh": str(refresh),
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        payload = _issue_session_and_tokens(request, user)
+        payload["detail"] = "User created successfully"
+        return Response(payload, status=status.HTTP_201_CREATED)
 
     except Exception as e:
         return Response(
@@ -81,7 +100,9 @@ def register_user(request):
 @permission_classes([AllowAny])
 def login_user(request):
     """
-    Login user and return JWT tokens.
+    Unified login: authenticate the user, create a Django session, and return
+    JWT tokens. The session cookie means the same credentials also grant access
+    to the Django admin and the DRF browsable API.
     """
     username = request.data.get("username", "").strip()
     password = request.data.get("password", "")
@@ -92,8 +113,7 @@ def login_user(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Authenticate user
-    user = authenticate(username=username, password=password)
+    user = authenticate(request, username=username, password=password)
 
     if user is None:
         return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
@@ -101,26 +121,25 @@ def login_user(request):
     if not user.is_active:
         return Response({"detail": "User account is disabled"}, status=status.HTTP_401_UNAUTHORIZED)
 
-    # Check if user can log in based on membership status or role
     if not user.can_login():
         return Response(
             {"detail": "User does not have an active membership or required role"},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    # Generate tokens
-    refresh = CustomRefreshToken.for_user(user)
-    access = refresh.access_token
+    return Response(_issue_session_and_tokens(request, user))
 
-    return Response(
-        {
-            "access": str(access),
-            "refresh": str(refresh),
-            "username": user.username,
-            "is_staff": user.is_staff,
-            "is_superuser": user.is_superuser,
-        }
-    )
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def logout_user(request):
+    """
+    Unified logout: destroy the Django session so the user is signed out of the
+    admin and the DRF browsable API. JWT tokens are client-held; the frontend
+    is expected to discard them.
+    """
+    django_logout(request)
+    return Response({"detail": "Logged out"}, status=status.HTTP_200_OK)
 
 
 @api_view(["POST"])

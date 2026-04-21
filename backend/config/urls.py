@@ -9,7 +9,7 @@ from django.urls import include, path
 
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from auth_views import create_test_membership, login_user, refresh_token, register_user
+from auth_views import create_test_membership, login_user, logout_user, refresh_token, register_user
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -23,6 +23,7 @@ urlpatterns = [
     # Custom auth endpoints
     path("api/auth/register/", register_user, name="register"),
     path("api/auth/login/", login_user, name="login"),
+    path("api/auth/logout/", logout_user, name="logout"),
     path("api/auth/refresh/", refresh_token, name="refresh"),
     path("api/auth/test-membership/", create_test_membership, name="test_membership"),
     # Passkey/WebAuthn endpoints

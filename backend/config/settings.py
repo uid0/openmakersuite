@@ -232,6 +232,21 @@ if DEVELOPMENT_MODE:
 
 FRONTEND_URL = config("FRONTEND_URL", default="http://192.168.1.36:3000")
 
+# Passkey / WebAuthn configuration
+# django-passkey-auth derives the Relying Party ID from request.get_host(). When
+# the site is served behind TLS, browsers will only surface the save-passkey
+# prompt if the RP ID matches the current host. PASSKEY_SITE_NAME is the
+# human-readable name shown to the user in the browser dialog.
+PASSKEY_SITE_NAME = config("PASSKEY_SITE_NAME", default="Makerspace Inventory")
+
+# Make session cookies safe to ship over the cross-origin pairing between the
+# SPA and the API. Defaults are conservative for local dev; production overrides
+# via env vars.
+SESSION_COOKIE_SAMESITE = config("SESSION_COOKIE_SAMESITE", default="Lax")
+SESSION_COOKIE_SECURE = config("SESSION_COOKIE_SECURE", default=not DEBUG, cast=bool)
+CSRF_COOKIE_SAMESITE = config("CSRF_COOKIE_SAMESITE", default="Lax")
+CSRF_COOKIE_SECURE = config("CSRF_COOKIE_SECURE", default=not DEBUG, cast=bool)
+
 # Postmark inbound webhook shared secret. The inbound work-order endpoint is
 # unauthenticated (Postmark does not ship a request signature), so this token
 # must match the `?token=` query param or the `X-Postmark-Webhook-Token` header

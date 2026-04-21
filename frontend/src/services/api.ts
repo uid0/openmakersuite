@@ -58,6 +58,9 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Send the Django session cookie alongside JWT so a single backend login
+  // authenticates the SPA, the DRF browsable API, and the admin at once.
+  withCredentials: true,
 });
 
 // Add auth token to requests if available
@@ -730,6 +733,9 @@ export const authAPI = {
 
   refresh: (refreshToken: string) =>
     api.post('/auth/refresh/', { refresh: refreshToken }),
+
+  logout: () =>
+    api.post('/auth/logout/'),
 };
 
 // User Profile API

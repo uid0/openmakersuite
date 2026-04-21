@@ -136,7 +136,9 @@ jobs:
             exit 1
           fi
           echo "🔍 Verifying package-lock.json is in sync with package.json..."
-          npm ci --dry-run || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
+          # --ignore-scripts skips postinstall (patch-package), which isn't on
+          # PATH before the real install. Lock sync doesn't need scripts.
+          npm ci --dry-run --ignore-scripts || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
           echo "✅ package-lock.json is in sync"
 
       - name: Install dependencies

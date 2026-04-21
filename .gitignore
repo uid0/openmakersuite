@@ -78,5 +78,7 @@ Thumbs.db
 # Gas Town / Polecat runtime files
 .runtime/
 .claude/
-CLAUDE.md
 .beads/redirect
+
+# Per-developer overrides (CLAUDE.md itself is committed — project conventions)
+CLAUDE.local.md

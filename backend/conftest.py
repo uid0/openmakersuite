@@ -105,8 +105,7 @@ def ensure_auth_user_groups_table(db):
             )
             table_exists = cursor.fetchone() is not None
             if not table_exists:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE auth_user_groups (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         user_id INTEGER NOT NULL,
@@ -117,22 +116,18 @@ def ensure_auth_user_groups_table(db):
                     );
                     CREATE INDEX auth_user_groups_user_id_idx ON auth_user_groups(user_id);
                     CREATE INDEX auth_user_groups_group_id_idx ON auth_user_groups(group_id);
-                    """
-                )
+                    """)
         elif connection.vendor == "postgresql":
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
                     WHERE table_schema = 'public'
                     AND table_name = 'auth_user_groups'
                 );
-                """
-            )
+                """)
             table_exists = cursor.fetchone()[0]
             if not table_exists:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE auth_user_groups (
                         id SERIAL PRIMARY KEY,
                         user_id INTEGER NOT NULL,
@@ -143,5 +138,4 @@ def ensure_auth_user_groups_table(db):
                     );
                     CREATE INDEX auth_user_groups_user_id_idx ON auth_user_groups(user_id);
                     CREATE INDEX auth_user_groups_group_id_idx ON auth_user_groups(group_id);
-                    """
-                )
+                    """)

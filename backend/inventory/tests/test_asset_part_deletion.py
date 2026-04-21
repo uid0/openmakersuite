@@ -198,8 +198,7 @@ class TestAssetPartDeletionWithAssetProblems:
 
         # Verify the constraint exists and is SET NULL
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT
                     tc.constraint_name,
                     rc.delete_rule
@@ -211,8 +210,7 @@ class TestAssetPartDeletionWithAssetProblems:
                 WHERE tc.table_name = 'inventory_assetproblem'
                     AND tc.constraint_type = 'FOREIGN KEY'
                     AND kcu.column_name = 'part_id'
-            """
-            )
+            """)
             result = cursor.fetchone()
 
             assert result is not None, "Foreign key constraint should exist"

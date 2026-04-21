@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     "donations",
     "search",
     "notifications",
+    "screens",
 ]
 
 MIDDLEWARE = [

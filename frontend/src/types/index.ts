@@ -946,3 +946,102 @@ export interface WebhookTestResult {
   response_body?: string | null;
   tested_at?: string | null;
 }
+
+// Interactive Screens / Kiosk Display
+export type ScreenBlockType =
+  | 'tool_status'
+  | 'asset_usage'
+  | 'custom_text'
+  | 'announcement'
+  | 'weather'
+  | 'traffic'
+  | 'member_count'
+  | 'board_meeting';
+
+export interface ScreenContentBlock {
+  id: string;
+  screen: string;
+  block_type: ScreenBlockType;
+  block_type_display?: string;
+  title: string;
+  body: string;
+  config: Record<string, unknown>;
+  order: number;
+  is_enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type SystemMessageLevel = 'info' | 'warning' | 'critical';
+
+export interface SystemMessage {
+  id: string;
+  title: string;
+  body: string;
+  level: SystemMessageLevel;
+  level_display?: string;
+  is_active: boolean;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  is_currently_visible?: boolean;
+}
+
+export interface Screen {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  location?: number | null;
+  location_name?: string;
+  sig?: number | null;
+  sig_name?: string;
+  is_active: boolean;
+  rotation_interval_seconds: number;
+  refresh_interval_seconds: number;
+  access_token: string;
+  is_online: boolean;
+  last_heartbeat_at?: string | null;
+  content_blocks: ScreenContentBlock[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ScreenStatusEntry {
+  id: string;
+  slug: string;
+  name: string;
+  is_active: boolean;
+  is_online: boolean;
+  last_heartbeat_at?: string | null;
+  sig_name?: string;
+  location_name?: string;
+  updated_at?: string;
+}
+
+export interface KioskPayload {
+  screen: {
+    id: string;
+    slug: string;
+    name: string;
+    description: string;
+    rotation_interval_seconds: number;
+    refresh_interval_seconds: number;
+  };
+  system_messages: Array<{
+    id: string;
+    title: string;
+    body: string;
+    level: SystemMessageLevel;
+  }>;
+  content_blocks: Array<{
+    id: string;
+    block_type: ScreenBlockType;
+    title: string;
+    body: string;
+    config: Record<string, unknown>;
+    order: number;
+  }>;
+  generated_at: string;
+}

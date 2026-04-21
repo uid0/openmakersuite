@@ -14,6 +14,8 @@ from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue.models import PurchaseOrder, ReorderRequest
 from reorder_queue.tests.factories import ReorderRequestFactory, UserFactory
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestReorderRequestModel:

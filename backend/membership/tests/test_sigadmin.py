@@ -17,6 +17,8 @@ from membership.utils import (
     is_sig_admin,
 )
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestSIGAdminModel:
@@ -125,7 +127,8 @@ class TestSIGPermissionUtils:
                 )
                 table_exists = cursor.fetchone() is not None
                 if not table_exists:
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         CREATE TABLE auth_user_groups (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             user_id INTEGER NOT NULL,
@@ -134,18 +137,22 @@ class TestSIGPermissionUtils:
                             FOREIGN KEY (user_id) REFERENCES auth_user(id),
                             FOREIGN KEY (group_id) REFERENCES auth_group(id)
                         );
-                        """)
+                        """
+                    )
             elif connection.vendor == "postgresql":
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables
                         WHERE table_schema = 'public'
                         AND table_name = 'auth_user_groups'
                     );
-                    """)
+                    """
+                )
                 table_exists = cursor.fetchone()[0]
                 if not table_exists:
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         CREATE TABLE auth_user_groups (
                             id SERIAL PRIMARY KEY,
                             user_id INTEGER NOT NULL,
@@ -156,7 +163,8 @@ class TestSIGPermissionUtils:
                         );
                         CREATE INDEX auth_user_groups_user_id_idx ON auth_user_groups(user_id);
                         CREATE INDEX auth_user_groups_group_id_idx ON auth_user_groups(group_id);
-                        """)
+                        """
+                    )
             # For other databases, assume table exists (migration should have created it)
 
         # Use through model directly to ensure migrations are applied

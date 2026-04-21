@@ -13,6 +13,8 @@ from customization.models import SiteSettings
 from inventory.services.qr_code_service import QRCodeService
 from inventory.tests.factories import AssetFactory, InventoryItemFactory, LocationFactory
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestQRCodeService:

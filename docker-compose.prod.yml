@@ -63,6 +63,8 @@ services:
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-dallas.openmakersuite.net}
       - CORS_ALLOWED_ORIGINS=https://${DOMAIN:-dallas.openmakersuite.net}
       - FRONTEND_URL=https://${DOMAIN:-dallas.openmakersuite.net}
+      - SENTRY_RELEASE=${GIT_HASH}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
     depends_on:
       db:
         condition: service_healthy
@@ -98,6 +100,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - SKIP_DB_MIGRATIONS=1
+      - SENTRY_RELEASE=${GIT_HASH}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
     depends_on:
       db:
         condition: service_healthy

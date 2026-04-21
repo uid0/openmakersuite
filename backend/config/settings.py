@@ -369,6 +369,7 @@ SENTRY_DSN = config(
     default="https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952",
 )
 SENTRY_ENVIRONMENT = config("SENTRY_ENVIRONMENT", default="development")
+SENTRY_RELEASE = config("SENTRY_RELEASE", default=None)
 
 if SENTRY_DSN:
     sentry_sdk.init(
@@ -380,6 +381,7 @@ if SENTRY_DSN:
         ],
         enable_logs=True,
         environment=SENTRY_ENVIRONMENT,
+        release=SENTRY_RELEASE,
         # Set traces_sample_rate to 1.0 to capture 100% of transactions for performance monitoring.
         # Adjust this value in production to reduce overhead
         traces_sample_rate=1.0 if DEBUG else 0.1,

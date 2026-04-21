@@ -1,10 +1,17 @@
 version: '3.8'
 
+x-logging: &default-logging
+  driver: 'json-file'
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   db:
     # Digest pinned from `docker pull postgres:15-alpine` on 2026-04-21 (resolved to postgres 15.17).
     # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
     image: postgres:15.17-alpine@sha256:1c52f5ad23db5d7648a63634444af76de48e63b860fccbe3e3a5458b2812eaed
+    logging: *default-logging
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -24,6 +31,7 @@ services:
     # Digest pinned from `docker pull redis:7-alpine` on 2026-04-21 (resolved to Redis 7.4.8).
     # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
     image: redis:7.4.8-alpine@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -37,6 +45,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
+    logging: *default-logging
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120
     volumes:
       - static_volume:/app/staticfiles
@@ -77,6 +86,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
+    logging: *default-logging
     command: celery -A config worker -l info
     volumes:
       - media_volume:/app/media
@@ -106,6 +116,7 @@ services:
         - REACT_APP_SENTRY_DSN=${REACT_APP_SENTRY_DSN}
         - REACT_APP_GIT_HASH=${GIT_HASH}
         - REACT_APP_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
+    logging: *default-logging
     volumes:
       - frontend_build:/app/frontend
     healthcheck:
@@ -122,6 +133,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    logging: *default-logging
     command: celery -A config flower --port=5555 --broker=redis://redis:6379/0 --broker_api=redis://redis:6379/0
     volumes:
       - ./backend:/app
@@ -147,6 +159,7 @@ services:
     build:
       context: ./nginx
       dockerfile: Dockerfile
+    logging: *default-logging
     ports:
       - "80:80"
       - "443:443"

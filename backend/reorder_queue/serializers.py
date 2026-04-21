@@ -519,6 +519,17 @@ class BarcodeReceiptSerializer(serializers.Serializer):
             raise serializers.ValidationError("Purchase order does not exist")
 
 
+class MarkDeliveredSerializer(serializers.Serializer):
+    """Serializer for manually marking a purchase order as delivered."""
+
+    delivery_date = serializers.DateField()
+    tracking_number = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, default=""
+    )
+    carrier = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    receipt_notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+
 # Lead Time and Analytics Serializers
 
 

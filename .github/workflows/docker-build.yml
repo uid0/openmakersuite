@@ -13,6 +13,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write

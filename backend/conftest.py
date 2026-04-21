@@ -59,13 +59,31 @@ def sample_image():
 def use_locmem_cache():
     """Route cache operations to local memory to avoid Redis during tests."""
     from django.conf import settings as django_settings
+    from django.core.signals import setting_changed
 
-    django_settings.CACHES = {
+    new_caches = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
             "LOCATION": "test-cache",
         }
     }
+    django_settings.CACHES = new_caches
+    # Fire setting_changed so Django resets cached cache-handler state
+    # (clear_cache_handlers in django.test.signals). Without this, any
+    # caches[...] access made before this fixture runs (e.g. at import
+    # time in a xdist worker) keeps a stale backend reference.
+    setting_changed.send(sender=None, setting="CACHES", value=new_caches, enter=True)
+
+
+@pytest.fixture(autouse=True)
+def clear_locmem_cache():
+    """Clear the locmem cache between tests so counters (rate limits,
+    throttles) don't bleed across tests under the session-scoped cache."""
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
 
 
 @pytest.fixture

@@ -118,6 +118,27 @@ class SIGSerializer(serializers.ModelSerializer):
         return SIGAdmin.is_sig_admin(request.user, obj)
 
 
+class SIGCreateSerializer(serializers.ModelSerializer):
+    """Writable serializer for creating/updating SIGs (Groups)."""
+
+    class Meta:
+        model = Group
+        fields = ["id", "name"]
+        read_only_fields = ["id"]
+
+    def validate_name(self, value):
+        """Ensure SIG name is non-empty and unique."""
+        name = (value or "").strip()
+        if not name:
+            raise serializers.ValidationError("SIG name is required.")
+        qs = Group.objects.filter(name=name)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A SIG with this name already exists.")
+        return name
+
+
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model (for member management)."""
 

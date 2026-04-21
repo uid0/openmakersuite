@@ -78,6 +78,98 @@ class TestSIGAPI:
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
+    def test_create_sig_as_staff(self, authenticated_client):
+        """Staff users can create a new SIG via POST /membership/sigs/."""
+        client, user = authenticated_client
+        user.is_staff = True
+        user.save()
+
+        url = reverse("sig-list")
+        response = client.post(url, {"name": "New SIG"})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["name"] == "New SIG"
+        assert Group.objects.filter(name="New SIG").exists()
+
+    def test_create_sig_as_superuser(self, authenticated_client):
+        """Superusers can create a new SIG."""
+        client, user = authenticated_client
+        user.is_superuser = True
+        user.save()
+
+        url = reverse("sig-list")
+        response = client.post(url, {"name": "Super SIG"})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Group.objects.filter(name="Super SIG").exists()
+
+    def test_create_sig_as_non_staff_forbidden(self, authenticated_client):
+        """Non-staff users cannot create SIGs (403)."""
+        client, _user = authenticated_client
+
+        url = reverse("sig-list")
+        response = client.post(url, {"name": "Nope SIG"})
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert not Group.objects.filter(name="Nope SIG").exists()
+
+    def test_create_sig_requires_auth(self, api_client):
+        """Unauthenticated requests are rejected."""
+        url = reverse("sig-list")
+        response = api_client.post(url, {"name": "Anon SIG"})
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert not Group.objects.filter(name="Anon SIG").exists()
+
+    def test_create_sig_rejects_blank_name(self, authenticated_client):
+        """Blank/missing names return 400."""
+        client, user = authenticated_client
+        user.is_staff = True
+        user.save()
+
+        url = reverse("sig-list")
+        response = client.post(url, {"name": "   "})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_create_sig_rejects_duplicate_name(self, authenticated_client):
+        """Duplicate SIG names return 400."""
+        client, user = authenticated_client
+        user.is_staff = True
+        user.save()
+        Group.objects.create(name="Existing SIG")
+
+        url = reverse("sig-list")
+        response = client.post(url, {"name": "Existing SIG"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_update_sig_as_staff(self, authenticated_client):
+        """Staff can rename a SIG via PATCH."""
+        client, user = authenticated_client
+        user.is_staff = True
+        user.save()
+        group = Group.objects.create(name="Old Name")
+
+        url = reverse("sig-detail", kwargs={"pk": group.pk})
+        response = client.patch(url, {"name": "New Name"})
+
+        assert response.status_code == status.HTTP_200_OK
+        group.refresh_from_db()
+        assert group.name == "New Name"
+
+    def test_delete_sig_as_non_staff_forbidden(self, authenticated_client):
+        """Non-staff SIG admins cannot delete their SIG."""
+        client, user = authenticated_client
+        group = Group.objects.create(name="My SIG")
+        SIGAdmin.objects.create(user=user, group=group, is_active=True)
+
+        url = reverse("sig-detail", kwargs={"pk": group.pk})
+        response = client.delete(url)
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert Group.objects.filter(pk=group.pk).exists()
+
 
 @pytest.mark.integration
 class TestSIGMemberAPI:

@@ -7,6 +7,7 @@ from django.contrib.auth.models import Group
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -14,6 +15,7 @@ from .models import SIGAdmin, User, UserRegistrationToken
 from .serializers import (
     ChangePasswordSerializer,
     SIGAdminSerializer,
+    SIGCreateSerializer,
     SIGMemberSerializer,
     SIGSerializer,
     TokenValidationSerializer,
@@ -24,11 +26,12 @@ from .serializers import (
 from .utils import get_user_managed_sigs, is_sig_admin
 
 
-class SIGViewSet(viewsets.ReadOnlyModelViewSet):
+class SIGViewSet(viewsets.ModelViewSet):
     """
     ViewSet for SIG (Special Interest Group) operations.
 
-    Allows SIG admins to view their SIGs and get details.
+    Read access is open to SIG admins (for their SIGs) and staff (all SIGs).
+    Create/update/delete is restricted to staff and superusers.
     """
 
     queryset = Group.objects.all()
@@ -46,11 +49,37 @@ class SIGViewSet(viewsets.ReadOnlyModelViewSet):
         # Regular users see only SIGs they administer
         return get_user_managed_sigs(user)
 
+    def get_serializer_class(self):
+        """Use a writable serializer for create/update actions."""
+        if self.action in ("create", "update", "partial_update"):
+            return SIGCreateSerializer
+        return SIGSerializer
+
     def get_serializer_context(self):
         """Add request to serializer context."""
         context = super().get_serializer_context()
         context["request"] = self.request
         return context
+
+    def _require_staff(self):
+        user = self.request.user
+        if not (user.is_authenticated and (user.is_superuser or user.is_staff)):
+            raise PermissionDenied("Only staff users can manage SIGs.")
+
+    def perform_create(self, serializer):
+        """Only staff/superusers can create SIGs."""
+        self._require_staff()
+        serializer.save()
+
+    def perform_update(self, serializer):
+        """Only staff/superusers can update SIGs."""
+        self._require_staff()
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        """Only staff/superusers can delete SIGs."""
+        self._require_staff()
+        instance.delete()
 
     @action(detail=True, methods=["get"])
     def details(self, request, pk=None):

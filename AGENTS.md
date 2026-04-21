@@ -1,5 +1,14 @@
 # Project Instructions
 
+## Workflow Roles (Codex vs Claude Code)
+
+Two coding agents work this repo with split responsibilities:
+
+- **Codex** — acceptance criteria author. Given a feature request, writes `.criteria/<slug>.md` in the format described in `.criteria/README.md`. Does not modify files under `backend/`, `frontend/`, migrations, or tests.
+- **Claude Code** — implementer. Reads `.criteria/*.md` and writes code + tests to satisfy every AC. See `CLAUDE.md` for the full role spec and project conventions.
+
+The rest of this file applies to both agents.
+
 ## Code Style
 
 - There is a .devcontainer environment for editing and running this application in development mode.

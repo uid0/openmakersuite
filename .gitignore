@@ -74,3 +74,11 @@ frontend/coverage/**
 .DS_Store
 Thumbs.db
 .devcontainer/devcontainer.json
+
+# Gas Town / Polecat runtime files
+.runtime/
+.claude/
+.beads/redirect
+
+# Per-developer overrides (CLAUDE.md itself is committed — project conventions)
+CLAUDE.local.md

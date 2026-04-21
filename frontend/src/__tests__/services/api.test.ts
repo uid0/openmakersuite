@@ -388,6 +388,22 @@ describe('API Service', () => {
 
       expect(response.data.access).toBe('new-access-token');
     });
+
+    test('logout posts to the unified logout endpoint', async () => {
+      mock.onPost('/auth/logout/').reply(200, { detail: 'Logged out' });
+
+      const response = await authAPI.logout();
+
+      expect(response.status).toBe(200);
+      expect(response.data.detail).toBe('Logged out');
+    });
+
+    test('requests include credentials so the session cookie rides along', () => {
+      // withCredentials must be true on the shared axios instance so that the
+      // Django session cookie set by /api/auth/login/ is sent on subsequent
+      // requests — this is how one sign-in covers admin + DRF browsable API.
+      expect(api.defaults.withCredentials).toBe(true);
+    });
   });
 
   describe('Authentication Interceptor', () => {

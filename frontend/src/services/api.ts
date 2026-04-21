@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -58,6 +58,9 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Send the Django session cookie alongside JWT so a single backend login
+  // authenticates the SPA, the DRF browsable API, and the admin at once.
+  withCredentials: true,
 });
 
 // Add auth token to requests if available
@@ -730,6 +733,9 @@ export const authAPI = {
 
   refresh: (refreshToken: string) =>
     api.post('/auth/refresh/', { refresh: refreshToken }),
+
+  logout: () =>
+    api.post('/auth/logout/'),
 };
 
 // User Profile API
@@ -1065,6 +1071,72 @@ export const webhooksAPI = {
 
   getTestStatus: (taskId: string) =>
     api.get<WebhookTestResult>(`/reorders/webhooks/test-status/`, { params: { task_id: taskId } }),
+};
+
+// Interactive Screens / Kiosk Display API
+export const screensAPI = {
+  listScreens: () =>
+    api.get<Screen[] | { results: Screen[] }>('/screens/screens/'),
+
+  getScreen: (slug: string) =>
+    api.get<Screen>(`/screens/screens/${slug}/`),
+
+  createScreen: (data: Partial<Screen>) =>
+    api.post<Screen>('/screens/screens/', data),
+
+  updateScreen: (slug: string, data: Partial<Screen>) =>
+    api.patch<Screen>(`/screens/screens/${slug}/`, data),
+
+  deleteScreen: (slug: string) =>
+    api.delete(`/screens/screens/${slug}/`),
+
+  getStatus: () =>
+    api.get<{ count: number; screens: ScreenStatusEntry[] }>('/screens/screens/status/'),
+
+  rotateToken: (slug: string) =>
+    api.post<{ access_token: string }>(`/screens/screens/${slug}/rotate-token/`),
+
+  listBlocks: (screenId?: string) =>
+    api.get<ScreenContentBlock[] | { results: ScreenContentBlock[] }>(
+      '/screens/blocks/',
+      screenId ? { params: { screen: screenId } } : undefined,
+    ),
+
+  createBlock: (data: Partial<ScreenContentBlock>) =>
+    api.post<ScreenContentBlock>('/screens/blocks/', data),
+
+  updateBlock: (id: string, data: Partial<ScreenContentBlock>) =>
+    api.patch<ScreenContentBlock>(`/screens/blocks/${id}/`, data),
+
+  deleteBlock: (id: string) =>
+    api.delete(`/screens/blocks/${id}/`),
+
+  listSystemMessages: () =>
+    api.get<SystemMessage[] | { results: SystemMessage[] }>('/screens/messages/'),
+
+  createSystemMessage: (data: Partial<SystemMessage>) =>
+    api.post<SystemMessage>('/screens/messages/', data),
+
+  updateSystemMessage: (id: string, data: Partial<SystemMessage>) =>
+    api.patch<SystemMessage>(`/screens/messages/${id}/`, data),
+
+  deleteSystemMessage: (id: string) =>
+    api.delete(`/screens/messages/${id}/`),
+};
+
+export const kioskAPI = {
+  fetchPayload: (slug: string, token: string) =>
+    axios.get<KioskPayload>(
+      `${resolveApiBaseUrl()}/screens/kiosk/${slug}/`,
+      { headers: { 'X-Screen-Token': token, 'Content-Type': 'application/json' } },
+    ),
+
+  heartbeat: (slug: string, token: string, contentVersion?: string) =>
+    axios.post(
+      `${resolveApiBaseUrl()}/screens/kiosk/${slug}/heartbeat/`,
+      { content_version: contentVersion || '' },
+      { headers: { 'X-Screen-Token': token, 'Content-Type': 'application/json' } },
+    ),
 };
 
 export default api;

@@ -106,7 +106,12 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await authAPI.logout();
+    } catch {
+      // Backend logout failures should not block client-side cleanup.
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('username');
@@ -115,7 +120,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
     setIsLoggedIn(false);
     setUsername('');
     onAuthChange(false);
-    
+
     // Dispatch custom event for NavigationBar
     window.dispatchEvent(new Event('authChange'));
   };

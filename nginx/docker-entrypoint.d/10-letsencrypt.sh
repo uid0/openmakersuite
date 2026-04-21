@@ -63,6 +63,7 @@ request_cert() {
 
     echo "[letsencrypt] Requesting certificates for: $LETSENCRYPT_DOMAINS"
     if certbot certonly --webroot -w "$WEBROOT" $domain_args \
+        --cert-name "$PRIMARY_DOMAIN" \
         --email "${LETSENCRYPT_EMAIL}" \
         --agree-tos --no-eff-email \
         --keep-until-expiring \
@@ -84,6 +85,6 @@ if [ -n "${LETSENCRYPT_EMAIL:-}" ]; then
     ) &
 
     # Set up cron job to renew certificates daily (certbot renew only renews if expiring within 30 days)
-    printf '0 3 * * * certbot renew --webroot -w %s --quiet --deploy-hook "nginx -s reload"\n' "$WEBROOT" > /etc/crontabs/root
+    printf '0 3 * * * certbot renew --cert-name %s --webroot -w %s --quiet --deploy-hook "nginx -s reload"\n' "$PRIMARY_DOMAIN" "$WEBROOT" > /etc/crontabs/root
     crond -b -l 2
 fi

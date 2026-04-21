@@ -7,6 +7,8 @@ import pytest
 from dashboard.models import DashboardWidget
 from dashboard.tests.factories import DashboardWidgetFactory, UserFactory
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestDashboardWidgetModel:

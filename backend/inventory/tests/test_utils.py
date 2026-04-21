@@ -11,6 +11,8 @@ from inventory.tests.factories import InventoryItemFactory
 from inventory.utils.pdf_generator import generate_bulk_cards, generate_item_card
 from inventory.utils.qr_generator import generate_qr_code_image, save_qr_code_to_item
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestQRCodeGeneration:

@@ -12,6 +12,8 @@ from inventory.tests.factories import AssetFactory, InventoryItemFactory
 from membership.models import SIGAdmin
 from membership.tests.factories import UserFactory
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.integration
 class TestSIGAPI:

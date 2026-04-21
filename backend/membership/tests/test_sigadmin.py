@@ -17,6 +17,8 @@ from membership.utils import (
     is_sig_admin,
 )
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestSIGAdminModel:

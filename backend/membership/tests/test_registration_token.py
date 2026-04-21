@@ -13,6 +13,8 @@ from membership.models import UserRegistrationToken
 
 User = get_user_model()
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestUserRegistrationToken:

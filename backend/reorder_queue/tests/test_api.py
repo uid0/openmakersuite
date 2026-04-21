@@ -495,3 +495,143 @@ class TestPurchaseOrderAPI:
         po_item = purchase_order.items.first()
 
         assert po_item.order_in_packages == 7  # 7 / 1 = 7
+
+    def test_create_po_rejects_duplicate_item_supplier_returns_400(self, authenticated_client):
+        """Duplicate item_supplier_id in one PO must be rejected with 400, not 500."""
+        client, _ = authenticated_client
+
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(
+            supplier=supplier, quantity_per_package=1, unit_cost=Decimal("2.00")
+        )
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {"item_supplier_id": item_supplier.id, "quantity": 3},
+                {"item_supplier_id": item_supplier.id, "quantity": 5},
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert (
+            "more than once" in str(response.data).lower()
+            or "combine" in str(response.data).lower()
+        )
+        assert PurchaseOrder.objects.count() == 0
+        assert PurchaseOrderItem.objects.count() == 0
+
+    def test_create_po_rejects_duplicate_asset_returns_400(self, authenticated_client):
+        """Duplicate asset_id in one PO must be rejected with 400, not 500."""
+        from inventory.tests.factories import AssetFactory
+
+        client, _ = authenticated_client
+
+        supplier = SupplierFactory()
+        asset = AssetFactory(manufacturer=supplier)
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {"asset_id": str(asset.id), "quantity": 1, "unit_cost": 100.00},
+                {"asset_id": str(asset.id), "quantity": 2, "unit_cost": 100.00},
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert (
+            "more than once" in str(response.data).lower()
+            or "combine" in str(response.data).lower()
+        )
+        assert PurchaseOrder.objects.count() == 0
+        assert PurchaseOrderItem.objects.count() == 0
+
+    def test_create_po_rejects_non_numeric_item_supplier_id_returns_400(self, authenticated_client):
+        """Non-integer item_supplier_id must produce 400, not 500."""
+        client, _ = authenticated_client
+
+        supplier = SupplierFactory()
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {"item_supplier_id": "abc", "quantity": 1},
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "abc" in str(response.data) or "does not exist" in str(response.data).lower()
+        assert PurchaseOrder.objects.count() == 0
+
+    def test_create_po_rejects_malformed_asset_uuid_returns_400(self, authenticated_client):
+        """Malformed asset_id UUID must produce 400, not 500."""
+        client, _ = authenticated_client
+
+        supplier = SupplierFactory()
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {"asset_id": "not-a-uuid", "quantity": 1, "unit_cost": 50.00},
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "invalid" in str(response.data).lower() or "not-a-uuid" in str(response.data)
+        assert PurchaseOrder.objects.count() == 0
+
+    def test_create_po_concurrent_posts_produce_distinct_po_numbers(self, authenticated_client):
+        """Two racing auto-generations must not collide into duplicate po_numbers."""
+        from unittest.mock import patch
+
+        client, user = authenticated_client
+
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(
+            supplier=supplier, quantity_per_package=1, unit_cost=Decimal("1.00")
+        )
+
+        # Create first PO normally so it holds the current auto-generated number.
+        first = PurchaseOrder.objects.create(created_by=user, supplier=supplier)
+        assert first.po_number is not None
+
+        # Simulate the race: second PO's first auto-generation pass collides with
+        # first.po_number. The save() retry loop must recover and pick a fresh one.
+        real_auto_generate = PurchaseOrder.auto_generate_po_number
+        call_count = {"n": 0}
+
+        def fake_auto_generate(self):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                self.po_number = first.po_number
+                return self.po_number
+            return real_auto_generate(self)
+
+        with patch.object(PurchaseOrder, "auto_generate_po_number", fake_auto_generate):
+            second = PurchaseOrder.objects.create(created_by=user, supplier=supplier)
+
+        assert call_count["n"] >= 2, "save() should have retried after the collision"
+        assert second.po_number is not None
+        assert second.po_number != first.po_number
+        assert PurchaseOrder.objects.filter(po_number=first.po_number).count() == 1
+        assert PurchaseOrder.objects.filter(po_number=second.po_number).count() == 1
+
+        # End-to-end: create two POs back-to-back through the API; numbers must differ.
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [{"item_supplier_id": item_supplier.id, "quantity": 1}],
+        }
+        r1 = client.post(url, data, format="json")
+        r2 = client.post(url, data, format="json")
+        assert r1.status_code == status.HTTP_201_CREATED
+        assert r2.status_code == status.HTTP_201_CREATED
+        assert r1.data["po_number"] != r2.data["po_number"]

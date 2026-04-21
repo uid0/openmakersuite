@@ -335,6 +335,121 @@ class TestReorderRequestAPI:
 
 
 @pytest.mark.integration
+class TestReorderRequestAutoApprove:
+    """Tests for auto-approval of reorder requests by admins/leaders (oms-ntz)."""
+
+    def _post_reorder(self, client, item, **extra):
+        url = reverse("reorderrequest-list")
+        data = {"item": str(item.id), "quantity": 5}
+        data.update(extra)
+        return client.post(url, data, format="json")
+
+    def test_sig_leader_auto_approve(self, api_client):
+        """SIG leader of the item's owning group → auto-approved."""
+        from django.contrib.auth.models import Group
+
+        from membership.models import SIGAdmin
+
+        sig = Group.objects.create(name="Woodshop SIG")
+        leader = User.objects.create_user(username="sig-leader", password="pass12345")
+        SIGAdmin.objects.create(user=leader, group=sig, is_active=True)
+        item = InventoryItemFactory(owning_group=sig)
+
+        api_client.force_authenticate(user=leader)
+        response = self._post_reorder(api_client, item)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["status"] == "approved"
+        assert response.data["reviewed_by"] == leader.id
+        assert response.data["reviewed_at"] is not None
+
+    def test_board_member_auto_approve(self, api_client):
+        """A user in the COO group (Board Member proxy) → auto-approved."""
+        from django.contrib.auth.models import Group
+
+        coo_group = Group.objects.create(name="COO")
+        board_user = User.objects.create_user(username="board", password="pass12345")
+        User.groups.through.objects.create(user=board_user, group=coo_group)
+        item = InventoryItemFactory()
+
+        api_client.force_authenticate(user=board_user)
+        response = self._post_reorder(api_client, item)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["status"] == "approved"
+        assert response.data["reviewed_by"] == board_user.id
+        assert response.data["reviewed_at"] is not None
+
+    def test_logistics_auto_approve(self, api_client):
+        """A Logistics group member → auto-approved."""
+        from django.contrib.auth.models import Group
+
+        logistics = Group.objects.create(name="Logistics")
+        log_user = User.objects.create_user(username="logistics", password="pass12345")
+        User.groups.through.objects.create(user=log_user, group=logistics)
+        item = InventoryItemFactory()
+
+        api_client.force_authenticate(user=log_user)
+        response = self._post_reorder(api_client, item)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["status"] == "approved"
+        assert response.data["reviewed_by"] == log_user.id
+
+    def test_staff_auto_approve(self, api_client):
+        """Staff/superusers → auto-approved."""
+        staff_user = User.objects.create_user(
+            username="staffer", password="pass12345", is_staff=True
+        )
+        item = InventoryItemFactory()
+
+        api_client.force_authenticate(user=staff_user)
+        response = self._post_reorder(api_client, item)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["status"] == "approved"
+        assert response.data["reviewed_by"] == staff_user.id
+
+    def test_regular_user_requires_approval(self, api_client):
+        """Regular authenticated members → pending (current behavior preserved)."""
+        user = User.objects.create_user(username="regular", password="pass12345")
+        item = InventoryItemFactory()
+
+        api_client.force_authenticate(user=user)
+        response = self._post_reorder(api_client, item)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["status"] == "pending"
+        assert response.data["reviewed_by"] is None
+        assert response.data["reviewed_at"] is None
+
+    def test_sig_leader_unrelated_sig_requires_approval(self, api_client):
+        """SIG leader auto-approval is scoped to their own SIG's items.
+
+        A SIG A leader requesting a space-owned item (which they are permitted to
+        request as an authenticated user) does NOT get auto-approved — auto-approval
+        is bounded to items of the SIG they actually lead.
+        """
+        from django.contrib.auth.models import Group
+
+        from membership.models import SIGAdmin
+
+        sig_a = Group.objects.create(name="SIG A")
+        leader_a = User.objects.create_user(username="leader-a", password="pass12345")
+        SIGAdmin.objects.create(user=leader_a, group=sig_a, is_active=True)
+        # Space-owned item (no owning_group) — any authenticated user may request,
+        # but SIG admin authority of sig_a should not extend to it.
+        space_item = InventoryItemFactory(owning_group=None)
+
+        api_client.force_authenticate(user=leader_a)
+        response = self._post_reorder(api_client, space_item)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["status"] == "pending"
+        assert response.data["reviewed_by"] is None
+
+
+@pytest.mark.integration
 class TestPurchaseOrderAPI:
     """Tests for PurchaseOrder API endpoints."""
 

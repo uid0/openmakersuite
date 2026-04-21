@@ -140,6 +140,45 @@ def is_logistics_member(user):
         return False
 
 
+def should_auto_approve_reorder(user, item):
+    """
+    Check if a reorder request by this user for this item should be auto-approved.
+
+    Auto-approval applies to users with administrative authority over the item:
+    - Staff/superusers
+    - Board Member proxies (members of the "COO" group)
+    - Members of the "Logistics" group
+    - SIG admins of the item's owning group (bounded to that SIG only)
+
+    Args:
+        user: The user creating the reorder request
+        item: The inventory item being requested
+
+    Returns:
+        bool: True if the request should land as "approved", False for default pending.
+    """
+    if not user or not user.is_authenticated:
+        return False
+
+    if user.is_staff or user.is_superuser:
+        return True
+
+    if is_logistics_member(user):
+        return True
+
+    try:
+        coo_group = Group.objects.get(name="COO")
+        if coo_group in user.groups.all():
+            return True
+    except Group.DoesNotExist:
+        pass
+
+    if item is not None and item.owning_group and is_sig_admin(user, item.owning_group):
+        return True
+
+    return False
+
+
 def can_create_reorder_request(user, item):
     """
     Check if a user can create a reorder request for an inventory item.

@@ -99,6 +99,20 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
 
+        # Auto-approve for users with administrative authority over the item.
+        # Done here (not in perform_create) so the serializer's create() can run
+        # with the public-facing field set unchanged, then we elevate status.
+        if user.is_authenticated:
+            from membership.utils import should_auto_approve_reorder
+
+            if should_auto_approve_reorder(user, serializer.instance.item):
+                serializer.instance.status = ReorderRequest.APPROVED
+                serializer.instance.reviewed_by = user
+                serializer.instance.reviewed_at = timezone.now()
+                serializer.instance.save(
+                    update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"]
+                )
+
         # Return full details
         instance = ReorderRequest.objects.get(id=serializer.instance.id)
         output_serializer = ReorderRequestSerializer(instance)

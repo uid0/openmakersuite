@@ -15,6 +15,7 @@ from membership.utils import (
     get_user_managed_sigs,
     is_logistics_member,
     is_sig_admin,
+    should_auto_approve_reorder,
 )
 
 
@@ -125,7 +126,8 @@ class TestSIGPermissionUtils:
                 )
                 table_exists = cursor.fetchone() is not None
                 if not table_exists:
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         CREATE TABLE auth_user_groups (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             user_id INTEGER NOT NULL,
@@ -134,18 +136,22 @@ class TestSIGPermissionUtils:
                             FOREIGN KEY (user_id) REFERENCES auth_user(id),
                             FOREIGN KEY (group_id) REFERENCES auth_group(id)
                         );
-                        """)
+                        """
+                    )
             elif connection.vendor == "postgresql":
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables
                         WHERE table_schema = 'public'
                         AND table_name = 'auth_user_groups'
                     );
-                    """)
+                    """
+                )
                 table_exists = cursor.fetchone()[0]
                 if not table_exists:
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         CREATE TABLE auth_user_groups (
                             id SERIAL PRIMARY KEY,
                             user_id INTEGER NOT NULL,
@@ -156,7 +162,8 @@ class TestSIGPermissionUtils:
                         );
                         CREATE INDEX auth_user_groups_user_id_idx ON auth_user_groups(user_id);
                         CREATE INDEX auth_user_groups_group_id_idx ON auth_user_groups(group_id);
-                        """)
+                        """
+                    )
             # For other databases, assume table exists (migration should have created it)
 
         # Use through model directly to ensure migrations are applied
@@ -304,3 +311,58 @@ class TestSIGPermissionUtils:
         assert can_create_reorder_request(sig_admin, non_requestable) is False
         assert can_create_reorder_request(staff_user, non_requestable) is True
         assert can_create_reorder_request(logistics_user, non_requestable) is True
+
+    def test_should_auto_approve_reorder(self):
+        """Test should_auto_approve_reorder helper (oms-ntz)."""
+        from django.contrib.auth import get_user_model
+
+        from inventory.tests.factories import InventoryItemFactory
+
+        User = get_user_model()
+
+        # Setup: three groups and users
+        sig_a = Group.objects.create(name="SIG A")
+        sig_b = Group.objects.create(name="SIG B")
+        coo = Group.objects.create(name="COO")
+        logistics = Group.objects.create(name="Logistics")
+
+        leader_a = UserFactory()
+        SIGAdmin.objects.create(user=leader_a, group=sig_a, is_active=True)
+
+        board_member = UserFactory()
+        User.groups.through.objects.create(user=board_member, group=coo)
+
+        logistics_user = UserFactory()
+        User.groups.through.objects.create(user=logistics_user, group=logistics)
+
+        staff_user = UserFactory(is_staff=True)
+        regular_user = UserFactory()
+
+        item_a = InventoryItemFactory(owning_group=sig_a)
+        item_b = InventoryItemFactory(owning_group=sig_b)
+        space_item = InventoryItemFactory(owning_group=None)
+
+        # Staff always auto-approves
+        assert should_auto_approve_reorder(staff_user, item_a) is True
+        assert should_auto_approve_reorder(staff_user, space_item) is True
+
+        # Logistics always auto-approves
+        assert should_auto_approve_reorder(logistics_user, item_a) is True
+        assert should_auto_approve_reorder(logistics_user, space_item) is True
+
+        # COO always auto-approves
+        assert should_auto_approve_reorder(board_member, item_a) is True
+        assert should_auto_approve_reorder(board_member, space_item) is True
+
+        # SIG leader auto-approves only for items in their SIG
+        assert should_auto_approve_reorder(leader_a, item_a) is True
+        assert should_auto_approve_reorder(leader_a, item_b) is False
+        # Space-owned items are not auto-approved for SIG leaders
+        assert should_auto_approve_reorder(leader_a, space_item) is False
+
+        # Regular user never auto-approves
+        assert should_auto_approve_reorder(regular_user, item_a) is False
+        assert should_auto_approve_reorder(regular_user, space_item) is False
+
+        # Anonymous / None user never auto-approves
+        assert should_auto_approve_reorder(None, item_a) is False

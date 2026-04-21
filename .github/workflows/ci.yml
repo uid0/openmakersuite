@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, develop]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend-tests:
     name: Backend Tests
@@ -44,6 +48,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
+          cache-dependency-path: backend/requirements*.txt
 
       - name: Install dependencies
         run: |
@@ -80,7 +85,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           cd backend
-          pytest --cov=inventory --cov=reorder_queue --cov=config --cov=membership --cov=forgekey --cov-report=xml --cov-report=term -v
+          pytest -n auto --cov=inventory --cov=reorder_queue --cov=config --cov=membership --cov=forgekey --cov-report=xml --cov-report=term -v
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
           SECRET_KEY: test-secret-key-for-ci-only
@@ -130,10 +135,10 @@ jobs:
             echo "❌ Error: package-lock.json not found"
             exit 1
           fi
-          # Verify sync by running npm ci in dry-run mode
-          npm install
           echo "🔍 Verifying package-lock.json is in sync with package.json..."
-          npm ci --dry-run || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
+          # --ignore-scripts skips postinstall (patch-package), which isn't on
+          # PATH before the real install. Lock sync doesn't need scripts.
+          npm ci --dry-run --ignore-scripts || (echo "❌ package-lock.json is out of sync with package.json. Run 'npm install' in frontend/ and commit the updated lock file." && exit 1)
           echo "✅ package-lock.json is in sync"
 
       - name: Install dependencies
@@ -141,25 +146,25 @@ jobs:
           cd frontend
           # Force IPv4 only for npm operations (via .npmrc and NODE_OPTIONS)
           npm ci --verbose
-          # Verify react-scripts is installed
-          if [ ! -f node_modules/.bin/react-scripts ]; then
-            echo "⚠️  react-scripts not found after npm ci, running npm install..."
-            npm install
-          fi
           # Verify installation
-          ls -la node_modules/.bin/react-scripts || (echo "❌ react-scripts still not found!" && exit 1)
+          ls -la node_modules/.bin/react-scripts || (echo "❌ react-scripts not found after npm ci!" && exit 1)
         env:
           NODE_OPTIONS: "--dns-result-order=ipv4first"
 
-      - name: Run tests
+      - name: Run tests (with coverage on main/develop)
         run: |
           cd frontend
-          npm test -- --coverage --ci --watchAll=false
+          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            npm test -- --maxWorkers=4 --ci --watchAll=false --coverage
+          else
+            npm test -- --maxWorkers=4 --ci --watchAll=false
+          fi
         env:
           CI: true
           NODE_OPTIONS: "--dns-result-order=ipv4first"
 
       - name: Verify coverage files exist
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
         run: |
           cd frontend
           if [ ! -f coverage/clover.xml ]; then
@@ -174,6 +179,7 @@ jobs:
           ls -lh coverage/clover.xml coverage/lcov.info
 
       - name: Upload coverage to Codecov
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
         uses: codecov/codecov-action@v4
         with:
           files: ./frontend/coverage/clover.xml,./frontend/coverage/lcov.info

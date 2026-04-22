@@ -1628,6 +1628,14 @@ class MaintenanceMaterial(models.Model):
         related_name="materials",
         help_text="The maintenance task that requires this material",
     )
+    inventory_item = models.ForeignKey(
+        "InventoryItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="maintenance_materials",
+        help_text="Optional link to an inventory item for stock checking",
+    )
     name = models.CharField(max_length=200, help_text="Name of the material or supply")
     quantity = models.DecimalField(
         max_digits=10,

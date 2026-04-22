@@ -2720,6 +2720,35 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
         serializer = MaintenanceItemSerializer(items, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["get"])
+    def check_material_stock(self, request, pk=None):
+        """
+        Return low-stock alerts for materials on this maintenance item.
+
+        Emits one alert per MaintenanceMaterial that is linked to an InventoryItem
+        whose current_stock is below its minimum_stock threshold.
+        """
+        item = self.get_object()
+        alerts = []
+        materials = item.materials.select_related("inventory_item").all()
+        for material in materials:
+            inv = material.inventory_item
+            if inv is None:
+                continue
+            if inv.current_stock >= inv.minimum_stock:
+                continue
+            alerts.append(
+                {
+                    "material_id": str(material.id),
+                    "item_id": str(inv.id),
+                    "name": inv.name,
+                    "current": inv.current_stock,
+                    "minimum": inv.minimum_stock,
+                    "reorder_qty": inv.reorder_quantity,
+                }
+            )
+        return Response({"low_stock_alerts": alerts})
+
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def clone(self, request, pk=None):
         """Clone this maintenance item (with tasks and materials) onto another asset."""

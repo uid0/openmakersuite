@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -514,6 +514,11 @@ export const workOrderAPI = {
 
   generateWorkOrder: (maintenanceItemId: string, data?: { due_date?: string; notes?: string }) =>
     api.post<WorkOrder>(`/inventory/maintenance-items/${maintenanceItemId}/generate_work_order/`, data || {}),
+
+  checkMaterialStock: (maintenanceItemId: string) =>
+    api.get<CheckMaterialStockResponse>(
+      `/inventory/maintenance-items/${maintenanceItemId}/check_material_stock/`
+    ),
 
   generateBulkWorkOrders: () =>
     api.post<{ created: number; work_order_ids: string[] }>(

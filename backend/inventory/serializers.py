@@ -981,12 +981,15 @@ class MaintenanceMaterialSerializer(serializers.ModelSerializer):
     """Serializer for materials needed for a maintenance task."""
 
     total_estimated_cost = serializers.ReadOnlyField()
+    inventory_item_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = MaintenanceMaterial
         fields = [
             "id",
             "maintenance_item",
+            "inventory_item",
+            "inventory_item_detail",
             "name",
             "quantity",
             "unit",
@@ -995,7 +998,19 @@ class MaintenanceMaterialSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
         ]
-        read_only_fields = ["total_estimated_cost", "created_at"]
+        read_only_fields = ["total_estimated_cost", "inventory_item_detail", "created_at"]
+
+    def get_inventory_item_detail(self, obj):
+        item = obj.inventory_item
+        if item is None:
+            return None
+        return {
+            "id": str(item.id),
+            "name": item.name,
+            "current_stock": item.current_stock,
+            "minimum_stock": item.minimum_stock,
+            "reorder_quantity": item.reorder_quantity,
+        }
 
 
 class MaintenanceTaskSerializer(serializers.ModelSerializer):

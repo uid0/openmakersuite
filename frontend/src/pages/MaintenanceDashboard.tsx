@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Alert,
   Badge,
   Box,
   Button,
@@ -7,6 +8,7 @@ import {
   Container,
   Divider,
   Group,
+  List,
   Loader,
   Modal,
   SimpleGrid,
@@ -29,8 +31,8 @@ import {
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { maintenanceAPI, workOrderAPI } from '../services/api';
-import { MaintenanceItem, WorkOrder } from '../types';
+import { maintenanceAPI, reorderAPI, workOrderAPI } from '../services/api';
+import { LowStockAlert, MaintenanceItem, WorkOrder } from '../types';
 
 const STATUS_COLORS: Record<string, string> = {
   open: 'blue',
@@ -125,6 +127,7 @@ const MaintenanceItemRow: React.FC<MaintenanceItemRowProps> = ({
               size="md"
               onClick={() => onGenerateWorkOrder(item)}
               loading={generating}
+              aria-label="Generate Work Order"
             >
               <IconPlus size={16} />
             </ActionIcon>
@@ -227,6 +230,11 @@ const MaintenanceDashboard: React.FC = () => {
   const [generatingBulk, setGeneratingBulk] = useState(false);
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [bulkConfirmOpened, { open: openBulkConfirm, close: closeBulkConfirm }] = useDisclosure(false);
+  const [stockWarning, setStockWarning] = useState<{
+    item: MaintenanceItem;
+    alerts: LowStockAlert[];
+  } | null>(null);
+  const [reordering, setReordering] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -274,7 +282,7 @@ const MaintenanceDashboard: React.FC = () => {
     loadData();
   }, [loadData]);
 
-  const handleGenerateWorkOrder = async (item: MaintenanceItem) => {
+  const createWorkOrder = async (item: MaintenanceItem) => {
     setGeneratingFor(item.id);
     try {
       await workOrderAPI.generateWorkOrder(item.id);
@@ -294,6 +302,61 @@ const MaintenanceDashboard: React.FC = () => {
     } finally {
       setGeneratingFor(null);
     }
+  };
+
+  const handleGenerateWorkOrder = async (item: MaintenanceItem) => {
+    setGeneratingFor(item.id);
+    try {
+      const { data } = await workOrderAPI.checkMaterialStock(item.id);
+      if (data.low_stock_alerts.length > 0) {
+        setStockWarning({ item, alerts: data.low_stock_alerts });
+        setGeneratingFor(null);
+        return;
+      }
+    } catch {
+      // Stock check is advisory; fall through and generate anyway.
+    }
+    await createWorkOrder(item);
+  };
+
+  const handleReorderAndGenerate = async () => {
+    if (!stockWarning) return;
+    const { item, alerts } = stockWarning;
+    setReordering(true);
+    try {
+      await Promise.all(
+        alerts.map((alert) =>
+          reorderAPI.createRequest({
+            item: alert.item_id,
+            quantity: alert.reorder_qty,
+            request_notes: `Auto-created from low-stock warning on WO for: ${item.title}`,
+          })
+        )
+      );
+      notifications.show({
+        title: 'Reorder Requests Created',
+        message: `Created ${alerts.length} reorder request(s).`,
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch {
+      notifications.show({
+        title: 'Reorder Failed',
+        message: 'Failed to create one or more reorder requests.',
+        color: 'red',
+      });
+    } finally {
+      setReordering(false);
+      setStockWarning(null);
+      await createWorkOrder(item);
+    }
+  };
+
+  const handleGenerateAnyway = async () => {
+    if (!stockWarning) return;
+    const { item } = stockWarning;
+    setStockWarning(null);
+    await createWorkOrder(item);
   };
 
   const handleBulkGenerate = async () => {
@@ -507,6 +570,45 @@ const MaintenanceDashboard: React.FC = () => {
           <Button variant="default" onClick={closeBulkConfirm}>Cancel</Button>
           <Button color="blue" onClick={handleBulkGenerate}>Generate</Button>
         </Group>
+      </Modal>
+
+      {/* Low-stock warning modal shown before creating a work order */}
+      <Modal
+        opened={stockWarning !== null}
+        onClose={() => setStockWarning(null)}
+        title="Low stock on linked materials"
+        size="md"
+      >
+        {stockWarning && (
+          <>
+            <Alert
+              icon={<IconAlertTriangle size={16} />}
+              color="orange"
+              mb="md"
+              data-testid="low-stock-banner"
+            >
+              Some materials for &ldquo;{stockWarning.item.title}&rdquo; are below minimum stock.
+            </Alert>
+            <List size="sm" spacing="xs" mb="md">
+              {stockWarning.alerts.map((alert) => (
+                <List.Item key={alert.material_id} data-testid="low-stock-alert">
+                  Low stock: {alert.name}: {alert.current}/{alert.minimum}
+                </List.Item>
+              ))}
+            </List>
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setStockWarning(null)}>
+                Cancel
+              </Button>
+              <Button variant="subtle" color="gray" onClick={handleGenerateAnyway}>
+                Generate without reordering
+              </Button>
+              <Button color="orange" loading={reordering} onClick={handleReorderAndGenerate}>
+                Create reorder requests &amp; continue
+              </Button>
+            </Group>
+          </>
+        )}
       </Modal>
     </Container>
   );

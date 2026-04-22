@@ -343,9 +343,19 @@ export interface AssetProblem {
   resolved_by: string;
 }
 
+export interface MaintenanceMaterialInventoryDetail {
+  id: string;
+  name: string;
+  current_stock: number;
+  minimum_stock: number;
+  reorder_quantity: number;
+}
+
 export interface MaintenanceMaterial {
   id: string;
   maintenance_item: string;
+  inventory_item: string | null;
+  inventory_item_detail: MaintenanceMaterialInventoryDetail | null;
   name: string;
   quantity: string;
   unit: string;
@@ -353,6 +363,19 @@ export interface MaintenanceMaterial {
   total_estimated_cost: string;
   notes: string;
   created_at: string;
+}
+
+export interface LowStockAlert {
+  material_id: string;
+  item_id: string;
+  name: string;
+  current: number;
+  minimum: number;
+  reorder_qty: number;
+}
+
+export interface CheckMaterialStockResponse {
+  low_stock_alerts: LowStockAlert[];
 }
 
 export interface MaintenanceItem {

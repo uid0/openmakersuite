@@ -168,7 +168,7 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
     )
     story.append(header_table)
     story.append(HRFlowable(width="100%", thickness=1, color=colors.black))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 2))
 
     # ── Asset summary ─────────────────────────────────────────────────────────
     story.append(Paragraph("Asset Information", subheading_style))
@@ -186,22 +186,23 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
         ["Manufacturer / Supplier", manufacturer_name, "Date Acquired", date_received],
         ["Category", asset.category.name if asset.category else "—", "Purchase Price", amount_paid],
     ]
+    created_str = work_order.created_at.strftime("%B %d, %Y")
     if work_order.due_date:
         asset_data.append(
             [
                 "Work Order Due",
                 work_order.due_date.strftime("%B %d, %Y"),
-                "WO Status",
-                work_order.get_status_display(),
+                "Work Order Created",
+                created_str,
             ]
         )
     else:
         asset_data.append(
             [
                 "Work Order Created",
-                work_order.created_at.strftime("%B %d, %Y"),
-                "WO Status",
-                work_order.get_status_display(),
+                created_str,
+                "Due Date",
+                "—",
             ]
         )
 

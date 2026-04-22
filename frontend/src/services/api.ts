@@ -463,6 +463,11 @@ export const maintenanceAPI = {
   completeItem: (id: string, data: { time_spent_minutes?: number; cost_incurred?: string; notes?: string }) =>
     api.post<MaintenanceLog>(`/inventory/maintenance-items/${id}/complete/`, data),
 
+  cloneItem: (id: string, targetAssetId: string) =>
+    api.post<MaintenanceItem>(`/inventory/maintenance-items/${id}/clone/`, {
+      target_asset_id: targetAssetId,
+    }),
+
   listMaterials: (maintenanceItemId: string) =>
     api.get<{ results: MaintenanceMaterial[] }>('/inventory/maintenance-materials/', { params: { maintenance_item: maintenanceItemId } }),
 

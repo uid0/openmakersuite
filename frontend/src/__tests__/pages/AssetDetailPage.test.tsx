@@ -5,8 +5,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import AssetDetailPage from '../../pages/AssetDetailPage';
-import { assetPartsAPI, assetsAPI } from '../../services/api';
-import { Asset, AssetProblem } from '../../types';
+import { assetPartsAPI, assetsAPI, maintenanceAPI } from '../../services/api';
+import { Asset, AssetProblem, MaintenanceItem } from '../../types';
 
 jest.mock('../../services/api');
 jest.mock('react-router-dom', () => ({
@@ -17,6 +17,7 @@ jest.mock('react-router-dom', () => ({
 
 const mockAssetsAPI = assetsAPI as jest.Mocked<typeof assetsAPI>;
 const mockAssetPartsAPI = assetPartsAPI as jest.Mocked<typeof assetPartsAPI>;
+const mockMaintenanceAPI = maintenanceAPI as jest.Mocked<typeof maintenanceAPI>;
 
 describe('AssetDetailPage', () => {
   const mockAsset: Asset = {
@@ -325,6 +326,120 @@ describe('AssetDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Error:/)).toBeInTheDocument();
+    });
+  });
+
+  describe('Clone maintenance item', () => {
+    const mockMaintenanceItem: MaintenanceItem = {
+      id: 'mi-1',
+      asset: 'test-id',
+      asset_name: 'Test Asset',
+      asset_tag: 'TAG001',
+      title: 'Monthly inspection',
+      description: '',
+      instructions: '',
+      estimated_time_minutes: 30,
+      estimated_cost: '5.00',
+      interval_days: 30,
+      last_completed_at: null,
+      is_active: true,
+      is_overdue: false,
+      days_overdue: null,
+      next_due_at: null,
+      materials: [],
+      tasks: [],
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+    };
+
+    const otherAsset: Asset = {
+      ...mockAsset,
+      id: 'target-id',
+      name: 'Target Asset',
+      asset_tag: 'TAG002',
+    };
+
+    beforeEach(() => {
+      localStorage.setItem('token', 'fake-token');
+      mockAssetsAPI.getMaintenanceItems.mockResolvedValue({
+        data: [mockMaintenanceItem],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+      mockAssetsAPI.listAssets.mockResolvedValue({
+        data: {
+          count: 2,
+          next: null,
+          previous: null,
+          results: [mockAsset, otherAsset],
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+    });
+
+    afterEach(() => {
+      localStorage.removeItem('token');
+    });
+
+    it('opens clone modal when Clone button is clicked', async () => {
+      render(
+        <MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter>
+      );
+
+      const cloneButton = await screen.findByText('Clone to asset...');
+      await userEvent.click(cloneButton);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Clone maintenance plan to another asset')
+        ).toBeInTheDocument();
+      });
+
+      await waitFor(() => {
+        expect(mockAssetsAPI.listAssets).toHaveBeenCalled();
+      });
+    });
+
+    it('submits clone and shows success toast', async () => {
+      mockMaintenanceAPI.cloneItem.mockResolvedValue({
+        data: { ...mockMaintenanceItem, id: 'mi-cloned', asset: 'target-id' },
+        status: 201,
+        statusText: 'Created',
+        headers: {},
+        config: {} as any,
+      });
+
+      render(
+        <MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter>
+      );
+
+      const cloneButton = await screen.findByText('Clone to asset...');
+      await userEvent.click(cloneButton);
+
+      const select = await screen.findByLabelText('Target asset');
+      await waitFor(() => {
+        expect(screen.getByRole('option', { name: /Target Asset/ })).toBeInTheDocument();
+      });
+      await userEvent.selectOptions(select, 'target-id');
+
+      const submit = screen.getByRole('button', { name: 'Clone' });
+      await userEvent.click(submit);
+
+      await waitFor(() => {
+        expect(mockMaintenanceAPI.cloneItem).toHaveBeenCalledWith('mi-1', 'target-id');
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/Cloned "Monthly inspection"/)).toBeInTheDocument();
+      });
     });
   });
 });

@@ -5,6 +5,7 @@ Views for inventory API.
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from django.db.models import F, Q
 from django.http import HttpResponse
@@ -2718,6 +2719,57 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                 items.append(item)
         serializer = MaintenanceItemSerializer(items, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def clone(self, request, pk=None):
+        """Clone this maintenance item (with tasks and materials) onto another asset."""
+        source = self.get_object()
+        target_asset_id = request.data.get("target_asset_id")
+        if not target_asset_id:
+            return Response(
+                {"detail": "target_asset_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            target_asset = Asset.objects.get(pk=target_asset_id)
+        except (Asset.DoesNotExist, ValueError, TypeError, DjangoValidationError):
+            return Response(
+                {"detail": "Target asset not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        with transaction.atomic():
+            cloned = MaintenanceItem.objects.create(
+                asset=target_asset,
+                title=source.title,
+                description=source.description,
+                instructions=source.instructions,
+                estimated_time_minutes=source.estimated_time_minutes,
+                estimated_cost=source.estimated_cost,
+                interval_days=source.interval_days,
+                is_active=source.is_active,
+                # last_completed_at intentionally left null — fresh template
+            )
+            for task in source.tasks.order_by("order", "title"):
+                MaintenanceTask.objects.create(
+                    maintenance_item=cloned,
+                    order=task.order,
+                    title=task.title,
+                    description=task.description,
+                    is_required=task.is_required,
+                )
+            for mat in source.materials.all():
+                MaintenanceMaterial.objects.create(
+                    maintenance_item=cloned,
+                    name=mat.name,
+                    quantity=mat.quantity,
+                    unit=mat.unit,
+                    estimated_cost_per_unit=mat.estimated_cost_per_unit,
+                    notes=mat.notes,
+                )
+
+        serializer = MaintenanceItemSerializer(cloned, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def generate_work_order(self, request, pk=None):

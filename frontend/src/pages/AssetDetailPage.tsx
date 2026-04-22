@@ -4,7 +4,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assetPartsAPI, assetsAPI } from '../services/api';
+import { assetPartsAPI, assetsAPI, maintenanceAPI } from '../services/api';
 import '../styles/AssetDetailPage.css';
 import { Asset, AssetProblem, MaintenanceItem } from '../types';
 
@@ -25,6 +25,12 @@ const AssetDetailPage: React.FC = () => {
   const [resolvingProblemId, setResolvingProblemId] = useState<string | null>(null);
   const [resolutionNotes, setResolutionNotes] = useState<string>('');
   const [resolvingStatus, setResolvingStatus] = useState<string>('resolved');
+  const [cloneSourceId, setCloneSourceId] = useState<string | null>(null);
+  const [cloneTargetOptions, setCloneTargetOptions] = useState<Asset[]>([]);
+  const [cloneTargetId, setCloneTargetId] = useState<string>('');
+  const [cloneSubmitting, setCloneSubmitting] = useState<boolean>(false);
+  const [cloneError, setCloneError] = useState<string | null>(null);
+  const [cloneToast, setCloneToast] = useState<string | null>(null);
 
   const loadAssetDetails = useCallback(async () => {
     if (!id) return;
@@ -205,6 +211,44 @@ const AssetDetailPage: React.FC = () => {
   const handleEdit = () => {
     if (id) {
       navigate(`/assets/${id}/edit`);
+    }
+  };
+
+  const openCloneModal = async (maintenanceItemId: string) => {
+    setCloneSourceId(maintenanceItemId);
+    setCloneTargetId('');
+    setCloneError(null);
+    try {
+      const response = await assetsAPI.listAssets({ page_size: 500 });
+      const options = response.data.results.filter((a) => a.id !== id);
+      setCloneTargetOptions(options);
+    } catch (err: any) {
+      setCloneError(err.response?.data?.detail || 'Failed to load assets');
+    }
+  };
+
+  const closeCloneModal = () => {
+    setCloneSourceId(null);
+    setCloneTargetId('');
+    setCloneTargetOptions([]);
+    setCloneError(null);
+  };
+
+  const handleCloneSubmit = async () => {
+    if (!cloneSourceId || !cloneTargetId) return;
+    try {
+      setCloneSubmitting(true);
+      setCloneError(null);
+      const response = await maintenanceAPI.cloneItem(cloneSourceId, cloneTargetId);
+      const target = cloneTargetOptions.find((a) => a.id === cloneTargetId);
+      setCloneToast(
+        `Cloned "${response.data.title}" to ${target ? target.name : 'target asset'}.`,
+      );
+      closeCloneModal();
+    } catch (err: any) {
+      setCloneError(err.response?.data?.detail || 'Failed to clone maintenance item');
+    } finally {
+      setCloneSubmitting(false);
     }
   };
 
@@ -717,12 +761,20 @@ const AssetDetailPage: React.FC = () => {
                         : 'As needed'}
                     </span>
                     {isLoggedIn && (
-                      <button
-                        className="edit-link-button"
-                        onClick={() => navigate(`/assets/${id}/maintenance/${item.id}/edit`)}
-                      >
-                        Edit
-                      </button>
+                      <>
+                        <button
+                          className="edit-link-button"
+                          onClick={() => navigate(`/assets/${id}/maintenance/${item.id}/edit`)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="edit-link-button"
+                          onClick={() => openCloneModal(item.id)}
+                        >
+                          Clone to asset...
+                        </button>
+                      </>
                     )}
                   </div>
                   {item.description && (
@@ -863,6 +915,55 @@ const AssetDetailPage: React.FC = () => {
           </section>
         )}
       </div>
+
+      {cloneToast && (
+        <div className="toast toast-success" role="status" onClick={() => setCloneToast(null)}>
+          {cloneToast}
+        </div>
+      )}
+
+      {cloneSourceId && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="clone-pm-title"
+          onClick={closeCloneModal}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3 id="clone-pm-title">Clone maintenance plan to another asset</h3>
+            <label htmlFor="clone-target-asset">Target asset</label>
+            <select
+              id="clone-target-asset"
+              aria-label="Target asset"
+              value={cloneTargetId}
+              onChange={(e) => setCloneTargetId(e.target.value)}
+            >
+              <option value="">Select an asset...</option>
+              {cloneTargetOptions.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                  {a.asset_tag ? ` (${a.asset_tag})` : ''}
+                </option>
+              ))}
+            </select>
+            {cloneError && <p className="error">{cloneError}</p>}
+            <div className="modal-actions">
+              <button type="button" onClick={closeCloneModal} disabled={cloneSubmitting}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={handleCloneSubmit}
+                disabled={!cloneTargetId || cloneSubmitting}
+              >
+                {cloneSubmitting ? 'Cloning...' : 'Clone'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

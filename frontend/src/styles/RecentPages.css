@@ -17,11 +17,41 @@
 }
 
 .recent-pages-scroll-container {
-  max-height: 400px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: #c0c0c0 #f5f5f5;
+}
+
+.recent-pages-resize-handle {
+  height: 6px;
+  margin: 0 -16px 8px -16px;
+  cursor: ns-resize;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #e0e0e0 50%,
+    transparent 100%
+  );
+  transition: background 0.15s ease;
+  touch-action: none;
+  user-select: none;
+}
+
+.recent-pages-resize-handle:hover,
+.recent-pages-resize-handle.dragging {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #667eea 50%,
+    transparent 100%
+  );
+}
+
+@media (max-width: 767px) {
+  .recent-pages-resize-handle {
+    display: none;
+  }
 }
 
 .recent-pages-scroll-container::-webkit-scrollbar {

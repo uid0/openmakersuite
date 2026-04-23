@@ -2,10 +2,11 @@
 Views for notification API.
 """
 
-from rest_framework import status, viewsets
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .models import Notification, NotificationPreference
@@ -63,34 +64,32 @@ class NotificationViewSet(viewsets.ModelViewSet):
         return Response({"status": "marked all as read", "updated": updated})
 
 
-class NotificationPreferenceViewSet(viewsets.ViewSet):
+class NotificationPreferenceView(APIView):
     """
-    ViewSet for managing user notification preferences.
+    Singleton view for the current user's notification preferences.
 
-    Auto-creates preferences on first access with default values.
+    GET/PUT/PATCH all act on the row owned by request.user, auto-creating it
+    with defaults on first access.
     """
 
     authentication_classes = (JWTAuthentication,)
     permission_classes = [IsAuthenticated]
-    serializer_class = NotificationPreferenceSerializer
 
-    def list(self, request):
-        """Get current user's notification preferences."""
-        preferences, created = NotificationPreference.objects.get_or_create(user=request.user)
-        serializer = self.get_serializer(preferences)
+    def _get_preferences(self, user):
+        preferences, _ = NotificationPreference.objects.get_or_create(user=user)
+        return preferences
+
+    def get(self, request):
+        preferences = self._get_preferences(request.user)
+        serializer = NotificationPreferenceSerializer(preferences)
         return Response(serializer.data)
 
-    def retrieve(self, request, pk=None):
-        """Get current user's notification preferences (alias for list)."""
-        preferences, created = NotificationPreference.objects.get_or_create(user=request.user)
-        serializer = self.get_serializer(preferences)
+    def put(self, request):
+        preferences = self._get_preferences(request.user)
+        serializer = NotificationPreferenceSerializer(preferences, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(serializer.data)
 
-    def update(self, request):
-        """Update current user's notification preferences."""
-        preferences, created = NotificationPreference.objects.get_or_create(user=request.user)
-        serializer = self.get_serializer(preferences, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    def patch(self, request):
+        return self.put(request)

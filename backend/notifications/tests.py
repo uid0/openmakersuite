@@ -5,7 +5,7 @@ Tests for notifications app.
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from .models import Notification
+from .models import Notification, NotificationPreference
 from .services import create_bulk_notifications, create_notification, notify_admins
 
 User = get_user_model()
@@ -234,3 +234,90 @@ class NotificationViewSetTest(TestCase):
         response = client.delete(f"/api/notifications/{notification_id}/")
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Notification.objects.filter(id=notification_id).exists())
+
+
+class NotificationPreferenceViewTest(TestCase):
+    """Tests for NotificationPreferenceView API."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="prefuser", email="pref@example.com", password="testpass123"
+        )
+
+    def _authed_client(self):
+        from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        client = APIClient()
+        refresh = RefreshToken.for_user(self.user)
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        return client
+
+    def test_get_preferences_requires_auth(self):
+        from rest_framework.test import APIClient
+
+        response = APIClient().get("/api/notifications/preferences/")
+        self.assertEqual(response.status_code, 401)
+
+    def test_get_preferences_creates_defaults_for_fresh_user(self):
+        self.assertFalse(NotificationPreference.objects.filter(user=self.user).exists())
+
+        response = self._authed_client().get("/api/notifications/preferences/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["email_enabled"])
+        self.assertTrue(response.data["in_app_enabled"])
+        self.assertEqual(response.data["recent_pages_limit"], 8)
+        self.assertTrue(NotificationPreference.objects.filter(user=self.user).exists())
+
+    def test_put_preferences_updates_and_persists(self):
+        response = self._authed_client().put(
+            "/api/notifications/preferences/",
+            data={
+                "email_enabled": False,
+                "in_app_enabled": False,
+                "supply_alerts": False,
+                "maintenance_alerts": False,
+                "order_updates": False,
+                "system_notifications": False,
+                "recent_pages_limit": 5,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["email_enabled"])
+        self.assertEqual(response.data["recent_pages_limit"], 5)
+
+        prefs = NotificationPreference.objects.get(user=self.user)
+        self.assertFalse(prefs.email_enabled)
+        self.assertFalse(prefs.in_app_enabled)
+        self.assertEqual(prefs.recent_pages_limit, 5)
+
+    def test_patch_preferences_partial_update(self):
+        NotificationPreference.objects.create(
+            user=self.user, email_enabled=True, recent_pages_limit=8
+        )
+
+        response = self._authed_client().patch(
+            "/api/notifications/preferences/",
+            data={"recent_pages_limit": 20},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["recent_pages_limit"], 20)
+        self.assertTrue(response.data["email_enabled"])  # unchanged
+
+        prefs = NotificationPreference.objects.get(user=self.user)
+        self.assertEqual(prefs.recent_pages_limit, 20)
+        self.assertTrue(prefs.email_enabled)
+
+    def test_put_preferences_validation_error(self):
+        response = self._authed_client().put(
+            "/api/notifications/preferences/",
+            data={"recent_pages_limit": 999},  # exceeds MaxValueValidator(50)
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)

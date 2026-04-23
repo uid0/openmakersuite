@@ -38,7 +38,7 @@ export function showInfo(message: string, title?: string): void {
 export function confirmDelete(message: string, onConfirm: () => void): void {
   modals.openConfirmModal({
     title: 'Confirm deletion',
-    children: React.createElement(Text, { size: 'sm' }, message),
+    children: <Text size="sm">{message}</Text>,
     labels: DEFAULT_DELETE_LABELS,
     confirmProps: { color: 'red' },
     onConfirm,
@@ -56,7 +56,7 @@ export function confirmAction(
 ): void {
   modals.openConfirmModal({
     title,
-    children: React.createElement(Text, { size: 'sm' }, message),
+    children: <Text size="sm">{message}</Text>,
     labels: options.labels ?? DEFAULT_CONFIRM_LABELS,
     confirmProps: options.color ? { color: options.color } : undefined,
     onConfirm,
@@ -92,29 +92,23 @@ const PromptForm: React.FC<PromptFormProps> = ({
     onCancel();
   };
 
-  return React.createElement(
-    'form',
-    { onSubmit: handleSubmit },
-    React.createElement(
-      Stack,
-      null,
-      React.createElement(TextInput, {
-        label,
-        placeholder,
-        autoFocus: true,
-        ...form.getInputProps('value'),
-      }),
-      React.createElement(
-        Group,
-        { justify: 'flex-end' },
-        React.createElement(
-          Button,
-          { variant: 'default', onClick: handleCancel, type: 'button' },
-          'Cancel',
-        ),
-        React.createElement(Button, { type: 'submit' }, 'Submit'),
-      ),
-    ),
+  return (
+    <form onSubmit={handleSubmit}>
+      <Stack>
+        <TextInput
+          label={label}
+          placeholder={placeholder}
+          autoFocus
+          {...form.getInputProps('value')}
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={handleCancel} type="button">
+            Cancel
+          </Button>
+          <Button type="submit">Submit</Button>
+        </Group>
+      </Stack>
+    </form>
   );
 };
 
@@ -147,17 +141,19 @@ export function promptInput(
       modalId,
       title,
       onClose: () => resolveOnce(null),
-      children: React.createElement(PromptForm, {
-        modalId,
-        label,
-        initialValue: options.initialValue ?? '',
-        placeholder: options.placeholder,
-        onSubmit: (value) => {
-          if (onSubmit) onSubmit(value);
-          resolveOnce(value);
-        },
-        onCancel: () => resolveOnce(null),
-      }),
+      children: (
+        <PromptForm
+          modalId={modalId}
+          label={label}
+          initialValue={options.initialValue ?? ''}
+          placeholder={options.placeholder}
+          onSubmit={(value) => {
+            if (onSubmit) onSubmit(value);
+            resolveOnce(value);
+          }}
+          onCancel={() => resolveOnce(null)}
+        />
+      ),
     });
   });
 }

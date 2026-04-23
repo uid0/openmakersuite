@@ -10,8 +10,8 @@ from django.utils import timezone
 import pytest
 from freezegun import freeze_time
 
-from inventory.tests.factories import InventoryItemFactory, SupplierFactory
-from reorder_queue.models import PurchaseOrder, ReorderRequest
+from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
+from reorder_queue.models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
 from reorder_queue.tests.factories import ReorderRequestFactory, UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -146,3 +146,33 @@ class TestPurchaseOrderModel:
 
         assert po1.po_number == "PO-2024-0001"
         assert po2.po_number == "PO-2024-0002"
+
+
+@pytest.mark.unit
+class TestPurchaseOrderItemOrderInPackages:
+    """Regression tests for oms-qqn: order_in_packages must accept integers.
+
+    Production drifted to a boolean column, breaking PO create with
+    `column "order_in_packages" is of type boolean but expression is of
+    type integer`. Migration 0016 corrects the column type in PostgreSQL.
+    These tests assert the model and storage accept non-boolean integer
+    values.
+    """
+
+    def test_order_in_packages_stores_large_integer(self):
+        supplier = SupplierFactory()
+        user = UserFactory()
+        item_supplier = ItemSupplierFactory(supplier=supplier)
+
+        po = PurchaseOrder.objects.create(supplier=supplier, created_by=user)
+        po_item = PurchaseOrderItem.objects.create(
+            purchase_order=po,
+            item_supplier=item_supplier,
+            quantity_ordered=25,
+            unit_cost_ordered=Decimal("1.00"),
+            order_in_packages=7,
+        )
+
+        po_item.refresh_from_db()
+        assert po_item.order_in_packages == 7
+        assert not isinstance(po_item.order_in_packages, bool)

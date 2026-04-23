@@ -2,7 +2,7 @@
  * Recent Pages Component
  * Tracks and displays recently visited pages
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { notificationsAPI } from '../services/api';
 import '../styles/RecentPages.css';
@@ -15,10 +15,29 @@ interface RecentPage {
 
 const DEFAULT_RECENT_PAGES_LIMIT = 8;
 const STORAGE_KEY = 'recentPages';
+const HEIGHT_STORAGE_KEY = 'recentPagesHeight';
+const MIN_HEIGHT = 100;
+const MAX_HEIGHT = 600;
+const DEFAULT_HEIGHT = 200;
+const COLLAPSED_HEIGHT = 80;
+
+const clampHeight = (value: number): number =>
+  Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, value));
 
 const RecentPages: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed = false }) => {
   const [recentPages, setRecentPages] = useState<RecentPage[]>([]);
   const [displayLimit, setDisplayLimit] = useState<number>(DEFAULT_RECENT_PAGES_LIMIT);
+  const [userHeight, setUserHeight] = useState<number>(() => {
+    if (typeof window === 'undefined') return DEFAULT_HEIGHT;
+    const stored = localStorage.getItem(HEIGHT_STORAGE_KEY);
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      if (!Number.isNaN(parsed)) return clampHeight(parsed);
+    }
+    return DEFAULT_HEIGHT;
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const location = useLocation();
 
   // Route to label mapping for display
@@ -139,6 +158,43 @@ const RecentPages: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed = false 
     setRecentPages(updatedPages);
   }, [location.pathname]);
 
+  const startDrag = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      dragStateRef.current = { startY: event.clientY, startHeight: userHeight };
+      setIsDragging(true);
+    },
+    [userHeight]
+  );
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMove = (event: MouseEvent) => {
+      const state = dragStateRef.current;
+      if (!state) return;
+      // Handle sits above the scroll area; dragging up (delta negative) grows panel.
+      const delta = event.clientY - state.startY;
+      setUserHeight(clampHeight(state.startHeight - delta));
+    };
+
+    const handleUp = () => {
+      setIsDragging(false);
+      dragStateRef.current = null;
+    };
+
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+    };
+  }, [isDragging]);
+
+  useEffect(() => {
+    localStorage.setItem(HEIGHT_STORAGE_KEY, String(userHeight));
+  }, [userHeight]);
+
   if (recentPages.length === 0) {
     return null;
   }
@@ -146,11 +202,26 @@ const RecentPages: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed = false 
   // Limit displayed pages based on user preference
   const displayedPages = recentPages.slice(0, displayLimit);
   const hasMorePages = recentPages.length > displayLimit;
+  const effectiveHeight = isCollapsed ? COLLAPSED_HEIGHT : userHeight;
+  const showHandle = !isCollapsed;
 
   return (
     <div className="recent-pages">
+      {showHandle && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize recent pages"
+          className={`recent-pages-resize-handle${isDragging ? ' dragging' : ''}`}
+          onMouseDown={startDrag}
+        />
+      )}
       {!isCollapsed && <h3 className="recent-pages-title">Recent</h3>}
-      <div className="recent-pages-scroll-container">
+      <div
+        className="recent-pages-scroll-container"
+        data-testid="recent-pages-scroll"
+        style={{ height: effectiveHeight }}
+      >
         <ul className="recent-pages-list">
           {displayedPages.map((page) => (
             <li key={`${page.path}-${page.timestamp}`} className="recent-page-item">

@@ -465,6 +465,22 @@ class InventoryItem(models.Model):
             return self.current_stock * cost
         return Decimal("0")
 
+    def average_unit_cost(self) -> Optional[Decimal]:
+        """Arithmetic mean of unit_cost across all active, non-null suppliers."""
+        from django.db.models import Avg
+
+        agg = self.item_suppliers.filter(is_active=True, unit_cost__isnull=False).aggregate(
+            avg=Avg("unit_cost")
+        )
+        return agg["avg"]
+
+    def average_total_value(self) -> Decimal:
+        """Total stock value using the average supplier unit cost."""
+        avg = self.average_unit_cost()
+        if avg is None:
+            return Decimal("0")
+        return Decimal(self.current_stock) * avg
+
     @property
     def primary_supplier(self) -> Optional[Supplier]:
         """Get the primary (preferred) supplier."""

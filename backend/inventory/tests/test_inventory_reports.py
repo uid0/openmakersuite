@@ -7,7 +7,13 @@ from decimal import Decimal
 import pytest
 from rest_framework import status
 
-from inventory.tests.factories import CategoryFactory, InventoryItemFactory, LocationFactory
+from inventory.models import ItemSupplier
+from inventory.tests.factories import (
+    CategoryFactory,
+    InventoryItemFactory,
+    LocationFactory,
+    SupplierFactory,
+)
 
 
 @pytest.mark.integration
@@ -332,6 +338,184 @@ class TestInventoryReportViewSet:
         assert len(response.data) == 1
         # total_value should only include items with unit_cost
         assert response.data[0]["total_value"] == 200.0  # 20 * 10
+
+    def test_multi_supplier_average_cost(self, authenticated_client):
+        """Total value uses the arithmetic mean of active-supplier unit_costs."""
+        client, user = authenticated_client
+        category = CategoryFactory(name="Electronics")
+
+        item = InventoryItemFactory(
+            category=category,
+            current_stock=4,
+            unit_cost=Decimal("10.00"),  # creates primary ItemSupplier at 10
+            is_active=True,
+        )
+        # Add a second active, non-primary supplier at 20 → avg = 15
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=SupplierFactory(),
+            supplier_sku="SUP-EXTRA-1",
+            unit_cost=Decimal("20.00"),
+            quantity_per_package=1,
+            is_primary=False,
+            is_active=True,
+        )
+
+        url = "/api/inventory/reports/inventory/stock_by_category/"
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        # 4 units * avg(10, 20) = 4 * 15 = 60
+        assert response.data[0]["total_value"] == 60.0
+
+    def test_no_suppliers_shows_zero(self, authenticated_client):
+        """Items with no ItemSupplier rows contribute $0 to total_value."""
+        client, user = authenticated_client
+        category = CategoryFactory(name="Electronics")
+
+        item = InventoryItemFactory(
+            category=category,
+            current_stock=10,
+            unit_cost=Decimal("10.00"),
+            is_active=True,
+        )
+        # Remove the auto-created primary supplier to simulate a zero-supplier item
+        ItemSupplier.objects.filter(item=item).delete()
+
+        url = "/api/inventory/reports/inventory/stock_by_category/"
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]["total_value"] == 0.0
+
+    def test_inactive_supplier_excluded_from_average(self, authenticated_client):
+        """Inactive ItemSuppliers are excluded from the average cost."""
+        client, user = authenticated_client
+        category = CategoryFactory(name="Electronics")
+
+        item = InventoryItemFactory(
+            category=category,
+            current_stock=3,
+            unit_cost=Decimal("10.00"),  # active primary @ 10
+            is_active=True,
+        )
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=SupplierFactory(),
+            supplier_sku="SUP-EXTRA-2",
+            unit_cost=Decimal("1000.00"),
+            quantity_per_package=1,
+            is_primary=False,
+            is_active=False,  # inactive → excluded
+        )
+
+        url = "/api/inventory/reports/inventory/stock_by_category/"
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        # Only the active supplier at 10 counts: 3 * 10 = 30
+        assert response.data[0]["total_value"] == 30.0
+
+    def test_null_unit_cost_supplier_excluded_from_average(self, authenticated_client):
+        """Suppliers with null unit_cost are excluded from the average."""
+        client, user = authenticated_client
+        category = CategoryFactory(name="Electronics")
+
+        item = InventoryItemFactory(
+            category=category,
+            current_stock=5,
+            unit_cost=Decimal("10.00"),  # active primary @ 10
+            is_active=True,
+        )
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=SupplierFactory(),
+            supplier_sku="SUP-EXTRA-3",
+            unit_cost=None,
+            quantity_per_package=1,
+            is_primary=False,
+            is_active=True,
+        )
+
+        url = "/api/inventory/reports/inventory/stock_by_category/"
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        # Only the non-null supplier counts: 5 * 10 = 50
+        assert response.data[0]["total_value"] == 50.0
+
+    def test_average_unit_cost_model_method(self, db):
+        """InventoryItem.average_unit_cost returns arithmetic mean, or None when empty."""
+        item = InventoryItemFactory(unit_cost=Decimal("10.00"), current_stock=2)
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=SupplierFactory(),
+            supplier_sku="SUP-MODEL-1",
+            unit_cost=Decimal("20.00"),
+            quantity_per_package=1,
+            is_primary=False,
+            is_active=True,
+        )
+        # Add an inactive + a null-cost supplier to ensure both are excluded
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=SupplierFactory(),
+            supplier_sku="SUP-MODEL-2",
+            unit_cost=Decimal("999.00"),
+            quantity_per_package=1,
+            is_primary=False,
+            is_active=False,
+        )
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=SupplierFactory(),
+            supplier_sku="SUP-MODEL-3",
+            unit_cost=None,
+            quantity_per_package=1,
+            is_primary=False,
+            is_active=True,
+        )
+
+        assert item.average_unit_cost() == Decimal("15.00")
+        assert item.average_total_value() == Decimal("30.00")
+
+        empty_item = InventoryItemFactory(unit_cost=Decimal("5.00"), current_stock=7)
+        ItemSupplier.objects.filter(item=empty_item).delete()
+        assert empty_item.average_unit_cost() is None
+        assert empty_item.average_total_value() == Decimal("0")
+
+    def test_value_by_location_multi_supplier_average(self, authenticated_client):
+        """value_by_location uses the same average-cost logic as stock_by_category."""
+        client, user = authenticated_client
+        location = LocationFactory(name="Warehouse A")
+
+        item = InventoryItemFactory(
+            location=location,
+            current_stock=2,
+            unit_cost=Decimal("10.00"),
+            is_active=True,
+        )
+        ItemSupplier.objects.create(
+            item=item,
+            supplier=SupplierFactory(),
+            supplier_sku="SUP-LOC-1",
+            unit_cost=Decimal("20.00"),
+            quantity_per_package=1,
+            is_primary=False,
+            is_active=True,
+        )
+
+        url = "/api/inventory/reports/inventory/value_by_location/"
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        # 2 units * avg(10, 20) = 30
+        assert response.data[0]["total_value"] == 30.0
 
     def test_value_by_location_with_null_unit_cost(self, authenticated_client):
         """Test value_by_location handles items with null unit_cost."""

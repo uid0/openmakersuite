@@ -163,6 +163,14 @@ jobs:
           CI: true
           NODE_OPTIONS: "--dns-result-order=ipv4first"
 
+      - name: Build production bundle
+        run: |
+          cd frontend
+          npm run build
+        env:
+          CI: false
+          NODE_OPTIONS: "--dns-result-order=ipv4first"
+
       - name: Verify coverage files exist
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
         run: |

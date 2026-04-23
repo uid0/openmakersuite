@@ -2,6 +2,8 @@
 Serializers for reorder queue API.
 """
 
+from decimal import Decimal, InvalidOperation
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 
@@ -288,7 +290,7 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         )
 
         # Create line items
-        total_cost = 0
+        total_cost = Decimal("0.00")
         for idx, item_data in enumerate(items_data):
             quantity = item_data.get("quantity", 1)
             notes = item_data.get("notes", "")
@@ -321,11 +323,16 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
 
                     # Get unit_cost override if provided, otherwise use item_supplier.unit_cost
                     unit_cost_override = item_data.get("unit_cost")
-                    unit_cost_ordered = (
-                        unit_cost_override
-                        if unit_cost_override is not None
-                        else (item_supplier.unit_cost or 0)
-                    )
+                    if unit_cost_override is not None:
+                        try:
+                            unit_cost_ordered = Decimal(str(unit_cost_override))
+                        except (InvalidOperation, ValueError):
+                            raise serializers.ValidationError(
+                                f"Item at index {idx}: unit_cost must be numeric, "
+                                f"got {unit_cost_override!r}"
+                            )
+                    else:
+                        unit_cost_ordered = item_supplier.unit_cost or Decimal("0.00")
 
                     # Get expected_shipment_date if provided
                     expected_shipment_date = item_data.get("expected_shipment_date")
@@ -356,6 +363,12 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         f"unit_cost is required when purchasing asset {asset_id}"
                     )
+                try:
+                    unit_cost = Decimal(str(unit_cost))
+                except (InvalidOperation, ValueError):
+                    raise serializers.ValidationError(
+                        f"Item at index {idx}: unit_cost must be numeric, " f"got {unit_cost!r}"
+                    )
 
                 try:
                     from inventory.models import Asset
@@ -380,7 +393,7 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
 
                     total_cost += line_item.estimated_cost
 
-                except (Asset.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+                except (Asset.DoesNotExist, DjangoValidationError, ValueError):
                     raise serializers.ValidationError(f"Invalid asset id: {asset_id}")
 
             # Handle freeform line items
@@ -396,6 +409,12 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
                 if unit_cost is None:
                     raise serializers.ValidationError(
                         f"unit_cost is required for freeform item: {description}"
+                    )
+                try:
+                    unit_cost = Decimal(str(unit_cost))
+                except (InvalidOperation, ValueError):
+                    raise serializers.ValidationError(
+                        f"Item at index {idx}: unit_cost must be numeric, " f"got {unit_cost!r}"
                     )
 
                 # Create the freeform line item (freeform items don't have package information)

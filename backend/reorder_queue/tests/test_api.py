@@ -638,6 +638,98 @@ class TestPurchaseOrderAPI:
         assert r2.status_code == status.HTTP_201_CREATED
         assert r1.data["po_number"] != r2.data["po_number"]
 
+    def test_create_po_inventory_plus_freeform_with_float_unit_cost_returns_201(
+        self, authenticated_client
+    ):
+        """Inventory line (Decimal total) + freeform line with float unit_cost must not 500."""
+        client, _ = authenticated_client
+
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(supplier=supplier, quantity_per_package=1)
+        # ItemSupplier.save() recomputes unit_cost from package_cost / quantity_per_package,
+        # so pin both to get a deterministic unit_cost.
+        item_supplier.package_cost = Decimal("2.00")
+        item_supplier.quantity_per_package = 1
+        item_supplier.save()
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {"item_supplier_id": item_supplier.id, "quantity": 3},
+                {"description": "Custom part", "quantity": 2, "unit_cost": 12.50},
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        po = PurchaseOrder.objects.get(id=response.data["id"])
+        # 3 * 2.00 + 2 * 12.50 = 6.00 + 25.00 = 31.00
+        assert po.estimated_total == Decimal("31.00")
+        assert po.items.count() == 2
+
+    def test_create_po_inventory_plus_asset_with_float_unit_cost_returns_201(
+        self, authenticated_client
+    ):
+        """Inventory line (Decimal total) + asset line with float unit_cost must not 400/500."""
+        from inventory.tests.factories import AssetFactory
+
+        client, _ = authenticated_client
+
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(supplier=supplier, quantity_per_package=1)
+        item_supplier.package_cost = Decimal("4.00")
+        item_supplier.quantity_per_package = 1
+        item_supplier.save()
+        asset = AssetFactory(manufacturer=supplier)
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {"item_supplier_id": item_supplier.id, "quantity": 2},
+                {"asset_id": str(asset.id), "quantity": 1, "unit_cost": 99.99},
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        # Regression guard: the asset branch must not mask the arithmetic TypeError
+        # as an "Invalid asset id" 400.
+        assert "Invalid asset id" not in str(response.data)
+        po = PurchaseOrder.objects.get(id=response.data["id"])
+        # 2 * 4.00 + 1 * 99.99 = 8.00 + 99.99 = 107.99
+        assert po.estimated_total == Decimal("107.99")
+        assert po.items.count() == 2
+
+    def test_create_po_freeform_plus_inventory_with_float_unit_cost_returns_201(
+        self, authenticated_client
+    ):
+        """Ordering sanity: freeform first, then inventory — still must not 500."""
+        client, _ = authenticated_client
+
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(supplier=supplier, quantity_per_package=1)
+        item_supplier.package_cost = Decimal("3.00")
+        item_supplier.quantity_per_package = 1
+        item_supplier.save()
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {"description": "Custom part", "quantity": 2, "unit_cost": 12.50},
+                {"item_supplier_id": item_supplier.id, "quantity": 4},
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        po = PurchaseOrder.objects.get(id=response.data["id"])
+        # 2 * 12.50 + 4 * 3.00 = 25.00 + 12.00 = 37.00
+        assert po.estimated_total == Decimal("37.00")
+        assert po.items.count() == 2
+
 
 @pytest.mark.integration
 class TestPurchaseOrderMarkDelivered:

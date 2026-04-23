@@ -2,8 +2,14 @@
 Tests for ForgeKey utility functions.
 """
 
+import base64
+import hashlib
+import hmac
+import json
+
 from django.conf import settings
 
+import jwt
 import pytest
 
 from forgekey.utils import (
@@ -102,3 +108,58 @@ class TestJWTGeneration:
         payload = verify_device_jwt(token, mac_address)
         assert payload is not None
         assert payload["custom_field"] == "custom_value"
+
+
+@pytest.mark.unit
+class TestJWTCritHeaderValidation:
+    """Regression tests for RFC 7515 §4.1.11 `crit` header validation.
+
+    PyJWT < 2.12.0 accepted tokens whose `crit` array listed extensions the
+    library did not understand, violating the RFC's MUST-reject requirement
+    (same class as CVE-2025-59420). This verifies the upgrade still enforces
+    rejection (oms-6s5).
+    """
+
+    @staticmethod
+    def _b64url(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    def _craft_token(self, secret: str, header: dict, payload: dict) -> str:
+        h = self._b64url(json.dumps(header, separators=(",", ":")).encode())
+        p = self._b64url(json.dumps(payload, separators=(",", ":")).encode())
+        signing_input = f"{h}.{p}".encode()
+        sig = self._b64url(hmac.new(secret.encode(), signing_input, hashlib.sha256).digest())
+        return f"{h}.{p}.{sig}"
+
+    def test_unknown_crit_extension_rejected(self):
+        """Token with crit=['unknown-ext'] must raise InvalidTokenError."""
+        secret = "a" * 64
+        token = self._craft_token(
+            secret,
+            header={
+                "alg": "HS256",
+                "crit": ["x-custom-policy"],
+                "x-custom-policy": "require-mfa",
+            },
+            payload={"sub": "attacker", "role": "admin"},
+        )
+        with pytest.raises(jwt.InvalidTokenError):
+            jwt.decode(token, secret, algorithms=["HS256"])
+
+    def test_device_jwt_rejects_unknown_crit(self):
+        """verify_device_jwt must return None for tokens with unknown crit."""
+        mac_address = "AA:BB:CC:DD:EE:FF"
+        normalized_mac = normalize_mac_address(mac_address)
+        message = f"{normalized_mac}:{settings.FORGEKEY_SHARED_SECRET}"
+        device_secret = hashlib.sha256(message.encode()).hexdigest()
+
+        token = self._craft_token(
+            device_secret,
+            header={
+                "alg": settings.FORGEKEY_JWT_ALGORITHM,
+                "crit": ["x-custom-policy"],
+                "x-custom-policy": "require-mfa",
+            },
+            payload={"mac": normalized_mac, "sub": "attacker"},
+        )
+        assert verify_device_jwt(token, mac_address) is None

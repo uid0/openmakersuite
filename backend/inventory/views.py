@@ -2227,15 +2227,20 @@ class InventoryReportViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def stock_by_category(self, request):
         """Get stock levels aggregated by category."""
-        from django.db.models import Count, OuterRef, Q, Subquery, Sum, Value
+        from django.db.models import Avg, Count, OuterRef, Q, Subquery, Sum, Value
         from django.db.models.functions import Coalesce
 
         from inventory.models import ItemSupplier
 
-        # Subquery to get unit_cost from primary ItemSupplier
-        primary_supplier = ItemSupplier.objects.filter(
-            item=OuterRef("pk"), is_primary=True, is_active=True, unit_cost__isnull=False
-        ).order_by("unit_cost")[:1]
+        # Subquery: average unit_cost across all active suppliers per item
+        avg_cost_subquery = (
+            ItemSupplier.objects.filter(
+                item=OuterRef("pk"), is_active=True, unit_cost__isnull=False
+            )
+            .values("item")
+            .annotate(avg=Avg("unit_cost"))
+            .values("avg")
+        )
 
         queryset = (
             InventoryItem.objects.filter(is_active=True)
@@ -2243,7 +2248,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
             .annotate(
                 category_id_coalesced=Coalesce("category__id", Value(0)),
                 category_name_coalesced=Coalesce("category__name", Value("Uncategorized")),
-                unit_cost_value=Subquery(primary_supplier.values("unit_cost")),
+                unit_cost_value=Subquery(avg_cost_subquery),
             )
             .values("category_id_coalesced", "category_name_coalesced")
             .annotate(
@@ -2333,15 +2338,20 @@ class InventoryReportViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def value_by_location(self, request):
         """Get total inventory value grouped by location."""
-        from django.db.models import Count, OuterRef, Subquery, Sum, Value
+        from django.db.models import Avg, Count, OuterRef, Subquery, Sum, Value
         from django.db.models.functions import Coalesce
 
         from inventory.models import ItemSupplier
 
-        # Subquery to get unit_cost from primary ItemSupplier
-        primary_supplier = ItemSupplier.objects.filter(
-            item=OuterRef("pk"), is_primary=True, is_active=True, unit_cost__isnull=False
-        ).order_by("unit_cost")[:1]
+        # Subquery: average unit_cost across all active suppliers per item
+        avg_cost_subquery = (
+            ItemSupplier.objects.filter(
+                item=OuterRef("pk"), is_active=True, unit_cost__isnull=False
+            )
+            .values("item")
+            .annotate(avg=Avg("unit_cost"))
+            .values("avg")
+        )
 
         queryset = (
             InventoryItem.objects.filter(is_active=True)
@@ -2349,7 +2359,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
             .annotate(
                 location_id_coalesced=Coalesce("location__id", Value(0)),
                 location_name_coalesced=Coalesce("location__name", Value("No Location")),
-                unit_cost_value=Subquery(primary_supplier.values("unit_cost")),
+                unit_cost_value=Subquery(avg_cost_subquery),
             )
             .values("location_id_coalesced", "location_name_coalesced")
             .annotate(

@@ -2197,3 +2197,67 @@ class FixtureRefillRequest(models.Model):
             delta = self.resolved_at - self.requested_at
             return int(delta.total_seconds() / 60)
         return None
+
+
+class StockReconciliation(models.Model):
+    """Audit record for a manual stock reconciliation of an inventory item.
+
+    Each row captures a single count: the projected (pre-count) stock, the
+    actual physical count, and the delta. History is additive — corrections
+    are new rows with reason='miscounted', never edits to existing rows.
+    """
+
+    REASON_LOST = "lost"
+    REASON_DAMAGED = "damaged"
+    REASON_MISCOUNTED = "miscounted"
+    REASON_USED_WITHOUT_SCAN = "used_without_scan"
+    REASON_FOUND = "found"
+    REASON_OTHER = "other"
+
+    REASON_CHOICES = [
+        (REASON_LOST, "Lost"),
+        (REASON_DAMAGED, "Damaged"),
+        (REASON_MISCOUNTED, "Miscounted"),
+        (REASON_USED_WITHOUT_SCAN, "Used without scanning"),
+        (REASON_FOUND, "Found (positive delta)"),
+        (REASON_OTHER, "Other"),
+    ]
+
+    item = models.ForeignKey(
+        InventoryItem,
+        on_delete=models.CASCADE,
+        related_name="reconciliations",
+    )
+    projected_count = models.IntegerField(help_text="current_stock at the time of reconciliation")
+    actual_count = models.IntegerField(help_text="Physically counted quantity")
+    delta = models.IntegerField(help_text="actual_count - projected_count (signed)")
+    reason = models.CharField(max_length=32, choices=REASON_CHOICES)
+    notes = models.TextField(blank=True)
+    reconciled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="stock_reconciliations",
+    )
+    reconciled_at = models.DateTimeField(auto_now_add=True)
+    triggered_reorder = models.ForeignKey(
+        "reorder_queue.ReorderRequest",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Auto-created reorder when actual_count <= minimum_stock",
+    )
+
+    class Meta:
+        ordering = ["-reconciled_at"]
+        indexes = [
+            models.Index(fields=["item", "-reconciled_at"]),
+            models.Index(fields=["-reconciled_at"]),
+            models.Index(fields=["reason"]),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"{self.item.name}: {self.projected_count} -> {self.actual_count} "
+            f"({self.delta:+d}) [{self.reason}]"
+        )

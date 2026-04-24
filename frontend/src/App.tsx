@@ -24,6 +24,7 @@ import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
 import InventoryItemFormPage from './pages/InventoryItemFormPage';
 import InventoryListPage from './pages/InventoryListPage';
 import InventoryReportPage from './pages/InventoryReportPage';
+import InventoryReconciliationPage from './pages/InventoryReconciliationPage';
 import LocationDetailPage from './pages/LocationDetailPage';
 import LocationFormPage from './pages/LocationFormPage';
 import LocationListPage from './pages/LocationListPage';
@@ -145,6 +146,7 @@ function AppContent() {
           <Route path="/inventory/locations" element={<WorkspaceLayout><LocationListPage /></WorkspaceLayout>} />
           <Route path="/inventory/locations/new" element={<WorkspaceLayout><LocationFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/locations/:id" element={<WorkspaceLayout><LocationDetailPage /></WorkspaceLayout>} />
+          <Route path="/inventory/locations/:id/reconcile" element={<WorkspaceLayout><InventoryReconciliationPage /></WorkspaceLayout>} />
           <Route path="/inventory/locations/:id/edit" element={<WorkspaceLayout><LocationFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/categories" element={<WorkspaceLayout><CategoryListPage /></WorkspaceLayout>} />
           <Route path="/inventory/categories/new" element={<WorkspaceLayout><CategoryFormPage /></WorkspaceLayout>} />

@@ -35,6 +35,7 @@ from .models import (
     MaintenanceMaterial,
     MaintenanceTask,
     PriceHistory,
+    StockReconciliation,
     Supplier,
     UsageLog,
     WorkOrder,
@@ -52,12 +53,15 @@ from .serializers import (
     InventoryItemDetailSerializer,
     InventoryItemSerializer,
     ItemSupplierSerializer,
+    LocationReconcileItemSerializer,
     LocationSerializer,
     MaintenanceItemSerializer,
     MaintenanceLogSerializer,
     MaintenanceMaterialSerializer,
     MaintenanceTaskSerializer,
     PriceHistorySerializer,
+    StockReconciliationBatchSerializer,
+    StockReconciliationSerializer,
     SupplierDetailSerializer,
     SupplierSerializer,
     UsageLogSerializer,
@@ -3286,3 +3290,150 @@ def postmark_inbound_work_order(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+def _user_can_reconcile_item(user, item):
+    """Return True if `user` may submit reconciliation rows for `item`.
+
+    Staff, superusers, and SIG admins of the item's owning_group are allowed.
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+    from membership.utils import is_sig_admin
+
+    group = getattr(item, "owning_group", None)
+    if group is None:
+        return False
+    return is_sig_admin(user, group)
+
+
+class InventoryReconciliationViewSet(viewsets.ViewSet):
+    """Endpoints for manual stock reconciliation."""
+
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        qs = StockReconciliation.objects.select_related(
+            "item", "reconciled_by", "triggered_reorder"
+        ).all()
+        item_id = request.query_params.get("item")
+        reason = request.query_params.get("reason")
+        if item_id:
+            qs = qs.filter(item_id=item_id)
+        if reason:
+            qs = qs.filter(reason=reason)
+        serializer = StockReconciliationSerializer(qs[:500], many=True)
+        return Response(serializer.data)
+
+    def location_grid(self, request, location_id=None):
+        """Return the reconciliation grid payload for a location.
+
+        Wired at GET /api/inventory/locations/<location_id>/reconcile/.
+        """
+        try:
+            location = Location.objects.get(pk=location_id)
+        except Location.DoesNotExist:
+            return Response(
+                {"detail": "Location not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        items = (
+            InventoryItem.objects.filter(location=location, is_active=True)
+            .select_related("owning_group")
+            .order_by("name")
+        )
+        serializer = LocationReconcileItemSerializer(items, many=True)
+        return Response(
+            {
+                "location_id": str(location.pk),
+                "location_name": location.name,
+                "items": serializer.data,
+            }
+        )
+
+    @action(detail=False, methods=["post"], url_path="batch")
+    def batch(self, request):
+        """Submit a batch of reconciliation rows; atomic across the batch."""
+        batch_serializer = StockReconciliationBatchSerializer(data=request.data)
+        batch_serializer.is_valid(raise_exception=True)
+        rows = batch_serializer.validated_data["rows"]
+
+        item_ids = [row["item_id"] for row in rows]
+        items = {
+            item.pk: item
+            for item in InventoryItem.objects.select_for_update().filter(pk__in=item_ids)
+        }
+        missing = [str(i) for i in item_ids if i not in items]
+        if missing:
+            return Response(
+                {"detail": f"Unknown item(s): {', '.join(missing)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        for row in rows:
+            item = items[row["item_id"]]
+            if not _user_can_reconcile_item(request.user, item):
+                return Response(
+                    {"detail": ("You do not have permission to reconcile item " f"{item.name}.")},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        created_reconciliations = []
+        reorders_created = 0
+
+        try:
+            with transaction.atomic():
+                for row in rows:
+                    item = items[row["item_id"]]
+                    projected = int(item.current_stock)
+                    actual = int(row["actual_count"])
+                    delta = actual - projected
+                    item.current_stock = actual
+                    item.save(update_fields=["current_stock", "updated_at"])
+
+                    reconciliation = StockReconciliation.objects.create(
+                        item=item,
+                        projected_count=projected,
+                        actual_count=actual,
+                        delta=delta,
+                        reason=row["reason"],
+                        notes=row.get("notes", "") or "",
+                        reconciled_by=request.user,
+                    )
+
+                    skip_reorder = bool(row.get("skip_reorder", False))
+                    if not skip_reorder and actual <= item.minimum_stock:
+                        from reorder_queue.models import ReorderRequest
+
+                        requested_by = (
+                            request.user.get_full_name() or request.user.username
+                        ).strip()
+                        reorder_quantity = item.reorder_quantity or 1
+                        reorder = ReorderRequest.objects.create(
+                            item=item,
+                            quantity=reorder_quantity,
+                            requested_by=requested_by,
+                            request_notes=(
+                                "Auto-created by stock reconciliation "
+                                f"(actual={actual}, minimum={item.minimum_stock})."
+                            ),
+                        )
+                        reconciliation.triggered_reorder = reorder
+                        reconciliation.save(update_fields=["triggered_reorder"])
+                        reorders_created += 1
+
+                    created_reconciliations.append(reconciliation)
+        except DjangoValidationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        output = StockReconciliationSerializer(created_reconciliations, many=True).data
+        return Response(
+            {
+                "reconciled": len(created_reconciliations),
+                "reorders_created": reorders_created,
+                "reconciliations": output,
+            },
+            status=status.HTTP_201_CREATED,
+        )

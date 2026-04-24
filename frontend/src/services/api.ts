@@ -338,7 +338,69 @@ export const inventoryAPI = {
 
   generateLocationQR: (id: string) =>
     api.post(`/inventory/locations/${id}/generate_qr/`),
+
+  // Stock reconciliation (oms-90k)
+  listLocationReconcileGrid: (locationId: string | number) =>
+    api.get<{
+      location_id: string;
+      location_name: string;
+      items: ReconciliationGridItem[];
+    }>(`/inventory/locations/${locationId}/reconcile/`),
+
+  submitReconciliationBatch: (rows: ReconciliationRow[]) =>
+    api.post<ReconciliationBatchResponse>('/inventory/reconciliations/batch/', {
+      rows,
+    }),
+
+  listReconciliations: (params?: { item?: string; reason?: string }) =>
+    api.get<StockReconciliation[]>('/inventory/reconciliations/', { params }),
 };
+
+export interface ReconciliationGridItem {
+  item_id: string;
+  name: string;
+  sku: string;
+  projected: number;
+  minimum_stock: number;
+  reorder_quantity: number;
+  owning_group_name: string;
+}
+
+export interface ReconciliationRow {
+  item_id: string;
+  actual_count: number;
+  reason:
+    | 'lost'
+    | 'damaged'
+    | 'miscounted'
+    | 'used_without_scan'
+    | 'found'
+    | 'other';
+  notes?: string;
+  skip_reorder?: boolean;
+}
+
+export interface StockReconciliation {
+  id: number;
+  item: string;
+  item_name: string;
+  item_sku: string;
+  projected_count: number;
+  actual_count: number;
+  delta: number;
+  reason: string;
+  notes: string;
+  reconciled_by: number;
+  reconciled_by_name: string;
+  reconciled_at: string;
+  triggered_reorder: number | null;
+}
+
+export interface ReconciliationBatchResponse {
+  reconciled: number;
+  reorders_created: number;
+  reconciliations: StockReconciliation[];
+}
 
 // Assets API
 export const assetsAPI = {

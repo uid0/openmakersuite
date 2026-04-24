@@ -2,6 +2,7 @@
  * Tests for ChecklistCompletionPage component
  */
 import { MantineProvider } from '@mantine/core';
+import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -84,17 +85,19 @@ describe('ChecklistCompletionPage', () => {
   ) => {
     const view = render(
       <MantineProvider>
-        <NotificationProvider>
-          <Notifications />
-          <MemoryRouter initialEntries={[`/checklist/${checklistId}/complete/${completionId}`]}>
-            <Routes>
-              <Route
-                path="/checklist/:checklistId/complete/:completionId"
-                element={<ChecklistCompletionPage />}
-              />
-            </Routes>
-          </MemoryRouter>
-        </NotificationProvider>
+        <ModalsProvider>
+          <NotificationProvider>
+            <Notifications />
+            <MemoryRouter initialEntries={[`/checklist/${checklistId}/complete/${completionId}`]}>
+              <Routes>
+                <Route
+                  path="/checklist/:checklistId/complete/:completionId"
+                  element={<ChecklistCompletionPage />}
+                />
+              </Routes>
+            </MemoryRouter>
+          </NotificationProvider>
+        </ModalsProvider>
       </MantineProvider>
     );
     return view;
@@ -195,8 +198,50 @@ describe('ChecklistCompletionPage', () => {
       data: { ...completionWithAllSteps, status: 'completed' },
     });
 
-    // Mock window.confirm to return true
-    window.confirm = jest.fn(() => true);
+    await renderWithRouter();
+
+    await screen.findByText('Monthly Safety Walk');
+
+    const completeButton = screen.getByRole('button', { name: /complete checklist/i });
+    fireEvent.click(completeButton);
+
+    // Confirm the Mantine modal that replaced window.confirm
+    const confirmInModal = await screen.findByRole('button', { name: /^confirm$/i });
+    fireEvent.click(confirmInModal);
+
+    await waitFor(() => {
+      expect(api.checklistsAPI.completeChecklist).toHaveBeenCalledWith('completion-id');
+    });
+  });
+
+  test('cancelling the complete checklist modal does not call the API', async () => {
+    const completionWithAllSteps = {
+      ...mockCompletion,
+      step_completions: [
+        {
+          id: 'step-completion-1',
+          step: 'step-1',
+          scanned_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'step-completion-2',
+          step: 'step-2',
+          scanned_at: '2024-01-01T00:00:00Z',
+        },
+      ],
+      completed_steps_count: 2,
+      required_steps_completed: 2,
+    };
+
+    (api.checklistsAPI.getChecklist as jest.Mock).mockResolvedValue({
+      data: mockChecklist,
+    });
+    (api.checklistsAPI.getCompletion as jest.Mock).mockResolvedValue({
+      data: completionWithAllSteps,
+    });
+    (api.checklistsAPI.completeChecklist as jest.Mock).mockResolvedValue({
+      data: { ...completionWithAllSteps, status: 'completed' },
+    });
 
     await renderWithRouter();
 
@@ -205,9 +250,14 @@ describe('ChecklistCompletionPage', () => {
     const completeButton = screen.getByRole('button', { name: /complete checklist/i });
     fireEvent.click(completeButton);
 
+    const cancelInModal = await screen.findByRole('button', { name: /^cancel$/i });
+    fireEvent.click(cancelInModal);
+
     await waitFor(() => {
-      expect(api.checklistsAPI.completeChecklist).toHaveBeenCalledWith('completion-id');
+      expect(screen.queryByRole('button', { name: /^cancel$/i })).not.toBeInTheDocument();
     });
+
+    expect(api.checklistsAPI.completeChecklist).not.toHaveBeenCalled();
   });
 
   test('shows completed status when checklist is completed', async () => {

@@ -9,6 +9,7 @@ import { useNotifications } from '../hooks/useNotifications';
 import { checklistsAPI, inventoryAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Checklist, ChecklistCompletion } from '../types';
+import { confirmAction } from '../utils/dialogs';
 
 const ChecklistCompletionPage: React.FC = () => {
   const { checklistId, completionId } = useParams<{ checklistId: string; completionId: string }>();
@@ -70,7 +71,7 @@ const ChecklistCompletionPage: React.FC = () => {
         .sort((a, b) => a.step_number - b.step_number)[0];
 
       if (!nextStep) {
-        alert('All steps are completed!');
+        notifications.showInfo('All steps completed', 'All steps are completed!');
         return;
       }
 
@@ -106,11 +107,21 @@ const ChecklistCompletionPage: React.FC = () => {
         updatedCompletion.data.required_steps_completed >= updatedCompletion.data.required_steps_total;
 
       if (allRequiredComplete) {
-        if (window.confirm('All required steps are complete! Would you like to finish the checklist?')) {
-          await checklistsAPI.completeChecklist(completionId!);
-          await loadData();
-          notifications.showSuccess('Checklist Completed', 'Checklist completed successfully!');
-        }
+        confirmAction(
+          'Finish checklist?',
+          'All required steps are complete! Would you like to finish the checklist?',
+          async () => {
+            try {
+              await checklistsAPI.completeChecklist(completionId!);
+              await loadData();
+              notifications.showSuccess('Checklist Completed', 'Checklist completed successfully!');
+            } catch (err: any) {
+              notifications.showError('Failed to complete checklist', err.response?.data?.detail);
+              console.error('Error completing checklist:', err);
+            }
+          },
+          { labels: { confirm: 'Finish', cancel: 'Not yet' } },
+        );
       }
     } catch (err: any) {
       notifications.showError('Failed to scan code', err.response?.data?.detail);
@@ -141,21 +152,23 @@ const ChecklistCompletionPage: React.FC = () => {
     document.body.classList.remove('qr-scanner-open');
   };
 
-  const handleCompleteChecklist = async () => {
+  const handleCompleteChecklist = () => {
     if (!completionId) return;
 
-    if (!window.confirm('Are you sure you want to complete this checklist?')) {
-      return;
-    }
-
-    try {
-      await checklistsAPI.completeChecklist(completionId);
-      await loadData();
-      notifications.showSuccess('Checklist Completed', 'Checklist completed successfully!');
-    } catch (err: any) {
-      notifications.showError('Failed to complete checklist', err.response?.data?.detail);
-      console.error('Error completing checklist:', err);
-    }
+    confirmAction(
+      'Complete checklist?',
+      'Are you sure you want to complete this checklist?',
+      async () => {
+        try {
+          await checklistsAPI.completeChecklist(completionId);
+          await loadData();
+          notifications.showSuccess('Checklist Completed', 'Checklist completed successfully!');
+        } catch (err: any) {
+          notifications.showError('Failed to complete checklist', err.response?.data?.detail);
+          console.error('Error completing checklist:', err);
+        }
+      },
+    );
   };
 
   if (loading) {

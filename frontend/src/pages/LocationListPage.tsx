@@ -8,6 +8,7 @@ import TreeView, { TreeNode } from '../components/TreeView';
 import { inventoryAPI } from '../services/api';
 import '../styles/LocationListPage.css';
 import { Location } from '../types';
+import { confirmDelete, showError, showSuccess } from '../utils/dialogs';
 
 const LocationListPage: React.FC = () => {
   const [locations, setLocations] = useState<Location[]>([]);
@@ -127,26 +128,24 @@ const LocationListPage: React.FC = () => {
     }
   }, [filteredLocations]);
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm('Are you sure you want to delete this location?')) {
-      return;
-    }
-
-    try {
-      await inventoryAPI.deleteLocation(id.toString());
-      await loadLocations();
-    } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to delete location');
-    }
+  const handleDelete = (id: number) => {
+    confirmDelete('Are you sure you want to delete this location?', async () => {
+      try {
+        await inventoryAPI.deleteLocation(id.toString());
+        await loadLocations();
+      } catch (err: any) {
+        showError(err.response?.data?.detail || 'Failed to delete location');
+      }
+    });
   };
 
   const handleGenerateQR = async (id: number) => {
     try {
       await inventoryAPI.generateLocationQR(id.toString());
       await loadLocations();
-      alert('QR code generated successfully');
+      showSuccess('QR code generated successfully');
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to generate QR code');
+      showError(err.response?.data?.error || 'Failed to generate QR code');
     }
   };
 

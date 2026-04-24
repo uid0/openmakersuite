@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import { indexCardsAPI, inventoryAPI } from '../services/api';
 import { Category, InventoryItem, Location } from '../types';
 import { exportInventoryItemsToCSV } from '../utils/csvExport';
+import { showError, showInfo, showSuccess } from '../utils/dialogs';
 
 type SortField = 'name' | 'sku' | 'current_stock' | 'category_name' | 'location' | 'unit_cost';
 type SortDirection = 'asc' | 'desc';
@@ -180,13 +181,13 @@ const InventoryListPage: React.FC = () => {
       setEditingStock(null);
     } catch (err) {
       console.error('Error updating stock:', err);
-      alert('Failed to update stock. Please try again.');
+      showError('Failed to update stock. Please try again.');
     }
   };
 
   const handleBulkGenerateQR = async () => {
     if (selectedItems.size === 0) {
-      alert('Please select items to generate QR codes for.');
+      showInfo('Please select items to generate QR codes for.');
       return;
     }
 
@@ -194,12 +195,12 @@ const InventoryListPage: React.FC = () => {
       setGeneratingQR(true);
       const promises = Array.from(selectedItems).map((id) => inventoryAPI.generateQR(id));
       await Promise.all(promises);
-      alert(`Successfully generated QR codes for ${selectedItems.size} items.`);
+      showSuccess(`Successfully generated QR codes for ${selectedItems.size} items.`);
       setSelectedItems(new Set());
       await loadData();
     } catch (err) {
       console.error('Error generating QR codes:', err);
-      alert('Failed to generate QR codes. Please try again.');
+      showError('Failed to generate QR codes. Please try again.');
     } finally {
       setGeneratingQR(false);
     }
@@ -215,7 +216,7 @@ const InventoryListPage: React.FC = () => {
     const itemIds = itemsToExport.length > 0 ? itemsToExport.map((i) => i.id) : sortedAndFilteredItems.map((i) => i.id);
 
     if (itemIds.length === 0) {
-      alert('No items to generate test sheet for.');
+      showInfo('No items to generate test sheet for.');
       return;
     }
 
@@ -233,7 +234,7 @@ const InventoryListPage: React.FC = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error generating test sheet:', err);
-      alert('Failed to generate test sheet. Please try again.');
+      showError('Failed to generate test sheet. Please try again.');
     } finally {
       setGeneratingTestSheet(false);
     }

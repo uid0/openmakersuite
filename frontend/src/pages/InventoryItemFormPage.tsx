@@ -19,6 +19,7 @@ import { FormSelect } from '../components/forms/FormSelect';
 import { FormTextarea } from '../components/forms/FormTextarea';
 import { inventoryAPI } from '../services/api';
 import { Category, InventoryItem, ItemSupplier, Location, Supplier } from '../types';
+import { promptInput, showError } from '../utils/dialogs';
 import { InventoryItemFormData, inventoryItemSchema } from '../utils/formSchemas';
 
 const InventoryItemFormPage: React.FC = () => {
@@ -175,7 +176,7 @@ const InventoryItemFormPage: React.FC = () => {
       setNewCategoryName('');
     } catch (err) {
       console.error('Error creating category:', err);
-      alert('Failed to create category. Please try again.');
+      showError('Failed to create category. Please try again.');
     }
   };
 
@@ -404,11 +405,13 @@ const InventoryItemFormPage: React.FC = () => {
                           value={field.value ? String(field.value) : ''}
                           onChange={(value) => {
                             if (value === '__create_new__') {
-                              const name = prompt('Enter location name:');
-                              if (name) {
-                                setNewLocationName(name);
-                                field.onChange(name);
-                              }
+                              promptInput('New Location', 'Location name', (name) => {
+                                const trimmed = name.trim();
+                                if (trimmed) {
+                                  setNewLocationName(trimmed);
+                                  field.onChange(trimmed);
+                                }
+                              });
                             } else {
                               field.onChange(value ? (isNaN(Number(value)) ? value : Number(value)) : null);
                             }

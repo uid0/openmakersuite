@@ -10,6 +10,14 @@ import * as api from '../../services/api';
 // Mock the API
 jest.mock('../../services/api');
 
+// Mock dialogs so confirmDelete invokes onConfirm immediately
+jest.mock('../../utils/dialogs', () => ({
+  confirmDelete: jest.fn(),
+  showError: jest.fn(),
+  showSuccess: jest.fn(),
+}));
+import { confirmDelete, showError, showSuccess } from '../../utils/dialogs';
+
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
@@ -96,6 +104,9 @@ describe('LocationListPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorageMock.clear();
+    (confirmDelete as jest.Mock).mockImplementation(
+      (_msg: string, onConfirm: () => void) => onConfirm(),
+    );
     (api.inventoryAPI.listLocations as jest.Mock).mockResolvedValue({
       data: { results: mockLocations },
       status: 200,
@@ -391,9 +402,6 @@ describe('LocationListPage', () => {
   it('reloads locations after delete', async () => {
     localStorageMock.setItem('is_staff', 'true');
     (api.inventoryAPI.deleteLocation as jest.Mock).mockResolvedValue({});
-    
-    // Mock window.confirm
-    window.confirm = jest.fn(() => true);
 
     renderPage();
 
@@ -403,15 +411,57 @@ describe('LocationListPage', () => {
 
     // Find and click delete button
     const deleteButtons = screen.getAllByText('Delete');
-    if (deleteButtons.length > 0) {
-      fireEvent.click(deleteButtons[0]);
+    expect(deleteButtons.length).toBeGreaterThan(0);
+    fireEvent.click(deleteButtons[0]);
 
-      await waitFor(() => {
-        expect(api.inventoryAPI.deleteLocation).toHaveBeenCalled();
-        // Should reload locations after delete
-        expect(api.inventoryAPI.listLocations).toHaveBeenCalledTimes(2);
-      });
-    }
+    expect(confirmDelete).toHaveBeenCalledWith(
+      'Are you sure you want to delete this location?',
+      expect.any(Function),
+    );
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.deleteLocation).toHaveBeenCalled();
+      // Should reload locations after delete
+      expect(api.inventoryAPI.listLocations).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('shows error notification when delete fails', async () => {
+    localStorageMock.setItem('is_staff', 'true');
+    (api.inventoryAPI.deleteLocation as jest.Mock).mockRejectedValue({
+      response: { data: { detail: 'Cannot delete' } },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Main Workshop')).toBeInTheDocument();
+    });
+
+    const deleteButtons = screen.getAllByText('Delete');
+    fireEvent.click(deleteButtons[0]);
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith('Cannot delete');
+    });
+  });
+
+  it('shows success notification after generating QR code', async () => {
+    localStorageMock.setItem('is_staff', 'true');
+    (api.inventoryAPI.generateLocationQR as jest.Mock).mockResolvedValue({});
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Main Workshop')).toBeInTheDocument();
+    });
+
+    const qrButtons = screen.getAllByTitle('Generate QR Code');
+    fireEvent.click(qrButtons[0]);
+
+    await waitFor(() => {
+      expect(showSuccess).toHaveBeenCalledWith('QR code generated successfully');
+    });
   });
 
   it('handles buildTree with duplicate IDs gracefully', async () => {

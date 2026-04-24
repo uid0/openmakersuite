@@ -25,6 +25,7 @@ from .models import (
     MaintenanceMaterial,
     MaintenanceTask,
     PriceHistory,
+    StockReconciliation,
     Supplier,
     UsageLog,
     WorkOrder,
@@ -1473,3 +1474,31 @@ class WorkOrderSubmissionAdmin(admin.ModelAdmin):
         "parse_error",
         "postmark_message_id",
     ]
+
+
+@admin.register(StockReconciliation)
+class StockReconciliationAdmin(admin.ModelAdmin):
+    list_display = [
+        "reconciled_at",
+        "item",
+        "projected_count",
+        "actual_count",
+        "delta",
+        "reason",
+        "reconciled_by",
+        "triggered_reorder",
+    ]
+    list_filter = ["reason", "reconciled_at", "reconciled_by"]
+    search_fields = ["item__name", "item__sku", "notes"]
+    readonly_fields = [
+        "item",
+        "projected_count",
+        "actual_count",
+        "delta",
+        "reason",
+        "notes",
+        "reconciled_by",
+        "reconciled_at",
+        "triggered_reorder",
+    ]
+    date_hierarchy = "reconciled_at"

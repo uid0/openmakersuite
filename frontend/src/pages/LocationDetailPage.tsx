@@ -101,6 +101,12 @@ const LocationDetailPage: React.FC = () => {
         {isStaff && (
           <div className="header-actions">
             <Link
+              to={`/inventory/locations/${location.id}/reconcile`}
+              className="btn-secondary"
+            >
+              Reconcile inventory
+            </Link>
+            <Link
               to={`/inventory/locations/${location.id}/edit`}
               className="btn-edit"
             >

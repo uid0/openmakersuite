@@ -354,6 +354,23 @@ export const inventoryAPI = {
 
   listReconciliations: (params?: { item?: string; reason?: string }) =>
     api.get<StockReconciliation[]>('/inventory/reconciliations/', { params }),
+
+  // CSV offline batch (oms-sig)
+  exportReconcileTemplate: (locationId: string | number) =>
+    api.get<Blob>(
+      `/inventory/locations/${locationId}/reconcile/export/`,
+      { responseType: 'blob' },
+    ),
+
+  uploadReconcileCsv: (file: File, partial = false) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.post<ReconciliationUploadResponse>(
+      `/inventory/reconciliations/upload/${partial ? '?partial=true' : ''}`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+  },
 };
 
 export interface ReconciliationGridItem {
@@ -400,6 +417,17 @@ export interface ReconciliationBatchResponse {
   reconciled: number;
   reorders_created: number;
   reconciliations: StockReconciliation[];
+}
+
+export interface ReconciliationUploadError {
+  row: number;
+  error: string;
+}
+
+export interface ReconciliationUploadResponse {
+  created: number;
+  skipped: number;
+  errors: ReconciliationUploadError[];
 }
 
 // Assets API

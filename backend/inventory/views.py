@@ -2,13 +2,15 @@
 Views for inventory API.
 """
 
+import csv
+import io
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from django.db.models import F, Q
-from django.http import HttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 
 from rest_framework import status, viewsets
@@ -3309,6 +3311,49 @@ def _user_can_reconcile_item(user, item):
     return is_sig_admin(user, group)
 
 
+def _apply_reconciliation_row(user, item, actual_count, reason, notes="", skip_reorder=False):
+    """Apply a single reconciliation row. Caller owns transaction + permission check.
+
+    Returns (StockReconciliation, reorder_created_bool).
+    """
+    projected = int(item.current_stock)
+    actual = int(actual_count)
+    delta = actual - projected
+    item.current_stock = actual
+    item.save(update_fields=["current_stock", "updated_at"])
+
+    reconciliation = StockReconciliation.objects.create(
+        item=item,
+        projected_count=projected,
+        actual_count=actual,
+        delta=delta,
+        reason=reason,
+        notes=notes or "",
+        reconciled_by=user,
+    )
+
+    reorder_created = False
+    if not skip_reorder and actual <= item.minimum_stock:
+        from reorder_queue.models import ReorderRequest
+
+        requested_by = (user.get_full_name() or user.username).strip()
+        reorder_quantity = item.reorder_quantity or 1
+        reorder = ReorderRequest.objects.create(
+            item=item,
+            quantity=reorder_quantity,
+            requested_by=requested_by,
+            request_notes=(
+                "Auto-created by stock reconciliation "
+                f"(actual={actual}, minimum={item.minimum_stock})."
+            ),
+        )
+        reconciliation.triggered_reorder = reorder
+        reconciliation.save(update_fields=["triggered_reorder"])
+        reorder_created = True
+
+    return reconciliation, reorder_created
+
+
 class InventoryReconciliationViewSet(viewsets.ViewSet):
     """Endpoints for manual stock reconciliation."""
 
@@ -3387,43 +3432,16 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
             with transaction.atomic():
                 for row in rows:
                     item = items[row["item_id"]]
-                    projected = int(item.current_stock)
-                    actual = int(row["actual_count"])
-                    delta = actual - projected
-                    item.current_stock = actual
-                    item.save(update_fields=["current_stock", "updated_at"])
-
-                    reconciliation = StockReconciliation.objects.create(
-                        item=item,
-                        projected_count=projected,
-                        actual_count=actual,
-                        delta=delta,
-                        reason=row["reason"],
+                    reconciliation, reorder_created = _apply_reconciliation_row(
+                        request.user,
+                        item,
+                        row["actual_count"],
+                        row["reason"],
                         notes=row.get("notes", "") or "",
-                        reconciled_by=request.user,
+                        skip_reorder=bool(row.get("skip_reorder", False)),
                     )
-
-                    skip_reorder = bool(row.get("skip_reorder", False))
-                    if not skip_reorder and actual <= item.minimum_stock:
-                        from reorder_queue.models import ReorderRequest
-
-                        requested_by = (
-                            request.user.get_full_name() or request.user.username
-                        ).strip()
-                        reorder_quantity = item.reorder_quantity or 1
-                        reorder = ReorderRequest.objects.create(
-                            item=item,
-                            quantity=reorder_quantity,
-                            requested_by=requested_by,
-                            request_notes=(
-                                "Auto-created by stock reconciliation "
-                                f"(actual={actual}, minimum={item.minimum_stock})."
-                            ),
-                        )
-                        reconciliation.triggered_reorder = reorder
-                        reconciliation.save(update_fields=["triggered_reorder"])
+                    if reorder_created:
                         reorders_created += 1
-
                     created_reconciliations.append(reconciliation)
         except DjangoValidationError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -3437,3 +3455,235 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=False, methods=["post"], url_path="upload")
+    def upload_csv(self, request):
+        """Batch-reconcile via multipart CSV upload.
+
+        Modes:
+          - default (all-or-nothing): any row error rolls back the whole batch
+            and returns 400 with per-row errors.
+          - ?partial=true: bad rows are skipped and reported; valid rows commit.
+        """
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response(
+                {"detail": "No file uploaded. Send the CSV under form field 'file'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        partial = str(request.query_params.get("partial", "")).lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+        valid_reasons = {v for v, _ in StockReconciliation.REASON_CHOICES}
+
+        try:
+            decoded = io.TextIOWrapper(file_obj, encoding="utf-8-sig", newline="")
+        except Exception as exc:  # pragma: no cover
+            return Response(
+                {"detail": f"Could not decode file as UTF-8 CSV: {exc}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        reader = csv.DictReader(decoded)
+        if not reader.fieldnames:
+            return Response(
+                {"detail": "CSV is empty or missing header row."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        header_set = {(f or "").strip().lower() for f in reader.fieldnames}
+        if "actual_count" not in header_set:
+            return Response(
+                {"detail": "CSV missing required 'actual_count' column."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if "reason" not in header_set:
+            return Response(
+                {"detail": "CSV missing required 'reason' column."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if "item_id" not in header_set and "sku" not in header_set:
+            return Response(
+                {"detail": "CSV must include either 'item_id' or 'sku' column."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        parsed = []
+        errors = []
+        for row_num, raw in enumerate(reader, start=2):
+            row = {
+                (k or "").strip().lower(): (v.strip() if isinstance(v, str) else "")
+                for k, v in raw.items()
+                if k is not None
+            }
+            item_id = row.get("item_id") or ""
+            sku = row.get("sku") or ""
+            item = None
+            if item_id:
+                try:
+                    item = InventoryItem.objects.filter(pk=item_id).first()
+                except (DjangoValidationError, ValueError):
+                    item = None
+            if item is None and sku:
+                item = InventoryItem.objects.filter(sku=sku).first()
+            if item is None:
+                errors.append(
+                    {
+                        "row": row_num,
+                        "error": (f"Item not found (item_id={item_id!r}, sku={sku!r})."),
+                    }
+                )
+                continue
+            try:
+                actual = int(row.get("actual_count") or "")
+            except (TypeError, ValueError):
+                errors.append(
+                    {
+                        "row": row_num,
+                        "error": "actual_count must be a non-negative integer.",
+                    }
+                )
+                continue
+            if actual < 0:
+                errors.append({"row": row_num, "error": "actual_count must be >= 0."})
+                continue
+            reason = (row.get("reason") or "").lower()
+            if reason not in valid_reasons:
+                errors.append(
+                    {
+                        "row": row_num,
+                        "error": (
+                            f"Invalid reason {reason!r}; choose from " f"{sorted(valid_reasons)}."
+                        ),
+                    }
+                )
+                continue
+            if not _user_can_reconcile_item(request.user, item):
+                errors.append(
+                    {
+                        "row": row_num,
+                        "error": (f"Permission denied for item {item.name}."),
+                    }
+                )
+                continue
+            skip_flag = (row.get("skip_reorder") or "").lower()
+            skip_reorder = skip_flag in ("1", "true", "yes", "y", "t")
+            parsed.append(
+                {
+                    "row": row_num,
+                    "item_pk": item.pk,
+                    "actual": actual,
+                    "reason": reason,
+                    "notes": row.get("notes") or "",
+                    "skip_reorder": skip_reorder,
+                }
+            )
+
+        if not parsed and not errors:
+            return Response(
+                {"detail": "CSV contains no data rows."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not partial and errors:
+            return Response(
+                {
+                    "created": 0,
+                    "skipped": len(parsed) + len(errors),
+                    "errors": errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created = 0
+        try:
+            with transaction.atomic():
+                for p in parsed:
+                    item = InventoryItem.objects.select_for_update().get(pk=p["item_pk"])
+                    _apply_reconciliation_row(
+                        request.user,
+                        item,
+                        p["actual"],
+                        p["reason"],
+                        notes=p["notes"],
+                        skip_reorder=p["skip_reorder"],
+                    )
+                    created += 1
+        except DjangoValidationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                "created": created,
+                "skipped": len(errors),
+                "errors": errors,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    def location_export(self, request, location_id=None):
+        """Return a pre-populated CSV template for offline reconciliation.
+
+        Wired at GET /api/inventory/locations/<location_id>/reconcile/export/.
+        """
+        try:
+            location = Location.objects.get(pk=location_id)
+        except Location.DoesNotExist:
+            return Response(
+                {"detail": "Location not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        items = (
+            InventoryItem.objects.filter(location=location, is_active=True)
+            .only(
+                "id",
+                "sku",
+                "name",
+                "current_stock",
+                "minimum_stock",
+            )
+            .order_by("name")
+            .iterator(chunk_size=500)
+        )
+
+        header = [
+            "item_id",
+            "sku",
+            "name",
+            "projected",
+            "minimum_stock",
+            "actual_count",
+            "reason",
+            "notes",
+            "skip_reorder",
+        ]
+
+        class _Echo:
+            def write(self, value):
+                return value
+
+        writer = csv.writer(_Echo())
+
+        def _rows():
+            yield writer.writerow(header)
+            for item in items:
+                yield writer.writerow(
+                    [
+                        str(item.pk),
+                        item.sku,
+                        item.name,
+                        item.current_stock,
+                        item.minimum_stock,
+                        "",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
+
+        response = StreamingHttpResponse(_rows(), content_type="text/csv")
+        filename = f"reconcile_location_{location.pk}.csv"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

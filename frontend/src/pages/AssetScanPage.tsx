@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { assetsAPI, checklistsAPI, maintenanceAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Asset, Checklist, MaintenanceItem } from '../types';
+import { confirmDelete, promptInput, showError } from '../utils/dialogs';
 
 const AssetScanPage: React.FC = () => {
   const { assetId } = useParams<{ assetId: string }>();
@@ -86,28 +87,32 @@ const AssetScanPage: React.FC = () => {
       setActionSuccess('Maintenance task marked complete');
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to log completion');
+      showError(err.response?.data?.detail || 'Failed to log completion');
       console.error('Error completing maintenance task:', err);
     } finally {
       setCompletingTask(null);
     }
   };
 
-  const handleStartChecklist = async (checklistId: string) => {
+  const startChecklistWithName = async (checklistId: string, userName: string | undefined) => {
     try {
-      // If logged in, use the username from localStorage; otherwise prompt
-      let userName: string | undefined;
-      if (isLoggedIn) {
-        userName = localStorage.getItem('username') || undefined;
-      } else {
-        const promptResult = prompt('Enter your name (optional):');
-        userName = promptResult || undefined;
-      }
       const completion = await checklistsAPI.startChecklist(checklistId, userName);
       navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to start checklist');
+      showError(err.response?.data?.detail || 'Failed to start checklist');
     }
+  };
+
+  const handleStartChecklist = async (checklistId: string) => {
+    // If logged in, use the username from localStorage; otherwise prompt
+    if (isLoggedIn) {
+      const userName = localStorage.getItem('username') || undefined;
+      await startChecklistWithName(checklistId, userName);
+      return;
+    }
+    const promptResult = await promptInput('Start checklist', 'Enter your name (optional):');
+    if (promptResult === null) return;
+    await startChecklistWithName(checklistId, promptResult || undefined);
   };
 
   const handleEnable = async () => {
@@ -120,81 +125,78 @@ const AssetScanPage: React.FC = () => {
       setActionSuccess('Asset enabled successfully');
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to enable asset');
+      showError(err.response?.data?.detail || 'Failed to enable asset');
       console.error('Error enabling asset:', err);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDisable = async () => {
+  const handleDisable = () => {
     if (!asset || !isLoggedIn) return;
 
-    if (!window.confirm('Are you sure you want to disable this asset?')) {
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-      await assetsAPI.disableAsset(asset.id);
-      await loadAsset(); // Reload to get updated data
-      setActionSuccess('Asset disabled successfully');
-      setTimeout(() => setActionSuccess(null), 3000);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to disable asset');
-      console.error('Error disabling asset:', err);
-    } finally {
-      setSubmitting(false);
-    }
+    confirmDelete('Are you sure you want to disable this asset?', async () => {
+      try {
+        setSubmitting(true);
+        await assetsAPI.disableAsset(asset.id);
+        await loadAsset(); // Reload to get updated data
+        setActionSuccess('Asset disabled successfully');
+        setTimeout(() => setActionSuccess(null), 3000);
+      } catch (err: any) {
+        showError(err.response?.data?.detail || 'Failed to disable asset');
+        console.error('Error disabling asset:', err);
+      } finally {
+        setSubmitting(false);
+      }
+    });
   };
 
-  const handleLock = async () => {
+  const handleLock = () => {
     if (!asset || !isLoggedIn) return;
 
-    if (!window.confirm('Are you sure you want to lock this asset? Non-admins will not be able to use it.')) {
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-      await assetsAPI.lockAsset(asset.id);
-      await loadAsset(); // Reload to get updated data
-      setActionSuccess('Asset locked successfully');
-      setTimeout(() => setActionSuccess(null), 3000);
-    } catch (err: any) {
-      alert(err.response?.data?.error || err.response?.data?.detail || 'Failed to lock asset');
-      console.error('Error locking asset:', err);
-    } finally {
-      setSubmitting(false);
-    }
+    confirmDelete(
+      'Are you sure you want to lock this asset? Non-admins will not be able to use it.',
+      async () => {
+        try {
+          setSubmitting(true);
+          await assetsAPI.lockAsset(asset.id);
+          await loadAsset(); // Reload to get updated data
+          setActionSuccess('Asset locked successfully');
+          setTimeout(() => setActionSuccess(null), 3000);
+        } catch (err: any) {
+          showError(err.response?.data?.error || err.response?.data?.detail || 'Failed to lock asset');
+          console.error('Error locking asset:', err);
+        } finally {
+          setSubmitting(false);
+        }
+      },
+    );
   };
 
-  const handleUnlock = async () => {
+  const handleUnlock = () => {
     if (!asset || !isLoggedIn) return;
 
-    if (!window.confirm('Are you sure you want to unlock this asset?')) {
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-      await assetsAPI.unlockAsset(asset.id);
-      await loadAsset(); // Reload to get updated data
-      setActionSuccess('Asset unlocked successfully');
-      setTimeout(() => setActionSuccess(null), 3000);
-    } catch (err: any) {
-      alert(err.response?.data?.error || err.response?.data?.detail || 'Failed to unlock asset');
-      console.error('Error unlocking asset:', err);
-    } finally {
-      setSubmitting(false);
-    }
+    confirmDelete('Are you sure you want to unlock this asset?', async () => {
+      try {
+        setSubmitting(true);
+        await assetsAPI.unlockAsset(asset.id);
+        await loadAsset(); // Reload to get updated data
+        setActionSuccess('Asset unlocked successfully');
+        setTimeout(() => setActionSuccess(null), 3000);
+      } catch (err: any) {
+        showError(err.response?.data?.error || err.response?.data?.detail || 'Failed to unlock asset');
+        console.error('Error unlocking asset:', err);
+      } finally {
+        setSubmitting(false);
+      }
+    });
   };
 
   const handleReportProblem = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!asset || !isLoggedIn || !problemDescription.trim()) {
-      alert('Please provide a description of the problem');
+      showError('Please provide a description of the problem');
       return;
     }
 
@@ -205,7 +207,7 @@ const AssetScanPage: React.FC = () => {
       setActionSuccess('Problem reported successfully');
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to report problem');
+      showError(err.response?.data?.detail || 'Failed to report problem');
       console.error('Error reporting problem:', err);
     } finally {
       setSubmitting(false);

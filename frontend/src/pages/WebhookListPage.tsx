@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { webhooksAPI } from '../services/api';
 import '../styles/WebhookListPage.css';
 import { Webhook } from '../types';
+import { confirmDelete, showError } from '../utils/dialogs';
 
 const EVENT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All Event Types' },
@@ -85,18 +86,16 @@ const WebhookListPage: React.FC = () => {
     return filtered;
   }, [webhooks, searchTerm, selectedEventType, selectedStatus]);
 
-  const handleDelete = async (id: number, name: string) => {
-    if (!window.confirm(`Are you sure you want to delete webhook "${name}"?`)) {
-      return;
-    }
-
-    try {
-      await webhooksAPI.deleteWebhook(id);
-      await loadWebhooks();
-    } catch (err: any) {
-      console.error('Error deleting webhook:', err);
-      alert(err.response?.data?.detail || 'Failed to delete webhook');
-    }
+  const handleDelete = (id: number, name: string) => {
+    confirmDelete(`Are you sure you want to delete webhook "${name}"?`, async () => {
+      try {
+        await webhooksAPI.deleteWebhook(id);
+        await loadWebhooks();
+      } catch (err: any) {
+        console.error('Error deleting webhook:', err);
+        showError(err.response?.data?.detail || 'Failed to delete webhook');
+      }
+    });
   };
 
   const getSuccessRateColor = (rate: number | null) => {

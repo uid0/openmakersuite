@@ -12,6 +12,7 @@ import { useNotifications } from '../hooks/useNotifications';
 import { checklistsAPI, inventoryAPI, locationCheckinAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Checklist } from '../types';
+import { promptInput, showError } from '../utils/dialogs';
 
 interface Location {
   id: string;
@@ -89,7 +90,7 @@ const LocationScanPage: React.FC = () => {
       if (isLoggedIn) {
         userName = localStorage.getItem('username') || undefined;
       } else {
-        const promptResult = prompt('Enter your name (optional):');
+        const promptResult = await promptInput('Start Checklist', 'Enter your name (optional)');
         userName = promptResult || undefined;
       }
       const completion = await checklistsAPI.startChecklist(checklistId, userName);
@@ -167,7 +168,7 @@ const LocationScanPage: React.FC = () => {
         setReportDescription('');
       }, 3000);
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to submit report');
+      showError(err.response?.data?.error || 'Failed to submit report');
       console.error('Error submitting report:', err);
     } finally {
       setSubmitting(false);

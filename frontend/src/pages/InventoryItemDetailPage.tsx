@@ -24,6 +24,7 @@ import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import { Asset, InventoryItem, ReorderRequest, UsageLog } from '../types';
+import { showError } from '../utils/dialogs';
 
 const InventoryItemDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -78,7 +79,7 @@ const InventoryItemDetailPage: React.FC = () => {
       await loadData(); // Reload to get updated QR code
     } catch (err) {
       console.error('Error generating QR code:', err);
-      alert('Failed to generate QR code. Please try again.');
+      showError('Failed to generate QR code. Please try again.');
     }
   };
 

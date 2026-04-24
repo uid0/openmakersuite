@@ -9,6 +9,7 @@ import { useNotifications } from '../hooks/useNotifications';
 import { fixturesAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Fixture, FixtureRefillRequest } from '../types';
+import { confirmAction, showError } from '../utils/dialogs';
 
 const FixtureScanPage: React.FC = () => {
   const { fixtureId } = useParams<{ fixtureId: string }>();
@@ -95,7 +96,7 @@ const FixtureScanPage: React.FC = () => {
     if (!fixture || !isLoggedIn) return;
 
     if (!fixture.is_active) {
-      alert('This fixture is inactive and cannot be refilled.');
+      showError('This fixture is inactive and cannot be refilled.');
       return;
     }
 
@@ -114,28 +115,29 @@ const FixtureScanPage: React.FC = () => {
     }
   };
 
-  const handleResolveAll = async (e: React.FormEvent) => {
+  const handleResolveAll = (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!fixture || !isAdmin) return;
 
-    if (!window.confirm('Mark all pending refill requests for this fixture as completed?')) {
-      return;
-    }
-
-    try {
-      setResolving(true);
-      await fixturesAPI.resolveFixtureRequest(fixture.id, notes || undefined);
-      setSubmitted(true);
-      // Reload fixture to get updated data
-      await loadFixture();
-      setNotes('');
-    } catch (err: any) {
-      notifications.showError('Failed to resolve requests', err.response?.data?.error);
-      console.error('Error resolving requests:', err);
-    } finally {
-      setResolving(false);
-    }
+    confirmAction(
+      'Resolve all pending requests',
+      'Mark all pending refill requests for this fixture as completed?',
+      async () => {
+        try {
+          setResolving(true);
+          await fixturesAPI.resolveFixtureRequest(fixture.id, notes || undefined);
+          setSubmitted(true);
+          await loadFixture();
+          setNotes('');
+        } catch (err: any) {
+          notifications.showError('Failed to resolve requests', err.response?.data?.error);
+          console.error('Error resolving requests:', err);
+        } finally {
+          setResolving(false);
+        }
+      },
+    );
   };
 
   if (loading) {

@@ -61,6 +61,11 @@ urlpatterns = [
         InventoryReconciliationViewSet.as_view({"get": "location_grid"}),
         name="inventory-location-reconcile-grid",
     ),
+    path(
+        "locations/<int:location_id>/reconcile/export/",
+        InventoryReconciliationViewSet.as_view({"get": "location_export"}),
+        name="inventory-location-reconcile-export",
+    ),
     path("", include(router.urls)),
     path("lookup-code/", lookup_by_code, name="lookup-by-code"),
     path(

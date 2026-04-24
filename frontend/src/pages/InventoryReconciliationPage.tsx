@@ -11,16 +11,18 @@ import {
   Button,
   Checkbox,
   Group,
+  List,
   Modal,
   NumberInput,
   Select,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
   Title,
 } from '@mantine/core';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import QRScanner from '../components/QRScanner';
 import { useNotifications } from '../hooks/useNotifications';
@@ -28,6 +30,7 @@ import {
   inventoryAPI,
   ReconciliationGridItem,
   ReconciliationRow,
+  ReconciliationUploadResponse,
 } from '../services/api';
 
 type ReasonCode = ReconciliationRow['reason'];
@@ -60,6 +63,11 @@ const InventoryReconciliationPage: React.FC = () => {
   const [items, setItems] = useState<ReconciliationGridItem[]>([]);
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [uploadPartial, setUploadPartial] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadResult, setUploadResult] =
+    useState<ReconciliationUploadResponse | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -145,6 +153,58 @@ const InventoryReconciliationPage: React.FC = () => {
     }
   };
 
+  const handleExport = async () => {
+    if (!id) return;
+    try {
+      const response = await inventoryAPI.exportReconcileTemplate(id);
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `reconcile_location_${id}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail || 'Failed to download CSV template';
+      notifications.showError('Export failed', detail);
+    }
+  };
+
+  const handleUploadFile = async (file: File | null | undefined) => {
+    if (!file) return;
+    try {
+      setUploadBusy(true);
+      const response = await inventoryAPI.uploadReconcileCsv(file, uploadPartial);
+      setUploadResult(response.data);
+      if (response.data.created > 0) {
+        await load();
+      }
+    } catch (err: unknown) {
+      const data = (err as { response?: { data?: unknown } })?.response?.data;
+      if (
+        data &&
+        typeof data === 'object' &&
+        ('errors' in data || 'created' in data)
+      ) {
+        setUploadResult(data as ReconciliationUploadResponse);
+      } else {
+        const detail =
+          (data as { detail?: string } | undefined)?.detail ||
+          'Failed to upload CSV';
+        notifications.showError('Upload failed', detail);
+      }
+    } finally {
+      setUploadBusy(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   const handleScanSuccess = async (decodedText: string) => {
     setScannerOpen(false);
     try {
@@ -216,6 +276,38 @@ const InventoryReconciliationPage: React.FC = () => {
             Submit ({rowsToSubmit.length})
           </Button>
         </Group>
+      </Group>
+
+      <Group gap="sm" align="center" data-testid="csv-batch-controls">
+        <Button
+          variant="default"
+          onClick={handleExport}
+          data-testid="export-csv-template"
+        >
+          Export CSV template
+        </Button>
+        <Button
+          variant="default"
+          onClick={() => fileInputRef.current?.click()}
+          loading={uploadBusy}
+          data-testid="upload-filled-csv"
+        >
+          Upload filled CSV
+        </Button>
+        <Switch
+          checked={uploadPartial}
+          onChange={(e) => setUploadPartial(e.currentTarget.checked)}
+          label="Skip bad rows (partial mode)"
+          data-testid="upload-partial-toggle"
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          style={{ display: 'none' }}
+          onChange={(e) => handleUploadFile(e.currentTarget.files?.[0])}
+          data-testid="csv-file-input"
+        />
       </Group>
 
       {items.length === 0 ? (
@@ -320,6 +412,44 @@ const InventoryReconciliationPage: React.FC = () => {
             onScanSuccess={handleScanSuccess}
             onClose={() => setScannerOpen(false)}
           />
+        )}
+      </Modal>
+
+      <Modal
+        opened={uploadResult !== null}
+        onClose={() => setUploadResult(null)}
+        title="CSV upload result"
+        size="lg"
+        data-testid="csv-upload-result-modal"
+      >
+        {uploadResult && (
+          <Stack>
+            <Text data-testid="csv-upload-summary">
+              Created: <b>{uploadResult.created}</b> &nbsp;·&nbsp; Skipped:{' '}
+              <b>{uploadResult.skipped}</b> &nbsp;·&nbsp; Errors:{' '}
+              <b>{uploadResult.errors.length}</b>
+            </Text>
+            {uploadResult.errors.length > 0 && (
+              <Alert color="red" title="Row errors">
+                <List size="sm" data-testid="csv-upload-errors">
+                  {uploadResult.errors.map((e) => (
+                    <List.Item key={`${e.row}-${e.error}`}>
+                      Row {e.row}: {e.error}
+                    </List.Item>
+                  ))}
+                </List>
+                {!uploadPartial && (
+                  <Text size="sm" mt="xs">
+                    Batch rolled back. Enable &quot;Skip bad rows&quot; and
+                    re-upload to commit valid rows.
+                  </Text>
+                )}
+              </Alert>
+            )}
+            <Group justify="flex-end">
+              <Button onClick={() => setUploadResult(null)}>Close</Button>
+            </Group>
+          </Stack>
         )}
       </Modal>
     </Stack>

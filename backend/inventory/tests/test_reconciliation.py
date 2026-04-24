@@ -1,4 +1,7 @@
-"""Tests for stock reconciliation API (oms-90k)."""
+"""Tests for stock reconciliation API (oms-90k, oms-sig)."""
+
+import csv
+import io
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -21,6 +24,7 @@ pytestmark = pytest.mark.django_db
 
 BATCH_URL = "/api/inventory/reconciliations/batch/"
 LIST_URL = "/api/inventory/reconciliations/"
+UPLOAD_URL = "/api/inventory/reconciliations/upload/"
 
 
 def _make_user(**kwargs):
@@ -273,3 +277,182 @@ class TestReconciliationList:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) == 1
         assert response.data[0]["delta"] == -2
+
+
+def _csv_bytes(header, rows):
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(header)
+    for r in rows:
+        writer.writerow(r)
+    return buf.getvalue().encode("utf-8")
+
+
+def _upload(client, csv_bytes, *, partial=False, filename="recon.csv"):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    upload = SimpleUploadedFile(filename, csv_bytes, content_type="text/csv")
+    url = UPLOAD_URL + ("?partial=true" if partial else "")
+    return client.post(url, {"file": upload}, format="multipart")
+
+
+class TestCsvUpload:
+    def test_csv_upload_happy_path(self, staff_client, location):
+        client, _ = staff_client
+        items = InventoryItemFactory.create_batch(
+            10, location=location, current_stock=20, minimum_stock=1
+        )
+        rows = [
+            [str(it.id), "", it.sku, 15 + i, "miscounted", "", "true"] for i, it in enumerate(items)
+        ]
+        header = [
+            "item_id",
+            "ignored",
+            "sku",
+            "actual_count",
+            "reason",
+            "notes",
+            "skip_reorder",
+        ]
+        response = _upload(client, _csv_bytes(header, rows))
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        assert response.data["created"] == 10
+        assert response.data["skipped"] == 0
+        assert response.data["errors"] == []
+        for i, it in enumerate(items):
+            it.refresh_from_db()
+            assert it.current_stock == 15 + i
+        assert StockReconciliation.objects.count() == 10
+
+    def test_csv_upload_invalid_item_row_reports_error(self, staff_client, location):
+        client, _ = staff_client
+        good = InventoryItemFactory(location=location, current_stock=20, minimum_stock=1)
+        header = ["item_id", "actual_count", "reason", "skip_reorder"]
+        rows = [
+            [str(good.id), 18, "miscounted", "true"],
+            ["00000000-0000-0000-0000-000000000000", 5, "lost", "true"],
+        ]
+        # default atomic mode — any bad row rolls back
+        response = _upload(client, _csv_bytes(header, rows))
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data["created"] == 0
+        assert len(response.data["errors"]) == 1
+        assert response.data["errors"][0]["row"] == 3
+        good.refresh_from_db()
+        assert good.current_stock == 20  # rolled back
+
+    def test_csv_upload_permission_denied_on_unauthorized_item(self, location):
+        # Regular user (no staff, no SIG admin) is forbidden.
+        regular = _make_user()
+        client = APIClient()
+        client.force_authenticate(user=regular)
+        item = InventoryItemFactory(location=location, current_stock=20, minimum_stock=1)
+        header = ["item_id", "actual_count", "reason", "skip_reorder"]
+        rows = [[str(item.id), 10, "miscounted", "true"]]
+        response = _upload(client, _csv_bytes(header, rows))
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data["created"] == 0
+        assert "Permission denied" in response.data["errors"][0]["error"]
+        item.refresh_from_db()
+        assert item.current_stock == 20
+
+    def test_csv_export_includes_all_items_at_location(self, staff_client, location):
+        client, _ = staff_client
+        items = InventoryItemFactory.create_batch(4, location=location)
+        InventoryItemFactory()  # different location
+        url = reverse(
+            "inventory-location-reconcile-export",
+            kwargs={"location_id": location.pk},
+        )
+        response = client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+        body = b"".join(response.streaming_content).decode("utf-8")
+        reader = csv.DictReader(io.StringIO(body))
+        rows = list(reader)
+        assert len(rows) == 4
+        sku_set = {r["sku"] for r in rows}
+        assert sku_set == {it.sku for it in items}
+
+    def test_csv_export_columns_match_expected(self, staff_client, location):
+        client, _ = staff_client
+        InventoryItemFactory(location=location, current_stock=7, minimum_stock=2)
+        url = reverse(
+            "inventory-location-reconcile-export",
+            kwargs={"location_id": location.pk},
+        )
+        response = client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+        body = b"".join(response.streaming_content).decode("utf-8")
+        reader = csv.reader(io.StringIO(body))
+        header = next(reader)
+        assert header == [
+            "item_id",
+            "sku",
+            "name",
+            "projected",
+            "minimum_stock",
+            "actual_count",
+            "reason",
+            "notes",
+            "skip_reorder",
+        ]
+        first = next(reader)
+        # actual_count/reason/notes/skip_reorder left blank for volunteer fill-in
+        assert first[3] == "7"
+        assert first[4] == "2"
+        assert first[5] == ""
+        assert first[6] == ""
+
+    def test_partial_mode_allows_bad_rows_to_skip(self, staff_client, location):
+        client, _ = staff_client
+        good = InventoryItemFactory(location=location, current_stock=20, minimum_stock=1)
+        header = ["item_id", "actual_count", "reason", "skip_reorder"]
+        rows = [
+            [str(good.id), 18, "miscounted", "true"],
+            ["00000000-0000-0000-0000-000000000000", 5, "lost", "true"],
+            [str(good.id), -3, "miscounted", "true"],  # negative actual_count
+            [str(good.id), 17, "not_a_reason", "true"],  # bad reason
+        ]
+        response = _upload(client, _csv_bytes(header, rows), partial=True)
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["created"] == 1
+        assert response.data["skipped"] == 3
+        err_rows = [e["row"] for e in response.data["errors"]]
+        assert err_rows == [3, 4, 5]
+        good.refresh_from_db()
+        assert good.current_stock == 18  # first row committed
+
+    def test_atomic_mode_rolls_back_entire_batch_on_any_error(self, staff_client, location):
+        client, _ = staff_client
+        a = InventoryItemFactory(location=location, current_stock=20, minimum_stock=1)
+        b = InventoryItemFactory(location=location, current_stock=30, minimum_stock=1)
+        header = ["item_id", "actual_count", "reason", "skip_reorder"]
+        rows = [
+            [str(a.id), 18, "miscounted", "true"],
+            [str(b.id), 25, "miscounted", "true"],
+            ["not-a-uuid", 0, "miscounted", "true"],
+        ]
+        response = _upload(client, _csv_bytes(header, rows))
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data["created"] == 0
+        assert response.data["skipped"] == 3
+        assert len(response.data["errors"]) == 1
+        a.refresh_from_db()
+        b.refresh_from_db()
+        assert a.current_stock == 20
+        assert b.current_stock == 30
+        assert StockReconciliation.objects.count() == 0
+
+    def test_csv_upload_sku_fallback_when_item_id_missing(self, staff_client, location):
+        # Volunteers may only have sku handy, not UUID. Ensure lookup by sku works.
+        client, _ = staff_client
+        item = InventoryItemFactory(
+            location=location, current_stock=20, minimum_stock=1, sku="ABC-123"
+        )
+        header = ["sku", "actual_count", "reason", "skip_reorder"]
+        rows = [["ABC-123", 16, "miscounted", "true"]]
+        response = _upload(client, _csv_bytes(header, rows))
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["created"] == 1
+        item.refresh_from_db()
+        assert item.current_stock == 16

@@ -103,6 +103,32 @@ describe('InventoryReconciliationPage', () => {
     expect(payload[0].skip_reorder).toBe(false);
   });
 
+  it('shows CSV export/upload controls and renders upload result modal', async () => {
+    (api.inventoryAPI.uploadReconcileCsv as jest.Mock).mockResolvedValue({
+      data: { created: 2, skipped: 1, errors: [{ row: 4, error: 'bad reason' }] },
+    });
+    renderPage();
+    expect(await screen.findByTestId('export-csv-template')).toBeInTheDocument();
+    const uploadBtn = screen.getByTestId('upload-filled-csv');
+    expect(uploadBtn).toBeInTheDocument();
+
+    const fileInput = screen.getByTestId('csv-file-input') as HTMLInputElement;
+    const file = new File(['item_id,actual_count,reason\n'], 'r.csv', {
+      type: 'text/csv',
+    });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(api.inventoryAPI.uploadReconcileCsv).toHaveBeenCalledWith(file, false),
+    );
+    expect(await screen.findByTestId('csv-upload-summary')).toHaveTextContent(
+      'Created: 2',
+    );
+    expect(await screen.findByTestId('csv-upload-errors')).toHaveTextContent(
+      'Row 4: bad reason',
+    );
+  });
+
   it('honors the skip-reorder checkbox', async () => {
     renderPage();
     expect(await screen.findByText('Widget B')).toBeInTheDocument();

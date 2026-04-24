@@ -4,6 +4,7 @@
  */
 import * as Sentry from '@sentry/react';
 import React, { useState } from 'react';
+import { showError } from '../utils/dialogs';
 import './ErrorFallback.css';
 
 interface ErrorFallbackProps {
@@ -31,7 +32,7 @@ const ErrorFallback: React.FC<ErrorFallbackProps> = ({ error, resetError, eventI
     e.preventDefault();
     
     if (!feedback.trim()) {
-      alert('Please tell us what you were doing when this error occurred.');
+      showError('Please tell us what you were doing when this error occurred.');
       return;
     }
 
@@ -90,7 +91,7 @@ const ErrorFallback: React.FC<ErrorFallbackProps> = ({ error, resetError, eventI
       }, 3000);
     } catch (err) {
       console.error('Error submitting feedback:', err);
-      alert('Failed to submit feedback. Please try again.');
+      showError('Failed to submit feedback. Please try again.');
     } finally {
       setSubmitting(false);
     }

@@ -9,6 +9,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { checklistsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Checklist, InventoryItem, ItemSupplier } from '../types';
+import { promptInput, showError } from '../utils/dialogs';
 
 const ScanPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
@@ -106,13 +107,13 @@ const ScanPage: React.FC = () => {
       if (isLoggedIn) {
         userName = localStorage.getItem('username') || undefined;
       } else {
-        const promptResult = prompt('Enter your name (optional):');
+        const promptResult = await promptInput('Start checklist', 'Enter your name (optional)');
         userName = promptResult || undefined;
       }
       const completion = await checklistsAPI.startChecklist(checklistId, userName);
       navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to start checklist');
+      showError(err.response?.data?.detail || 'Failed to start checklist');
     }
   };
 
@@ -174,7 +175,7 @@ const ScanPage: React.FC = () => {
 
     // Logged in user: Use supplier selection and package quantities
     if (!selectedSupplier) {
-      alert('Please select a supplier.');
+      showError('Please select a supplier.');
       return;
     }
 
@@ -196,7 +197,7 @@ const ScanPage: React.FC = () => {
         navigate('/');
       }, 3000);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to submit reorder request');
+      showError(err.response?.data?.detail || 'Failed to submit reorder request');
       console.error('Error submitting reorder:', err);
     } finally {
       setSubmitting(false);

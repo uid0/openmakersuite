@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { donationsAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Disposition, DispositionType, DonationItem, KeptDestination, SaleMethod } from '../types';
+import { showError } from '../utils/dialogs';
 
 const DonationItemScanPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
@@ -78,7 +79,7 @@ const DonationItemScanPage: React.FC = () => {
       setActionSuccess('Item information updated successfully');
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to update item');
+      showError(err.response?.data?.detail || 'Failed to update item');
       console.error('Error updating item:', err);
     } finally {
       setSubmitting(false);
@@ -89,27 +90,27 @@ const DonationItemScanPage: React.FC = () => {
     if (!item || !isLoggedIn || !dispositionType) return;
 
     if (!dispositionType) {
-      alert('Please select a disposition type');
+      showError('Please select a disposition type');
       return;
     }
 
     // Validate required fields based on disposition type
     if (dispositionType === 'sold' || dispositionType === 'auctioned') {
       if (!saleMethod) {
-        alert('Please select a sale method');
+        showError('Please select a sale method');
         return;
       }
     }
 
     if (dispositionType === 'kept') {
       if (!keptDestination) {
-        alert('Please select where the item is being kept');
+        showError('Please select where the item is being kept');
         return;
       }
     }
 
     if (quantity > (item.remaining_quantity || item.quantity)) {
-      alert(`Quantity cannot exceed remaining quantity (${item.remaining_quantity || item.quantity})`);
+      showError(`Quantity cannot exceed remaining quantity (${item.remaining_quantity || item.quantity})`);
       return;
     }
 
@@ -155,7 +156,7 @@ const DonationItemScanPage: React.FC = () => {
       
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to create disposition');
+      showError(err.response?.data?.detail || 'Failed to create disposition');
       console.error('Error creating disposition:', err);
     } finally {
       setSubmitting(false);

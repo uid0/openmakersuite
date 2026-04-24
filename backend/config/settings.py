@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "django_celery_results",
     "passkeys",
+    "anymail",
     # Local apps
     "membership",
     "inventory",
@@ -246,6 +247,21 @@ SESSION_COOKIE_SAMESITE = config("SESSION_COOKIE_SAMESITE", default="Lax")
 SESSION_COOKIE_SECURE = config("SESSION_COOKIE_SECURE", default=not DEBUG, cast=bool)
 CSRF_COOKIE_SAMESITE = config("CSRF_COOKIE_SAMESITE", default="Lax")
 CSRF_COOKIE_SECURE = config("CSRF_COOKIE_SECURE", default=not DEBUG, cast=bool)
+
+# Outbound email via Postmark (django-anymail). The console backend is a safer
+# default for development — production overrides EMAIL_BACKEND via env to route
+# real mail through Postmark.
+EMAIL_BACKEND = config(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend",
+)
+ANYMAIL = {
+    "POSTMARK_SERVER_TOKEN": config("POSTMARK_SERVER_TOKEN", default=""),
+}
+DEFAULT_FROM_EMAIL = config(
+    "DEFAULT_FROM_EMAIL",
+    default="noreply@openmakersuite.example",
+)
 
 # Postmark inbound webhook shared secret. The inbound work-order endpoint is
 # unauthenticated (Postmark does not ship a request signature), so this token

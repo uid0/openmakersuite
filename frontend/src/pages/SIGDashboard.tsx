@@ -22,6 +22,7 @@ const SIGDashboard: React.FC = () => {
   const [members, setMembers] = useState<any[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newSIGName, setNewSIGName] = useState('');
+  const [newSIGEmail, setNewSIGEmail] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -59,6 +60,7 @@ const SIGDashboard: React.FC = () => {
 
   const openCreateModal = () => {
     setNewSIGName('');
+    setNewSIGEmail('');
     setCreateError(null);
     setShowCreateModal(true);
   };
@@ -66,12 +68,14 @@ const SIGDashboard: React.FC = () => {
   const closeCreateModal = () => {
     setShowCreateModal(false);
     setNewSIGName('');
+    setNewSIGEmail('');
     setCreateError(null);
   };
 
   const handleCreateSIG = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = newSIGName.trim();
+    const groupEmail = newSIGEmail.trim();
     if (!name) {
       setCreateError('SIG name is required.');
       return;
@@ -79,12 +83,13 @@ const SIGDashboard: React.FC = () => {
     try {
       setCreating(true);
       setCreateError(null);
-      await sigAPI.createSIG({ name });
+      await sigAPI.createSIG({ name, group_email: groupEmail });
       closeCreateModal();
       await loadSIGs();
     } catch (err: any) {
       const detail =
         err?.response?.data?.name?.[0] ||
+        err?.response?.data?.group_email?.[0] ||
         err?.response?.data?.detail ||
         'Failed to create SIG.';
       setCreateError(detail);
@@ -145,6 +150,18 @@ const SIGDashboard: React.FC = () => {
             autoFocus
             disabled={creating}
           />
+          <label htmlFor="new-sig-email">Group email (optional)</label>
+          <input
+            id="new-sig-email"
+            type="email"
+            value={newSIGEmail}
+            onChange={(e) => setNewSIGEmail(e.target.value)}
+            placeholder="sig-contact@example.org"
+            disabled={creating}
+          />
+          <p className="help-text" style={{ color: '#666', fontSize: '0.85em', marginTop: 4 }}>
+            New reorder requests for this SIG will be emailed here. Leave blank to notify SIG admins individually.
+          </p>
           {createError && <p className="error-message" role="alert">{createError}</p>}
           <div className="modal-actions">
             <button type="button" onClick={closeCreateModal} disabled={creating}>

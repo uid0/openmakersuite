@@ -6,7 +6,7 @@ from django.contrib.auth.models import Group
 
 from rest_framework import serializers
 
-from .models import SIGAdmin, User, UserRegistrationToken
+from .models import SIGAdmin, SIGProfile, User, UserRegistrationToken
 
 
 class SIGAdminSerializer(serializers.ModelSerializer):
@@ -64,18 +64,25 @@ class SIGSerializer(serializers.ModelSerializer):
     inventory_count = serializers.SerializerMethodField()
     admins = serializers.SerializerMethodField()
     is_user_admin = serializers.SerializerMethodField()
+    group_email = serializers.SerializerMethodField()
 
     class Meta:
         model = Group
         fields = [
             "id",
             "name",
+            "group_email",
             "member_count",
             "asset_count",
             "inventory_count",
             "admins",
             "is_user_admin",
         ]
+
+    def get_group_email(self, obj):
+        """Return the SIG-wide contact email if a SIGProfile exists."""
+        profile = getattr(obj, "sig_profile", None)
+        return profile.email if profile else ""
 
     def get_member_count(self, obj):
         """Get the number of members in this SIG."""
@@ -121,9 +128,11 @@ class SIGSerializer(serializers.ModelSerializer):
 class SIGCreateSerializer(serializers.ModelSerializer):
     """Writable serializer for creating/updating SIGs (Groups)."""
 
+    group_email = serializers.EmailField(required=False, allow_blank=True)
+
     class Meta:
         model = Group
-        fields = ["id", "name"]
+        fields = ["id", "name", "group_email"]
         read_only_fields = ["id"]
 
     def validate_name(self, value):
@@ -137,6 +146,34 @@ class SIGCreateSerializer(serializers.ModelSerializer):
         if qs.exists():
             raise serializers.ValidationError("A SIG with this name already exists.")
         return name
+
+    def _save_group_email(self, group, email):
+        """Upsert the SIGProfile with the given group email."""
+        SIGProfile.objects.update_or_create(
+            group=group,
+            defaults={"email": (email or "").strip()},
+        )
+
+    def create(self, validated_data):
+        group_email = validated_data.pop("group_email", "")
+        group = super().create(validated_data)
+        if group_email:
+            self._save_group_email(group, group_email)
+        return group
+
+    def update(self, instance, validated_data):
+        has_group_email = "group_email" in validated_data
+        group_email = validated_data.pop("group_email", "")
+        group = super().update(instance, validated_data)
+        if has_group_email:
+            self._save_group_email(group, group_email)
+        return group
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        profile = getattr(instance, "sig_profile", None)
+        data["group_email"] = profile.email if profile else ""
+        return data
 
 
 class UserSerializer(serializers.ModelSerializer):

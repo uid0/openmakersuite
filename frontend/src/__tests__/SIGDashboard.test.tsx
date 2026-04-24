@@ -191,7 +191,10 @@ describe('SIGDashboard', () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(sigAPI.sigAPI.createSIG).toHaveBeenCalledWith({ name: 'Created SIG' });
+      expect(sigAPI.sigAPI.createSIG).toHaveBeenCalledWith({
+        name: 'Created SIG',
+        group_email: '',
+      });
     });
 
     await waitFor(() => {

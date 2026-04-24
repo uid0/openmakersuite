@@ -727,11 +727,14 @@ export const sigAPI = {
   getSIGDetails: (id: number) =>
     api.get<SIG>(`/membership/sigs/${id}/details/`),
 
-  createSIG: (data: { name: string }) =>
-    api.post<{ id: number; name: string }>('/membership/sigs/', data),
+  createSIG: (data: { name: string; group_email?: string }) =>
+    api.post<{ id: number; name: string; group_email?: string }>('/membership/sigs/', data),
 
-  updateSIG: (id: number, data: { name: string }) =>
-    api.put<{ id: number; name: string }>(`/membership/sigs/${id}/`, data),
+  updateSIG: (id: number, data: { name: string; group_email?: string }) =>
+    api.put<{ id: number; name: string; group_email?: string }>(
+      `/membership/sigs/${id}/`,
+      data,
+    ),
 
   deleteSIG: (id: number) =>
     api.delete(`/membership/sigs/${id}/`),

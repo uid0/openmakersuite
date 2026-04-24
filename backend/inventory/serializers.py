@@ -19,6 +19,7 @@ from .models import (
     MaintenanceMaterial,
     MaintenanceTask,
     PriceHistory,
+    StockReconciliation,
     Supplier,
     UsageLog,
     WorkOrder,
@@ -1382,3 +1383,80 @@ class WorkOrderListSerializer(serializers.ModelSerializer):
 
     def get_task_total_count(self, obj):
         return obj.task_completions.count()
+
+
+class StockReconciliationSerializer(serializers.ModelSerializer):
+    """Read serializer for StockReconciliation audit rows."""
+
+    item_name = serializers.CharField(source="item.name", read_only=True)
+    item_sku = serializers.CharField(source="item.sku", read_only=True)
+    reconciled_by_name = serializers.SerializerMethodField()
+    triggered_reorder_id = serializers.PrimaryKeyRelatedField(
+        source="triggered_reorder", read_only=True
+    )
+
+    class Meta:
+        model = StockReconciliation
+        fields = [
+            "id",
+            "item",
+            "item_name",
+            "item_sku",
+            "projected_count",
+            "actual_count",
+            "delta",
+            "reason",
+            "notes",
+            "reconciled_by",
+            "reconciled_by_name",
+            "reconciled_at",
+            "triggered_reorder",
+            "triggered_reorder_id",
+        ]
+        read_only_fields = fields
+
+    def get_reconciled_by_name(self, obj):
+        user = obj.reconciled_by
+        if not user:
+            return ""
+        full = (getattr(user, "get_full_name", lambda: "")() or "").strip()
+        return full or getattr(user, "username", "") or getattr(user, "email", "")
+
+
+class StockReconciliationRowSerializer(serializers.Serializer):
+    """A single row in a batch reconciliation submission."""
+
+    item_id = serializers.UUIDField()
+    actual_count = serializers.IntegerField(min_value=0)
+    reason = serializers.ChoiceField(choices=StockReconciliation.REASON_CHOICES)
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+    skip_reorder = serializers.BooleanField(required=False, default=False)
+
+
+class StockReconciliationBatchSerializer(serializers.Serializer):
+    """Batch payload: a list of reconciliation rows."""
+
+    rows = StockReconciliationRowSerializer(many=True, allow_empty=False)
+
+
+class LocationReconcileItemSerializer(serializers.ModelSerializer):
+    """Single item row in the location reconcile grid payload."""
+
+    item_id = serializers.UUIDField(source="id", read_only=True)
+    projected = serializers.IntegerField(source="current_stock", read_only=True)
+    owning_group_name = serializers.CharField(
+        source="owning_group.name", read_only=True, default=""
+    )
+
+    class Meta:
+        model = InventoryItem
+        fields = [
+            "item_id",
+            "name",
+            "sku",
+            "projected",
+            "minimum_stock",
+            "reorder_quantity",
+            "owning_group_name",
+        ]
+        read_only_fields = fields

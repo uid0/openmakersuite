@@ -14,6 +14,7 @@ from .views import (
     FixtureRefillRequestViewSet,
     FixtureViewSet,
     InventoryItemViewSet,
+    InventoryReconciliationViewSet,
     InventoryReportViewSet,
     ItemSupplierViewSet,
     LocationViewSet,
@@ -48,8 +49,18 @@ router.register(r"maintenance-tasks", MaintenanceTaskViewSet)
 router.register(r"work-orders", WorkOrderViewSet)
 router.register(r"reports/inventory", InventoryReportViewSet, basename="inventory-reports")
 router.register(r"reports/assets", AssetReportViewSet, basename="asset-reports")
+router.register(
+    r"reconciliations",
+    InventoryReconciliationViewSet,
+    basename="inventory-reconciliations",
+)
 
 urlpatterns = [
+    path(
+        "locations/<int:location_id>/reconcile/",
+        InventoryReconciliationViewSet.as_view({"get": "location_grid"}),
+        name="inventory-location-reconcile-grid",
+    ),
     path("", include(router.urls)),
     path("lookup-code/", lookup_by_code, name="lookup-by-code"),
     path(

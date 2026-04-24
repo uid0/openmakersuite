@@ -2,10 +2,125 @@
  * Admin Dashboard
  * Manage reorder queue, view pending requests, and access supplier cart links
  */
+import { Button, Group, Stack, TextInput } from '@mantine/core';
+import { useForm } from '@mantine/form';
+import { modals } from '@mantine/modals';
 import React, { useCallback, useEffect, useState } from 'react';
 import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/AdminDashboard.css';
 import { Asset, InventoryItem, ReorderRequest } from '../types';
+import { promptInput, showError, showSuccess } from '../utils/dialogs';
+
+interface MarkOrderedValues {
+  orderNumber: string;
+  estimatedDelivery: string;
+  actualCost: string;
+}
+
+interface MarkOrderedFormProps {
+  modalId: string;
+  onSubmit: (values: MarkOrderedValues) => void;
+}
+
+const MarkOrderedForm: React.FC<MarkOrderedFormProps> = ({ modalId, onSubmit }) => {
+  const form = useForm<MarkOrderedValues>({
+    initialValues: { orderNumber: '', estimatedDelivery: '', actualCost: '' },
+  });
+
+  const handleSubmit = form.onSubmit((values) => {
+    modals.close(modalId);
+    onSubmit(values);
+  });
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <Stack>
+        <TextInput
+          label="Order number"
+          placeholder="Optional"
+          {...form.getInputProps('orderNumber')}
+        />
+        <TextInput
+          label="Estimated delivery date"
+          placeholder="YYYY-MM-DD (optional)"
+          {...form.getInputProps('estimatedDelivery')}
+        />
+        <TextInput
+          label="Actual cost"
+          placeholder="Optional"
+          {...form.getInputProps('actualCost')}
+        />
+        <Group justify="flex-end">
+          <Button variant="default" type="button" onClick={() => modals.close(modalId)}>
+            Cancel
+          </Button>
+          <Button type="submit">Mark Ordered</Button>
+        </Group>
+      </Stack>
+    </form>
+  );
+};
+
+interface UpdateTrackingValues {
+  trackingNumber: string;
+  carrier: string;
+  expectedDeliveryDate: string;
+  trackingUrl: string;
+}
+
+interface UpdateTrackingFormProps {
+  modalId: string;
+  onSubmit: (values: UpdateTrackingValues) => void;
+}
+
+const UpdateTrackingForm: React.FC<UpdateTrackingFormProps> = ({ modalId, onSubmit }) => {
+  const form = useForm<UpdateTrackingValues>({
+    initialValues: {
+      trackingNumber: '',
+      carrier: '',
+      expectedDeliveryDate: '',
+      trackingUrl: '',
+    },
+  });
+
+  const handleSubmit = form.onSubmit((values) => {
+    modals.close(modalId);
+    onSubmit(values);
+  });
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <Stack>
+        <TextInput
+          label="Tracking number"
+          placeholder="Optional"
+          {...form.getInputProps('trackingNumber')}
+        />
+        <TextInput
+          label="Carrier / shipper"
+          placeholder="Optional"
+          {...form.getInputProps('carrier')}
+        />
+        <TextInput
+          label="Expected delivery date"
+          placeholder="YYYY-MM-DD (optional)"
+          {...form.getInputProps('expectedDeliveryDate')}
+        />
+        <TextInput
+          label="Tracking URL"
+          placeholder="Optional"
+          {...form.getInputProps('trackingUrl')}
+        />
+        <Group justify="flex-end">
+          <Button variant="default" type="button" onClick={() => modals.close(modalId)}>
+            Cancel
+          </Button>
+          <Button type="submit">Update Tracking</Button>
+        </Group>
+      </Stack>
+    </form>
+  );
+};
 
 const AdminDashboard: React.FC = () => {
   const [requests, setRequests] = useState<ReorderRequest[]>([]);
@@ -30,7 +145,7 @@ const AdminDashboard: React.FC = () => {
       }
     } catch (err) {
       console.error('Error loading requests:', err);
-      alert('Failed to load requests. Please log in.');
+      showError('Failed to load requests. Please log in.');
     } finally {
       setLoading(false);
     }
@@ -89,84 +204,108 @@ const AdminDashboard: React.FC = () => {
     try {
       await reorderAPI.approveRequest(id);
       loadRequests();
-      alert('Request approved');
+      showSuccess('Request approved');
     } catch (err) {
       console.error('Error approving request:', err);
-      alert('Failed to approve request');
+      showError('Failed to approve request');
     }
   };
 
-  const handleMarkOrdered = async (id: number) => {
-    const orderNumber = prompt('Enter order number (optional):');
-    const estimatedDeliveryStr = prompt('Enter estimated delivery date (YYYY-MM-DD, optional):');
-    const actualCostStr = prompt('Enter actual cost (optional):');
+  const handleMarkOrdered = (id: number) => {
+    const modalId = `mark-ordered-${id}-${Date.now()}`;
+    modals.open({
+      modalId,
+      title: 'Mark as Ordered',
+      children: (
+        <MarkOrderedForm
+          modalId={modalId}
+          onSubmit={async (values) => {
+            try {
+              const data: any = {};
+              if (values.orderNumber) data.order_number = values.orderNumber;
+              if (values.estimatedDelivery) data.estimated_delivery = values.estimatedDelivery;
+              if (values.actualCost) data.actual_cost = parseFloat(values.actualCost);
 
-    try {
-      const data: any = {};
-      if (orderNumber) data.order_number = orderNumber;
-      if (estimatedDeliveryStr) data.estimated_delivery = estimatedDeliveryStr;
-      if (actualCostStr) data.actual_cost = parseFloat(actualCostStr);
-
-      await reorderAPI.markOrdered(id, data);
-      loadRequests();
-      alert('Marked as ordered with tracking information');
-    } catch (err) {
-      console.error('Error marking as ordered:', err);
-      alert('Failed to mark as ordered');
-    }
+              await reorderAPI.markOrdered(id, data);
+              loadRequests();
+              showSuccess('Marked as ordered with tracking information');
+            } catch (err) {
+              console.error('Error marking as ordered:', err);
+              showError('Failed to mark as ordered');
+            }
+          }}
+        />
+      ),
+    });
   };
 
-  const handleMarkReceived = async (id: number) => {
-    const actualDeliveryStr = prompt('Enter actual delivery date (YYYY-MM-DD, optional - defaults to today):');
-    try {
-      await reorderAPI.markReceived(id, actualDeliveryStr || undefined);
-      loadRequests();
-      alert('Marked as received and inventory updated');
-    } catch (err) {
-      console.error('Error marking as received:', err);
-      alert('Failed to mark as received');
-    }
+  const handleMarkReceived = (id: number) => {
+    promptInput(
+      'Mark as Received',
+      'Actual delivery date (YYYY-MM-DD, optional — defaults to today)',
+      async (actualDeliveryStr) => {
+        try {
+          await reorderAPI.markReceived(id, actualDeliveryStr || undefined);
+          loadRequests();
+          showSuccess('Marked as received and inventory updated');
+        } catch (err) {
+          console.error('Error marking as received:', err);
+          showError('Failed to mark as received');
+        }
+      },
+    );
   };
 
-  const handleCancel = async (id: number) => {
-    const notes = prompt('Reason for cancellation:');
-    if (notes === null) return;
-
-    try {
-      await reorderAPI.cancelRequest(id, notes);
-      loadRequests();
-      alert('Request cancelled');
-    } catch (err) {
-      console.error('Error cancelling request:', err);
-      alert('Failed to cancel request');
-    }
+  const handleCancel = (id: number) => {
+    promptInput('Cancel Request', 'Reason for cancellation', async (notes) => {
+      try {
+        await reorderAPI.cancelRequest(id, notes);
+        loadRequests();
+        showSuccess('Request cancelled');
+      } catch (err) {
+        console.error('Error cancelling request:', err);
+        showError('Failed to cancel request');
+      }
+    });
   };
 
-  const handleUpdateTracking = async (id: number) => {
-    const trackingNumber = prompt('Enter tracking number (optional):');
-    const carrier = prompt('Enter carrier/shipper (optional):');
-    const expectedDeliveryStr = prompt('Update expected delivery date (YYYY-MM-DD, optional):');
-    const trackingUrl = prompt('Enter tracking URL (optional):');
+  const handleUpdateTracking = (id: number) => {
+    const modalId = `update-tracking-${id}-${Date.now()}`;
+    modals.open({
+      modalId,
+      title: 'Update Tracking',
+      children: (
+        <UpdateTrackingForm
+          modalId={modalId}
+          onSubmit={async (values) => {
+            if (
+              !values.trackingNumber &&
+              !values.carrier &&
+              !values.expectedDeliveryDate &&
+              !values.trackingUrl
+            ) {
+              return;
+            }
 
-    // If user cancels all prompts, don't proceed
-    if (trackingNumber === null && carrier === null && expectedDeliveryStr === null && trackingUrl === null) {
-      return;
-    }
+            try {
+              const data: any = {};
+              if (values.trackingNumber) data.tracking_number = values.trackingNumber;
+              if (values.carrier) data.carrier = values.carrier;
+              if (values.expectedDeliveryDate)
+                data.expected_delivery_date = values.expectedDeliveryDate;
+              if (values.trackingUrl) data.delivery_tracking_url = values.trackingUrl;
 
-    try {
-      const data: any = {};
-      if (trackingNumber) data.tracking_number = trackingNumber;
-      if (carrier) data.carrier = carrier;
-      if (expectedDeliveryStr) data.expected_delivery_date = expectedDeliveryStr;
-      if (trackingUrl) data.delivery_tracking_url = trackingUrl;
-
-      await reorderAPI.updateTracking(id, data);
-      loadRequests();
-      alert('Tracking information updated');
-    } catch (err) {
-      console.error('Error updating tracking:', err);
-      alert('Failed to update tracking information');
-    }
+              await reorderAPI.updateTracking(id, data);
+              loadRequests();
+              showSuccess('Tracking information updated');
+            } catch (err) {
+              console.error('Error updating tracking:', err);
+              showError('Failed to update tracking information');
+            }
+          }}
+        />
+      ),
+    });
   };
 
   const getPriorityClass = (priority: string) => {
@@ -427,7 +566,7 @@ const AdminDashboard: React.FC = () => {
       {/* Assets Not Checked In Section */}
       <div className="assets-section">
         <h2>Assets Not Checked In (3+ Months)</h2>
-        
+
         {/* Asset Filters */}
         <div className="asset-filters" style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <div className="filter-group">
@@ -448,7 +587,7 @@ const AdminDashboard: React.FC = () => {
               <option value="donated_out">Donated Out</option>
             </select>
           </div>
-          
+
           <div className="filter-group">
             <label htmlFor="asset-inventory-item-filter" style={{ marginRight: '0.5rem' }}>Inventory Item:</label>
             <select

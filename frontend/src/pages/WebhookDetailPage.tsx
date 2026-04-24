@@ -23,6 +23,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { webhooksAPI } from '../services/api';
 import '../styles/WebhookDetailPage.css';
 import { Webhook, WebhookTestResult } from '../types';
+import { confirmDelete, showError } from '../utils/dialogs';
 
 const WebhookDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -135,20 +136,18 @@ const WebhookDetailPage: React.FC = () => {
     setTimeout(poll, pollInterval);
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!id || !webhook) return;
 
-    if (!window.confirm(`Are you sure you want to delete webhook "${webhook.name}"?`)) {
-      return;
-    }
-
-    try {
-      await webhooksAPI.deleteWebhook(Number(id));
-      navigate('/settings/webhooks');
-    } catch (err: any) {
-      console.error('Error deleting webhook:', err);
-      alert(err.response?.data?.detail || 'Failed to delete webhook');
-    }
+    confirmDelete(`Are you sure you want to delete webhook "${webhook.name}"?`, async () => {
+      try {
+        await webhooksAPI.deleteWebhook(Number(id));
+        navigate('/settings/webhooks');
+      } catch (err: any) {
+        console.error('Error deleting webhook:', err);
+        showError(err.response?.data?.detail || 'Failed to delete webhook');
+      }
+    });
   };
 
   const getSuccessRateColor = (rate: number | null) => {

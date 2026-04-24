@@ -8,6 +8,7 @@ import { useSwipeable } from 'react-swipeable';
 import { indexCardsAPI, inventoryAPI } from '../services/api';
 import '../styles/InventoryList.css';
 import { InventoryItem } from '../types';
+import { showError, showInfo } from '../utils/dialogs';
 
 const InventoryList: React.FC = () => {
   const navigate = useNavigate();
@@ -67,7 +68,7 @@ const InventoryList: React.FC = () => {
 
   const generateTestSheet = async () => {
     if (filteredItems.length === 0) {
-      alert('No items to generate test sheet for.');
+      showInfo('No items to generate test sheet for.');
       return;
     }
 
@@ -88,7 +89,7 @@ const InventoryList: React.FC = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error generating test sheet:', err);
-      alert('Failed to generate test sheet. Please try again.');
+      showError('Failed to generate test sheet. Please try again.');
     } finally {
       setGeneratingTestSheet(false);
     }

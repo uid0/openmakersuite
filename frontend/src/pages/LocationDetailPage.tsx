@@ -8,6 +8,7 @@ import LocationFixturesList from '../components/LocationFixturesList';
 import { inventoryAPI } from '../services/api';
 import '../styles/LocationDetailPage.css';
 import { Location } from '../types';
+import { confirmDelete, showError, showSuccess } from '../utils/dialogs';
 
 const LocationDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -49,25 +50,24 @@ const LocationDetailPage: React.FC = () => {
       setGeneratingQR(true);
       await inventoryAPI.generateLocationQR(id);
       await loadLocation();
-      alert('QR code generated successfully');
+      showSuccess('QR code generated successfully');
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to generate QR code');
+      showError(err.response?.data?.error || 'Failed to generate QR code');
     } finally {
       setGeneratingQR(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!id || !window.confirm('Are you sure you want to delete this location?')) {
-      return;
-    }
-
-    try {
-      await inventoryAPI.deleteLocation(id);
-      navigate('/inventory/locations');
-    } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to delete location');
-    }
+  const handleDelete = () => {
+    if (!id) return;
+    confirmDelete('Are you sure you want to delete this location?', async () => {
+      try {
+        await inventoryAPI.deleteLocation(id);
+        navigate('/inventory/locations');
+      } catch (err: any) {
+        showError(err.response?.data?.detail || 'Failed to delete location');
+      }
+    });
   };
 
   if (loading) {

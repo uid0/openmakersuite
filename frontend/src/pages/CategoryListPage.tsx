@@ -8,6 +8,7 @@ import TreeView, { TreeNode } from '../components/TreeView';
 import { inventoryAPI } from '../services/api';
 import '../styles/CategoryListPage.css';
 import { Category } from '../types';
+import { confirmDelete, showError } from '../utils/dialogs';
 
 const CategoryListPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -78,17 +79,15 @@ const CategoryListPage: React.FC = () => {
 
   const treeNodes = useMemo(() => buildTree(filteredCategories), [filteredCategories]);
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm('Are you sure you want to delete this category?')) {
-      return;
-    }
-
-    try {
-      await inventoryAPI.deleteCategory(id.toString());
-      await loadCategories();
-    } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to delete category');
-    }
+  const handleDelete = (id: number) => {
+    confirmDelete('Are you sure you want to delete this category?', async () => {
+      try {
+        await inventoryAPI.deleteCategory(id.toString());
+        await loadCategories();
+      } catch (err: any) {
+        showError(err.response?.data?.detail || 'Failed to delete category');
+      }
+    });
   };
 
   const renderCategoryNode = (node: TreeNode, level: number) => {

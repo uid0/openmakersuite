@@ -12,6 +12,12 @@ import * as api from '../../services/api';
 // Mock the API
 jest.mock('../../services/api');
 
+jest.mock('../../utils/dialogs', () => ({
+  promptInput: jest.fn(() => Promise.resolve(null)),
+  showError: jest.fn(),
+}));
+import { promptInput, showError } from '../../utils/dialogs';
+
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
@@ -193,6 +199,60 @@ describe('LocationScanPage', () => {
           message: 'This is test feedback',
         })
       );
+    });
+  });
+
+  test('shows error notification when security report submission fails', async () => {
+    (api.inventoryAPI.getLocation as jest.Mock).mockResolvedValue({
+      data: mockLocation,
+    });
+    (api.locationCheckinAPI.reportSecurity as jest.Mock).mockRejectedValue({
+      response: { data: { error: 'Server unavailable' } },
+    });
+
+    await renderWithRouter();
+    await screen.findByText('Test Location');
+
+    fireEvent.click(screen.getByRole('button', { name: /report issue/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/report an issue/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/needs cleaning/i));
+    await waitFor(() => {
+      expect(screen.getByLabelText(/needs immediate attention/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith('Server unavailable');
+    });
+  });
+
+  test('prompts for name via modal when starting checklist as anonymous user', async () => {
+    (api.inventoryAPI.getLocation as jest.Mock).mockResolvedValue({ data: mockLocation });
+    (api.inventoryAPI.getLocationChecklists as jest.Mock).mockResolvedValue({
+      data: [{ id: 'checklist-1', name: 'Daily Inspection', step_count: 3, description: 'desc' }],
+    });
+    (api.checklistsAPI.startChecklist as jest.Mock).mockResolvedValue({
+      data: { id: 'completion-1' },
+    });
+    (promptInput as jest.Mock).mockResolvedValue('Alice');
+
+    await renderWithRouter();
+    await screen.findByText('Test Location');
+
+    const checklistButton = await screen.findByRole(
+      'button',
+      { name: /Daily Inspection/i },
+      { timeout: 3000 },
+    );
+    fireEvent.click(checklistButton);
+
+    await waitFor(() => {
+      expect(promptInput).toHaveBeenCalledWith('Start Checklist', 'Enter your name (optional)');
+      expect(api.checklistsAPI.startChecklist).toHaveBeenCalledWith('checklist-1', 'Alice');
     });
   });
 

@@ -136,6 +136,13 @@ describe('AssetDetailPage', () => {
       headers: {},
       config: {} as any,
     });
+    mockAssetsAPI.getTagUrl.mockImplementation(
+      (id: string, size: 'standard' | 'large' = 'standard', download = false) => {
+        const params = new URLSearchParams({ size });
+        if (download) params.set('download', '1');
+        return `http://test/api/inventory/assets/${id}/tag/?${params.toString()}`;
+      }
+    );
   });
 
   it('renders asset details', async () => {
@@ -295,6 +302,63 @@ describe('AssetDetailPage', () => {
 
     await waitFor(() => {
       expect(mockAssetsAPI.generateQR).toHaveBeenCalledWith('test-id');
+    });
+  });
+
+  it('hides asset tag section when not logged in', async () => {
+    render(
+      <MemoryRouter>
+        <AssetDetailPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Asset')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('asset-tag-section')).not.toBeInTheDocument();
+  });
+
+  describe('asset tag (logged in)', () => {
+    beforeEach(() => {
+      localStorage.setItem('token', 'fake-token');
+    });
+
+    afterEach(() => {
+      localStorage.removeItem('token');
+    });
+
+    it('renders preview, size selector, and download link', async () => {
+      render(
+        <MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('asset-tag-section')).toBeInTheDocument();
+      });
+
+      const preview = screen.getByAltText(/Asset tag/);
+      expect(preview).toHaveAttribute(
+        'src',
+        expect.stringContaining('/inventory/assets/test-id/tag/?size=standard')
+      );
+
+      const downloadLink = screen.getByRole('link', { name: 'Download PNG' });
+      expect(downloadLink).toHaveAttribute(
+        'href',
+        expect.stringContaining('size=standard&download=1')
+      );
+
+      const sizeSelect = screen.getByLabelText(/Size:/);
+      await userEvent.selectOptions(sizeSelect, 'large');
+
+      const updatedPreview = screen.getByAltText(/Asset tag/);
+      expect(updatedPreview).toHaveAttribute(
+        'src',
+        expect.stringContaining('size=large')
+      );
     });
   });
 

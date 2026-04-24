@@ -1362,6 +1362,40 @@ class AssetViewSet(viewsets.ModelViewSet):
         return ip
 
     @action(detail=True, methods=["get"])
+    def tag(self, request, pk=None):
+        """Render an asset tag PNG suitable for riveting onto the asset."""
+        from membership.utils import can_manage_sig_asset
+
+        from .services.asset_tag_service import SIZES, InvalidTagSizeError, render_asset_tag
+
+        asset = self.get_object()
+
+        if not can_manage_sig_asset(request.user, asset):
+            return Response(
+                {"detail": "You do not have permission to view this asset's tag."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        size = request.query_params.get("size", "standard")
+        if size not in SIZES:
+            return Response(
+                {"detail": f"Invalid size '{size}'. Valid sizes: {sorted(SIZES)}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            png_bytes = render_asset_tag(asset, size=size)
+        except InvalidTagSizeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        response = HttpResponse(png_bytes, content_type="image/png")
+        if request.query_params.get("download") == "1":
+            response["Content-Disposition"] = (
+                f'attachment; filename="asset-tag-{asset.id}-{size}.png"'
+            )
+        return response
+
+    @action(detail=True, methods=["get"])
     def qr_code(self, request, pk=None):
         """Get the QR code image for an asset."""
         asset = self.get_object()

@@ -6,13 +6,17 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from .models import ReorderRequest
-from .tasks import trigger_reorder_request_webhook
+from .tasks import send_reorder_request_notification_email, trigger_reorder_request_webhook
 
 
 @receiver(post_save, sender=ReorderRequest)
 def handle_reorder_request_created(sender, instance, created, **kwargs):
     """
-    Trigger webhook notification when a new reorder request is created.
+    Fan out notifications when a new reorder request is created.
+
+    Currently:
+      - Triggers any configured outbound webhooks.
+      - Sends a Postmark email to SIG contacts / admins (see notifications.py).
 
     Args:
         sender: The model class (ReorderRequest)
@@ -21,5 +25,5 @@ def handle_reorder_request_created(sender, instance, created, **kwargs):
         **kwargs: Additional arguments
     """
     if created:
-        # Trigger webhook asynchronously via Celery
         trigger_reorder_request_webhook.delay(instance.id)
+        send_reorder_request_notification_email.delay(instance.id)

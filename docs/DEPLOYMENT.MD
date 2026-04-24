@@ -51,10 +51,43 @@ nano .env  # Edit with your values
 
 The script will:
 1. Build Docker images
-2. Start all services
-3. Run database migrations
-4. Collect static files
-5. Optionally create a superuser
+2. Start the database (only) and wait for it to become healthy
+3. **Verify migration state** — run `python manage.py showmigrations --plan --no-color`
+   against the target DB using the freshly built backend image. Any pending
+   migrations (lines prefixed with `[ ]`) are auto-applied via
+   `python manage.py migrate --noinput` **before** the backend container starts
+   accepting traffic. If `migrate` fails, the deploy aborts non-zero with a
+   clear error — the backend never starts against a partially-migrated DB.
+   The pre- and post-migrate `showmigrations` output is appended to
+   `deploy.log` for auditability.
+4. Start all remaining services
+5. Collect static files
+6. Optionally create a superuser
+
+### Why the migration gate exists
+
+Previously, migrations ran only *after* the backend container was already up.
+If `migrate` silently failed or was skipped, Django would serve requests
+against a schema that didn't match the model definitions — inserts would
+silently drop data or return 500s (see bead `oms-p2x`, issue `oms-qqn`).
+The gate makes it impossible for deployed code to run against an un-migrated
+database.
+
+### Simulating a pending migration (manual verification)
+
+```bash
+# Revert the last migration record in the DB so it shows as pending again:
+docker compose -f docker-compose.prod.yml exec -T db \
+    psql -U makerspace -d makerspace_inventory \
+    -c "DELETE FROM django_migrations WHERE app='reorder_queue' AND name='0016_fix_order_in_packages_column_type';"
+
+# Re-run deploy.sh — the script should detect the pending migration, log it,
+# auto-apply, and then bring the stack up.
+./deploy.sh
+
+# Check the audit log:
+tail -50 deploy.log
+```
 
 ### 4. Access your application
 
@@ -187,17 +220,21 @@ cat backup.sql | docker-compose -f docker-compose.prod.yml exec -T db psql -U ma
 ## Updating the Application
 
 ```bash
-# Pull latest code
+# Preferred: use deploy.sh, which includes the pre-deploy migration gate.
+./deploy.sh
+
+# Manual equivalent (no migration gate — only use if deploy.sh is unavailable):
 git pull
-
-# Rebuild and restart
 docker-compose -f docker-compose.prod.yml build
+docker-compose -f docker-compose.prod.yml up -d db
+# ...wait for db healthy, then:
+docker-compose -f docker-compose.prod.yml run --rm --no-deps \
+    -e SKIP_DB_MIGRATIONS=1 backend \
+    python manage.py showmigrations --plan --no-color
+docker-compose -f docker-compose.prod.yml run --rm --no-deps \
+    -e SKIP_DB_MIGRATIONS=1 backend \
+    python manage.py migrate --noinput
 docker-compose -f docker-compose.prod.yml up -d
-
-# Run migrations
-docker-compose -f docker-compose.prod.yml exec backend python manage.py migrate
-
-# Collect static files
 docker-compose -f docker-compose.prod.yml exec backend python manage.py collectstatic --noinput
 ```
 

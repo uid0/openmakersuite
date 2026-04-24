@@ -242,6 +242,39 @@ class SIGAdmin(models.Model):
         ).distinct()
 
 
+class SIGProfile(models.Model):
+    """
+    Optional profile metadata attached to a SIG (Django Group).
+
+    Currently stores a group-wide contact email used for notifications like
+    reorder requests. SIGs without a profile fall back to their SIGAdmins.
+    """
+
+    group = models.OneToOneField(
+        Group,
+        on_delete=models.CASCADE,
+        related_name="sig_profile",
+        help_text="SIG (Group) this profile belongs to",
+    )
+    email = models.EmailField(
+        blank=True,
+        help_text=(
+            "Group-wide contact email for this SIG. When set, SIG notifications "
+            "(e.g. new reorder requests) go here instead of fanning out to every "
+            "SIG admin individually."
+        ),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "SIG Profile"
+        verbose_name_plural = "SIG Profiles"
+
+    def __str__(self) -> str:
+        return f"SIGProfile({self.group.name})"
+
+
 class UserRegistrationToken(models.Model):
     """
     One-time use token for user registration via QR code.

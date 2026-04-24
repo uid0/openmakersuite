@@ -544,6 +544,7 @@ export interface FixtureRefillRequest {
 export interface SIG {
   id: number;
   name: string;
+  group_email?: string;
   member_count: number;
   asset_count: number;
   inventory_count: number;

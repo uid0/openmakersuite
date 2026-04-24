@@ -1,0 +1,17 @@
+New reorder request submitted
+================================
+
+Item:      {{ item.name }}{% if item.sku %} (SKU {{ item.sku }}){% endif %}
+Quantity:  {{ quantity }}
+Priority:  {{ priority }}
+Status:    {{ status }}
+{% if sig_name %}SIG:       {{ sig_name }}
+{% endif %}Requested by: {{ requester }}
+{% if notes %}
+Notes:
+{{ notes }}
+{% endif %}{% if admin_url %}
+Review or approve this request:
+{{ admin_url }}
+{% endif %}
+— OpenMakerSuite

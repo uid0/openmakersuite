@@ -164,6 +164,32 @@ def send_webhook_notification(
 
 
 @shared_task
+def send_reorder_request_notification_email(request_id: int) -> Dict[str, Any]:
+    """
+    Celery task: send a new-reorder-request email notification.
+
+    Looks up the ReorderRequest and delegates to notifications.send_reorder_request_notification.
+    Swallows non-existence so a race condition (request deleted before the task
+    runs) never raises.
+    """
+    from .models import ReorderRequest
+    from .notifications import send_reorder_request_notification
+
+    try:
+        reorder_request = ReorderRequest.objects.select_related("item", "item__owning_group").get(
+            id=request_id
+        )
+    except ReorderRequest.DoesNotExist:
+        logger.warning(
+            "send_reorder_request_notification_email: ReorderRequest %s not found", request_id
+        )
+        return {"sent": 0, "reason": "not-found"}
+
+    sent = send_reorder_request_notification(reorder_request)
+    return {"sent": sent or 0, "request_id": request_id}
+
+
+@shared_task
 def trigger_reorder_request_webhook(request_id: int) -> Dict[str, Any]:
     """
     Trigger webhook notification for a reorder request.

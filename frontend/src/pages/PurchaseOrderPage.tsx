@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderPage.css';
+import { confirmAction, showError } from '../utils/dialogs';
 
 interface PurchaseOrderItem {
   id: string;
@@ -119,7 +120,7 @@ const PurchaseOrderPage: React.FC = () => {
   const handleSaveLineCost = async (itemId: string, item: PurchaseOrderItem) => {
     const lineCostValue = parseFloat(lineCost);
     if (isNaN(lineCostValue) || lineCostValue < 0) {
-      alert('Please enter a valid line cost (must be a positive number)');
+      showError('Please enter a valid line cost (must be a positive number)');
       return;
     }
 
@@ -132,7 +133,7 @@ const PurchaseOrderPage: React.FC = () => {
       setEditingCostItemId(null);
       setLineCost('');
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to update line cost');
+      showError(err.response?.data?.error || 'Failed to update line cost');
       console.error('Error updating line cost:', err);
     } finally {
       setSaving(false);
@@ -149,35 +150,38 @@ const PurchaseOrderPage: React.FC = () => {
       setEditingItemId(null);
       setShipmentDate('');
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to update shipment date');
+      showError(err.response?.data?.error || 'Failed to update shipment date');
       console.error('Error updating shipment date:', err);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleVoidItem = async (itemId: string) => {
+  const handleVoidItem = (itemId: string) => {
     if (!voidReason.trim()) {
-      alert('Please provide a reason for voiding this line item');
+      showError('Please provide a reason for voiding this line item');
       return;
     }
 
-    if (!window.confirm('Are you sure you want to void this line item? This will also mark the item as discontinued from this supplier.')) {
-      return;
-    }
-
-    try {
-      setSaving(true);
-      await purchaseOrderAPI.voidLineItem(orderId!, itemId, voidReason);
-      await loadOrder(); // Reload to get updated data
-      setVoidingItemId(null);
-      setVoidReason('');
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to void line item');
-      console.error('Error voiding line item:', err);
-    } finally {
-      setSaving(false);
-    }
+    confirmAction(
+      'Void line item?',
+      'Are you sure you want to void this line item? This will also mark the item as discontinued from this supplier.',
+      async () => {
+        try {
+          setSaving(true);
+          await purchaseOrderAPI.voidLineItem(orderId!, itemId, voidReason);
+          await loadOrder(); // Reload to get updated data
+          setVoidingItemId(null);
+          setVoidReason('');
+        } catch (err: any) {
+          showError(err.response?.data?.error || 'Failed to void line item');
+          console.error('Error voiding line item:', err);
+        } finally {
+          setSaving(false);
+        }
+      },
+      { labels: { confirm: 'Void', cancel: 'Cancel' }, color: 'red' },
+    );
   };
 
   const handleOpenMarkDelivered = () => {
@@ -197,7 +201,7 @@ const PurchaseOrderPage: React.FC = () => {
 
   const handleSubmitMarkDelivered = async () => {
     if (!deliveryDate) {
-      alert('Please select a delivery date');
+      showError('Please select a delivery date');
       return;
     }
 
@@ -211,7 +215,7 @@ const PurchaseOrderPage: React.FC = () => {
       await loadOrder();
       handleCancelMarkDelivered();
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to mark purchase order as delivered');
+      showError(err.response?.data?.error || 'Failed to mark purchase order as delivered');
       console.error('Error marking delivered:', err);
     } finally {
       setSaving(false);

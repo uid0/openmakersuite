@@ -32,6 +32,7 @@ const AssetDetailPage: React.FC = () => {
   const [cloneSubmitting, setCloneSubmitting] = useState<boolean>(false);
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [cloneToast, setCloneToast] = useState<string | null>(null);
+  const [tagSize, setTagSize] = useState<'standard' | 'large'>('standard');
 
   const loadAssetDetails = useCallback(async () => {
     if (!id) return;
@@ -883,6 +884,46 @@ const AssetDetailPage: React.FC = () => {
             </div>
           )}
         </section>
+
+        {/* Asset Tag */}
+        {isLoggedIn && id && (
+          <section className="asset-detail-section" data-testid="asset-tag-section">
+            <h2>Asset Tag</h2>
+            <div className="asset-tag-section">
+              <img
+                src={assetsAPI.getTagUrl(id, tagSize)}
+                alt={`Asset tag (${tagSize})`}
+                className="asset-tag-preview"
+                style={{ maxWidth: '100%', border: '1px solid #ccc', background: '#fff' }}
+              />
+              <div className="asset-tag-actions" style={{ marginTop: '0.5rem' }}>
+                <label htmlFor="asset-tag-size" style={{ marginRight: '0.5rem' }}>
+                  Size:
+                </label>
+                <select
+                  id="asset-tag-size"
+                  value={tagSize}
+                  onChange={(e) => setTagSize(e.target.value as 'standard' | 'large')}
+                >
+                  <option value="standard">Standard 1.5&quot; x 1&quot;</option>
+                  <option value="large">Large 3&quot; x 1.5&quot;</option>
+                </select>
+                <a
+                  href={assetsAPI.getTagUrl(id, tagSize, true)}
+                  download={`asset-tag-${id}-${tagSize}.png`}
+                  className="download-button"
+                  style={{ marginLeft: '0.75rem' }}
+                >
+                  Download PNG
+                </a>
+              </div>
+              <p className="asset-tag-note" style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#555' }}>
+                Designed for rivet mounting &mdash; holes at &frac14;&quot; from each
+                short edge for a 3/32&quot; rivet.
+              </p>
+            </div>
+          </section>
+        )}
 
         {/* Links & Resources */}
         {(asset.product_url || asset.wiki_page_url || asset.manual_pdf_url) && (

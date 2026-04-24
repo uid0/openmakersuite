@@ -493,6 +493,12 @@ export const assetsAPI = {
       responseType: 'blob',
     }),
 
+  getTagUrl: (id: string, size: 'standard' | 'large' = 'standard', download = false) => {
+    const params = new URLSearchParams({ size });
+    if (download) params.set('download', '1');
+    return `${API_BASE_URL}/inventory/assets/${id}/tag/?${params.toString()}`;
+  },
+
   downloadLabelsBatch: (assetIds: string[]) =>
     api.post(`/inventory/assets/download_labels_batch/`, { asset_ids: assetIds }, {
       responseType: 'blob',

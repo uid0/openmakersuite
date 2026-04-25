@@ -3095,6 +3095,86 @@ class AssetReportViewSet(viewsets.ViewSet):
             )
 
     @action(detail=False, methods=["get"])
+    def tco(self, request):
+        """Per-asset Total Cost of Ownership over the last 90 days.
+
+        Returns one row per asset with maintenance_days_last_90 (distinct calendar
+        days where any work order overlapped the window, plus today if the asset
+        is currently in MAINTENANCE status), bucketed cost components, and the
+        tco total. Sorted by tco DESC. Repair cost is reserved for future use
+        (AssetProblem does not yet carry cost fields).
+        """
+        from django.db.models import Prefetch
+
+        from .serializers import AssetTcoReportSerializer
+
+        today = timezone.now().date()
+        window_start = today - timedelta(days=90)
+
+        assets = Asset.objects.all().prefetch_related(
+            Prefetch(
+                "maintenance_items__work_orders",
+                queryset=WorkOrder.objects.prefetch_related("material_usage__material"),
+            )
+        )
+
+        rows = []
+        for asset in assets:
+            days_set: set = set()
+            scheduled = Decimal("0.00")
+            unscheduled = Decimal("0.00")
+
+            for mi in asset.maintenance_items.all():
+                for wo in mi.work_orders.all():
+                    wo_start = wo.created_at.date()
+                    wo_end = wo.completed_at.date() if wo.completed_at else today
+                    span_start = max(wo_start, window_start)
+                    span_end = min(wo_end, today)
+                    if span_start <= span_end:
+                        d = span_start
+                        while d <= span_end:
+                            days_set.add(d)
+                            d += timedelta(days=1)
+
+                    if (
+                        wo.status == WorkOrder.STATUS_COMPLETED
+                        and wo.completed_at is not None
+                        and window_start <= wo.completed_at.date() <= today
+                    ):
+                        if mi.interval_days is not None:
+                            scheduled += mi.estimated_cost or Decimal("0.00")
+                        else:
+                            for usage in wo.material_usage.all():
+                                if usage.was_used and usage.material is not None:
+                                    unscheduled += (
+                                        usage.quantity_planned
+                                        * usage.material.estimated_cost_per_unit
+                                    )
+
+            if asset.status == Asset.MAINTENANCE:
+                days_set.add(today)
+
+            repair = Decimal("0.00")
+            tco_total = scheduled + unscheduled + repair
+
+            rows.append(
+                {
+                    "asset_id": str(asset.id),
+                    "asset_name": asset.name,
+                    "asset_tag": asset.asset_tag or "",
+                    "maintenance_days_last_90": len(days_set),
+                    "scheduled_maintenance_cost": scheduled,
+                    "unscheduled_maintenance_cost": unscheduled,
+                    "repair_cost": repair,
+                    "tco": tco_total,
+                }
+            )
+
+        rows.sort(key=lambda r: r["tco"], reverse=True)
+        serializer = AssetTcoReportSerializer(rows, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
     def export(self, request):
         """Export asset report data as CSV."""
         import csv
@@ -3181,6 +3261,40 @@ class AssetReportViewSet(viewsets.ViewSet):
                         "total_sessions": row["total_sessions"],
                         "total_hours": row["total_hours"],
                         "avg_hours_per_session": row["avg_hours_per_session"],
+                    }
+                )
+
+            return response_obj
+        elif report_type == "tco":
+            response = self.tco(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = 'attachment; filename="assets_tco.csv"'
+
+            writer = csv.DictWriter(
+                response_obj,
+                fieldnames=[
+                    "asset_name",
+                    "asset_tag",
+                    "maintenance_days_last_90",
+                    "scheduled_maintenance_cost",
+                    "unscheduled_maintenance_cost",
+                    "repair_cost",
+                    "tco",
+                ],
+            )
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {
+                        "asset_name": row["asset_name"],
+                        "asset_tag": row["asset_tag"],
+                        "maintenance_days_last_90": row["maintenance_days_last_90"],
+                        "scheduled_maintenance_cost": row["scheduled_maintenance_cost"],
+                        "unscheduled_maintenance_cost": row["unscheduled_maintenance_cost"],
+                        "repair_cost": row["repair_cost"],
+                        "tco": row["tco"],
                     }
                 )
 

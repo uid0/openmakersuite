@@ -20,6 +20,7 @@ import { reportsAPI } from '../services/api';
 import {
   AssetAssetsByStatus,
   AssetMaintenanceDue,
+  AssetTco,
   AssetUtilization,
 } from '../types';
 import { exportAssetReportToCSV } from '../utils/csvExport';
@@ -40,6 +41,7 @@ const AssetReportPage: React.FC = () => {
   const [assetsByStatus, setAssetsByStatus] = useState<AssetAssetsByStatus[]>([]);
   const [maintenanceDue, setMaintenanceDue] = useState<AssetMaintenanceDue[]>([]);
   const [utilization, setUtilization] = useState<AssetUtilization[]>([]);
+  const [tcoRows, setTcoRows] = useState<AssetTco[]>([]);
   const [dateRange, setDateRange] = useState<DatesRangeValue>(getDefaultDateRange);
   const [sortField, setSortField] = useState<SortField>('');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -53,6 +55,8 @@ const AssetReportPage: React.FC = () => {
       loadMaintenanceDue();
     } else if (activeTab === 'utilization') {
       loadUtilization();
+    } else if (activeTab === 'tco') {
+      loadTco();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, dateRange]);
@@ -76,6 +80,18 @@ const AssetReportPage: React.FC = () => {
       setMaintenanceDue(response.data);
     } catch (err) {
       console.error('Error loading maintenance due:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTco = async () => {
+    try {
+      setLoading(true);
+      const response = await reportsAPI.getAssetTco();
+      setTcoRows(response.data);
+    } catch (err) {
+      console.error('Error loading TCO report:', err);
     } finally {
       setLoading(false);
     }
@@ -126,6 +142,40 @@ const AssetReportPage: React.FC = () => {
   const sortedAssetsByStatus = useMemo(() => sortData(assetsByStatus), [assetsByStatus, sortField, sortDirection]);
   const sortedMaintenanceDue = useMemo(() => sortData(maintenanceDue), [maintenanceDue, sortField, sortDirection]);
   const sortedUtilization = useMemo(() => sortData(utilization), [utilization, sortField, sortDirection]);
+  const sortedTco = useMemo(() => {
+    if (!sortField) {
+      return [...tcoRows].sort((a, b) => Number(b.tco) - Number(a.tco));
+    }
+    const sorted = [...tcoRows];
+    sorted.sort((a, b) => {
+      let aVal: any = (a as any)[sortField];
+      let bVal: any = (b as any)[sortField];
+      const numericFields = [
+        'maintenance_days_last_90',
+        'scheduled_maintenance_cost',
+        'unscheduled_maintenance_cost',
+        'repair_cost',
+        'tco',
+      ];
+      if (numericFields.includes(sortField)) {
+        aVal = Number(aVal);
+        bVal = Number(bVal);
+      } else if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase();
+        bVal = (bVal ?? '').toString().toLowerCase();
+      }
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [tcoRows, sortField, sortDirection]);
+
+  const tcoHighlightThreshold = useMemo(() => {
+    if (tcoRows.length === 0) return Infinity;
+    const sorted = [...tcoRows].sort((a, b) => Number(b.tco) - Number(a.tco));
+    return Number(sorted[Math.min(sorted.length - 1, 2)].tco);
+  }, [tcoRows]);
 
   const handleExport = () => {
     if (activeTab === 'assets_by_status') {
@@ -134,7 +184,24 @@ const AssetReportPage: React.FC = () => {
       exportAssetReportToCSV(maintenanceDue, 'maintenance_due');
     } else if (activeTab === 'utilization') {
       exportAssetReportToCSV(utilization, 'utilization');
+    } else if (activeTab === 'tco') {
+      exportAssetReportToCSV(tcoRows, 'tco');
     }
+  };
+
+  const formatMoney = (value: string | number) => {
+    const num = typeof value === 'number' ? value : parseFloat(value || '0');
+    return Number.isFinite(num) ? num.toFixed(2) : '0.00';
+  };
+
+  const tcoRowColor = (tcoValue: string) => {
+    const num = Number(tcoValue);
+    if (!Number.isFinite(num) || num <= 0) return undefined;
+    if (num >= tcoHighlightThreshold && num >= Number(sortedTco[0]?.tco ?? 0) * 0.8) {
+      return 'red.0';
+    }
+    if (num >= tcoHighlightThreshold) return 'orange.0';
+    return undefined;
   };
 
   return (
@@ -155,6 +222,7 @@ const AssetReportPage: React.FC = () => {
           <Tabs.Tab value="assets_by_status">Assets by Status</Tabs.Tab>
           <Tabs.Tab value="maintenance_due">Maintenance Due</Tabs.Tab>
           <Tabs.Tab value="utilization">Utilization</Tabs.Tab>
+          <Tabs.Tab value="tco">Total Cost of Ownership</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="assets_by_status" pt="md">
@@ -325,6 +393,75 @@ const AssetReportPage: React.FC = () => {
                           <Table.Td>{item.total_sessions}</Table.Td>
                           <Table.Td>{item.total_hours.toFixed(2)}</Table.Td>
                           <Table.Td>{item.avg_hours_per_session.toFixed(2)}</Table.Td>
+                        </Table.Tr>
+                      ))
+                    )}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            </Paper>
+          </Stack>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="tco" pt="md">
+          <Stack gap="xs">
+            <Text size="sm" c="dimmed">
+              Per-asset cost over the last 90 days. Top spenders are highlighted so
+              you can decide where to invest, retire, or replace. Sort by any column.
+            </Text>
+            <Paper withBorder>
+              <Table.ScrollContainer minWidth={1100}>
+                <Table highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('asset_name')}>
+                        Asset
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('asset_tag')}>
+                        Tag
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('maintenance_days_last_90')}>
+                        Days in Maintenance (90d)
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('scheduled_maintenance_cost')}>
+                        Scheduled $
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('unscheduled_maintenance_cost')}>
+                        Unscheduled $
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('repair_cost')}>
+                        Repair $
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('tco')}>
+                        TCO
+                      </Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {loading ? (
+                      <Table.Tr>
+                        <Table.Td colSpan={7} style={{ textAlign: 'center' }}>
+                          <Text>Loading...</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ) : sortedTco.length === 0 ? (
+                      <Table.Tr>
+                        <Table.Td colSpan={7} style={{ textAlign: 'center' }}>
+                          <Text>No TCO data available</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ) : (
+                      sortedTco.map((item) => (
+                        <Table.Tr key={item.asset_id} bg={tcoRowColor(item.tco)}>
+                          <Table.Td>{item.asset_name}</Table.Td>
+                          <Table.Td>{item.asset_tag || '-'}</Table.Td>
+                          <Table.Td>{item.maintenance_days_last_90}</Table.Td>
+                          <Table.Td>${formatMoney(item.scheduled_maintenance_cost)}</Table.Td>
+                          <Table.Td>${formatMoney(item.unscheduled_maintenance_cost)}</Table.Td>
+                          <Table.Td>${formatMoney(item.repair_cost)}</Table.Td>
+                          <Table.Td>
+                            <Text fw={600}>${formatMoney(item.tco)}</Text>
+                          </Table.Td>
                         </Table.Tr>
                       ))
                     )}

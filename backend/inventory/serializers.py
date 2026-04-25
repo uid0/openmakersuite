@@ -1448,6 +1448,19 @@ class StockReconciliationBatchSerializer(serializers.Serializer):
     rows = StockReconciliationRowSerializer(many=True, allow_empty=False)
 
 
+class AssetTcoReportSerializer(serializers.Serializer):
+    """One row in the per-asset Total Cost of Ownership report."""
+
+    asset_id = serializers.UUIDField()
+    asset_name = serializers.CharField()
+    asset_tag = serializers.CharField(allow_blank=True)
+    maintenance_days_last_90 = serializers.IntegerField()
+    scheduled_maintenance_cost = serializers.DecimalField(max_digits=12, decimal_places=2)
+    unscheduled_maintenance_cost = serializers.DecimalField(max_digits=12, decimal_places=2)
+    repair_cost = serializers.DecimalField(max_digits=12, decimal_places=2)
+    tco = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
 class LocationReconcileItemSerializer(serializers.ModelSerializer):
     """Single item row in the location reconcile grid payload."""
 

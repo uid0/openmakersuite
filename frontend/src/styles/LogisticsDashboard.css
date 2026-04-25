@@ -1,6 +1,7 @@
 /**
  * Logistics Dashboard Styles
- * Optimized for 32" Fire TV / Silk Browser display
+ * Optimized for 32" Fire TV / Silk Browser display at 1920x1080.
+ * Six metric cards must fit on a single screen with no scrolling.
  */
 
 .logistics-dashboard {
@@ -9,10 +10,10 @@
   overflow: hidden;
   background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #1e3a8a 100%);
   color: #ffffff;
-  padding: 3rem;
+  padding: 1.25rem 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.25rem;
   font-family: 'Segoe UI', 'Roboto', 'Arial', sans-serif;
   box-sizing: border-box;
   position: relative;
@@ -27,7 +28,7 @@
 }
 
 .logistics-loader {
-  font-size: 4rem;
+  font-size: 3.5rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   color: #ffffff;
@@ -35,34 +36,34 @@
 
 .logistics-error-card {
   background: rgba(15, 23, 42, 0.9);
-  padding: 4rem;
-  border-radius: 2rem;
+  padding: 3rem;
+  border-radius: 1.5rem;
   border: 2px solid rgba(59, 130, 246, 0.5);
   text-align: center;
   max-width: 800px;
 }
 
 .logistics-error-card h1 {
-  font-size: 3rem;
-  margin: 0 0 1.5rem 0;
+  font-size: 2.5rem;
+  margin: 0 0 1rem 0;
 }
 
 .logistics-error-card p {
   font-size: 1.5rem;
-  margin: 1rem 0;
+  margin: 0.75rem 0;
 }
 
 .logistics-error-tip {
-  margin-top: 2rem;
+  margin-top: 1.5rem;
   color: rgba(255, 255, 255, 0.7);
   font-size: 1.25rem;
 }
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(2, 1fr);
-  gap: 2.5rem;
+  gap: 1.25rem;
   flex: 1;
   min-height: 0;
   position: relative;
@@ -73,17 +74,23 @@
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
   border: 2px solid rgba(255, 255, 255, 0.2);
-  border-radius: 1.5rem;
-  padding: 3rem;
+  border-radius: 1.25rem;
+  padding: 1.5rem 1.25rem;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 1.5rem;
+  gap: 0.75rem;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
   /* Burn-in prevention: subtle animation to prevent static images */
   animation: subtle-shift 300s ease-in-out infinite;
+}
+
+.metric-card--alert {
+  border-color: rgba(250, 82, 82, 0.6);
+  box-shadow: 0 20px 60px rgba(250, 82, 82, 0.25);
 }
 
 .metric-card:hover {
@@ -92,7 +99,7 @@
 }
 
 .metric-label {
-  font-size: 2rem;
+  font-size: 1.5rem;
   font-weight: 600;
   text-align: center;
   color: rgba(255, 255, 255, 0.9);
@@ -101,7 +108,7 @@
 }
 
 .metric-value {
-  font-size: 6rem;
+  font-size: 5.5rem;
   font-weight: 700;
   color: #ffffff;
   line-height: 1;
@@ -109,7 +116,7 @@
 }
 
 .sparkline-container {
-  margin-top: 1rem;
+  margin-top: 0.25rem;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -121,38 +128,35 @@
 }
 
 .logistics-footer {
-  margin-top: auto;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
+  justify-content: space-between;
   gap: 1.5rem;
   flex-shrink: 0;
-  padding-top: 2rem;
+  padding: 0 0.5rem;
   position: relative;
   z-index: 1;
 }
 
 .footer-time {
-  font-size: 5rem;
+  font-size: 3rem;
   font-weight: 600;
   color: #ffffff;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   /* Burn-in prevention: subtle animation for time display */
   animation: subtle-pulse 180s ease-in-out infinite;
 }
 
 .refresh-progress-container {
-  width: 100%;
+  flex: 1;
   max-width: 800px;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
 }
 
 .refresh-progress-bar {
-  height: 12px;
+  height: 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.2);
   overflow: hidden;
@@ -233,59 +237,55 @@
   }
 }
 
-/* Responsive adjustments for different screen sizes */
-@media (max-width: 1920px) {
-  .metric-value {
-    font-size: 5rem;
+/* Smaller TVs / monitors: collapse to 2 cols x 3 rows so cards stay legible. */
+@media (max-width: 1366px) {
+  .logistics-dashboard {
+    padding: 1rem;
+    gap: 1rem;
   }
-  
-  .footer-time {
+
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 1rem;
+  }
+
+  .metric-card {
+    padding: 1.25rem 1rem;
+  }
+
+  .metric-label {
+    font-size: 1.25rem;
+  }
+
+  .metric-value {
     font-size: 4rem;
   }
-}
 
-@media (max-width: 1366px) {
-  .dashboard-grid {
-    gap: 2rem;
-  }
-  
-  .metric-card {
-    padding: 2.5rem;
-  }
-  
-  .metric-label {
-    font-size: 1.75rem;
-  }
-  
-  .metric-value {
-    font-size: 4.5rem;
-  }
-  
   .footer-time {
-    font-size: 3.5rem;
+    font-size: 2.25rem;
   }
 }
 
+/* Tablet / portrait fallback: single column, scrolling acceptable. */
 @media (max-width: 1024px) {
+  .logistics-dashboard {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
   .dashboard-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: repeat(4, 1fr);
-    gap: 1.5rem;
+    grid-template-rows: repeat(6, minmax(140px, 1fr));
+    gap: 0.75rem;
   }
-  
-  .metric-card {
-    padding: 2rem;
-  }
-  
-  .metric-label {
-    font-size: 1.5rem;
-  }
-  
+
   .metric-value {
-    font-size: 4rem;
+    font-size: 3.5rem;
   }
-  
+
   .footer-time {
-    font-size: 3rem;
+    font-size: 2rem;
   }
 }

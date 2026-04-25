@@ -5,8 +5,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import AssetDetailPage from '../../pages/AssetDetailPage';
-import { assetPartsAPI, assetsAPI, maintenanceAPI } from '../../services/api';
-import { Asset, AssetProblem, MaintenanceItem } from '../../types';
+import { assetPartsAPI, assetsAPI, maintenanceAPI, workOrderAPI } from '../../services/api';
+import { Asset, AssetProblem, MaintenanceItem, WorkOrder } from '../../types';
 
 jest.mock('../../services/api');
 jest.mock('react-router-dom', () => ({
@@ -18,6 +18,7 @@ jest.mock('react-router-dom', () => ({
 const mockAssetsAPI = assetsAPI as jest.Mocked<typeof assetsAPI>;
 const mockAssetPartsAPI = assetPartsAPI as jest.Mocked<typeof assetPartsAPI>;
 const mockMaintenanceAPI = maintenanceAPI as jest.Mocked<typeof maintenanceAPI>;
+const mockWorkOrderAPI = workOrderAPI as jest.Mocked<typeof workOrderAPI>;
 
 describe('AssetDetailPage', () => {
   const mockAsset: Asset = {
@@ -136,6 +137,13 @@ describe('AssetDetailPage', () => {
       headers: {},
       config: {} as any,
     });
+    mockWorkOrderAPI.listWorkOrders.mockResolvedValue({
+      data: { results: [] },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    } as any);
     mockAssetsAPI.getTagUrl.mockImplementation(
       (id: string, size: 'standard' | 'large' = 'standard', download = false) => {
         const params = new URLSearchParams({ size });
@@ -390,6 +398,113 @@ describe('AssetDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Error:/)).toBeInTheDocument();
+    });
+  });
+
+  describe('Maintenance section (single source)', () => {
+    const scheduledItem: MaintenanceItem = {
+      id: 'mi-1',
+      asset: 'test-id',
+      asset_name: 'Test Asset',
+      asset_tag: 'TAG001',
+      title: 'Quarterly belt inspection',
+      description: '',
+      instructions: '',
+      estimated_time_minutes: 15,
+      estimated_cost: '0',
+      interval_days: 90,
+      last_completed_at: null,
+      is_active: true,
+      is_overdue: false,
+      days_overdue: null,
+      next_due_at: '2025-12-01T00:00:00Z',
+      materials: [],
+      tasks: [],
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+    };
+
+    const recentWorkOrder: WorkOrder = {
+      id: 'wo-1',
+      short_id: 'wo-001',
+      maintenance_item: 'mi-1',
+      maintenance_item_title: 'Quarterly belt inspection',
+      asset_name: 'Test Asset',
+      asset_tag: 'TAG001',
+      asset_id: 'test-id',
+      status: 'completed',
+      due_date: null,
+      assigned_to: null,
+      assigned_to_name: 'Alice',
+      completed_by_name: 'Alice',
+      completed_at: '2024-02-01T00:00:00Z',
+      notes: '',
+      is_overdue: false,
+      task_completions: [],
+      material_usage: [],
+      photos: [],
+      created_at: '2024-01-15T00:00:00Z',
+      updated_at: '2024-02-01T00:00:00Z',
+    };
+
+    it('renders exactly one Maintenance section sourced from MaintenanceItem and WorkOrder', async () => {
+      mockAssetsAPI.getMaintenanceItems.mockResolvedValueOnce({
+        data: [scheduledItem],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+      mockWorkOrderAPI.listWorkOrders.mockResolvedValueOnce({
+        data: { results: [recentWorkOrder] },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      } as any);
+
+      render(
+        <MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'Maintenance', level: 2 })).toBeInTheDocument();
+      });
+
+      expect(
+        screen.queryByRole('heading', { name: 'Preventive Maintenance' })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Maintenance Log' })).not.toBeInTheDocument();
+
+      expect(screen.getByRole('heading', { name: 'Scheduled', level: 3 })).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Recent Work Orders', level: 3 })
+      ).toBeInTheDocument();
+
+      expect(screen.getAllByText('Quarterly belt inspection').length).toBeGreaterThan(0);
+      expect(screen.getByText(/Completed/)).toBeInTheDocument();
+    });
+
+    it('does not render legacy maintenance_plan or condition_notes on the detail page', async () => {
+      render(
+        <MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'Maintenance', level: 2 })).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText('Monthly maintenance required')).not.toBeInTheDocument();
+      expect(screen.queryByText('Good condition')).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Maintenance Plan' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Condition Notes' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('heading', { name: 'Part Replacement History' })
+      ).not.toBeInTheDocument();
     });
   });
 

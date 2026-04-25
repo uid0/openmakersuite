@@ -1,12 +1,12 @@
 /**
  * Asset Detail Page
- * Full page view for asset details with part tracking, problem history, maintenance log, QR code, and lock/unlock controls
+ * Full page view for asset details with part tracking, problem history, maintenance, QR code, and lock/unlock controls
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assetPartsAPI, assetsAPI, maintenanceAPI } from '../services/api';
+import { assetPartsAPI, assetsAPI, maintenanceAPI, workOrderAPI } from '../services/api';
 import '../styles/AssetDetailPage.css';
-import { Asset, AssetProblem, MaintenanceItem } from '../types';
+import { Asset, AssetProblem, MaintenanceItem, WorkOrder } from '../types';
 import { showError } from '../utils/dialogs';
 
 const AssetDetailPage: React.FC = () => {
@@ -15,6 +15,7 @@ const AssetDetailPage: React.FC = () => {
   const [asset, setAsset] = useState<Asset | null>(null);
   const [problems, setProblems] = useState<AssetProblem[]>([]);
   const [maintenanceItems, setMaintenanceItems] = useState<MaintenanceItem[]>([]);
+  const [recentWorkOrders, setRecentWorkOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [problemStatusFilter, setProblemStatusFilter] = useState<string>('all');
@@ -40,14 +41,17 @@ const AssetDetailPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const [assetResponse, problemsResponse, maintenanceResponse] = await Promise.all([
-        assetsAPI.getAsset(id),
-        assetsAPI.getAssetProblems(id),
-        assetsAPI.getMaintenanceItems(id),
-      ]);
+      const [assetResponse, problemsResponse, maintenanceResponse, workOrdersResponse] =
+        await Promise.all([
+          assetsAPI.getAsset(id),
+          assetsAPI.getAssetProblems(id),
+          assetsAPI.getMaintenanceItems(id),
+          workOrderAPI.listWorkOrders({ asset: id }),
+        ]);
       setAsset(assetResponse.data);
       setProblems(problemsResponse.data);
       setMaintenanceItems(maintenanceResponse.data);
+      setRecentWorkOrders(workOrdersResponse.data?.results ?? []);
     } catch (err: any) {
       console.error('Error loading asset details:', err);
       setError(err.response?.data?.detail || 'Failed to load asset details');
@@ -728,10 +732,10 @@ const AssetDetailPage: React.FC = () => {
           )}
         </section>
 
-        {/* Preventive Maintenance Tasks */}
+        {/* Maintenance — single source of scheduled (preventive) and unscheduled (work order) maintenance */}
         <section className="asset-detail-section">
           <div className="section-header-row">
-            <h2>Preventive Maintenance</h2>
+            <h2>Maintenance</h2>
             {isLoggedIn && (
               <button
                 className="add-button"
@@ -741,8 +745,10 @@ const AssetDetailPage: React.FC = () => {
               </button>
             )}
           </div>
+
+          <h3>Scheduled</h3>
           {maintenanceItems.length === 0 ? (
-            <p className="no-maintenance-plan">No preventive maintenance tasks defined.</p>
+            <p className="no-maintenance-plan">No scheduled maintenance tasks defined.</p>
           ) : (
             <ul className="maintenance-list">
               {maintenanceItems.map((item) => (
@@ -794,46 +800,45 @@ const AssetDetailPage: React.FC = () => {
               ))}
             </ul>
           )}
-        </section>
 
-        {/* Maintenance Log */}
-        <section className="asset-detail-section">
-          <h2>Maintenance Log</h2>
-          {asset.maintenance_plan ? (
-            <div className="maintenance-plan">
-              <h3>Maintenance Plan</h3>
-              <pre className="maintenance-plan-text">{asset.maintenance_plan}</pre>
-            </div>
+          <h3>Recent Work Orders</h3>
+          {recentWorkOrders.length === 0 ? (
+            <p className="no-maintenance-plan">No work orders for this asset.</p>
           ) : (
-            <p className="no-maintenance-plan">No maintenance plan available.</p>
-          )}
-          {asset.condition_notes && (
-            <div className="condition-notes">
-              <h3>Condition Notes</h3>
-              <p>{asset.condition_notes}</p>
-            </div>
-          )}
-          {asset.parts && asset.parts.length > 0 && (
-            <div className="maintenance-history">
-              <h3>Part Replacement History</h3>
-              <ul className="maintenance-list">
-                {asset.parts
-                  .filter((part) => part.last_replaced_at)
-                  .sort((a, b) => {
-                    if (!a.last_replaced_at || !b.last_replaced_at) return 0;
-                    return new Date(b.last_replaced_at).getTime() - new Date(a.last_replaced_at).getTime();
-                  })
-                  .map((part) => (
-                    <li key={part.id} className="maintenance-item">
-                      <div className="maintenance-item-header">
-                        <span className="maintenance-part-name">{part.part_name}</span>
-                        <span className="maintenance-date">{formatDate(part.last_replaced_at)}</span>
-                      </div>
-                      {part.notes && <div className="maintenance-notes">{part.notes}</div>}
-                    </li>
-                  ))}
-              </ul>
-            </div>
+            <ul className="maintenance-list">
+              {recentWorkOrders.map((wo) => (
+                <li key={wo.id} className="maintenance-item">
+                  <div className="maintenance-item-header">
+                    <button
+                      className="edit-link-button"
+                      onClick={() => navigate(`/maintenance/work-orders/${wo.id}`)}
+                    >
+                      {wo.maintenance_item_title || `Work order ${wo.short_id}`}
+                    </button>
+                    <span
+                      className={`maintenance-status-badge ${
+                        wo.status === 'completed'
+                          ? 'status-asneeded'
+                          : wo.is_overdue
+                          ? 'status-overdue'
+                          : 'status-upcoming'
+                      }`}
+                    >
+                      {wo.status === 'completed'
+                        ? `Completed ${formatDate(wo.completed_at)}`
+                        : wo.is_overdue
+                        ? 'Overdue'
+                        : wo.due_date
+                        ? `Due ${new Date(wo.due_date).toLocaleDateString()}`
+                        : wo.status.replace('_', ' ')}
+                    </span>
+                  </div>
+                  {wo.assigned_to_name && (
+                    <div className="maintenance-meta">Assigned: {wo.assigned_to_name}</div>
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
         </section>
 

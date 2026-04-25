@@ -1302,4 +1302,44 @@ export const kioskAPI = {
     ),
 };
 
+export interface MakerBox {
+  id: number;
+  bin_id: string;
+  assigned_username: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  display_name: string;
+  assigned_at: string | null;
+  expires_at: string | null;
+  last_verified_at: string | null;
+  status: 'valid' | 'grace' | 'expired' | 'unassigned' | 'unknown';
+  paid_at: string | null;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MakerBoxScanResult {
+  status: 'valid' | 'grace' | 'expired' | 'unknown';
+  bin_id: string;
+  username: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  expires_at: string | null;
+  days_remaining: number | null;
+}
+
+export const makerBoxesAPI = {
+  list: () => api.get<{ results: MakerBox[] } | MakerBox[]>('/maker-boxes/'),
+  scan: (binId: string, username: string) =>
+    api.post<MakerBoxScanResult>('/maker-boxes/scan/', { bin_id: binId, username }),
+  labelUrl: (id: number) => `${API_BASE_URL}/maker-boxes/${id}/label/`,
+  manualLabel: (data: { username: string; first_name?: string; last_name?: string }) =>
+    api.post('/maker-boxes/manual-label/', data, { responseType: 'blob' }),
+  emailPickup: (id: number, email?: string) =>
+    api.post<{ sent: boolean; to: string }>(`/maker-boxes/${id}/email-pickup/`, email ? { email } : {}),
+};
+
 export default api;

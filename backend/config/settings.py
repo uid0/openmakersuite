@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     "search",
     "notifications",
     "screens",
+    "maker_boxes",
 ]
 
 MIDDLEWARE = [
@@ -263,6 +264,15 @@ DEFAULT_FROM_EMAIL = config(
     "DEFAULT_FROM_EMAIL",
     default="noreply@openmakersuite.example",
 )
+
+# WHMCS API credentials for the maker box (personal storage bin) verification
+# flow. All four are sourced from environment variables; if URL/identifier/
+# secret are missing the maker_boxes service degrades to a 503 response from
+# the scan endpoint rather than failing requests in unexpected ways.
+WHMCS_API_URL = config("WHMCS_API_URL", default="")
+WHMCS_API_IDENTIFIER = config("WHMCS_API_IDENTIFIER", default="")
+WHMCS_API_SECRET = config("WHMCS_API_SECRET", default="")
+WHMCS_API_ACCESSKEY = config("WHMCS_API_ACCESSKEY", default="")
 
 # Postmark inbound webhook shared secret. The inbound work-order endpoint is
 # unauthenticated (Postmark does not ship a request signature), so this token

@@ -1,9 +1,9 @@
 """Asset tag rendering service.
 
 Generates physical asset tag images (PNG) suitable for being riveted onto
-hardware. Each tag includes a QR code that links to the public scan page,
-plus a short call-to-action. Layout reserves clear zones around the rivet
-hole locations so design and QR elements don't sit under the holes.
+hardware. Each tag holds a QR code that links to the public scan page.
+Layout reserves clear zones around the rivet hole locations so the QR
+doesn't sit under the holes.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 from io import BytesIO
 
 import qrcode
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 SCAN_URL_TEMPLATE = "https://dms.openmakersuite.net/scan/asset/{asset_id}"
 
@@ -25,12 +25,6 @@ RIVET_RADIUS = 0.15
 
 DEFAULT_DPI = 1440
 
-_FONT_CANDIDATES = (
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/Library/Fonts/Arial Bold.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-)
-
 
 class InvalidTagSizeError(ValueError):
     """Raised when an unknown size is requested."""
@@ -38,39 +32,6 @@ class InvalidTagSizeError(ValueError):
 
 def get_scan_url(asset) -> str:
     return SCAN_URL_TEMPLATE.format(asset_id=asset.id)
-
-
-def _load_font(size_px: int) -> ImageFont.ImageFont:
-    for path in _FONT_CANDIDATES:
-        try:
-            return ImageFont.truetype(path, size_px)
-        except OSError:
-            continue
-    return ImageFont.load_default()
-
-
-def _fit_font(
-    draw: ImageDraw.ImageDraw, lines, max_width_px: int, max_height_px: int, start_size: int
-) -> ImageFont.ImageFont:
-    """Find the largest font size at which all lines fit the given box."""
-    size = start_size
-    while size > 8:
-        font = _load_font(size)
-        line_heights = []
-        max_line_w = 0
-        for line in lines:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            w = bbox[2] - bbox[0]
-            h = bbox[3] - bbox[1]
-            line_heights.append(h)
-            if w > max_line_w:
-                max_line_w = w
-        line_gap = int(size * 0.25)
-        total_h = sum(line_heights) + line_gap * (len(lines) - 1)
-        if max_line_w <= max_width_px and total_h <= max_height_px:
-            return font
-        size -= 2
-    return _load_font(size)
 
 
 def _build_qr_image(url: str, target_px: int) -> Image.Image:
@@ -104,7 +65,6 @@ def render_asset_tag(asset, size: str = "standard", dpi: int = DEFAULT_DPI) -> b
     height_px = int(round(spec["height"] * dpi))
 
     img = Image.new("RGB", (width_px, height_px), "white")
-    draw = ImageDraw.Draw(img)
 
     # Safe drawing rectangle: keep design clear of the rivet exclusion circles
     # by inseting the full vertical band on each short edge.
@@ -115,44 +75,17 @@ def render_asset_tag(asset, size: str = "standard", dpi: int = DEFAULT_DPI) -> b
     safe_width = safe_right - safe_left
     safe_height = safe_bottom - safe_top
 
-    # QR sizing: square that fits within safe height (with a little padding)
-    # while leaving roughly 40% of safe width for the CTA text.
-    inner_padding = int(round(0.05 * dpi))
-    max_qr_by_height = safe_height - 2 * inner_padding
-    max_qr_by_width = int(safe_width * 0.6)
-    qr_size_px = max(64, min(max_qr_by_height, max_qr_by_width))
+    # QR fills the safe rect: largest square that fits within both dimensions,
+    # minus a small inner padding so the code doesn't kiss the rivet zones.
+    inner_padding = int(round(0.025 * dpi))
+    qr_size_px = max(64, min(safe_width, safe_height) - 2 * inner_padding)
 
     qr_url = get_scan_url(asset)
     qr_img = _build_qr_image(qr_url, qr_size_px)
 
-    qr_x = safe_left
+    qr_x = safe_left + (safe_width - qr_size_px) // 2
     qr_y = safe_top + (safe_height - qr_size_px) // 2
     img.paste(qr_img, (qr_x, qr_y))
-
-    # CTA text occupies the remainder of the safe rect to the right of the QR.
-    text_x = qr_x + qr_size_px + inner_padding
-    text_box_w = safe_right - text_x
-    text_box_h = safe_height - 2 * inner_padding
-
-    if text_box_w > 0:
-        lines = ["Problems?", "Scan me!"]
-        # Start with a generous font size proportional to the tag height,
-        # then shrink to fit.
-        start_size = max(24, int(height_px * 0.18))
-        font = _fit_font(draw, lines, text_box_w, text_box_h, start_size)
-
-        line_metrics = []
-        for line in lines:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            line_metrics.append((line, bbox[2] - bbox[0], bbox[3] - bbox[1]))
-        line_gap = int(font.size * 0.25)
-        total_h = sum(h for _, _, h in line_metrics) + line_gap * (len(line_metrics) - 1)
-
-        cursor_y = safe_top + (safe_height - total_h) // 2
-        for line, line_w, line_h in line_metrics:
-            cursor_x = text_x + (text_box_w - line_w) // 2
-            draw.text((cursor_x, cursor_y), line, fill="black", font=font)
-            cursor_y += line_h + line_gap
 
     buffer = BytesIO()
     # Pillow records DPI in metadata so downstream printers honor it.
@@ -176,6 +109,18 @@ def get_rivet_centers_px(size: str, dpi: int = DEFAULT_DPI) -> list[tuple[int, i
     return [(cx_left, cy), (cx_right, cy)]
 
 
+def get_safe_rect_px(size: str, dpi: int = DEFAULT_DPI) -> tuple[int, int, int, int]:
+    """Return the (left, top, right, bottom) pixel bounds of the safe drawing rect."""
+    if size not in SIZES:
+        raise InvalidTagSizeError(f"Unknown asset tag size '{size}'. Valid sizes: {sorted(SIZES)}")
+    spec = SIZES[size]
+    width_px = int(round(spec["width"] * dpi))
+    height_px = int(round(spec["height"] * dpi))
+    safe_left = int(round((RIVET_OFFSET + RIVET_RADIUS) * dpi))
+    safe_right = width_px - safe_left
+    return (safe_left, 0, safe_right, height_px)
+
+
 __all__ = [
     "SIZES",
     "RIVET_OFFSET",
@@ -186,4 +131,5 @@ __all__ = [
     "render_asset_tag",
     "get_scan_url",
     "get_rivet_centers_px",
+    "get_safe_rect_px",
 ]

@@ -14,7 +14,7 @@ from django.conf import settings
 from django.core.files import File
 
 import qrcode
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 from qrcode.image.pil import PilImage
 
 from customization.models import SiteSettings
@@ -230,9 +230,6 @@ class QRCodeService:
         # Generate QR code image
         qr_img = self.generate_qr_code_image(scan_url)
 
-        # Add access code text below QR code
-        qr_img = self._add_code_text(qr_img, asset.access_code)
-
         # Convert to BytesIO for saving
         buffer = BytesIO()
         qr_img.save(buffer, format="PNG")
@@ -271,9 +268,6 @@ class QRCodeService:
 
         # Generate QR code image
         qr_img = self.generate_qr_code_image(scan_url)
-
-        # Add access code text below QR code
-        qr_img = self._add_code_text(qr_img, item.access_code)
 
         # Convert to BytesIO for saving
         buffer = BytesIO()
@@ -314,9 +308,6 @@ class QRCodeService:
         # Generate QR code image
         qr_img = self.generate_qr_code_image(scan_url)
 
-        # Add access code text below QR code
-        qr_img = self._add_code_text(qr_img, location.access_code)
-
         # Convert to BytesIO for saving
         buffer = BytesIO()
         qr_img.save(buffer, format="PNG")
@@ -332,67 +323,3 @@ class QRCodeService:
         location.refresh_from_db()
 
         return location
-
-    def _add_code_text(self, img: PilImage, code: str) -> PilImage:
-        """
-        Add access code text below the QR code image.
-
-        Args:
-            img: The QR code PIL image
-            code: The access code to display
-
-        Returns:
-            PIL Image with code text added
-        """
-        # Convert to RGB if needed
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-
-        # Calculate dimensions
-        qr_width, qr_height = img.size
-        padding = 20  # Padding below QR code
-        text_height = 40  # Height for text
-        new_height = qr_height + padding + text_height
-
-        # Create new image with space for text
-        new_img = Image.new("RGB", (qr_width, new_height), "white")
-        new_img.paste(img, (0, 0))
-
-        # Draw text
-        draw = ImageDraw.Draw(new_img)
-
-        # Try to use a nice font, fallback to default if not available
-        try:
-            # Try to use a larger, bold font
-            font_size = 32
-            font = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size
-            )
-        except OSError:
-            try:
-                # Try default font
-                font = ImageFont.load_default()
-            except Exception:
-                font = None
-
-        # Calculate text position (centered)
-        if font:
-            # Get text bounding box
-            bbox = draw.textbbox((0, 0), code, font=font)
-            text_width = bbox[2] - bbox[0]
-        else:
-            # Estimate width if no font
-            text_width = len(code) * 20
-
-        text_x = (qr_width - text_width) // 2
-        text_y = qr_height + padding
-
-        # Draw text
-        draw.text(
-            (text_x, text_y),
-            code,
-            fill="black",
-            font=font if font else None,
-        )
-
-        return new_img

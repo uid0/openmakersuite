@@ -57,6 +57,7 @@ const AssetFormPage: React.FC = () => {
       manufacturer: null,
       manufacturer_name: '',
       circuit: '',
+      mac_address: '',
       needs_compressed_air: false,
       needs_ventilation: false,
       is_chargeable: false,
@@ -135,6 +136,7 @@ const AssetFormPage: React.FC = () => {
         manufacturer: asset.manufacturer ? Number(asset.manufacturer) : null,
         manufacturer_name: asset.manufacturer_name || '',
         circuit: asset.circuit || '',
+        mac_address: asset.mac_address || '',
         needs_compressed_air: asset.needs_compressed_air,
         needs_ventilation: asset.needs_ventilation,
         is_chargeable: asset.is_chargeable,
@@ -440,6 +442,12 @@ const AssetFormPage: React.FC = () => {
                       control={control}
                       label="Circuit"
                       placeholder="Circuit identification"
+                    />
+                    <FormInput
+                      name="mac_address"
+                      control={control}
+                      label="MAC Address"
+                      placeholder="AA:BB:CC:11:22:33"
                     />
                     <div>
                       <Switch

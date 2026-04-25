@@ -733,6 +733,7 @@ class AssetSerializer(serializers.ModelSerializer):
             "needs_compressed_air",
             "needs_ventilation",
             "is_chargeable",
+            "mac_address",
             # Scanning tracking
             "last_scanned_at",
             # Group ownership

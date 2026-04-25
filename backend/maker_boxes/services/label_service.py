@@ -135,7 +135,7 @@ def render_box_label(
     measurements = [_measure_text(draw, line, font) for line, font in zip(name_lines, fonts)]
     total_text_height = sum(h for _, h in measurements)
     cursor_y = (height_px - total_text_height) // 2
-    for line, font, (line_w, line_h) in zip(name_lines, fonts, measurements):
+    for line, font, (_line_w, line_h) in zip(name_lines, fonts, measurements):
         draw.text((text_left, cursor_y), line, fill="black", font=font)
         cursor_y += line_h
 

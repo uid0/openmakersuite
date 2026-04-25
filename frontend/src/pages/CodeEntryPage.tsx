@@ -5,7 +5,7 @@
  */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import QRScanner from '../components/QRScanner';
+import QRScanner, { QRScannerError } from '../components/QRScanner';
 import { inventoryAPI } from '../services/api';
 import '../styles/ScanPage.css';
 
@@ -91,7 +91,7 @@ const CodeEntryPage: React.FC = () => {
     processScannedCode(decodedText);
   };
 
-  const handleScanError = (error: string) => {
+  const handleScanError = (_error: QRScannerError) => {
     // Error handling is done in the scanner component
   };
 

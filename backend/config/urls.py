@@ -41,6 +41,7 @@ urlpatterns = [
     path("api/search/", include("search.urls")),
     path("api/notifications/", include("notifications.urls")),
     path("api/screens/", include("screens.urls")),
+    path("api/maker-boxes/", include("maker_boxes.urls")),
     # Flower proxy (superuser only)
     path("flower/", include("config.flower_urls")),
 ]

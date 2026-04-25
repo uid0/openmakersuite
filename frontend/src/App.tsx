@@ -30,6 +30,8 @@ import LocationFormPage from './pages/LocationFormPage';
 import LocationListPage from './pages/LocationListPage';
 import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
+import MakerBoxAdminPage from './pages/MakerBoxAdminPage';
+import MakerBoxScanPage from './pages/MakerBoxScanPage';
 import MaintenanceDashboard from './pages/MaintenanceDashboard';
 import WorkOrderPage from './pages/WorkOrderPage';
 import PurchaseOrderFormPage from './pages/PurchaseOrderFormPage';
@@ -172,6 +174,8 @@ function AppContent() {
           <Route path="/facilities/screens/:slug" element={<WorkspaceLayout><ScreenEditPage /></WorkspaceLayout>} />
           <Route path="/kiosk/:slug" element={<KioskDisplayPage />} />
           <Route path="/facilities/logistics" element={<LogisticsDashboard />} />
+          <Route path="/facilities/maker-boxes/scan" element={<WorkspaceLayout><MakerBoxScanPage /></WorkspaceLayout>} />
+          <Route path="/facilities/maker-boxes" element={<WorkspaceLayout><MakerBoxAdminPage /></WorkspaceLayout>} />
 
           {/* Preventive Maintenance */}
           <Route path="/maintenance/dashboard" element={<WorkspaceLayout><MaintenanceDashboard /></WorkspaceLayout>} />

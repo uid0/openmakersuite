@@ -725,6 +725,10 @@ class AssetSerializer(serializers.ModelSerializer):
             "product_url",
             "wiki_page_url",
             # Maintenance
+            # NOTE: maintenance_plan is a legacy free-text field kept on the
+            # model + admin form for back-compat. The asset detail page no
+            # longer renders it — scheduled maintenance lives on
+            # MaintenanceItem and unscheduled work on WorkOrder. See oms-4mk.
             "maintenance_plan",
             # Parts/consumables
             "parts",
@@ -759,6 +763,10 @@ class AssetSerializer(serializers.ModelSerializer):
             "qr_code_scan_url",
             # Status
             "status",
+            # NOTE: condition_notes is a legacy free-text field kept on the
+            # model + admin form for back-compat. The asset detail page no
+            # longer renders it — current condition is reflected by
+            # AssetProblem (Problem History) and WorkOrder. See oms-4mk.
             "condition_notes",
             # Metadata
             "is_active",

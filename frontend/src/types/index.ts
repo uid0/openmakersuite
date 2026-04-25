@@ -270,6 +270,7 @@ export interface Asset {
   report_only: boolean;
   notes: string;
   circuit: string;
+  mac_address: string;
   needs_compressed_air: boolean;
   needs_ventilation: boolean;
   is_chargeable: boolean;

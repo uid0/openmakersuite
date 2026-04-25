@@ -199,6 +199,14 @@ export const assetFormSchema = z
     needs_compressed_air: z.boolean().default(false),
     needs_ventilation: z.boolean().default(false),
     is_chargeable: z.boolean().default(false),
+    mac_address: z
+      .string()
+      .regex(
+        /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/,
+        'Enter a valid MAC address (e.g., AA:BB:CC:11:22:33)'
+      )
+      .optional()
+      .or(z.literal('')),
 
     // Media
     image: z.union([z.instanceof(File), z.string().url(), z.null()]).optional(),

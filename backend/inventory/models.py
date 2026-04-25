@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from django.conf import settings
 from django.contrib.auth.models import Group
-from django.core.validators import MaxValueValidator, MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.utils.text import slugify
 
@@ -1112,6 +1112,17 @@ class Asset(models.Model):
     is_chargeable = models.BooleanField(
         default=False,
         help_text="Device is chargeable to members (for billing purposes)",
+    )
+    mac_address = models.CharField(
+        max_length=17,
+        blank=True,
+        validators=[
+            RegexValidator(
+                regex=r"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$",
+                message="Enter a valid MAC address (e.g., AA:BB:CC:11:22:33).",
+            )
+        ],
+        help_text="MAC address for electronic/networked assets (e.g., AA:BB:CC:11:22:33).",
     )
 
     # Scanning tracking

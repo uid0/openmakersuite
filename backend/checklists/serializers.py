@@ -20,6 +20,7 @@ class ChecklistStepSerializer(serializers.ModelSerializer):
             "location",
             "inventory_item",
             "required",
+            "requires_photo",
             "notes",
         ]
         read_only_fields = ["id"]
@@ -84,6 +85,7 @@ class ChecklistStepCompletionSerializer(serializers.ModelSerializer):
     scanned_asset_name = serializers.CharField(source="scanned_asset.name", read_only=True)
     scanned_location_name = serializers.CharField(source="scanned_location.name", read_only=True)
     scanned_item_name = serializers.CharField(source="scanned_item.name", read_only=True)
+    photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ChecklistStepCompletion
@@ -100,8 +102,18 @@ class ChecklistStepCompletionSerializer(serializers.ModelSerializer):
             "scanned_item",
             "scanned_item_name",
             "notes",
+            "photo_url",
+            "photo_caption",
         ]
-        read_only_fields = ["id", "scanned_at"]
+        read_only_fields = ["id", "scanned_at", "photo_url"]
+
+    def get_photo_url(self, obj):
+        if not obj.photo:
+            return None
+        request = self.context.get("request")
+        if request is not None:
+            return request.build_absolute_uri(obj.photo.url)
+        return obj.photo.url
 
 
 class ChecklistCompletionSerializer(serializers.ModelSerializer):
@@ -180,6 +192,8 @@ class ChecklistStepScanSerializer(serializers.Serializer):
     location_id = serializers.IntegerField(required=False, allow_null=True)
     item_id = serializers.UUIDField(required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
+    photo = serializers.ImageField(required=False, allow_null=True)
+    photo_caption = serializers.CharField(required=False, allow_blank=True, max_length=500)
 
     def validate(self, data):
         """Validate that exactly one of asset_id, location_id, or item_id is provided."""

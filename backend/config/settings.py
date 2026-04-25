@@ -270,6 +270,11 @@ DEFAULT_FROM_EMAIL = config(
 # that Postmark is configured to send. If empty, the endpoint returns 503.
 POSTMARK_INBOUND_TOKEN = config("POSTMARK_INBOUND_TOKEN", default="")
 
+# Shared secret used by IoT devices (ForgeKey, ESP32, etc.) to authenticate
+# anonymous traffic-count pings to /api/location-checkins/webhook/. If empty,
+# the endpoint returns 503.
+LOCATION_PING_TOKEN = config("LOCATION_PING_TOKEN", default="")
+
 # Redis configuration
 REDIS_URL = config("REDIS_URL", default="redis://192.168.1.36:6379/0")
 

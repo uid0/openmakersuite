@@ -4,8 +4,14 @@
  */
 import React, { useEffect, useState, useRef } from 'react';
 import '../styles/LogisticsDashboard.css';
-import { analyticsAPI, customizationAPI } from '../services/api';
+import { analyticsAPI, customizationAPI, locationCheckinAPI } from '../services/api';
 import { SiteSettings } from '../types';
+
+interface TopLocationRow {
+  location_id: number;
+  location_name: string;
+  count: number;
+}
 
 interface QRScanDay {
   date: string;
@@ -32,6 +38,7 @@ const LogisticsDashboard: React.FC = () => {
   const [refreshProgress, setRefreshProgress] = useState(100);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
+  const [topLocations, setTopLocations] = useState<TopLocationRow[]>([]);
   const logoRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number>();
   const positionRef = useRef({ x: 100, y: 100 });
@@ -91,6 +98,27 @@ const LogisticsDashboard: React.FC = () => {
   useEffect(() => {
     fetchDashboardData();
     const interval = setInterval(fetchDashboardData, REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchTopLocations = async () => {
+      try {
+        const end = new Date();
+        const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const response = await locationCheckinAPI.getTopLocations({
+          start: start.toISOString(),
+          end: end.toISOString(),
+          limit: 5,
+        });
+        setTopLocations(response.data.results);
+      } catch (err) {
+        console.warn('Failed to load top locations by traffic:', err);
+        setTopLocations([]);
+      }
+    };
+    fetchTopLocations();
+    const interval = setInterval(fetchTopLocations, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
 
@@ -394,6 +422,25 @@ const LogisticsDashboard: React.FC = () => {
           <div className="sparkline-container">
             <Sparkline data={Array.isArray(data.qr_scans_by_day) ? data.qr_scans_by_day : []} />
           </div>
+        </div>
+
+        {/* Top Locations by Traffic (Last 7 Days) */}
+        <div className="metric-card metric-card--list">
+          <div className="metric-label">Top Locations by Traffic (7d)</div>
+          {topLocations.length === 0 ? (
+            <div className="metric-value" style={{ fontSize: '1.5rem' }}>
+              No traffic recorded
+            </div>
+          ) : (
+            <ol className="top-locations-list">
+              {topLocations.map((row) => (
+                <li key={row.location_id}>
+                  <span className="top-location-name">{row.location_name}</span>
+                  <span className="top-location-count">{row.count.toLocaleString()}</span>
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       </div>
 

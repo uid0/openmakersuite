@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageChops
 from rest_framework.test import APIClient
 
 from inventory.services.asset_tag_service import (
@@ -15,6 +15,7 @@ from inventory.services.asset_tag_service import (
     SIZES,
     InvalidTagSizeError,
     get_rivet_centers_px,
+    get_safe_rect_px,
     render_asset_tag,
 )
 from inventory.tests.factories import AssetFactory
@@ -91,6 +92,53 @@ class TestRenderAssetTag:
                         f"Expected white pixel at ({cx + dx},{cy + dy}) "
                         f"in rivet exclusion zone, got {px}"
                     )
+
+    def test_no_text_in_tag(self):
+        # The only non-white content on the tag should be the QR code itself —
+        # the call-to-action text was removed because it's unreadable at print
+        # size. Verify by checking that the bounding box of non-white pixels is
+        # square-ish (matches a QR) rather than a wide rectangle that would
+        # include text to the right of the code.
+        asset = AssetFactory()
+        png = render_asset_tag(asset, size="standard", dpi=1440)
+        img = _open_png(png).convert("RGB")
+        white = Image.new("RGB", img.size, "white")
+        bbox = ImageChops.difference(img, white).getbbox()
+        assert bbox is not None, "tag rendered as fully blank"
+        bbox_w = bbox[2] - bbox[0]
+        bbox_h = bbox[3] - bbox[1]
+        # QR is square; allow a 5% tolerance.
+        assert abs(bbox_w - bbox_h) <= max(bbox_w, bbox_h) * 0.05, (
+            f"non-white region is not square (w={bbox_w}, h={bbox_h}); "
+            "indicates extra text rendering alongside QR"
+        )
+
+    def test_qr_code_takes_full_safe_rect(self):
+        # QR should fill the safe rect (the area between rivet exclusion zones).
+        # The limiting dimension is the safe-rect width on the standard tag.
+        asset = AssetFactory()
+        png = render_asset_tag(asset, size="standard", dpi=1440)
+        img = _open_png(png).convert("RGB")
+
+        safe_left, safe_top, safe_right, safe_bottom = get_safe_rect_px("standard", dpi=1440)
+        safe_w = safe_right - safe_left
+        safe_h = safe_bottom - safe_top
+        limiting_dim = min(safe_w, safe_h)
+
+        white = Image.new("RGB", img.size, "white")
+        bbox = ImageChops.difference(img, white).getbbox()
+        assert bbox is not None
+        bbox_w = bbox[2] - bbox[0]
+        bbox_h = bbox[3] - bbox[1]
+        # QR fills the safe rect minus a small inner padding and minus the QR's
+        # own quiet zone — so the dark content reaches ~85% of the limiting
+        # safe-rect dimension.
+        assert (
+            bbox_w >= limiting_dim * 0.85
+        ), f"QR width {bbox_w}px does not fill safe rect (limiting dim {limiting_dim}px)"
+        assert (
+            bbox_h >= limiting_dim * 0.85
+        ), f"QR height {bbox_h}px does not fill safe rect (limiting dim {limiting_dim}px)"
 
     def test_render_executes_without_error_at_default_dpi(self):
         asset = AssetFactory()

@@ -4,7 +4,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import QRScanner from '../components/QRScanner';
+import QRScanner, { QRScannerError } from '../components/QRScanner';
 import { useNotifications } from '../hooks/useNotifications';
 import { checklistsAPI, inventoryAPI } from '../services/api';
 import '../styles/ScanPage.css';
@@ -203,8 +203,15 @@ const ChecklistCompletionPage: React.FC = () => {
     processScannedCode(decodedText);
   };
 
-  const handleScanError = (error: string) => {
-    notifications.showError('Scan Error', error);
+  const handleScanError = (scanError: QRScannerError) => {
+    const titleByKind: Record<QRScannerError['kind'], string> = {
+      'permission-denied': 'Camera access denied',
+      'no-camera': 'No camera detected',
+      'insecure-context': 'HTTPS required',
+      unsupported: 'Browser not supported',
+      unknown: 'Scan error',
+    };
+    notifications.showError(titleByKind[scanError.kind], scanError.message);
   };
 
   const handleCloseScanner = () => {

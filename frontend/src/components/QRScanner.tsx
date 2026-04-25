@@ -3,17 +3,58 @@
  * Mobile-optimized QR code scanner using html5-qrcode
  */
 import { Html5Qrcode } from 'html5-qrcode';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import '../styles/QRScanner.css';
+
+export type QRScannerErrorKind =
+  | 'permission-denied'
+  | 'no-camera'
+  | 'insecure-context'
+  | 'unsupported'
+  | 'unknown';
+
+export interface QRScannerError {
+  kind: QRScannerErrorKind;
+  message: string;
+}
 
 interface QRScannerProps {
   onScanSuccess: (decodedText: string) => void;
-  onScanError?: (error: string) => void;
+  onScanError?: (error: QRScannerError) => void;
   onClose?: () => void;
   fps?: number;
   qrbox?: { width: number; height: number };
   aspectRatio?: number;
 }
+
+const PERMISSION_DENIED_MESSAGE =
+  'Camera access denied. Enable camera permission for this site in your browser settings, then tap "Try again".';
+const NO_CAMERA_MESSAGE =
+  'No camera detected on this device. Connect a camera and reload, or enter the code manually.';
+const INSECURE_CONTEXT_MESSAGE =
+  'Camera access requires HTTPS. Open this page over https:// (or http://localhost) and try again.';
+const UNSUPPORTED_MESSAGE =
+  'This browser does not support camera access. Try Chrome, Safari, or Firefox.';
+
+const classifyMediaError = (err: unknown): QRScannerError => {
+  const name = (err as { name?: string } | null)?.name;
+  const fallback = (err as { message?: string } | null)?.message;
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+    case 'PermissionDeniedError':
+      return { kind: 'permission-denied', message: PERMISSION_DENIED_MESSAGE };
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+    case 'DevicesNotFoundError':
+      return { kind: 'no-camera', message: NO_CAMERA_MESSAGE };
+    case 'NotSupportedError':
+    case 'TypeError':
+      return { kind: 'unsupported', message: UNSUPPORTED_MESSAGE };
+    default:
+      return { kind: 'unknown', message: fallback || 'Failed to start camera.' };
+  }
+};
 
 const QRScanner: React.FC<QRScannerProps> = ({
   onScanSuccess,
@@ -26,34 +67,99 @@ const QRScanner: React.FC<QRScannerProps> = ({
   const scannerRef = useRef<HTMLDivElement>(null);
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<QRScannerError | null>(null);
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
   const [currentCameraId, setCurrentCameraId] = useState<string | null>(null);
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
   const scannerIdRef = useRef(`qr-scanner-${Date.now()}-${Math.random()}`);
 
-  // Detect available cameras
+  const reportError = useCallback(
+    (qrError: QRScannerError) => {
+      setError(qrError);
+      setIsScanning(false);
+      if (onScanError) {
+        onScanError(qrError);
+      }
+    },
+    [onScanError]
+  );
+
+  // Explicit getUserMedia preflight to force the browser permission prompt.
+  // Without this, html5-qrcode swallows the DOMException and surfaces a
+  // generic "Failed to start camera" instead of letting the browser ask the
+  // user. We request the stream, then immediately stop tracks so html5-qrcode
+  // can take its own stream when it starts.
   useEffect(() => {
+    let cancelled = false;
+
+    const requestPermission = async () => {
+      if (
+        typeof window === 'undefined' ||
+        !window.isSecureContext ||
+        !navigator.mediaDevices?.getUserMedia
+      ) {
+        if (typeof window !== 'undefined' && window.isSecureContext === false) {
+          reportError({ kind: 'insecure-context', message: INSECURE_CONTEXT_MESSAGE });
+        } else {
+          reportError({ kind: 'unsupported', message: UNSUPPORTED_MESSAGE });
+        }
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+        });
+        stream.getTracks().forEach((track) => track.stop());
+        if (cancelled) return;
+        setPermissionGranted(true);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        reportError(classifyMediaError(err));
+      }
+    };
+
+    requestPermission();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [retryToken, reportError]);
+
+  // Detect available cameras (only after permission so labels populate)
+  useEffect(() => {
+    if (!permissionGranted) return;
+    let cancelled = false;
     const detectCameras = async () => {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
         const videoDevices = devices.filter((device) => device.kind === 'videoinput');
         setAvailableCameras(videoDevices);
         setHasMultipleCameras(videoDevices.length > 1);
-        if (videoDevices.length > 0) {
-          setCurrentCameraId(videoDevices[0].deviceId);
+        if (videoDevices.length === 0) {
+          reportError({ kind: 'no-camera', message: NO_CAMERA_MESSAGE });
+          return;
         }
+        setCurrentCameraId((prev) => prev ?? videoDevices[0].deviceId);
       } catch (err) {
-        console.error('Error detecting cameras:', err);
+        if (cancelled) return;
+        reportError(classifyMediaError(err));
       }
     };
     detectCameras();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [permissionGranted, reportError]);
 
   // Start scanning
   useEffect(() => {
-    if (!scannerRef.current || !currentCameraId) return;
+    if (!scannerRef.current || !currentCameraId || !permissionGranted) return;
 
     const startScanning = async () => {
       try {
@@ -89,7 +195,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
             // Error callback - ignore most errors as they're just "no QR code found"
             if (errorMessage && !errorMessage.includes('No QR code found')) {
               if (onScanError) {
-                onScanError(errorMessage);
+                onScanError({ kind: 'unknown', message: errorMessage });
               }
             }
           }
@@ -97,13 +203,8 @@ const QRScanner: React.FC<QRScannerProps> = ({
 
         setIsScanning(true);
         setError(null);
-      } catch (err: any) {
-        const errorMsg = err.message || 'Failed to start camera';
-        setError(errorMsg);
-        setIsScanning(false);
-        if (onScanError) {
-          onScanError(errorMsg);
-        }
+      } catch (err) {
+        reportError(classifyMediaError(err));
       }
     };
 
@@ -113,7 +214,14 @@ const QRScanner: React.FC<QRScannerProps> = ({
       stopScanning();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCameraId, fps, aspectRatio, onScanSuccess, onScanError]);
+  }, [currentCameraId, permissionGranted, fps, aspectRatio]);
+
+  const handleRetry = () => {
+    setError(null);
+    setPermissionGranted(false);
+    setCurrentCameraId(null);
+    setRetryToken((token) => token + 1);
+  };
 
   const stopScanning = async () => {
     if (html5QrCodeRef.current && isScanning) {
@@ -180,9 +288,16 @@ const QRScanner: React.FC<QRScannerProps> = ({
       </div>
 
       {error && (
-        <div className="qr-scanner-error">
-          <p>{error}</p>
-          <button onClick={() => setError(null)}>Dismiss</button>
+        <div
+          className="qr-scanner-error"
+          role="alert"
+          data-error-kind={error.kind}
+        >
+          <p>{error.message}</p>
+          <div className="qr-scanner-error-actions">
+            <button onClick={handleRetry}>Try again</button>
+            <button onClick={handleClose}>Close</button>
+          </div>
         </div>
       )}
 

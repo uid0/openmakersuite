@@ -229,7 +229,7 @@ export function exportPurchasingReportToCSV(
  */
 export function exportAssetReportToCSV(
   data: any[],
-  reportType: 'assets_by_status' | 'maintenance_due' | 'utilization'
+  reportType: 'assets_by_status' | 'maintenance_due' | 'utilization' | 'tco'
 ): void {
   let headers: string[] = [];
   let csvData: any[] = [];
@@ -269,6 +269,25 @@ export function exportAssetReportToCSV(
       'Total Sessions': item.total_sessions || 0,
       'Total Hours': item.total_hours ? item.total_hours.toFixed(2) : '0.00',
       'Avg Hours per Session': item.avg_hours_per_session ? item.avg_hours_per_session.toFixed(2) : '0.00',
+    }));
+  } else if (reportType === 'tco') {
+    headers = [
+      'Asset Name',
+      'Asset Tag',
+      'Days in Maintenance (last 90d)',
+      'Scheduled Maintenance Cost',
+      'Unscheduled Maintenance Cost',
+      'Repair Cost',
+      'Total Cost of Ownership',
+    ];
+    csvData = data.map((item) => ({
+      'Asset Name': item.asset_name || '',
+      'Asset Tag': item.asset_tag || '',
+      'Days in Maintenance (last 90d)': item.maintenance_days_last_90 ?? 0,
+      'Scheduled Maintenance Cost': item.scheduled_maintenance_cost ?? '0.00',
+      'Unscheduled Maintenance Cost': item.unscheduled_maintenance_cost ?? '0.00',
+      'Repair Cost': item.repair_cost ?? '0.00',
+      'Total Cost of Ownership': item.tco ?? '0.00',
     }));
   }
 

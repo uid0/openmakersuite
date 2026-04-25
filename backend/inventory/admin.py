@@ -720,6 +720,7 @@ class AssetAdmin(admin.ModelAdmin):
         "name",
         "asset_tag",
         "serial_number",
+        "mac_address",
         "status_badge",
         "operational_mode_display",
         "category",
@@ -748,6 +749,7 @@ class AssetAdmin(admin.ModelAdmin):
         "description",
         "serial_number",
         "asset_tag",
+        "mac_address",
         "manufacturer_name",
         "donor_name",
     ]
@@ -848,6 +850,7 @@ class AssetAdmin(admin.ModelAdmin):
                     "needs_compressed_air",
                     "needs_ventilation",
                     "is_chargeable",
+                    "mac_address",
                 ),
                 "description": "Operational requirements and billing information for the asset.",
             },

@@ -304,6 +304,8 @@ class ChecklistCompletionViewSet(viewsets.ReadOnlyModelViewSet):
         location_id = scan_serializer.validated_data.get("location_id")
         item_id = scan_serializer.validated_data.get("item_id")
         notes = scan_serializer.validated_data.get("notes", "")
+        photo = scan_serializer.validated_data.get("photo")
+        photo_caption = scan_serializer.validated_data.get("photo_caption", "")
 
         # Get the step
         try:
@@ -312,6 +314,12 @@ class ChecklistCompletionViewSet(viewsets.ReadOnlyModelViewSet):
             return Response(
                 {"detail": "Step not found in this checklist."},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if step.requires_photo and not photo:
+            return Response(
+                {"detail": "This step requires a photo upload."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Verify the scanned item matches the step
@@ -349,15 +357,20 @@ class ChecklistCompletionViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         # Create or update step completion
+        defaults = {
+            "scanned_asset": scanned_asset,
+            "scanned_location": scanned_location,
+            "scanned_item": scanned_item,
+            "notes": notes,
+            "photo_caption": photo_caption,
+        }
+        if photo:
+            defaults["photo"] = photo
+
         step_completion, created = ChecklistStepCompletion.objects.get_or_create(
             completion=completion,
             step=step,
-            defaults={
-                "scanned_asset": scanned_asset,
-                "scanned_location": scanned_location,
-                "scanned_item": scanned_item,
-                "notes": notes,
-            },
+            defaults=defaults,
         )
 
         if not created:
@@ -368,11 +381,17 @@ class ChecklistCompletionViewSet(viewsets.ReadOnlyModelViewSet):
             step_completion.scanned_item = scanned_item
             if notes:
                 step_completion.notes = notes
+            if photo:
+                step_completion.photo = photo
+            if photo_caption:
+                step_completion.photo_caption = photo_caption
             step_completion.save()
 
         # Reload completion to get updated step completions
         completion.refresh_from_db()
-        response_serializer = ChecklistCompletionSerializer(completion)
+        response_serializer = ChecklistCompletionSerializer(
+            completion, context={"request": request}
+        )
         return Response(response_serializer.data)
 
     @action(detail=True, methods=["post"], permission_classes=[AllowAny])

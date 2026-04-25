@@ -95,6 +95,10 @@ class ChecklistStep(models.Model):
         help_text="Associated inventory item to scan for this step",
     )
     required = models.BooleanField(default=True, help_text="Whether this step must be completed")
+    requires_photo = models.BooleanField(
+        default=False,
+        help_text="If true, scanning this step requires a photo upload.",
+    )
     notes = models.TextField(blank=True, help_text="Additional instructions for this step")
 
     class Meta:
@@ -226,6 +230,13 @@ class ChecklistStepCompletion(models.Model):
         help_text="Which inventory item was scanned",
     )
     notes = models.TextField(blank=True, help_text="User notes for this step")
+    photo = models.ImageField(
+        upload_to="checklist_step_photos/%Y/%m/",
+        null=True,
+        blank=True,
+        help_text="Optional photo captured while completing this step",
+    )
+    photo_caption = models.CharField(max_length=500, blank=True)
 
     class Meta:
         ordering = ["completion", "step__step_number"]

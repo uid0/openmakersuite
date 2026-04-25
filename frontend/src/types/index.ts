@@ -576,6 +576,7 @@ export interface ChecklistStep {
   location: number | null;
   inventory_item: string | null;
   required: boolean;
+  requires_photo: boolean;
   notes: string;
 }
 
@@ -608,6 +609,8 @@ export interface ChecklistStepCompletion {
   scanned_item: string | null;
   scanned_item_name: string | null;
   notes: string;
+  photo_url: string | null;
+  photo_caption: string;
 }
 
 export type ChecklistCompletionStatus = 'in_progress' | 'completed' | 'abandoned';

@@ -956,13 +956,31 @@ export const checklistsAPI = {
     completionId: string,
     stepId: string,
     scannedItem: { asset_id?: string; location_id?: number; item_id?: string },
-    notes?: string
-  ) =>
-    api.post<ChecklistCompletion>(`/checklists/completions/${completionId}/scan/`, {
+    notes?: string,
+    photo?: { file: File; caption?: string }
+  ) => {
+    if (photo) {
+      const formData = new FormData();
+      formData.append('step_id', stepId);
+      if (scannedItem.asset_id) formData.append('asset_id', scannedItem.asset_id);
+      if (scannedItem.location_id !== undefined)
+        formData.append('location_id', String(scannedItem.location_id));
+      if (scannedItem.item_id) formData.append('item_id', scannedItem.item_id);
+      formData.append('notes', notes || '');
+      formData.append('photo', photo.file);
+      if (photo.caption) formData.append('photo_caption', photo.caption);
+      return api.post<ChecklistCompletion>(
+        `/checklists/completions/${completionId}/scan/`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+    }
+    return api.post<ChecklistCompletion>(`/checklists/completions/${completionId}/scan/`, {
       step_id: stepId,
       ...scannedItem,
       notes: notes || '',
-    }),
+    });
+  },
 
   completeChecklist: (completionId: string) =>
     api.post<ChecklistCompletion>(`/checklists/completions/${completionId}/complete/`),

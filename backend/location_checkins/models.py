@@ -28,6 +28,12 @@ class LocationCheckIn(models.Model):
         ("anonymous", "Anonymous User"),
     ]
 
+    SOURCE_CHOICES = [
+        ("manual", "Manual"),
+        ("qr", "QR Code"),
+        ("device", "IoT Device"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     location = models.ForeignKey(
         Location,
@@ -49,14 +55,35 @@ class LocationCheckIn(models.Model):
         related_name="location_check_ins",
         help_text="Authenticated user (null for anonymous)",
     )
-    checked_in_at = models.DateTimeField(auto_now_add=True, help_text="When the check-in occurred")
+    checked_in_at = models.DateTimeField(
+        default=timezone.now, help_text="When the check-in occurred"
+    )
     notes = models.TextField(blank=True, help_text="Optional notes about the check-in")
+    device_id = models.CharField(
+        max_length=100,
+        blank=True,
+        db_index=True,
+        help_text="Identifier of the IoT device that recorded this check-in (blank for manual/QR)",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default="qr",
+        help_text="How this check-in was recorded",
+    )
+    event_id = models.CharField(
+        max_length=100,
+        blank=True,
+        db_index=True,
+        help_text="Optional client-supplied event id used for idempotent webhook ingest",
+    )
 
     class Meta:
         ordering = ["-checked_in_at"]
         indexes = [
             models.Index(fields=["location", "-checked_in_at"]),
             models.Index(fields=["checkin_type", "-checked_in_at"]),
+            models.Index(fields=["source", "-checked_in_at"]),
         ]
 
     def __str__(self):

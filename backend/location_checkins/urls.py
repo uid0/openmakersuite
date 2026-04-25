@@ -11,6 +11,9 @@ from .views import (
     LocationFeedbackViewSet,
     LocationTaskViewSet,
     SecurityReportViewSet,
+    TopLocationsReportView,
+    TrafficReportView,
+    location_ping_webhook,
 )
 
 router = DefaultRouter()
@@ -20,5 +23,16 @@ router.register(r"security-reports", SecurityReportViewSet, basename="security-r
 router.register(r"tasks", LocationTaskViewSet, basename="location-task")
 
 urlpatterns = [
+    path("webhook/", location_ping_webhook, name="location-ping-webhook"),
+    path(
+        "reports/traffic/",
+        TrafficReportView.as_view(),
+        name="location-traffic-report",
+    ),
+    path(
+        "reports/top/",
+        TopLocationsReportView.as_view(),
+        name="location-top-report",
+    ),
     path("", include(router.urls)),
 ]

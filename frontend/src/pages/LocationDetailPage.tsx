@@ -5,6 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import LocationFixturesList from '../components/LocationFixturesList';
+import LocationTrafficPanel from '../components/LocationTrafficPanel';
 import { inventoryAPI } from '../services/api';
 import '../styles/LocationDetailPage.css';
 import { Location } from '../types';
@@ -196,6 +197,11 @@ const LocationDetailPage: React.FC = () => {
             <LocationFixturesList locationId={location.id.toString()} />
           </div>
         )}
+
+        <div className="detail-section">
+          <h2>Traffic</h2>
+          <LocationTrafficPanel locationId={location.id} />
+        </div>
       </div>
     </div>
   );

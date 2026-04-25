@@ -934,6 +934,26 @@ export const locationCheckinAPI = {
 
   completeTask: (taskId: string, notes?: string) =>
     api.post(`/location-checkins/tasks/${taskId}/complete/`, { notes }),
+
+  getTrafficReport: (params: {
+    location?: string;
+    start?: string;
+    end?: string;
+    bucket?: 'hour' | 'day' | 'week' | 'month';
+  }) =>
+    api.get<{
+      bucket: string;
+      start: string;
+      end: string;
+      results: { bucket_start: string; count: number }[];
+    }>('/location-checkins/reports/traffic/', { params }),
+
+  getTopLocations: (params?: { start?: string; end?: string; limit?: number }) =>
+    api.get<{
+      start: string;
+      end: string;
+      results: { location_id: number; location_name: string; count: number }[];
+    }>('/location-checkins/reports/top/', { params }),
 };
 
 // Checklists API

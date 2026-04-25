@@ -1178,7 +1178,10 @@ export const reportsAPI = {
   getAssetUtilization: (params?: DateRangeParams) =>
     api.get('/inventory/reports/assets/utilization/', { params }),
 
-  exportAssetReport: (type: 'assets_by_status' | 'maintenance_due' | 'utilization', params?: DateRangeParams) =>
+  getAssetTco: () =>
+    api.get('/inventory/reports/assets/tco/'),
+
+  exportAssetReport: (type: 'assets_by_status' | 'maintenance_due' | 'utilization' | 'tco', params?: DateRangeParams) =>
     api.get('/inventory/reports/assets/export/', {
       params: { type, ...params },
       responseType: 'blob',

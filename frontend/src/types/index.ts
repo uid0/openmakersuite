@@ -808,6 +808,17 @@ export interface AssetUtilization {
   avg_hours_per_session: number;
 }
 
+export interface AssetTco {
+  asset_id: string;
+  asset_name: string;
+  asset_tag: string;
+  maintenance_days_last_90: number;
+  scheduled_maintenance_cost: string;
+  unscheduled_maintenance_cost: string;
+  repair_cost: string;
+  tco: string;
+}
+
 // Dashboard Widget Types
 export type WidgetType = 'low_stock' | 'pending_reorders' | 'asset_problems' | 'qr_scans' | 'deliveries';
 

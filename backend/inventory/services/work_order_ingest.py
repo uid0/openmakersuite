@@ -98,12 +98,12 @@ def _iter_pdf_images(reader: PdfReader):
     for page in reader.pages:
         try:
             images = list(page.images)
-        except Exception:  # noqa: BLE001 - pypdf is permissive about odd PDFs
+        except Exception:  # noqa: BLE001  # nosec B112 - pypdf raises many types on odd PDFs
             continue
         for img in images:
             try:
                 yield img.data
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # nosec B112
                 continue
 
 
@@ -126,14 +126,14 @@ def _decode_qr_payloads(image_bytes: bytes) -> List[str]:
             ok, decoded, _, _ = detector.detectAndDecodeMulti(arr)
             if ok and decoded:
                 payloads.extend([d for d in decoded if d])
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # nosec B110 - cv2 raises generic errors on bad images
             pass
         if not payloads:
             try:
                 data, _, _ = detector.detectAndDecode(arr)
                 if data:
                     payloads.append(data)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # nosec B110
                 pass
     except Exception as exc:  # noqa: BLE001 - cv2 missing or image unreadable
         logger.debug("cv2 QR decode skipped: %s", exc)
@@ -148,7 +148,7 @@ def _decode_qr_payloads(image_bytes: bytes) -> List[str]:
             for sym in pyzbar_decode(pil):
                 try:
                     payloads.append(sym.data.decode("utf-8", errors="replace"))
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001  # nosec B112
                     continue
         except Exception as exc:  # noqa: BLE001
             logger.debug("pyzbar QR decode skipped: %s", exc)
@@ -181,7 +181,7 @@ def _extract_id_from_text(reader: PdfReader) -> Tuple[Optional[str], Optional[st
     for page in reader.pages:
         try:
             text_chunks.append(page.extract_text() or "")
-        except Exception:  # noqa: BLE001 - nosec B112
+        except Exception:  # noqa: BLE001  # nosec B112
             continue
     text = "\n".join(text_chunks)
     if not text.strip():

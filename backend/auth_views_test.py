@@ -2,8 +2,10 @@
 Basic tests for auth views to improve coverage.
 """
 
+import json
+
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import Client, TestCase
 
 User = get_user_model()
 
@@ -65,3 +67,46 @@ class AuthViewsImportTest(TestCase):
         # Test wrong password
         auth_user = authenticate(username="testuser", password="wrongpass")
         self.assertIsNone(auth_user)
+
+
+class PasskeyEndpointsTest(TestCase):
+    """Smoke tests for the django-passkey-auth endpoints mounted at /auth/passkey/.
+
+    The Register Passkey button in Django admin (oms-0sb) silently failed in
+    production because nginx had no proxy block for /auth/passkey/, so requests
+    fell through to the SPA catch-all and the JS got HTML instead of JSON.
+    These tests pin the backend contract: the URL stays mounted and returns
+    JSON to an authenticated session.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="passkeyadmin", email="p@example.com", password="pw"
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def test_passkey_info_returns_json(self):
+        response = self.client.get("/auth/passkey/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
+        body = json.loads(response.content)
+        self.assertIn("rpId", body)
+        self.assertEqual(body["userName"], "passkeyadmin")
+
+    def test_passkey_register_get_returns_webauthn_options(self):
+        response = self.client.get("/auth/passkey/register/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
+        body = json.loads(response.content)
+        # Spot-check the WebAuthn PublicKeyCredentialCreationOptions shape.
+        self.assertIn("challenge", body)
+        self.assertIn("rp", body)
+        self.assertIn("user", body)
+        self.assertIn("pubKeyCredParams", body)
+
+    def test_passkey_register_requires_authentication(self):
+        anon = Client()
+        # LoginRequiredMixin redirects unauthenticated users to the login URL.
+        response = anon.get("/auth/passkey/register/")
+        self.assertIn(response.status_code, (302, 401, 403))

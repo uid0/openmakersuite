@@ -63,6 +63,39 @@ class AcroCheckbox(Flowable):
         )
 
 
+class WorkOrderIdField(Flowable):
+    """
+    Invisible AcroForm text field carrying the work-order UUID.
+
+    The value survives PDF re-saves (Adobe Reader, Preview, browser viewers)
+    and is the most reliable way to recover the WO ID on ingest — it doesn't
+    depend on text extraction working or on the QR code being preserved when
+    a paper form is scanned back to PDF.
+    """
+
+    def __init__(self, work_order_id: str):
+        super().__init__()
+        self.work_order_id = work_order_id
+        self.width = 0
+        self.height = 0
+
+    def draw(self) -> None:
+        # Render off-page (negative coords) and zero-size so it's invisible
+        # in any viewer but still queryable via pypdf.get_fields().
+        self.canv.acroForm.textfield(
+            name="work_order_id",
+            value=self.work_order_id,
+            x=-100,
+            y=-100,
+            width=1,
+            height=1,
+            borderWidth=0,
+            forceBorder=False,
+            fontSize=1,
+            tooltip="work_order_id",
+        )
+
+
 def _make_qr_image(url: str, size_inches: float = 1.5) -> Image:
     """Generate a QR code image from a URL."""
     qr = qrcode.QRCode(
@@ -140,6 +173,10 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
     # ── Header row: title + QR code ──────────────────────────────────────────
     digital_url = f"{base_url}/maintenance/work-orders/{work_order.id}"
     qr_image = _make_qr_image(digital_url, size_inches=1.4)
+
+    # Hidden AcroForm text field — the most reliable place to recover the WO
+    # ID on ingest (survives re-saves and image-based scans).
+    story.append(WorkOrderIdField(str(work_order.id)))
 
     header_content = [
         [

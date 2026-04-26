@@ -66,6 +66,13 @@ const QRScanner: React.FC<QRScannerProps> = ({
 }) => {
   const scannerRef = useRef<HTMLDivElement>(null);
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<QRScannerError | null>(null);
   const [torchEnabled, setTorchEnabled] = useState(false);
@@ -161,15 +168,16 @@ const QRScanner: React.FC<QRScannerProps> = ({
   useEffect(() => {
     if (!scannerRef.current || !currentCameraId || !permissionGranted) return;
 
+    let cancelled = false;
+    let scanHandled = false;
+    const scannerId = scannerIdRef.current;
+    if (scannerRef.current) {
+      scannerRef.current.id = scannerId;
+    }
+    const html5QrCode = new Html5Qrcode(scannerId);
+
     const startScanning = async () => {
       try {
-        const scannerId = scannerIdRef.current;
-        if (scannerRef.current) {
-          scannerRef.current.id = scannerId;
-        }
-        const html5QrCode = new Html5Qrcode(scannerId);
-        html5QrCodeRef.current = html5QrCode;
-
         await html5QrCode.start(
           currentCameraId,
           {
@@ -186,9 +194,11 @@ const QRScanner: React.FC<QRScannerProps> = ({
             aspectRatio,
           },
           (decodedText) => {
-            // Success callback
+            // The library can fire success multiple times before stop() resolves.
+            // Guard so onScanSuccess only ever runs once per session.
+            if (scanHandled) return;
+            scanHandled = true;
             onScanSuccess(decodedText);
-            // Stop scanning after successful scan
             stopScanning();
           },
           (errorMessage) => {
@@ -201,9 +211,23 @@ const QRScanner: React.FC<QRScannerProps> = ({
           }
         );
 
+        if (cancelled) {
+          // Component unmounted (or deps changed) while start() was in flight.
+          // Tear down the now-running camera so we don't leak a MediaStream.
+          try {
+            await html5QrCode.stop();
+            await html5QrCode.clear();
+          } catch (err) {
+            console.error('Error stopping scanner after cancelled start:', err);
+          }
+          return;
+        }
+
+        html5QrCodeRef.current = html5QrCode;
         setIsScanning(true);
         setError(null);
       } catch (err) {
+        if (cancelled) return;
         reportError(classifyMediaError(err));
       }
     };
@@ -211,6 +235,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
     startScanning();
 
     return () => {
+      cancelled = true;
       stopScanning();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -224,15 +249,21 @@ const QRScanner: React.FC<QRScannerProps> = ({
   };
 
   const stopScanning = async () => {
-    if (html5QrCodeRef.current && isScanning) {
-      try {
-        await html5QrCodeRef.current.stop();
-        await html5QrCodeRef.current.clear();
-        html5QrCodeRef.current = null;
-        setIsScanning(false);
-      } catch (err) {
-        console.error('Error stopping scanner:', err);
-      }
+    // Atomically claim the instance so concurrent callers (success callback
+    // racing with effect cleanup at unmount) can't double-stop the library.
+    // We also can't gate on `isScanning` state because callers capture stale
+    // closures from before setIsScanning(true) propagates.
+    const instance = html5QrCodeRef.current;
+    if (!instance) return;
+    html5QrCodeRef.current = null;
+    try {
+      await instance.stop();
+      await instance.clear();
+    } catch (err) {
+      console.error('Error stopping scanner:', err);
+    }
+    if (isMountedRef.current) {
+      setIsScanning(false);
     }
   };
 

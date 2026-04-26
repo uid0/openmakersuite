@@ -36,6 +36,26 @@ const INSECURE_CONTEXT_MESSAGE =
 const UNSUPPORTED_MESSAGE =
   'This browser does not support camera access. Try Chrome, Safari, or Firefox.';
 
+// html5-qrcode invokes the per-frame error callback for every video frame
+// that fails to decode a QR. These are "no QR detected yet", not real errors,
+// and must not bubble up to onScanError.
+export const isNoQrFoundSignal = (
+  errorMessage: string | undefined | null,
+  errorObj?: unknown
+): boolean => {
+  if (errorObj && typeof errorObj === 'object') {
+    const name = (errorObj as { name?: string }).name;
+    if (name === 'NotFoundException') return true;
+  }
+  if (!errorMessage) return false;
+  return (
+    errorMessage.includes('No MultiFormat Readers') ||
+    errorMessage.includes('NotFoundException') ||
+    errorMessage.startsWith('QR code parse error') ||
+    errorMessage.includes('No QR code found')
+  );
+};
+
 const classifyMediaError = (err: unknown): QRScannerError => {
   const name = (err as { name?: string } | null)?.name;
   const fallback = (err as { message?: string } | null)?.message;
@@ -201,12 +221,19 @@ const QRScanner: React.FC<QRScannerProps> = ({
             onScanSuccess(decodedText);
             stopScanning();
           },
-          (errorMessage) => {
-            // Error callback - ignore most errors as they're just "no QR code found"
-            if (errorMessage && !errorMessage.includes('No QR code found')) {
-              if (onScanError) {
-                onScanError({ kind: 'unknown', message: errorMessage });
-              }
+          (errorMessage, errorObj) => {
+            // html5-qrcode invokes this every frame it doesn't decode a QR.
+            // The "no QR yet" signal arrives as strings like:
+            //   "QR code parse error, error = T: No MultiFormat Readers were able to detect the code."
+            //   "NotFoundException: ..."
+            // and an Error/object whose .name is "NotFoundException". None of
+            // these are real failures — surfacing them spams the parent's
+            // notification system. Drop them silently and only forward errors
+            // that indicate a genuine camera/library problem.
+            if (!errorMessage) return;
+            if (isNoQrFoundSignal(errorMessage, errorObj)) return;
+            if (onScanError) {
+              onScanError({ kind: 'unknown', message: errorMessage });
             }
           }
         );

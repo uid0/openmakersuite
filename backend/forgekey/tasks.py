@@ -4,6 +4,7 @@ Celery tasks for ForgeKey MQTT operations.
 
 import json
 import logging
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from django.conf import settings
@@ -12,7 +13,7 @@ from django.utils import timezone
 import paho.mqtt.client as mqtt
 from celery import shared_task
 
-from .models import ESP32Device, PowerMeterReading
+from .models import ESP32Device, ESP32DevicePhoto, PowerMeterReading
 from .utils import get_mqtt_command_topic, normalize_mac_address
 
 logger = logging.getLogger(__name__)
@@ -268,3 +269,24 @@ def process_mqtt_firmware_update_response(
         logger.warning(f"Received firmware update response for unknown update: {update_id}")
     except Exception as e:
         logger.error(f"Error processing firmware update response from {mac_address}: {e}")
+
+
+@shared_task
+def prune_device_photos(retention_days: int = 30) -> Dict[str, Any]:
+    """
+    Delete ESP32DevicePhoto rows older than ``retention_days`` (default 30).
+
+    Returns a dict with the count of deleted rows. Intended to be scheduled via
+    Celery beat; the cutoff is configurable so operators can tune retention
+    without a code change.
+    """
+    cutoff = timezone.now() - timedelta(days=retention_days)
+    qs = ESP32DevicePhoto.objects.filter(received_at__lt=cutoff)
+    deleted, _ = qs.delete()
+    logger.info(
+        "Pruned %s ESP32DevicePhoto row(s) older than %s days (cutoff=%s)",
+        deleted,
+        retention_days,
+        cutoff.isoformat(),
+    )
+    return {"deleted": deleted, "retention_days": retention_days}

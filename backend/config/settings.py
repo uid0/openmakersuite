@@ -349,6 +349,14 @@ FORGEKEY_SHARED_SECRET = config("FORGEKEY_SHARED_SECRET", default="change-me-in-
 FORGEKEY_JWT_ALGORITHM = "HS256"
 FORGEKEY_JWT_EXPIRATION_SECONDS = 3600  # 1 hour
 
+# ForgeKey provisioning token — devices send this in
+# X-ForgeKey-Provisioning-Token to call the registration endpoint.
+FORGEKEY_PROVISIONING_TOKEN = config("FORGEKEY_PROVISIONING_TOKEN", default="")
+
+# ForgeKey periodic-photo retention (days). Photos older than this are pruned
+# by the prune_device_photos celery task.
+FORGEKEY_PHOTO_RETENTION_DAYS = config("FORGEKEY_PHOTO_RETENTION_DAYS", default=30, cast=int)
+
 # Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {
     "TITLE": "Makerspace Inventory Management API",

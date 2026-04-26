@@ -14,7 +14,7 @@ from django.core.validators import RegexValidator
 from django.db import models
 from django.utils import timezone
 
-from inventory.models import Asset
+from inventory.models import Asset, Location
 
 
 class DeviceType(models.Model):
@@ -31,6 +31,9 @@ class DeviceType(models.Model):
     TYPE_GENERIC_OUTPUT = "generic_output"
     TYPE_AC_RELAY = "ac_relay"
     TYPE_POWER_MEASUREMENT = "power_measurement"
+    TYPE_PEOPLE_COUNTER = "people_counter"
+    TYPE_ENV_SENSOR = "env_sensor"
+    TYPE_DOOR_COUNTER = "door_counter"
 
     TYPE_CHOICES = [
         (TYPE_INDICATOR, "Indicator/Status Light"),
@@ -42,6 +45,9 @@ class DeviceType(models.Model):
         (TYPE_GENERIC_OUTPUT, "Generic Output"),
         (TYPE_AC_RELAY, "AC Relay"),
         (TYPE_POWER_MEASUREMENT, "Power Measurement"),
+        (TYPE_PEOPLE_COUNTER, "People Counter"),
+        (TYPE_ENV_SENSOR, "Environmental Sensor"),
+        (TYPE_DOOR_COUNTER, "Door Counter"),
     ]
 
     name = models.CharField(max_length=50, unique=True, help_text="Device type name")
@@ -103,6 +109,41 @@ class ESP32Device(models.Model):
     )
     is_online = models.BooleanField(default=False, help_text="Is the device currently online?")
     is_active = models.BooleanField(default=True, help_text="Is this device active?")
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="forgekey_devices",
+        help_text="Default location assignment (for sensor devices unbound to a specific asset)",
+    )
+    enrollment_photo = models.ImageField(
+        upload_to="forgekey/enrollment_photos/",
+        null=True,
+        blank=True,
+        help_text="Photo captured at device enrollment for staff identification",
+    )
+    last_photo = models.ImageField(
+        upload_to="forgekey/device_photos/last/",
+        null=True,
+        blank=True,
+        help_text="Most-recent periodic surveillance photo from the device",
+    )
+    boot_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Last-reported boot counter from the device",
+    )
+    free_heap = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Last-reported free heap (bytes) from the device",
+    )
+    ip = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="Last-reported IP address of the device",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -566,6 +607,19 @@ class FirmwareVersion(models.Model):
         help_text="Firmware binary file",
     )
     signature = models.TextField(help_text="Cryptographic signature of the firmware file")
+    sha256 = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA-256 hex digest of the firmware binary (auto-computed on save)",
+    )
+    binary_url = models.URLField(
+        blank=True,
+        help_text="Override URL for the firmware binary; if blank, the firmware_file URL is used",
+    )
+    mandatory = models.BooleanField(
+        default=False,
+        help_text="If true, devices must apply this firmware before continuing normal operation",
+    )
     release_notes = models.TextField(blank=True, help_text="Release notes for this version")
     is_active = models.BooleanField(default=True, help_text="Is this firmware version active?")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -584,6 +638,69 @@ class FirmwareVersion(models.Model):
 
     def __str__(self) -> str:
         return f"{self.device_type.name} - {self.version}"
+
+    def save(self, *args, **kwargs):
+        if self.firmware_file and not self.sha256:
+            digest = hashlib.sha256()
+            try:
+                self.firmware_file.seek(0)
+                for chunk in self.firmware_file.chunks():
+                    digest.update(chunk)
+                self.firmware_file.seek(0)
+            except (ValueError, AttributeError):
+                # Underlying file may not support seek (e.g. already closed
+                # after a prior save). Fall back to opening the storage copy.
+                if self.firmware_file.name:
+                    with self.firmware_file.storage.open(self.firmware_file.name, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(65536), b""):
+                            digest.update(chunk)
+            self.sha256 = digest.hexdigest()
+        super().save(*args, **kwargs)
+
+    @property
+    def effective_binary_url(self) -> str:
+        if self.binary_url:
+            return self.binary_url
+        if self.firmware_file:
+            return self.firmware_file.url
+        return ""
+
+
+class ESP32DevicePhoto(models.Model):
+    """
+    Periodic surveillance photo uploaded by an ESP32 sensor device.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        ESP32Device,
+        on_delete=models.CASCADE,
+        related_name="photos",
+        help_text="Device that uploaded this photo",
+    )
+    image = models.ImageField(
+        upload_to="forgekey/device_photos/",
+        help_text="JPEG photo from the device",
+    )
+    captured_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the device captured the photo (device-supplied)",
+    )
+    received_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the server received the photo",
+    )
+
+    class Meta:
+        ordering = ["-received_at"]
+        indexes = [
+            models.Index(fields=["device", "-received_at"]),
+            models.Index(fields=["received_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.device.mac_address} photo @ {self.received_at:%Y-%m-%d %H:%M:%S}"
 
 
 class DeviceFirmwareUpdate(models.Model):

@@ -127,3 +127,13 @@ def get_mqtt_status_topic(mac_address: str) -> str:
 def get_mqtt_data_topic(mac_address: str) -> str:
     """Get MQTT topic for receiving data from a device."""
     return get_mqtt_topic(mac_address, "data")
+
+
+def get_mqtt_firmware_topic(mac_address: str) -> str:
+    """Get MQTT topic the server publishes firmware-update payloads to."""
+    return get_mqtt_topic(mac_address, "firmware")
+
+
+def get_mqtt_ping_topic(mac_address: str) -> str:
+    """Get MQTT topic devices publish heartbeat / ping messages on."""
+    return get_mqtt_topic(mac_address, "ping")

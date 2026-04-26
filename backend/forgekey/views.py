@@ -2,12 +2,18 @@
 Views for ForgeKey API.
 """
 
+import json
+import logging
+
+from django.conf import settings
 from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import (
     AssetAuthorization,
@@ -17,6 +23,7 @@ from .models import (
     DeviceType,
     DeviceUsage,
     ESP32Device,
+    ESP32DevicePhoto,
     FirmwareVersion,
     LockoutLevel,
     OperationalMode,
@@ -35,6 +42,212 @@ from .serializers import (
     PowerMeterReadingSerializer,
 )
 from .tasks import disable_device, enable_device, request_device_status
+from .utils import (
+    generate_device_jwt,
+    get_mqtt_firmware_topic,
+    get_mqtt_ping_topic,
+    normalize_mac_address,
+    verify_device_jwt,
+)
+
+logger = logging.getLogger(__name__)
+
+
+JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def _provisioning_token_valid(request) -> bool:
+    expected = getattr(settings, "FORGEKEY_PROVISIONING_TOKEN", "")
+    if not expected:
+        return False
+    supplied = request.headers.get("x-forgekey-provisioning-token", "")
+    return bool(supplied) and supplied == expected
+
+
+class ForgeKeyDeviceRegisterView(APIView):
+    """
+    POST /api/forgekey/devices/register/
+
+    Accepts a multipart/form-data request from a freshly-booted ESP32 device
+    containing an enrollment photo plus identifying metadata. Idempotent on
+    ``mac_address`` — re-posting updates the existing row.
+
+    Auth: shared FORGEKEY_PROVISIONING_TOKEN, supplied via the
+    ``X-ForgeKey-Provisioning-Token`` request header.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        if not _provisioning_token_valid(request):
+            return Response(
+                {"detail": "Invalid or missing provisioning token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # Metadata may arrive either as top-level multipart fields or as a
+        # JSON blob under the "metadata" field — accept both shapes.
+        meta_blob = request.data.get("metadata")
+        if isinstance(meta_blob, str):
+            try:
+                meta = json.loads(meta_blob)
+            except json.JSONDecodeError:
+                return Response(
+                    {"detail": "metadata field must be valid JSON."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            meta = {k: v for k, v in request.data.items() if k not in ("photo", "metadata")}
+
+        mac_raw = meta.get("mac_address")
+        if not mac_raw:
+            return Response(
+                {"detail": "mac_address is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            mac = normalize_mac_address(mac_raw)
+        except Exception:
+            return Response(
+                {"detail": "mac_address is malformed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        device_type_code = meta.get("device_type") or meta.get("sensor_kind")
+        device_type_obj = None
+        if device_type_code:
+            device_type_obj = DeviceType.objects.filter(code=device_type_code).first()
+            if device_type_obj is None:
+                return Response(
+                    {"detail": f"Unknown device_type '{device_type_code}'."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        defaults = {
+            "firmware_version": meta.get("firmware_version", ""),
+            "boot_count": meta.get("boot_count"),
+            "free_heap": meta.get("free_heap"),
+            "ip": meta.get("ip"),
+            "last_seen": timezone.now(),
+        }
+        if device_type_obj is not None:
+            defaults["device_type"] = device_type_obj
+
+        device = ESP32Device.objects.filter(mac_address=mac).first()
+        created = device is None
+        if created:
+            if device_type_obj is None:
+                return Response(
+                    {"detail": "device_type is required for first registration."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            device = ESP32Device(mac_address=mac, **defaults)
+        else:
+            for field, value in defaults.items():
+                if value is not None and value != "":
+                    setattr(device, field, value)
+
+        photo = request.FILES.get("photo")
+        if photo is not None:
+            device.enrollment_photo = photo
+
+        device.save()
+
+        token = generate_device_jwt(mac)
+        return Response(
+            {
+                "device_id": str(device.id),
+                "assigned_location_id": (str(device.location_id) if device.location_id else None),
+                "mqtt_topic_for_firmware": get_mqtt_firmware_topic(mac),
+                "mqtt_topic_for_pings": get_mqtt_ping_topic(mac),
+                "jwt_token": token,
+                "created": created,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class ForgeKeyDevicePhotoUploadView(APIView):
+    """
+    POST /api/forgekey/devices/<mac>/photo/
+
+    Accepts a JPEG photo upload from an enrolled device. Auth via the JWT
+    issued at registration; falls back to the provisioning token so a device
+    can re-enroll if its JWT has aged out.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, mac):
+        try:
+            normalized_mac = normalize_mac_address(mac)
+        except Exception:
+            return Response(
+                {"detail": "mac is malformed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        device = ESP32Device.objects.filter(mac_address=normalized_mac).first()
+        if device is None:
+            return Response(
+                {"detail": "Unknown device."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not self._authorize(request, normalized_mac):
+            return Response(
+                {"detail": "Authentication failed."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        photo = request.FILES.get("photo")
+        if photo is None:
+            return Response(
+                {"detail": "photo is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        head = photo.read(3)
+        photo.seek(0)
+        if head != JPEG_MAGIC:
+            return Response(
+                {"detail": "photo must be a JPEG image."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        captured_at = request.data.get("captured_at") or None
+        record = ESP32DevicePhoto.objects.create(
+            device=device,
+            image=photo,
+            captured_at=captured_at,
+        )
+
+        device.last_photo = record.image
+        device.last_seen = timezone.now()
+        device.is_online = True
+        device.save(update_fields=["last_photo", "last_seen", "is_online", "updated_at"])
+
+        return Response(
+            {
+                "photo_id": str(record.id),
+                "received_at": record.received_at.isoformat(),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _authorize(request, mac: str) -> bool:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1].strip()
+            payload = verify_device_jwt(token, mac)
+            if payload and payload.get("mac") == mac:
+                return True
+        return _provisioning_token_valid(request)
 
 
 class DeviceTypeViewSet(viewsets.ModelViewSet):

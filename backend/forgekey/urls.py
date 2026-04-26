@@ -15,6 +15,8 @@ from .views import (
     DeviceUsageViewSet,
     ESP32DeviceViewSet,
     FirmwareVersionViewSet,
+    ForgeKeyDevicePhotoUploadView,
+    ForgeKeyDeviceRegisterView,
     OperationalModeViewSet,
     PowerMeterReadingViewSet,
 )
@@ -34,5 +36,15 @@ router.register(r"firmware-updates", DeviceFirmwareUpdateViewSet, basename="firm
 app_name = "forgekey"
 
 urlpatterns = [
+    path(
+        "devices/register/",
+        ForgeKeyDeviceRegisterView.as_view(),
+        name="device-register",
+    ),
+    path(
+        "devices/<str:mac>/photo/",
+        ForgeKeyDevicePhotoUploadView.as_view(),
+        name="device-photo-upload",
+    ),
     path("", include(router.urls)),
 ]

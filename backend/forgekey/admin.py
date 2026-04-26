@@ -2,7 +2,8 @@
 Admin interface for ForgeKey models.
 """
 
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.utils.html import format_html
 
 from .models import (
     AssetAuthorization,
@@ -12,6 +13,7 @@ from .models import (
     DeviceType,
     DeviceUsage,
     ESP32Device,
+    ESP32DevicePhoto,
     FirmwareVersion,
     OperationalMode,
     PowerMeterReading,
@@ -35,14 +37,95 @@ class ESP32DeviceAdmin(admin.ModelAdmin):
         "mac_address",
         "name",
         "device_type",
+        "location",
         "firmware_version",
         "is_online",
         "is_active",
         "last_seen",
+        "last_photo_thumb",
     ]
-    list_filter = ["device_type", "is_online", "is_active"]
+    list_filter = ["device_type", "is_online", "is_active", "location"]
     search_fields = ["mac_address", "name", "description"]
-    readonly_fields = ["id", "created_at", "updated_at"]
+    readonly_fields = [
+        "id",
+        "created_at",
+        "updated_at",
+        "enrollment_photo_preview",
+        "last_photo_preview",
+    ]
+    raw_id_fields = ["device_type", "location"]
+    fields = (
+        "id",
+        "mac_address",
+        "name",
+        "device_type",
+        "description",
+        "firmware_version",
+        "location",
+        "is_online",
+        "is_active",
+        "last_seen",
+        "boot_count",
+        "free_heap",
+        "ip",
+        "enrollment_photo",
+        "enrollment_photo_preview",
+        "last_photo",
+        "last_photo_preview",
+        "created_at",
+        "updated_at",
+    )
+
+    @admin.display(description="Last photo")
+    def last_photo_thumb(self, obj):
+        if obj.last_photo:
+            return format_html('<img src="{}" style="max-height: 48px;"/>', obj.last_photo.url)
+        return "—"
+
+    @admin.display(description="Enrollment photo")
+    def enrollment_photo_preview(self, obj):
+        if obj.enrollment_photo:
+            return format_html(
+                '<img src="{}" style="max-height: 320px;"/>',
+                obj.enrollment_photo.url,
+            )
+        return "—"
+
+    @admin.display(description="Latest periodic photo")
+    def last_photo_preview(self, obj):
+        if obj.last_photo:
+            return format_html('<img src="{}" style="max-height: 320px;"/>', obj.last_photo.url)
+        return "—"
+
+
+@admin.register(ESP32DevicePhoto)
+class ESP32DevicePhotoAdmin(admin.ModelAdmin):
+    """Read-only gallery of periodic surveillance photos."""
+
+    list_display = ["device", "received_at", "captured_at", "thumbnail"]
+    list_filter = ["device__device_type", "received_at"]
+    search_fields = ["device__mac_address", "device__name"]
+    readonly_fields = ["id", "device", "image", "captured_at", "received_at", "preview"]
+    fields = ("id", "device", "image", "preview", "captured_at", "received_at")
+    raw_id_fields: list = []
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    @admin.display(description="Thumbnail")
+    def thumbnail(self, obj):
+        if obj.image:
+            return format_html('<img src="{}" style="max-height: 48px;"/>', obj.image.url)
+        return "—"
+
+    @admin.display(description="Preview")
+    def preview(self, obj):
+        if obj.image:
+            return format_html('<img src="{}" style="max-height: 480px;"/>', obj.image.url)
+        return "—"
 
 
 @admin.register(AssetDevice)
@@ -141,11 +224,38 @@ class PowerMeterReadingAdmin(admin.ModelAdmin):
 class FirmwareVersionAdmin(admin.ModelAdmin):
     """Admin interface for firmware versions."""
 
-    list_display = ["version", "device_type", "is_active", "created_at", "created_by"]
-    list_filter = ["device_type", "is_active", "created_at"]
-    search_fields = ["version", "device_type__name", "release_notes"]
-    readonly_fields = ["id", "created_at"]
+    list_display = [
+        "version",
+        "device_type",
+        "mandatory",
+        "sha256_short",
+        "is_active",
+        "created_at",
+        "created_by",
+    ]
+    list_filter = ["device_type", "mandatory", "is_active", "created_at"]
+    search_fields = ["version", "device_type__name", "release_notes", "sha256"]
+    readonly_fields = ["id", "created_at", "sha256"]
     raw_id_fields = ["device_type", "created_by"]
+    actions = ["dispatch_firmware_update"]
+
+    @admin.display(description="SHA-256 (short)")
+    def sha256_short(self, obj):
+        return obj.sha256[:12] if obj.sha256 else "—"
+
+    @admin.action(description="Dispatch firmware update via MQTT")
+    def dispatch_firmware_update(self, request, queryset):
+        from .services.firmware_dispatch import dispatch_to_device_type
+
+        total = 0
+        for firmware in queryset:
+            records = dispatch_to_device_type(firmware, requested_by=request.user)
+            total += len(records)
+        self.message_user(
+            request,
+            f"Dispatched {queryset.count()} firmware version(s) to {total} device(s).",
+            level=messages.SUCCESS,
+        )
 
 
 @admin.register(DeviceFirmwareUpdate)

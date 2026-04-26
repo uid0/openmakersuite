@@ -154,3 +154,69 @@ describe('MaintenanceDashboard low-stock flow', () => {
     });
   });
 });
+
+describe('MaintenanceDashboard manual PDF upload', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListsEmpty();
+    mockWorkOrderAPI.getDueThisWeek.mockResolvedValue({ data: [] } as any);
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('is_staff');
+  });
+
+  test('staff can upload a PDF and result modal lists completed steps', async () => {
+    mockWorkOrderAPI.uploadPdf.mockResolvedValue({
+      data: {
+        submission_id: 'sub-1',
+        status: 'applied',
+        work_order_id: 'wo-9',
+        completed_items: [
+          { id: 'tc-1', task_title: 'Step 1' },
+          { id: 'tc-2', task_title: 'Step 2' },
+        ],
+        errors: [],
+      },
+    } as any);
+
+    renderDashboard();
+    await waitFor(() => expect(mockWorkOrderAPI.getDueThisWeek).toHaveBeenCalled());
+
+    const uploadBtn = await screen.findByRole('button', {
+      name: /upload completed work order pdf/i,
+    });
+    expect(uploadBtn).toBeInTheDocument();
+
+    // FileButton hides a real <input type="file"> behind the button. Drive it
+    // directly so we don't depend on Mantine's click-bridging.
+    const fileInput = uploadBtn.parentElement?.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement;
+    expect(fileInput).toBeTruthy();
+    const file = new File(['%PDF-1.4 fake'], 'completed.pdf', { type: 'application/pdf' });
+    await userEvent.upload(fileInput, file);
+
+    await waitFor(() =>
+      expect(mockWorkOrderAPI.uploadPdf).toHaveBeenCalledWith(expect.any(File))
+    );
+
+    const modal = await screen.findByTestId('upload-result-modal');
+    expect(modal).toHaveTextContent(/PDF applied successfully/i);
+    const items = await screen.findAllByTestId('upload-completed-item');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent('Step 1');
+    expect(items[1]).toHaveTextContent('Step 2');
+  });
+
+  test('upload button is hidden for non-staff users', async () => {
+    localStorage.setItem('is_staff', 'false');
+    renderDashboard();
+    await waitFor(() => expect(mockWorkOrderAPI.getDueThisWeek).toHaveBeenCalled());
+
+    expect(
+      screen.queryByRole('button', { name: /upload completed work order pdf/i })
+    ).not.toBeInTheDocument();
+  });
+});

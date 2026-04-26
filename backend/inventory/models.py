@@ -2047,6 +2047,14 @@ class WorkOrderSubmission(models.Model):
         (STATUS_FAILED, "Failed"),
     ]
 
+    SOURCE_EMAIL = "email"
+    SOURCE_MANUAL = "manual"
+
+    SOURCE_CHOICES = [
+        (SOURCE_EMAIL, "Email"),
+        (SOURCE_MANUAL, "Manual"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     work_order = models.ForeignKey(
         WorkOrder,
@@ -2067,6 +2075,20 @@ class WorkOrderSubmission(models.Model):
         max_length=20,
         choices=STATUS_CHOICES,
         default=STATUS_RECEIVED,
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_EMAIL,
+        help_text="How this submission entered the system (email webhook vs manual upload)",
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_order_submissions",
+        help_text="User who manually uploaded the PDF (null for email-source submissions)",
     )
     parse_error = models.TextField(blank=True)
     parsed_fields = models.JSONField(

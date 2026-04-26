@@ -489,6 +489,19 @@ export interface WorkOrder {
   updated_at: string;
 }
 
+export interface WorkOrderUploadCompletedItem {
+  id: string;
+  task_title: string;
+}
+
+export interface WorkOrderUploadResult {
+  submission_id: string;
+  status: 'received' | 'applied' | 'failed';
+  work_order_id: string | null;
+  completed_items: WorkOrderUploadCompletedItem[];
+  errors: string[];
+}
+
 export interface SiteSettings {
   site_name: string;
   site_tagline: string;

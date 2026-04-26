@@ -34,6 +34,10 @@ DEBUG = config("DEBUG", default=True, cast=bool)
 DEVELOPMENT_MODE = config("DEVELOPMENT_MODE", default=False, cast=bool)
 
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
+# Loopback addresses are always permitted: container healthchecks and other
+# host-local probes hit http://localhost:8000/ and would otherwise trigger
+# DisallowedHost log spam when env-supplied ALLOWED_HOSTS omits them.
+ALLOWED_HOSTS = list({h.strip() for h in ALLOWED_HOSTS if h.strip()} | {"localhost", "127.0.0.1"})
 
 # CSRF Settings for production deployment
 # Required when Django is behind a reverse proxy (nginx) with HTTPS

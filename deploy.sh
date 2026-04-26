@@ -5,15 +5,23 @@ git pull
 
 echo "🚀 Deploying Dallas Makerspace Inventory Management System..."
 
-# Check if .env file exists
-if [ ! -f .env ]; then
-    echo "❌ Error: .env file not found!"
-    echo "Please create a .env file from .env.prod.example"
+# Check if .env.prod file exists. .env.prod is the single source of truth for
+# production env vars: it is consumed both by this deploy script (for shell
+# variable substitution in docker-compose.prod.yml) and by docker-compose
+# directly via `env_file: .env.prod` on the backend and celery services. Keeping
+# everything pointed at one file avoids the class of bug where a secret is set
+# in one env file but the runtime reads a different one (oms-g7s).
+if [ ! -f .env.prod ]; then
+    echo "❌ Error: .env.prod file not found!"
+    echo "Please create a .env.prod file from .env.prod.example"
     exit 1
 fi
 
 # Load environment variables
-export $(cat .env | grep -v '^#' | xargs)
+set -a
+# shellcheck disable=SC1091
+. ./.env.prod
+set +a
 
 # Get git hash for build
 export GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")

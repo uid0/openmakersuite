@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import (
     AllowAny,
     IsAdminUser,
@@ -2674,6 +2675,87 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
         return Response(WorkOrderTaskCompletionSerializer(tc).data)
 
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="upload-pdf",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_pdf(self, request):
+        """Manually upload a completed work-order PDF (staff only).
+
+        Mirrors the postmark inbound webhook for users who scan paper forms
+        themselves rather than emailing them in. Reuses the same
+        work_order_ingest pipeline.
+        """
+        from django.core.files.base import ContentFile
+
+        from .services.work_order_ingest import apply_submission
+
+        user = request.user
+        if not (user.is_authenticated and (user.is_staff or user.is_superuser)):
+            return Response(
+                {"detail": "Staff access required."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        pdf_file = request.FILES.get("pdf")
+        if not pdf_file:
+            return Response(
+                {"detail": "pdf field required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        submission = WorkOrderSubmission(
+            source=WorkOrderSubmission.SOURCE_MANUAL,
+            submitted_by=user,
+            from_email=(user.email or "")[:254],
+            subject=(pdf_file.name or "")[:500],
+            status=WorkOrderSubmission.STATUS_RECEIVED,
+        )
+        submission.attachment.save(
+            pdf_file.name or "work-order.pdf",
+            ContentFile(pdf_file.read()),
+            save=False,
+        )
+        submission.save()
+
+        apply_submission(submission)
+        submission.refresh_from_db()
+
+        completed_items: list[dict] = []
+        errors: list[str] = []
+        if submission.parse_error:
+            errors.append(submission.parse_error)
+        if submission.work_order_id:
+            checked_ids = [
+                tc_id
+                for tc_id, checked in (submission.parsed_fields or {})
+                .get("task_checks", {})
+                .items()
+                if checked
+            ]
+            if checked_ids:
+                completed_items = list(
+                    submission.work_order.task_completions.filter(
+                        id__in=checked_ids,
+                        is_completed=True,
+                    ).values("id", "task_title")
+                )
+
+        return Response(
+            {
+                "submission_id": str(submission.id),
+                "status": submission.status,
+                "work_order_id": (
+                    str(submission.work_order_id) if submission.work_order_id else None
+                ),
+                "completed_items": completed_items,
+                "errors": errors,
+            },
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=True, methods=["patch"], url_path="materials/(?P<material_id>[^/.]+)/toggle")
     def toggle_material(self, request, pk=None, material_id=None):
         """Toggle whether a material was used in this work order."""
@@ -3383,6 +3465,7 @@ def postmark_inbound_work_order(request):
         subject=(payload.get("Subject") or "")[:500],
         postmark_message_id=message_id[:200],
         status=WorkOrderSubmission.STATUS_RECEIVED,
+        source=WorkOrderSubmission.SOURCE_EMAIL,
     )
     submission.attachment.save(filename, ContentFile(pdf_bytes), save=False)
     submission.save()

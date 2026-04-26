@@ -7,6 +7,7 @@ import {
   Card,
   Container,
   Divider,
+  FileButton,
   Group,
   List,
   Loader,
@@ -28,11 +29,12 @@ import {
   IconFileText,
   IconPlus,
   IconRefresh,
+  IconUpload,
 } from '@tabler/icons-react';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { maintenanceAPI, reorderAPI, workOrderAPI } from '../services/api';
-import { LowStockAlert, MaintenanceItem, WorkOrder } from '../types';
+import { LowStockAlert, MaintenanceItem, WorkOrder, WorkOrderUploadResult } from '../types';
 
 const STATUS_COLORS: Record<string, string> = {
   open: 'blue',
@@ -235,6 +237,16 @@ const MaintenanceDashboard: React.FC = () => {
     alerts: LowStockAlert[];
   } | null>(null);
   const [reordering, setReordering] = useState(false);
+  const [isStaff, setIsStaff] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [uploadResult, setUploadResult] = useState<WorkOrderUploadResult | null>(null);
+  const [uploadResultOpened, { open: openUploadResult, close: closeUploadResult }] =
+    useDisclosure(false);
+  const resetPdfRef = useRef<() => void>(null);
+
+  useEffect(() => {
+    setIsStaff(localStorage.getItem('is_staff') === 'true');
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -359,6 +371,42 @@ const MaintenanceDashboard: React.FC = () => {
     await createWorkOrder(item);
   };
 
+  const handlePdfUpload = async (file: File | null) => {
+    if (!file) return;
+    setUploadingPdf(true);
+    try {
+      const { data } = await workOrderAPI.uploadPdf(file);
+      setUploadResult(data);
+      openUploadResult();
+      if (data.status === 'applied') {
+        notifications.show({
+          title: 'Work Order Uploaded',
+          message: data.completed_items.length
+            ? `Marked ${data.completed_items.length} step(s) complete.`
+            : 'Submission applied to work order.',
+          color: 'green',
+          icon: <IconCheck size={16} />,
+        });
+        loadData();
+      } else {
+        notifications.show({
+          title: 'Upload Failed to Apply',
+          message: data.errors[0] || 'PDF could not be applied to a work order.',
+          color: 'red',
+        });
+      }
+    } catch (err: any) {
+      notifications.show({
+        title: 'Upload Failed',
+        message: err?.response?.data?.detail || 'Could not upload PDF.',
+        color: 'red',
+      });
+    } finally {
+      setUploadingPdf(false);
+      resetPdfRef.current?.();
+    }
+  };
+
   const handleBulkGenerate = async () => {
     closeBulkConfirm();
     setGeneratingBulk(true);
@@ -415,6 +463,26 @@ const MaintenanceDashboard: React.FC = () => {
           >
             Generate Due Work Orders
           </Button>
+          {isStaff && (
+            <FileButton
+              resetRef={resetPdfRef}
+              accept="application/pdf"
+              onChange={handlePdfUpload}
+            >
+              {(props) => (
+                <Button
+                  {...props}
+                  leftSection={<IconUpload size={16} />}
+                  variant="default"
+                  size="sm"
+                  loading={uploadingPdf}
+                  aria-label="Upload completed work order PDF"
+                >
+                  Upload PDF
+                </Button>
+              )}
+            </FileButton>
+          )}
         </Group>
       </Group>
 
@@ -608,6 +676,67 @@ const MaintenanceDashboard: React.FC = () => {
               </Button>
             </Group>
           </>
+        )}
+      </Modal>
+
+      {/* Manual PDF upload result modal */}
+      <Modal
+        opened={uploadResultOpened}
+        onClose={closeUploadResult}
+        title="Work Order PDF Upload"
+        size="md"
+      >
+        {uploadResult && (
+          <Stack gap="sm" data-testid="upload-result-modal">
+            {uploadResult.status === 'applied' ? (
+              <Alert icon={<IconCheck size={16} />} color="green">
+                PDF applied successfully.
+              </Alert>
+            ) : (
+              <Alert icon={<IconAlertTriangle size={16} />} color="red">
+                Could not apply PDF.
+              </Alert>
+            )}
+            {uploadResult.work_order_id && (
+              <Text size="sm">
+                Work Order:{' '}
+                <Link to={`/maintenance/work-orders/${uploadResult.work_order_id}`}>
+                  Open work order
+                </Link>
+              </Text>
+            )}
+            {uploadResult.completed_items.length > 0 && (
+              <Box>
+                <Text size="sm" fw={600} mb={4}>
+                  Completed steps ({uploadResult.completed_items.length})
+                </Text>
+                <List size="sm" spacing={2}>
+                  {uploadResult.completed_items.map((item) => (
+                    <List.Item key={item.id} data-testid="upload-completed-item">
+                      {item.task_title}
+                    </List.Item>
+                  ))}
+                </List>
+              </Box>
+            )}
+            {uploadResult.errors.length > 0 && (
+              <Box>
+                <Text size="sm" fw={600} c="red" mb={4}>
+                  Errors
+                </Text>
+                <List size="sm" spacing={2}>
+                  {uploadResult.errors.map((err, idx) => (
+                    <List.Item key={idx} data-testid="upload-error-item">
+                      {err}
+                    </List.Item>
+                  ))}
+                </List>
+              </Box>
+            )}
+            <Group justify="flex-end" mt="sm">
+              <Button onClick={closeUploadResult}>Close</Button>
+            </Group>
+          </Stack>
         )}
       </Modal>
     </Container>

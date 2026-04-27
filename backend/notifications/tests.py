@@ -321,3 +321,71 @@ class NotificationPreferenceViewTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+
+class NotificationListBehaviorTest(TestCase):
+    """Coverage for ordering, pagination, and read filtering of GET /api/notifications/."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="lister", email="lister@example.com", password="testpass123"
+        )
+
+    def _client(self):
+        from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        client = APIClient()
+        refresh = RefreshToken.for_user(self.user)
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        return client
+
+    def test_list_returns_paginated_response_ordered_by_newest(self):
+        # Create 30 notifications so pagination kicks in regardless of page-size config
+        for i in range(30):
+            Notification.objects.create(
+                user=self.user,
+                type="info",
+                title=f"Notif {i}",
+                message="m",
+            )
+
+        response = self._client().get("/api/notifications/")
+        self.assertEqual(response.status_code, 200)
+        # Paginated payload exposes "results" + "count"
+        self.assertIn("results", response.data)
+        self.assertIn("count", response.data)
+        self.assertEqual(response.data["count"], 30)
+
+        # Newest first (Notification.Meta.ordering = ["-created_at"])
+        results = response.data["results"]
+        self.assertGreater(len(results), 0)
+        titles = [r["title"] for r in results]
+        self.assertEqual(titles[0], "Notif 29")
+
+    def test_filter_by_unread(self):
+        Notification.objects.create(
+            user=self.user, type="info", title="Read", message="m", read=True
+        )
+        Notification.objects.create(
+            user=self.user, type="info", title="Unread", message="m", read=False
+        )
+
+        response = self._client().get("/api/notifications/?read=false")
+        self.assertEqual(response.status_code, 200)
+        titles = [r["title"] for r in response.data["results"]]
+        self.assertEqual(titles, ["Unread"])
+
+    def test_mark_read_cannot_target_other_users_notification(self):
+        other = User.objects.create_user(
+            username="other2", email="other2@example.com", password="testpass123"
+        )
+        other_notif = Notification.objects.create(
+            user=other, type="info", title="Theirs", message="m"
+        )
+
+        response = self._client().post(f"/api/notifications/{other_notif.id}/mark-read/")
+        # Queryset filters to current user, so the row is "not found"
+        self.assertEqual(response.status_code, 404)
+        other_notif.refresh_from_db()
+        self.assertFalse(other_notif.read)

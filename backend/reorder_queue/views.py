@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -22,6 +23,7 @@ from .models import (
     LeadTimeLog,
     OrderDelivery,
     PurchaseOrder,
+    PurchaseOrderAttachment,
     PurchaseOrderItem,
     ReorderRequest,
     WebHook,
@@ -31,6 +33,7 @@ from .serializers import (
     MarkDeliveredSerializer,
     OrderDeliverySerializer,
     OrderMetricsSerializer,
+    PurchaseOrderAttachmentSerializer,
     PurchaseOrderCreateSerializer,
     PurchaseOrderSerializer,
     ReorderRequestCreateSerializer,
@@ -381,6 +384,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         "items__asset",
         "items__asset__manufacturer",
         "deliveries__items",
+        "attachments__uploaded_by",
     )
 
     def get_permissions(self):
@@ -1164,6 +1168,55 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="upload-attachment",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_attachment(self, request, pk=None):
+        """Attach a file (sales order, supplier confirmation, etc.) to this PO.
+
+        Any authenticated user may attach files; deletion is restricted to staff
+        (see destroy_attachment).
+        """
+        purchase_order = self.get_object()
+
+        serializer = PurchaseOrderAttachmentSerializer(
+            data=request.data, context={"request": request}
+        )
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer.save(purchase_order=purchase_order, uploaded_by=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["delete"],
+        url_path="attachments/(?P<attachment_id>[^/.]+)",
+    )
+    def destroy_attachment(self, request, pk=None, attachment_id=None):
+        """Delete an attachment from this PO. Staff/superuser only."""
+        user = request.user
+        if not (user.is_staff or user.is_superuser):
+            return Response(
+                {"detail": "Only staff may delete purchase order attachments."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        purchase_order = self.get_object()
+        try:
+            attachment = purchase_order.attachments.get(pk=attachment_id)
+        except PurchaseOrderAttachment.DoesNotExist:
+            return Response(
+                {"detail": "Attachment not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        attachment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=["get"])
     def dashboard_summary(self, request):

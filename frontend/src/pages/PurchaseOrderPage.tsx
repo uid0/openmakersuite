@@ -34,6 +34,17 @@ interface PurchaseOrderItem {
   void_reason: string;
 }
 
+interface PurchaseOrderAttachment {
+  id: number;
+  file: string;
+  file_url: string | null;
+  file_name: string | null;
+  description: string;
+  uploaded_by: number | null;
+  uploaded_by_name: string | null;
+  uploaded_at: string;
+}
+
 interface PurchaseOrder {
   id: string;
   po_number: string;
@@ -42,6 +53,9 @@ interface PurchaseOrder {
   status_label: string;
   order_date: string;
   expected_delivery_date: string | null;
+  supplier_order_number: string;
+  sales_order_number: string;
+  attachments: PurchaseOrderAttachment[];
   items: PurchaseOrderItem[];
   estimated_total: string;
   voided_at: string | null;
@@ -67,6 +81,13 @@ const PurchaseOrderPage: React.FC = () => {
   const [deliveryDate, setDeliveryDate] = useState<string>('');
   const [deliveryTracking, setDeliveryTracking] = useState<string>('');
   const [deliveryCarrier, setDeliveryCarrier] = useState<string>('');
+  const [editingMetadata, setEditingMetadata] = useState(false);
+  const [metadataSupplierOrderNumber, setMetadataSupplierOrderNumber] = useState('');
+  const [metadataSalesOrderNumber, setMetadataSalesOrderNumber] = useState('');
+  const [metadataExpectedDelivery, setMetadataExpectedDelivery] = useState('');
+  const [attachmentDescription, setAttachmentDescription] = useState('');
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
   const loadOrder = useCallback(async () => {
     try {
@@ -265,6 +286,82 @@ const PurchaseOrderPage: React.FC = () => {
   const canMarkDelivered = (po: PurchaseOrder) =>
     isAuthenticated && ['sent', 'confirmed', 'partially_received'].includes(po.status);
 
+  const handleStartEditMetadata = () => {
+    if (!order) return;
+    setMetadataSupplierOrderNumber(order.supplier_order_number || '');
+    setMetadataSalesOrderNumber(order.sales_order_number || '');
+    setMetadataExpectedDelivery(order.expected_delivery_date || '');
+    setEditingMetadata(true);
+  };
+
+  const handleCancelEditMetadata = () => {
+    setEditingMetadata(false);
+    setMetadataSupplierOrderNumber('');
+    setMetadataSalesOrderNumber('');
+    setMetadataExpectedDelivery('');
+  };
+
+  const handleSaveMetadata = async () => {
+    try {
+      setSaving(true);
+      await purchaseOrderAPI.updateOrder(orderId!, {
+        supplier_order_number: metadataSupplierOrderNumber,
+        sales_order_number: metadataSalesOrderNumber,
+        expected_delivery_date: metadataExpectedDelivery || null,
+      });
+      await loadOrder();
+      setEditingMetadata(false);
+      showSuccess('Purchase order details updated');
+    } catch (err: any) {
+      showError(err.response?.data?.detail || 'Failed to update purchase order details');
+      console.error('Error updating PO metadata:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUploadAttachment = async () => {
+    if (!attachmentFile) {
+      showError('Please choose a file to upload');
+      return;
+    }
+
+    try {
+      setUploadingAttachment(true);
+      await purchaseOrderAPI.uploadAttachment(orderId!, attachmentFile, attachmentDescription);
+      await loadOrder();
+      setAttachmentFile(null);
+      setAttachmentDescription('');
+      showSuccess('Attachment uploaded');
+    } catch (err: any) {
+      showError(err.response?.data?.detail || 'Failed to upload attachment');
+      console.error('Error uploading attachment:', err);
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleDeleteAttachment = (attachment: PurchaseOrderAttachment) => {
+    confirmAction(
+      'Delete attachment?',
+      `Remove "${attachment.file_name || attachment.description || 'this attachment'}" from the purchase order? This cannot be undone.`,
+      async () => {
+        try {
+          setSaving(true);
+          await purchaseOrderAPI.deleteAttachment(orderId!, attachment.id);
+          await loadOrder();
+          showSuccess('Attachment deleted');
+        } catch (err: any) {
+          showError(err.response?.data?.detail || 'Failed to delete attachment');
+          console.error('Error deleting attachment:', err);
+        } finally {
+          setSaving(false);
+        }
+      },
+      { labels: { confirm: 'Delete', cancel: 'Cancel' }, color: 'red' },
+    );
+  };
+
   const formatDate = (dateString: string | null) => {
     if (!dateString) return '—';
     const date = new Date(dateString);
@@ -420,10 +517,170 @@ const PurchaseOrderPage: React.FC = () => {
           <span className="info-value">{formatDate(order.expected_delivery_date)}</span>
         </div>
         <div className="info-item">
+          <span className="info-label">Supplier Order #:</span>
+          <span className="info-value">{order.supplier_order_number || '—'}</span>
+        </div>
+        <div className="info-item">
+          <span className="info-label">Sales Order #:</span>
+          <span className="info-value">{order.sales_order_number || '—'}</span>
+        </div>
+        <div className="info-item">
           <span className="info-label">Estimated Total:</span>
           <span className="info-value">{formatCurrency(order.estimated_total)}</span>
         </div>
       </div>
+
+      {isAuthenticated && (
+        <section className="po-metadata" aria-label="Purchase order details">
+          <div className="po-metadata-header">
+            <h2>Order Details</h2>
+            {!editingMetadata && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleStartEditMetadata}
+              >
+                Edit Details
+              </button>
+            )}
+          </div>
+          {editingMetadata ? (
+            <div className="po-metadata-edit">
+              <label htmlFor="metadata-supplier-order">
+                Supplier Order Number
+                <input
+                  id="metadata-supplier-order"
+                  type="text"
+                  value={metadataSupplierOrderNumber}
+                  onChange={(e) => setMetadataSupplierOrderNumber(e.target.value)}
+                  placeholder="Order number assigned by supplier"
+                  maxLength={128}
+                />
+              </label>
+              <label htmlFor="metadata-sales-order">
+                Sales Order Number
+                <input
+                  id="metadata-sales-order"
+                  type="text"
+                  value={metadataSalesOrderNumber}
+                  onChange={(e) => setMetadataSalesOrderNumber(e.target.value)}
+                  placeholder="Sales order reference"
+                  maxLength={128}
+                />
+              </label>
+              <label htmlFor="metadata-expected-delivery">
+                Expected Delivery Date
+                <input
+                  id="metadata-expected-delivery"
+                  type="date"
+                  value={metadataExpectedDelivery}
+                  onChange={(e) => setMetadataExpectedDelivery(e.target.value)}
+                />
+              </label>
+              <div className="po-metadata-actions">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleSaveMetadata}
+                  disabled={saving}
+                >
+                  {saving ? 'Saving…' : 'Save Details'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleCancelEditMetadata}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      )}
+
+      <section className="po-attachments" aria-label="Purchase order attachments">
+        <h2>Attachments</h2>
+        {order.attachments.length === 0 ? (
+          <p className="no-data">No attachments yet.</p>
+        ) : (
+          <ul className="attachments-list">
+            {order.attachments.map((attachment) => (
+              <li key={attachment.id} className="attachment-item">
+                <div className="attachment-meta">
+                  {attachment.file_url ? (
+                    <a
+                      href={attachment.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="attachment-link"
+                    >
+                      {attachment.file_name || 'Download'}
+                    </a>
+                  ) : (
+                    <span>{attachment.file_name || 'Attachment'}</span>
+                  )}
+                  {attachment.description && (
+                    <span className="attachment-description">— {attachment.description}</span>
+                  )}
+                  <span className="attachment-uploader">
+                    {attachment.uploaded_by_name
+                      ? `Uploaded by ${attachment.uploaded_by_name}`
+                      : 'Uploaded'}{' '}
+                    on {formatDate(attachment.uploaded_at)}
+                  </span>
+                </div>
+                {isStaff && (
+                  <button
+                    type="button"
+                    className="btn-danger"
+                    onClick={() => handleDeleteAttachment(attachment)}
+                    disabled={saving}
+                  >
+                    Delete
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {isAuthenticated && (
+          <div className="attachment-upload">
+            <h3>Upload Attachment</h3>
+            <label htmlFor="attachment-file">
+              File
+              <input
+                id="attachment-file"
+                type="file"
+                onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)}
+                disabled={uploadingAttachment}
+              />
+            </label>
+            <label htmlFor="attachment-description">
+              Description (optional)
+              <input
+                id="attachment-description"
+                type="text"
+                value={attachmentDescription}
+                onChange={(e) => setAttachmentDescription(e.target.value)}
+                placeholder="e.g. Sales order from supplier"
+                maxLength={500}
+                disabled={uploadingAttachment}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleUploadAttachment}
+              disabled={uploadingAttachment || !attachmentFile}
+            >
+              {uploadingAttachment ? 'Uploading…' : 'Upload'}
+            </button>
+          </div>
+        )}
+      </section>
 
       <section className="po-items">
         <h2>Line Items</h2>

@@ -1430,6 +1430,34 @@ export interface MakerBoxScanResult {
   days_remaining: number | null;
 }
 
+export interface ForgeKeyDevice {
+  id: string;
+  mac_address: string;
+  device_type: number | null;
+  device_type_name: string | null;
+  name: string;
+  description: string;
+  firmware_version: string;
+  last_seen: string | null;
+  is_online: boolean;
+  is_active: boolean;
+  location: number | null;
+  enrollment_photo: string | null;
+  last_photo: string | null;
+  boot_count: number | null;
+  free_heap: number | null;
+  ip: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const forgekeyAPI = {
+  listDevices: () =>
+    api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/'),
+  updateDevice: (id: string, data: Partial<ForgeKeyDevice>) =>
+    api.patch<ForgeKeyDevice>(`/forgekey/devices/${id}/`, data),
+};
+
 export const makerBoxesAPI = {
   list: () => api.get<{ results: MakerBox[] } | MakerBox[]>('/maker-boxes/'),
   scan: (binId: string, username: string) =>

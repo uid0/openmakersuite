@@ -1032,6 +1032,7 @@ export type ScreenBlockType =
   | 'custom_text'
   | 'announcement'
   | 'weather'
+  | 'shared_weather'
   | 'traffic'
   | 'member_count'
   | 'board_meeting';
@@ -1121,5 +1122,6 @@ export interface KioskPayload {
     config: Record<string, unknown>;
     order: number;
   }>;
+  weather_url?: string;
   generated_at: string;
 }

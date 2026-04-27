@@ -36,6 +36,7 @@ def regular_client(db):
 
 
 @pytest.mark.integration
+@pytest.mark.django_db
 class TestKioskPayloadEndpoint:
     def test_payload_requires_token(self, api_client):
         screen = ScreenFactory()
@@ -74,6 +75,28 @@ class TestKioskPayloadEndpoint:
             HTTP_X_SCREEN_TOKEN=screen.access_token,
         )
         assert resp.status_code == status.HTTP_200_OK
+
+    def test_payload_includes_weather_url(self, api_client, settings):
+        settings.WEATHER_URL = "https://example.com/weather/"
+        screen = ScreenFactory()
+        resp = api_client.get(f"/api/screens/kiosk/{screen.slug}/?token={screen.access_token}")
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data["weather_url"] == "https://example.com/weather/"
+
+    def test_payload_renders_shared_weather_block(self, api_client):
+        screen = ScreenFactory()
+        block = ScreenContentBlockFactory(
+            screen=screen,
+            order=0,
+            block_type=ScreenContentBlock.BLOCK_SHARED_WEATHER,
+            title="",
+            body="",
+        )
+        resp = api_client.get(f"/api/screens/kiosk/{screen.slug}/?token={screen.access_token}")
+        assert resp.status_code == status.HTTP_200_OK
+        assert len(resp.data["content_blocks"]) == 1
+        assert resp.data["content_blocks"][0]["id"] == str(block.id)
+        assert resp.data["content_blocks"][0]["block_type"] == "shared_weather"
 
 
 @pytest.mark.integration

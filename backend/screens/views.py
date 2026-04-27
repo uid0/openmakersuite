@@ -13,6 +13,7 @@ Authenticated endpoints:
 
 import hmac
 
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -36,7 +37,7 @@ from .serializers import (
 
 
 def _client_ip(request):
-    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.META.get("REMOTE_ADDR") or None
@@ -79,6 +80,7 @@ def _build_kiosk_payload(screen):
         },
         "system_messages": system_messages,
         "content_blocks": content_blocks,
+        "weather_url": getattr(settings, "WEATHER_URL", ""),
         "generated_at": timezone.now(),
     }
 
@@ -92,7 +94,7 @@ def kiosk_payload(request, slug):
     Requires an `access_token` (either as ?token=... or in the X-Screen-Token
     header) matching the screen. Inactive screens are hidden.
     """
-    token = request.query_params.get("token") or request.META.get("HTTP_X_SCREEN_TOKEN")
+    token = request.query_params.get("token") or request.headers.get("x-screen-token")
     if not token:
         return Response({"detail": "Missing access token."}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -107,7 +109,7 @@ def kiosk_payload(request, slug):
 @permission_classes([AllowAny])
 def kiosk_heartbeat(request, slug):
     """Record a heartbeat from a kiosk endpoint."""
-    token = request.query_params.get("token") or request.META.get("HTTP_X_SCREEN_TOKEN")
+    token = request.query_params.get("token") or request.headers.get("x-screen-token")
     if not token:
         return Response({"detail": "Missing access token."}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -117,7 +119,7 @@ def kiosk_heartbeat(request, slug):
 
     heartbeat = ScreenHeartbeat.objects.create(
         screen=screen,
-        user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:255],
+        user_agent=(request.headers.get("user-agent") or "")[:255],
         client_ip=_client_ip(request),
         content_version=(
             request.data.get("content_version", "")[:64] if isinstance(request.data, dict) else ""

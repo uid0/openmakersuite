@@ -35,6 +35,7 @@ const BLOCK_TYPE_OPTIONS: { value: ScreenBlockType; label: string }[] = [
   { value: 'custom_text', label: 'Custom Text / Rules Reminder' },
   { value: 'announcement', label: 'Announcement / Class Slide' },
   { value: 'weather', label: 'Weather' },
+  { value: 'shared_weather', label: 'Shared Weather' },
   { value: 'traffic', label: 'Traffic' },
   { value: 'member_count', label: 'Member Count' },
   { value: 'board_meeting', label: 'Next Board Meeting' },

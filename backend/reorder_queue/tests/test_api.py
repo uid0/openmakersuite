@@ -11,6 +11,7 @@ from django.utils import timezone
 
 import pytest
 from rest_framework import status
+from rest_framework.test import APIClient
 
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
@@ -876,3 +877,140 @@ class TestPurchaseOrderMarkDelivered:
             format="json",
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.integration
+class TestPurchaseOrderVoid:
+    """Tests for PurchaseOrder void action (oms-rrx)."""
+
+    def _make_po_with_items(self, user, *, status_=PurchaseOrder.SENT, item_count=2):
+        supplier = SupplierFactory()
+        purchase_order = PurchaseOrder.objects.create(
+            supplier=supplier,
+            status=status_,
+            created_by=user,
+            estimated_total=Decimal("100.00"),
+        )
+        items = []
+        for _ in range(item_count):
+            item_supplier = ItemSupplierFactory(supplier=supplier)
+            items.append(
+                PurchaseOrderItem.objects.create(
+                    purchase_order=purchase_order,
+                    item_supplier=item_supplier,
+                    quantity_ordered=5,
+                    unit_cost_ordered=Decimal("10.00"),
+                )
+            )
+        return purchase_order, items
+
+    def _staff_client(self):
+        client = APIClient()
+        user = User.objects.create_user(
+            username="po-void-staff",
+            email="staff@example.com",
+            password="pw12345678",
+            is_staff=True,
+        )
+        client.force_authenticate(user=user)
+        return client, user
+
+    def test_void_changes_status_and_records_metadata(self):
+        """AC-2: voiding sets status=voided and records voided_at/voided_by/void_reason."""
+        client, user = self._staff_client()
+        purchase_order, _ = self._make_po_with_items(user)
+
+        url = reverse("purchaseorder-void", kwargs={"pk": purchase_order.pk})
+        response = client.post(url, {"reason": "supplier rejected all lines"}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.VOIDED
+        assert purchase_order.voided_at is not None
+        assert purchase_order.voided_by == user
+        assert purchase_order.void_reason == "supplier rejected all lines"
+
+    def test_void_cascades_to_unvoided_line_items(self):
+        """AC-2: voiding cascades is_voided=True to non-voided line items."""
+        client, user = self._staff_client()
+        purchase_order, items = self._make_po_with_items(user, item_count=3)
+        # Pre-void one item to confirm we don't overwrite its existing void_reason
+        already_voided = items[0]
+        already_voided.is_voided = True
+        already_voided.void_reason = "previously voided"
+        already_voided.save()
+
+        url = reverse("purchaseorder-void", kwargs={"pk": purchase_order.pk})
+        response = client.post(url, {"reason": "orphaned"}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        for line_item in items:
+            line_item.refresh_from_db()
+            assert line_item.is_voided is True
+
+        # Cascaded items get the cascade reason; pre-voided keeps its own reason
+        already_voided.refresh_from_db()
+        assert already_voided.void_reason == "previously voided"
+        for line_item in items[1:]:
+            line_item.refresh_from_db()
+            assert line_item.void_reason == "PO voided"
+            assert line_item.voided_by == user
+            assert line_item.voided_at is not None
+
+    def test_cannot_void_received_po(self):
+        """AC-3: voiding a received PO returns 400."""
+        client, user = self._staff_client()
+        purchase_order, _ = self._make_po_with_items(user, status_=PurchaseOrder.RECEIVED)
+
+        url = reverse("purchaseorder-void", kwargs={"pk": purchase_order.pk})
+        response = client.post(url, {"reason": "oops"}, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.RECEIVED
+
+    def test_cannot_double_void(self):
+        """AC-2: voiding an already-voided PO returns 400."""
+        client, user = self._staff_client()
+        purchase_order, _ = self._make_po_with_items(user)
+
+        url = reverse("purchaseorder-void", kwargs={"pk": purchase_order.pk})
+        first = client.post(url, {"reason": "first"}, format="json")
+        assert first.status_code == status.HTTP_200_OK
+
+        second = client.post(url, {"reason": "second"}, format="json")
+        assert second.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_non_staff_cannot_void(self, authenticated_client):
+        """AC-4: non-staff/non-COO users cannot void POs."""
+        client, user = authenticated_client
+        purchase_order, _ = self._make_po_with_items(user)
+
+        url = reverse("purchaseorder-void", kwargs={"pk": purchase_order.pk})
+        response = client.post(url, {"reason": "nope"}, format="json")
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        purchase_order.refresh_from_db()
+        assert purchase_order.status != PurchaseOrder.VOIDED
+
+    def test_coo_group_member_can_void(self):
+        """COO group members may void POs without is_staff."""
+        from django.contrib.auth.models import Group
+
+        coo_group, _ = Group.objects.get_or_create(name="COO")
+        user = User.objects.create_user(
+            username="po-void-coo",
+            email="coo@example.com",
+            password="pw12345678",
+        )
+        user.groups.add(coo_group)
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        purchase_order, _ = self._make_po_with_items(user)
+        url = reverse("purchaseorder-void", kwargs={"pk": purchase_order.pk})
+        response = client.post(url, {"reason": "coo"}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        purchase_order.refresh_from_db()
+        assert purchase_order.status == PurchaseOrder.VOIDED

@@ -139,6 +139,7 @@ describe('PurchaseOrderPage line item rendering', () => {
       voided_at: null,
       voided_by_username: null,
       void_reason: '',
+      attachments: [],
       items: [
         {
           id: 'item-1',
@@ -184,6 +185,7 @@ describe('PurchaseOrderPage line item rendering', () => {
       voided_at: null,
       voided_by_username: null,
       void_reason: '',
+      attachments: [],
       items: [
         {
           id: 'item-inv',

@@ -25,6 +25,7 @@ from .models import (
     WorkOrder,
     WorkOrderMaterialUsage,
     WorkOrderPhoto,
+    WorkOrderSubmission,
     WorkOrderTaskCompletion,
 )
 
@@ -1300,6 +1301,41 @@ class WorkOrderPhotoSerializer(serializers.ModelSerializer):
         return None
 
 
+class WorkOrderSubmissionSerializer(serializers.ModelSerializer):
+    """Serializer for an inbound (emailed or manually-uploaded) WO submission."""
+
+    pdf_url = serializers.SerializerMethodField()
+    submitted_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WorkOrderSubmission
+        fields = [
+            "id",
+            "pdf_url",
+            "received_at",
+            "status",
+            "source",
+            "from_email",
+            "subject",
+            "submitted_by",
+            "submitted_by_name",
+            "parse_error",
+        ]
+        read_only_fields = fields
+
+    def get_pdf_url(self, obj):
+        if not obj.attachment:
+            return None
+        request = self.context.get("request")
+        url = obj.attachment.url
+        return request.build_absolute_uri(url) if request else url
+
+    def get_submitted_by_name(self, obj):
+        if obj.submitted_by:
+            return obj.submitted_by.get_full_name() or obj.submitted_by.username
+        return None
+
+
 class WorkOrderSerializer(serializers.ModelSerializer):
     """Full serializer for a work order, including nested completions and photos."""
 
@@ -1313,6 +1349,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     task_completions = WorkOrderTaskCompletionSerializer(many=True, read_only=True)
     material_usage = WorkOrderMaterialUsageSerializer(many=True, read_only=True)
     photos = WorkOrderPhotoSerializer(many=True, read_only=True)
+    submissions = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkOrder
@@ -1335,6 +1372,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "task_completions",
             "material_usage",
             "photos",
+            "submissions",
             "created_at",
             "updated_at",
         ]
@@ -1346,7 +1384,12 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "task_completions",
             "material_usage",
             "photos",
+            "submissions",
         ]
+
+    def get_submissions(self, obj):
+        qs = obj.submissions.all().order_by("-received_at")
+        return WorkOrderSubmissionSerializer(qs, many=True, context=self.context).data
 
     def get_assigned_to_name(self, obj):
         if obj.assigned_to:

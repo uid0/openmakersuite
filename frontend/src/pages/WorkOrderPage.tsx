@@ -23,9 +23,11 @@ import {
   IconCamera,
   IconCheck,
   IconClipboard,
+  IconDownload,
   IconFileText,
   IconPhoto,
   IconTag,
+  IconUpload,
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -329,7 +331,80 @@ const WorkOrderPage: React.FC = () => {
                         ✓ {tc.completed_by_name || 'Done'} · {new Date(tc.completed_at).toLocaleString()}
                       </Text>
                     )}
+                    {tc.notes && (
+                      <Text size="xs" c="dimmed" mt={2} style={{ whiteSpace: 'pre-wrap' }}>
+                        {tc.notes}
+                      </Text>
+                    )}
                   </Box>
+                </Group>
+              </Box>
+            ))}
+          </Stack>
+        </Card>
+      )}
+
+      {/* Uploaded PDFs */}
+      {workOrder.submissions && workOrder.submissions.length > 0 && (
+        <Card withBorder p="md" radius="md" mb="md">
+          <Group mb="sm" gap="xs">
+            <IconUpload size={18} />
+            <Title order={5}>Uploaded PDFs</Title>
+            <Badge color="gray" size="sm">{workOrder.submissions.length}</Badge>
+          </Group>
+          <Stack gap="xs">
+            {workOrder.submissions.map((sub) => (
+              <Box
+                key={sub.id}
+                p="sm"
+                style={{
+                  borderRadius: 8,
+                  backgroundColor: '#f8f9fa',
+                  border: '1px solid #dee2e6',
+                }}
+              >
+                <Group justify="space-between" wrap="nowrap" gap="sm">
+                  <Box style={{ flex: 1, minWidth: 0 }}>
+                    <Group gap="xs">
+                      <Text fw={600} size="sm" truncate>
+                        {sub.subject || (sub.source === 'manual' ? 'Manual upload' : 'Email submission')}
+                      </Text>
+                      <Badge size="xs" variant="light" color={sub.source === 'manual' ? 'blue' : 'grape'}>
+                        {sub.source === 'manual' ? 'manual' : 'email'}
+                      </Badge>
+                      <Badge
+                        size="xs"
+                        variant="light"
+                        color={sub.status === 'applied' ? 'green' : sub.status === 'failed' ? 'red' : 'yellow'}
+                      >
+                        {sub.status}
+                      </Badge>
+                    </Group>
+                    <Text size="xs" c="dimmed">
+                      {sub.submitted_by_name || sub.from_email || '—'} ·{' '}
+                      {new Date(sub.received_at).toLocaleString()}
+                    </Text>
+                    {sub.parse_error && (
+                      <Text size="xs" c="red" mt={2}>
+                        {sub.parse_error}
+                      </Text>
+                    )}
+                  </Box>
+                  {sub.pdf_url && (
+                    <Tooltip label="Download PDF">
+                      <ActionIcon
+                        variant="light"
+                        color="blue"
+                        size="lg"
+                        component="a"
+                        href={sub.pdf_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <IconDownload size={18} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
                 </Group>
               </Box>
             ))}

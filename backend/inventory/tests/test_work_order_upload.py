@@ -148,3 +148,33 @@ class TestUploadPdfEndpoint:
         submission = WorkOrderSubmission.objects.get(id=resp.json()["submission_id"])
         assert submission.source == WorkOrderSubmission.SOURCE_MANUAL
         assert submission.submitted_by_id == user.id
+
+
+@pytest.mark.integration
+class TestWorkOrderSerializerExposesSubmissions:
+    """
+    The WorkOrder detail API must expose uploaded submissions so the frontend
+    can render a downloadable history of paper-form scans.
+    """
+
+    def test_workorder_serializer_exposes_pdf_url(self):
+        client, _ = _staff_client()
+        wo = _make_work_order(num_tasks=1)
+        pdf_bytes = generate_work_order_pdf(wo, base_url="http://example.com")
+
+        # Upload one PDF to populate a submission row tied to this WO.
+        upload_resp = _upload(client, pdf_bytes)
+        assert upload_resp.status_code == status.HTTP_200_OK, upload_resp.content
+
+        detail_resp = client.get(f"/api/inventory/work-orders/{wo.id}/")
+        assert detail_resp.status_code == status.HTTP_200_OK, detail_resp.content
+        body = detail_resp.json()
+
+        assert "submissions" in body
+        assert len(body["submissions"]) == 1
+        sub = body["submissions"][0]
+        assert sub["pdf_url"], "pdf_url must be a non-empty URL"
+        assert sub["pdf_url"].endswith(".pdf")
+        assert sub["source"] == WorkOrderSubmission.SOURCE_MANUAL
+        assert sub["status"] == WorkOrderSubmission.STATUS_APPLIED
+        assert sub["received_at"]

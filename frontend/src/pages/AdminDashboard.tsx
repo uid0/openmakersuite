@@ -3,8 +3,10 @@
  * Manage reorder queue, view pending requests, and access supplier cart links
  */
 import { Button, Group, Stack, TextInput } from '@mantine/core';
+import { DateInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { modals } from '@mantine/modals';
+import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useState } from 'react';
 import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/AdminDashboard.css';
@@ -13,7 +15,7 @@ import { promptInput, showError, showSuccess } from '../utils/dialogs';
 
 interface MarkOrderedValues {
   orderNumber: string;
-  estimatedDelivery: string;
+  estimatedDelivery: Date | null;
   actualCost: string;
 }
 
@@ -24,7 +26,7 @@ interface MarkOrderedFormProps {
 
 const MarkOrderedForm: React.FC<MarkOrderedFormProps> = ({ modalId, onSubmit }) => {
   const form = useForm<MarkOrderedValues>({
-    initialValues: { orderNumber: '', estimatedDelivery: '', actualCost: '' },
+    initialValues: { orderNumber: '', estimatedDelivery: null, actualCost: '' },
   });
 
   const handleSubmit = form.onSubmit((values) => {
@@ -40,9 +42,11 @@ const MarkOrderedForm: React.FC<MarkOrderedFormProps> = ({ modalId, onSubmit }) 
           placeholder="Optional"
           {...form.getInputProps('orderNumber')}
         />
-        <TextInput
+        <DateInput
           label="Estimated delivery date"
-          placeholder="YYYY-MM-DD (optional)"
+          placeholder="Select date (optional)"
+          valueFormat="YYYY-MM-DD"
+          clearable
           {...form.getInputProps('estimatedDelivery')}
         />
         <TextInput
@@ -223,7 +227,9 @@ const AdminDashboard: React.FC = () => {
             try {
               const data: any = {};
               if (values.orderNumber) data.order_number = values.orderNumber;
-              if (values.estimatedDelivery) data.estimated_delivery = values.estimatedDelivery;
+              if (values.estimatedDelivery) {
+                data.estimated_delivery = dayjs(values.estimatedDelivery).format('YYYY-MM-DD');
+              }
               if (values.actualCost) data.actual_cost = parseFloat(values.actualCost);
 
               await reorderAPI.markOrdered(id, data);

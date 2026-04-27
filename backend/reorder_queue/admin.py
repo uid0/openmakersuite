@@ -30,6 +30,7 @@ from .models import (
     LeadTimeLog,
     OrderDelivery,
     PurchaseOrder,
+    PurchaseOrderAttachment,
     PurchaseOrderItem,
     ReorderRequest,
     WebHook,
@@ -755,3 +756,18 @@ class WebHookAdmin(admin.ModelAdmin):
             last_triggered_at=None,
         )
         self.message_user(request, f"Statistics reset for {updated} webhook(s).")
+
+
+@admin.register(PurchaseOrderAttachment)
+class PurchaseOrderAttachmentAdmin(admin.ModelAdmin):
+    """Admin for purchase order attachments."""
+
+    list_display = ("purchase_order", "description", "uploaded_by", "uploaded_at")
+    list_filter = ("uploaded_at",)
+    search_fields = (
+        "purchase_order__po_number",
+        "description",
+        "uploaded_by__username",
+    )
+    readonly_fields = ("uploaded_at",)
+    autocomplete_fields = ("purchase_order", "uploaded_by")

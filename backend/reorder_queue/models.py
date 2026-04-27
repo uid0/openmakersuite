@@ -196,6 +196,19 @@ class PurchaseOrder(models.Model):
     expected_delivery_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
 
+    # Supplier-side reference numbers (filled in after creation, e.g. once the
+    # supplier confirms the order and assigns their own identifiers)
+    supplier_order_number = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Order number assigned by the supplier (e.g. their internal order ID)",
+    )
+    sales_order_number = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Sales order number associated with this purchase order",
+    )
+
     # Financial tracking
     estimated_total = models.DecimalField(
         max_digits=12,
@@ -504,6 +517,41 @@ class PurchaseOrderItem(models.Model):
         if self.quantity_ordered is None:
             return 0
         return max(0, self.quantity_ordered - self.quantity_received)
+
+
+class PurchaseOrderAttachment(models.Model):
+    """
+    A file attached to a purchase order after creation.
+
+    Used to attach supporting documents (sales orders, supplier confirmations,
+    receipts, etc.) once the PO is in flight.
+    """
+
+    purchase_order = models.ForeignKey(
+        PurchaseOrder,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+        help_text="The purchase order this attachment belongs to",
+    )
+    file = models.FileField(
+        upload_to="purchase_orders/attachments/%Y/%m/",
+        help_text="Attached document",
+    )
+    description = models.CharField(max_length=500, blank=True)
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="purchase_order_attachments",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["uploaded_at"]
+
+    def __str__(self) -> str:
+        return f"Attachment for PO #{self.purchase_order.po_number} ({self.uploaded_at.date()})"
 
 
 class OrderDelivery(models.Model):

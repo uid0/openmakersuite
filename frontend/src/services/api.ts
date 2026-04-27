@@ -868,6 +868,29 @@ export const purchaseOrderAPI = {
     orderId: string,
     data: { delivery_date: string; tracking_number?: string; carrier?: string; receipt_notes?: string },
   ) => api.post<any>(`/reorders/purchase-orders/${orderId}/mark-delivered/`, data),
+  updateOrder: (
+    orderId: string,
+    data: {
+      supplier_order_number?: string;
+      sales_order_number?: string;
+      expected_delivery_date?: string | null;
+      notes?: string;
+    },
+  ) => api.patch<any>(`/reorders/purchase-orders/${orderId}/`, data),
+  uploadAttachment: (orderId: string, file: File, description?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (description) {
+      formData.append('description', description);
+    }
+    return api.post<any>(
+      `/reorders/purchase-orders/${orderId}/upload-attachment/`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+  },
+  deleteAttachment: (orderId: string, attachmentId: number | string) =>
+    api.delete(`/reorders/purchase-orders/${orderId}/attachments/${attachmentId}/`),
 };
 
 // Fixtures API

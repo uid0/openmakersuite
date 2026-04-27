@@ -1014,3 +1014,141 @@ class TestPurchaseOrderVoid:
         assert response.status_code == status.HTTP_200_OK
         purchase_order.refresh_from_db()
         assert purchase_order.status == PurchaseOrder.VOIDED
+
+
+@pytest.mark.integration
+class TestPurchaseOrderMetadataAndAttachments:
+    """Tests for editable metadata fields and file attachments on POs (oms-aq2)."""
+
+    def _make_po(self, user):
+        supplier = SupplierFactory()
+        purchase_order = PurchaseOrder.objects.create(
+            supplier=supplier,
+            status=PurchaseOrder.SENT,
+            created_by=user,
+        )
+        return purchase_order
+
+    def _file(self, name="sales-order.pdf", content=b"PDF-1.4 stub"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        return SimpleUploadedFile(name=name, content=content, content_type="application/pdf")
+
+    def test_patch_updates_supplier_and_sales_order_numbers(self, authenticated_client):
+        """AC-1: PATCH allows setting supplier_order_number, sales_order_number, expected_delivery_date."""
+        client, user = authenticated_client
+        purchase_order = self._make_po(user)
+
+        url = reverse("purchaseorder-detail", kwargs={"pk": purchase_order.pk})
+        payload = {
+            "supplier_order_number": "SUP-12345",
+            "sales_order_number": "SO-99",
+            "expected_delivery_date": "2026-05-15",
+        }
+        response = client.patch(url, payload, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        purchase_order.refresh_from_db()
+        assert purchase_order.supplier_order_number == "SUP-12345"
+        assert purchase_order.sales_order_number == "SO-99"
+        assert str(purchase_order.expected_delivery_date) == "2026-05-15"
+
+    def test_po_detail_includes_metadata_fields(self, api_client, authenticated_client):
+        """AC-1/AC-4: PO detail response surfaces the new metadata fields."""
+        _, user = authenticated_client
+        purchase_order = self._make_po(user)
+        purchase_order.supplier_order_number = "SUP-7"
+        purchase_order.sales_order_number = "SO-7"
+        purchase_order.save()
+
+        url = reverse("purchaseorder-detail", kwargs={"pk": purchase_order.pk})
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["supplier_order_number"] == "SUP-7"
+        assert response.data["sales_order_number"] == "SO-7"
+        assert response.data["attachments"] == []
+
+    def test_upload_attachment_creates_record(self, authenticated_client):
+        """AC-3: authenticated users may upload an attachment to a PO."""
+        client, user = authenticated_client
+        purchase_order = self._make_po(user)
+
+        url = reverse("purchaseorder-upload-attachment", kwargs={"pk": purchase_order.pk})
+        response = client.post(
+            url,
+            {"file": self._file(), "description": "Sales order from supplier"},
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["description"] == "Sales order from supplier"
+        assert response.data["uploaded_by"] == user.id
+        assert response.data["file_url"]
+        assert purchase_order.attachments.count() == 1
+
+    def test_upload_attachment_requires_authentication(self, api_client, authenticated_client):
+        """AC-3: anonymous uploads are rejected."""
+        _, user = authenticated_client
+        purchase_order = self._make_po(user)
+
+        url = reverse("purchaseorder-upload-attachment", kwargs={"pk": purchase_order.pk})
+        response = api_client.post(url, {"file": self._file()}, format="multipart")
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+        assert purchase_order.attachments.count() == 0
+
+    def test_attachments_appear_in_po_detail(self, authenticated_client):
+        """AC-4: PO detail nests attachments with download URLs."""
+        client, user = authenticated_client
+        purchase_order = self._make_po(user)
+
+        upload_url = reverse("purchaseorder-upload-attachment", kwargs={"pk": purchase_order.pk})
+        client.post(upload_url, {"file": self._file(), "description": "doc"}, format="multipart")
+
+        detail_url = reverse("purchaseorder-detail", kwargs={"pk": purchase_order.pk})
+        response = client.get(detail_url)
+
+        assert response.status_code == status.HTTP_200_OK
+        attachments = response.data["attachments"]
+        assert len(attachments) == 1
+        assert attachments[0]["description"] == "doc"
+        assert attachments[0]["file_url"]
+        assert attachments[0]["uploaded_by_name"]
+
+    def test_delete_attachment_requires_staff(self, authenticated_client):
+        """AC-6: non-staff users cannot delete attachments."""
+        client, user = authenticated_client
+        purchase_order = self._make_po(user)
+
+        upload_url = reverse("purchaseorder-upload-attachment", kwargs={"pk": purchase_order.pk})
+        upload_response = client.post(upload_url, {"file": self._file()}, format="multipart")
+        attachment_id = upload_response.data["id"]
+
+        delete_url = reverse(
+            "purchaseorder-destroy-attachment",
+            kwargs={"pk": purchase_order.pk, "attachment_id": attachment_id},
+        )
+        response = client.delete(delete_url)
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert purchase_order.attachments.count() == 1
+
+    def test_delete_attachment_succeeds_for_staff(self, admin_user):
+        """AC-6: staff users can delete attachments."""
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        purchase_order = self._make_po(admin_user)
+
+        upload_url = reverse("purchaseorder-upload-attachment", kwargs={"pk": purchase_order.pk})
+        upload_response = client.post(upload_url, {"file": self._file()}, format="multipart")
+        attachment_id = upload_response.data["id"]
+
+        delete_url = reverse(
+            "purchaseorder-destroy-attachment",
+            kwargs={"pk": purchase_order.pk, "attachment_id": attachment_id},
+        )
+        response = client.delete(delete_url)
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert purchase_order.attachments.count() == 0

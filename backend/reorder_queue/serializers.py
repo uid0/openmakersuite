@@ -160,6 +160,9 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     sent_by_username = serializers.CharField(
         source="sent_by.username", read_only=True, allow_null=True
     )
+    voided_by_username = serializers.CharField(
+        source="voided_by.username", read_only=True, allow_null=True
+    )
 
     # Line items
     items = PurchaseOrderItemSerializer(many=True, read_only=True)
@@ -189,6 +192,10 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "sent_by",
             "sent_by_username",
             "sent_at",
+            "voided_at",
+            "voided_by",
+            "voided_by_username",
+            "void_reason",
             "updated_at",
             # Related data
             "items",

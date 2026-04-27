@@ -1109,6 +1109,62 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         serializer = PurchaseOrderItemSerializer(line_item)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["post"])
+    def void(self, request, pk=None):
+        """Void an entire purchase order (e.g., orphaned PO with all line items rejected).
+
+        Only staff/superusers or members of the COO group may void POs.
+        Cascades to non-voided line items so they stop appearing in queues.
+        """
+        from django.contrib.auth.models import Group
+
+        user = request.user
+        is_coo = False
+        try:
+            is_coo = Group.objects.get(name="COO") in user.groups.all()
+        except Group.DoesNotExist:
+            is_coo = False
+
+        if not (user.is_staff or user.is_superuser or is_coo):
+            return Response(
+                {"detail": "Only staff or COO group members may void purchase orders."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        purchase_order = self.get_object()
+
+        if purchase_order.status == PurchaseOrder.VOIDED:
+            return Response(
+                {"detail": "Purchase order is already voided."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if purchase_order.status == PurchaseOrder.RECEIVED:
+            return Response(
+                {"detail": "Cannot void a received PO; create a return instead."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        now = timezone.now()
+        reason = request.data.get("reason", "")
+
+        with transaction.atomic():
+            purchase_order.status = PurchaseOrder.VOIDED
+            purchase_order.voided_at = now
+            purchase_order.voided_by = user
+            purchase_order.void_reason = reason
+            purchase_order.save()
+
+            purchase_order.items.filter(is_voided=False).update(
+                is_voided=True,
+                voided_at=now,
+                voided_by=user,
+                void_reason="PO voided",
+            )
+
+        serializer = self.get_serializer(purchase_order)
+        return Response(serializer.data)
+
     @action(detail=False, methods=["get"])
     def dashboard_summary(self, request):
         """Get summary data for the orders dashboard."""

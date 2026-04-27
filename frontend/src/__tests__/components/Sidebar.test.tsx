@@ -113,6 +113,26 @@ describe('Sidebar Component', () => {
     }
   });
 
+  it('does not show a Code Entry nav link (oms-7pj)', async () => {
+    localStorage.setItem('token', 'test-token');
+    renderSidebar();
+
+    const inventorySectionButtons = screen.getAllByRole('button').filter(btn => {
+      const text = btn.textContent || '';
+      return text.includes('Inventory') && btn.className.includes('section-header');
+    });
+    const inventorySection = inventorySectionButtons[0];
+    expect(inventorySection).toBeDefined();
+
+    if (inventorySection) {
+      inventorySection.click();
+      await waitFor(() => {
+        expect(screen.getByText(/scan items/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/code entry/i)).not.toBeInTheDocument();
+    }
+  });
+
   it('shows staff-only items when user is staff', async () => {
     localStorage.setItem('token', 'test-token');
     localStorage.setItem('is_staff', 'true');

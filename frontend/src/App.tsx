@@ -137,7 +137,7 @@ function AppContent() {
           <Route path="/inventory/suppliers/:id/edit" element={<WorkspaceLayout><SupplierFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/assets" element={<WorkspaceLayout><AssetsPage /></WorkspaceLayout>} />
           <Route path="/inventory/admin" element={<WorkspaceLayout><AdminDashboard /></WorkspaceLayout>} />
-          <Route path="/inventory/code-entry" element={<WorkspaceLayout><CodeEntryPage /></WorkspaceLayout>} />
+          <Route path="/inventory/code-entry" element={<Navigate to="/inventory/scan" replace />} />
           <Route path="/inventory/transparency" element={<WorkspaceLayout><TransparencyPage /></WorkspaceLayout>} />
           <Route path="/inventory/scan" element={<WorkspaceLayout><CodeEntryPage /></WorkspaceLayout>} />
           <Route path="/inventory/scan/:itemId" element={<WorkspaceLayout><ScanPage /></WorkspaceLayout>} />
@@ -203,7 +203,7 @@ function AppContent() {
 
           {/* Legacy routes - redirect to new workspace routes */}
           <Route path="/orderadmin" element={<Navigate to="/inventory/admin" replace />} />
-          <Route path="/code-entry" element={<Navigate to="/inventory/code-entry" replace />} />
+          <Route path="/code-entry" element={<Navigate to="/inventory/scan" replace />} />
           <Route path="/transparency" element={<Navigate to="/inventory/transparency" replace />} />
           <Route path="/purchase-order" element={<Navigate to="/purchasing/orders" replace />} />
           <Route path="/purchase-order/:orderId" element={<RedirectPurchaseOrder />} />

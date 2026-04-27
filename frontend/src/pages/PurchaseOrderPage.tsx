@@ -10,7 +10,8 @@ import { confirmAction, promptInput, showError, showSuccess } from '../utils/dia
 
 interface PurchaseOrderItem {
   id: string;
-  item_type: 'inventory_item' | 'asset' | null;
+  item_type: 'inventory_item' | 'asset' | 'freeform' | null;
+  description: string | null;
   item_details: {
     name: string;
     sku: string;
@@ -707,12 +708,18 @@ const PurchaseOrderPage: React.FC = () => {
               </tr>
             ) : (
               order.items.map((item) => {
-                const itemName = item.item_type === 'asset' 
-                  ? (item.asset_details?.name || 'Unknown Asset')
-                  : (item.item_details?.name || 'Unknown Item');
-                const itemSku = item.item_type === 'asset'
-                  ? (item.asset_details?.asset_tag || '—')
-                  : (item.item_details?.sku || '—');
+                let itemName: string;
+                let itemSku: string;
+                if (item.item_type === 'asset') {
+                  itemName = item.asset_details?.name || 'Unknown Asset';
+                  itemSku = item.asset_details?.asset_tag || '—';
+                } else if (item.item_type === 'freeform') {
+                  itemName = item.description || 'Unknown Item';
+                  itemSku = '—';
+                } else {
+                  itemName = item.item_details?.name || 'Unknown Item';
+                  itemSku = item.item_details?.sku || '—';
+                }
                 
                 return (
                 <tr key={item.id} className={item.is_voided ? 'voided-item' : ''}>

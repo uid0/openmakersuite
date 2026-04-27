@@ -470,6 +470,45 @@ class TestPurchaseOrderAPI:
 
         assert po_item.order_in_packages == 0  # Freeform items don't have package information
 
+    def test_freeform_purchase_order_item_exposes_description_in_response(
+        self, authenticated_client
+    ):
+        """Freeform line items must serialize their description and item_type='freeform'.
+
+        Regression for oms-74q: freeform items were rendering as 'Unknown item' because
+        the API response/frontend fallback didn't surface the description.
+        """
+        client, _user = authenticated_client
+
+        supplier = SupplierFactory()
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {
+                    "description": "Custom widget XL",
+                    "quantity": 3,
+                    "unit_cost": 17.50,
+                }
+            ],
+        }
+        response = client.post(url, data, format="json")
+        assert response.status_code == status.HTTP_201_CREATED
+
+        po_id = response.data["id"]
+        detail_url = reverse("purchaseorder-detail", args=[po_id])
+        detail = client.get(detail_url)
+        assert detail.status_code == status.HTTP_200_OK
+
+        items = detail.data["items"]
+        assert len(items) == 1
+        line = items[0]
+        assert line["description"] == "Custom widget XL"
+        assert line["item_type"] == "freeform"
+        assert line["item_supplier"] is None
+        assert line["asset"] is None
+
     def test_create_purchase_order_with_quantity_per_package_one(self, authenticated_client):
         """Test order_in_packages when quantity_per_package is 1."""
         client, user = authenticated_client

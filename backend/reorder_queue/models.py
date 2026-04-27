@@ -168,6 +168,7 @@ class PurchaseOrder(models.Model):
     PARTIALLY_RECEIVED = "partially_received"
     RECEIVED = "received"
     CANCELLED = "cancelled"
+    VOIDED = "voided"
 
     STATUS_CHOICES = [
         (DRAFT, "Draft"),
@@ -176,6 +177,7 @@ class PurchaseOrder(models.Model):
         (PARTIALLY_RECEIVED, "Partially Received"),
         (RECEIVED, "Fully Received"),
         (CANCELLED, "Cancelled"),
+        (VOIDED, "Voided"),
     ]
 
     # Core fields
@@ -219,6 +221,20 @@ class PurchaseOrder(models.Model):
         related_name="sent_orders",
     )
     sent_at = models.DateTimeField(null=True, blank=True)
+
+    # Void tracking (for orphaned/rejected POs)
+    voided_at = models.DateTimeField(
+        null=True, blank=True, help_text="When this purchase order was voided"
+    )
+    voided_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="voided_purchase_orders",
+        help_text="User who voided this purchase order",
+    )
+    void_reason = models.TextField(blank=True, help_text="Reason for voiding this purchase order")
 
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)

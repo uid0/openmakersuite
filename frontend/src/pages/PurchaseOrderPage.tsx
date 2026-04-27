@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderPage.css';
-import { confirmAction, showError } from '../utils/dialogs';
+import { confirmAction, promptInput, showError, showSuccess } from '../utils/dialogs';
 
 interface PurchaseOrderItem {
   id: string;
@@ -44,6 +44,9 @@ interface PurchaseOrder {
   expected_delivery_date: string | null;
   items: PurchaseOrderItem[];
   estimated_total: string;
+  voided_at: string | null;
+  voided_by_username: string | null;
+  void_reason: string;
 }
 
 const PurchaseOrderPage: React.FC = () => {
@@ -59,6 +62,7 @@ const PurchaseOrderPage: React.FC = () => {
   const [voidingItemId, setVoidingItemId] = useState<string | null>(null);
   const [voidReason, setVoidReason] = useState<string>('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isStaff, setIsStaff] = useState(false);
   const [markingDelivered, setMarkingDelivered] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState<string>('');
   const [deliveryTracking, setDeliveryTracking] = useState<string>('');
@@ -82,6 +86,10 @@ const PurchaseOrderPage: React.FC = () => {
     // Check if user is authenticated
     const token = localStorage.getItem('token');
     setIsAuthenticated(!!token);
+    setIsStaff(
+      localStorage.getItem('is_staff') === 'true' ||
+        localStorage.getItem('is_superuser') === 'true',
+    );
 
     if (orderId) {
       loadOrder();
@@ -184,6 +192,38 @@ const PurchaseOrderPage: React.FC = () => {
     );
   };
 
+  const handleVoidOrder = async () => {
+    const reason = await promptInput(
+      'Void purchase order',
+      'Reason for voiding (optional)',
+      undefined,
+      { placeholder: 'e.g. supplier rejected all line items' },
+    );
+    if (reason === null) return;
+
+    confirmAction(
+      'Void this purchase order?',
+      'This will void the PO and cascade to all non-voided line items. This cannot be undone.',
+      async () => {
+        try {
+          setSaving(true);
+          await purchaseOrderAPI.voidOrder(orderId!, reason);
+          showSuccess('Purchase order voided');
+          await loadOrder();
+        } catch (err: any) {
+          showError(err.response?.data?.detail || 'Failed to void purchase order');
+          console.error('Error voiding purchase order:', err);
+        } finally {
+          setSaving(false);
+        }
+      },
+      { labels: { confirm: 'Void PO', cancel: 'Cancel' }, color: 'red' },
+    );
+  };
+
+  const canVoidOrder = (po: PurchaseOrder) =>
+    isStaff && po.status !== 'voided' && po.status !== 'received';
+
   const handleOpenMarkDelivered = () => {
     const today = new Date().toISOString().split('T')[0];
     setDeliveryDate(today);
@@ -284,8 +324,35 @@ const PurchaseOrderPage: React.FC = () => {
               Mark as Delivered
             </button>
           )}
+          {canVoidOrder(order) && (
+            <button
+              type="button"
+              className="btn-danger void-po-button"
+              onClick={handleVoidOrder}
+              disabled={saving}
+            >
+              Void PO
+            </button>
+          )}
         </div>
       </header>
+
+      {order.status === 'voided' && (
+        <section className="po-voided-banner" aria-label="Voided purchase order">
+          <span className="status-badge status-voided">VOIDED</span>
+          {order.void_reason && (
+            <p className="void-reason">
+              <strong>Reason:</strong> {order.void_reason}
+            </p>
+          )}
+          {order.voided_by_username && (
+            <p className="void-meta">
+              Voided by {order.voided_by_username}
+              {order.voided_at && ` on ${formatDate(order.voided_at)}`}
+            </p>
+          )}
+        </section>
+      )}
 
       {markingDelivered && (
         <section className="mark-delivered-panel" aria-label="Mark purchase order as delivered">

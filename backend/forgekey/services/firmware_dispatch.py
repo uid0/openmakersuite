@@ -36,6 +36,7 @@ def _build_payload(firmware: FirmwareVersion) -> dict:
     return {
         "url": firmware.effective_binary_url,
         "sha256": firmware.sha256,
+        "signature": firmware.signature or "",
         "version": firmware.version,
         "mandatory": firmware.mandatory,
     }

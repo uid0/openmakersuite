@@ -357,6 +357,15 @@ FORGEKEY_JWT_EXPIRATION_SECONDS = 3600  # 1 hour
 # X-ForgeKey-Provisioning-Token to call the registration endpoint.
 FORGEKEY_PROVISIONING_TOKEN = config("FORGEKEY_PROVISIONING_TOKEN", default="")
 
+# ECDSA(P-256) private key (PEM, may include literal "\n" newlines) used to
+# sign firmware binaries before MQTT dispatch. The matching public key is
+# baked into device firmware and used to verify signatures on receipt.
+# Generate with scripts/build/gen-firmware-signing-key.sh in the forgekey repo.
+# Leave empty in dev; production deployments must set this to a real key.
+FORGEKEY_FIRMWARE_SIGNING_KEY = config("FORGEKEY_FIRMWARE_SIGNING_KEY", default="").replace(
+    "\\n", "\n"
+)
+
 # ForgeKey periodic-photo retention (days). Photos older than this are pruned
 # by the prune_device_photos celery task.
 FORGEKEY_PHOTO_RETENTION_DAYS = config("FORGEKEY_PHOTO_RETENTION_DAYS", default=30, cast=int)

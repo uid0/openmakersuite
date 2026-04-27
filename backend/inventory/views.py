@@ -27,6 +27,7 @@ from rest_framework.response import Response
 from .models import (
     Asset,
     AssetPart,
+    AssetProblem,
     Category,
     Fixture,
     FixtureRefillRequest,
@@ -48,6 +49,8 @@ from .models import (
 )
 from .serializers import (
     AssetPartSerializer,
+    AssetProblemPhotoSerializer,
+    AssetProblemSerializer,
     AssetSerializer,
     CategorySerializer,
     FixtureDetailSerializer,
@@ -1852,7 +1855,7 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         from .serializers import AssetProblemSerializer
 
-        serializer = AssetProblemSerializer(problem)
+        serializer = AssetProblemSerializer(problem, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], permission_classes=[IsAuthenticatedOrReadOnly])
@@ -1862,8 +1865,12 @@ class AssetViewSet(viewsets.ModelViewSet):
         from .models import AssetProblem
         from .serializers import AssetProblemSerializer
 
-        problems = AssetProblem.objects.filter(asset=asset).order_by("-created_at")
-        serializer = AssetProblemSerializer(problems, many=True)
+        problems = (
+            AssetProblem.objects.filter(asset=asset)
+            .prefetch_related("photos")
+            .order_by("-created_at")
+        )
+        serializer = AssetProblemSerializer(problems, many=True, context={"request": request})
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
@@ -1912,8 +1919,61 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         problem.save()
 
-        serializer = AssetProblemSerializer(problem)
+        serializer = AssetProblemSerializer(problem, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):
+    """API endpoint for asset problem reports.
+
+    Read-only here; problems are created via Asset.report_problem. This viewset
+    exposes detail GET plus the upload-photo action so reporters can attach
+    images to a freshly-created problem report.
+    """
+
+    queryset = AssetProblem.objects.select_related("asset", "part").prefetch_related("photos")
+    serializer_class = AssetProblemSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="upload-photo",
+        permission_classes=[AllowAny],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_photo(self, request, pk=None):
+        """Attach a photo to this problem report.
+
+        Authorization: the reporter (matched by username) or staff. Anonymous
+        reporters created the problem with reported_by="" — those are open
+        until staff review, so we accept anonymous photo uploads against them.
+        """
+        problem = self.get_object()
+        user = request.user
+
+        is_staff = bool(user and user.is_authenticated and (user.is_staff or user.is_superuser))
+        is_reporter = bool(
+            user
+            and user.is_authenticated
+            and problem.reported_by
+            and user.username == problem.reported_by
+        )
+        is_anonymous_report = not problem.reported_by
+
+        if not (is_staff or is_reporter or is_anonymous_report):
+            return Response(
+                {"detail": "Not authorized to attach photos to this problem."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = AssetProblemPhotoSerializer(data=request.data, context={"request": request})
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        uploaded_by = user if (user and user.is_authenticated) else None
+        serializer.save(problem=problem, uploaded_by=uploaded_by)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class AssetPartViewSet(viewsets.ModelViewSet):

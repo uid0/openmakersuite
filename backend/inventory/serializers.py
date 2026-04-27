@@ -8,6 +8,7 @@ from .models import (
     Asset,
     AssetPart,
     AssetProblem,
+    AssetProblemPhoto,
     Category,
     Fixture,
     FixtureRefillRequest,
@@ -962,11 +963,52 @@ class AssetSerializer(serializers.ModelSerializer):
             return None
 
 
+class AssetProblemPhotoSerializer(serializers.ModelSerializer):
+    """Serializer for photos attached to an asset problem report."""
+
+    uploaded_by_name = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssetProblemPhoto
+        fields = [
+            "id",
+            "problem",
+            "image",
+            "image_url",
+            "caption",
+            "uploaded_by",
+            "uploaded_by_name",
+            "uploaded_at",
+        ]
+        read_only_fields = [
+            "problem",
+            "uploaded_at",
+            "uploaded_by",
+            "uploaded_by_name",
+            "image_url",
+        ]
+
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by:
+            return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
+        return None
+
+    def get_image_url(self, obj):
+        request = self.context.get("request")
+        if obj.image and request:
+            return request.build_absolute_uri(obj.image.url)
+        if obj.image:
+            return obj.image.url
+        return None
+
+
 class AssetProblemSerializer(serializers.ModelSerializer):
     """Serializer for asset problem reports."""
 
     asset_name = serializers.CharField(source="asset.name", read_only=True)
     asset_tag = serializers.CharField(source="asset.asset_tag", read_only=True)
+    photos = AssetProblemPhotoSerializer(many=True, read_only=True)
 
     class Meta:
         model = AssetProblem
@@ -983,6 +1025,7 @@ class AssetProblemSerializer(serializers.ModelSerializer):
             "updated_at",
             "resolved_at",
             "resolved_by",
+            "photos",
         ]
         read_only_fields = ["created_at", "updated_at", "resolved_at"]
 

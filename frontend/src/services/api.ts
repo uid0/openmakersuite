@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -507,7 +507,7 @@ export const assetsAPI = {
     api.post<Asset>(`/inventory/assets/${id}/unlock/`),
 
   reportProblem: (id: string, description: string) =>
-    api.post(`/inventory/assets/${id}/report_problem/`, { description }),
+    api.post<AssetProblem>(`/inventory/assets/${id}/report_problem/`, { description }),
 
   resolveProblem: (id: string, problemId: string, resolutionNotes?: string, status?: string) =>
     api.post(`/inventory/assets/${id}/resolve_problem/`, {
@@ -537,6 +537,25 @@ export const assetsAPI = {
 
   getMaintenanceItems: (assetId: string) =>
     api.get<MaintenanceItem[]>(`/inventory/assets/${assetId}/maintenance_items/`),
+};
+
+// Asset Problem API
+export const assetProblemsAPI = {
+  get: (id: string) =>
+    api.get<AssetProblem>(`/inventory/asset-problems/${id}/`),
+
+  uploadPhoto: (problemId: string, image: File, caption?: string) => {
+    const formData = new FormData();
+    formData.append('image', image);
+    if (caption) {
+      formData.append('caption', caption);
+    }
+    return api.post<AssetProblemPhoto>(
+      `/inventory/asset-problems/${problemId}/upload-photo/`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+  },
 };
 
 // Maintenance API

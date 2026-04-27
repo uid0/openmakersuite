@@ -668,6 +668,44 @@ const AssetDetailPage: React.FC = () => {
                       </p>
                     )}
 
+                    {problem.photos && problem.photos.length > 0 && (
+                      <div className="problem-photos">
+                        <strong>Photos:</strong>
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                            gap: '0.5rem',
+                            marginTop: '0.5rem',
+                          }}
+                        >
+                          {problem.photos.map((photo) => (
+                            <a
+                              key={photo.id}
+                              href={photo.image_url || '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={photo.caption || 'Open photo'}
+                              style={{ display: 'block' }}
+                            >
+                              <img
+                                src={photo.image_url || ''}
+                                alt={photo.caption || 'Problem photo'}
+                                style={{
+                                  width: '100%',
+                                  height: 100,
+                                  objectFit: 'cover',
+                                  borderRadius: 4,
+                                  border: '1px solid #ddd',
+                                  cursor: 'zoom-in',
+                                }}
+                              />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Resolve Problem UI */}
                     {isLoggedIn && resolvingProblemId === problem.id ? (
                       <div className="resolve-problem-form" style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9' }}>

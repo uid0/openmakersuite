@@ -1538,6 +1538,37 @@ class AssetProblem(models.Model):
         return f"{self.asset.name} - {self.get_status_display()} ({self.created_at.date()})"
 
 
+class AssetProblemPhoto(models.Model):
+    """A photo attached to an asset problem report by the reporter."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    problem = models.ForeignKey(
+        AssetProblem,
+        on_delete=models.CASCADE,
+        related_name="photos",
+        help_text="The asset problem this photo documents",
+    )
+    image = models.ImageField(
+        upload_to="asset_problems/%Y/%m/",
+        help_text="Photo illustrating the reported problem",
+    )
+    caption = models.CharField(max_length=500, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="asset_problem_photos",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["uploaded_at"]
+
+    def __str__(self) -> str:
+        return f"Photo for problem {self.problem_id} ({self.uploaded_at.date()})"
+
+
 class MaintenanceItem(models.Model):
     """
     A recurring preventive maintenance (PM) task for a physical asset.

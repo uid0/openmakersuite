@@ -329,6 +329,17 @@ export interface AssetPart {
 
 export type AssetProblemStatus = 'reported' | 'in_progress' | 'resolved' | 'closed';
 
+export interface AssetProblemPhoto {
+  id: string;
+  problem: string;
+  image: string;
+  image_url: string | null;
+  caption: string;
+  uploaded_by: number | null;
+  uploaded_by_name: string | null;
+  uploaded_at: string;
+}
+
 export interface AssetProblem {
   id: string;
   asset: string;
@@ -342,6 +353,7 @@ export interface AssetProblem {
   updated_at: string;
   resolved_at: string | null;
   resolved_by: string;
+  photos: AssetProblemPhoto[];
 }
 
 export interface MaintenanceMaterialInventoryDetail {

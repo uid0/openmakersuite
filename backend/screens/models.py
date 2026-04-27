@@ -194,6 +194,7 @@ class ScreenContentBlock(models.Model):
     BLOCK_WEATHER = "weather"
     BLOCK_SHARED_WEATHER = "shared_weather"
     BLOCK_TRAFFIC = "traffic"
+    BLOCK_SHARED_TRAFFIC = "shared_traffic"
     BLOCK_MEMBER_COUNT = "member_count"
     BLOCK_BOARD_MEETING = "board_meeting"
 
@@ -205,6 +206,7 @@ class ScreenContentBlock(models.Model):
         (BLOCK_WEATHER, "Weather"),
         (BLOCK_SHARED_WEATHER, "Shared Weather"),
         (BLOCK_TRAFFIC, "Traffic"),
+        (BLOCK_SHARED_TRAFFIC, "Shared Traffic (unified site map)"),
         (BLOCK_MEMBER_COUNT, "Member Count"),
         (BLOCK_BOARD_MEETING, "Next Board Meeting"),
     ]

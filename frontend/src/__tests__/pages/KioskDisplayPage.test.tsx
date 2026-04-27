@@ -112,6 +112,30 @@ describe('KioskDisplayPage', () => {
     );
   });
 
+  it('renders a shared_traffic block as an iframe using the config URL', async () => {
+    (api.kioskAPI.fetchPayload as jest.Mock).mockResolvedValue({
+      data: makePayload({
+        content_blocks: [
+          {
+            id: 'b1',
+            block_type: 'shared_traffic',
+            title: 'Site Traffic',
+            body: '',
+            config: { url: 'https://embed.waze.com/iframe?lat=1&lon=2' },
+            order: 0,
+          },
+        ],
+      }),
+    });
+    renderKiosk('lobby', 'secret');
+    await waitFor(() => {
+      expect(screen.getByTestId('shared-traffic-iframe')).toBeInTheDocument();
+    });
+    const iframe = screen.getByTestId('shared-traffic-iframe') as HTMLIFrameElement;
+    expect(iframe.src).toBe('https://embed.waze.com/iframe?lat=1&lon=2');
+    expect(screen.getByText('Site Traffic')).toBeInTheDocument();
+  });
+
   it('shows error state when backend rejects', async () => {
     (api.kioskAPI.fetchPayload as jest.Mock).mockRejectedValue(new Error('403'));
     renderKiosk('lobby', 'secret');

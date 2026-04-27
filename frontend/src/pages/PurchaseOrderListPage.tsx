@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderListPage.css';
+import { formatDateOnly } from '../utils/dates';
 
 interface PurchaseOrder {
   id: string;
@@ -54,10 +55,7 @@ const PurchaseOrderListPage: React.FC = () => {
   }, [loadOrders]);
 
   const formatDate = (dateString: string | null) => {
-    if (!dateString) return '—';
-    const date = new Date(dateString);
-    if (Number.isNaN(date.getTime())) return '—';
-    return date.toLocaleDateString('en-US', {
+    return formatDateOnly(dateString, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',

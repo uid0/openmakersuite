@@ -35,6 +35,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { maintenanceAPI, reorderAPI, workOrderAPI } from '../services/api';
 import { LowStockAlert, MaintenanceItem, WorkOrder, WorkOrderUploadResult } from '../types';
+import { parseYmd } from '../utils/dates';
 
 const STATUS_COLORS: Record<string, string> = {
   open: 'blue',
@@ -152,7 +153,7 @@ const MaintenanceItemRow: React.FC<MaintenanceItemRowProps> = ({
 };
 
 const WorkOrderRow: React.FC<{ wo: WorkOrder }> = ({ wo }) => {
-  const dueDate = wo.due_date ? new Date(wo.due_date) : null;
+  const dueDate = wo.due_date ? parseYmd(wo.due_date) : null;
   const apiBaseUrl = process.env.REACT_APP_API_URL || '';
 
   return (

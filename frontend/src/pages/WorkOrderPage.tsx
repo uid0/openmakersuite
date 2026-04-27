@@ -33,6 +33,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { workOrderAPI } from '../services/api';
 import { WorkOrder, WorkOrderStatus } from '../types';
+import { formatDateOnly } from '../utils/dates';
 
 const STATUS_OPTIONS = [
   { value: 'open', label: 'Open' },
@@ -246,7 +247,7 @@ const WorkOrderPage: React.FC = () => {
             </Text>
             {workOrder.due_date && (
               <Text size="xs" c="dimmed">
-                Due: {new Date(workOrder.due_date).toLocaleDateString()}
+                Due: {formatDateOnly(workOrder.due_date, undefined, '')}
               </Text>
             )}
           </Box>

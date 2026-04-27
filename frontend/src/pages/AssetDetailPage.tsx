@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { assetPartsAPI, assetsAPI, maintenanceAPI, workOrderAPI } from '../services/api';
 import '../styles/AssetDetailPage.css';
 import { Asset, AssetProblem, MaintenanceItem, WorkOrder } from '../types';
+import { formatDateOnly } from '../utils/dates';
 import { showError } from '../utils/dialogs';
 
 const AssetDetailPage: React.FC = () => {
@@ -92,18 +93,12 @@ const AssetDetailPage: React.FC = () => {
     };
   }, []);
 
-  const formatDate = (dateString: string | null | undefined): string => {
-    if (!dateString) return 'N/A';
-    try {
-      return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      });
-    } catch {
-      return dateString;
-    }
-  };
+  const formatDate = (dateString: string | null | undefined): string =>
+    formatDateOnly(
+      dateString,
+      { year: 'numeric', month: 'long', day: 'numeric' },
+      'N/A',
+    );
 
   const formatDateTime = (dateString: string | null | undefined): string => {
     if (!dateString) return 'N/A';
@@ -873,7 +868,7 @@ const AssetDetailPage: React.FC = () => {
                         : wo.is_overdue
                         ? 'Overdue'
                         : wo.due_date
-                        ? `Due ${new Date(wo.due_date).toLocaleDateString()}`
+                        ? `Due ${formatDateOnly(wo.due_date, undefined, '')}`
                         : wo.status.replace('_', ' ')}
                     </span>
                   </div>

@@ -12,6 +12,7 @@ import { resolveApiBaseUrl } from '../services/api';
 import '../styles/InventoryList.css';
 import '../styles/TVDashboard.css';
 import { InventoryItem } from '../types';
+import { parseYmd } from '../utils/dates';
 
 // Create a dedicated API instance for TV Dashboard that doesn't send auth headers
 const tvAPI = axios.create({
@@ -231,10 +232,11 @@ const TVDashboard: React.FC = () => {
   };
 
   const formatExpectedDelivery = (dateString: string) => {
-    const date = new Date(dateString);
-    const today = new Date();
+    const date = parseYmd(dateString) ?? new Date(dateString);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const diffTime = date.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
     if (diffDays < 0) {
       return `Overdue by ${Math.abs(diffDays)} days`;

@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { donationsAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Disposition, DispositionType, DonationItem, KeptDestination, SaleMethod } from '../types';
+import { formatDateOnly } from '../utils/dates';
 import { showError } from '../utils/dialogs';
 
 const DonationItemScanPage: React.FC = () => {
@@ -424,7 +425,7 @@ const DonationItemScanPage: React.FC = () => {
                   <tbody>
                     {dispositions.map((disp) => (
                       <tr key={disp.id}>
-                        <td>{new Date(disp.disposition_date).toLocaleDateString()}</td>
+                        <td>{formatDateOnly(disp.disposition_date)}</td>
                         <td>{disp.disposition_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</td>
                         <td>{disp.quantity}</td>
                         <td>

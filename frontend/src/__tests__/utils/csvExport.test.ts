@@ -127,9 +127,9 @@ describe('CSV Export Utilities', () => {
       expect(global.Blob).toHaveBeenCalled();
       const blobCall = (global.Blob as jest.Mock).mock.calls[0];
       const content = blobCall[0][0];
-      // Check that dates are formatted (toLocaleDateString may vary by timezone)
-      // The date should be formatted, not in ISO format
-      expect(content).toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/); // Matches MM/DD/YYYY or M/D/YYYY format
+      // formatDateOnly preserves the local calendar day for date-only inputs
+      // (no off-by-one drift in TZs west of UTC) and renders en-US 'short' month.
+      expect(content).toContain('Jan 1, 2024');
       // Verify it's not in ISO format
       expect(content).not.toContain('2024-01-01T');
       expect(content).not.toContain('T00:00:00Z');

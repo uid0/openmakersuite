@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderPage.css';
+import { formatDateOnly, formatYmd } from '../utils/dates';
 import { confirmAction, promptInput, showError, showSuccess } from '../utils/dialogs';
 
 interface PurchaseOrderItem {
@@ -247,7 +248,7 @@ const PurchaseOrderPage: React.FC = () => {
     isStaff && po.status !== 'voided' && po.status !== 'received';
 
   const handleOpenMarkDelivered = () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatYmd(new Date());
     setDeliveryDate(today);
     setDeliveryTracking('');
     setDeliveryCarrier('');
@@ -363,16 +364,8 @@ const PurchaseOrderPage: React.FC = () => {
     );
   };
 
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return '—';
-    const date = new Date(dateString);
-    if (Number.isNaN(date.getTime())) return '—';
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
+  const formatDate = (dateString: string | null) =>
+    formatDateOnly(dateString, { year: 'numeric', month: 'short', day: 'numeric' });
 
   const formatCurrency = (value: string | null) => {
     if (!value) return '—';

@@ -843,6 +843,8 @@ export const purchaseOrderAPI = {
     api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
   voidLineItem: (orderId: string, itemId: string, reason?: string) =>
     api.post(`/reorders/purchase-orders/${orderId}/items/${itemId}/void/`, { reason }),
+  voidOrder: (orderId: string, reason: string) =>
+    api.post<any>(`/reorders/purchase-orders/${orderId}/void/`, { reason }),
   markDelivered: (
     orderId: string,
     data: { delivery_date: string; tracking_number?: string; carrier?: string; receipt_notes?: string },

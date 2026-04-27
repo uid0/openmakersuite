@@ -476,6 +476,19 @@ export interface WorkOrderPhoto {
   uploaded_at: string;
 }
 
+export interface WorkOrderSubmission {
+  id: string;
+  pdf_url: string | null;
+  received_at: string;
+  status: 'received' | 'applied' | 'failed';
+  source: 'email' | 'manual';
+  from_email: string;
+  subject: string;
+  submitted_by: number | null;
+  submitted_by_name: string | null;
+  parse_error: string;
+}
+
 export interface WorkOrder {
   id: string;
   short_id: string;
@@ -495,6 +508,7 @@ export interface WorkOrder {
   task_completions: WorkOrderTaskCompletion[];
   material_usage: WorkOrderMaterialUsage[];
   photos: WorkOrderPhoto[];
+  submissions: WorkOrderSubmission[];
   task_completion_count?: number;
   task_total_count?: number;
   created_at: string;

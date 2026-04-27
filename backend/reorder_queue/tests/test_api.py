@@ -409,6 +409,38 @@ class TestPurchaseOrderAPI:
 
         assert po_item.order_in_packages == 3  # 30 / 10 = 3 exactly
 
+    def test_create_purchase_order_honors_explicit_order_in_packages(self, authenticated_client):
+        """Frontend can send order_in_packages directly when ordering whole cases.
+
+        When the user enters '6 cases' for a QPP=24 item, the frontend submits
+        quantity=144 and order_in_packages=6. The backend must record exactly 6,
+        not recompute via ceil(144/24).
+        """
+        client, _ = authenticated_client
+
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(
+            supplier=supplier, quantity_per_package=24, unit_cost=Decimal("1.25")
+        )
+
+        url = reverse("purchaseorder-list")
+        data = {
+            "supplier": supplier.id,
+            "items": [
+                {
+                    "item_supplier_id": item_supplier.id,
+                    "quantity": 144,
+                    "order_in_packages": 6,
+                }
+            ],
+        }
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+        po_item = PurchaseOrder.objects.get(id=response.data["id"]).items.first()
+        assert po_item.quantity_ordered == 144
+        assert po_item.order_in_packages == 6
+
     def test_create_purchase_order_with_asset_sets_order_in_packages_to_zero(
         self, authenticated_client
     ):

@@ -22,8 +22,10 @@ from rest_framework import status
 from inventory.models import (
     MaintenanceItem,
     MaintenanceLog,
+    MaintenanceMaterial,
     MaintenanceTask,
     WorkOrder,
+    WorkOrderMaterialUsage,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
 )
@@ -236,6 +238,78 @@ class TestApplySubmission:
         # completed_at preserved — we never un-complete a task.
         assert tcs[0].completed_at == first_completed_at
         assert tcs[1].is_completed is True
+
+    def test_apply_submission_marks_completed_tasks(self):
+        """3 of 5 boxes checked → 3 task completions get is_completed=True."""
+        wo = _make_work_order(num_tasks=5)
+        tcs = list(wo.task_completions.order_by("task_order"))
+        pdf_bytes = generate_work_order_pdf(wo, base_url="http://example.com")
+        # Check three of the five.
+        filled = _fill_checkboxes(pdf_bytes, [f"task_{tc.id}" for tc in tcs[:3]])
+
+        submission = WorkOrderSubmission()
+        submission.attachment.save("wo.pdf", ContentFile(filled), save=False)
+        submission.save()
+
+        apply_submission(submission)
+
+        completed = list(wo.task_completions.filter(is_completed=True).order_by("task_order"))
+        assert {tc.id for tc in completed} == {tc.id for tc in tcs[:3]}
+        # Each completed row picked up a completed_at timestamp.
+        for tc in completed:
+            assert tc.completed_at is not None
+
+    def test_apply_submission_links_pdf_to_workorder(self):
+        """The submission's PDF must be retrievable via the WO's `submissions` reverse FK."""
+        wo = _make_work_order(num_tasks=1)
+        pdf_bytes = generate_work_order_pdf(wo, base_url="http://example.com")
+
+        submission = WorkOrderSubmission()
+        submission.attachment.save("wo.pdf", ContentFile(pdf_bytes), save=False)
+        submission.save()
+        apply_submission(submission)
+
+        wo.refresh_from_db()
+        submissions = list(wo.submissions.all())
+        assert len(submissions) == 1
+        assert submissions[0].id == submission.id
+        # The original PDF is still on disk and readable.
+        assert submissions[0].attachment
+        submissions[0].attachment.open("rb")
+        try:
+            assert submissions[0].attachment.read()[:4] == b"%PDF"
+        finally:
+            submissions[0].attachment.close()
+        # And the WO has a copy on `completed_scan` for the maintenance history.
+        assert wo.completed_scan
+
+    def test_apply_submission_creates_material_usage(self):
+        """A checked `material_<id>` field flips its WorkOrderMaterialUsage row to was_used=True."""
+        wo = _make_work_order(num_tasks=1)
+        material = MaintenanceMaterial.objects.create(
+            maintenance_item=wo.maintenance_item,
+            name="Filter cartridge",
+            quantity=2,
+            unit="pcs",
+        )
+        usage = WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=material,
+            material_name=material.name,
+            quantity_planned=material.quantity,
+            unit=material.unit,
+            was_used=False,
+        )
+        pdf_bytes = generate_work_order_pdf(wo, base_url="http://example.com")
+        filled = _fill_checkboxes(pdf_bytes, [f"material_{usage.id}"])
+
+        submission = WorkOrderSubmission()
+        submission.attachment.save("wo.pdf", ContentFile(filled), save=False)
+        submission.save()
+        apply_submission(submission)
+
+        usage.refresh_from_db()
+        assert usage.was_used is True
 
     def test_unknown_work_order_id_marks_failed(self):
         wo = _make_work_order(num_tasks=1)

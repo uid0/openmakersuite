@@ -1,17 +1,14 @@
 /**
- * Tests for PurchaseOrderPage attachment + metadata behaviors (oms-aq2).
+ * Tests for PurchaseOrderPage:
+ *  - oms-aq2: editable metadata + file attachments behaviors.
+ *  - oms-74q: freeform PO line items render their description, not 'Unknown Item'.
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PurchaseOrderPage from '../../pages/PurchaseOrderPage';
 import * as api from '../../services/api';
 
 jest.mock('../../services/api');
-
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
-  useParams: () => ({ orderId: 'po-1' }),
-}));
 
 jest.mock('../../utils/dialogs', () => ({
   showError: jest.fn(),
@@ -21,6 +18,15 @@ jest.mock('../../utils/dialogs', () => ({
   }),
   promptInput: jest.fn(),
 }));
+
+const renderPage = () =>
+  render(
+    <MemoryRouter initialEntries={['/purchase-orders/po-1']}>
+      <Routes>
+        <Route path="/purchase-orders/:orderId" element={<PurchaseOrderPage />} />
+      </Routes>
+    </MemoryRouter>
+  );
 
 const baseOrder = {
   id: 'po-1',
@@ -56,6 +62,7 @@ describe('PurchaseOrderPage attachments + metadata', () => {
     jest.clearAllMocks();
     localStorage.clear();
     localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
   });
 
   test('renders metadata fields and existing attachment', async () => {
@@ -63,11 +70,7 @@ describe('PurchaseOrderPage attachments + metadata', () => {
       data: baseOrder,
     });
 
-    render(
-      <MemoryRouter>
-        <PurchaseOrderPage />
-      </MemoryRouter>,
-    );
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('PO-2026-0001', { exact: false })).toBeInTheDocument();
@@ -89,11 +92,7 @@ describe('PurchaseOrderPage attachments + metadata', () => {
       data: { id: 2 },
     });
 
-    render(
-      <MemoryRouter>
-        <PurchaseOrderPage />
-      </MemoryRouter>,
-    );
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText(/Upload Attachment/i)).toBeInTheDocument();
@@ -116,5 +115,131 @@ describe('PurchaseOrderPage attachments + metadata', () => {
         'Confirmation email',
       );
     });
+  });
+});
+
+describe('PurchaseOrderPage line item rendering', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  test('renders freeform line item description, not "Unknown Item"', async () => {
+    const order = {
+      id: 'po-1',
+      po_number: 'PO-2024-0001',
+      supplier_details: 'Test Supplier',
+      status: 'submitted',
+      status_label: 'Submitted',
+      order_date: '2026-04-27',
+      expected_delivery_date: null,
+      estimated_total: '52.50',
+      voided_at: null,
+      voided_by_username: null,
+      void_reason: '',
+      attachments: [],
+      items: [
+        {
+          id: 'item-1',
+          item_type: 'freeform',
+          description: 'Custom widget XL',
+          item_details: null,
+          asset_details: null,
+          quantity_ordered: 3,
+          quantity_received: 0,
+          unit_cost_ordered: '17.50',
+          unit_cost_actual: null,
+          estimated_cost: '52.50',
+          actual_cost: null,
+          expected_shipment_date: null,
+          notes: '',
+          is_voided: false,
+          voided_at: null,
+          void_reason: '',
+        },
+      ],
+    };
+
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: order });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Custom widget XL')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Unknown Item')).not.toBeInTheDocument();
+  });
+
+  test('renders inventory and asset items via their respective details', async () => {
+    const order = {
+      id: 'po-1',
+      po_number: 'PO-2024-0002',
+      supplier_details: 'Test Supplier',
+      status: 'submitted',
+      status_label: 'Submitted',
+      order_date: '2026-04-27',
+      expected_delivery_date: null,
+      estimated_total: '0.00',
+      voided_at: null,
+      voided_by_username: null,
+      void_reason: '',
+      attachments: [],
+      items: [
+        {
+          id: 'item-inv',
+          item_type: 'inventory_item',
+          description: null,
+          item_details: { name: 'Stocked Bolt', sku: 'BOLT-1' },
+          asset_details: null,
+          quantity_ordered: 10,
+          quantity_received: 0,
+          unit_cost_ordered: '1.00',
+          unit_cost_actual: null,
+          estimated_cost: '10.00',
+          actual_cost: null,
+          expected_shipment_date: null,
+          notes: '',
+          is_voided: false,
+          voided_at: null,
+          void_reason: '',
+        },
+        {
+          id: 'item-asset',
+          item_type: 'asset',
+          description: null,
+          item_details: null,
+          asset_details: {
+            id: 'a-1',
+            name: 'Forklift 7',
+            asset_tag: 'FL-7',
+            location_name: null,
+          },
+          quantity_ordered: 1,
+          quantity_received: 0,
+          unit_cost_ordered: '5000.00',
+          unit_cost_actual: null,
+          estimated_cost: '5000.00',
+          actual_cost: null,
+          expected_shipment_date: null,
+          notes: '',
+          is_voided: false,
+          voided_at: null,
+          void_reason: '',
+        },
+      ],
+    };
+
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: order });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Stocked Bolt')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Forklift 7')).toBeInTheDocument();
+    expect(screen.queryByText('Unknown Item')).not.toBeInTheDocument();
+    expect(screen.queryByText('Unknown Asset')).not.toBeInTheDocument();
   });
 });

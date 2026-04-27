@@ -3,9 +3,12 @@
  * - Unauthenticated users: Show basic info and QR code, update last_scanned_at
  * - Authenticated users: Show full info, enable/disable, report problem options
  */
+import { Button, Group, Image, SimpleGrid, Stack, Text } from '@mantine/core';
+import { Dropzone, IMAGE_MIME_TYPE } from '@mantine/dropzone';
+import { IconPhoto, IconUpload, IconX } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assetsAPI, checklistsAPI, maintenanceAPI } from '../services/api';
+import { assetProblemsAPI, assetsAPI, checklistsAPI, maintenanceAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Asset, Checklist, MaintenanceItem } from '../types';
 import { confirmDelete, promptInput, showError } from '../utils/dialogs';
@@ -31,6 +34,33 @@ const AssetScanPage: React.FC = () => {
   const [problemDescription, setProblemDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [problemPhotos, setProblemPhotos] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+
+  const handlePhotosDrop = (files: File[]) => {
+    setProblemPhotos((existing) => [...existing, ...files]);
+    setPhotoPreviews((existing) => [
+      ...existing,
+      ...files.map((f) => URL.createObjectURL(f)),
+    ]);
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setProblemPhotos((existing) => existing.filter((_, i) => i !== index));
+    setPhotoPreviews((existing) => {
+      const url = existing[index];
+      if (url) URL.revokeObjectURL(url);
+      return existing.filter((_, i) => i !== index);
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      photoPreviews.forEach((url) => URL.revokeObjectURL(url));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadAsset = useCallback(async () => {
     try {
@@ -202,15 +232,40 @@ const AssetScanPage: React.FC = () => {
 
     try {
       setSubmitting(true);
-      await assetsAPI.reportProblem(asset.id, problemDescription);
+      const reportResp = await assetsAPI.reportProblem(asset.id, problemDescription);
+      const problemId = reportResp.data?.id;
+
+      if (problemId && problemPhotos.length > 0) {
+        for (let i = 0; i < problemPhotos.length; i += 1) {
+          setUploadProgress(`Uploading photo ${i + 1} of ${problemPhotos.length}...`);
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await assetProblemsAPI.uploadPhoto(problemId, problemPhotos[i]);
+          } catch (uploadErr) {
+            // Photo failed but the problem was created — surface but don't roll back.
+            console.error('Photo upload failed:', uploadErr);
+            showError(`Photo ${i + 1} failed to upload (problem report was saved).`);
+          }
+        }
+        setUploadProgress(null);
+      }
+
+      photoPreviews.forEach((url) => URL.revokeObjectURL(url));
+      setProblemPhotos([]);
+      setPhotoPreviews([]);
       setProblemDescription('');
-      setActionSuccess('Problem reported successfully');
+      setActionSuccess(
+        problemPhotos.length > 0
+          ? `Problem reported with ${problemPhotos.length} photo(s)`
+          : 'Problem reported successfully',
+      );
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
       showError(err.response?.data?.detail || 'Failed to report problem');
       console.error('Error reporting problem:', err);
     } finally {
       setSubmitting(false);
+      setUploadProgress(null);
     }
   };
 
@@ -617,6 +672,67 @@ const AssetScanPage: React.FC = () => {
                       required
                       disabled={submitting}
                     />
+                    <Stack gap="xs" mt="sm" mb="sm">
+                      <Text size="sm" fw={500}>
+                        Add photos (optional)
+                      </Text>
+                      <Dropzone
+                        onDrop={handlePhotosDrop}
+                        accept={IMAGE_MIME_TYPE}
+                        multiple
+                        disabled={submitting}
+                        maxSize={10 * 1024 * 1024}
+                      >
+                        <Group justify="center" gap="md" mih={100} style={{ pointerEvents: 'none' }}>
+                          <Dropzone.Accept>
+                            <IconUpload size={36} stroke={1.5} />
+                          </Dropzone.Accept>
+                          <Dropzone.Reject>
+                            <IconX size={36} stroke={1.5} />
+                          </Dropzone.Reject>
+                          <Dropzone.Idle>
+                            <IconPhoto size={36} stroke={1.5} />
+                          </Dropzone.Idle>
+                          <div>
+                            <Text size="md" inline>
+                              Take or drop photos of the problem
+                            </Text>
+                            <Text size="xs" c="dimmed" inline mt={4}>
+                              Tap to use your camera. Multiple photos OK (max 10MB each).
+                            </Text>
+                          </div>
+                        </Group>
+                      </Dropzone>
+                      {photoPreviews.length > 0 && (
+                        <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="xs">
+                          {photoPreviews.map((url, idx) => (
+                            <Stack key={url} gap={4}>
+                              <Image
+                                src={url}
+                                alt={`Photo ${idx + 1}`}
+                                height={100}
+                                fit="cover"
+                                radius="sm"
+                              />
+                              <Button
+                                size="xs"
+                                variant="light"
+                                color="red"
+                                onClick={() => handleRemovePhoto(idx)}
+                                disabled={submitting}
+                              >
+                                Remove
+                              </Button>
+                            </Stack>
+                          ))}
+                        </SimpleGrid>
+                      )}
+                      {uploadProgress && (
+                        <Text size="xs" c="dimmed">
+                          {uploadProgress}
+                        </Text>
+                      )}
+                    </Stack>
                     <button
                       type="submit"
                       className="btn-report"

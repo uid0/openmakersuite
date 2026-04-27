@@ -8,6 +8,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AssetPartViewSet,
+    AssetProblemViewSet,
     AssetReportViewSet,
     AssetViewSet,
     CategoryViewSet,
@@ -37,6 +38,7 @@ router.register(r"categories", CategoryViewSet)
 router.register(r"locations", LocationViewSet)
 router.register(r"items", InventoryItemViewSet)
 router.register(r"assets", AssetViewSet)
+router.register(r"asset-problems", AssetProblemViewSet)
 router.register(r"asset-parts", AssetPartViewSet)
 router.register(r"usage-logs", UsageLogViewSet)
 router.register(r"item-suppliers", ItemSupplierViewSet)

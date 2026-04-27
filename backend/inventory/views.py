@@ -3084,6 +3084,191 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
         )
 
 
+class MaintenanceDashboardViewSet(viewsets.ViewSet):
+    """Aggregated maintenance overview: scheduled PM, unscheduled work, costs."""
+
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["get"])
+    def dashboard(self, request):
+        """Return scheduled PM, open unscheduled work, and cost rollups.
+
+        Cost calculation mirrors AssetReportViewSet.tco: for each completed work
+        order, scheduled cost comes from MaintenanceItem.estimated_cost when the
+        item has interval_days; unscheduled cost is the sum of used materials
+        (quantity_planned * material.estimated_cost_per_unit). Per-period buckets
+        filter on completed_at; the by_asset rollup uses the trailing 90 days
+        and reports days_in_maintenance_90d the same way TCO does.
+        """
+        from django.db.models import Prefetch
+
+        now = timezone.now()
+        today = now.date()
+        week_start_date = today - timedelta(days=today.weekday())
+        month_start_date = today.replace(day=1)
+        year_start_date = today.replace(month=1, day=1)
+        window_start_date = today - timedelta(days=90)
+
+        active_items = (
+            MaintenanceItem.objects.filter(is_active=True, interval_days__isnull=False)
+            .select_related("asset")
+            .order_by("asset__name", "title")
+        )
+        scheduled_pm = []
+        for item in active_items:
+            next_due = item.next_due_at
+            days_until = None
+            if next_due is not None:
+                days_until = (next_due.date() - today).days
+            scheduled_pm.append(
+                {
+                    "asset_id": str(item.asset_id),
+                    "asset_name": item.asset.name,
+                    "maintenance_item_id": str(item.id),
+                    "title": item.title,
+                    "interval_days": item.interval_days,
+                    "next_due": next_due.isoformat() if next_due is not None else None,
+                    "days_until": days_until,
+                    "last_completed_at": (
+                        item.last_completed_at.isoformat()
+                        if item.last_completed_at is not None
+                        else None
+                    ),
+                    "is_overdue": item.is_overdue,
+                }
+            )
+        scheduled_pm.sort(
+            key=lambda r: (
+                r["days_until"] is None,
+                r["days_until"] if r["days_until"] is not None else 0,
+            )
+        )
+
+        open_statuses = [
+            WorkOrder.STATUS_OPEN,
+            WorkOrder.STATUS_IN_PROGRESS,
+            WorkOrder.STATUS_BLOCKED,
+        ]
+        unscheduled_qs = (
+            WorkOrder.objects.filter(
+                status__in=open_statuses,
+                maintenance_item__interval_days__isnull=True,
+            )
+            .select_related("maintenance_item__asset")
+            .order_by("created_at")
+        )
+        unscheduled = [
+            {
+                "workorder_id": str(wo.id),
+                "short_id": wo.short_id,
+                "asset_id": str(wo.maintenance_item.asset_id),
+                "asset_name": wo.maintenance_item.asset.name,
+                "problem": wo.maintenance_item.title,
+                "opened_at": wo.created_at.isoformat(),
+                "status": wo.status,
+            }
+            for wo in unscheduled_qs
+        ]
+
+        completed_qs = (
+            WorkOrder.objects.filter(
+                status=WorkOrder.STATUS_COMPLETED,
+                completed_at__isnull=False,
+            )
+            .select_related("maintenance_item")
+            .prefetch_related("material_usage__material")
+        )
+
+        period_starts = {
+            "today": today,
+            "this_week": week_start_date,
+            "this_month": month_start_date,
+            "this_year": year_start_date,
+        }
+        per_period = {key: Decimal("0.00") for key in period_starts}
+        per_period["all_time"] = Decimal("0.00")
+
+        for wo in completed_qs:
+            mi = wo.maintenance_item
+            if mi.interval_days is not None:
+                cost = mi.estimated_cost or Decimal("0.00")
+            else:
+                cost = Decimal("0.00")
+                for usage in wo.material_usage.all():
+                    if usage.was_used and usage.material is not None:
+                        cost += usage.quantity_planned * usage.material.estimated_cost_per_unit
+            if cost == 0:
+                continue
+            completed_date = wo.completed_at.date()
+            per_period["all_time"] += cost
+            for key, start in period_starts.items():
+                if completed_date >= start:
+                    per_period[key] += cost
+
+        assets = Asset.objects.all().prefetch_related(
+            Prefetch(
+                "maintenance_items__work_orders",
+                queryset=WorkOrder.objects.prefetch_related("material_usage__material"),
+            )
+        )
+        by_asset = []
+        for asset in assets:
+            days_set: set = set()
+            total_cost = Decimal("0.00")
+            for mi in asset.maintenance_items.all():
+                for wo in mi.work_orders.all():
+                    wo_start = wo.created_at.date()
+                    wo_end = wo.completed_at.date() if wo.completed_at else today
+                    span_start = max(wo_start, window_start_date)
+                    span_end = min(wo_end, today)
+                    if span_start <= span_end:
+                        d = span_start
+                        while d <= span_end:
+                            days_set.add(d)
+                            d += timedelta(days=1)
+                    if (
+                        wo.status == WorkOrder.STATUS_COMPLETED
+                        and wo.completed_at is not None
+                        and window_start_date <= wo.completed_at.date() <= today
+                    ):
+                        if mi.interval_days is not None:
+                            total_cost += mi.estimated_cost or Decimal("0.00")
+                        else:
+                            for usage in wo.material_usage.all():
+                                if usage.was_used and usage.material is not None:
+                                    total_cost += (
+                                        usage.quantity_planned
+                                        * usage.material.estimated_cost_per_unit
+                                    )
+            if asset.status == Asset.MAINTENANCE:
+                days_set.add(today)
+            if not days_set and total_cost == 0:
+                continue
+            by_asset.append(
+                {
+                    "asset_id": str(asset.id),
+                    "asset_name": asset.name,
+                    "total_cost": str(total_cost.quantize(Decimal("0.01"))),
+                    "days_in_maintenance_90d": len(days_set),
+                }
+            )
+        by_asset.sort(key=lambda r: Decimal(r["total_cost"]), reverse=True)
+
+        return Response(
+            {
+                "scheduled_pm": scheduled_pm,
+                "unscheduled": unscheduled,
+                "costs": {
+                    "per_period": {
+                        key: str(value.quantize(Decimal("0.01")))
+                        for key, value in per_period.items()
+                    },
+                    "by_asset": by_asset,
+                },
+            }
+        )
+
+
 class AssetReportViewSet(viewsets.ViewSet):
     """API endpoint for asset reports."""
 

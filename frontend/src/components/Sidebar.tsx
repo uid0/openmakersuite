@@ -120,6 +120,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
       label: 'Maintenance',
       icon: '🔧',
       items: [
+        { path: '/maintenance', label: 'Overview', icon: '🧭', requiresAuth: true },
         { path: '/maintenance/dashboard', label: 'PM Dashboard', icon: '📋', requiresAuth: true },
       ],
     },

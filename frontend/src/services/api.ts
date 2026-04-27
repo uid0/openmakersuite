@@ -594,7 +594,54 @@ export const maintenanceAPI = {
 
   listLogs: (params?: { maintenance_item?: string; asset?: string }) =>
     api.get<{ results: MaintenanceLog[] }>('/inventory/maintenance-logs/', { params }),
+
+  getDashboard: () =>
+    api.get<MaintenanceDashboardData>('/inventory/maintenance/dashboard/'),
 };
+
+export interface MaintenanceDashboardScheduledRow {
+  asset_id: string;
+  asset_name: string;
+  maintenance_item_id: string;
+  title: string;
+  interval_days: number | null;
+  next_due: string | null;
+  days_until: number | null;
+  last_completed_at: string | null;
+  is_overdue: boolean;
+}
+
+export interface MaintenanceDashboardUnscheduledRow {
+  workorder_id: string;
+  short_id: string;
+  asset_id: string;
+  asset_name: string;
+  problem: string;
+  opened_at: string;
+  status: string;
+}
+
+export interface MaintenanceDashboardByAssetRow {
+  asset_id: string;
+  asset_name: string;
+  total_cost: string;
+  days_in_maintenance_90d: number;
+}
+
+export interface MaintenanceDashboardData {
+  scheduled_pm: MaintenanceDashboardScheduledRow[];
+  unscheduled: MaintenanceDashboardUnscheduledRow[];
+  costs: {
+    per_period: {
+      today: string;
+      this_week: string;
+      this_month: string;
+      this_year: string;
+      all_time: string;
+    };
+    by_asset: MaintenanceDashboardByAssetRow[];
+  };
+}
 
 // Maintenance Task API (sub-task steps within a MaintenanceItem)
 export const maintenanceTaskAPI = {

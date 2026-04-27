@@ -37,6 +37,7 @@ const BLOCK_TYPE_OPTIONS: { value: ScreenBlockType; label: string }[] = [
   { value: 'weather', label: 'Weather' },
   { value: 'shared_weather', label: 'Shared Weather' },
   { value: 'traffic', label: 'Traffic' },
+  { value: 'shared_traffic', label: 'Shared Traffic (unified site map)' },
   { value: 'member_count', label: 'Member Count' },
   { value: 'board_meeting', label: 'Next Board Meeting' },
 ];

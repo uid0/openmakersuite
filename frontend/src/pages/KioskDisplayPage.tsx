@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import SharedWeatherBlock from '../components/screens/SharedWeatherBlock';
+import SharedTrafficBlock from '../components/screens/SharedTrafficBlock';
 import { kioskAPI } from '../services/api';
 import { KioskPayload, ScreenBlockType, SystemMessageLevel } from '../types';
 
@@ -36,6 +37,8 @@ const blockTypeLabel = (t: ScreenBlockType): string => {
     case 'shared_weather':
       return 'Weather';
     case 'traffic':
+      return 'Traffic';
+    case 'shared_traffic':
       return 'Traffic';
     case 'member_count':
       return 'Member Count';
@@ -197,27 +200,30 @@ const KioskDisplayPage: React.FC = () => {
         }}
       >
         {activeBlock ? (
-          <>
-            <div style={{ fontSize: 22, opacity: 0.7, marginBottom: 8 }}>
-              {blockTypeLabel(activeBlock.block_type)}
-            </div>
-            {activeBlock.block_type === 'shared_weather' ? (
-              <SharedWeatherBlock weatherUrl={payload.weather_url || ''} />
-            ) : (
-              <>
-                {activeBlock.title && (
-                  <div style={{ fontSize: 72, fontWeight: 700, marginBottom: 16 }}>
-                    {activeBlock.title}
-                  </div>
-                )}
-                {activeBlock.body && (
-                  <div style={{ fontSize: 36, whiteSpace: 'pre-wrap', maxWidth: 960 }}>
-                    {activeBlock.body}
-                  </div>
-                )}
-              </>
-            )}
-          </>
+          activeBlock.block_type === 'shared_traffic' ? (
+            <SharedTrafficBlock
+              url={String(activeBlock.config?.url ?? '')}
+              title={activeBlock.title}
+            />
+          ) : activeBlock.block_type === 'shared_weather' ? (
+            <SharedWeatherBlock weatherUrl={payload.weather_url || ''} />
+          ) : (
+            <>
+              <div style={{ fontSize: 22, opacity: 0.7, marginBottom: 8 }}>
+                {blockTypeLabel(activeBlock.block_type)}
+              </div>
+              {activeBlock.title && (
+                <div style={{ fontSize: 72, fontWeight: 700, marginBottom: 16 }}>
+                  {activeBlock.title}
+                </div>
+              )}
+              {activeBlock.body && (
+                <div style={{ fontSize: 36, whiteSpace: 'pre-wrap', maxWidth: 960 }}>
+                  {activeBlock.body}
+                </div>
+              )}
+            </>
+          )
         ) : (
           <div style={{ fontSize: 48, opacity: 0.7 }}>{payload.screen.name}</div>
         )}

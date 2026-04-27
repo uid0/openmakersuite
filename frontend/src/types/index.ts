@@ -1034,6 +1034,7 @@ export type ScreenBlockType =
   | 'weather'
   | 'shared_weather'
   | 'traffic'
+  | 'shared_traffic'
   | 'member_count'
   | 'board_meeting';
 

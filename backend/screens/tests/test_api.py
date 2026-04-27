@@ -98,6 +98,39 @@ class TestKioskPayloadEndpoint:
         assert resp.data["content_blocks"][0]["id"] == str(block.id)
         assert resp.data["content_blocks"][0]["block_type"] == "shared_weather"
 
+    @pytest.mark.django_db
+    def test_shared_traffic_block_includes_traffic_url_in_config(self, api_client, settings):
+        settings.TRAFFIC_URL = "https://embed.waze.com/iframe?lat=1&lon=2"
+        screen = ScreenFactory()
+        ScreenContentBlockFactory(
+            screen=screen,
+            block_type=ScreenContentBlock.BLOCK_SHARED_TRAFFIC,
+            title="Site Traffic",
+            body="",
+            config={},
+        )
+        resp = api_client.get(f"/api/screens/kiosk/{screen.slug}/?token={screen.access_token}")
+        assert resp.status_code == status.HTTP_200_OK
+        blocks = resp.data["content_blocks"]
+        assert len(blocks) == 1
+        assert blocks[0]["block_type"] == "shared_traffic"
+        assert blocks[0]["config"]["url"] == "https://embed.waze.com/iframe?lat=1&lon=2"
+
+    @pytest.mark.django_db
+    def test_non_shared_traffic_block_config_is_unchanged(self, api_client, settings):
+        settings.TRAFFIC_URL = "https://embed.waze.com/iframe?lat=1&lon=2"
+        screen = ScreenFactory()
+        ScreenContentBlockFactory(
+            screen=screen,
+            block_type=ScreenContentBlock.BLOCK_CUSTOM_TEXT,
+            config={"foo": "bar"},
+        )
+        resp = api_client.get(f"/api/screens/kiosk/{screen.slug}/?token={screen.access_token}")
+        assert resp.status_code == status.HTTP_200_OK
+        block = resp.data["content_blocks"][0]
+        assert "url" not in block["config"]
+        assert block["config"] == {"foo": "bar"}
+
 
 @pytest.mark.integration
 class TestHeartbeatEndpoint:

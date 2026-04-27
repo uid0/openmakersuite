@@ -296,6 +296,14 @@ POSTMARK_INBOUND_TOKEN = config("POSTMARK_INBOUND_TOKEN", default="")
 # the endpoint returns 503.
 LOCATION_PING_TOKEN = config("LOCATION_PING_TOKEN", default="")
 
+# Shared kiosk resources. SIGs at the same physical site share a single
+# traffic feed; the kiosk renders this URL inside any 'shared_traffic'
+# content block, so updating the env var changes every screen at once.
+TRAFFIC_URL = config(
+    "TRAFFIC_URL",
+    default="https://embed.waze.com/iframe?zoom=14&lat=32.945552&lon=-96.912503&ct=livemap",
+)
+
 # Redis configuration
 REDIS_URL = config("REDIS_URL", default="redis://192.168.1.36:6379/0")
 

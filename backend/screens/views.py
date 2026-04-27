@@ -58,17 +58,21 @@ def _build_kiosk_payload(screen):
         }
         for m in SystemMessage.active_for_now().order_by("-level", "-created_at")
     ]
-    content_blocks = [
-        {
-            "id": str(b.id),
-            "block_type": b.block_type,
-            "title": b.title,
-            "body": b.body,
-            "config": b.config,
-            "order": b.order,
-        }
-        for b in screen.content_blocks.filter(is_enabled=True).order_by("order", "created_at")
-    ]
+    content_blocks = []
+    for b in screen.content_blocks.filter(is_enabled=True).order_by("order", "created_at"):
+        config = dict(b.config or {})
+        if b.block_type == ScreenContentBlock.BLOCK_SHARED_TRAFFIC:
+            config["url"] = settings.TRAFFIC_URL
+        content_blocks.append(
+            {
+                "id": str(b.id),
+                "block_type": b.block_type,
+                "title": b.title,
+                "body": b.body,
+                "config": config,
+                "order": b.order,
+            }
+        )
     return {
         "screen": {
             "id": str(screen.id),

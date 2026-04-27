@@ -373,13 +373,30 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
                             f"Item supplier {item_supplier_id} does not belong to selected supplier"
                         )
 
-                    # Calculate order_in_packages
+                    # Calculate order_in_packages: prefer explicit caller value
+                    # (frontend sends this when user enters whole cases), otherwise
+                    # ceil-divide the unit quantity by the supplier's case size.
                     quantity_per_package = item_supplier.quantity_per_package or 1
-                    order_in_packages = (
-                        (int(quantity) + quantity_per_package - 1) // quantity_per_package
-                        if quantity_per_package > 0
-                        else 0
-                    )
+                    explicit_packages = item_data.get("order_in_packages")
+                    if explicit_packages is not None:
+                        try:
+                            order_in_packages = int(explicit_packages)
+                        except (TypeError, ValueError):
+                            raise serializers.ValidationError(
+                                f"Item at index {idx}: order_in_packages must be "
+                                f"an integer, got {explicit_packages!r}"
+                            )
+                        if order_in_packages < 0:
+                            raise serializers.ValidationError(
+                                f"Item at index {idx}: order_in_packages must be "
+                                f"non-negative, got {order_in_packages}"
+                            )
+                    else:
+                        order_in_packages = (
+                            (int(quantity) + quantity_per_package - 1) // quantity_per_package
+                            if quantity_per_package > 0
+                            else 0
+                        )
 
                     # Get unit_cost override if provided, otherwise use item_supplier.unit_cost
                     unit_cost_override = item_data.get("unit_cost")

@@ -19,6 +19,7 @@ import '../styles/PurchaseOrderFormPage.css';
 interface SelectedItem extends ReorderDataItem {
   selected: boolean;
   quantity: number;
+  cases: number;
   unit_cost_override?: string;
   expected_shipment_date?: string;
 }
@@ -88,11 +89,19 @@ const PurchaseOrderFormPage: React.FC = () => {
       if (supplier) {
         // Initialize items with all selected by default
         setSelectedItems(
-          supplier.items.map((item) => ({
-            ...item,
-            selected: true,
-            quantity: item.suggested_quantity,
-          }))
+          supplier.items.map((item) => {
+            const qpp = item.quantity_per_package || 1;
+            // For case-packed items, round suggested units up to whole cases
+            // so the user always orders at least the suggested coverage.
+            const cases = qpp > 1 ? Math.max(1, Math.ceil(item.suggested_quantity / qpp)) : item.suggested_quantity;
+            const quantity = qpp > 1 ? cases * qpp : item.suggested_quantity;
+            return {
+              ...item,
+              selected: true,
+              quantity,
+              cases,
+            };
+          })
         );
         // Initialize assets with none selected
         setSelectedAssets(
@@ -144,12 +153,29 @@ const PurchaseOrderFormPage: React.FC = () => {
     );
   };
 
-  // Update item quantity
+  // Update item quantity (units). For case-packed items, also re-derive cases
+  // as ceil(units / qpp) so the two stay consistent.
   const updateItemQuantity = (itemSupplierId: number, quantity: number) => {
     setSelectedItems((prev) =>
-      prev.map((item) =>
-        item.item_supplier_id === itemSupplierId ? { ...item, quantity: Math.max(1, quantity) } : item
-      )
+      prev.map((item) => {
+        if (item.item_supplier_id !== itemSupplierId) return item;
+        const units = Math.max(1, quantity);
+        const qpp = item.quantity_per_package || 1;
+        const cases = qpp > 1 ? Math.max(1, Math.ceil(units / qpp)) : units;
+        return { ...item, quantity: units, cases };
+      })
+    );
+  };
+
+  // Update item case count. Drives quantity (units) = cases * qpp.
+  const updateItemCases = (itemSupplierId: number, cases: number) => {
+    setSelectedItems((prev) =>
+      prev.map((item) => {
+        if (item.item_supplier_id !== itemSupplierId) return item;
+        const qpp = item.quantity_per_package || 1;
+        const newCases = Math.max(1, cases);
+        return { ...item, cases: newCases, quantity: newCases * qpp };
+      })
     );
   };
 
@@ -313,6 +339,7 @@ const PurchaseOrderFormPage: React.FC = () => {
       }
 
       // Add the item to selectedItems
+      const qpp = matchingItemSupplier.quantity_per_package || 1;
       const newItem: SelectedItem = {
         item_supplier_id: matchingItemSupplier.id,
         item_id: inventoryItem.id,
@@ -321,17 +348,18 @@ const PurchaseOrderFormPage: React.FC = () => {
         current_stock: inventoryItem.current_stock || 0,
         minimum_stock: inventoryItem.minimum_stock || 0,
         reorder_quantity: inventoryItem.reorder_quantity || 0,
-        suggested_quantity: matchingItemSupplier.quantity_per_package || 1,
+        suggested_quantity: qpp,
         unit_cost: matchingItemSupplier.unit_cost?.toString() || '0',
         package_cost: matchingItemSupplier.package_cost?.toString() || null,
-        quantity_per_package: matchingItemSupplier.quantity_per_package || 1,
+        quantity_per_package: qpp,
         lead_time_days: matchingItemSupplier.average_lead_time || 7,
         supplier_sku: matchingItemSupplier.supplier_sku || '',
         supplier_url: matchingItemSupplier.supplier_url || '',
         is_primary: matchingItemSupplier.is_primary || false,
-        line_total: (parseFloat(matchingItemSupplier.unit_cost?.toString() || '0') * (matchingItemSupplier.quantity_per_package || 1)).toString(),
+        line_total: (parseFloat(matchingItemSupplier.unit_cost?.toString() || '0') * qpp).toString(),
         selected: true,
-        quantity: matchingItemSupplier.quantity_per_package || 1,
+        quantity: qpp,
+        cases: 1,
       };
 
       setSelectedItems((prev) => [...prev, newItem]);
@@ -404,6 +432,11 @@ const PurchaseOrderFormPage: React.FC = () => {
             item_supplier_id: item.item_supplier_id,
             quantity: item.quantity,
           };
+          // For case-packed items, send the case count explicitly so the
+          // backend records exactly what the user entered (no ceil rounding).
+          if ((item.quantity_per_package || 1) > 1) {
+            itemData.order_in_packages = item.cases;
+          }
           // Add unit_cost override if provided
           if (item.unit_cost_override && item.unit_cost_override.trim()) {
             const overrideCost = parseFloat(item.unit_cost_override);
@@ -542,6 +575,12 @@ const PurchaseOrderFormPage: React.FC = () => {
             {/* Inventory Items */}
             <section className="form-section items-section">
               <h2>2. Inventory Items ({selectedItems.length})</h2>
+              {selectedItems.some((it) => it.quantity_per_package > 1) && (
+                <p className="case-help-text">
+                  When ordering items by the case, enter the number of cases. We compute units
+                  automatically from the supplier&apos;s case size.
+                </p>
+              )}
               {selectedItems.length === 0 ? (
                 <p className="no-data">No low-stock items from this supplier.</p>
               ) : (
@@ -602,15 +641,65 @@ const PurchaseOrderFormPage: React.FC = () => {
                             </span>
                           </td>
                           <td className="col-quantity">
-                            <input
-                              type="number"
-                              min="1"
-                              value={item.quantity}
-                              onChange={(e) =>
-                                updateItemQuantity(item.item_supplier_id, parseInt(e.target.value, 10) || 1)
-                              }
-                              disabled={!item.selected}
-                            />
+                            {item.quantity_per_package > 1 ? (
+                              <div className="case-qty-group">
+                                <label className="case-qty-field">
+                                  <span className="case-qty-label">Cases</span>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={item.cases}
+                                    onChange={(e) =>
+                                      updateItemCases(item.item_supplier_id, parseInt(e.target.value, 10) || 1)
+                                    }
+                                    disabled={!item.selected}
+                                    aria-label={`Cases for ${item.item_name}`}
+                                  />
+                                </label>
+                                <label className="case-qty-field">
+                                  <span className="case-qty-label">Units</span>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={item.quantity}
+                                    onChange={(e) =>
+                                      updateItemQuantity(item.item_supplier_id, parseInt(e.target.value, 10) || 1)
+                                    }
+                                    disabled={!item.selected}
+                                    aria-label={`Units for ${item.item_name}`}
+                                  />
+                                </label>
+                                <div
+                                  className="case-qty-summary"
+                                  data-testid={`case-summary-${item.item_supplier_id}`}
+                                >
+                                  {item.cases} cases × {item.quantity_per_package} units/case ={' '}
+                                  {item.quantity} units @{' '}
+                                  {formatCurrency(
+                                    item.unit_cost_override
+                                      ? parseFloat(item.unit_cost_override)
+                                      : parseFloat(item.unit_cost)
+                                  )}
+                                  /unit ={' '}
+                                  {formatCurrency(
+                                    (item.unit_cost_override
+                                      ? parseFloat(item.unit_cost_override)
+                                      : parseFloat(item.unit_cost)) * item.quantity
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.quantity}
+                                onChange={(e) =>
+                                  updateItemQuantity(item.item_supplier_id, parseInt(e.target.value, 10) || 1)
+                                }
+                                disabled={!item.selected}
+                                aria-label={`Quantity for ${item.item_name}`}
+                              />
+                            )}
                           </td>
                           <td className="col-cost">
                             <input
@@ -622,6 +711,7 @@ const PurchaseOrderFormPage: React.FC = () => {
                               onChange={(e) => updateItemPrice(item.item_supplier_id, e.target.value)}
                               disabled={!item.selected}
                               className="input-cost"
+                              title="Cost per individual unit (we use this for inventory valuation; total = unit cost × units ordered)."
                             />
                           </td>
                           <td className="col-lead">{item.lead_time_days} days</td>

@@ -837,6 +837,7 @@ export interface CreatePurchaseOrderItem {
   asset_id?: string;
   description?: string;
   quantity: number;
+  order_in_packages?: number;
   unit_cost?: number;
   expected_shipment_date?: string;
   notes?: string;

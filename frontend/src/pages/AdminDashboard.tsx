@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/AdminDashboard.css';
 import { Asset, InventoryItem, ReorderRequest } from '../types';
+import { formatDateOnly, parseYmd } from '../utils/dates';
 import { promptInput, showError, showSuccess } from '../utils/dialogs';
 
 interface MarkOrderedValues {
@@ -416,7 +417,7 @@ const AdminDashboard: React.FC = () => {
                           {request.estimated_delivery && (
                             <div className="delivery-info">
                               <small>
-                                📅 Expected: {new Date(request.estimated_delivery).toLocaleDateString()}
+                                📅 Expected: {formatDateOnly(request.estimated_delivery, undefined, '')}
                               </small>
                             </div>
                           )}
@@ -424,7 +425,7 @@ const AdminDashboard: React.FC = () => {
                           {request.actual_delivery && (
                             <div className="delivery-info">
                               <small>
-                                ✅ Delivered: {new Date(request.actual_delivery).toLocaleDateString()}
+                                ✅ Delivered: {formatDateOnly(request.actual_delivery, undefined, '')}
                               </small>
                             </div>
                           )}
@@ -433,10 +434,17 @@ const AdminDashboard: React.FC = () => {
                             <div className="delivery-status">
                               <small>
                                 {(() => {
-                                  const estimatedDate = new Date(request.estimated_delivery);
-                                  const today = new Date();
+                                  const estimatedDate =
+                                    parseYmd(request.estimated_delivery) ??
+                                    new Date(request.estimated_delivery);
+                                  const now = new Date();
+                                  const today = new Date(
+                                    now.getFullYear(),
+                                    now.getMonth(),
+                                    now.getDate(),
+                                  );
                                   const diffTime = estimatedDate.getTime() - today.getTime();
-                                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                                  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
                                   if (diffDays < 0) {
                                     return <span className="overdue">⚠️ {Math.abs(diffDays)} days overdue</span>;

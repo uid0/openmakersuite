@@ -19,6 +19,7 @@ import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Asset } from '../types';
 import { exportAssetsToCSV } from '../utils/csvExport';
+import { formatDateOnly } from '../utils/dates';
 
 interface AssetTableViewProps {
   assets: Asset[];
@@ -127,14 +128,8 @@ const AssetTableView: React.FC<AssetTableViewProps> = ({
     return `${days}d`;
   };
 
-  const formatDate = (dateString: string | null | undefined) => {
-    if (!dateString) return 'N/A';
-    try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return 'N/A';
-    }
-  };
+  const formatDate = (dateString: string | null | undefined) =>
+    formatDateOnly(dateString, undefined, 'N/A');
 
   const getSortIcon = (field: SortableField) => {
     if (sortField !== field) return null;

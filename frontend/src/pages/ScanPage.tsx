@@ -9,6 +9,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { checklistsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Checklist, InventoryItem, ItemSupplier } from '../types';
+import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
 
 const ScanPage: React.FC = () => {
@@ -268,7 +269,7 @@ const ScanPage: React.FC = () => {
               <p><strong>Requested:</strong> {new Date(request.requested_at).toLocaleDateString()}</p>
               {request.requested_by && <p><strong>Requested by:</strong> {request.requested_by}</p>}
               {item.expected_delivery_date && (
-                <p><strong>Expected Delivery:</strong> {new Date(item.expected_delivery_date).toLocaleDateString()}</p>
+                <p><strong>Expected Delivery:</strong> {formatDateOnly(item.expected_delivery_date)}</p>
               )}
             </div>
             <p className="status-message">{statusMessage}</p>
@@ -433,7 +434,7 @@ const ScanPage: React.FC = () => {
                 <p><strong>Requested by:</strong> {item.active_reorder_request.requested_by}</p>
               )}
               {item.expected_delivery_date && (
-                <p><strong>Expected Delivery:</strong> {new Date(item.expected_delivery_date).toLocaleDateString()}</p>
+                <p><strong>Expected Delivery:</strong> {formatDateOnly(item.expected_delivery_date)}</p>
               )}
             </div>
           </div>

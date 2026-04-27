@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { donationsAPI } from '../services/api';
 import { TaxReceipt } from '../types';
 import '../styles/ScanPage.css';
+import { formatDateOnly } from '../utils/dates';
 
 const TaxReceiptLookupPage: React.FC = () => {
   const [serialNumber, setSerialNumber] = useState('');
@@ -54,14 +55,8 @@ const TaxReceiptLookupPage: React.FC = () => {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-  };
+  const formatDate = (dateString: string) =>
+    formatDateOnly(dateString, { year: 'numeric', month: 'long', day: 'numeric' });
 
   return (
     <div className="scan-page">

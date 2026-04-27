@@ -2,6 +2,7 @@
  * CSV Export Utility
  * Functions for exporting data to CSV format
  */
+import { formatDateOnly } from './dates';
 
 export interface CSVExportOptions {
   filename?: string;
@@ -311,12 +312,7 @@ function formatAge(ageInDays: number | undefined): string {
  * Format date string to readable format
  */
 function formatDate(dateString: string | null | undefined): string {
-  if (!dateString) return 'N/A';
-  try {
-    return new Date(dateString).toLocaleDateString();
-  } catch {
-    return 'N/A';
-  }
+  return formatDateOnly(dateString, undefined, 'N/A');
 }
 
 /**

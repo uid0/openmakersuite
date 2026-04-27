@@ -7,7 +7,7 @@
  */
 import { MantineProvider } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
-import { Notifications } from '@mantine/notifications';
+import { Notifications, notifications } from '@mantine/notifications';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 
@@ -102,6 +102,7 @@ const buildRequest = (overrides: Partial<ReorderRequest>): ReorderRequest => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  notifications.clean();
   mockAssetsAPI.getNotCheckedIn.mockResolvedValue({ data: [] } as any);
   mockInventoryAPI.listItems.mockResolvedValue({ data: { results: [] } } as any);
   mockReorderAPI.listRequests.mockResolvedValue({ data: { results: [] } } as any);
@@ -157,6 +158,35 @@ describe('AdminDashboard — mark ordered flow', () => {
         order_number: 'PO-123',
         estimated_delivery: '2026-05-01',
         actual_cost: 42.5,
+      });
+    });
+
+    expect(
+      await screen.findByText('Marked as ordered with tracking information'),
+    ).toBeInTheDocument();
+  });
+
+  it('normalizes a non-ISO date entry to YYYY-MM-DD before submit', async () => {
+    mockReorderAPI.getPendingRequests.mockResolvedValue({
+      data: [buildRequest({ id: 8, status: 'approved' })],
+    } as any);
+    mockReorderAPI.markOrdered.mockResolvedValue({ data: {} } as any);
+
+    renderDashboard();
+
+    const markOrderedBtn = await screen.findByRole('button', { name: /mark ordered/i });
+    fireEvent.click(markOrderedBtn);
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/estimated delivery date/i), {
+      target: { value: '05/01/2026' },
+    });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /mark ordered/i }));
+
+    await waitFor(() => {
+      expect(mockReorderAPI.markOrdered).toHaveBeenCalledWith(8, {
+        estimated_delivery: '2026-05-01',
       });
     });
 

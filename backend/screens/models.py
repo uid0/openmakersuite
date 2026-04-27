@@ -192,6 +192,7 @@ class ScreenContentBlock(models.Model):
     BLOCK_CUSTOM_TEXT = "custom_text"
     BLOCK_ANNOUNCEMENT = "announcement"
     BLOCK_WEATHER = "weather"
+    BLOCK_SHARED_WEATHER = "shared_weather"
     BLOCK_TRAFFIC = "traffic"
     BLOCK_MEMBER_COUNT = "member_count"
     BLOCK_BOARD_MEETING = "board_meeting"
@@ -202,6 +203,7 @@ class ScreenContentBlock(models.Model):
         (BLOCK_CUSTOM_TEXT, "Custom Text / Rules Reminder"),
         (BLOCK_ANNOUNCEMENT, "Announcement / Class Slide"),
         (BLOCK_WEATHER, "Weather"),
+        (BLOCK_SHARED_WEATHER, "Shared Weather"),
         (BLOCK_TRAFFIC, "Traffic"),
         (BLOCK_MEMBER_COUNT, "Member Count"),
         (BLOCK_BOARD_MEETING, "Next Board Meeting"),

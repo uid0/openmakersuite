@@ -239,6 +239,13 @@ if DEVELOPMENT_MODE:
 
 FRONTEND_URL = config("FRONTEND_URL", default="http://192.168.1.36:3000")
 
+# Shared weather widget URL surfaced to all kiosk screens. All SIGs share the
+# same physical location, so a single global URL avoids per-screen duplication.
+WEATHER_URL = config(
+    "WEATHER_URL",
+    default="https://www.wunderground.com/weather/us/tx/carrollton/",
+)
+
 # Passkey / WebAuthn configuration
 # django-passkey-auth derives the Relying Party ID from request.get_host(). When
 # the site is served behind TLS, browsers will only surface the save-passkey

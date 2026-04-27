@@ -144,4 +144,5 @@ class KioskPayloadSerializer(serializers.Serializer):
     screen = serializers.DictField()
     system_messages = serializers.ListField(child=serializers.DictField())
     content_blocks = serializers.ListField(child=serializers.DictField())
+    weather_url = serializers.CharField(allow_blank=True)
     generated_at = serializers.DateTimeField()

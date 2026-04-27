@@ -89,6 +89,29 @@ describe('KioskDisplayPage', () => {
     expect(screen.getByText('Meeting at 3')).toBeInTheDocument();
   });
 
+  it('renders shared_weather block as an iframe pointing at weather_url', async () => {
+    (api.kioskAPI.fetchPayload as jest.Mock).mockResolvedValue({
+      data: makePayload({
+        weather_url: 'https://www.wunderground.com/weather/us/tx/carrollton/',
+        content_blocks: [
+          {
+            id: 'w1',
+            block_type: 'shared_weather',
+            title: '',
+            body: '',
+            config: {},
+            order: 0,
+          },
+        ],
+      }),
+    });
+    renderKiosk('lobby', 'secret');
+    const iframe = (await screen.findByTestId('shared-weather-iframe')) as HTMLIFrameElement;
+    expect(iframe.getAttribute('src')).toBe(
+      'https://www.wunderground.com/weather/us/tx/carrollton/',
+    );
+  });
+
   it('shows error state when backend rejects', async () => {
     (api.kioskAPI.fetchPayload as jest.Mock).mockRejectedValue(new Error('403'));
     renderKiosk('lobby', 'secret');

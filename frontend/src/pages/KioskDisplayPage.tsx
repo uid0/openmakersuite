@@ -8,6 +8,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import SharedWeatherBlock from '../components/screens/SharedWeatherBlock';
 import { kioskAPI } from '../services/api';
 import { KioskPayload, ScreenBlockType, SystemMessageLevel } from '../types';
 
@@ -31,6 +32,8 @@ const blockTypeLabel = (t: ScreenBlockType): string => {
     case 'announcement':
       return 'Announcement';
     case 'weather':
+      return 'Weather';
+    case 'shared_weather':
       return 'Weather';
     case 'traffic':
       return 'Traffic';
@@ -198,15 +201,21 @@ const KioskDisplayPage: React.FC = () => {
             <div style={{ fontSize: 22, opacity: 0.7, marginBottom: 8 }}>
               {blockTypeLabel(activeBlock.block_type)}
             </div>
-            {activeBlock.title && (
-              <div style={{ fontSize: 72, fontWeight: 700, marginBottom: 16 }}>
-                {activeBlock.title}
-              </div>
-            )}
-            {activeBlock.body && (
-              <div style={{ fontSize: 36, whiteSpace: 'pre-wrap', maxWidth: 960 }}>
-                {activeBlock.body}
-              </div>
+            {activeBlock.block_type === 'shared_weather' ? (
+              <SharedWeatherBlock weatherUrl={payload.weather_url || ''} />
+            ) : (
+              <>
+                {activeBlock.title && (
+                  <div style={{ fontSize: 72, fontWeight: 700, marginBottom: 16 }}>
+                    {activeBlock.title}
+                  </div>
+                )}
+                {activeBlock.body && (
+                  <div style={{ fontSize: 36, whiteSpace: 'pre-wrap', maxWidth: 960 }}>
+                    {activeBlock.body}
+                  </div>
+                )}
+              </>
             )}
           </>
         ) : (

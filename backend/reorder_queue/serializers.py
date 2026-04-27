@@ -17,6 +17,7 @@ from .models import (
     LeadTimeLog,
     OrderDelivery,
     PurchaseOrder,
+    PurchaseOrderAttachment,
     PurchaseOrderItem,
     ReorderRequest,
     WebHook,
@@ -151,6 +152,54 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
         return None
 
 
+class PurchaseOrderAttachmentSerializer(serializers.ModelSerializer):
+    """Serializer for files attached to a purchase order."""
+
+    uploaded_by_name = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+    file_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PurchaseOrderAttachment
+        fields = [
+            "id",
+            "purchase_order",
+            "file",
+            "file_url",
+            "file_name",
+            "description",
+            "uploaded_by",
+            "uploaded_by_name",
+            "uploaded_at",
+        ]
+        read_only_fields = [
+            "purchase_order",
+            "uploaded_at",
+            "uploaded_by",
+            "uploaded_by_name",
+            "file_url",
+            "file_name",
+        ]
+
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by:
+            return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
+        return None
+
+    def get_file_url(self, obj):
+        request = self.context.get("request")
+        if obj.file and request:
+            return request.build_absolute_uri(obj.file.url)
+        if obj.file:
+            return obj.file.url
+        return None
+
+    def get_file_name(self, obj):
+        if obj.file:
+            return obj.file.name.rsplit("/", 1)[-1]
+        return None
+
+
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     """Comprehensive serializer for purchase orders."""
 
@@ -166,6 +215,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
 
     # Line items
     items = PurchaseOrderItemSerializer(many=True, read_only=True)
+    attachments = PurchaseOrderAttachmentSerializer(many=True, read_only=True)
 
     # Calculated fields
     total_items = serializers.IntegerField(read_only=True)
@@ -184,6 +234,8 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "status",
             "order_date",
             "expected_delivery_date",
+            "supplier_order_number",
+            "sales_order_number",
             "notes",
             "estimated_total",
             "actual_total",
@@ -199,6 +251,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "updated_at",
             # Related data
             "items",
+            "attachments",
             # Calculated fields
             "total_items",
             "total_quantity",

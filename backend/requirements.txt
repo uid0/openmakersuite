@@ -35,7 +35,7 @@ python-slugify==8.0.4
 requests==2.33.0
 paho-mqtt==2.1.0
 PyJWT==2.12.1
-cryptography==46.0.6
+cryptography==46.0.7
 
 # Error Tracking
 sentry-sdk[django]==2.44.0

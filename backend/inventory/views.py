@@ -1853,6 +1853,28 @@ class AssetViewSet(viewsets.ModelViewSet):
             logger = logging.getLogger(__name__)
             logger.warning(f"Failed to send asset problem webhook: {e}", exc_info=True)
 
+        # Create in-app notifications for admins about the asset problem
+        try:
+            from notifications.services import notify_admins
+
+            reporter_text = f" by {reported_by}" if reported_by else ""
+            notify_admins(
+                type="warning",
+                title=f"Asset problem reported: {asset.name}",
+                message=(
+                    f"A problem was reported{reporter_text} for {asset.name}: "
+                    f"{description[:200]}"
+                ),
+                action_url=f"/inventory/assets/{asset.id}",
+                metadata={
+                    "asset_problem_id": str(problem.id),
+                    "asset_id": str(asset.id),
+                },
+            )
+        except Exception:  # nosec B110
+            # Don't fail the request if notification creation fails
+            pass
+
         from .serializers import AssetProblemSerializer
 
         serializer = AssetProblemSerializer(problem, context={"request": request})

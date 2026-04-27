@@ -91,9 +91,13 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
     setIsMobileOpen(false);
   };
 
-  // Load notifications on mount
+  // Load notifications on mount and poll every 60s so the bell badge stays current.
   useEffect(() => {
     notifications.loadNotifications();
+    const interval = setInterval(() => {
+      notifications.loadNotifications();
+    }, 60000);
+    return () => clearInterval(interval);
   }, [notifications]);
 
   if (shouldHideSidebar) {

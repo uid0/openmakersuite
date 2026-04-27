@@ -1213,10 +1213,10 @@ export const notificationsAPI = {
     api.get<{ results: BackendNotification[] }>('/notifications/', { params }),
 
   markAsRead: (id: string) =>
-    api.post(`/notifications/${id}/mark_read/`),
+    api.post(`/notifications/${id}/mark-read/`),
 
   markAllAsRead: () =>
-    api.post('/notifications/mark_all_read/'),
+    api.post('/notifications/mark-all-read/'),
 
   delete: (id: string) =>
     api.delete(`/notifications/${id}/`),

@@ -39,8 +39,34 @@ describe('NotificationBadge Component', () => {
 
     const badge = screen.getByRole('button', { name: /3 unread notifications/i });
     expect(badge).toBeInTheDocument();
-    
+
     badge.click();
     expect(mockOnClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes the unread count in its accessible name', () => {
+    renderBadge(7);
+    expect(
+      screen.getByRole('button', { name: /7 unread notifications/i })
+    ).toBeInTheDocument();
+  });
+
+  it('renders single-digit, double-digit, and 99+ counts', () => {
+    const { rerender } = renderBadge(1);
+    expect(screen.getByText('1')).toBeInTheDocument();
+
+    rerender(
+      <MantineProvider>
+        <NotificationBadge count={42} />
+      </MantineProvider>
+    );
+    expect(screen.getByText('42')).toBeInTheDocument();
+
+    rerender(
+      <MantineProvider>
+        <NotificationBadge count={250} />
+      </MantineProvider>
+    );
+    expect(screen.getByText('99+')).toBeInTheDocument();
   });
 });

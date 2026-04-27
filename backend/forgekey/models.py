@@ -5,6 +5,7 @@ Models for ForgeKey - ESP32 device management and asset authorization system.
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 from typing import Optional
 
@@ -15,6 +16,8 @@ from django.db import models
 from django.utils import timezone
 
 from inventory.models import Asset, Location
+
+logger = logging.getLogger(__name__)
 
 
 class DeviceType(models.Model):
@@ -606,7 +609,13 @@ class FirmwareVersion(models.Model):
         upload_to="forgekey/firmware/",
         help_text="Firmware binary file",
     )
-    signature = models.TextField(help_text="Cryptographic signature of the firmware file")
+    signature = models.TextField(
+        blank=True,
+        help_text=(
+            "base64(DER) ECDSA(P-256) signature over the firmware binary, "
+            "computed on save when FORGEKEY_FIRMWARE_SIGNING_KEY is configured."
+        ),
+    )
     sha256 = models.CharField(
         max_length=64,
         blank=True,
@@ -640,22 +649,44 @@ class FirmwareVersion(models.Model):
         return f"{self.device_type.name} - {self.version}"
 
     def save(self, *args, **kwargs):
-        if self.firmware_file and not self.sha256:
-            digest = hashlib.sha256()
-            try:
-                self.firmware_file.seek(0)
-                for chunk in self.firmware_file.chunks():
-                    digest.update(chunk)
-                self.firmware_file.seek(0)
-            except (ValueError, AttributeError):
-                # Underlying file may not support seek (e.g. already closed
-                # after a prior save). Fall back to opening the storage copy.
-                if self.firmware_file.name:
-                    with self.firmware_file.storage.open(self.firmware_file.name, "rb") as fh:
-                        for chunk in iter(lambda: fh.read(65536), b""):
-                            digest.update(chunk)
-            self.sha256 = digest.hexdigest()
+        if self.firmware_file and (not self.sha256 or not self.signature):
+            data = self._read_firmware_bytes()
+            if data is not None:
+                if not self.sha256:
+                    self.sha256 = hashlib.sha256(data).hexdigest()
+                if not self.signature:
+                    self.signature = self._sign_or_log(data)
         super().save(*args, **kwargs)
+
+    def _read_firmware_bytes(self) -> Optional[bytes]:
+        try:
+            self.firmware_file.seek(0)
+            data = self.firmware_file.read()
+            self.firmware_file.seek(0)
+            return data
+        except (ValueError, AttributeError):
+            if not self.firmware_file.name:
+                return None
+            with self.firmware_file.storage.open(self.firmware_file.name, "rb") as fh:
+                return fh.read()
+
+    @staticmethod
+    def _sign_or_log(data: bytes) -> str:
+        # Imported lazily so the model module stays import-safe even if the
+        # cryptography stack is unavailable in some test environments.
+        from .services.firmware_signing import (
+            FirmwareSigningError,
+            is_signing_configured,
+            sign_firmware_bytes,
+        )
+
+        if not is_signing_configured():
+            return ""
+        try:
+            return sign_firmware_bytes(data)
+        except FirmwareSigningError as exc:
+            logger.warning("Skipping firmware signing: %s", exc)
+            return ""
 
     @property
     def effective_binary_url(self) -> str:

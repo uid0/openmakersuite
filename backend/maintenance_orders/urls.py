@@ -6,8 +6,10 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AssetWarrantyViewSet,
+    EmergencyAuthorizationViewSet,
     ThirdPartyWorkOrderAssetViewSet,
     ThirdPartyWorkOrderAttachmentViewSet,
+    ThirdPartyWorkOrderQuoteViewSet,
     ThirdPartyWorkOrderViewSet,
     asset_wo_status,
 )
@@ -23,6 +25,12 @@ router.register(
     r"attachments",
     ThirdPartyWorkOrderAttachmentViewSet,
     basename="third-party-work-order-attachment",
+)
+router.register(r"quotes", ThirdPartyWorkOrderQuoteViewSet, basename="third-party-work-order-quote")
+router.register(
+    r"emergency-authorizations",
+    EmergencyAuthorizationViewSet,
+    basename="emergency-authorization",
 )
 router.register(r"warranties", AssetWarrantyViewSet, basename="asset-warranty")
 

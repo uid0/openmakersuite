@@ -4,9 +4,11 @@ from django.contrib import admin
 
 from .models import (
     AssetWarranty,
+    EmergencyAuthorization,
     ThirdPartyWorkOrder,
     ThirdPartyWorkOrderAsset,
     ThirdPartyWorkOrderAttachment,
+    ThirdPartyWorkOrderQuote,
 )
 
 
@@ -136,6 +138,29 @@ class AssetWarrantyAdmin(admin.ModelAdmin):
     @admin.display(boolean=True, description="Active")
     def active(self, obj):
         return obj.is_active
+
+
+@admin.register(ThirdPartyWorkOrderQuote)
+class ThirdPartyWorkOrderQuoteAdmin(admin.ModelAdmin):
+    list_display = ["work_order", "vendor", "amount", "submitted_by", "created_at"]
+    search_fields = ["work_order__id", "vendor__name", "notes"]
+    autocomplete_fields = ["work_order", "vendor", "submitted_by"]
+    readonly_fields = ["id", "created_at"]
+
+
+@admin.register(EmergencyAuthorization)
+class EmergencyAuthorizationAdmin(admin.ModelAdmin):
+    list_display = [
+        "work_order",
+        "authorized_by",
+        "authorized_at",
+        "expires_at",
+        "revoked_at",
+    ]
+    list_filter = ["revoked_at"]
+    search_fields = ["work_order__id", "reason"]
+    autocomplete_fields = ["work_order", "authorized_by"]
+    readonly_fields = ["id", "authorized_at", "expires_at"]
 
 
 @admin.register(ThirdPartyWorkOrderAttachment)

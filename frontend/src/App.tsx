@@ -35,6 +35,7 @@ import MakerBoxAdminPage from './pages/MakerBoxAdminPage';
 import MakerBoxScanPage from './pages/MakerBoxScanPage';
 import MaintenanceDashboard from './pages/MaintenanceDashboard';
 import MaintenanceDashboardPage from './pages/MaintenanceDashboardPage';
+import ThirdPartyWorkOrderPage from './pages/ThirdPartyWorkOrderPage';
 import WorkOrderPage from './pages/WorkOrderPage';
 import PurchaseOrderFormPage from './pages/PurchaseOrderFormPage';
 import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
@@ -184,6 +185,7 @@ function AppContent() {
           <Route path="/maintenance" element={<WorkspaceLayout><MaintenanceDashboardPage /></WorkspaceLayout>} />
           <Route path="/maintenance/dashboard" element={<WorkspaceLayout><MaintenanceDashboard /></WorkspaceLayout>} />
           <Route path="/maintenance/work-orders/:id" element={<WorkspaceLayout><WorkOrderPage /></WorkspaceLayout>} />
+          <Route path="/maintenance/third-party/:id" element={<WorkspaceLayout><ThirdPartyWorkOrderPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist/:checklistId/complete/:completionId" element={<WorkspaceLayout><ChecklistCompletionPage /></WorkspaceLayout>} />
 
           {/* SIGs Workspace */}

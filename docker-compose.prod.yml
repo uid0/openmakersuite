@@ -56,10 +56,15 @@ services:
     volumes:
       - emqx_data:/opt/emqx/data
       - emqx_log:/opt/emqx/log
+      # bootstrap_users is rendered by deploy.sh from EMQX_DASHBOARD_PASSWORD;
+      # EMQX re-applies it on every boot, so the admin login stays in sync with
+      # the .env value (oms-f9z).
+      - ./scripts/emqx/bootstrap-admins.txt:/opt/emqx/etc/bootstrap_users:ro
     environment:
       - EMQX_NAME=oms-emqx
       - EMQX_HOST=127.0.0.1
       - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD}
+      - EMQX_DASHBOARD__BOOTSTRAP_USERS_FILE=/opt/emqx/etc/bootstrap_users
     healthcheck:
       test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
       interval: 30s

@@ -32,6 +32,48 @@ deploy_log() {
     echo "$@" | tee -a "$DEPLOY_LOG"
 }
 
+# Render the EMQX bootstrap admin file. EMQX 6.x enforces password complexity
+# (8+ chars, mixed case, digit) when the dashboard user is created, and the
+# legacy EMQX_DASHBOARD__DEFAULT_PASSWORD env var is bootstrap-only — if it
+# fails complexity or is missing, EMQX silently falls back to its built-in
+# `public` default and there is no way to recover without nuking emqx_data.
+# bootstrap_users_file is re-applied on every boot, so we render it from the
+# validated env var before bringing the broker up (oms-f9z).
+echo "🔐 Rendering EMQX bootstrap admin file..."
+if [ -z "${EMQX_DASHBOARD_PASSWORD:-}" ]; then
+    echo "❌ EMQX_DASHBOARD_PASSWORD is not set in .env — refusing to deploy."
+    echo "   Set it to a value with 8+ chars, mixed case, and at least one digit."
+    exit 1
+fi
+
+PW="$EMQX_DASHBOARD_PASSWORD"
+PW_ERR=""
+if [ ${#PW} -lt 8 ]; then
+    PW_ERR="must be at least 8 characters"
+elif ! printf '%s' "$PW" | grep -q '[A-Z]'; then
+    PW_ERR="must contain an uppercase letter"
+elif ! printf '%s' "$PW" | grep -q '[a-z]'; then
+    PW_ERR="must contain a lowercase letter"
+elif ! printf '%s' "$PW" | grep -q '[0-9]'; then
+    PW_ERR="must contain a digit"
+elif [ "$PW" = "change-me-on-first-deploy" ]; then
+    PW_ERR="is the placeholder value from .env.prod.example"
+fi
+
+if [ -n "$PW_ERR" ]; then
+    echo "❌ EMQX_DASHBOARD_PASSWORD ${PW_ERR}."
+    echo "   EMQX 6.x rejects weak passwords at bootstrap; pick a stronger value."
+    exit 1
+fi
+
+mkdir -p scripts/emqx
+# Write atomically: chmod first so the password is never world-readable on disk.
+BOOTSTRAP_FILE="scripts/emqx/bootstrap-admins.txt"
+umask 077
+printf 'admin:%s\n' "$PW" > "$BOOTSTRAP_FILE"
+chmod 600 "$BOOTSTRAP_FILE"
+echo "✅ Wrote $BOOTSTRAP_FILE (admin user)"
+
 # Stop existing containers
 echo "⏹️  Stopping existing containers..."
 $COMPOSE down

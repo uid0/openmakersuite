@@ -2086,14 +2086,39 @@ class WorkOrderSubmission(models.Model):
         (SOURCE_MANUAL, "Manual"),
     ]
 
+    KIND_PM_COMPLETION = "pm_completion"
+    KIND_THIRD_PARTY_WO = "third_party_wo"
+
+    KIND_CHOICES = [
+        (KIND_PM_COMPLETION, "PM completion"),
+        (KIND_THIRD_PARTY_WO, "Third-party WO"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(
+        max_length=20,
+        choices=KIND_CHOICES,
+        default=KIND_PM_COMPLETION,
+        help_text=(
+            "Discriminates which ingest pipeline to run: pm_completion routes to "
+            "WorkOrder updates; third_party_wo routes to ThirdPartyWorkOrder."
+        ),
+    )
     work_order = models.ForeignKey(
         WorkOrder,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="submissions",
-        help_text="Resolved work order (null until the PDF has been parsed)",
+        help_text="Resolved PM work order (null for third_party_wo or until parsed)",
+    )
+    third_party_work_order = models.ForeignKey(
+        "maintenance_orders.ThirdPartyWorkOrder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submissions",
+        help_text="Resolved third-party work order (null for pm_completion or until parsed)",
     )
     received_at = models.DateTimeField(auto_now_add=True)
     from_email = models.EmailField(blank=True)

@@ -363,6 +363,14 @@ MQTT_TOPIC_PREFIX = config("MQTT_TOPIC_PREFIX", default="forgekey")
 MQTT_CLIENT_ID = config("MQTT_CLIENT_ID", default="forgekey-server")
 MQTT_KEEPALIVE = config("MQTT_KEEPALIVE", default=60, cast=int)
 
+# EMQX broker — dashboard password is rendered into the bootstrap_users_file
+# by deploy.sh on every deploy; the API key/secret pair is generated in the
+# dashboard after first deploy and used by the backend to call EMQX REST API.
+EMQX_API_URL = config("EMQX_API_URL", default="http://emqx:18083/api/v5")
+EMQX_DASHBOARD_PASSWORD = config("EMQX_DASHBOARD_PASSWORD", default="")
+EMQX_API_KEY = config("EMQX_API_KEY", default="")
+EMQX_API_SECRET = config("EMQX_API_SECRET", default="")
+
 # ForgeKey JWT Configuration
 FORGEKEY_SHARED_SECRET = config("FORGEKEY_SHARED_SECRET", default="change-me-in-production")
 FORGEKEY_JWT_ALGORITHM = "HS256"

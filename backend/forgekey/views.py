@@ -125,8 +125,23 @@ class ForgeKeyDeviceRegisterView(APIView):
         if device_type_code:
             device_type_obj = DeviceType.objects.filter(code=device_type_code).first()
             if device_type_obj is None:
+                valid_codes = sorted(
+                    DeviceType.objects.filter(is_active=True).values_list("code", flat=True)
+                )
+                logger.warning(
+                    "ForgeKey register: unknown device_type %r (normalized=%r) from mac=%s",
+                    raw_device_type,
+                    device_type_code,
+                    mac,
+                )
                 return Response(
-                    {"detail": f"Unknown device_type '{raw_device_type}'."},
+                    {
+                        "detail": (
+                            f"Unknown device_type '{raw_device_type}'. "
+                            f"Valid: {', '.join(valid_codes)}"
+                        ),
+                        "valid_device_types": valid_codes,
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -144,8 +159,17 @@ class ForgeKeyDeviceRegisterView(APIView):
         created = device is None
         if created:
             if device_type_obj is None:
+                valid_codes = sorted(
+                    DeviceType.objects.filter(is_active=True).values_list("code", flat=True)
+                )
                 return Response(
-                    {"detail": "device_type is required for first registration."},
+                    {
+                        "detail": (
+                            "device_type is required for first registration. "
+                            f"Valid: {', '.join(valid_codes)}"
+                        ),
+                        "valid_device_types": valid_codes,
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             device = ESP32Device(mac_address=mac, **defaults)

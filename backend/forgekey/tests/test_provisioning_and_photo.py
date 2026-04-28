@@ -224,6 +224,88 @@ class TestRegister:
         assert device.free_heap == 123456
         assert device.ip == "192.168.1.42"
 
+    def test_register_unknown_device_type_returns_400_with_valid_codes(
+        self, api_client, register_url
+    ):
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:10",
+            "sensor_kind": "smell-o-meter",
+        }
+
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN=PROVISIONING_TOKEN,
+            format="multipart",
+        )
+
+        assert resp.status_code == 400, resp.content
+        body = resp.json()
+        assert "smell-o-meter" in body["detail"]
+        valid = body.get("valid_device_types") or []
+        assert DeviceType.TYPE_PEOPLE_COUNTER in valid
+        assert DeviceType.TYPE_ENV_SENSOR in valid
+        assert DeviceType.TYPE_DOOR_COUNTER in valid
+
+    def test_register_missing_device_type_returns_400_with_valid_codes(
+        self, api_client, register_url
+    ):
+        meta = {"mac_address": "AA:BB:CC:DD:EE:11"}
+
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN=PROVISIONING_TOKEN,
+            format="multipart",
+        )
+
+        assert resp.status_code == 400, resp.content
+        body = resp.json()
+        assert "device_type is required" in body["detail"]
+        valid = body.get("valid_device_types") or []
+        assert DeviceType.TYPE_PEOPLE_COUNTER in valid
+
+
+class TestSeedDeviceTypesMigration:
+    """Migration 0004 must seed every TYPE_CHOICES code so a fresh DB can
+    register devices end-to-end without a manual fixture step (oms-f9z).
+    """
+
+    def test_seed_migration_creates_rows_for_all_choices(self, db):
+        for code, _label in DeviceType.TYPE_CHOICES:
+            assert DeviceType.objects.filter(code=code).exists(), (
+                f"DeviceType row missing for code={code!r}; "
+                "migration 0004_seed_device_types should have created it."
+            )
+
+    def test_seed_migration_creates_required_forgekey_codes(self, db):
+        for code in (
+            DeviceType.TYPE_PEOPLE_COUNTER,
+            DeviceType.TYPE_ENV_SENSOR,
+            DeviceType.TYPE_DOOR_COUNTER,
+        ):
+            row = DeviceType.objects.get(code=code)
+            assert row.is_active is True
+            assert row.name  # non-empty human-readable label
+
+    def test_register_with_seeded_people_counter_returns_201(self, api_client, register_url):
+        """No factory: relies purely on the data migration having seeded the row."""
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:20",
+            "sensor_kind": "people-counter",
+            "firmware_version": "0.1.0",
+        }
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN=PROVISIONING_TOKEN,
+            format="multipart",
+        )
+
+        assert resp.status_code == 201, resp.content
+        device = ESP32Device.objects.get(mac_address="AA:BB:CC:DD:EE:20")
+        assert device.device_type.code == DeviceType.TYPE_PEOPLE_COUNTER
+
 
 # ---------------------------------------------------------------------------
 # AC: periodic photo upload

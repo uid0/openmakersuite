@@ -41,6 +41,35 @@ services:
     networks:
       - app-network
 
+  emqx:
+    # Digest pinned from `docker pull emqx/emqx-enterprise:6.2.0` on 2026-04-28.
+    # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
+    image: emqx/emqx-enterprise:6.2.0@sha256:da01e1b51c2b60fa735a32922c697bcaa5bcf45c4c76b6ca8214111da752ff25
+    container_name: oms-emqx
+    logging: *default-logging
+    ports:
+      - "1883:1883"     # MQTT
+      - "8083:8083"     # MQTT-over-WebSocket
+      - "8084:8084"     # MQTT-over-WSS
+      - "8883:8883"     # MQTTS
+      - "18083:18083"   # Dashboard + REST API
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    environment:
+      - EMQX_NAME=oms-emqx
+      - EMQX_HOST=127.0.0.1
+      - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD}
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - app-network
+
   backend:
     build:
       context: ./backend
@@ -65,10 +94,19 @@ services:
       - FRONTEND_URL=https://${DOMAIN:-dallas.openmakersuite.net}
       - SENTRY_RELEASE=${GIT_HASH}
       - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
+      - MQTT_BROKER_HOST=emqx
+      - MQTT_BROKER_PORT=1883
+      - MQTT_BROKER_USERNAME=${MQTT_BROKER_USERNAME:-}
+      - MQTT_BROKER_PASSWORD=${MQTT_BROKER_PASSWORD:-}
+      - EMQX_API_URL=http://emqx:18083/api/v5
+      - EMQX_API_KEY=${EMQX_API_KEY:-}
+      - EMQX_API_SECRET=${EMQX_API_SECRET:-}
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      emqx:
         condition: service_healthy
     healthcheck:
       test:
@@ -203,6 +241,8 @@ volumes:
   letsencrypt_lib:
   letsencrypt_logs:
   certbot_challenges:
+  emqx_data:
+  emqx_log:
 
 networks:
   app-network:

@@ -2,7 +2,12 @@
 
 from django.contrib import admin
 
-from .models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAsset, ThirdPartyWorkOrderAttachment
+from .models import (
+    AssetWarranty,
+    ThirdPartyWorkOrder,
+    ThirdPartyWorkOrderAsset,
+    ThirdPartyWorkOrderAttachment,
+)
 
 
 class ThirdPartyWorkOrderAssetInline(admin.TabularInline):
@@ -112,6 +117,25 @@ class ThirdPartyWorkOrderAssetAdmin(admin.ModelAdmin):
     search_fields = ["work_order__id", "asset__name", "asset__asset_tag"]
     autocomplete_fields = ["work_order", "asset"]
     readonly_fields = ["id", "created_at"]
+
+
+@admin.register(AssetWarranty)
+class AssetWarrantyAdmin(admin.ModelAdmin):
+    list_display = ["asset", "provider", "install_date", "end_date", "duration_days", "active"]
+    list_filter = ["provider"]
+    search_fields = ["asset__name", "asset__asset_tag", "provider", "policy_number"]
+    autocomplete_fields = ["asset"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    fieldsets = (
+        (None, {"fields": ("id", "asset", "provider", "policy_number")}),
+        ("Coverage", {"fields": ("install_date", "duration_days", "end_date")}),
+        ("Notes", {"fields": ("notes",)}),
+        ("Audit", {"fields": ("created_at", "updated_at")}),
+    )
+
+    @admin.display(boolean=True, description="Active")
+    def active(self, obj):
+        return obj.is_active
 
 
 @admin.register(ThirdPartyWorkOrderAttachment)

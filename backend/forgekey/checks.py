@@ -15,8 +15,8 @@ from django.core.checks import Tags, Warning, register
 W_MISSING = "forgekey.W001"
 W_DEFAULT = "forgekey.W002"
 W_INVALID = "forgekey.W003"
-W_PROVISIONING_TOKEN = "forgekey.W004"
-W_EMQX_PASSWORD = "forgekey.W005"
+W_PROVISIONING_TOKEN = "forgekey.W004"  # nosec B105 — Django check ID, not a password
+W_EMQX_PASSWORD = "forgekey.W005"  # nosec B105 — Django check ID, not a password
 W_EMQX_API = "forgekey.W006"
 
 PLACEHOLDER_PROVISIONING_TOKEN = "REPLACE_ME_PROVISIONING_TOKEN"  # nosec B105

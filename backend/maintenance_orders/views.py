@@ -19,16 +19,20 @@ from . import transitions as wo_transitions
 from .models import (
     AssetWarranty,
     EmergencyAuthorization,
+    RecoveryTask,
     ThirdPartyWorkOrder,
     ThirdPartyWorkOrderAsset,
     ThirdPartyWorkOrderAttachment,
+    ThirdPartyWorkOrderAuditLog,
     ThirdPartyWorkOrderQuote,
 )
 from .serializers import (
     AssetWarrantySerializer,
     EmergencyAuthorizationSerializer,
+    RecoveryTaskSerializer,
     ThirdPartyWorkOrderAssetSerializer,
     ThirdPartyWorkOrderAttachmentSerializer,
+    ThirdPartyWorkOrderAuditLogSerializer,
     ThirdPartyWorkOrderQuoteSerializer,
     ThirdPartyWorkOrderSerializer,
 )
@@ -188,6 +192,31 @@ class ThirdPartyWorkOrderViewSet(_StaffWriteMixin, viewsets.ModelViewSet):
             return _err(exc)
         return Response(self.get_serializer(wo).data)
 
+    @action(detail=True, methods=["post"], url_path="record-keyfob-return")
+    def record_keyfob_return(self, request, pk=None):
+        wo = self.get_object()
+        try:
+            wo_transitions.record_keyfob_return(wo, user=request.user)
+        except (PermissionDenied, ValidationError) as exc:
+            return _err(exc)
+        return Response(self.get_serializer(wo).data)
+
+    @action(detail=True, methods=["post"], url_path="override-variance")
+    def override_variance(self, request, pk=None):
+        wo = self.get_object()
+        reason = request.data.get("reason", "")
+        try:
+            wo_transitions.override_variance_block(wo, user=request.user, reason=reason)
+        except (PermissionDenied, ValidationError) as exc:
+            return _err(exc)
+        return Response(self.get_serializer(wo).data)
+
+    @action(detail=True, methods=["get"], url_path="audit-log")
+    def audit_log(self, request, pk=None):
+        wo = self.get_object()
+        logs = wo.audit_logs.select_related("actor").all()
+        return Response(ThirdPartyWorkOrderAuditLogSerializer(logs, many=True).data)
+
 
 def _err(exc):
     if isinstance(exc, PermissionDenied):
@@ -236,6 +265,18 @@ class AssetWarrantyViewSet(_StaffWriteMixin, viewsets.ModelViewSet):
     queryset = AssetWarranty.objects.select_related("asset")
     serializer_class = AssetWarrantySerializer
     filterset_fields = ["asset", "provider"]
+
+
+class ThirdPartyWorkOrderAuditLogViewSet(_StaffWriteMixin, viewsets.ReadOnlyModelViewSet):
+    queryset = ThirdPartyWorkOrderAuditLog.objects.select_related("work_order", "actor")
+    serializer_class = ThirdPartyWorkOrderAuditLogSerializer
+    filterset_fields = ["work_order", "action", "actor"]
+
+
+class RecoveryTaskViewSet(_StaffWriteMixin, viewsets.ModelViewSet):
+    queryset = RecoveryTask.objects.select_related("work_order", "vendor", "assigned_to")
+    serializer_class = RecoveryTaskSerializer
+    filterset_fields = ["status", "assigned_group", "work_order", "vendor"]
 
 
 def _vendor_compliance_payload(vendor: Vendor) -> dict:

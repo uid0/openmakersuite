@@ -5,9 +5,11 @@ from rest_framework import serializers
 from .models import (
     AssetWarranty,
     EmergencyAuthorization,
+    RecoveryTask,
     ThirdPartyWorkOrder,
     ThirdPartyWorkOrderAsset,
     ThirdPartyWorkOrderAttachment,
+    ThirdPartyWorkOrderAuditLog,
     ThirdPartyWorkOrderQuote,
 )
 
@@ -141,6 +143,54 @@ class ThirdPartyWorkOrderAttachmentSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "uploaded_at", "uploaded_by_username"]
 
 
+class ThirdPartyWorkOrderAuditLogSerializer(serializers.ModelSerializer):
+    actor_username = serializers.CharField(source="actor.username", read_only=True, allow_null=True)
+    action_display = serializers.CharField(source="get_action_display", read_only=True)
+
+    class Meta:
+        model = ThirdPartyWorkOrderAuditLog
+        fields = [
+            "id",
+            "work_order",
+            "actor",
+            "actor_username",
+            "action",
+            "action_display",
+            "old_state",
+            "new_state",
+            "notes",
+            "metadata",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class RecoveryTaskSerializer(serializers.ModelSerializer):
+    vendor_name = serializers.CharField(source="vendor.name", read_only=True, allow_null=True)
+    work_order_short_id = serializers.CharField(source="work_order.short_id", read_only=True)
+
+    class Meta:
+        model = RecoveryTask
+        fields = [
+            "id",
+            "work_order",
+            "work_order_short_id",
+            "vendor",
+            "vendor_name",
+            "amount",
+            "title",
+            "description",
+            "status",
+            "assigned_group",
+            "assigned_to",
+            "resolved_at",
+            "resolution_notes",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "work_order_short_id", "vendor_name", "created_at", "updated_at"]
+
+
 class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
     """Full third-party work order with nested asset distribution + attachments."""
 
@@ -164,6 +214,7 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
             has_required_quotes,
         )
 
+        keyfob_outstanding = bool(obj.keyfob_id) and obj.keyfob_returned_at is None
         return {
             "has_nte": obj.nte_amount is not None,
             "has_active_emergency_authorization": has_active_emergency_authorization(obj),
@@ -172,6 +223,7 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
             "has_photo_evidence": has_photo_evidence(obj),
             "has_invoice_and_fsr": has_invoice_and_fsr(obj),
             "variance_status": obj.variance_status,
+            "keyfob_outstanding": keyfob_outstanding,
         }
 
     def get_active_warranty(self, obj):
@@ -205,6 +257,8 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
             "downtime_end",
             "total_downtime",
             "keyfob_id",
+            "keyfob_returned_at",
+            "keyfob_returned_by",
             "warranty_recovery",
             "nte_set_by",
             "nte_set_at",
@@ -241,6 +295,8 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
             "quote_waiver_signed_at",
             "quote_waiver_reason",
             "variance_status",
+            "keyfob_returned_at",
+            "keyfob_returned_by",
             "workflow",
             "created_at",
             "updated_at",

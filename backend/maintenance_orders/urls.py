@@ -7,8 +7,10 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AssetWarrantyViewSet,
     EmergencyAuthorizationViewSet,
+    RecoveryTaskViewSet,
     ThirdPartyWorkOrderAssetViewSet,
     ThirdPartyWorkOrderAttachmentViewSet,
+    ThirdPartyWorkOrderAuditLogViewSet,
     ThirdPartyWorkOrderQuoteViewSet,
     ThirdPartyWorkOrderViewSet,
     asset_wo_status,
@@ -33,6 +35,12 @@ router.register(
     basename="emergency-authorization",
 )
 router.register(r"warranties", AssetWarrantyViewSet, basename="asset-warranty")
+router.register(
+    r"audit-logs",
+    ThirdPartyWorkOrderAuditLogViewSet,
+    basename="third-party-work-order-audit-log",
+)
+router.register(r"recovery-tasks", RecoveryTaskViewSet, basename="recovery-task")
 
 urlpatterns = [
     path("", include(router.urls)),

@@ -26,7 +26,13 @@ from django.utils import timezone
 
 from membership.utils import is_logistics_member, is_sig_admin
 
-from .models import EmergencyAuthorization, ThirdPartyWorkOrder, ThirdPartyWorkOrderAttachment
+from .models import (
+    EmergencyAuthorization,
+    RecoveryTask,
+    ThirdPartyWorkOrder,
+    ThirdPartyWorkOrderAttachment,
+    ThirdPartyWorkOrderAuditLog,
+)
 
 REQUIRED_QUOTE_COUNT = 3
 """Number of vendor quotes a non-emergency standard WO must have before scheduling."""
@@ -172,6 +178,27 @@ def _ensure_status(wo: ThirdPartyWorkOrder, expected: str) -> None:
         raise TransitionError(f"Work order is in '{wo.status}' state; expected '{expected}'.")
 
 
+def _audit(
+    wo: ThirdPartyWorkOrder,
+    *,
+    actor,
+    action: str,
+    old_state: str = "",
+    new_state: str = "",
+    notes: str = "",
+    metadata: Optional[dict] = None,
+) -> ThirdPartyWorkOrderAuditLog:
+    return ThirdPartyWorkOrderAuditLog.objects.create(
+        work_order=wo,
+        actor=actor if (actor and getattr(actor, "is_authenticated", False)) else None,
+        action=action,
+        old_state=old_state,
+        new_state=new_state,
+        notes=notes,
+        metadata=metadata or {},
+    )
+
+
 @transaction.atomic
 def set_nte(wo: ThirdPartyWorkOrder, *, user, nte_amount: Decimal) -> ThirdPartyWorkOrder:
     """Step 1 (intake) — SIG sets NTE."""
@@ -187,6 +214,15 @@ def set_nte(wo: ThirdPartyWorkOrder, *, user, nte_amount: Decimal) -> ThirdParty
     wo.nte_set_by = user
     wo.nte_set_at = timezone.now()
     wo.save(update_fields=["nte_amount", "nte_set_by", "nte_set_at", "updated_at"])
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_TRANSITION,
+        old_state=wo.status,
+        new_state=wo.status,
+        notes=f"NTE set to ${wo.nte_amount}",
+        metadata={"nte_amount": str(wo.nte_amount)},
+    )
     return wo
 
 
@@ -218,7 +254,39 @@ def authorize_emergency(
             "updated_at",
         ]
     )
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_EMERGENCY_AUTH,
+        old_state=wo.status,
+        new_state=wo.status,
+        notes=reason or "",
+        metadata={
+            "authorization_id": str(auth.id),
+            "expires_at": auth.expires_at.isoformat() if auth.expires_at else None,
+        },
+    )
     return auth
+
+
+def validate_emergency_authority(wo: ThirdPartyWorkOrder, *, user, context: str = "") -> bool:
+    """Re-validate that the WO has an active emergency authorization.
+
+    Records an audit entry every time it is invoked (whether or not the
+    authorization is currently valid) so audit reviewers can see when
+    Logistics' emergency authority was checked. Returns the active state.
+    """
+    active = has_active_emergency_authorization(wo)
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_EMERGENCY_VALIDATION,
+        old_state=wo.status,
+        new_state=wo.status,
+        notes=context,
+        metadata={"active": active},
+    )
+    return active
 
 
 @transaction.atomic
@@ -238,6 +306,14 @@ def waive_quote_requirement(wo: ThirdPartyWorkOrder, *, user, reason: str) -> Th
             "updated_at",
         ]
     )
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_QUOTE_WAIVER,
+        old_state=wo.status,
+        new_state=wo.status,
+        notes=wo.quote_waiver_reason,
+    )
     return wo
 
 
@@ -250,8 +326,18 @@ def advance_to_sourcing(wo: ThirdPartyWorkOrder, *, user) -> ThirdPartyWorkOrder
         raise TransitionError(
             "Cannot advance to sourcing without an NTE or emergency authorization."
         )
+    old = wo.status
     wo.status = ThirdPartyWorkOrder.STATUS_SOURCING
     wo.save(update_fields=["status", "updated_at"])
+    if wo.is_emergency or has_active_emergency_authorization(wo):
+        validate_emergency_authority(wo, user=user, context="advance_to_sourcing emergency check")
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_TRANSITION,
+        old_state=old,
+        new_state=wo.status,
+    )
     return wo
 
 
@@ -265,8 +351,18 @@ def advance_to_scheduled(wo: ThirdPartyWorkOrder, *, user) -> ThirdPartyWorkOrde
             "Standard work orders require 3 quotes OR a signed waiver OR an "
             "active emergency authorization before scheduling."
         )
+    old = wo.status
     wo.status = ThirdPartyWorkOrder.STATUS_SCHEDULED
     wo.save(update_fields=["status", "updated_at"])
+    if wo.is_emergency or has_active_emergency_authorization(wo):
+        validate_emergency_authority(wo, user=user, context="advance_to_scheduled emergency check")
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_TRANSITION,
+        old_state=old,
+        new_state=wo.status,
+    )
     _emit_scheduling_email(wo)
     return wo
 
@@ -282,6 +378,7 @@ def vendor_arrived(
     """Step 3 → 4. 'Vendor Arrived' button. Starts downtime clock."""
     _ensure_actor(user, wo)
     _ensure_status(wo, ThirdPartyWorkOrder.STATUS_SCHEDULED)
+    old = wo.status
     wo.status = ThirdPartyWorkOrder.STATUS_IN_PROGRESS
     wo.downtime_start = timezone.now()
     if keyfob_id:
@@ -296,6 +393,42 @@ def vendor_arrived(
             "shadow_user",
             "updated_at",
         ]
+    )
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_TRANSITION,
+        old_state=old,
+        new_state=wo.status,
+        metadata={"keyfob_id": wo.keyfob_id} if wo.keyfob_id else {},
+    )
+    return wo
+
+
+@transaction.atomic
+def record_keyfob_return(wo: ThirdPartyWorkOrder, *, user) -> ThirdPartyWorkOrder:
+    """Record that the vendor returned their checked-out keyfob.
+
+    Required before closure when ``keyfob_id`` is set. Idempotent — calling
+    twice keeps the original return timestamp; only adds a fresh audit row.
+    """
+    _ensure_actor(user, wo)
+    if not wo.keyfob_id:
+        raise TransitionError("No keyfob is checked out for this work order.")
+    if wo.keyfob_returned_at is None:
+        wo.keyfob_returned_at = timezone.now()
+        wo.keyfob_returned_by = user
+        wo.save(update_fields=["keyfob_returned_at", "keyfob_returned_by", "updated_at"])
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_KEYFOB_RETURN,
+        old_state=wo.status,
+        new_state=wo.status,
+        metadata={
+            "keyfob_id": wo.keyfob_id,
+            "returned_at": wo.keyfob_returned_at.isoformat(),
+        },
     )
     return wo
 
@@ -314,6 +447,7 @@ def ops_sign_off(wo: ThirdPartyWorkOrder, *, user) -> ThirdPartyWorkOrder:
         wo.downtime_start = timezone.now()
     wo.downtime_end = timezone.now()
     wo.total_downtime = wo.downtime_end - wo.downtime_start
+    old = wo.status
     wo.status = ThirdPartyWorkOrder.STATUS_VALIDATED
     wo.save(
         update_fields=[
@@ -323,6 +457,18 @@ def ops_sign_off(wo: ThirdPartyWorkOrder, *, user) -> ThirdPartyWorkOrder:
             "total_downtime",
             "updated_at",
         ]
+    )
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_TRANSITION,
+        old_state=old,
+        new_state=wo.status,
+        metadata={
+            "total_downtime_seconds": (
+                int(wo.total_downtime.total_seconds()) if wo.total_downtime else None
+            ),
+        },
     )
     return wo
 
@@ -345,6 +491,7 @@ def advance_to_financial_review(
     if wo.actual_invoice_total is None:
         raise TransitionError("Actual invoice total must be set before financial review.")
     wo.variance_status = evaluate_variance(wo)
+    old = wo.status
     wo.status = ThirdPartyWorkOrder.STATUS_FINANCIAL_REVIEW
     wo.save(
         update_fields=[
@@ -356,14 +503,62 @@ def advance_to_financial_review(
         ]
     )
     split_dispatch_fee(wo)
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_TRANSITION,
+        old_state=old,
+        new_state=wo.status,
+        metadata={
+            "actual_invoice_total": str(wo.actual_invoice_total),
+            "dispatch_fee": str(wo.dispatch_fee) if wo.dispatch_fee is not None else None,
+            "variance_status": wo.variance_status,
+        },
+    )
     if wo.variance_status == "blocked":
         _alert_variance_blocked(wo)
     return wo
 
 
 @transaction.atomic
+def override_variance_block(wo: ThirdPartyWorkOrder, *, user, reason: str) -> ThirdPartyWorkOrder:
+    """Finance/staff override for a variance-blocked WO.
+
+    Clears the ``blocked`` status by marking variance auto_approved with an
+    audit row capturing who overrode and why. Required before closure when
+    the invoice can't be reduced and the SIG has agreed to absorb the
+    overage out-of-band.
+    """
+    if not _is_staff_or_super(user):
+        raise PermissionDenied("Only staff may override a variance block.")
+    if wo.variance_status != "blocked":
+        raise TransitionError("Variance is not currently blocked; nothing to override.")
+    if not reason or not reason.strip():
+        raise TransitionError("Override requires a written reason for audit.")
+    wo.variance_status = "auto_approved"
+    wo.save(update_fields=["variance_status", "updated_at"])
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_VARIANCE_OVERRIDE,
+        old_state=wo.status,
+        new_state=wo.status,
+        notes=reason.strip(),
+        metadata={
+            "actual_invoice_total": str(wo.actual_invoice_total),
+            "nte_amount": str(wo.nte_amount) if wo.nte_amount is not None else None,
+        },
+    )
+    return wo
+
+
+@transaction.atomic
 def close_work_order(wo: ThirdPartyWorkOrder, *, user) -> ThirdPartyWorkOrder:
-    """Step 6 → 7. Requires invoice + FSR; variance must not be blocked."""
+    """Step 6 → 7. Requires invoice + FSR; variance must not be blocked.
+
+    Phase 5 adds a keyfob return gate (block close while a checked-out keyfob
+    is still outstanding) and a warranty-recovery auto-task creation step.
+    """
     _ensure_actor(user, wo)
     _ensure_status(wo, ThirdPartyWorkOrder.STATUS_FINANCIAL_REVIEW)
     if wo.variance_status == "blocked":
@@ -375,11 +570,57 @@ def close_work_order(wo: ThirdPartyWorkOrder, *, user) -> ThirdPartyWorkOrder:
         raise TransitionError(
             "Closure requires both invoice and FSR (Field Service Report) attachments."
         )
+    if wo.keyfob_id and wo.keyfob_returned_at is None:
+        raise TransitionError(
+            f"Keyfob {wo.keyfob_id} is still checked out to the vendor. "
+            "Record the keyfob return before closing the work order."
+        )
+    old = wo.status
     wo.status = ThirdPartyWorkOrder.STATUS_CLOSED
     wo.closed_at = timezone.now()
     wo.save(update_fields=["status", "closed_at", "updated_at"])
-    _emit_closure_alert(wo)
+    _audit(
+        wo,
+        actor=user,
+        action=ThirdPartyWorkOrderAuditLog.ACTION_TRANSITION,
+        old_state=old,
+        new_state=wo.status,
+        metadata={
+            "actual_invoice_total": (
+                str(wo.actual_invoice_total) if wo.actual_invoice_total is not None else None
+            ),
+            "warranty_recovery": wo.warranty_recovery,
+        },
+    )
+    if wo.warranty_recovery:
+        _create_warranty_recovery_task(wo, user=user)
+    _emit_closure_notifications(wo)
     return wo
+
+
+def _create_warranty_recovery_task(wo: ThirdPartyWorkOrder, *, user) -> RecoveryTask:
+    """Auto-create a Logistics follow-up task for warranty recovery."""
+    short = wo.short_id
+    vendor_name = wo.vendor.name if wo.vendor else "(unknown vendor)"
+    amount = wo.actual_invoice_total
+    title = (
+        f"Pursue warranty recovery for {short} — vendor: {vendor_name}, amount: ${amount or '—'}"
+    )
+    description = (
+        f"WO {short} closed with warranty_recovery=True. "
+        f"Contact the manufacturer/warranty provider for reimbursement.\n\n"
+        f"Vendor: {vendor_name}\n"
+        f"Asset: {wo.asset.name if wo.asset else '(none)'}\n"
+        f"Amount: ${amount or '—'}\n"
+    )
+    return RecoveryTask.objects.create(
+        work_order=wo,
+        vendor=wo.vendor,
+        amount=amount,
+        title=title,
+        description=description,
+        assigned_group="Logistics",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -488,18 +729,85 @@ def _alert_variance_blocked(wo: ThirdPartyWorkOrder) -> None:
 
 
 def _emit_closure_alert(wo: ThirdPartyWorkOrder) -> None:
-    """Step 7: SIG closure alert email."""
+    """Backwards-compatible alias retained so existing callers keep working."""
+    _emit_closure_notifications(wo)
+
+
+def _closure_recipients(wo: ThirdPartyWorkOrder):
+    """Return a deduped queryset of users who should be notified on close.
+
+    Includes:
+      - SIG admins of the asset's owning group
+      - Finance group members
+      - SIG Leaders group members (mirrors variance-block fan-out)
+      - The opener of the work order
+    """
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    user_ids = set()
+
+    base_qs = _sig_leader_and_finance_recipients(wo)
+    user_ids.update(base_qs.values_list("id", flat=True))
+
+    if wo.opened_by_id and getattr(wo.opened_by, "is_active", True):
+        user_ids.add(wo.opened_by_id)
+
+    return User.objects.filter(id__in=user_ids, is_active=True)
+
+
+def _emit_closure_notifications(wo: ThirdPartyWorkOrder) -> None:
+    """Step 7: SIG/Finance/opener closure notification — in-app + email."""
     from django.core.mail import send_mail
 
-    recipients = list(_sig_leader_and_finance_recipients(wo))
-    emails = [u.email for u in recipients if u.email]
-    if not emails:
-        return
-    subject = f"[WO Closed] {wo.short_id}"
-    body = (
+    from notifications.models import Notification
+
+    recipients = list(_closure_recipients(wo))
+    asset_label = wo.asset.name if wo.asset else "(no asset linked)"
+    downtime = ""
+    if wo.total_downtime is not None:
+        total_seconds = int(wo.total_downtime.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes = remainder // 60
+        downtime = f"{hours}h {minutes}m"
+    title = f"WO closed: {wo.short_id}"
+    message = (
         f"{wo.title}\n"
         f"Vendor: {wo.vendor.name}\n"
-        f"Final: ${wo.actual_invoice_total or '—'} (NTE ${wo.nte_amount or '—'})\n"
+        f"Asset: {asset_label}\n"
+        f"Final cost: ${wo.actual_invoice_total or '—'} "
+        f"(NTE ${wo.nte_amount or '—'})\n"
+        f"Downtime: {downtime or '—'}\n"
         f"Variance: {wo.variance_status or 'n/a'}\n"
     )
-    send_mail(subject, body, None, emails, fail_silently=True)
+    metadata = {
+        "work_order_id": str(wo.id),
+        "short_id": wo.short_id,
+        "kind": "third_party_wo_closed",
+        "actual_invoice_total": (
+            str(wo.actual_invoice_total) if wo.actual_invoice_total is not None else None
+        ),
+        "nte_amount": str(wo.nte_amount) if wo.nte_amount is not None else None,
+        "total_downtime_seconds": (
+            int(wo.total_downtime.total_seconds()) if wo.total_downtime else None
+        ),
+        "variance_status": wo.variance_status,
+        "warranty_recovery": wo.warranty_recovery,
+    }
+    for user in recipients:
+        Notification.objects.create(
+            user=user,
+            type="info",
+            title=title,
+            message=message,
+            metadata=metadata,
+        )
+    emails = [u.email for u in recipients if u.email]
+    if emails:
+        send_mail(
+            f"[WO Closed] {wo.short_id}",
+            message,
+            None,
+            emails,
+            fail_silently=True,
+        )

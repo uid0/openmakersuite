@@ -154,6 +154,10 @@ class TestHappyPath:
             t.close_work_order(wo, user=staff)
         _attach(wo, ThirdPartyWorkOrderAttachment.KIND_INVOICE)
         _attach(wo, ThirdPartyWorkOrderAttachment.KIND_FSR)
+        # Phase 5: keyfob still checked out — closure blocked.
+        with pytest.raises(ValidationError):
+            t.close_work_order(wo, user=staff)
+        t.record_keyfob_return(wo, user=staff)
         t.close_work_order(wo, user=staff)
         wo.refresh_from_db()
         assert wo.status == ThirdPartyWorkOrder.STATUS_CLOSED

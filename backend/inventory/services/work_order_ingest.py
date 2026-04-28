@@ -588,7 +588,7 @@ def detect_submission_kind(pdf_bytes: bytes, subject: str = "") -> str:
         fields = reader.get_fields() or {}
         if "third_party_work_order_id" in fields:
             return WorkOrderSubmission.KIND_THIRD_PARTY_WO
-    except Exception:  # noqa: BLE001 - malformed PDFs default to PM path
+    except Exception:  # noqa: BLE001  # nosec B110 - malformed PDFs default to PM path
         pass
     if THIRD_PARTY_HEADER_RE.search(_pdf_text(pdf_bytes)):
         return WorkOrderSubmission.KIND_THIRD_PARTY_WO
@@ -599,7 +599,7 @@ def _looks_like_qr_payload(image_bytes: bytes) -> bool:
     """Best-effort: does this embedded image contain decodable QR content?"""
     try:
         return bool(_decode_qr_payloads(image_bytes))
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001  # nosec B110
         return False
 
 

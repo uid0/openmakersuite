@@ -155,6 +155,22 @@ class ThirdPartyWorkOrder(models.Model):
             "Phase 5 enforces return before closure."
         ),
     )
+    keyfob_returned_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Set when the vendor returns the keyfob. Closure is blocked while "
+            "keyfob_id is set but keyfob_returned_at is null."
+        ),
+    )
+    keyfob_returned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="keyfob_returned_third_party_work_orders",
+        help_text="User who recorded the keyfob return.",
+    )
 
     nte_set_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -577,3 +593,141 @@ class EmergencyAuthorization(models.Model):
         if self.revoked_at and self.revoked_at <= now:
             return False
         return self.expires_at > now
+
+
+class ThirdPartyWorkOrderAuditLog(models.Model):
+    """Append-only audit row for third-party WO state transitions and overrides.
+
+    Phase 5 (D): every state transition, variance override, and emergency
+    authorization validation is recorded here so Finance + Logistics have a
+    permanent paper trail. Rows are never updated or deleted by application
+    code — admin removal requires raw SQL.
+    """
+
+    ACTION_TRANSITION = "transition"
+    ACTION_VARIANCE_OVERRIDE = "variance_override"
+    ACTION_EMERGENCY_AUTH = "emergency_auth"
+    ACTION_EMERGENCY_VALIDATION = "emergency_validation"
+    ACTION_KEYFOB_RETURN = "keyfob_return"
+    ACTION_QUOTE_WAIVER = "quote_waiver"
+
+    ACTION_CHOICES = [
+        (ACTION_TRANSITION, "State transition"),
+        (ACTION_VARIANCE_OVERRIDE, "Variance override"),
+        (ACTION_EMERGENCY_AUTH, "Emergency authorization"),
+        (ACTION_EMERGENCY_VALIDATION, "Emergency validation"),
+        (ACTION_KEYFOB_RETURN, "Keyfob return"),
+        (ACTION_QUOTE_WAIVER, "Quote waiver"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        ThirdPartyWorkOrder,
+        on_delete=models.CASCADE,
+        related_name="audit_logs",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="third_party_wo_audit_actions",
+        help_text="User who performed the action; null for system events.",
+    )
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    old_state = models.CharField(max_length=32, blank=True)
+    new_state = models.CharField(max_length=32, blank=True)
+    notes = models.TextField(blank=True)
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Action-specific payload (variance amounts, auth ids, etc).",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["work_order", "-created_at"], name="tpwo_audit_wo_idx"),
+            models.Index(fields=["action", "-created_at"], name="tpwo_audit_action_idx"),
+        ]
+
+    def __str__(self) -> str:
+        if self.old_state or self.new_state:
+            return f"{self.work_order_id} {self.action}: {self.old_state} → {self.new_state}"
+        return f"{self.work_order_id} {self.action}"
+
+
+class RecoveryTask(models.Model):
+    """Logistics follow-up task to chase warranty recovery on a closed WO.
+
+    Auto-created when a WO closes with ``warranty_recovery=True``. Logistics
+    works the queue, contacts the manufacturer, and closes the task once the
+    reimbursement is reconciled.
+    """
+
+    STATUS_OPEN = "open"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_PROGRESS, "In Progress"),
+        (STATUS_RESOLVED, "Resolved"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        ThirdPartyWorkOrder,
+        on_delete=models.CASCADE,
+        related_name="recovery_tasks",
+    )
+    vendor = models.ForeignKey(
+        "vendors.Vendor",
+        on_delete=models.PROTECT,
+        related_name="recovery_tasks",
+        null=True,
+        blank=True,
+    )
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Recoverable amount — typically the WO's actual_invoice_total at closure.",
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_OPEN,
+    )
+    assigned_group = models.CharField(
+        max_length=64,
+        default="Logistics",
+        help_text="Auth Group name responsible for working this task.",
+    )
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_recovery_tasks",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"], name="rt_status_created_idx"),
+            models.Index(fields=["assigned_group", "status"], name="rt_group_status_idx"),
+            models.Index(fields=["work_order"], name="rt_wo_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"RecoveryTask {self.title} [{self.status}]"

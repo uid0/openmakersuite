@@ -5,9 +5,11 @@ from django.contrib import admin
 from .models import (
     AssetWarranty,
     EmergencyAuthorization,
+    RecoveryTask,
     ThirdPartyWorkOrder,
     ThirdPartyWorkOrderAsset,
     ThirdPartyWorkOrderAttachment,
+    ThirdPartyWorkOrderAuditLog,
     ThirdPartyWorkOrderQuote,
 )
 
@@ -170,3 +172,66 @@ class ThirdPartyWorkOrderAttachmentAdmin(admin.ModelAdmin):
     search_fields = ["work_order__id", "caption"]
     autocomplete_fields = ["work_order", "uploaded_by"]
     readonly_fields = ["id", "uploaded_at"]
+
+
+@admin.register(ThirdPartyWorkOrderAuditLog)
+class ThirdPartyWorkOrderAuditLogAdmin(admin.ModelAdmin):
+    list_display = [
+        "created_at",
+        "work_order",
+        "action",
+        "actor",
+        "old_state",
+        "new_state",
+    ]
+    list_filter = ["action", "created_at"]
+    search_fields = [
+        "work_order__id",
+        "work_order__title",
+        "actor__username",
+        "notes",
+    ]
+    readonly_fields = [
+        "id",
+        "work_order",
+        "actor",
+        "action",
+        "old_state",
+        "new_state",
+        "notes",
+        "metadata",
+        "created_at",
+    ]
+    date_hierarchy = "created_at"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(RecoveryTask)
+class RecoveryTaskAdmin(admin.ModelAdmin):
+    list_display = [
+        "title",
+        "status",
+        "vendor",
+        "amount",
+        "assigned_group",
+        "assigned_to",
+        "created_at",
+    ]
+    list_filter = ["status", "assigned_group"]
+    search_fields = [
+        "title",
+        "description",
+        "work_order__id",
+        "vendor__name",
+    ]
+    autocomplete_fields = ["work_order", "vendor", "assigned_to"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    date_hierarchy = "created_at"

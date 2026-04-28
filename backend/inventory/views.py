@@ -2772,7 +2772,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         """
         from django.core.files.base import ContentFile
 
-        from .services.work_order_ingest import apply_submission
+        from .services.work_order_ingest import apply_submission, detect_submission_kind
 
         user = request.user
         if not (user.is_authenticated and (user.is_staff or user.is_superuser)):
@@ -2788,7 +2788,11 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        pdf_bytes = pdf_file.read()
+        kind = detect_submission_kind(pdf_bytes, subject=pdf_file.name or "")
+
         submission = WorkOrderSubmission(
+            kind=kind,
             source=WorkOrderSubmission.SOURCE_MANUAL,
             submitted_by=user,
             from_email=(user.email or "")[:254],
@@ -2797,7 +2801,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         )
         submission.attachment.save(
             pdf_file.name or "work-order.pdf",
-            ContentFile(pdf_file.read()),
+            ContentFile(pdf_bytes),
             save=False,
         )
         submission.save()
@@ -2828,9 +2832,15 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         return Response(
             {
                 "submission_id": str(submission.id),
+                "kind": submission.kind,
                 "status": submission.status,
                 "work_order_id": (
                     str(submission.work_order_id) if submission.work_order_id else None
+                ),
+                "third_party_work_order_id": (
+                    str(submission.third_party_work_order_id)
+                    if submission.third_party_work_order_id
+                    else None
                 ),
                 "completed_items": completed_items,
                 "errors": errors,
@@ -3692,7 +3702,7 @@ def postmark_inbound_work_order(request):
     from django.conf import settings as django_settings
     from django.core.files.base import ContentFile
 
-    from .services.work_order_ingest import apply_submission
+    from .services.work_order_ingest import apply_submission, detect_submission_kind
 
     expected = getattr(django_settings, "POSTMARK_INBOUND_TOKEN", "") or ""
     if not expected:
@@ -3727,9 +3737,13 @@ def postmark_inbound_work_order(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    subject = (payload.get("Subject") or "")[:500]
+    kind = detect_submission_kind(pdf_bytes, subject=subject)
+
     submission = WorkOrderSubmission(
+        kind=kind,
         from_email=(payload.get("FromFull") or {}).get("Email") or payload.get("From") or "",
-        subject=(payload.get("Subject") or "")[:500],
+        subject=subject,
         postmark_message_id=message_id[:200],
         status=WorkOrderSubmission.STATUS_RECEIVED,
         source=WorkOrderSubmission.SOURCE_EMAIL,
@@ -3750,8 +3764,14 @@ def postmark_inbound_work_order(request):
     return Response(
         {
             "id": str(submission.id),
+            "kind": submission.kind,
             "status": submission.status,
             "work_order_id": (str(submission.work_order_id) if submission.work_order_id else None),
+            "third_party_work_order_id": (
+                str(submission.third_party_work_order_id)
+                if submission.third_party_work_order_id
+                else None
+            ),
             "parse_error": submission.parse_error or None,
         },
         status=status.HTTP_200_OK,

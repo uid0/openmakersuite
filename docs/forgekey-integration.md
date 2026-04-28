@@ -192,16 +192,84 @@ Set these in `.env` (development) and `.env.prod` (production):
 | `FORGEKEY_PROVISIONING_TOKEN`     | Shared secret devices send in `X-ForgeKey-Provisioning-Token`. Empty disables registration.    |
 | `FORGEKEY_SHARED_SECRET`          | Base secret used to sign per-device JWTs.                                                      |
 | `FORGEKEY_PHOTO_RETENTION_DAYS`   | Days to keep `ESP32DevicePhoto` rows before pruning. Default 30.                               |
-| `MQTT_BROKER_HOST`                | Hostname of the MQTT broker.                                                                   |
+| `MQTT_BROKER_HOST`                | Hostname of the MQTT broker. In production this is `emqx` (the in-stack EMQX service).         |
 | `MQTT_BROKER_PORT`                | Port (default 1883).                                                                           |
 | `MQTT_BROKER_USERNAME`            | Optional broker auth.                                                                          |
 | `MQTT_BROKER_PASSWORD`            | Optional broker auth.                                                                          |
 | `MQTT_TOPIC_PREFIX`               | Prefix for all ForgeKey topics. Default `forgekey`.                                            |
 | `MQTT_CLIENT_ID`                  | MQTT client id used by the backend publisher.                                                  |
 | `MQTT_KEEPALIVE`                  | MQTT keepalive in seconds (default 60).                                                        |
+| `EMQX_DASHBOARD_PASSWORD`         | Initial password for the `admin` dashboard user (production only — see EMQX deployment below). |
+| `EMQX_API_URL`                    | EMQX REST API base URL. Set to `http://emqx:18083/api/v5` in the docker-compose stack.         |
+| `EMQX_API_KEY`                    | API key for backend → EMQX REST calls. Generate via dashboard `System > API Keys`.             |
+| `EMQX_API_SECRET`                 | API secret matching `EMQX_API_KEY`.                                                            |
 
 See `.env.example` and `backend/env.production.example` for the templated
 versions.
+
+## EMQX deployment
+
+The production stack ships the broker as an EMQX Enterprise service in
+`docker-compose.prod.yml`:
+
+```
+services:
+  emqx:
+    image: emqx/emqx-enterprise:6.2.0@sha256:<digest>
+    ports:
+      - 1883:1883     # MQTT
+      - 8083:8083     # MQTT-over-WebSocket
+      - 8084:8084     # MQTT-over-WSS
+      - 8883:8883     # MQTTS
+      - 18083:18083   # Dashboard + REST API
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+```
+
+The `backend` service depends on `emqx` with `condition: service_healthy`,
+publishes via the MAC-aware topics described above, and uses the EMQX
+REST API at `http://emqx:18083/api/v5` for management calls. Devices on
+the same LAN as the host reach the broker on port `1883` (or `8883` for
+TLS); the dashboard is reachable on port `18083`.
+
+### First-deploy checklist
+
+1. Set `EMQX_DASHBOARD_PASSWORD` in `.env.prod` to a strong value before
+   `docker compose up -d`. EMQX bakes this into the dashboard's default
+   `admin` user on first boot.
+2. Open `https://<host>:18083` and log in as `admin`. Rotate the password
+   immediately if you reused a placeholder.
+3. Generate an API key under **System → API Keys**. Copy the key and
+   secret into `EMQX_API_KEY` / `EMQX_API_SECRET` in `.env.prod` and
+   restart the `backend` service so it picks up the new values.
+4. (Optional) Create a dedicated MQTT user under **Access Control →
+   Authentication** and set `MQTT_BROKER_USERNAME` /
+   `MQTT_BROKER_PASSWORD` for the backend publisher. Devices use JWT
+   auth — see `EMQX_JWT_SETUP.md` for that flow.
+
+### Topics
+
+The broker handles the ForgeKey topics described under [MQTT topic
+schema](#mqtt-topic-schema): `forgekey/<mac>/firmware`,
+`forgekey/<mac>/ping`, `forgekey/<mac>/command`, `forgekey/<mac>/status`,
+and `forgekey/<mac>/data`. Firmware advertisements are retained, so a
+device that reconnects after downtime still receives the latest pointer.
+
+### Backups
+
+The `emqx_data` volume holds retained messages, ACL state, and any
+configuration set via the dashboard or REST API. Snapshot it alongside
+`postgres_data` in your backup routine. The `emqx_log` volume contains
+broker logs; rotate it with the rest of the stack's `*_log` volumes.
+
+### Firewall / network
+
+In a single-host deployment, only the dashboard (`18083`) and MQTT
+listeners (`1883`, `8083`, `8084`, `8883`) need to be reachable from the
+device LAN. If devices live on the same private network as the docker
+host, drop the public port mappings for `1883`/`8083`/`8084`/`8883` and
+keep traffic inside the `app-network` bridge.
 
 ## Out of scope
 

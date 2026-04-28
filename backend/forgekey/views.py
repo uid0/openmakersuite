@@ -47,6 +47,7 @@ from .utils import (
     get_mqtt_firmware_topic,
     get_mqtt_ping_topic,
     normalize_mac_address,
+    normalize_sensor_kind,
     verify_device_jwt,
 )
 
@@ -54,14 +55,17 @@ logger = logging.getLogger(__name__)
 
 
 JPEG_MAGIC = b"\xff\xd8\xff"
+PLACEHOLDER_PROVISIONING_TOKEN = "REPLACE_ME_PROVISIONING_TOKEN"  # nosec B105
 
 
 def _provisioning_token_valid(request) -> bool:
     expected = getattr(settings, "FORGEKEY_PROVISIONING_TOKEN", "")
-    if not expected:
+    if not expected or expected == PLACEHOLDER_PROVISIONING_TOKEN:
         return False
     supplied = request.headers.get("x-forgekey-provisioning-token", "")
-    return bool(supplied) and supplied == expected
+    if not supplied or supplied == PLACEHOLDER_PROVISIONING_TOKEN:
+        return False
+    return supplied == expected
 
 
 class ForgeKeyDeviceRegisterView(APIView):
@@ -115,13 +119,14 @@ class ForgeKeyDeviceRegisterView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        device_type_code = meta.get("device_type") or meta.get("sensor_kind")
+        raw_device_type = meta.get("device_type") or meta.get("sensor_kind")
+        device_type_code = normalize_sensor_kind(raw_device_type) if raw_device_type else None
         device_type_obj = None
         if device_type_code:
             device_type_obj = DeviceType.objects.filter(code=device_type_code).first()
             if device_type_obj is None:
                 return Response(
-                    {"detail": f"Unknown device_type '{device_type_code}'."},
+                    {"detail": f"Unknown device_type '{raw_device_type}'."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -156,12 +161,15 @@ class ForgeKeyDeviceRegisterView(APIView):
         device.save()
 
         token = generate_device_jwt(mac)
+        sensor_kind_for_topic = device_type_code or (
+            device.device_type.code if device.device_type_id else ""
+        )
         return Response(
             {
                 "device_id": str(device.id),
                 "assigned_location_id": (str(device.location_id) if device.location_id else None),
                 "mqtt_topic_for_firmware": get_mqtt_firmware_topic(mac),
-                "mqtt_topic_for_pings": get_mqtt_ping_topic(mac),
+                "mqtt_topic_for_pings": get_mqtt_ping_topic(mac, sensor_kind_for_topic),
                 "jwt_token": token,
                 "created": created,
             },

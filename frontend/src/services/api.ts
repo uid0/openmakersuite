@@ -104,12 +104,12 @@ api.interceptors.response.use(
     const isPublicEndpoint = originalRequest?.url?.includes('/reorders/purchase-orders/') ||
                             originalRequest?.url?.includes('/reorders/analytics/transparency/') ||
                             originalRequest?.url?.includes('/reorders/analytics/logistics_dashboard/');
-    
+
     // Only attempt refresh if we have a valid error response with 401 status
     // and we haven't already retried this request
     if (
-      error.response?.status === 401 && 
-      !originalRequest._retry && 
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
       !isRefreshEndpoint &&
       !isPublicEndpoint &&
       originalRequest
@@ -154,16 +154,16 @@ api.interceptors.response.use(
         });
         const { access } = refreshResponse.data;
         localStorage.setItem('token', access);
-        
+
         // Update the original request headers
         if (!originalRequest.headers) {
           originalRequest.headers = {};
         }
         originalRequest.headers.Authorization = `Bearer ${access}`;
-        
+
         isRefreshing = false;
         processQueue(null, access);
-        
+
         // Retry the original request with the new token
         return api(originalRequest);
       } catch (refreshError: any) {
@@ -1244,7 +1244,7 @@ export const reportsAPI = {
     api.get('/inventory/reports/inventory/value_by_location/'),
 
   exportInventoryReport: (type: 'stock_by_category' | 'reorder_frequency' | 'value_by_location', params?: DateRangeParams) =>
-    api.get('/inventory/reports/inventory/export/', { 
+    api.get('/inventory/reports/inventory/export/', {
       params: { type, ...params },
       responseType: 'blob',
     }),
@@ -1503,12 +1503,154 @@ export interface AssetWoStatusDto {
   vendor_compliance?: VendorComplianceDto;
 }
 
+export type ThirdPartyWorkOrderStatus =
+  | 'requested'
+  | 'sourcing'
+  | 'scheduled'
+  | 'in_progress'
+  | 'validated'
+  | 'financial_review'
+  | 'closed'
+  | 'cancelled';
+
+export type VarianceStatus = '' | 'auto_approved' | 'blocked';
+
+export interface ThirdPartyQuoteDto {
+  id: string;
+  work_order: string;
+  vendor: string;
+  vendor_name: string;
+  amount: string;
+  notes: string;
+  submitted_by: number | null;
+  created_at: string;
+}
+
+export interface ThirdPartyAssetLinkDto {
+  id: string;
+  work_order: string;
+  asset: string;
+  asset_name?: string;
+  asset_tag?: string;
+  share_pct: string;
+  allocated_cost: string | null;
+  notes: string;
+  created_at: string;
+}
+
+export interface ThirdPartyAttachmentDto {
+  id: string;
+  work_order: string;
+  file: string;
+  kind: 'invoice' | 'fsr' | 'photo' | 'quote' | 'paper_form' | 'other';
+  kind_display: string;
+  caption: string;
+  uploaded_by: number | null;
+  uploaded_by_username: string | null;
+  uploaded_at: string;
+}
+
+export interface ThirdPartyWorkflowGates {
+  has_nte: boolean;
+  has_active_emergency_authorization: boolean;
+  has_required_quotes: boolean;
+  quote_count: number;
+  has_photo_evidence: boolean;
+  has_invoice_and_fsr: boolean;
+  variance_status: VarianceStatus;
+}
+
+export interface ThirdPartyWorkOrderDto {
+  id: string;
+  short_id: string;
+  title: string;
+  asset: string | null;
+  asset_name: string | null;
+  vendor: string;
+  vendor_name: string;
+  work_type: string;
+  work_type_display: string;
+  is_emergency: boolean;
+  status: ThirdPartyWorkOrderStatus;
+  status_display: string;
+  nte_amount: string | null;
+  par_cost_buffer: string;
+  actual_invoice_total: string | null;
+  dispatch_fee: string | null;
+  downtime_start: string | null;
+  downtime_end: string | null;
+  total_downtime: string | null;
+  keyfob_id: string;
+  warranty_recovery: boolean;
+  variance_status: VarianceStatus;
+  asset_links: ThirdPartyAssetLinkDto[];
+  attachments: ThirdPartyAttachmentDto[];
+  quotes: ThirdPartyQuoteDto[];
+  workflow: ThirdPartyWorkflowGates;
+  notes: string;
+  internal_notes: string;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+}
+
 export const thirdPartyMaintenanceAPI = {
   getAssetWoStatus: (assetId: string, vendorId?: string) =>
     api.get<AssetWoStatusDto>(
       `/maintenance-orders/assets/${assetId}/wo-status/`,
       { params: vendorId ? { vendor: vendorId } : {} }
     ),
+  retrieve: (id: string) =>
+    api.get<ThirdPartyWorkOrderDto>(`/maintenance-orders/work-orders/${id}/`),
+  setNte: (id: string, amount: string) =>
+    api.post<ThirdPartyWorkOrderDto>(
+      `/maintenance-orders/work-orders/${id}/set-nte/`,
+      { nte_amount: amount }
+    ),
+  authorizeEmergency: (id: string, reason: string) =>
+    api.post(`/maintenance-orders/work-orders/${id}/authorize-emergency/`, {
+      reason,
+    }),
+  advanceToSourcing: (id: string) =>
+    api.post<ThirdPartyWorkOrderDto>(
+      `/maintenance-orders/work-orders/${id}/advance-to-sourcing/`
+    ),
+  waiveQuoteRequirement: (id: string, reason: string) =>
+    api.post<ThirdPartyWorkOrderDto>(
+      `/maintenance-orders/work-orders/${id}/waive-quote-requirement/`,
+      { reason }
+    ),
+  advanceToScheduled: (id: string) =>
+    api.post<ThirdPartyWorkOrderDto>(
+      `/maintenance-orders/work-orders/${id}/advance-to-scheduled/`
+    ),
+  vendorArrived: (id: string, payload: { keyfob_id?: string; shadow_user?: string }) =>
+    api.post<ThirdPartyWorkOrderDto>(
+      `/maintenance-orders/work-orders/${id}/vendor-arrived/`,
+      payload
+    ),
+  signOff: (id: string) =>
+    api.post<ThirdPartyWorkOrderDto>(
+      `/maintenance-orders/work-orders/${id}/sign-off/`
+    ),
+  advanceToFinancialReview: (
+    id: string,
+    payload: { actual_invoice_total: string; dispatch_fee?: string }
+  ) =>
+    api.post<ThirdPartyWorkOrderDto>(
+      `/maintenance-orders/work-orders/${id}/advance-to-financial-review/`,
+      payload
+    ),
+  close: (id: string) =>
+    api.post<ThirdPartyWorkOrderDto>(
+      `/maintenance-orders/work-orders/${id}/close/`
+    ),
+  addQuote: (payload: {
+    work_order: string;
+    vendor: string;
+    amount: string;
+    notes?: string;
+  }) => api.post<ThirdPartyQuoteDto>('/maintenance-orders/quotes/', payload),
 };
 
 export default api;

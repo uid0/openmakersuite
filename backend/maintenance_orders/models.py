@@ -139,12 +139,76 @@ class ThirdPartyWorkOrder(models.Model):
 
     downtime_start = models.DateTimeField(null=True, blank=True)
     downtime_end = models.DateTimeField(null=True, blank=True)
+    total_downtime = models.DurationField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Persisted total downtime computed at validation. Equals "
+            "downtime_end - downtime_start once Ops signs off in Step 5."
+        ),
+    )
     keyfob_id = models.CharField(
         max_length=64,
         blank=True,
         help_text=(
             "Keyfob checked out to the vendor for site access. "
             "Phase 5 enforces return before closure."
+        ),
+    )
+
+    nte_set_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="nte_set_third_party_work_orders",
+        help_text="SIG admin who set the NTE during Step 1 intake",
+    )
+    nte_set_at = models.DateTimeField(null=True, blank=True)
+
+    emergency_authorized_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="emergency_authorized_third_party_work_orders",
+        help_text=(
+            "Logistics user who authorized emergency bypass of NTE / 3-quote "
+            "rules. Re-authorization required every 24h via "
+            "EmergencyAuthorization audit rows."
+        ),
+    )
+    emergency_authorized_at = models.DateTimeField(null=True, blank=True)
+
+    quote_waiver_signed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="quote_waived_third_party_work_orders",
+        help_text=(
+            "Authorized user who signed off on bypassing the 3-quote "
+            "requirement. Persisted with reason + timestamp for audit."
+        ),
+    )
+    quote_waiver_signed_at = models.DateTimeField(null=True, blank=True)
+    quote_waiver_reason = models.TextField(
+        blank=True,
+        help_text="Justification for waiving the 3-quote requirement (audit log)",
+    )
+
+    variance_status = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        choices=[
+            ("", "Not evaluated"),
+            ("auto_approved", "Auto-approved within par buffer"),
+            ("blocked", "Blocked — exceeds par/15% NTE"),
+        ],
+        help_text=(
+            "Outcome of Step 6 financial reconciliation. Set when "
+            "advance_to_financial_review is called. 'blocked' prevents closure."
         ),
     )
 
@@ -238,6 +302,18 @@ class ThirdPartyWorkOrderAsset(models.Model):
         default=Decimal("0"),
         validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("100"))],
         help_text="Share of the WO's total cost allocated to this asset (0-100)",
+    )
+    allocated_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text=(
+            "Cost share materialized at reconciliation: "
+            "(actual_invoice_total - dispatch_fee) * share_pct + "
+            "dispatch_fee/N. Persisted on advance_to_financial_review."
+        ),
     )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -399,3 +475,105 @@ class AssetWarranty(models.Model):
             return False
         today = timezone.now().date()
         return self.install_date <= today <= self.end_date
+
+
+class ThirdPartyWorkOrderQuote(models.Model):
+    """Vendor quote captured during Step 2 sourcing.
+
+    Standard work orders require ≥3 quotes before advancing from sourcing
+    to scheduled. The 3-quote rule can be waived by an authorized user
+    (recorded on the parent WO via ``quote_waiver_*`` fields).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        ThirdPartyWorkOrder,
+        on_delete=models.CASCADE,
+        related_name="quotes",
+    )
+    vendor = models.ForeignKey(
+        "vendors.Vendor",
+        on_delete=models.PROTECT,
+        related_name="third_party_quotes",
+    )
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Quoted total in dollars",
+    )
+    notes = models.TextField(blank=True)
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submitted_third_party_quotes",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["work_order", "amount"]
+        indexes = [
+            models.Index(fields=["work_order"], name="tpwo_quote_wo_idx"),
+            models.Index(fields=["vendor"], name="tpwo_quote_vendor_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.work_order.short_id} quote {self.vendor.name}: ${self.amount}"
+
+
+class EmergencyAuthorization(models.Model):
+    """Audit row for Logistics emergency-bypass authorizations.
+
+    Per the bead, Logistics' emergency authority must auto-revalidate every 24h.
+    Each row represents a single authorization window. ``is_currently_valid``
+    asks: was the most recent row created within the last 24 hours?
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        ThirdPartyWorkOrder,
+        on_delete=models.CASCADE,
+        related_name="emergency_authorizations",
+    )
+    authorized_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="emergency_authorizations",
+    )
+    authorized_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(
+        help_text="24 hours after authorized_at unless explicitly revoked"
+    )
+    reason = models.TextField(blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-authorized_at"]
+        indexes = [
+            models.Index(fields=["work_order", "-authorized_at"], name="tpwo_emerg_auth_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Emergency auth {self.work_order.short_id} by {self.authorized_by_id}"
+
+    def save(self, *args, **kwargs):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        if not self.expires_at:
+            self.expires_at = (self.authorized_at or timezone.now()) + timedelta(hours=24)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_currently_valid(self) -> bool:
+        from django.utils import timezone
+
+        now = timezone.now()
+        if self.revoked_at and self.revoked_at <= now:
+            return False
+        return self.expires_at > now

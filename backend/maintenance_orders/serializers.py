@@ -4,9 +4,11 @@ from rest_framework import serializers
 
 from .models import (
     AssetWarranty,
+    EmergencyAuthorization,
     ThirdPartyWorkOrder,
     ThirdPartyWorkOrderAsset,
     ThirdPartyWorkOrderAttachment,
+    ThirdPartyWorkOrderQuote,
 )
 
 
@@ -64,10 +66,55 @@ class ThirdPartyWorkOrderAssetSerializer(serializers.ModelSerializer):
             "asset_name",
             "asset_tag",
             "share_pct",
+            "allocated_cost",
             "notes",
             "created_at",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = ["id", "allocated_cost", "created_at"]
+
+
+class ThirdPartyWorkOrderQuoteSerializer(serializers.ModelSerializer):
+    """Vendor quote captured during sourcing."""
+
+    vendor_name = serializers.CharField(source="vendor.name", read_only=True)
+
+    class Meta:
+        model = ThirdPartyWorkOrderQuote
+        fields = [
+            "id",
+            "work_order",
+            "vendor",
+            "vendor_name",
+            "amount",
+            "notes",
+            "submitted_by",
+            "created_at",
+        ]
+        read_only_fields = ["id", "submitted_by", "created_at"]
+
+
+class EmergencyAuthorizationSerializer(serializers.ModelSerializer):
+    is_currently_valid = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = EmergencyAuthorization
+        fields = [
+            "id",
+            "work_order",
+            "authorized_by",
+            "authorized_at",
+            "expires_at",
+            "reason",
+            "revoked_at",
+            "is_currently_valid",
+        ]
+        read_only_fields = [
+            "id",
+            "authorized_by",
+            "authorized_at",
+            "expires_at",
+            "is_currently_valid",
+        ]
 
 
 class ThirdPartyWorkOrderAttachmentSerializer(serializers.ModelSerializer):
@@ -104,7 +151,28 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
     asset_name = serializers.CharField(source="asset.name", read_only=True, allow_null=True)
     asset_links = ThirdPartyWorkOrderAssetSerializer(many=True, read_only=True)
     attachments = ThirdPartyWorkOrderAttachmentSerializer(many=True, read_only=True)
+    quotes = ThirdPartyWorkOrderQuoteSerializer(many=True, read_only=True)
     active_warranty = serializers.SerializerMethodField()
+    workflow = serializers.SerializerMethodField()
+
+    def get_workflow(self, obj):
+        """Per-step gate status for the frontend stepper."""
+        from .transitions import (
+            has_active_emergency_authorization,
+            has_invoice_and_fsr,
+            has_photo_evidence,
+            has_required_quotes,
+        )
+
+        return {
+            "has_nte": obj.nte_amount is not None,
+            "has_active_emergency_authorization": has_active_emergency_authorization(obj),
+            "has_required_quotes": has_required_quotes(obj),
+            "quote_count": obj.quotes.count(),
+            "has_photo_evidence": has_photo_evidence(obj),
+            "has_invoice_and_fsr": has_invoice_and_fsr(obj),
+            "variance_status": obj.variance_status,
+        }
 
     def get_active_warranty(self, obj):
         from .signals import active_warranty_for
@@ -135,8 +203,17 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
             "dispatch_fee",
             "downtime_start",
             "downtime_end",
+            "total_downtime",
             "keyfob_id",
             "warranty_recovery",
+            "nte_set_by",
+            "nte_set_at",
+            "emergency_authorized_by",
+            "emergency_authorized_at",
+            "quote_waiver_signed_by",
+            "quote_waiver_signed_at",
+            "quote_waiver_reason",
+            "variance_status",
             "shadow_user",
             "opened_by",
             "opened_at",
@@ -145,11 +222,29 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
             "internal_notes",
             "asset_links",
             "attachments",
+            "quotes",
             "active_warranty",
+            "workflow",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "short_id", "opened_at", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "short_id",
+            "opened_at",
+            "total_downtime",
+            "nte_set_by",
+            "nte_set_at",
+            "emergency_authorized_by",
+            "emergency_authorized_at",
+            "quote_waiver_signed_by",
+            "quote_waiver_signed_at",
+            "quote_waiver_reason",
+            "variance_status",
+            "workflow",
+            "created_at",
+            "updated_at",
+        ]
 
     def validate(self, attrs):
         """Enforce SIG-work asset linkage rule.

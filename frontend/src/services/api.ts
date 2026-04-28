@@ -1470,4 +1470,45 @@ export const makerBoxesAPI = {
     api.post<{ sent: boolean; to: string }>(`/maker-boxes/${id}/email-pickup/`, email ? { email } : {}),
 };
 
+export interface AssetWarrantyDto {
+  id: string;
+  asset: string;
+  install_date: string;
+  duration_days: number | null;
+  end_date: string | null;
+  provider: string;
+  policy_number: string;
+  notes: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ComplianceBucket = 'ok' | 'expiring_soon' | 'expired' | 'missing';
+
+export interface VendorComplianceDto {
+  vendor_id: string;
+  vendor_name: string;
+  is_active: boolean;
+  tdlr_status: ComplianceBucket;
+  tdlr_expires_at: string | null;
+  coi_status: ComplianceBucket;
+  coi_expires_at: string | null;
+}
+
+export interface AssetWoStatusDto {
+  asset_id: string;
+  warranty: AssetWarrantyDto | null;
+  warranty_recovery_recommended: boolean;
+  vendor_compliance?: VendorComplianceDto;
+}
+
+export const thirdPartyMaintenanceAPI = {
+  getAssetWoStatus: (assetId: string, vendorId?: string) =>
+    api.get<AssetWoStatusDto>(
+      `/maintenance-orders/assets/${assetId}/wo-status/`,
+      { params: vendorId ? { vendor: vendorId } : {} }
+    ),
+};
+
 export default api;

@@ -354,6 +354,10 @@ CELERY_BEAT_SCHEDULE = {
         # use crontab instead:
         # "schedule": crontab(day_of_month=1, month_of_year="1,4,7,10"),
     },
+    "flag-expiring-vendor-compliance": {
+        "task": "vendors.flag_expiring_compliance",
+        "schedule": 86400.0,  # daily — emails Logistics a TDLR/COI digest
+    },
 }
 
 # MQTT Configuration for ForgeKey

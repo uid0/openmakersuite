@@ -2,7 +2,51 @@
 
 from rest_framework import serializers
 
-from .models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAsset, ThirdPartyWorkOrderAttachment
+from .models import (
+    AssetWarranty,
+    ThirdPartyWorkOrder,
+    ThirdPartyWorkOrderAsset,
+    ThirdPartyWorkOrderAttachment,
+)
+
+
+class AssetWarrantySerializer(serializers.ModelSerializer):
+    is_active = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = AssetWarranty
+        fields = [
+            "id",
+            "asset",
+            "install_date",
+            "duration_days",
+            "end_date",
+            "provider",
+            "policy_number",
+            "notes",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "is_active", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        instance = getattr(self, "instance", None)
+        install_date = attrs.get("install_date", getattr(instance, "install_date", None))
+        duration_days = attrs.get("duration_days", getattr(instance, "duration_days", None))
+        end_date = attrs.get("end_date", getattr(instance, "end_date", None))
+        if not duration_days and not end_date:
+            raise serializers.ValidationError(
+                "Provide either duration_days or end_date — one is required."
+            )
+        if duration_days and end_date and install_date:
+            from datetime import timedelta
+
+            if install_date + timedelta(days=duration_days) != end_date:
+                raise serializers.ValidationError(
+                    "duration_days and end_date disagree; provide only one."
+                )
+        return attrs
 
 
 class ThirdPartyWorkOrderAssetSerializer(serializers.ModelSerializer):
@@ -60,6 +104,15 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
     asset_name = serializers.CharField(source="asset.name", read_only=True, allow_null=True)
     asset_links = ThirdPartyWorkOrderAssetSerializer(many=True, read_only=True)
     attachments = ThirdPartyWorkOrderAttachmentSerializer(many=True, read_only=True)
+    active_warranty = serializers.SerializerMethodField()
+
+    def get_active_warranty(self, obj):
+        from .signals import active_warranty_for
+
+        warranty = active_warranty_for(obj.asset)
+        if warranty is None:
+            return None
+        return AssetWarrantySerializer(warranty).data
 
     class Meta:
         model = ThirdPartyWorkOrder
@@ -92,6 +145,7 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
             "internal_notes",
             "asset_links",
             "attachments",
+            "active_warranty",
             "created_at",
             "updated_at",
         ]

@@ -1,9 +1,12 @@
 """
-Third-party maintenance work order models (Phase 1: foundation).
+Third-party maintenance work order models.
 
-Phase 1 only ships the data structures + minimal CRUD. The 7-step state
-machine, warranty/compliance gates, variance reconciliation, paper-form
-ingestion, and SIG closure notifications all land in subsequent phases.
+Phase 1 shipped the data structures + minimal CRUD. Phase 2 (this file's
+warranty gate + AssetWarranty model + vendor compliance hooks) adds the
+preconditions Logistics needs before sourcing — warranty recovery and
+TDLR/COI status surfacing. The 7-step state machine, variance
+reconciliation, paper-form ingestion, and SIG closure notifications still
+land in later phases.
 """
 
 import uuid
@@ -305,3 +308,94 @@ class ThirdPartyWorkOrderAttachment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.work_order.short_id} {self.get_kind_display()}: {self.caption or self.file.name}"
+
+
+class AssetWarranty(models.Model):
+    """Manufacturer or third-party warranty coverage for an asset.
+
+    Used by the Phase 2 warranty gate on third-party WO creation: if the asset
+    has an active warranty when a WO is opened, ``warranty_recovery`` is set
+    on the WO so Logistics knows to pursue the manufacturer for reimbursement
+    before paying the vendor invoice out of operating budget.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        "inventory.Asset",
+        on_delete=models.CASCADE,
+        related_name="warranties",
+    )
+    install_date = models.DateField(
+        help_text="Date the warranty coverage begins (typically install or purchase date)"
+    )
+    duration_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Duration of coverage in days. Either duration_days or end_date "
+            "must be provided; the other is computed automatically."
+        ),
+    )
+    end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Computed from install_date + duration_days when blank. "
+            "Set explicitly to override (e.g., extended warranty)."
+        ),
+    )
+    provider = models.CharField(
+        max_length=200,
+        help_text="Warranty provider — usually the manufacturer or extended-warranty carrier",
+    )
+    policy_number = models.CharField(max_length=128, blank=True)
+    notes = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-end_date"]
+        verbose_name_plural = "asset warranties"
+        indexes = [
+            models.Index(fields=["asset", "-end_date"], name="aw_asset_end_idx"),
+            models.Index(fields=["end_date"], name="aw_end_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.provider} warranty for {self.asset_id} (ends {self.end_date})"
+
+    def clean(self):
+        from datetime import timedelta
+
+        from django.core.exceptions import ValidationError
+
+        if not self.duration_days and not self.end_date:
+            raise ValidationError(
+                "Provide either duration_days or end_date — one is required to bound coverage."
+            )
+        if self.duration_days and self.end_date:
+            expected = self.install_date + timedelta(days=self.duration_days)
+            if expected != self.end_date:
+                raise ValidationError(
+                    "duration_days and end_date disagree; provide only one and let the other compute."
+                )
+
+    def save(self, *args, **kwargs):
+        from datetime import timedelta
+
+        if self.duration_days and not self.end_date:
+            self.end_date = self.install_date + timedelta(days=self.duration_days)
+        elif self.end_date and not self.duration_days:
+            self.duration_days = (self.end_date - self.install_date).days
+        super().save(*args, **kwargs)
+
+    @property
+    def is_active(self) -> bool:
+        """True if today's date is within the install_date..end_date window."""
+        from django.utils import timezone
+
+        if not self.end_date:
+            return False
+        today = timezone.now().date()
+        return self.install_date <= today <= self.end_date

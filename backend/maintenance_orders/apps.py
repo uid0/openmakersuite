@@ -9,3 +9,6 @@ class MaintenanceOrdersConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "maintenance_orders"
     verbose_name = "Third-Party Maintenance Orders"
+
+    def ready(self) -> None:
+        from . import signals  # noqa: F401

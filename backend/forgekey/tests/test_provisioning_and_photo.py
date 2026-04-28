@@ -99,8 +99,8 @@ class TestRegister:
         body = resp.json()
         device = ESP32Device.objects.get(mac_address="AA:BB:CC:11:22:33")
         assert body["device_id"] == str(device.id)
-        assert body["mqtt_topic_for_firmware"] == "forgekey/AA-BB-CC-11-22-33/firmware"
-        assert body["mqtt_topic_for_pings"] == "forgekey/AA-BB-CC-11-22-33/ping"
+        assert body["mqtt_topic_for_firmware"] == "forgekey/aabbcc112233/firmware"
+        assert body["mqtt_topic_for_pings"] == "forgekey/aabbcc112233/people_counter/occupancy"
         assert body["jwt_token"]
         assert device.enrollment_photo  # photo persisted
         assert device.firmware_version == "1.4.2"
@@ -152,6 +152,77 @@ class TestRegister:
         )
         assert resp.status_code == 401
         assert ESP32Device.objects.filter(mac_address="AA:BB:CC:DD:EE:02").exists() is False
+
+    def test_register_placeholder_token_returns_401(
+        self, api_client, people_counter_type, register_url
+    ):
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:03",
+            "device_type": DeviceType.TYPE_PEOPLE_COUNTER,
+        }
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN="REPLACE_ME_PROVISIONING_TOKEN",
+            format="multipart",
+        )
+        assert resp.status_code == 401
+        assert ESP32Device.objects.filter(mac_address="AA:BB:CC:DD:EE:03").exists() is False
+
+    def test_register_missing_token_returns_401(
+        self, api_client, people_counter_type, register_url
+    ):
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:04",
+            "device_type": DeviceType.TYPE_PEOPLE_COUNTER,
+        }
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            format="multipart",
+        )
+        assert resp.status_code == 401
+
+    def test_register_firmware_contract_payload(
+        self, api_client, people_counter_type, register_url
+    ):
+        """Literal firmware payload from oms-kla spec — both lowercase-no-sep mac and
+        hyphenated sensor_kind must be accepted, response must use spec-shape topics."""
+        meta = {
+            "mac_address": "aabbccddeeff",
+            "firmware_version": "0.1.0",
+            "sensor_kind": "people-counter",
+            "boot_count": 3,
+            "free_heap": 123456,
+            "ip": "192.168.1.42",
+        }
+
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg("boot.jpg"), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN=PROVISIONING_TOKEN,
+            format="multipart",
+        )
+
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert set(body) >= {
+            "device_id",
+            "mqtt_topic_for_firmware",
+            "mqtt_topic_for_pings",
+            "jwt_token",
+        }
+        assert body["device_id"]
+        assert body["mqtt_topic_for_firmware"] == "forgekey/aabbccddeeff/firmware"
+        assert body["mqtt_topic_for_pings"] == "forgekey/aabbccddeeff/people_counter/occupancy"
+        assert body["jwt_token"]
+
+        device = ESP32Device.objects.get(mac_address="AA:BB:CC:DD:EE:FF")
+        assert device.device_type == people_counter_type
+        assert device.firmware_version == "0.1.0"
+        assert device.boot_count == 3
+        assert device.free_heap == 123456
+        assert device.ip == "192.168.1.42"
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +309,7 @@ class TestFirmwareDispatch:
         assert len(records) == 1
         assert mqtt_client.publish.called
         topic, payload = mqtt_client.publish.call_args[0][:2]
-        assert topic == "forgekey/DE-AD-BE-EF-00-01/firmware"
+        assert topic == "forgekey/deadbeef0001/firmware"
         body = json.loads(payload)
         assert body["version"] == "2.0.0"
         assert body["mandatory"] is True

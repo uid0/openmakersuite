@@ -129,11 +129,28 @@ def get_mqtt_data_topic(mac_address: str) -> str:
     return get_mqtt_topic(mac_address, "data")
 
 
+def _firmware_contract_mac(mac_address: str) -> str:
+    """MAC formatted per the firmware provisioning contract: lowercase hex, no separators."""
+    return normalize_mac_address(mac_address).replace(":", "").lower()
+
+
+def normalize_sensor_kind(sensor_kind: str) -> str:
+    """Normalize sensor_kind to the DeviceType.code form (hyphens → underscores)."""
+    return (sensor_kind or "").strip().replace("-", "_").lower()
+
+
 def get_mqtt_firmware_topic(mac_address: str) -> str:
-    """Get MQTT topic the server publishes firmware-update payloads to."""
-    return get_mqtt_topic(mac_address, "firmware")
+    """MQTT topic the firmware subscribes to for OTA advertisements.
+
+    Firmware contract: ``forgekey/<lowercase-no-sep-mac>/firmware``.
+    """
+    return f"{settings.MQTT_TOPIC_PREFIX}/{_firmware_contract_mac(mac_address)}/firmware"
 
 
-def get_mqtt_ping_topic(mac_address: str) -> str:
-    """Get MQTT topic devices publish heartbeat / ping messages on."""
-    return get_mqtt_topic(mac_address, "ping")
+def get_mqtt_ping_topic(mac_address: str, sensor_kind: str) -> str:
+    """MQTT topic the firmware publishes sensor pings to.
+
+    Firmware contract: ``forgekey/<lowercase-no-sep-mac>/<sensor_kind>/occupancy``.
+    """
+    kind = normalize_sensor_kind(sensor_kind)
+    return f"{settings.MQTT_TOPIC_PREFIX}/{_firmware_contract_mac(mac_address)}/{kind}/occupancy"

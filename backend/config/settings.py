@@ -81,6 +81,8 @@ INSTALLED_APPS = [
     "notifications",
     "screens",
     "maker_boxes",
+    "vendors",
+    "maintenance_orders",
 ]
 
 MIDDLEWARE = [

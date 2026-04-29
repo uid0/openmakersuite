@@ -16,7 +16,8 @@ import {
 import { IconAlertTriangle, IconCalendar, IconCash, IconClipboardList } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { maintenanceAPI, MaintenanceDashboardData } from '../services/api';
+import { activeMaintenanceAPI, maintenanceAPI, MaintenanceDashboardData } from '../services/api';
+import { ActiveMaintenanceRow } from '../types';
 
 const PERIOD_LABELS: Array<{ key: keyof MaintenanceDashboardData['costs']['per_period']; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -39,20 +40,49 @@ const formatDate = (iso: string | null): string => {
   return d.toLocaleDateString();
 };
 
+type ActiveKindFilter = 'all' | ActiveMaintenanceRow['kind'];
+
+const KIND_LABELS: Record<ActiveMaintenanceRow['kind'], string> = {
+  work_order: 'Work Order',
+  asset_problem: 'Asset Problem',
+  location_problem: 'Location Problem',
+};
+
+const KIND_COLORS: Record<ActiveMaintenanceRow['kind'], string> = {
+  work_order: 'blue',
+  asset_problem: 'orange',
+  location_problem: 'grape',
+};
+
+const SEVERITY_COLORS: Record<string, string> = {
+  low: 'gray',
+  medium: 'cyan',
+  high: 'orange',
+  urgent: 'red',
+};
+
+const detailLinkFor = (row: ActiveMaintenanceRow): string => {
+  if (row.kind === 'work_order') return `/maintenance/work-orders/${row.id}`;
+  if (row.kind === 'location_problem') return `/maintenance/location-problems/${row.id}`;
+  return `/assets/${row.asset_id ?? ''}`;
+};
+
 const MaintenanceDashboardPage: React.FC = () => {
   const [data, setData] = useState<MaintenanceDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [active, setActive] = useState<ActiveMaintenanceRow[]>([]);
+  const [activeFilter, setActiveFilter] = useState<ActiveKindFilter>('all');
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    maintenanceAPI
-      .getDashboard()
-      .then((res) => {
+    Promise.all([maintenanceAPI.getDashboard(), activeMaintenanceAPI.list()])
+      .then(([dash, act]) => {
         if (cancelled) return;
-        setData(res.data);
+        setData(dash.data);
+        setActive(act.data.results);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -66,6 +96,10 @@ const MaintenanceDashboardPage: React.FC = () => {
       cancelled = true;
     };
   }, []);
+
+  const filteredActive = active.filter(
+    (row) => activeFilter === 'all' || row.kind === activeFilter,
+  );
 
   return (
     <Container size="xl" py="md" data-testid="maintenance-dashboard-page">
@@ -91,6 +125,87 @@ const MaintenanceDashboardPage: React.FC = () => {
 
       {!loading && !error && data && (
         <Stack gap="lg">
+          <Box data-testid="active-maintenance-list">
+            <Group mb="sm" gap="xs">
+              <IconClipboardList size={18} />
+              <Title order={4}>Active Maintenance</Title>
+              <Badge>{filteredActive.length}</Badge>
+              <Group gap={4} ml="auto">
+                {(['all', 'work_order', 'asset_problem', 'location_problem'] as ActiveKindFilter[]).map(
+                  (kind) => (
+                    <Badge
+                      key={kind}
+                      onClick={() => setActiveFilter(kind)}
+                      variant={activeFilter === kind ? 'filled' : 'light'}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {kind === 'all' ? 'All' : KIND_LABELS[kind]}
+                    </Badge>
+                  ),
+                )}
+              </Group>
+            </Group>
+            {filteredActive.length === 0 ? (
+              <Card withBorder p="md" radius="sm">
+                <Text size="sm" c="dimmed">
+                  No active maintenance items.
+                </Text>
+              </Card>
+            ) : (
+              <Card withBorder p={0} radius="sm">
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Kind</Table.Th>
+                      <Table.Th>ID</Table.Th>
+                      <Table.Th>Title</Table.Th>
+                      <Table.Th>Asset / Location</Table.Th>
+                      <Table.Th>Severity</Table.Th>
+                      <Table.Th>Status</Table.Th>
+                      <Table.Th>Opened</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {filteredActive.map((row) => (
+                      <Table.Tr
+                        key={`${row.kind}-${row.id}`}
+                        data-testid={`active-row-${row.kind}`}
+                      >
+                        <Table.Td>
+                          <Badge color={KIND_COLORS[row.kind]} variant="light">
+                            {KIND_LABELS[row.kind]}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Anchor component={Link} to={detailLinkFor(row)}>
+                            {row.short_id}
+                          </Anchor>
+                        </Table.Td>
+                        <Table.Td>{row.title}</Table.Td>
+                        <Table.Td>
+                          {row.asset_name ?? row.location_name ?? '—'}
+                        </Table.Td>
+                        <Table.Td>
+                          {row.severity ? (
+                            <Badge color={SEVERITY_COLORS[row.severity]} variant="filled">
+                              {row.severity}
+                            </Badge>
+                          ) : (
+                            '—'
+                          )}
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge variant="light">{row.status_display}</Badge>
+                        </Table.Td>
+                        <Table.Td>{formatDate(row.opened_at)}</Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Card>
+            )}
+          </Box>
+
           <Box>
             <Group mb="sm" gap="xs">
               <IconCash size={18} />

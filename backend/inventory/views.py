@@ -34,6 +34,7 @@ from .models import (
     InventoryItem,
     ItemSupplier,
     Location,
+    LocationProblem,
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
@@ -59,6 +60,7 @@ from .serializers import (
     InventoryItemDetailSerializer,
     InventoryItemSerializer,
     ItemSupplierSerializer,
+    LocationProblemSerializer,
     LocationReconcileItemSerializer,
     LocationSerializer,
     MaintenanceItemSerializer,
@@ -358,6 +360,80 @@ class LocationViewSet(viewsets.ModelViewSet):
                     checklists = checklists.filter(is_public=True)
 
         serializer = ChecklistListSerializer(checklists, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[AllowAny],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def report_problem(self, request, pk=None):
+        """Report a problem at this location.
+
+        Mirrors Asset.report_problem. Accepts ``description``, ``severity``,
+        and an optional ``photo`` upload. Anonymous reporters are allowed
+        (parallel to QR-scan asset reporting); authenticated users get their
+        username recorded.
+        """
+        location = self.get_object()
+        description = (request.data.get("description") or "").strip()
+        if not description:
+            return Response(
+                {"error": "description is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        severity = request.data.get("severity") or LocationProblem.SEVERITY_MEDIUM
+        valid_sev = {choice for choice, _ in LocationProblem.SEVERITY_CHOICES}
+        if severity not in valid_sev:
+            return Response(
+                {"error": f"severity must be one of {sorted(valid_sev)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reported_by = ""
+        if request.user and request.user.is_authenticated:
+            reported_by = request.user.username
+
+        problem = LocationProblem.objects.create(
+            location=location,
+            reported_by=reported_by,
+            description=description,
+            severity=severity,
+            photo=request.FILES.get("photo"),
+        )
+
+        try:
+            from notifications.services import notify_admins
+
+            reporter_text = f" by {reported_by}" if reported_by else ""
+            notify_admins(
+                type="warning",
+                title=f"Location problem reported: {location.name}",
+                message=(
+                    f"A problem was reported{reporter_text} at {location.name} "
+                    f"[{problem.get_severity_display()}]: {description[:200]}"
+                ),
+                action_url=f"/inventory/locations/{location.id}",
+                metadata={
+                    "location_problem_id": str(problem.id),
+                    "location_id": str(location.id),
+                    "severity": problem.severity,
+                },
+            )
+        except Exception:  # nosec B110 - notifications must not block reports
+            pass
+
+        serializer = LocationProblemSerializer(problem, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def problems(self, request, pk=None):
+        """List problem reports filed against this location."""
+        location = self.get_object()
+        qs = LocationProblem.objects.filter(location=location).order_by("-reported_at")
+        serializer = LocationProblemSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data)
 
 
@@ -1998,6 +2074,236 @@ class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
+    """API endpoint for location problem reports.
+
+    Read-only here; reports are created via Location.report_problem. This
+    viewset exposes detail GET, the promote-to-WO actions, and the
+    resolve action so staff can close out a report.
+    """
+
+    queryset = LocationProblem.objects.select_related(
+        "location", "work_order", "third_party_work_order"
+    )
+    serializer_class = LocationProblemSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        location_id = self.request.query_params.get("location")
+        if location_id:
+            qs = qs.filter(location_id=location_id)
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        severity = self.request.query_params.get("severity")
+        if severity:
+            qs = qs.filter(severity=severity)
+        return qs
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="promote-standard",
+        permission_classes=[IsAuthenticated],
+    )
+    def promote_to_standard_work_order(self, request, pk=None):
+        """Promote this LocationProblem to a standard PM WorkOrder.
+
+        Required: ``maintenance_item`` (uuid). Existing WorkOrder model is
+        bound to a MaintenanceItem (which is asset-rooted), so the caller
+        picks the MaintenanceItem under which to track the work — typically
+        a building-level "as-needed" item attached to an Asset that
+        represents the location.
+        """
+        problem = self.get_object()
+        if problem.work_order_id:
+            return Response(
+                {"error": "Already promoted to a standard work order."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        mi_id = request.data.get("maintenance_item")
+        if not mi_id:
+            return Response(
+                {"error": "maintenance_item is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            mi = MaintenanceItem.objects.get(id=mi_id)
+        except MaintenanceItem.DoesNotExist:
+            return Response(
+                {"error": "MaintenanceItem not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        with transaction.atomic():
+            wo = WorkOrder.objects.create(
+                maintenance_item=mi,
+                notes=problem.description,
+                assigned_to=request.user if request.user.is_authenticated else None,
+            )
+            problem.work_order = wo
+            problem.status = LocationProblem.IN_PROGRESS
+            problem.save(update_fields=["work_order", "status", "updated_at"])
+            self._copy_attachments_to_work_order(problem, wo)
+
+        serializer = LocationProblemSerializer(problem, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="promote-third-party",
+        permission_classes=[IsAuthenticated],
+    )
+    def promote_to_third_party_work_order(self, request, pk=None):
+        """Promote this LocationProblem to a ThirdPartyWorkOrder.
+
+        Required: ``vendor`` (uuid) and ``title``. Pre-fills the WO with
+        the problem description (in ``notes``), links the WO back to the
+        problem's location, and copies any attached photo or paper-form
+        PDF to the new WO as attachments.
+        """
+        from maintenance_orders.models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAttachment
+        from vendors.models import Vendor
+
+        problem = self.get_object()
+        if problem.third_party_work_order_id:
+            return Response(
+                {"error": "Already promoted to a third-party work order."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        vendor_id = request.data.get("vendor")
+        title = (request.data.get("title") or "").strip()
+        if not vendor_id or not title:
+            return Response(
+                {"error": "vendor and title are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            vendor = Vendor.objects.get(id=vendor_id)
+        except Vendor.DoesNotExist:
+            return Response(
+                {"error": "Vendor not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        work_type = request.data.get("work_type") or ThirdPartyWorkOrder.WORK_TYPE_STANDARD
+
+        with transaction.atomic():
+            tpwo = ThirdPartyWorkOrder.objects.create(
+                title=title,
+                location=problem.location,
+                vendor=vendor,
+                work_type=work_type,
+                notes=problem.description,
+                opened_by=request.user if request.user.is_authenticated else None,
+            )
+            if problem.photo:
+                self._copy_to_tpwo_attachment(
+                    problem.photo,
+                    tpwo,
+                    kind=ThirdPartyWorkOrderAttachment.KIND_PHOTO,
+                    caption=f"Reporter photo from LocationProblem {problem.id}",
+                    filename_hint="location-problem-photo",
+                    user=request.user if request.user.is_authenticated else None,
+                )
+            if problem.paper_form_attachment:
+                self._copy_to_tpwo_attachment(
+                    problem.paper_form_attachment,
+                    tpwo,
+                    kind=ThirdPartyWorkOrderAttachment.KIND_PAPER_FORM,
+                    caption=f"Original paper form from LocationProblem {problem.id}",
+                    filename_hint="location-problem-paper-form",
+                    user=request.user if request.user.is_authenticated else None,
+                )
+            problem.third_party_work_order = tpwo
+            problem.status = LocationProblem.IN_PROGRESS
+            problem.save(update_fields=["third_party_work_order", "status", "updated_at"])
+
+        serializer = LocationProblemSerializer(problem, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def resolve(self, request, pk=None):
+        """Mark this location problem as resolved or closed."""
+        problem = self.get_object()
+        new_status = request.data.get("status", LocationProblem.RESOLVED)
+        if new_status not in (LocationProblem.RESOLVED, LocationProblem.CLOSED):
+            return Response(
+                {
+                    "error": (
+                        f"status must be '{LocationProblem.RESOLVED}' or "
+                        f"'{LocationProblem.CLOSED}'"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        problem.status = new_status
+        problem.resolution_notes = request.data.get(
+            "resolution_notes", problem.resolution_notes or ""
+        )
+        if not problem.resolved_at:
+            problem.resolved_at = timezone.now()
+            if request.user.is_authenticated:
+                problem.resolved_by = getattr(request.user, "handle", None) or request.user.username
+        problem.save()
+
+        serializer = LocationProblemSerializer(problem, context={"request": request})
+        return Response(serializer.data)
+
+    @staticmethod
+    def _copy_attachments_to_work_order(problem, work_order):
+        """Copy a problem's photo to a PM WorkOrder via WorkOrderPhoto."""
+        from .models import WorkOrderPhoto
+
+        if problem.photo:
+            wop = WorkOrderPhoto(
+                work_order=work_order,
+                caption=f"From LocationProblem {problem.id}",
+            )
+            problem.photo.open("rb")
+            try:
+                from django.core.files.base import ContentFile
+
+                wop.image.save(
+                    f"location-problem-{problem.id}.jpg",
+                    ContentFile(problem.photo.read()),
+                    save=False,
+                )
+            finally:
+                problem.photo.close()
+            wop.save()
+
+    @staticmethod
+    def _copy_to_tpwo_attachment(file_field, tpwo, *, kind, caption, filename_hint, user):
+        from django.core.files.base import ContentFile
+
+        from maintenance_orders.models import ThirdPartyWorkOrderAttachment
+
+        file_field.open("rb")
+        try:
+            data = file_field.read()
+        finally:
+            file_field.close()
+        attachment = ThirdPartyWorkOrderAttachment(
+            work_order=tpwo,
+            kind=kind,
+            caption=caption,
+            uploaded_by=user,
+        )
+        ext = file_field.name.rsplit(".", 1)[-1] if "." in file_field.name else "bin"
+        attachment.file.save(
+            f"{filename_hint}-{tpwo.short_id}.{ext}",
+            ContentFile(data),
+            save=False,
+        )
+        attachment.save()
+
+
 class AssetPartViewSet(viewsets.ModelViewSet):
     """API endpoint for asset parts/consumables."""
 
@@ -3299,6 +3605,108 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
                 },
             }
         )
+
+    @action(detail=False, methods=["get"], url_path="active")
+    def active_work_orders(self, request):
+        """Unioned active maintenance list: WorkOrders + open Problems.
+
+        Surfaces every item that needs attention from the maintenance team
+        in a single feed: open WorkOrders, AssetProblems not yet promoted to
+        a WO, and LocationProblems not yet promoted to a WO. Each row carries
+        a ``kind`` discriminator so the frontend can render appropriate CTAs.
+        """
+        open_wo_statuses = [
+            WorkOrder.STATUS_OPEN,
+            WorkOrder.STATUS_IN_PROGRESS,
+            WorkOrder.STATUS_BLOCKED,
+        ]
+        open_problem_statuses = [
+            AssetProblem.REPORTED,
+            AssetProblem.IN_PROGRESS,
+        ]
+        open_location_problem_statuses = [
+            LocationProblem.REPORTED,
+            LocationProblem.IN_PROGRESS,
+        ]
+
+        rows = []
+
+        for wo in (
+            WorkOrder.objects.filter(status__in=open_wo_statuses)
+            .select_related("maintenance_item__asset")
+            .order_by("-created_at")
+        ):
+            rows.append(
+                {
+                    "kind": "work_order",
+                    "id": str(wo.id),
+                    "short_id": wo.short_id,
+                    "title": wo.maintenance_item.title,
+                    "status": wo.status,
+                    "status_display": wo.get_status_display(),
+                    "asset_id": str(wo.maintenance_item.asset_id),
+                    "asset_name": wo.maintenance_item.asset.name,
+                    "location_id": None,
+                    "location_name": None,
+                    "severity": None,
+                    "due_date": wo.due_date.isoformat() if wo.due_date else None,
+                    "opened_at": wo.created_at.isoformat(),
+                }
+            )
+
+        # AssetProblem has no FK to WorkOrder, so we surface every open report.
+        for ap in (
+            AssetProblem.objects.filter(status__in=open_problem_statuses)
+            .select_related("asset")
+            .order_by("-created_at")
+        ):
+            rows.append(
+                {
+                    "kind": "asset_problem",
+                    "id": str(ap.id),
+                    "short_id": str(ap.id)[:8].upper(),
+                    "title": ap.description[:80],
+                    "status": ap.status,
+                    "status_display": ap.get_status_display(),
+                    "asset_id": str(ap.asset_id),
+                    "asset_name": ap.asset.name,
+                    "location_id": None,
+                    "location_name": None,
+                    "severity": None,
+                    "due_date": None,
+                    "opened_at": ap.created_at.isoformat(),
+                }
+            )
+
+        for lp in (
+            LocationProblem.objects.filter(
+                status__in=open_location_problem_statuses,
+                work_order__isnull=True,
+                third_party_work_order__isnull=True,
+            )
+            .select_related("location")
+            .order_by("-reported_at")
+        ):
+            rows.append(
+                {
+                    "kind": "location_problem",
+                    "id": str(lp.id),
+                    "short_id": str(lp.id)[:8].upper(),
+                    "title": lp.description[:80],
+                    "status": lp.status,
+                    "status_display": lp.get_status_display(),
+                    "asset_id": None,
+                    "asset_name": None,
+                    "location_id": lp.location_id,
+                    "location_name": lp.location.name,
+                    "severity": lp.severity,
+                    "due_date": None,
+                    "opened_at": lp.reported_at.isoformat(),
+                }
+            )
+
+        rows.sort(key=lambda r: r["opened_at"], reverse=True)
+        return Response({"results": rows, "count": len(rows)})
 
 
 class AssetReportViewSet(viewsets.ViewSet):

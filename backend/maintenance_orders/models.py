@@ -72,6 +72,18 @@ class ThirdPartyWorkOrder(models.Model):
             "captured via ThirdPartyWorkOrderAsset."
         ),
     )
+    location = models.ForeignKey(
+        "inventory.Location",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="third_party_work_orders",
+        help_text=(
+            "Location this work order targets. Set when the WO was promoted "
+            "from a LocationProblem (non-asset complaint such as a leak or "
+            "broken door). Optional for asset-rooted work."
+        ),
+    )
 
     vendor = models.ForeignKey(
         "vendors.Vendor",

@@ -199,6 +199,7 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     vendor_name = serializers.CharField(source="vendor.name", read_only=True)
     asset_name = serializers.CharField(source="asset.name", read_only=True, allow_null=True)
+    location_name = serializers.CharField(source="location.name", read_only=True, allow_null=True)
     asset_links = ThirdPartyWorkOrderAssetSerializer(many=True, read_only=True)
     attachments = ThirdPartyWorkOrderAttachmentSerializer(many=True, read_only=True)
     quotes = ThirdPartyWorkOrderQuoteSerializer(many=True, read_only=True)
@@ -242,6 +243,8 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
             "title",
             "asset",
             "asset_name",
+            "location",
+            "location_name",
             "vendor",
             "vendor_name",
             "work_type",
@@ -318,13 +321,15 @@ class ThirdPartyWorkOrderSerializer(serializers.ModelSerializer):
         )
         is_emergency = attrs.get("is_emergency", getattr(instance, "is_emergency", False))
         asset = attrs.get("asset", getattr(instance, "asset", None))
+        location = attrs.get("location", getattr(instance, "location", None))
 
         if (
             work_type != ThirdPartyWorkOrder.WORK_TYPE_BUILDING_EMERGENCY
             and not is_emergency
             and asset is None
+            and location is None
         ):
             raise serializers.ValidationError(
-                {"asset": "Asset is required for non-emergency work orders."}
+                {"asset": ("Asset or location is required for non-emergency work orders.")}
             )
         return attrs

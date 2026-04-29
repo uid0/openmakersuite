@@ -356,6 +356,52 @@ export interface AssetProblem {
   photos: AssetProblemPhoto[];
 }
 
+export type LocationProblemStatus = 'reported' | 'in_progress' | 'resolved' | 'closed';
+export type LocationProblemSeverity = 'low' | 'medium' | 'high' | 'urgent';
+
+export interface LocationProblem {
+  id: string;
+  location: number;
+  location_name: string;
+  reported_by: string;
+  description: string;
+  status: LocationProblemStatus;
+  status_display: string;
+  severity: LocationProblemSeverity;
+  severity_display: string;
+  photo: string | null;
+  photo_url: string | null;
+  paper_form_attachment: string | null;
+  paper_form_url: string | null;
+  work_order: string | null;
+  work_order_short_id: string | null;
+  third_party_work_order: string | null;
+  third_party_work_order_short_id: string | null;
+  resolution_notes: string;
+  reported_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  resolved_by: string;
+}
+
+export type ActiveMaintenanceKind = 'work_order' | 'asset_problem' | 'location_problem';
+
+export interface ActiveMaintenanceRow {
+  kind: ActiveMaintenanceKind;
+  id: string;
+  short_id: string;
+  title: string;
+  status: string;
+  status_display: string;
+  asset_id: string | null;
+  asset_name: string | null;
+  location_id: number | null;
+  location_name: string | null;
+  severity: LocationProblemSeverity | null;
+  due_date: string | null;
+  opened_at: string;
+}
+
 export interface MaintenanceMaterialInventoryDetail {
   id: string;
   name: string;

@@ -8,7 +8,7 @@ import { MantineProvider } from '@mantine/core';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import MaintenanceDashboardPage from '../../pages/MaintenanceDashboardPage';
-import { maintenanceAPI, MaintenanceDashboardData } from '../../services/api';
+import { activeMaintenanceAPI, maintenanceAPI, MaintenanceDashboardData } from '../../services/api';
 
 jest.mock('../../services/api', () => {
   const actual = jest.requireActual('../../services/api');
@@ -18,10 +18,17 @@ jest.mock('../../services/api', () => {
       ...actual.maintenanceAPI,
       getDashboard: jest.fn(),
     },
+    activeMaintenanceAPI: {
+      ...actual.activeMaintenanceAPI,
+      list: jest.fn(),
+    },
   };
 });
 
 const mockMaintenanceAPI = maintenanceAPI as jest.Mocked<typeof maintenanceAPI>;
+const mockActiveMaintenanceAPI = activeMaintenanceAPI as jest.Mocked<
+  typeof activeMaintenanceAPI
+>;
 
 const emptyDashboard = (): MaintenanceDashboardData => ({
   scheduled_pm: [],
@@ -50,6 +57,9 @@ const renderPage = () =>
 describe('MaintenanceDashboardPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockActiveMaintenanceAPI.list.mockResolvedValue({
+      data: { results: [], count: 0 },
+    } as any);
   });
 
   test('renders title and graceful empty states when no data exists', async () => {

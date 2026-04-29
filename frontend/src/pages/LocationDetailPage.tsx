@@ -5,7 +5,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import LocationFixturesList from '../components/LocationFixturesList';
+import LocationProblemsPanel from '../components/LocationProblemsPanel';
 import LocationTrafficPanel from '../components/LocationTrafficPanel';
+import ReportLocationProblemModal from '../components/ReportLocationProblemModal';
 import { inventoryAPI } from '../services/api';
 import '../styles/LocationDetailPage.css';
 import { Location } from '../types';
@@ -19,6 +21,8 @@ const LocationDetailPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isStaff, setIsStaff] = useState(false);
   const [generatingQR, setGeneratingQR] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [problemsRefreshKey, setProblemsRefreshKey] = useState(0);
 
   useEffect(() => {
     const staffStatus = localStorage.getItem('is_staff');
@@ -99,25 +103,34 @@ const LocationDetailPage: React.FC = () => {
             <p className="location-description">{location.description}</p>
           )}
         </div>
-        {isStaff && (
-          <div className="header-actions">
-            <Link
-              to={`/inventory/locations/${location.id}/reconcile`}
-              className="btn-secondary"
-            >
-              Reconcile inventory
-            </Link>
-            <Link
-              to={`/inventory/locations/${location.id}/edit`}
-              className="btn-edit"
-            >
-              Edit
-            </Link>
-            <button onClick={handleDelete} className="btn-delete">
-              Delete
-            </button>
-          </div>
-        )}
+        <div className="header-actions">
+          <button
+            type="button"
+            onClick={() => setShowReportModal(true)}
+            className="btn-secondary"
+          >
+            Report Problem
+          </button>
+          {isStaff && (
+            <>
+              <Link
+                to={`/inventory/locations/${location.id}/reconcile`}
+                className="btn-secondary"
+              >
+                Reconcile inventory
+              </Link>
+              <Link
+                to={`/inventory/locations/${location.id}/edit`}
+                className="btn-edit"
+              >
+                Edit
+              </Link>
+              <button onClick={handleDelete} className="btn-delete">
+                Delete
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
       <div className="location-details">
@@ -202,7 +215,28 @@ const LocationDetailPage: React.FC = () => {
           <h2>Traffic</h2>
           <LocationTrafficPanel locationId={location.id} />
         </div>
+
+        <div className="detail-section">
+          <h2>Problem Reports</h2>
+          <LocationProblemsPanel
+            locationId={location.id}
+            refreshKey={problemsRefreshKey}
+          />
+        </div>
       </div>
+
+      {showReportModal && (
+        <ReportLocationProblemModal
+          locationId={location.id}
+          locationName={location.name}
+          onClose={() => setShowReportModal(false)}
+          onSubmitted={() => {
+            setShowReportModal(false);
+            setProblemsRefreshKey((k) => k + 1);
+            showSuccess('Problem reported. Maintenance has been notified.');
+          }}
+        />
+      )}
     </div>
   );
 };

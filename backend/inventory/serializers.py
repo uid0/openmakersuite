@@ -15,6 +15,7 @@ from .models import (
     InventoryItem,
     ItemSupplier,
     Location,
+    LocationProblem,
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
@@ -1029,6 +1030,77 @@ class AssetProblemSerializer(serializers.ModelSerializer):
             "photos",
         ]
         read_only_fields = ["created_at", "updated_at", "resolved_at"]
+
+
+class LocationProblemSerializer(serializers.ModelSerializer):
+    """Serializer for location problem reports."""
+
+    location_name = serializers.CharField(source="location.name", read_only=True)
+    photo_url = serializers.SerializerMethodField()
+    paper_form_url = serializers.SerializerMethodField()
+    work_order_short_id = serializers.SerializerMethodField()
+    third_party_work_order_short_id = serializers.SerializerMethodField()
+    severity_display = serializers.CharField(source="get_severity_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = LocationProblem
+        fields = [
+            "id",
+            "location",
+            "location_name",
+            "reported_by",
+            "description",
+            "status",
+            "status_display",
+            "severity",
+            "severity_display",
+            "photo",
+            "photo_url",
+            "paper_form_attachment",
+            "paper_form_url",
+            "work_order",
+            "work_order_short_id",
+            "third_party_work_order",
+            "third_party_work_order_short_id",
+            "resolution_notes",
+            "reported_at",
+            "updated_at",
+            "resolved_at",
+            "resolved_by",
+        ]
+        read_only_fields = [
+            "id",
+            "reported_at",
+            "updated_at",
+            "resolved_at",
+            "work_order",
+            "third_party_work_order",
+        ]
+
+    def _absolute(self, file_field):
+        if not file_field:
+            return None
+        request = self.context.get("request")
+        try:
+            url = file_field.url
+        except Exception:
+            return None
+        if request:
+            return request.build_absolute_uri(url)
+        return url
+
+    def get_photo_url(self, obj):
+        return self._absolute(obj.photo)
+
+    def get_paper_form_url(self, obj):
+        return self._absolute(obj.paper_form_attachment)
+
+    def get_work_order_short_id(self, obj):
+        return obj.work_order.short_id if obj.work_order else None
+
+    def get_third_party_work_order_short_id(self, obj):
+        return obj.third_party_work_order.short_id if obj.third_party_work_order else None
 
 
 class MaintenanceMaterialSerializer(serializers.ModelSerializer):

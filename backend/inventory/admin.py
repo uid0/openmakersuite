@@ -20,6 +20,7 @@ from .models import (
     InventoryItem,
     ItemSupplier,
     Location,
+    LocationProblem,
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
@@ -1341,6 +1342,104 @@ class AssetProblemAdmin(admin.ModelAdmin):
             request,
             f"{count} problem(s) marked as closed.",
             level=messages.SUCCESS,
+        )
+
+
+@admin.register(LocationProblem)
+class LocationProblemAdmin(admin.ModelAdmin):
+    """Admin interface for location problem reports."""
+
+    list_display = [
+        "location",
+        "severity_badge",
+        "status_badge",
+        "reported_by",
+        "reported_at",
+        "resolved_at",
+    ]
+    list_filter = ["status", "severity", "location", "reported_at"]
+    search_fields = [
+        "location__name",
+        "description",
+        "reported_by",
+    ]
+    readonly_fields = ["id", "reported_at", "updated_at"]
+    date_hierarchy = "reported_at"
+
+    fieldsets = (
+        (
+            "Problem Information",
+            {
+                "fields": (
+                    "location",
+                    "reported_by",
+                    "description",
+                    "severity",
+                    "status",
+                    "photo",
+                    "paper_form_attachment",
+                )
+            },
+        ),
+        (
+            "Promotion",
+            {
+                "fields": (
+                    "work_order",
+                    "third_party_work_order",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Resolution",
+            {
+                "fields": (
+                    "resolution_notes",
+                    "resolved_at",
+                    "resolved_by",
+                )
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ("id", "reported_at", "updated_at"),
+                "classes": ("collapse",),
+            },
+        ),
+    )
+
+    @admin.display(description="Status")
+    def status_badge(self, obj):
+        colors = {
+            "reported": "#dc3545",
+            "in_progress": "#ffc107",
+            "resolved": "#28a745",
+            "closed": "#6c757d",
+        }
+        color = colors.get(obj.status, "#6c757d")
+        return format_html(
+            '<span style="background: {}; color: white; padding: 4px 8px; '
+            'border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            obj.get_status_display(),
+        )
+
+    @admin.display(description="Severity")
+    def severity_badge(self, obj):
+        colors = {
+            "low": "#6c757d",
+            "medium": "#17a2b8",
+            "high": "#fd7e14",
+            "urgent": "#dc3545",
+        }
+        color = colors.get(obj.severity, "#6c757d")
+        return format_html(
+            '<span style="background: {}; color: white; padding: 4px 8px; '
+            'border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            obj.get_severity_display(),
         )
 
 

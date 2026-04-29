@@ -29,6 +29,7 @@ import InventoryReconciliationPage from './pages/InventoryReconciliationPage';
 import LocationDetailPage from './pages/LocationDetailPage';
 import LocationFormPage from './pages/LocationFormPage';
 import LocationListPage from './pages/LocationListPage';
+import LocationProblemDetailPage from './pages/LocationProblemDetailPage';
 import LocationScanPage from './pages/LocationScanPage';
 import LogisticsDashboard from './pages/LogisticsDashboard';
 import MakerBoxAdminPage from './pages/MakerBoxAdminPage';
@@ -186,6 +187,7 @@ function AppContent() {
           <Route path="/maintenance/dashboard" element={<WorkspaceLayout><MaintenanceDashboard /></WorkspaceLayout>} />
           <Route path="/maintenance/work-orders/:id" element={<WorkspaceLayout><WorkOrderPage /></WorkspaceLayout>} />
           <Route path="/maintenance/third-party/:id" element={<WorkspaceLayout><ThirdPartyWorkOrderPage /></WorkspaceLayout>} />
+          <Route path="/maintenance/location-problems/:id" element={<WorkspaceLayout><LocationProblemDetailPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist/:checklistId/complete/:completionId" element={<WorkspaceLayout><ChecklistCompletionPage /></WorkspaceLayout>} />
 
           {/* SIGs Workspace */}

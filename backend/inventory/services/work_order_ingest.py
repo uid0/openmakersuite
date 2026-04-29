@@ -56,6 +56,12 @@ THIRD_PARTY_HEADER_RE = re.compile(r"Third[- ]Party Work Order", re.IGNORECASE)
 THIRD_PARTY_SUBJECT_PREFIX = "[3PWO]"
 TPWO_QR_PREFIX = "tpwo:"
 
+LOCATION_PROBLEM_HEADER_RE = re.compile(r"Location Problem Report", re.IGNORECASE)
+LOCATION_PROBLEM_SUBJECT_PREFIX = "[LOCPROB]"
+LOCATION_QR_PREFIX = "location:"
+LOCATION_ID_TEXT_RE = re.compile(r"Location ID:\s*(\d+)")
+SEVERITY_TEXT_RE = re.compile(r"Severity:\s*(low|medium|high|urgent)", re.IGNORECASE)
+
 
 def _field_is_checked(value) -> bool:
     """Return True if a pypdf AcroForm field value represents a checked state."""
@@ -287,6 +293,8 @@ def apply_submission(submission: WorkOrderSubmission) -> WorkOrderSubmission:
 
     if submission.kind == WorkOrderSubmission.KIND_THIRD_PARTY_WO:
         return _apply_third_party_submission(submission, pdf_bytes)
+    if submission.kind == WorkOrderSubmission.KIND_LOCATION_PROBLEM:
+        return _apply_location_problem_submission(submission, pdf_bytes)
     return _apply_pm_submission(submission, pdf_bytes)
 
 
@@ -573,24 +581,35 @@ def _pdf_text(pdf_bytes: bytes) -> str:
 
 def detect_submission_kind(pdf_bytes: bytes, subject: str = "") -> str:
     """
-    Return ``WorkOrderSubmission.KIND_THIRD_PARTY_WO`` if the message looks
-    like a third-party paper-form submission, otherwise ``KIND_PM_COMPLETION``.
+    Detect the submission kind from a PDF.
 
     Routing signals, in order of confidence:
-      1. Email subject prefixed with ``[3PWO]``.
-      2. Hidden AcroForm field ``third_party_work_order_id`` present.
-      3. Header text matches ``Third-Party Work Order``.
+      1. Email subject prefix (``[3PWO]`` or ``[LOCPROB]``).
+      2. Hidden AcroForm fields (``third_party_work_order_id``,
+         ``location_problem_report`` / ``location_id``).
+      3. Header text (``Third-Party Work Order`` /
+         ``Location Problem Report``).
+
+    Defaults to ``KIND_PM_COMPLETION``.
     """
-    if subject and subject.lstrip().upper().startswith(THIRD_PARTY_SUBJECT_PREFIX):
+    subject_norm = (subject or "").lstrip().upper()
+    if subject_norm.startswith(THIRD_PARTY_SUBJECT_PREFIX):
         return WorkOrderSubmission.KIND_THIRD_PARTY_WO
+    if subject_norm.startswith(LOCATION_PROBLEM_SUBJECT_PREFIX):
+        return WorkOrderSubmission.KIND_LOCATION_PROBLEM
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         fields = reader.get_fields() or {}
         if "third_party_work_order_id" in fields:
             return WorkOrderSubmission.KIND_THIRD_PARTY_WO
+        if "location_problem_report" in fields or "location_id" in fields:
+            return WorkOrderSubmission.KIND_LOCATION_PROBLEM
     except Exception:  # noqa: BLE001  # nosec B110 - malformed PDFs default to PM path
         pass
-    if THIRD_PARTY_HEADER_RE.search(_pdf_text(pdf_bytes)):
+    text = _pdf_text(pdf_bytes)
+    if LOCATION_PROBLEM_HEADER_RE.search(text):
+        return WorkOrderSubmission.KIND_LOCATION_PROBLEM
+    if THIRD_PARTY_HEADER_RE.search(text):
         return WorkOrderSubmission.KIND_THIRD_PARTY_WO
     return WorkOrderSubmission.KIND_PM_COMPLETION
 
@@ -781,4 +800,127 @@ def _apply_third_party_submission(
     submission.save(
         update_fields=["status", "third_party_work_order", "parsed_fields", "parse_error"]
     )
+    return submission
+
+
+def parse_location_problem_pdf(pdf_bytes: bytes) -> dict:
+    """Extract location id, severity, and description from a Location
+    Problem Report PDF.
+
+    The recognised template is described in
+    ``docs/location-problem-form.md``: a header line ``Location Problem
+    Report``, a ``Location ID:`` field (numeric) or QR code with payload
+    ``location:<id>``, an optional ``Severity:`` line, and a free-form
+    ``Description:`` block that runs to the end of the page.
+    """
+    parsed: dict = {
+        "location_id": None,
+        "severity": None,
+        "description": "",
+        "extraction_errors": [],
+    }
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+    except Exception as exc:  # noqa: BLE001
+        parsed["extraction_errors"].append(f"PdfReader failed: {exc}")
+        return parsed
+
+    fields = {}
+    try:
+        fields = reader.get_fields() or {}
+    except Exception:  # noqa: BLE001
+        pass
+
+    location_id = _field_value(fields.get("location_id")) if fields else None
+    severity = _field_value(fields.get("severity")) if fields else None
+    description = _field_value(fields.get("description")) if fields else None
+
+    text = _pdf_text(pdf_bytes)
+    if not location_id:
+        match = LOCATION_ID_TEXT_RE.search(text)
+        if match:
+            location_id = match.group(1)
+    if not location_id:
+        for image_bytes in _iter_pdf_images(reader):
+            for payload in _decode_qr_payloads(image_bytes) or []:
+                if payload and payload.startswith(LOCATION_QR_PREFIX):
+                    location_id = payload[len(LOCATION_QR_PREFIX) :].strip()
+                    break
+            if location_id:
+                break
+
+    if not severity:
+        match = SEVERITY_TEXT_RE.search(text)
+        if match:
+            severity = match.group(1).lower()
+
+    if not description:
+        marker = "Description:"
+        idx = text.find(marker)
+        if idx >= 0:
+            description = text[idx + len(marker) :].strip()
+
+    try:
+        parsed["location_id"] = int(location_id) if location_id else None
+    except (TypeError, ValueError):
+        parsed["extraction_errors"].append(f"Bad location id: {location_id!r}")
+        parsed["location_id"] = None
+    parsed["severity"] = (severity or "").lower() or None
+    parsed["description"] = (description or "").strip()
+    return parsed
+
+
+@transaction.atomic
+def _apply_location_problem_submission(
+    submission: WorkOrderSubmission, pdf_bytes: bytes
+) -> WorkOrderSubmission:
+    """Location-problem path: create a LocationProblem from the PDF."""
+    from ..models import Location, LocationProblem
+
+    parsed = parse_location_problem_pdf(pdf_bytes)
+    submission.parsed_fields = parsed
+
+    location_id = parsed.get("location_id")
+    if not location_id:
+        submission.status = WorkOrderSubmission.STATUS_FAILED
+        submission.parse_error = (
+            "Could not extract a Location ID from the form. "
+            "Tried: AcroForm location_id, Location ID text, QR location:<id>."
+        )
+        submission.save(update_fields=["status", "parse_error", "parsed_fields"])
+        return submission
+
+    try:
+        location = Location.objects.get(id=location_id)
+    except Location.DoesNotExist:
+        submission.status = WorkOrderSubmission.STATUS_FAILED
+        submission.parse_error = f"Location {location_id} not found."
+        submission.save(update_fields=["status", "parse_error", "parsed_fields"])
+        return submission
+
+    severity = parsed.get("severity") or LocationProblem.SEVERITY_MEDIUM
+    valid_severities = {choice for choice, _ in LocationProblem.SEVERITY_CHOICES}
+    if severity not in valid_severities:
+        severity = LocationProblem.SEVERITY_MEDIUM
+
+    description = parsed.get("description") or "Reported via paper Location Problem Report"
+
+    if submission.location_problem is None:
+        problem = LocationProblem.objects.create(
+            location=location,
+            description=description,
+            severity=severity,
+            reported_by=submission.from_email or "",
+            status=LocationProblem.REPORTED,
+        )
+        problem.paper_form_attachment.save(
+            f"locprob-{problem.id}-paper.pdf",
+            ContentFile(pdf_bytes),
+            save=True,
+        )
+        submission.location_problem = problem
+
+    submission.status = WorkOrderSubmission.STATUS_APPLIED
+    submission.parse_error = ""
+    submission.save(update_fields=["status", "location_problem", "parsed_fields", "parse_error"])
     return submission

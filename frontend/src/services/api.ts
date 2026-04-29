@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, Location, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -537,6 +537,67 @@ export const assetsAPI = {
 
   getMaintenanceItems: (assetId: string) =>
     api.get<MaintenanceItem[]>(`/inventory/assets/${assetId}/maintenance_items/`),
+};
+
+// Location Problem API (oms-sd1)
+export const locationProblemsAPI = {
+  list: (params?: { location?: string | number; status?: string; severity?: string }) =>
+    api.get<{ results: LocationProblem[] }>('/inventory/location-problems/', { params }),
+
+  get: (id: string) =>
+    api.get<LocationProblem>(`/inventory/location-problems/${id}/`),
+
+  reportForLocation: (locationId: string | number, payload: {
+    description: string;
+    severity?: 'low' | 'medium' | 'high' | 'urgent';
+    photo?: File;
+  }) => {
+    const form = new FormData();
+    form.append('description', payload.description);
+    if (payload.severity) form.append('severity', payload.severity);
+    if (payload.photo) form.append('photo', payload.photo);
+    return api.post<LocationProblem>(
+      `/inventory/locations/${locationId}/report_problem/`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+  },
+
+  listForLocation: (locationId: string | number) =>
+    api.get<LocationProblem[]>(`/inventory/locations/${locationId}/problems/`),
+
+  promoteStandard: (id: string, maintenanceItemId: string) =>
+    api.post<LocationProblem>(
+      `/inventory/location-problems/${id}/promote-standard/`,
+      { maintenance_item: maintenanceItemId },
+    ),
+
+  promoteThirdParty: (id: string, payload: {
+    vendor: string;
+    title: string;
+    work_type?: string;
+  }) =>
+    api.post<LocationProblem>(
+      `/inventory/location-problems/${id}/promote-third-party/`,
+      payload,
+    ),
+
+  resolve: (id: string, payload: {
+    status?: 'resolved' | 'closed';
+    resolution_notes?: string;
+  }) =>
+    api.post<LocationProblem>(
+      `/inventory/location-problems/${id}/resolve/`,
+      payload,
+    ),
+};
+
+// Active maintenance work-order list (unioned: WO + AssetProblem + LocationProblem)
+export const activeMaintenanceAPI = {
+  list: () =>
+    api.get<{ results: ActiveMaintenanceRow[]; count: number }>(
+      '/inventory/maintenance/active/',
+    ),
 };
 
 // Asset Problem API

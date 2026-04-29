@@ -18,6 +18,7 @@ from .views import (
     InventoryReconciliationViewSet,
     InventoryReportViewSet,
     ItemSupplierViewSet,
+    LocationProblemViewSet,
     LocationViewSet,
     MaintenanceDashboardViewSet,
     MaintenanceItemViewSet,
@@ -39,6 +40,7 @@ router.register(r"locations", LocationViewSet)
 router.register(r"items", InventoryItemViewSet)
 router.register(r"assets", AssetViewSet)
 router.register(r"asset-problems", AssetProblemViewSet)
+router.register(r"location-problems", LocationProblemViewSet)
 router.register(r"asset-parts", AssetPartViewSet)
 router.register(r"usage-logs", UsageLogViewSet)
 router.register(r"item-suppliers", ItemSupplierViewSet)

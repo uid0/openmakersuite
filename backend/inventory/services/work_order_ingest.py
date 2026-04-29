@@ -828,7 +828,7 @@ def parse_location_problem_pdf(pdf_bytes: bytes) -> dict:
     fields = {}
     try:
         fields = reader.get_fields() or {}
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001  # nosec B110 - falls back to text/QR
         pass
 
     location_id = _field_value(fields.get("location_id")) if fields else None

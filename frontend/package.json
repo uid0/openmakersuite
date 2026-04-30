@@ -45,6 +45,7 @@
     "test:coverage": "TZ=America/Chicago react-scripts test --maxWorkers=4 --coverage --watchAll=false",
     "test:ci": "TZ=America/Chicago CI=true react-scripts test --maxWorkers=4 --watchAll=false",
     "test:ci:coverage": "TZ=America/Chicago CI=true react-scripts test --maxWorkers=4 --coverage --watchAll=false",
+    "test:fast": "TZ=America/Chicago CI=true react-scripts test --maxWorkers=4 --watchAll=false --bail --passWithNoTests",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

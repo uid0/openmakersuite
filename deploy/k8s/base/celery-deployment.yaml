@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oms-celery
+  namespace: openmakersuite
+  labels:
+    app.kubernetes.io/name: openmakersuite
+    app.kubernetes.io/part-of: openmakersuite
+    app.kubernetes.io/component: celery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openmakersuite
+      app.kubernetes.io/component: celery
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openmakersuite
+        app.kubernetes.io/part-of: openmakersuite
+        app.kubernetes.io/component: celery
+    spec:
+      serviceAccountName: openmakersuite
+      containers:
+        - name: celery
+          image: "ghcr.io/openmakersuite/backend:latest"
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - config
+            - worker
+            - -l
+            - info
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-database
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-redis
+                  key: redis-url
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-redis
+                  key: redis-url
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oms-secrets
+                  key: SECRET_KEY
+            # The worker shares the backend image, which runs migrations on
+            # boot by default; skip that here so the dedicated migrations
+            # Job remains the single source of truth.
+            - name: SKIP_DB_MIGRATIONS
+              value: "1"
+          envFrom:
+            - configMapRef:
+                name: oms-env
+            - secretRef:
+                name: oms-secrets
+                optional: true
+          # Celery has no HTTP endpoint — use a "process is alive" probe so
+          # Kubernetes restarts hung workers without inventing a fake server.
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - celery -A config inspect ping -d celery@$HOSTNAME -t 10
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: media
+              mountPath: /app/media
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: oms-media

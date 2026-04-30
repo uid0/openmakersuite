@@ -22,6 +22,36 @@ data:
   EMQX_API_URL: {{ . | quote }}
   {{- end }}
   {{- end }}
+  {{- with .Values.env.email.backend }}
+  EMAIL_BACKEND: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.env.email.host }}
+  EMAIL_HOST: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.env.email.port }}
+  EMAIL_PORT: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.env.email.useTls }}
+  EMAIL_USE_TLS: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.env.email.defaultFrom }}
+  DEFAULT_FROM_EMAIL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.env.email.logisticsAlert }}
+  LOGISTICS_ALERT_EMAIL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.env.publicUrls.traffic }}
+  TRAFFIC_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.env.publicUrls.weather }}
+  WEATHER_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.env.publicUrls.github }}
+  GITHUB_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.env.whmcs.apiUrl }}
+  WHMCS_API_URL: {{ . | quote }}
+  {{- end }}
   {{- range $key, $value := .Values.env.extra }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}

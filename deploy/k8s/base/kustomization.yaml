@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# `kubectl apply -k deploy/k8s/base` renders and applies the bundle below.
+# It is also valid to apply individual files with `kubectl apply -f <file>`
+# (use `kubectl kustomize deploy/k8s/base` to inspect the rendered manifest).
+
+namespace: openmakersuite
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - secret-app.yaml
+  - secret-postgres.yaml
+  - secret-database.yaml
+  - secret-redis.yaml
+  - pvc-static.yaml
+  - pvc-media.yaml
+  - postgres-statefulset.yaml
+  - postgres-service.yaml
+  - redis-deployment.yaml
+  - redis-service.yaml
+  - backend-deployment.yaml
+  - backend-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - celery-deployment.yaml
+  - migrations-job.yaml
+  - ingress.yaml
+  # Flower is opt-in — uncomment both files together to enable the dashboard.
+  # - flower-deployment.yaml
+  # - flower-service.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: openmakersuite
+    includeSelectors: false

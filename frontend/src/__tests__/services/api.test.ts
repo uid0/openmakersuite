@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import MockAdapter from 'axios-mock-adapter';
-import api, { assetPartsAPI, assetsAPI, authAPI, checklistsAPI, inventoryAPI, reorderAPI } from '../../services/api';
+import api, { assetPartsAPI, assetsAPI, authAPI, checklistsAPI, inventoryAPI, reorderAPI, resolveApiBaseUrl, workOrderAPI } from '../../services/api';
 
 jest.mock('@sentry/react', () => ({
   captureException: jest.fn(),
@@ -769,6 +769,81 @@ describe('API Service', () => {
       const response = await assetPartsAPI.markReplaced('1');
 
       expect(response.data.last_replaced_at).toBeDefined();
+    });
+  });
+
+  describe('resolveApiBaseUrl (deployment-configurable API base URL)', () => {
+    const ORIGINAL_ENV = process.env;
+    const ORIGINAL_LOCATION = window.location;
+
+    const setHostname = (hostname: string) => {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { ...ORIGINAL_LOCATION, hostname },
+      });
+    };
+
+    beforeEach(() => {
+      process.env = { ...ORIGINAL_ENV };
+      delete process.env.REACT_APP_API_URL;
+    });
+
+    afterEach(() => {
+      process.env = ORIGINAL_ENV;
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: ORIGINAL_LOCATION,
+      });
+    });
+
+    test('uses absolute REACT_APP_API_URL and appends /api when missing', () => {
+      process.env.REACT_APP_API_URL = 'https://api.example.com';
+      expect(resolveApiBaseUrl()).toBe('https://api.example.com/api');
+    });
+
+    test('does not duplicate /api when REACT_APP_API_URL already ends with /api', () => {
+      process.env.REACT_APP_API_URL = 'https://api.example.com/api';
+      expect(resolveApiBaseUrl()).toBe('https://api.example.com/api');
+    });
+
+    test('strips trailing slashes before adding /api', () => {
+      process.env.REACT_APP_API_URL = 'https://api.example.com/';
+      expect(resolveApiBaseUrl()).toBe('https://api.example.com/api');
+    });
+
+    test('honors a relative /api value (the documented prod default)', () => {
+      process.env.REACT_APP_API_URL = '/api';
+      expect(resolveApiBaseUrl()).toBe('/api');
+    });
+
+    test('falls back to localhost Django backend only when running on localhost without env override', () => {
+      setHostname('localhost');
+      expect(resolveApiBaseUrl()).toBe('http://localhost:8000/api');
+    });
+
+    test('falls back to relative /api on a deployed host without env override (no localhost coupling)', () => {
+      setHostname('makerspace.example.org');
+      expect(resolveApiBaseUrl()).toBe('/api');
+    });
+
+    test('does not bake private container hostnames into the resolved URL', () => {
+      // The frontend bundle ships to browsers; it must never resolve to
+      // docker-network names like "backend" or "django" that only exist
+      // inside the cluster.
+      setHostname('makerspace.example.org');
+      const url = resolveApiBaseUrl();
+      expect(url).not.toMatch(/\bbackend\b/);
+      expect(url).not.toMatch(/\bdjango\b/);
+    });
+  });
+
+  describe('workOrderAPI.getPdfUrl uses the resolved API base URL', () => {
+    test('produces a URL prefixed by the resolved API base URL', () => {
+      const url = workOrderAPI.getPdfUrl('abc-123');
+      // The module-level API_BASE_URL is captured on import. In jsdom the
+      // hostname is "localhost" and REACT_APP_API_URL is unset by default,
+      // so the test environment resolves to http://localhost:8000/api.
+      expect(url).toBe('http://localhost:8000/api/inventory/work-orders/abc-123/pdf/');
     });
   });
 });

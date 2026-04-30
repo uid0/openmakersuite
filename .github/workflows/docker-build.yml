@@ -34,6 +34,8 @@ jobs:
       backend_tags: ${{ steps.tags.outputs.backend_tags }}
       frontend_tags: ${{ steps.tags.outputs.frontend_tags }}
       should_build: ${{ steps.tags.outputs.should_build }}
+      publish_helm: ${{ steps.tags.outputs.publish_helm }}
+      sha_short: ${{ steps.tags.outputs.sha_short }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -50,20 +52,34 @@ jobs:
           BACKEND_TAGS=""
           FRONTEND_TAGS=""
           SHOULD_BUILD="true"
+          PUBLISH_HELM="false"
+
+          # Resolve the SHA we are actually building. For workflow_run events
+          # github.sha points at the workflow file commit, not the CI run, so
+          # prefer workflow_run.head_sha when present.
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            BUILD_SHA="${{ github.event.workflow_run.head_sha }}"
+          else
+            BUILD_SHA="${{ github.sha }}"
+          fi
+          SHA_SHORT="${BUILD_SHA:0:7}"
+          echo "🔍 Build SHA: $BUILD_SHA (short: $SHA_SHORT)"
 
           # Check if this is a tag push
           if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" =~ ^refs/tags/v ]]; then
             VERSION_TAG="${{ github.ref_name }}"
             echo "🏷️ Git tag detected: $VERSION_TAG"
 
-            BACKEND_TAGS="$REGISTRY/backend:$VERSION_TAG,$REGISTRY/backend:latest"
-            FRONTEND_TAGS="$REGISTRY/frontend:$VERSION_TAG,$REGISTRY/frontend:latest"
+            BACKEND_TAGS="$REGISTRY/backend:$VERSION_TAG,$REGISTRY/backend:latest,$REGISTRY/backend:sha-$SHA_SHORT"
+            FRONTEND_TAGS="$REGISTRY/frontend:$VERSION_TAG,$REGISTRY/frontend:latest,$REGISTRY/frontend:sha-$SHA_SHORT"
+            PUBLISH_HELM="true"
 
           # Check if this is main branch
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "🏷️ Main branch detected - tagging as latest"
-            BACKEND_TAGS="$REGISTRY/backend:latest"
-            FRONTEND_TAGS="$REGISTRY/frontend:latest"
+            echo "🏷️ Main branch detected - tagging as latest + sha-$SHA_SHORT + main"
+            BACKEND_TAGS="$REGISTRY/backend:latest,$REGISTRY/backend:main,$REGISTRY/backend:sha-$SHA_SHORT"
+            FRONTEND_TAGS="$REGISTRY/frontend:latest,$REGISTRY/frontend:main,$REGISTRY/frontend:sha-$SHA_SHORT"
+            PUBLISH_HELM="true"
 
           # Check if this is a feature branch (extract issue number after slash)
           elif [[ "${{ github.ref }}" =~ ^refs/heads/.*/([0-9]+)- ]]; then
@@ -83,9 +99,10 @@ jobs:
             # Get the branch from the workflow run
             BRANCH_NAME="${{ github.event.workflow_run.head_branch }}"
             if [[ "$BRANCH_NAME" == "main" ]]; then
-              echo "🏷️ CI completed on main branch - tagging as latest"
-              BACKEND_TAGS="$REGISTRY/backend:latest"
-              FRONTEND_TAGS="$REGISTRY/frontend:latest"
+              echo "🏷️ CI completed on main branch - tagging as latest + sha-$SHA_SHORT + main"
+              BACKEND_TAGS="$REGISTRY/backend:latest,$REGISTRY/backend:main,$REGISTRY/backend:sha-$SHA_SHORT"
+              FRONTEND_TAGS="$REGISTRY/frontend:latest,$REGISTRY/frontend:main,$REGISTRY/frontend:sha-$SHA_SHORT"
+              PUBLISH_HELM="true"
             elif [[ "$BRANCH_NAME" =~ .*/([0-9]+)- ]]; then
               ISSUE_NUM=$(echo "$BRANCH_NAME" | sed -n 's|.*/\([0-9]*\)-.*|\1|p')
               if [ -n "$ISSUE_NUM" ]; then
@@ -109,10 +126,13 @@ jobs:
           echo "📦 Backend tags: $BACKEND_TAGS"
           echo "📦 Frontend tags: $FRONTEND_TAGS"
           echo "🔨 Should build: $SHOULD_BUILD"
+          echo "📜 Publish Helm: $PUBLISH_HELM"
 
           echo "backend_tags=$BACKEND_TAGS" >> $GITHUB_OUTPUT
           echo "frontend_tags=$FRONTEND_TAGS" >> $GITHUB_OUTPUT
           echo "should_build=$SHOULD_BUILD" >> $GITHUB_OUTPUT
+          echo "publish_helm=$PUBLISH_HELM" >> $GITHUB_OUTPUT
+          echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
 
   build-backend:
     name: 🏗️ Build Backend Container
@@ -257,21 +277,130 @@ jobs:
           sentry-cli releases finalize "$GIT_HASH"
           echo "✅ Source maps uploaded for release $GIT_HASH"
 
+  publish-helm:
+    name: 📜 Publish Helm Chart
+    runs-on: ubuntu-latest
+    needs: [determine-tags, build-backend, build-frontend]
+    if: |
+      needs.determine-tags.outputs.should_build == 'true' &&
+      needs.determine-tags.outputs.publish_helm == 'true' &&
+      needs.build-backend.result == 'success' &&
+      needs.build-frontend.result == 'success'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Log in to GHCR for Helm OCI
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GHCR_USER" --password-stdin
+
+      - name: Resolve chart channel + version
+        id: chart
+        env:
+          SHA_SHORT: ${{ needs.determine-tags.outputs.sha_short }}
+        run: |
+          REPO_NAME="${{ github.repository }}"
+          REPO_LOWER=$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]')
+          CHART_DIR="deploy/helm/openmakersuite"
+          CHART_NAME=$(grep -E '^name:' "$CHART_DIR/Chart.yaml" | head -1 | awk '{print $2}')
+          BASE_VERSION=$(grep -E '^version:' "$CHART_DIR/Chart.yaml" | head -1 | awk '{print $2}' | tr -d '"')
+
+          # Pick the stable channel tag — versioned for vX.Y.Z, "main" for main builds.
+          if [[ "${{ github.ref }}" =~ ^refs/tags/v ]]; then
+            VERSION_TAG="${{ github.ref_name }}"
+            CHANNEL_VERSION="${VERSION_TAG#v}"
+          else
+            CHANNEL_VERSION="${BASE_VERSION}-main"
+          fi
+
+          # SHA-pinned semver build metadata (not a separate prerelease — keeps
+          # the channel tag sortable while still exposing the SHA).
+          SHA_VERSION="${BASE_VERSION}-sha.${SHA_SHORT}"
+
+          echo "chart_dir=$CHART_DIR" >> $GITHUB_OUTPUT
+          echo "chart_name=$CHART_NAME" >> $GITHUB_OUTPUT
+          echo "repo_lower=$REPO_LOWER" >> $GITHUB_OUTPUT
+          echo "channel_version=$CHANNEL_VERSION" >> $GITHUB_OUTPUT
+          echo "sha_version=$SHA_VERSION" >> $GITHUB_OUTPUT
+
+          echo "📦 Chart: $CHART_NAME"
+          echo "🏷️  Channel version: $CHANNEL_VERSION"
+          echo "🏷️  SHA version: $SHA_VERSION"
+
+      - name: Lint Helm chart
+        run: helm lint ${{ steps.chart.outputs.chart_dir }}
+
+      - name: Package + push SHA-pinned chart
+        env:
+          CHART_DIR: ${{ steps.chart.outputs.chart_dir }}
+          CHART_NAME: ${{ steps.chart.outputs.chart_name }}
+          REPO_LOWER: ${{ steps.chart.outputs.repo_lower }}
+          SHA_VERSION: ${{ steps.chart.outputs.sha_version }}
+          SHA_SHORT: ${{ needs.determine-tags.outputs.sha_short }}
+        run: |
+          mkdir -p packaged-sha
+          helm package "$CHART_DIR" \
+            --version "$SHA_VERSION" \
+            --app-version "$SHA_SHORT" \
+            -d packaged-sha
+          ls -la packaged-sha
+          helm push "packaged-sha/${CHART_NAME}-${SHA_VERSION}.tgz" "oci://ghcr.io/${REPO_LOWER}/charts"
+
+      - name: Package + push channel chart
+        env:
+          CHART_DIR: ${{ steps.chart.outputs.chart_dir }}
+          CHART_NAME: ${{ steps.chart.outputs.chart_name }}
+          REPO_LOWER: ${{ steps.chart.outputs.repo_lower }}
+          CHANNEL_VERSION: ${{ steps.chart.outputs.channel_version }}
+          SHA_SHORT: ${{ needs.determine-tags.outputs.sha_short }}
+        run: |
+          mkdir -p packaged-channel
+          helm package "$CHART_DIR" \
+            --version "$CHANNEL_VERSION" \
+            --app-version "$SHA_SHORT" \
+            -d packaged-channel
+          ls -la packaged-channel
+          helm push "packaged-channel/${CHART_NAME}-${CHANNEL_VERSION}.tgz" "oci://ghcr.io/${REPO_LOWER}/charts"
+
   build-complete:
     name: ✅ Build Complete
     runs-on: ubuntu-latest
-    needs: [determine-tags, build-backend, build-frontend]
+    needs: [determine-tags, build-backend, build-frontend, publish-helm]
     if: always() && needs.determine-tags.outputs.should_build == 'true'
     steps:
       - name: Report completion
         run: |
-          if [[ "${{ needs.build-backend.result }}" == "success" && "${{ needs.build-frontend.result }}" == "success" ]]; then
-            echo "✅ All containers built and published successfully!"
+          BACKEND="${{ needs.build-backend.result }}"
+          FRONTEND="${{ needs.build-frontend.result }}"
+          HELM="${{ needs.publish-helm.result }}"
+          PUBLISH_HELM="${{ needs.determine-tags.outputs.publish_helm }}"
+
+          # Helm only runs on main/tag builds; "skipped" is fine on feature branches.
+          if [[ "$PUBLISH_HELM" == "true" ]]; then
+            HELM_OK="$HELM"
+          else
+            HELM_OK="success"
+          fi
+
+          if [[ "$BACKEND" == "success" && "$FRONTEND" == "success" && "$HELM_OK" == "success" ]]; then
+            echo "✅ All artifacts built and published successfully!"
             echo "📦 Backend tags: ${{ needs.determine-tags.outputs.backend_tags }}"
             echo "📦 Frontend tags: ${{ needs.determine-tags.outputs.frontend_tags }}"
+            if [[ "$PUBLISH_HELM" == "true" ]]; then
+              echo "📜 Helm chart published to oci://ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')/charts"
+            fi
           else
             echo "❌ Some builds failed:"
-            echo "  Backend: ${{ needs.build-backend.result }}"
-            echo "  Frontend: ${{ needs.build-frontend.result }}"
+            echo "  Backend:    $BACKEND"
+            echo "  Frontend:   $FRONTEND"
+            echo "  Helm chart: $HELM (publish_helm=$PUBLISH_HELM)"
             exit 1
           fi

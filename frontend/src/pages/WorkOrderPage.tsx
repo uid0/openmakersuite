@@ -62,8 +62,6 @@ const WorkOrderPage: React.FC = () => {
   const [savingNotes, setSavingNotes] = useState(false);
   const resetPhotoRef = useRef<() => void>(null);
 
-  const apiBaseUrl = process.env.REACT_APP_API_URL || '';
-
   const loadWorkOrder = useCallback(async () => {
     if (!id) return;
     try {
@@ -258,7 +256,7 @@ const WorkOrderPage: React.FC = () => {
                 color="gray"
                 size="lg"
                 component="a"
-                href={`${apiBaseUrl}/inventory/work-orders/${workOrder.id}/pdf/`}
+                href={workOrderAPI.getPdfUrl(workOrder.id)}
                 target="_blank"
                 rel="noopener noreferrer"
               >

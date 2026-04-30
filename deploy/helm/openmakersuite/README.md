@@ -7,6 +7,12 @@ dashboard, optional in-cluster PostgreSQL and Redis (or external instances),
 Ingress with TLS hooks, persistence for static/media, secrets, and a one-shot
 migrations Job.
 
+## Prerequisites
+
+`helm` 3 and a `kubectl` whose minor version is within ±1 of your cluster's
+control-plane version. For a per-distro install walkthrough (Ubuntu/Debian,
+Fedora/RHEL, Arch) see [`../../PREREQUISITES.md`](../../PREREQUISITES.md).
+
 ## Quick start
 
 ```bash
@@ -63,6 +69,28 @@ helm install oms ./deploy/helm/openmakersuite \
 All probes are tunable under `<component>.probes.{liveness,readiness,startup}`
 and can be disabled by setting `enabled: false` per probe.
 
+## Configuration sources
+
+Where each setting category lives:
+
+| Category                | Helm values path                                                                       | Rendered as                       |
+| ----------------------- | -------------------------------------------------------------------------------------- | --------------------------------- |
+| Hostnames / CORS / CSRF | `domain`, `extraAllowedHosts`, `extraCsrfTrustedOrigins`, `extraCorsAllowedOrigins`    | ConfigMap `<rel>-openmakersuite-env` |
+| Database URL            | `postgresql.*` (bundled) or `externalDatabase.url` / `existingSecret`                  | Secret `<rel>-openmakersuite-database` |
+| Redis URL               | `redis.*` (bundled) or `externalRedis.url` / `existingSecret`                          | Secret `<rel>-openmakersuite-redis`    |
+| Sentry                  | `env.sentry.{environment,release}` + `secrets.values.SENTRY_DSN`                       | ConfigMap (env) + Secret (DSN)    |
+| Email transport         | `env.email.{backend,host,port,useTls,defaultFrom,logisticsAlert}`                      | ConfigMap                         |
+| Email credentials       | `secrets.values.{EMAIL_HOST_USER,EMAIL_HOST_PASSWORD,POSTMARK_SERVER_TOKEN}`           | Secret                            |
+| Inbound webhooks        | `secrets.values.{POSTMARK_INBOUND_TOKEN,LOCATION_PING_TOKEN}`                          | Secret                            |
+| Public iframe URLs      | `env.publicUrls.{traffic,weather,github}`                                              | ConfigMap                         |
+| WHMCS API               | `env.whmcs.apiUrl` + `secrets.values.WHMCS_API_{IDENTIFIER,SECRET,ACCESSKEY}`          | ConfigMap (URL) + Secret (creds)  |
+| EMQX MQTT               | `env.emqx.*` + `secrets.values.{EMQX_*,MQTT_BROKER_*}`                                 | ConfigMap + Secret                |
+| ForgeKey signing key    | `secrets.values.FORGEKEY_FIRMWARE_SIGNING_KEY`                                         | Secret                            |
+
+`backend.extraEnv`, `frontend.extraEnv`, and `celery.extraEnv` accept raw
+container env entries for anything outside this list (including
+`valueFrom.secretKeyRef` references to externally managed Secrets).
+
 ## Secrets handling
 
 Sensitive values (Django `SECRET_KEY`, Sentry DSN, EMQX credentials, mail
@@ -86,6 +114,14 @@ The bundled Postgres password works the same way: set
 `python manage.py migrate --no-input` runs as a Helm pre-install/pre-upgrade
 hook by default. Set `migrations.useHooks=false` to ship it as a regular Job
 instead, or `migrations.enabled=false` to skip it entirely.
+
+## Smoke tests
+
+After `helm install`/`upgrade` finishes and the migrations hook completes,
+walk through [`../../SMOKE_TESTS.md`](../../SMOKE_TESTS.md) — eight
+curl-based checks plus a short browser pass covering frontend, backend
+health, API docs, admin, DB, Redis, static/media, and the unauthenticated
+public endpoints. Anything red there is a failed release.
 
 ## Validating local changes
 

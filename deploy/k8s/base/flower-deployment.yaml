@@ -1,0 +1,78 @@
+# Flower is the Celery dashboard. Optional — exclude this file (and
+# flower-service.yaml) from the kustomization for installs that don't need
+# it. Disabled by default because the dashboard exposes broker contents and
+# requires its own auth strategy.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oms-flower
+  namespace: openmakersuite
+  labels:
+    app.kubernetes.io/name: openmakersuite
+    app.kubernetes.io/part-of: openmakersuite
+    app.kubernetes.io/component: flower
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openmakersuite
+      app.kubernetes.io/component: flower
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openmakersuite
+        app.kubernetes.io/part-of: openmakersuite
+        app.kubernetes.io/component: flower
+    spec:
+      serviceAccountName: openmakersuite
+      containers:
+        - name: flower
+          image: "ghcr.io/openmakersuite/backend:latest"
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - config
+            - flower
+            - --port=5555
+          ports:
+            - name: flower
+              containerPort: 5555
+              protocol: TCP
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-database
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-redis
+                  key: redis-url
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-redis
+                  key: redis-url
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oms-secrets
+                  key: SECRET_KEY
+          envFrom:
+            - configMapRef:
+                name: oms-env
+            - secretRef:
+                name: oms-secrets
+                optional: true
+          livenessProbe:
+            tcpSocket:
+              port: flower
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: flower
+            initialDelaySeconds: 5
+            periodSeconds: 10

@@ -1,0 +1,23 @@
+apiVersion: v2
+name: openmakersuite
+description: |
+  Helm chart for OpenMakerSuite — a makerspace inventory and operations
+  platform. Renders the Django backend, the React frontend (served by nginx),
+  the Celery worker, an optional Flower dashboard, optional in-cluster
+  PostgreSQL and Redis (or pointers to external instances), an Ingress with
+  TLS hooks, persistence for static/media, secrets, a one-shot migrations
+  Job, and standard Kubernetes health probes. Covers AC-8.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - django
+  - react
+  - celery
+  - makerspace
+home: https://github.com/uid0/openmakersuite
+sources:
+  - https://github.com/uid0/openmakersuite
+maintainers:
+  - name: OpenMakerSuite
+    url: https://github.com/uid0/openmakersuite

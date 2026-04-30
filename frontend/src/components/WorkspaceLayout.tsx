@@ -14,6 +14,8 @@ import { CommandPalette } from './CommandPalette';
 import NotificationBadge from './NotificationBadge';
 import NotificationBanner from './NotificationBanner';
 import NotificationCenter from './NotificationCenter';
+import OfflineIndicator from './OfflineIndicator';
+import SessionExpiredBanner from './SessionExpiredBanner';
 import Sidebar from './Sidebar';
 
 interface WorkspaceLayoutProps {
@@ -186,6 +188,10 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
         isOpen={isNotificationCenterOpen}
         onClose={() => setIsNotificationCenterOpen(false)}
       />
+      <SessionExpiredBanner />
+      <div style={{ position: 'fixed', bottom: 16, left: 16, zIndex: 1050, maxWidth: 360 }}>
+        <OfflineIndicator />
+      </div>
     </div>
   );
 };

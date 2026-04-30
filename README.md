@@ -55,11 +55,17 @@ With that said, there are a few things that Open Maker Suite isn't:
 
 ## 🚀 Quick Start
 
+The Quick Start below boots a local development stack. For self-hosted or
+cluster deployments, see **[Supported Deployment Paths](docs/deployment-paths.md)**
+(local development, Docker Compose, raw Kubernetes, Helm).
+
 ### Prerequisites
 
 - Docker & Docker Compose
 - Node.js 18+ (for local frontend development)
 - Python 3.11+ (for local backend development)
+
+For full per-distro install steps, see [`deploy/PREREQUISITES.md`](deploy/PREREQUISITES.md).
 
 ### 1. Clone and Setup
 

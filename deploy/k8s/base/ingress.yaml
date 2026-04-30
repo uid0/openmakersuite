@@ -1,0 +1,53 @@
+# Edit `host:` and `tls.hosts[]` to match the deployment domain. Any cluster
+# with an ingress controller (nginx-ingress, Traefik, AWS ALB, etc.) and a
+# matching IngressClass will route this Ingress; uncomment `ingressClassName`
+# below if your controller doesn't auto-claim Ingresses without one.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oms
+  namespace: openmakersuite
+  labels:
+    app.kubernetes.io/name: openmakersuite
+    app.kubernetes.io/part-of: openmakersuite
+  # annotations:
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  #   nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+spec:
+  # ingressClassName: nginx
+  # tls:
+  #   - secretName: openmakersuite-tls
+  #     hosts:
+  #       - openmakersuite.local
+  rules:
+    - host: openmakersuite.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: oms-backend
+                port:
+                  number: 8000
+          - path: /static
+            pathType: Prefix
+            backend:
+              service:
+                name: oms-backend
+                port:
+                  number: 8000
+          - path: /media
+            pathType: Prefix
+            backend:
+              service:
+                name: oms-backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oms-frontend
+                port:
+                  number: 80

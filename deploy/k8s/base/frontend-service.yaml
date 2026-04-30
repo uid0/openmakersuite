@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oms-frontend
+  namespace: openmakersuite
+  labels:
+    app.kubernetes.io/name: openmakersuite
+    app.kubernetes.io/part-of: openmakersuite
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: openmakersuite
+    app.kubernetes.io/component: frontend

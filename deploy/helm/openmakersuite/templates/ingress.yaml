@@ -1,0 +1,45 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "openmakersuite.fullname" . }}
+  labels:
+    {{- include "openmakersuite.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ default "Prefix" .pathType }}
+            backend:
+              service:
+                {{- if eq (default "frontend" .service) "backend" }}
+                name: {{ include "openmakersuite.backendServiceName" $ }}
+                port:
+                  number: {{ $.Values.backend.service.port }}
+                {{- else if eq .service "flower" }}
+                name: {{ include "openmakersuite.flowerServiceName" $ }}
+                port:
+                  number: {{ $.Values.flower.service.port }}
+                {{- else }}
+                name: {{ include "openmakersuite.frontendServiceName" $ }}
+                port:
+                  number: {{ $.Values.frontend.service.port }}
+                {{- end }}
+          {{- end }}
+    {{- end }}
+{{- end }}

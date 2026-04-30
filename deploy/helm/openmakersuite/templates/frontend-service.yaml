@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openmakersuite.frontendServiceName" . }}
+  labels:
+    {{- include "openmakersuite.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "frontend") | nindent 4 }}
+spec:
+  type: {{ .Values.frontend.service.type }}
+  ports:
+    - port: {{ .Values.frontend.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "openmakersuite.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "frontend") | nindent 4 }}

@@ -2,6 +2,10 @@
 
 This guide explains how to deploy the application to `dallas.openmakersuite.net`.
 
+For day-2 operations (manual builds, migrations, backups, restores, log
+inspection, upgrades, and rollbacks) see the
+[Docker Compose Operations Runbook](../deploy/COMPOSE_RUNBOOK.md).
+
 ## Architecture
 
 The production setup uses:
@@ -18,7 +22,10 @@ The production setup uses:
 
 ## Prerequisites
 
-1. A server with Docker and Docker Compose installed
+1. A server with Docker and Docker Compose installed — see
+   [`deploy/PREREQUISITES.md`](../deploy/PREREQUISITES.md) for distro-specific
+   install steps (Ubuntu/Debian, Fedora/RHEL, Arch) covering Docker, Compose,
+   kubectl, Helm, Git, Node, and Python.
 2. Domain pointing to your server: `dallas.openmakersuite.net`
 3. (Optional) SSL certificate for HTTPS
 
@@ -210,7 +217,8 @@ docker-compose -f docker-compose.prod.yml exec backend python manage.py shell
 # Access database
 docker-compose -f docker-compose.prod.yml exec db psql -U makerspace -d makerspace_inventory
 
-# Backup database
+# Backup database (quick form — see deploy/BACKUP_RESTORE.md for the full
+# playbook covering media, secrets, and Kubernetes)
 docker-compose -f docker-compose.prod.yml exec db pg_dump -U makerspace makerspace_inventory > backup.sql
 
 # Restore database
@@ -273,7 +281,7 @@ docker stats
 - [ ] Configure HTTPS with SSL certificate
 - [ ] Set proper `ALLOWED_HOSTS`
 - [ ] Configure firewall (allow only 80, 443)
-- [ ] Regular backups of database
+- [ ] Regular backups of database and media (see [`deploy/BACKUP_RESTORE.md`](../deploy/BACKUP_RESTORE.md))
 - [ ] Keep Docker images updated
 - [ ] Review nginx access logs regularly
 

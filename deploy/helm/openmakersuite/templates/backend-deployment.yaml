@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openmakersuite.fullname" . }}-backend
+  labels:
+    {{- include "openmakersuite.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "backend") | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "openmakersuite.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "openmakersuite.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "backend") | nindent 8 }}
+      annotations:
+        # Roll the backend pods whenever non-secret env or sensitive
+        # values change so the new values land without a manual restart.
+        checksum/configmap: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret-app.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "openmakersuite.serviceAccountName" . }}
+      {{- include "openmakersuite.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: {{ include "openmakersuite.image" (dict "top" $ "component" "backend") | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command:
+            {{- toYaml .Values.backend.command | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            {{- include "openmakersuite.appEnvVars" . | nindent 12 }}
+            {{- with .Values.backend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            {{- include "openmakersuite.appEnvFrom" . | nindent 12 }}
+          {{- if .Values.backend.probes.liveness.enabled }}
+          livenessProbe:
+            {{- omit .Values.backend.probes.liveness "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          {{- if .Values.backend.probes.readiness.enabled }}
+          readinessProbe:
+            {{- omit .Values.backend.probes.readiness "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          {{- if .Values.backend.probes.startup.enabled }}
+          startupProbe:
+            {{- omit .Values.backend.probes.startup "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.persistence.static.enabled }}
+            - name: static
+              mountPath: {{ .Values.persistence.static.mountPath }}
+            {{- end }}
+            {{- if .Values.persistence.media.enabled }}
+            - name: media
+              mountPath: {{ .Values.persistence.media.mountPath }}
+            {{- end }}
+      volumes:
+        {{- if .Values.persistence.static.enabled }}
+        - name: static
+          persistentVolumeClaim:
+            claimName: {{ include "openmakersuite.fullname" . }}-static
+        {{- end }}
+        {{- if .Values.persistence.media.enabled }}
+        - name: media
+          persistentVolumeClaim:
+            claimName: {{ include "openmakersuite.fullname" . }}-media
+        {{- end }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

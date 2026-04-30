@@ -1,0 +1,341 @@
+# Default values for openmakersuite.
+# This is a YAML-formatted file. Override any of these in your own values
+# file, e.g. `helm install oms ./deploy/helm/openmakersuite -f my-values.yaml`.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Image registry / pull-secret defaults shared by backend, frontend, celery,
+# and flower. Per-component image stanzas override `repository`/`tag`.
+image:
+  registry: ghcr.io
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# Domain settings used to populate ALLOWED_HOSTS / CSRF / CORS in the backend
+# and to wire the Ingress host. Override `domain` per environment.
+domain: openmakersuite.local
+extraAllowedHosts: []
+extraCsrfTrustedOrigins: []
+extraCorsAllowedOrigins: []
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+
+backend:
+  image:
+    repository: openmakersuite/backend
+    # Defaults to .Chart.AppVersion when empty.
+    tag: ""
+  replicaCount: 2
+  command:
+    - gunicorn
+    - config.wsgi:application
+    - --bind=0.0.0.0:8000
+    - --workers=4
+    - --timeout=120
+  service:
+    type: ClusterIP
+    port: 8000
+  probes:
+    liveness:
+      enabled: true
+      httpGet:
+        path: /api/dashboard/health/
+        port: http
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      enabled: true
+      httpGet:
+        path: /api/dashboard/health/
+        port: http
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    startup:
+      enabled: false
+      httpGet:
+        path: /api/dashboard/health/
+        port: http
+      periodSeconds: 5
+      failureThreshold: 30
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+frontend:
+  # The frontend image is expected to be an nginx-based container that
+  # already bakes in the built React assets and listens on port 8080 (or
+  # whatever you set in `containerPort`). The reference image is
+  # produced by `frontend/Dockerfile.prod` plus the nginx image in
+  # `nginx/Dockerfile` published as a single artifact.
+  image:
+    repository: openmakersuite/frontend
+    tag: ""
+  replicaCount: 2
+  containerPort: 8080
+  service:
+    type: ClusterIP
+    port: 80
+  probes:
+    liveness:
+      enabled: true
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      enabled: true
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+celery:
+  enabled: true
+  replicaCount: 1
+  # The celery worker reuses the backend image.
+  image:
+    repository: ""
+    tag: ""
+  command:
+    - celery
+    - -A
+    - config
+    - worker
+    - -l
+    - info
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv:
+    - name: SKIP_DB_MIGRATIONS
+      value: "1"
+
+flower:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ""
+    tag: ""
+  command:
+    - celery
+    - -A
+    - config
+    - flower
+    - --port=5555
+  service:
+    type: ClusterIP
+    port: 5555
+  probes:
+    liveness:
+      enabled: true
+      tcpSocket:
+        port: flower
+      initialDelaySeconds: 30
+      periodSeconds: 30
+    readiness:
+      enabled: true
+      tcpSocket:
+        port: flower
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  resources: {}
+
+# Bundled PostgreSQL — turn off and set externalDatabase.url for managed DBs.
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "15.17-alpine"
+    pullPolicy: IfNotPresent
+  auth:
+    database: makerspace_inventory
+    username: makerspace
+    # If empty AND no existingSecret, a 32-char password is generated
+    # at install time and stored in the chart-managed Secret.
+    password: ""
+    existingSecret: ""
+    existingSecretPasswordKey: postgres-password
+  service:
+    port: 5432
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  resources: {}
+
+externalDatabase:
+  # Used when postgresql.enabled = false. Supply a full DATABASE_URL
+  # (postgresql://user:pass@host:5432/db) via either `url` or by
+  # referencing an existing Secret.
+  url: ""
+  existingSecret: ""
+  existingSecretUrlKey: database-url
+
+# Bundled Redis — turn off and set externalRedis.url for managed Redis.
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7.4.8-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    port: 6379
+  persistence:
+    enabled: false
+    size: 5Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  resources: {}
+
+externalRedis:
+  url: ""
+  existingSecret: ""
+  existingSecretUrlKey: redis-url
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Hosts and TLS sections follow the standard Ingress shape. The default
+  # path "/api" routes to the backend Service, and "/" routes to the
+  # frontend Service. Override `paths` to change that.
+  hosts:
+    - host: openmakersuite.local
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: backend
+        - path: /static
+          pathType: Prefix
+          service: backend
+        - path: /media
+          pathType: Prefix
+          service: backend
+        - path: /
+          pathType: Prefix
+          service: frontend
+  tls: []
+  #  - secretName: openmakersuite-tls
+  #    hosts:
+  #      - openmakersuite.local
+
+# Persistence for backend-collected static assets and uploaded media.
+# Disable either to use an emptyDir (fine for ephemeral dev clusters).
+persistence:
+  static:
+    enabled: true
+    size: 2Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    mountPath: /app/staticfiles
+  media:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    mountPath: /app/media
+
+# One-shot Job that runs `python manage.py migrate` before every install/upgrade.
+migrations:
+  enabled: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  resources: {}
+  # Use Helm hooks so migrations run before the rollout is updated. Set
+  # to false to ship migrations alongside the deploy (e.g. for cluster
+  # configurations that block hook resources).
+  useHooks: true
+
+# Application-level (non-secret) environment toggles. These end up in the
+# generated ConfigMap.
+env:
+  debug: "0"
+  djangoSettingsModule: "config.settings"
+  sentry:
+    environment: production
+    release: ""
+  emqx:
+    enabled: false
+    host: emqx
+    port: 1883
+    apiUrl: ""
+  # Outbound email transport. Defaults to console (development-safe). Set
+  # `backend` to "anymail.backends.postmark.EmailBackend" (with
+  # secrets.values.POSTMARK_SERVER_TOKEN) or
+  # "django.core.mail.backends.smtp.EmailBackend" (with `host`/`port`/`useTls`
+  # and secrets.values.EMAIL_HOST_USER/EMAIL_HOST_PASSWORD).
+  email:
+    backend: ""
+    host: ""
+    port: ""
+    useTls: ""
+    defaultFrom: ""
+    # Distribution list that receives high/urgent LocationProblem alerts.
+    # Empty disables email alerts.
+    logisticsAlert: ""
+  # Public iframe URLs embedded by kiosk shared-content blocks. Override per
+  # site so the same chart renders the local traffic/weather feed.
+  publicUrls:
+    traffic: ""
+    weather: ""
+    github: ""
+  # WHMCS API endpoint (URL is non-secret; credentials live under
+  # secrets.values).
+  whmcs:
+    apiUrl: ""
+  extra: {}
+
+# Sensitive values land in a chart-managed Secret unless `existingSecret`
+# is set, in which case the chart references it as-is and ignores the
+# `values` block.
+secrets:
+  existingSecret: ""
+  values:
+    SECRET_KEY: ""
+    SENTRY_DSN: ""
+    REACT_APP_SENTRY_DSN: ""
+    MQTT_BROKER_USERNAME: ""
+    MQTT_BROKER_PASSWORD: ""
+    EMQX_DASHBOARD_PASSWORD: ""
+    EMQX_API_KEY: ""
+    EMQX_API_SECRET: ""
+    FORGEKEY_FIRMWARE_SIGNING_KEY: ""
+    EMAIL_HOST_USER: ""
+    EMAIL_HOST_PASSWORD: ""
+    POSTMARK_SERVER_TOKEN: ""
+    POSTMARK_INBOUND_TOKEN: ""
+    LOCATION_PING_TOKEN: ""
+    WHMCS_API_IDENTIFIER: ""
+    WHMCS_API_SECRET: ""
+    WHMCS_API_ACCESSKEY: ""

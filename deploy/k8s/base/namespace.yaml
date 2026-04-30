@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openmakersuite
+  labels:
+    app.kubernetes.io/part-of: openmakersuite
+    app.kubernetes.io/managed-by: kubectl

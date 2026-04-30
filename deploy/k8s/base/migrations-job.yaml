@@ -1,0 +1,57 @@
+# Run `kubectl apply -f migrations-job.yaml` (or `kubectl replace --force`)
+# before each backend rollout to apply Django migrations. The Job name is
+# fixed so it's easy to track; delete it before re-applying or use
+# `kubectl create -f migrations-job.yaml --dry-run=client -o yaml | sed
+# 's/oms-migrate/oms-migrate-<rev>/' | kubectl apply -f -` to keep history.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oms-migrate
+  namespace: openmakersuite
+  labels:
+    app.kubernetes.io/name: openmakersuite
+    app.kubernetes.io/part-of: openmakersuite
+    app.kubernetes.io/component: migrations
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openmakersuite
+        app.kubernetes.io/part-of: openmakersuite
+        app.kubernetes.io/component: migrations
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: openmakersuite
+      containers:
+        - name: migrate
+          image: "ghcr.io/openmakersuite/backend:latest"
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - manage.py
+            - migrate
+            - --no-input
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-database
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-redis
+                  key: redis-url
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oms-secrets
+                  key: SECRET_KEY
+          envFrom:
+            - configMapRef:
+                name: oms-env
+            - secretRef:
+                name: oms-secrets
+                optional: true

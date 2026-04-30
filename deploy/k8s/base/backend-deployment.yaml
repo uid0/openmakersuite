@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oms-backend
+  namespace: openmakersuite
+  labels:
+    app.kubernetes.io/name: openmakersuite
+    app.kubernetes.io/part-of: openmakersuite
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openmakersuite
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openmakersuite
+        app.kubernetes.io/part-of: openmakersuite
+        app.kubernetes.io/component: backend
+    spec:
+      serviceAccountName: openmakersuite
+      containers:
+        - name: backend
+          image: "ghcr.io/openmakersuite/backend:latest"
+          imagePullPolicy: IfNotPresent
+          command:
+            - gunicorn
+            - config.wsgi:application
+            - --bind=0.0.0.0:8000
+            - --workers=4
+            - --timeout=120
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-database
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-redis
+                  key: redis-url
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oms-redis
+                  key: redis-url
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oms-secrets
+                  key: SECRET_KEY
+          envFrom:
+            - configMapRef:
+                name: oms-env
+            - secretRef:
+                name: oms-secrets
+                optional: true
+          livenessProbe:
+            httpGet:
+              path: /api/dashboard/health/
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/dashboard/health/
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: static
+              mountPath: /app/staticfiles
+            - name: media
+              mountPath: /app/media
+      volumes:
+        - name: static
+          persistentVolumeClaim:
+            claimName: oms-static
+        - name: media
+          persistentVolumeClaim:
+            claimName: oms-media

@@ -1,0 +1,41 @@
+OpenMakerSuite has been deployed.
+
+Release name: {{ .Release.Name }}
+Namespace:    {{ .Release.Namespace }}
+
+Backend service:  {{ include "openmakersuite.backendServiceName" . }}:{{ .Values.backend.service.port }}
+Frontend service: {{ include "openmakersuite.frontendServiceName" . }}:{{ .Values.frontend.service.port }}
+{{- if .Values.flower.enabled }}
+Flower service:   {{ include "openmakersuite.flowerServiceName" . }}:{{ .Values.flower.service.port }}
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+Ingress hosts:
+{{- range .Values.ingress.hosts }}
+  - {{- if $.Values.ingress.tls }} https://{{ else }} http://{{ end }}{{ .host }}
+{{- end }}
+{{- else }}
+Ingress is disabled. To reach the frontend run:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "openmakersuite.frontendServiceName" . }} 8080:{{ .Values.frontend.service.port }}
+{{- end }}
+
+{{- if .Values.postgresql.enabled }}
+
+A bundled PostgreSQL StatefulSet was installed at
+  {{ include "openmakersuite.postgresHost" . }}:{{ .Values.postgresql.service.port }}
+For production traffic point externalDatabase.url at a managed database
+and set postgresql.enabled=false instead.
+{{- end }}
+
+{{- if .Values.redis.enabled }}
+
+A bundled Redis Deployment was installed at
+  {{ include "openmakersuite.redisHost" . }}:{{ .Values.redis.service.port }}
+{{- end }}
+
+{{- if .Values.migrations.enabled }}
+
+Database migrations ran as a {{ if .Values.migrations.useHooks }}pre-install/pre-upgrade hook Job{{ else }}standalone Job{{ end }}.
+Inspect the result with:
+  kubectl --namespace {{ .Release.Namespace }} get jobs -l app.kubernetes.io/component=migrations -l app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}

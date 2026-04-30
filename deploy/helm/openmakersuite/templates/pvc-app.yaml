@@ -1,0 +1,37 @@
+{{- if .Values.persistence.static.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openmakersuite.fullname" . }}-static
+  labels:
+    {{- include "openmakersuite.labels" . | nindent 4 }}
+    app.kubernetes.io/component: static
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.static.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.static.size | quote }}
+  {{- with .Values.persistence.static.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
+{{- if .Values.persistence.media.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openmakersuite.fullname" . }}-media
+  labels:
+    {{- include "openmakersuite.labels" . | nindent 4 }}
+    app.kubernetes.io/component: media
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.media.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.media.size | quote }}
+  {{- with .Values.persistence.media.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

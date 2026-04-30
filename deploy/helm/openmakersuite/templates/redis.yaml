@@ -1,0 +1,97 @@
+{{- if .Values.redis.enabled }}
+{{- if .Values.redis.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openmakersuite.redisHost" . }}
+  labels:
+    {{- include "openmakersuite.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "redis") | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.redis.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.redis.persistence.size | quote }}
+  {{- with .Values.redis.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openmakersuite.redisHost" . }}
+  labels:
+    {{- include "openmakersuite.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "redis") | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "openmakersuite.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "openmakersuite.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "redis") | nindent 8 }}
+    spec:
+      {{- include "openmakersuite.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          {{- if .Values.redis.persistence.enabled }}
+          # Append-only mode keeps the dataset durable across restarts when
+          # we mount a PVC. Disable persistence for ephemeral installs.
+          args:
+            - --appendonly
+            - "yes"
+          {{- end }}
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if .Values.redis.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "openmakersuite.redisHost" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openmakersuite.redisHost" . }}
+  labels:
+    {{- include "openmakersuite.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "redis") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.redis.service.port }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    {{- include "openmakersuite.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "redis") | nindent 4 }}
+{{- end }}

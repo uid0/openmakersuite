@@ -1,0 +1,42 @@
+{{- if .Values.nginx.enabled -}}
+{{- $component := "nginx" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oms.fullname" . }}-nginx
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" $component) .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.nginx.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "oms.serviceAccountName" . }}
+      {{- include "oms.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: nginx
+          image: {{ include "oms.image" (dict "image" .Values.nginx.image "registry" .Values.imageRegistry "tag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.nginx.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: DOMAIN
+              value: {{ .Values.config.domain | quote }}
+            - name: BACKEND_HOST
+              value: {{ printf "%s-backend" (include "oms.fullname" .) | quote }}
+            - name: BACKEND_PORT
+              value: {{ .Values.backend.service.port | quote }}
+            - name: FRONTEND_HOST
+              value: {{ printf "%s-frontend" (include "oms.fullname" .) | quote }}
+            - name: FRONTEND_PORT
+              value: {{ .Values.frontend.service.port | quote }}
+          resources:
+            {{- toYaml .Values.nginx.resources | nindent 12 }}
+{{- end }}

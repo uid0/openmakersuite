@@ -1,0 +1,35 @@
+{{- if .Values.backend.migrationJob.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "oms.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" "backend-migrate") .) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.backend.migrationJob.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.backend.migrationJob.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "oms.componentSelectorLabels" (merge (dict "component" "backend-migrate") .) | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "oms.serviceAccountName" . }}
+      {{- include "oms.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: migrate
+          image: {{ include "oms.image" (dict "image" .Values.backend.image "registry" .Values.imageRegistry "tag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - python manage.py ensure_membership_initial_migration && python manage.py migrate --noinput
+          env:
+            - name: SKIP_DB_MIGRATIONS
+              value: "1"
+            {{- include "oms.backendEnv" . | nindent 12 }}
+{{- end }}

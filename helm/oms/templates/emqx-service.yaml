@@ -1,0 +1,34 @@
+{{- if .Values.emqx.internal -}}
+{{- $component := "emqx" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oms.fullname" . }}-emqx
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" $component) .) | nindent 4 }}
+spec:
+  type: {{ .Values.emqx.service.type }}
+  ports:
+    - name: mqtt
+      port: {{ .Values.emqx.service.mqttPort }}
+      targetPort: mqtt
+      protocol: TCP
+    - name: mqtts
+      port: {{ .Values.emqx.service.mqttsPort }}
+      targetPort: mqtts
+      protocol: TCP
+    - name: ws
+      port: {{ .Values.emqx.service.wsPort }}
+      targetPort: ws
+      protocol: TCP
+    - name: wss
+      port: {{ .Values.emqx.service.wssPort }}
+      targetPort: wss
+      protocol: TCP
+    - name: dashboard
+      port: {{ .Values.emqx.service.dashboardPort }}
+      targetPort: dashboard
+      protocol: TCP
+  selector:
+    {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 4 }}
+{{- end }}

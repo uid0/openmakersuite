@@ -1,0 +1,24 @@
+{{- if and .Values.observability.enabled .Values.observability.podMonitor.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "oms.fullname" . }}-celery
+  {{- with .Values.observability.podMonitor.namespace }}
+  namespace: {{ . | quote }}
+  {{- end }}
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" "celery") .) | nindent 4 }}
+    {{- with .Values.observability.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "oms.componentSelectorLabels" (merge (dict "component" "celery") .) | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  podMetricsEndpoints:
+    - port: metrics
+      interval: {{ .Values.observability.podMonitor.interval }}
+{{- end }}

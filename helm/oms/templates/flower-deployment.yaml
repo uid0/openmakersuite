@@ -1,0 +1,55 @@
+{{- if .Values.flower.enabled -}}
+{{- $component := "flower" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oms.fullname" . }}-flower
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" $component) .) | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "oms.serviceAccountName" . }}
+      {{- include "oms.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: flower
+          image: {{ include "oms.image" (dict "image" .Values.flower.image "registry" .Values.imageRegistry "tag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.flower.image.pullPolicy }}
+          args:
+            - celery
+            - --broker={{ include "oms.redisUrl" . }}
+            - flower
+            - --port={{ .Values.flower.service.port }}
+            {{- with .Values.flower.basicAuth }}
+            - --basic-auth={{ . }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.flower.service.port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.flower.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oms.fullname" . }}-flower
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" $component) .) | nindent 4 }}
+spec:
+  type: {{ .Values.flower.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.flower.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 4 }}
+{{- end }}

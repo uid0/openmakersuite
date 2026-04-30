@@ -1,0 +1,83 @@
+{{- if .Values.emqx.internal -}}
+{{- $component := "emqx" -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "oms.fullname" . }}-emqx
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" $component) .) | nindent 4 }}
+spec:
+  serviceName: {{ include "oms.fullname" . }}-emqx
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 8 }}
+    spec:
+      {{- include "oms.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: emqx
+          image: {{ include "oms.image" (dict "image" .Values.emqx.image "registry" .Values.imageRegistry "tag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.emqx.image.pullPolicy }}
+          ports:
+            - name: mqtt
+              containerPort: 1883
+            - name: mqtts
+              containerPort: 8883
+            - name: ws
+              containerPort: 8083
+            - name: wss
+              containerPort: 8084
+            - name: dashboard
+              containerPort: 18083
+          env:
+            - name: EMQX_NAME
+              value: {{ printf "%s-emqx" (include "oms.fullname" .) | quote }}
+            - name: EMQX_HOST
+              value: "127.0.0.1"
+            - name: EMQX_DASHBOARD__DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oms.secretName" . }}
+                  key: emqx-dashboard-password
+          readinessProbe:
+            exec:
+              command: ["/opt/emqx/bin/emqx", "ctl", "status"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.emqx.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /opt/emqx/data
+      {{- if and .Values.emqx.persistence.enabled .Values.emqx.persistence.existingClaim }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.emqx.persistence.existingClaim }}
+      {{- else if not .Values.emqx.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if and .Values.emqx.persistence.enabled (not .Values.emqx.persistence.existingClaim) }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "oms.componentLabels" (merge (dict "component" $component) .) | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ .Values.emqx.persistence.accessMode }}
+        resources:
+          requests:
+            storage: {{ .Values.emqx.persistence.size | quote }}
+        {{- with .Values.emqx.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+  {{- end }}
+{{- end }}

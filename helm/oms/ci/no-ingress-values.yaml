@@ -1,0 +1,8 @@
+secrets:
+  djangoSecretKey: ci-django-secret
+  postgresPassword: ci-postgres-pw
+  emqxDashboardPassword: CiDashPw1
+config:
+  domain: oms.ci.example.com
+ingress:
+  enabled: false

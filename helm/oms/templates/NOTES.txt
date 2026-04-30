@@ -1,0 +1,25 @@
+{{- $fullName := include "oms.fullname" . -}}
+OMS chart {{ .Chart.Version }} (app {{ .Chart.AppVersion }}) installed as release {{ .Release.Name }}.
+
+Components:
+  backend       : {{ .Values.backend.replicaCount }} replicas
+  celery        : {{ .Values.celery.replicaCount }} replicas
+  frontend      : {{ .Values.frontend.replicaCount }} replicas
+  nginx         : {{ if .Values.nginx.enabled }}{{ .Values.nginx.replicaCount }} replicas{{ else }}disabled{{ end }}
+  postgres      : {{ if .Values.postgres.internal }}in-cluster (size {{ .Values.postgres.persistence.size }}){{ else }}external -> {{ .Values.postgres.external.host }}:{{ .Values.postgres.external.port }}{{ end }}
+  redis         : {{ if .Values.redis.internal }}in-cluster{{ else }}external -> {{ .Values.redis.external.host }}:{{ .Values.redis.external.port }}{{ end }}
+  emqx          : {{ if .Values.emqx.internal }}in-cluster (size {{ .Values.emqx.persistence.size }}){{ else }}external -> {{ .Values.emqx.external.host }}{{ end }}
+  flower        : {{ if .Values.flower.enabled }}enabled{{ else }}disabled{{ end }}
+  observability : {{ if .Values.observability.enabled }}enabled{{ else }}disabled{{ end }}
+
+{{- if .Values.ingress.enabled }}
+
+Reach the app at:
+  {{- range .Values.ingress.hosts }}
+  - {{ if $.Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ default $.Values.config.domain .host }}
+  {{- end }}
+{{- else }}
+
+Ingress is disabled. Port-forward to test:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ if .Values.nginx.enabled }}{{ $fullName }}-nginx{{ else }}{{ $fullName }}-backend{{ end }} 8080:{{ if .Values.nginx.enabled }}{{ .Values.nginx.service.port }}{{ else }}{{ .Values.backend.service.port }}{{ end }}
+{{- end }}

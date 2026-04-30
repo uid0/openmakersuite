@@ -1,0 +1,22 @@
+secrets:
+  djangoSecretKey: ci-django-secret
+  postgresPassword: ci-postgres-pw
+  emqxDashboardPassword: CiDashPw1
+config:
+  domain: oms.ci.example.com
+postgres:
+  internal: false
+  external:
+    host: pg.external.example.com
+    port: 5432
+redis:
+  internal: false
+  external:
+    host: redis.external.example.com
+    port: 6379
+emqx:
+  internal: false
+  external:
+    host: emqx.external.example.com
+    mqttPort: 1883
+    apiUrl: https://emqx.external.example.com/api/v5

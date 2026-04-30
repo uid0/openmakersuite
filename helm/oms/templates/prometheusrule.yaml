@@ -1,0 +1,16 @@
+{{- if and .Values.observability.enabled .Values.observability.prometheusRules.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "oms.fullname" . }}
+  {{- with .Values.observability.prometheusRules.namespace }}
+  namespace: {{ . | quote }}
+  {{- end }}
+  labels:
+    {{- include "oms.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: {{ include "oms.fullname" . }}.rules
+      rules:
+        {{- toYaml .Values.observability.prometheusRules.rules | nindent 8 }}
+{{- end }}

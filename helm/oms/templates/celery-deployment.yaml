@@ -1,0 +1,59 @@
+{{- $component := "celery" -}}
+{{- $celeryImage := dict "registry" .Values.celery.image.registry "repository" (default .Values.backend.image.repository .Values.celery.image.repository) "tag" (default .Values.backend.image.tag .Values.celery.image.tag) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oms.fullname" . }}-celery
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" $component) .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.celery.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 8 }}
+      {{- with .Values.celery.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "oms.serviceAccountName" . }}
+      {{- include "oms.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: celery
+          image: {{ include "oms.image" (dict "image" $celeryImage "registry" .Values.imageRegistry "tag" .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.celery.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.celery.command | nindent 12 }}
+          env:
+            - name: SKIP_DB_MIGRATIONS
+              value: "1"
+            {{- include "oms.backendEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.celery.resources | nindent 12 }}
+          volumeMounts:
+            - name: media
+              mountPath: /app/media
+      volumes:
+        - name: media
+          {{- if .Values.backend.mediaPersistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-media" (include "oms.fullname" .)) .Values.backend.mediaPersistence.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.celery.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.celery.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.celery.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

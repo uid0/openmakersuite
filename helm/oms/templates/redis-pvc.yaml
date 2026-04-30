@@ -1,0 +1,17 @@
+{{- if and .Values.redis.internal .Values.redis.persistence.enabled (not .Values.redis.persistence.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oms.fullname" . }}-redis
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" "redis") .) | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.redis.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.redis.persistence.size | quote }}
+  {{- with .Values.redis.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,17 @@
+{{- if and .Values.backend.mediaPersistence.enabled (not .Values.backend.mediaPersistence.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oms.fullname" . }}-media
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" "backend") .) | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.backend.mediaPersistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.backend.mediaPersistence.size | quote }}
+  {{- with .Values.backend.mediaPersistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

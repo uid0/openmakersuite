@@ -1,0 +1,25 @@
+secrets:
+  djangoSecretKey: ci-django-secret
+  postgresPassword: ci-postgres-pw
+  emqxDashboardPassword: CiDashPw1
+config:
+  domain: oms.ci.example.com
+observability:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+  podMonitor:
+    enabled: true
+  prometheusRules:
+    enabled: true
+    rules:
+      - alert: OMSBackendDown
+        expr: up{job="oms-backend"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: OMS backend is down
+flower:
+  enabled: true
+  basicAuth: admin:flower-pw

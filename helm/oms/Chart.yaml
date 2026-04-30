@@ -1,0 +1,22 @@
+apiVersion: v2
+name: oms
+description: |
+  Open Makers Suite (OMS) — Django + Celery + nginx + frontend, with optional
+  in-cluster PostgreSQL, Redis, and EMQX MQTT broker. Designed so a single
+  values.yaml controls common deployment choices (internal/external data
+  plane, ingress, TLS, persistence, replicas, resources, image tags, and
+  Prometheus observability).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.24.0-0"
+keywords:
+  - django
+  - makerspace
+  - inventory
+  - oms
+home: https://github.com/uid0/openmakersuite
+sources:
+  - https://github.com/uid0/openmakersuite
+maintainers:
+  - name: Open Makers Suite

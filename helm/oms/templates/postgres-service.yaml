@@ -1,0 +1,18 @@
+{{- if .Values.postgres.internal -}}
+{{- $component := "postgres" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oms.fullname" . }}-postgres
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" $component) .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.service.port }}
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 4 }}
+{{- end }}

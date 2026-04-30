@@ -1,0 +1,18 @@
+{{- if .Values.redis.internal -}}
+{{- $component := "redis" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oms.fullname" . }}-redis
+  labels:
+    {{- include "oms.componentLabels" (merge (dict "component" $component) .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: redis
+      port: {{ .Values.redis.service.port }}
+      targetPort: redis
+      protocol: TCP
+  selector:
+    {{- include "oms.componentSelectorLabels" (merge (dict "component" $component) .) | nindent 4 }}
+{{- end }}

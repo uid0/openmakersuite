@@ -1,0 +1,53 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "oms.fullname" . -}}
+{{- $svcName := ternary (printf "%s-nginx" $fullName) (printf "%s-backend" $fullName) .Values.nginx.enabled -}}
+{{- $svcPort := ternary .Values.nginx.service.port .Values.backend.service.port .Values.nginx.enabled -}}
+{{- $defaultHost := .Values.config.domain -}}
+{{- $tlsEnabled := .Values.ingress.tls.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "oms.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if and $tlsEnabled (not .Values.ingress.tls.existingSecret) .Values.ingress.tls.clusterIssuer }}
+  {{- if not .Values.ingress.annotations }}
+  annotations:
+  {{- end }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $tlsEnabled }}
+  tls:
+    - hosts:
+        {{- range .Values.ingress.hosts }}
+        - {{ default $defaultHost .host | quote }}
+        {{- end }}
+      secretName: {{ default (printf "%s-tls" $fullName) .Values.ingress.tls.existingSecret }}
+  {{- with .Values.ingress.extraTls }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ default $defaultHost .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $svcName }}
+                port:
+                  number: {{ $svcPort }}
+          {{- end }}
+    {{- end }}
+{{- end }}

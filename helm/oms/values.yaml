@@ -1,0 +1,382 @@
+# Default values for the OMS Helm chart.
+#
+# Every toggle here is wired up by the templates so that flipping a single
+# flag changes the rendered manifests. See helm/oms/README.md for an overview
+# of common deployment combinations and helm/oms/ci/* for example values
+# files used in tests.
+
+# -- Override the chart's release name (helm `fullname` template).
+fullnameOverride: ""
+# -- Override the chart's name component.
+nameOverride: ""
+
+# -- Image registry applied to every image that does not specify its own.
+imageRegistry: ""
+
+# -- Image pull secrets attached to every PodSpec.
+imagePullSecrets: []
+# - name: registry-creds
+
+# -- Common labels applied to every rendered object.
+commonLabels: {}
+# -- Common annotations applied to every rendered object.
+commonAnnotations: {}
+
+serviceAccount:
+  # -- If true, create a ServiceAccount for the application pods.
+  create: true
+  # -- Use an existing ServiceAccount instead of creating one.
+  name: ""
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Application secrets / configuration
+# ---------------------------------------------------------------------------
+secrets:
+  # -- If true, render a Secret from the values below. If false, expect an
+  # existing Secret named `existingSecret` with the same keys.
+  create: true
+  # -- Name of an existing Secret to reuse (when create=false).
+  existingSecret: ""
+  # Required values — leave empty when create=false and supply via existingSecret.
+  djangoSecretKey: ""
+  postgresPassword: ""
+  emqxDashboardPassword: ""
+  emqxApiKey: ""
+  emqxApiSecret: ""
+  mqttBrokerUsername: ""
+  mqttBrokerPassword: ""
+  forgekeyFirmwareSigningKey: ""
+  sentryDsn: ""
+
+config:
+  # -- Public domain used in ALLOWED_HOSTS, CORS, and ingress hosts.
+  domain: oms.example.com
+  # -- Comma-separated list for Django ALLOWED_HOSTS.
+  allowedHosts: ""
+  # -- Comma-separated CSRF_TRUSTED_ORIGINS. Leave empty to derive from domain.
+  csrfTrustedOrigins: ""
+  # -- Comma-separated CORS_ALLOWED_ORIGINS. Leave empty to derive from domain.
+  corsAllowedOrigins: ""
+  # -- Frontend URL (defaults to https://<domain>).
+  frontendUrl: ""
+  # -- Sentry environment label.
+  sentryEnvironment: production
+  # -- Free-form extra environment variables applied to backend + celery pods.
+  extraEnv: []
+  # - name: FOO
+  #   value: bar
+
+# ---------------------------------------------------------------------------
+# Backend (Django + gunicorn)
+# ---------------------------------------------------------------------------
+backend:
+  image:
+    registry: ""
+    repository: ghcr.io/uid0/openmakersuite/backend
+    tag: ""  # defaults to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  command:
+    - gunicorn
+    - config.wsgi:application
+    - --bind=0.0.0.0:8000
+    - --workers=4
+    - --timeout=120
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  livenessProbe:
+    httpGet:
+      path: /api/dashboard/health/
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /api/dashboard/health/
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # -- Persist Django media uploads on a PVC mounted at /app/media. When
+  # disabled the directory is ephemeral (per-pod emptyDir).
+  mediaPersistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteMany
+    existingClaim: ""
+  # -- Run `python manage.py migrate` as a Job before the deployment rolls.
+  migrationJob:
+    enabled: true
+    backoffLimit: 3
+    activeDeadlineSeconds: 600
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 75
+
+# ---------------------------------------------------------------------------
+# Celery worker
+# ---------------------------------------------------------------------------
+celery:
+  image:
+    registry: ""
+    repository: ""  # defaults to backend.image.repository
+    tag: ""         # defaults to backend.image.tag
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  command:
+    - celery
+    - -A
+    - config
+    - worker
+    - -l
+    - info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Frontend (static assets baked into a sidecar)
+# ---------------------------------------------------------------------------
+frontend:
+  image:
+    registry: ""
+    repository: ghcr.io/uid0/openmakersuite/frontend
+    tag: ""  # defaults to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# nginx reverse proxy
+# ---------------------------------------------------------------------------
+nginx:
+  enabled: true
+  image:
+    registry: ""
+    repository: ghcr.io/uid0/openmakersuite/nginx
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ---------------------------------------------------------------------------
+# Flower (Celery monitoring) — optional
+# ---------------------------------------------------------------------------
+flower:
+  enabled: false
+  image:
+    registry: ""
+    repository: mher/flower
+    tag: "2.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5555
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  basicAuth: ""  # username:password — unauthenticated when empty
+
+# ---------------------------------------------------------------------------
+# Ingress
+# ---------------------------------------------------------------------------
+ingress:
+  # -- Render an Ingress resource. Set false when fronted by an external LB.
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: ""        # defaults to .Values.config.domain
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    # -- Terminate TLS at the ingress.
+    enabled: true
+    # -- Reuse an existing Secret rather than letting cert-manager mint one.
+    existingSecret: ""
+    # -- cert-manager ClusterIssuer to use when no existingSecret is set.
+    clusterIssuer: letsencrypt-prod
+  extraTls: []
+
+# ---------------------------------------------------------------------------
+# PostgreSQL
+# ---------------------------------------------------------------------------
+postgres:
+  # -- When true, run an in-cluster PostgreSQL StatefulSet. When false, the
+  # backend connects to `external.host:external.port` (or DATABASE_URL).
+  internal: true
+  image:
+    registry: ""
+    repository: postgres
+    tag: "15.17-alpine"
+    pullPolicy: IfNotPresent
+  auth:
+    database: makerspace_inventory
+    username: makerspace
+  service:
+    port: 5432
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  external:
+    # -- Hostname of the external Postgres. Used when internal=false.
+    host: ""
+    port: 5432
+    # -- Full DATABASE_URL override; when set takes precedence.
+    url: ""
+
+# ---------------------------------------------------------------------------
+# Redis
+# ---------------------------------------------------------------------------
+redis:
+  internal: true
+  image:
+    registry: ""
+    repository: redis
+    tag: "7.4.8-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    port: 6379
+  persistence:
+    enabled: false
+    size: 5Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  external:
+    host: ""
+    port: 6379
+    # -- Full REDIS_URL override.
+    url: ""
+
+# ---------------------------------------------------------------------------
+# EMQX MQTT broker
+# ---------------------------------------------------------------------------
+emqx:
+  internal: true
+  image:
+    registry: ""
+    repository: emqx/emqx-enterprise
+    tag: "6.2.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    mqttPort: 1883
+    mqttsPort: 8883
+    wsPort: 8083
+    wssPort: 8084
+    dashboardPort: 18083
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  external:
+    host: ""
+    mqttPort: 1883
+    apiUrl: ""
+
+# ---------------------------------------------------------------------------
+# Observability
+# ---------------------------------------------------------------------------
+observability:
+  # -- Master switch for all observability resources below.
+  enabled: false
+  serviceMonitor:
+    # -- Render a Prometheus Operator ServiceMonitor for the backend service.
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    labels: {}
+  podMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    labels: {}
+  prometheusRules:
+    enabled: false
+    namespace: ""
+    rules: []

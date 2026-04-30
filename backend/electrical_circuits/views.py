@@ -1,7 +1,11 @@
 """DRF viewsets for electrical circuits and network drops."""
 
+from django.http import HttpResponse
+
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import Breaker, LightSwitch, NetworkDrop, Outlet
 from .serializers import (
@@ -10,6 +14,7 @@ from .serializers import (
     NetworkDropSerializer,
     OutletSerializer,
 )
+from .utils.panel_directory_pdf import generate_network_drop_list_pdf, generate_panel_directory_pdf
 
 
 class _LocationFilterMixin:
@@ -78,3 +83,51 @@ class NetworkDropViewSet(_LocationFilterMixin, viewsets.ModelViewSet):
         if drop_type:
             qs = qs.filter(drop_type=drop_type)
         return qs
+
+
+class PanelDirectoryReportView(APIView):
+    """
+    GET /api/electrical-circuits/reports/panel-directory.pdf?panel=<name>
+
+    Generates a printable directory of breakers and the outlets / light
+    switches each one feeds. Omitting ``panel`` produces a report that
+    covers every panel in the system.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        panel = request.query_params.get("panel") or None
+        pdf_bytes = generate_panel_directory_pdf(panel=panel)
+        slug = panel.replace(" ", "-") if panel else "all"
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="panel-directory-{slug}.pdf"'
+        return response
+
+
+class NetworkDropListReportView(APIView):
+    """
+    GET /api/electrical-circuits/reports/network-drop-list.pdf?location=<id>
+
+    Lists network drops, grouped by location, with patch-panel/port and
+    connected-device notes. Omitting ``location`` returns every drop.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        location_param = request.query_params.get("location")
+        location_id = None
+        if location_param:
+            try:
+                location_id = int(location_param)
+            except ValueError:
+                return Response(
+                    {"detail": "location must be an integer id."},
+                    status=400,
+                )
+        pdf_bytes = generate_network_drop_list_pdf(location_id=location_id)
+        slug = str(location_id) if location_id is not None else "all"
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="network-drop-list-{slug}.pdf"'
+        return response

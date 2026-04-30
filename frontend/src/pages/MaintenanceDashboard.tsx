@@ -154,7 +154,6 @@ const MaintenanceItemRow: React.FC<MaintenanceItemRowProps> = ({
 
 const WorkOrderRow: React.FC<{ wo: WorkOrder }> = ({ wo }) => {
   const dueDate = wo.due_date ? parseYmd(wo.due_date) : null;
-  const apiBaseUrl = process.env.REACT_APP_API_URL || '';
 
   return (
     <Card
@@ -211,7 +210,7 @@ const WorkOrderRow: React.FC<{ wo: WorkOrder }> = ({ wo }) => {
               color="gray"
               size="md"
               component="a"
-              href={`${apiBaseUrl}/inventory/work-orders/${wo.id}/pdf/`}
+              href={workOrderAPI.getPdfUrl(wo.id)}
               target="_blank"
               rel="noopener noreferrer"
             >

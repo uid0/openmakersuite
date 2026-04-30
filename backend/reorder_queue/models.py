@@ -265,15 +265,39 @@ class PurchaseOrder(models.Model):
 
     @property
     def total_items(self) -> int:
-        """Total number of distinct items in this order."""
-        return self.items.count()
+        """Total number of distinct non-voided items in this order."""
+        return sum(1 for item in self.items.all() if not item.is_voided)
 
     @property
     def total_quantity(self) -> int:
-        """Total quantity of all items ordered."""
+        """Total quantity of non-voided items ordered."""
         return sum(
-            item.quantity_ordered for item in self.items.all() if item.quantity_ordered is not None
+            item.quantity_ordered
+            for item in self.items.all()
+            if not item.is_voided and item.quantity_ordered is not None
         )
+
+    @property
+    def effective_estimated_total(self) -> Decimal:
+        """Estimated total cost excluding voided line items.
+
+        Voided lines are subtracted from the stored ``estimated_total`` so the
+        displayed cost reflects only items the supplier is actually fulfilling.
+        """
+        voided_total = sum(
+            (item.estimated_cost for item in self.items.all() if item.is_voided),
+            start=Decimal("0.00"),
+        )
+        base = self.estimated_total or Decimal("0.00")
+        adjusted = base - voided_total
+        if adjusted < Decimal("0.00"):
+            return Decimal("0.00")
+        return adjusted
+
+    @property
+    def has_active_items(self) -> bool:
+        """Whether any line item on this PO is not voided."""
+        return any(not item.is_voided for item in self.items.all())
 
     @property
     def total_received_quantity(self) -> int:

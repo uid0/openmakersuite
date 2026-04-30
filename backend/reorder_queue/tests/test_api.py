@@ -1223,3 +1223,100 @@ class TestPurchaseOrderMetadataAndAttachments:
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert purchase_order.attachments.count() == 0
+
+
+@pytest.mark.integration
+class TestPurchaseOrderListVoidHandling:
+    """Tests for oms-a8o: zero-out and red-out voided POs in the list endpoint.
+
+    The /reorders/purchase-orders/ list must hide POs whose line items are all
+    voided, and the displayed estimated total must subtract voided line items.
+    Detail retrieval is unaffected — deep links to fully-voided POs still work.
+    """
+
+    def _make_po_with_items(self, user, *, item_count=2, unit_cost=Decimal("10.00")):
+        supplier = SupplierFactory()
+        purchase_order = PurchaseOrder.objects.create(
+            supplier=supplier,
+            status=PurchaseOrder.SENT,
+            created_by=user,
+        )
+        items = []
+        for _ in range(item_count):
+            item_supplier = ItemSupplierFactory(supplier=supplier)
+            items.append(
+                PurchaseOrderItem.objects.create(
+                    purchase_order=purchase_order,
+                    item_supplier=item_supplier,
+                    quantity_ordered=5,
+                    unit_cost_ordered=unit_cost,
+                )
+            )
+        purchase_order.calculate_estimated_total()
+        purchase_order.save()
+        return purchase_order, items
+
+    def _void_item(self, item, user):
+        item.is_voided = True
+        item.voided_at = timezone.now()
+        item.voided_by = user
+        item.void_reason = "discontinued"
+        item.save()
+
+    def test_list_excludes_po_with_all_voided_items(self, authenticated_client):
+        """A PO whose every line item is voided must not appear in the list."""
+        client, user = authenticated_client
+        all_voided_po, items = self._make_po_with_items(user, item_count=2)
+        for item in items:
+            self._void_item(item, user)
+
+        # A second PO with at least one active line should still appear.
+        active_po, active_items = self._make_po_with_items(user, item_count=2)
+        self._void_item(active_items[0], user)
+
+        url = reverse("purchaseorder-list")
+        response = client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+
+        listed_ids = {row["id"] for row in response.data["results"]}
+        assert all_voided_po.id not in listed_ids
+        assert active_po.id in listed_ids
+
+    def test_retrieve_still_returns_fully_voided_po(self, authenticated_client):
+        """Hiding from the list must not 404 on detail retrieval."""
+        client, user = authenticated_client
+        purchase_order, items = self._make_po_with_items(user)
+        for item in items:
+            self._void_item(item, user)
+
+        url = reverse("purchaseorder-detail", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["id"] == purchase_order.id
+
+    def test_estimated_total_subtracts_voided_line_items(self, authenticated_client):
+        """Voided lines are subtracted from the displayed estimated total."""
+        client, user = authenticated_client
+        # 2 items × 5 qty × $10 = $100 stored estimated_total
+        purchase_order, items = self._make_po_with_items(user, item_count=2)
+        assert purchase_order.estimated_total == Decimal("100.00")
+
+        # Void one line: 5 × $10 = $50 worth of items removed.
+        self._void_item(items[0], user)
+
+        url = reverse("purchaseorder-detail", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+        assert Decimal(response.data["estimated_total"]) == Decimal("50.00")
+
+    def test_total_items_and_quantity_exclude_voided(self, authenticated_client):
+        """Counts shown in the list must not include voided lines."""
+        client, user = authenticated_client
+        purchase_order, items = self._make_po_with_items(user, item_count=3)
+        self._void_item(items[0], user)
+
+        url = reverse("purchaseorder-detail", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["total_items"] == 2
+        assert response.data["total_quantity"] == 10  # 2 lines × 5 qty

@@ -428,6 +428,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 | Q(notes__icontains=search)
             )
 
+        # Hide POs with no active line items from the list view (oms-a8o).
+        # A PO whose items are all voided has nothing to show or pay for, so it
+        # should not appear in the public/admin purchase order list. Detail
+        # retrieval is unaffected so deep links and audit trails still resolve.
+        if self.action == "list":
+            queryset = queryset.annotate(
+                _active_items_count=Count("items", filter=Q(items__is_voided=False))
+            ).filter(_active_items_count__gt=0)
+
         return queryset
 
     def get_serializer_class(self):

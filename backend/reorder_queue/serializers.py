@@ -223,6 +223,12 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     total_received_quantity = serializers.IntegerField(read_only=True)
     is_fully_received = serializers.BooleanField(read_only=True)
     days_since_ordered = serializers.IntegerField(read_only=True)
+    estimated_total = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        source="effective_estimated_total",
+        read_only=True,
+    )
 
     class Meta:
         model = PurchaseOrder

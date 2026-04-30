@@ -425,6 +425,27 @@ class LocationViewSet(viewsets.ModelViewSet):
         except Exception:  # nosec B110 - notifications must not block reports
             pass
 
+        # Webhook + email fan-out for the new oms-0yz logistics flow. Both must
+        # fail open: the user-facing report should never 500 because Celery,
+        # Postmark, or a downstream subscriber is unavailable.
+        try:
+            from reorder_queue.tasks import send_location_problem_webhook
+
+            send_location_problem_webhook.delay(str(problem.id))
+        except Exception:  # nosec B110 - webhook delivery must not block reports
+            pass
+
+        if problem.severity in (
+            LocationProblem.SEVERITY_HIGH,
+            LocationProblem.SEVERITY_URGENT,
+        ):
+            try:
+                from inventory.services.location_problem_alerts import email_logistics_alert
+
+                email_logistics_alert(problem)
+            except Exception:  # nosec B110 - email delivery must not block reports
+                pass
+
         serializer = LocationProblemSerializer(problem, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 

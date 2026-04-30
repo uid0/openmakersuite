@@ -815,6 +815,7 @@ class WebHook(models.Model):
     LOCATION_CHECKIN = "location_checkin"
     LOCATION_FEEDBACK = "location_feedback"
     SECURITY_REPORT = "security_report"
+    LOCATION_PROBLEM_REPORTED = "location_problem_reported"
 
     EVENT_TYPE_CHOICES = [
         (REORDER_REQUEST_CREATED, "Reorder Request Created"),
@@ -828,6 +829,7 @@ class WebHook(models.Model):
         (LOCATION_CHECKIN, "Location Check-in"),
         (LOCATION_FEEDBACK, "Location Feedback"),
         (SECURITY_REPORT, "Security Report"),
+        (LOCATION_PROBLEM_REPORTED, "Location Problem Reported"),
     ]
 
     # Core fields

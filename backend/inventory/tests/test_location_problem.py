@@ -326,3 +326,159 @@ class TestPaperFormIngestion:
         result = _apply_location_problem_submission(submission, pdf_bytes)
         assert result.status == WorkOrderSubmission.STATUS_FAILED
         assert "999999" in result.parse_error
+
+
+@pytest.mark.django_db
+class TestLogisticsAlertFanOut:
+    """oms-0yz: webhook + email fan-out when a LocationProblem is reported."""
+
+    def test_urgent_report_emails_logistics(self, settings, location):
+        from django.core import mail
+
+        settings.LOGISTICS_ALERT_EMAIL = "logistics@example.test"
+        client = APIClient()
+        resp = client.post(
+            f"/api/inventory/locations/{location.id}/report_problem/",
+            {"description": "Ceiling leaking onto CNC", "severity": "urgent"},
+            format="multipart",
+        )
+        assert resp.status_code == 201, resp.content
+        assert len(mail.outbox) == 1
+        message = mail.outbox[0]
+        assert message.to == ["logistics@example.test"]
+        assert "URGENT" in message.subject
+        assert location.name in message.subject
+        assert "Ceiling leaking onto CNC" in message.body
+
+    def test_low_severity_report_does_not_email(self, settings, location):
+        from django.core import mail
+
+        settings.LOGISTICS_ALERT_EMAIL = "logistics@example.test"
+        client = APIClient()
+        resp = client.post(
+            f"/api/inventory/locations/{location.id}/report_problem/",
+            {"description": "Light bulb burned out", "severity": "low"},
+            format="multipart",
+        )
+        assert resp.status_code == 201
+        assert mail.outbox == []
+
+    def test_empty_alert_address_skips_email(self, settings, location):
+        from django.core import mail
+
+        settings.LOGISTICS_ALERT_EMAIL = ""
+        client = APIClient()
+        resp = client.post(
+            f"/api/inventory/locations/{location.id}/report_problem/",
+            {"description": "Major leak", "severity": "high"},
+            format="multipart",
+        )
+        assert resp.status_code == 201
+        assert mail.outbox == []
+
+    def test_report_fires_webhook_task(self, location, monkeypatch):
+        """``report_problem`` enqueues the LocationProblem webhook task."""
+        calls = []
+
+        from reorder_queue import tasks as rq_tasks
+
+        def fake_delay(problem_id):
+            calls.append(problem_id)
+
+        monkeypatch.setattr(rq_tasks.send_location_problem_webhook, "delay", fake_delay)
+        client = APIClient()
+        resp = client.post(
+            f"/api/inventory/locations/{location.id}/report_problem/",
+            {"description": "Door wont latch", "severity": "medium"},
+            format="multipart",
+        )
+        assert resp.status_code == 201
+        assert len(calls) == 1
+        # Task receives the new LocationProblem id
+        problem = LocationProblem.objects.get()
+        assert calls[0] == str(problem.id)
+
+    def test_send_location_problem_webhook_payload(self, location):
+        from reorder_queue.models import WebHook
+        from reorder_queue.tasks import send_location_problem_webhook
+
+        problem = LocationProblem.objects.create(
+            location=location,
+            description="Roof leak",
+            severity=LocationProblem.SEVERITY_URGENT,
+            reported_by="alice",
+        )
+        # No active webhooks: the task short-circuits but still validates the
+        # event_type is registered (no 0 webhooks_triggered fallback would not
+        # exercise the field lookup, which is the regression we care about).
+        result = send_location_problem_webhook(str(problem.id))
+        assert result.get("webhooks_triggered") == 0
+
+        # Create a matching webhook and invoke again — should now be triggered.
+        WebHook.objects.create(
+            name="Logistics LP",
+            url="https://example.test/lp",
+            event_type=WebHook.LOCATION_PROBLEM_REPORTED,
+        )
+        # send_webhook_notification posts to the URL, which we don't want in a
+        # unit test. Stub it via patching at the module level.
+        from unittest.mock import patch
+
+        with patch(
+            "reorder_queue.tasks.send_webhook_notification.run",
+            return_value={"event_type": "location_problem_reported", "webhooks_triggered": 1},
+        ) as mocked:
+            send_location_problem_webhook(str(problem.id))
+        assert mocked.called
+        event_type, payload = mocked.call_args.args
+        assert event_type == "location_problem_reported"
+        assert payload["data"]["id"] == str(problem.id)
+        assert payload["data"]["severity"] == "urgent"
+        assert payload["data"]["location_name"] == location.name
+
+
+@pytest.mark.django_db
+class TestLogisticsDashboardLocationProblems:
+    """oms-0yz: dashboard counts and alert state."""
+
+    def test_open_problems_count_includes_location_problem(self, location):
+        client = APIClient()
+        # Open LocationProblem
+        LocationProblem.objects.create(
+            location=location,
+            description="Tile cracked",
+            severity=LocationProblem.SEVERITY_LOW,
+        )
+        resp = client.get("/api/reorders/analytics/logistics_dashboard/")
+        assert resp.status_code == 200, resp.content
+        body = resp.json()
+        assert body["open_locations_with_problems"] >= 1
+        assert body["urgent_location_problems"] == 0
+        assert body["alert_active"] is False
+
+    def test_urgent_problem_triggers_alert(self, location):
+        client = APIClient()
+        LocationProblem.objects.create(
+            location=location,
+            description="Ceiling leak",
+            severity=LocationProblem.SEVERITY_URGENT,
+        )
+        resp = client.get("/api/reorders/analytics/logistics_dashboard/")
+        assert resp.status_code == 200, resp.content
+        body = resp.json()
+        assert body["urgent_location_problems"] == 1
+        assert body["alert_active"] is True
+
+    def test_resolved_problem_does_not_trigger_alert(self, location):
+        client = APIClient()
+        LocationProblem.objects.create(
+            location=location,
+            description="Old leak",
+            severity=LocationProblem.SEVERITY_URGENT,
+            status=LocationProblem.RESOLVED,
+        )
+        resp = client.get("/api/reorders/analytics/logistics_dashboard/")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["urgent_location_problems"] == 0
+        assert body["alert_active"] is False

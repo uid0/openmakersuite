@@ -1,0 +1,166 @@
+# Celery task inventory (AC-28, AC-31)
+
+This document inventories every Celery task registered by OpenMakerSuite,
+together with its trigger, queue/worker expectation, side effects, retry
+policy, timeout, idempotency posture, owning workflow, and recovery path.
+Update it in the same PR whenever a task is added, removed, or its policy
+changes — this register is the source of truth for the task-worker
+proficiency baseline.
+
+For deployment of the worker and the (future) beat process, see
+[`deploy/COMPOSE_RUNBOOK.md`](../deploy/COMPOSE_RUNBOOK.md) §10 and
+[`deploy/SMOKE_TESTS.md`](../deploy/SMOKE_TESTS.md) §6.
+
+For the failure-recovery surface, see [§ Failed task recovery](#failed-task-recovery-ac-31).
+
+## Queue/worker model
+
+OMS runs a single Celery worker against the Redis broker
+(`docker-compose.prod.yml` `celery` service, command
+`celery -A config worker -l info`). All tasks share the **default** queue —
+no per-task queue routing is configured. Tasks compete for the same worker
+pool. If a high-volume webhook task starves a maintenance task, that's a
+signal to introduce queues; until then keep all tasks on `celery` (default)
+to keep operator surface area minimal.
+
+The hard global timeout is `CELERY_TASK_TIME_LIMIT = 30 * 60` (30 min). No
+soft time limit is configured. Per-task `time_limit` overrides are not in
+use today.
+
+Task results land in `django-db` (`django_celery_results.TaskResult`) and
+the Django admin at `/admin/django_celery_results/taskresult/` is the
+operator surface for inspecting status, args, and tracebacks
+(`backend/config/celery_admin.py`).
+
+## Tasks by app
+
+> **Idempotency column legend**
+>
+> - **Yes** — safe to retry; replays produce no duplicate external side effect.
+> - **Duplicate-safe** — replay may emit the side effect again, but downstream consumers are expected to deduplicate (HMAC-signed webhooks with a stable payload `id`).
+> - **At-most-once on success** — the in-process check prevents duplicate work after a successful prior run; a retry that crosses a worker restart could emit twice.
+> - **No** — replay produces a duplicate external side effect; retries must be avoided or guarded at the call site.
+
+### donations
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `donations.tasks.send_quarterly_donor_updates` | Beat: every 7,776,000 s (~90 days) — see `CELERY_BEAT_SCHEDULE["send-quarterly-donor-updates"]` | Emails every donor with `tax_receipt_issued=True` and a non-empty `donor_email` (one email per donation row) | None (`@shared_task` defaults) | 30 min global | **No** — per-run loop sends each email unconditionally; running twice in the same window double-emails donors | Manual re-run is destructive. To replay for a single donor, call `DonationEmailService.send_quarterly_update(donation)` from `manage.py shell` rather than re-invoking the task. |
+
+### vendors
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `vendors.flag_expiring_compliance` | Beat: every 86,400 s (daily) — see `CELERY_BEAT_SCHEDULE["flag-expiring-vendor-compliance"]` | Single digest email to the Logistics group listing TDLR/COI expired or expiring within 30 days | None | 30 min global | **Duplicate-safe** — re-running the same day re-sends the digest, but content is a snapshot; recipients expect daily delivery. No per-vendor side effect. | Re-run via `celery -A config call vendors.flag_expiring_compliance` in the worker container. |
+
+### inventory
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `inventory.tasks.download_image_from_url` | `.delay()` from item create/update flows that supply an image URL | HTTP GET to the supplied URL (30 s timeout); writes `InventoryItem.image` | None | 30 min global | **Yes** — early-returns `"Image already exists for {item.name}"` when `item.image` is already set | Clear `item.image` and re-queue, or re-call directly. |
+| `inventory.tasks.generate_qr_code` | `.delay()` from item create/save | Writes QR PNG to `InventoryItem.qr_code` field via `QRCodeService` | None | 30 min global | **Yes** — overwrites the existing QR; re-running produces the same artifact for the same item | Re-queue. |
+| `inventory.tasks.generate_index_card` | `.delay()` (currently called only in tests) | Generates a PDF in memory; not persisted (TODO in code) | None | 30 min global | N/A | Not user-recoverable; this task does not yet have a storage destination. |
+| `inventory.tasks.update_average_lead_times` | Manual / not currently scheduled | Updates `ItemSupplier.average_lead_time` for items with completed reorders in the last 180 days | None | 30 min global | **Yes** — recomputes from scratch; idempotent on a stable history | Re-queue from `manage.py shell`. |
+
+### reorder_queue (webhooks + email)
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `reorder_queue.tasks.send_webhook_notification` | `.delay()` from the per-event trigger tasks below | HTTP POST to every active `WebHook` row matching the event type, optionally HMAC-signed | `max_retries=3`, `default_retry_delay=60` s, `autoretry_for=(requests.exceptions.RequestException,)` | 30 min global | **Duplicate-safe** — payload includes an `id` and a stable `timestamp`, so subscribers can dedupe; `WebHook.record_failure`/`record_success` accumulate counts on every attempt | Failed deliveries surface in the admin (`/admin/reorder_queue/webhook/`, columns `failure_count`, `last_error`). Re-fire by replaying the trigger task with the original ID, or call `send_webhook_notification.delay(event_type, payload)` from `manage.py shell`. |
+| `reorder_queue.tasks.send_reorder_request_notification_email` | `.delay()` from `ReorderRequest.save` notification flow | Sends in-app + email notification for the request | None | 30 min global | **Duplicate-safe** — the notification layer dedupes on `request_id`; missing rows return `{"sent": 0, "reason": "not-found"}` rather than raising | Re-call with the same `request_id`. |
+| `reorder_queue.tasks.trigger_reorder_request_webhook` | `.delay()` from `ReorderRequest` post-save signal | Builds payload, hands off to `send_webhook_notification` | None at this layer; downstream task retries | 30 min global | **Duplicate-safe** | Re-call with the same `request_id`. |
+| `reorder_queue.tasks.run_webhook_test` | `.delay()` from the admin "Test webhook" action | Single HTTP POST to the configured URL with a test payload (`"test": True`) | None | 30 min global | **Yes** — clearly marked test payload; re-running emits another test event | Re-trigger from the admin. |
+| `reorder_queue.tasks.send_fixture_refill_webhook` | `.delay()` from `FixtureRefillRequest` create | Builds payload, hands off to `send_webhook_notification` | None at this layer; downstream task retries | 30 min global | **Duplicate-safe** | Re-call with the same `refill_request_id`. |
+| `reorder_queue.tasks.send_asset_problem_webhook` | `.delay()` from `AssetProblem` create | Builds payload, hands off to `send_webhook_notification` | None at this layer; downstream task retries | 30 min global | **Duplicate-safe** | Re-call with the same `problem_id`. |
+| `reorder_queue.tasks.send_location_problem_webhook` | `.delay()` from `Location.report_problem` action | Builds payload, hands off to `send_webhook_notification` | None at this layer; downstream task retries | 30 min global | **Duplicate-safe** | Re-call with the same `problem_id`. |
+
+### location_checkins
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `location_checkins.tasks.send_location_checkin_webhook` | `.delay()` from `LocationCheckIn` create | Builds payload, hands off to `send_webhook_notification` | None at this layer; downstream task retries | 30 min global | **Duplicate-safe** | Re-call with the same `checkin_id`. |
+| `location_checkins.tasks.send_location_feedback_webhook` | `.delay()` from `LocationFeedback` create | Builds payload, hands off to `send_webhook_notification` | None at this layer; downstream task retries | 30 min global | **Duplicate-safe** | Re-call with the same `feedback_id`. |
+| `location_checkins.tasks.send_security_report_webhook` | `.delay()` from `SecurityReport` create | Builds payload, hands off to `send_webhook_notification` | None at this layer; downstream task retries | 30 min global | **Duplicate-safe** | Re-call with the same `report_id`. |
+
+### forgekey (MQTT)
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `forgekey.tasks.send_mqtt_command` | `.delay()` from device control flows | MQTT publish (QoS 1) to the device command topic | `max_retries=3`, `default_retry_delay=60` s | 30 min global | **Duplicate-safe** — commands are level-triggered (`enable`/`disable`/`status`); device firmware idempotently applies the latest state | Re-call with the same args. |
+| `forgekey.tasks.enable_device` | `.delay()` from device control / lockout-release flows | Wraps `send_mqtt_command(mac, "enable")` | `max_retries=3`, `default_retry_delay=60` s | 30 min global | **Duplicate-safe** | Re-call. |
+| `forgekey.tasks.disable_device` | `.delay()` from device lockout flows (with optional `delay_seconds`) | Wraps `send_mqtt_command(mac, "disable", {...})` | `max_retries=3`, `default_retry_delay=60` s | 30 min global | **Duplicate-safe** | Re-call. |
+| `forgekey.tasks.request_device_status` | `.delay()` from admin / scheduled status checks | Wraps `send_mqtt_command(mac, "status")` | `max_retries=3`, `default_retry_delay=60` s | 30 min global | **Yes** — status request, no state change | Re-call. |
+| `forgekey.tasks.process_mqtt_status_message` | `.delay()` from MQTT status message handler | Updates `ESP32Device.is_online`, `last_seen`, `firmware_version` | None | 30 min global | **Yes** — last-write-wins on a single device row | Replay from MQTT log if needed. |
+| `forgekey.tasks.process_mqtt_power_reading` | `.delay()` from MQTT power-reading handler | Inserts a `PowerMeterReading` row | None | 30 min global | **No** — append-only; replay creates duplicate readings | If duplicate readings ship, delete the offending rows by `received_at`. Avoid replaying this task. |
+| `forgekey.tasks.process_mqtt_firmware_update_response` | `.delay()` from MQTT firmware response handler | Updates `DeviceFirmwareUpdate` row + `ESP32Device.firmware_version` | None | 30 min global | **Yes** — idempotent state transition keyed on `update_id` + `device` | Replay from MQTT log if needed. |
+| `forgekey.tasks.prune_device_photos` | **Not currently scheduled.** Defined for beat use; see [Gaps](#gaps). | Deletes `ESP32DevicePhoto` rows older than `retention_days` (default 30) | None | 30 min global | **Yes** — re-running with the same cutoff is a no-op | Run manually: `celery -A config call forgekey.tasks.prune_device_photos`. |
+
+### config (debug)
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `config.celery.debug_task` | Manual only | Prints request metadata (`ignore_result=True`) | None | 30 min global | **Yes** | N/A |
+
+## Failed task recovery (AC-31)
+
+Failed and retrying tasks are visible to staff and operators through three
+surfaces:
+
+1. **Django admin → Celery Task Results** at
+   `/admin/django_celery_results/taskresult/`
+   (`backend/config/celery_admin.py`). Status is colour-coded
+   (`SUCCESS` / `FAILURE` / `PENDING` / `STARTED` / `RETRY` / `REVOKED`),
+   list filters cover status / task name / worker / date, and tracebacks
+   are persisted in the read-only detail view. Use the `status=FAILURE`
+   filter for the failed-task queue.
+2. **Webhook delivery counters** on each `WebHook` row
+   (`/admin/reorder_queue/webhook/`): `success_count`, `failure_count`,
+   `last_triggered_at`, `last_error`. These accumulate across retries and
+   survive worker restarts.
+3. **Flower**, exposed by the bundled `flower` compose service on port
+   5555, gives a live worker / queue / inflight task view. It is **not**
+   exposed publicly by default — see
+   [`deploy/COMPOSE_RUNBOOK.md`](../deploy/COMPOSE_RUNBOOK.md) §10 for
+   the access path.
+
+### Replay paths
+
+For most tasks, the cleanest replay is to re-call the trigger with the
+same canonical ID (`request_id`, `problem_id`, `mac_address`, …) so the
+task rebuilds its payload from the current database state — never replay
+a stale captured payload.
+
+```bash
+# In the worker container:
+docker compose -f docker-compose.prod.yml exec celery \
+    celery -A config call <task_name> --args='[...]' --kwargs='{...}'
+
+# Or from a Django shell:
+docker compose -f docker-compose.prod.yml exec backend \
+    python manage.py shell -c "
+from reorder_queue.tasks import trigger_reorder_request_webhook
+trigger_reorder_request_webhook.delay(<request_id>)
+"
+```
+
+`send_quarterly_donor_updates` is the only task that is **not safe to
+replay wholesale** — see its row above for the per-donor recovery path.
+
+## Gaps
+
+The following gaps are tracked here because they affect operator
+expectations even though the work to close them has not landed:
+
+- **No `celery beat` process is deployed.** `CELERY_BEAT_SCHEDULE` is
+  populated in `backend/config/settings.py`, but
+  `docker-compose.prod.yml` defines only the `celery` worker service.
+  Until a beat container is added, the scheduled tasks above (donor
+  updates, vendor compliance digest) **do not fire** in production.
+  Operators running a beat process today must do so manually — see
+  [`deploy/COMPOSE_RUNBOOK.md`](../deploy/COMPOSE_RUNBOOK.md) §10.
+- **`forgekey.tasks.prune_device_photos` is not in `CELERY_BEAT_SCHEDULE`.**
+  It is a maintenance task that needs to be added to the schedule once
+  a beat process exists; until then it must be run on a host cron.
+- **Per-queue routing is not configured.** A spike in webhook traffic
+  can starve maintenance tasks. Introduce queues only when monitoring
+  shows it's needed.

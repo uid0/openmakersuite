@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "passkeys",
     "anymail",
     # Local apps
+    "config.apps.ConfigConfig",
     "membership",
     "inventory",
     "reorder_queue",

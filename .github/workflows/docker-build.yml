@@ -1,20 +1,18 @@
 name: 🐳 Build and Publish Docker Containers
+# Image and chart publishing is strictly gated on a successful CI run.
+# We only trigger off `workflow_run` (CI completed) and require
+# `conclusion == 'success'`. There is no `push` / `pull_request` trigger here:
+# adding one would re-introduce a path where containers/charts can be published
+# even though CI failed (linting, unit tests, coverage, frontend build, Docker
+# build, security, manifest validation, Helm lint, or template rendering).
+# See AC-11 (oms-2gi).
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
-    branches: [main]
-  push:
-    branches:
-      - main
-      - "**" # All branches for issue-NN-latest tagging
-    tags:
-      - "v*" # Version tags
-  pull_request:
-    branches: [main]
 
 concurrency:
-  group: docker-build-${{ github.ref }}
+  group: docker-build-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -25,21 +23,25 @@ jobs:
   determine-tags:
     name: 🏷️ Determine Tags
     runs-on: ubuntu-latest
-    # Only run if CI succeeded (for workflow_run) or on direct push/tag
-    if: |
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
-      (github.event_name == 'push' && github.ref_type == 'branch')
+    # AC-11 release gate: only run when CI fully succeeded. Any other
+    # workflow_run conclusion (failure, cancelled, timed_out, action_required,
+    # neutral, skipped, stale) skips the entire publish chain.
+    if: github.event.workflow_run.conclusion == 'success'
     outputs:
       backend_tags: ${{ steps.tags.outputs.backend_tags }}
       frontend_tags: ${{ steps.tags.outputs.frontend_tags }}
       should_build: ${{ steps.tags.outputs.should_build }}
       publish_helm: ${{ steps.tags.outputs.publish_helm }}
       sha_short: ${{ steps.tags.outputs.sha_short }}
+      git_tag: ${{ steps.tags.outputs.git_tag }}
+      head_branch: ${{ steps.tags.outputs.head_branch }}
+      head_sha: ${{ steps.tags.outputs.head_sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # Build the exact SHA CI verified, not the workflow file's HEAD.
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Determine tags
@@ -54,72 +56,43 @@ jobs:
           SHOULD_BUILD="true"
           PUBLISH_HELM="false"
 
-          # Resolve the SHA we are actually building. For workflow_run events
-          # github.sha points at the workflow file commit, not the CI run, so
-          # prefer workflow_run.head_sha when present.
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            BUILD_SHA="${{ github.event.workflow_run.head_sha }}"
-          else
-            BUILD_SHA="${{ github.sha }}"
-          fi
+          # All triggers come from a successful CI workflow_run. Use the SHA
+          # CI verified — not github.sha, which points at the workflow file commit.
+          BUILD_SHA="${{ github.event.workflow_run.head_sha }}"
           SHA_SHORT="${BUILD_SHA:0:7}"
+          BRANCH_NAME="${{ github.event.workflow_run.head_branch }}"
           echo "🔍 Build SHA: $BUILD_SHA (short: $SHA_SHORT)"
+          echo "🔍 Branch:    $BRANCH_NAME"
 
-          # Check if this is a tag push
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" =~ ^refs/tags/v ]]; then
-            VERSION_TAG="${{ github.ref_name }}"
-            echo "🏷️ Git tag detected: $VERSION_TAG"
+          # Detect a version tag pointing at the verified SHA. This covers
+          # tag pushes (vX.Y.Z) that triggered CI on the tagged commit.
+          GIT_TAG=$(git tag --points-at "$BUILD_SHA" 2>/dev/null | grep -E '^v' | head -1 || true)
 
-            BACKEND_TAGS="$REGISTRY/backend:$VERSION_TAG,$REGISTRY/backend:latest,$REGISTRY/backend:sha-$SHA_SHORT"
-            FRONTEND_TAGS="$REGISTRY/frontend:$VERSION_TAG,$REGISTRY/frontend:latest,$REGISTRY/frontend:sha-$SHA_SHORT"
+          if [ -n "$GIT_TAG" ]; then
+            echo "🏷️ Version tag detected: $GIT_TAG"
+            BACKEND_TAGS="$REGISTRY/backend:$GIT_TAG,$REGISTRY/backend:latest,$REGISTRY/backend:sha-$SHA_SHORT"
+            FRONTEND_TAGS="$REGISTRY/frontend:$GIT_TAG,$REGISTRY/frontend:latest,$REGISTRY/frontend:sha-$SHA_SHORT"
             PUBLISH_HELM="true"
 
-          # Check if this is main branch
-          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "🏷️ Main branch detected - tagging as latest + sha-$SHA_SHORT + main"
+          elif [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "🏷️ Main branch — tagging as latest + main + sha-$SHA_SHORT"
             BACKEND_TAGS="$REGISTRY/backend:latest,$REGISTRY/backend:main,$REGISTRY/backend:sha-$SHA_SHORT"
             FRONTEND_TAGS="$REGISTRY/frontend:latest,$REGISTRY/frontend:main,$REGISTRY/frontend:sha-$SHA_SHORT"
             PUBLISH_HELM="true"
 
-          # Check if this is a feature branch (extract issue number after slash)
-          elif [[ "${{ github.ref }}" =~ ^refs/heads/.*/([0-9]+)- ]]; then
-            ISSUE_NUM=$(echo "${{ github.ref }}" | sed -n 's|.*/\([0-9]*\)-.*|\1|p')
+          elif [[ "$BRANCH_NAME" =~ .*/([0-9]+)- ]]; then
+            ISSUE_NUM=$(echo "$BRANCH_NAME" | sed -n 's|.*/\([0-9]*\)-.*|\1|p')
             if [ -n "$ISSUE_NUM" ]; then
               ISSUE_TAG="issue-$ISSUE_NUM-latest"
-              echo "🏷️ Feature branch detected - tagging as $ISSUE_TAG (extracted issue #$ISSUE_NUM)"
+              echo "🏷️ Feature branch — tagging as $ISSUE_TAG (issue #$ISSUE_NUM)"
               BACKEND_TAGS="$REGISTRY/backend:$ISSUE_TAG"
               FRONTEND_TAGS="$REGISTRY/frontend:$ISSUE_TAG"
             else
               echo "⚠️ Could not extract issue number from branch, skipping build"
               SHOULD_BUILD="false"
             fi
-
-          # For workflow_run events, check the branch that triggered CI
-          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            # Get the branch from the workflow run
-            BRANCH_NAME="${{ github.event.workflow_run.head_branch }}"
-            if [[ "$BRANCH_NAME" == "main" ]]; then
-              echo "🏷️ CI completed on main branch - tagging as latest + sha-$SHA_SHORT + main"
-              BACKEND_TAGS="$REGISTRY/backend:latest,$REGISTRY/backend:main,$REGISTRY/backend:sha-$SHA_SHORT"
-              FRONTEND_TAGS="$REGISTRY/frontend:latest,$REGISTRY/frontend:main,$REGISTRY/frontend:sha-$SHA_SHORT"
-              PUBLISH_HELM="true"
-            elif [[ "$BRANCH_NAME" =~ .*/([0-9]+)- ]]; then
-              ISSUE_NUM=$(echo "$BRANCH_NAME" | sed -n 's|.*/\([0-9]*\)-.*|\1|p')
-              if [ -n "$ISSUE_NUM" ]; then
-                ISSUE_TAG="issue-$ISSUE_NUM-latest"
-                echo "🏷️ CI completed on feature branch - tagging as $ISSUE_TAG (extracted issue #$ISSUE_NUM)"
-                BACKEND_TAGS="$REGISTRY/backend:$ISSUE_TAG"
-                FRONTEND_TAGS="$REGISTRY/frontend:$ISSUE_TAG"
-              else
-                echo "⚠️ Could not extract issue number from branch, skipping build"
-                SHOULD_BUILD="false"
-              fi
-            else
-              echo "⚠️ Branch name doesn't match expected pattern, skipping build"
-              SHOULD_BUILD="false"
-            fi
           else
-            echo "⚠️ Unhandled event type or branch, skipping build"
+            echo "⚠️ Branch name doesn't match expected pattern, skipping build"
             SHOULD_BUILD="false"
           fi
 
@@ -133,6 +106,9 @@ jobs:
           echo "should_build=$SHOULD_BUILD" >> $GITHUB_OUTPUT
           echo "publish_helm=$PUBLISH_HELM" >> $GITHUB_OUTPUT
           echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
+          echo "git_tag=$GIT_TAG" >> $GITHUB_OUTPUT
+          echo "head_branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "head_sha=$BUILD_SHA" >> $GITHUB_OUTPUT
 
   build-backend:
     name: 🏗️ Build Backend Container
@@ -142,6 +118,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.determine-tags.outputs.head_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -181,6 +159,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.determine-tags.outputs.head_sha }}
           fetch-depth: 0 # Need full history for git hash
 
       - name: Set up Docker Buildx
@@ -223,12 +202,12 @@ jobs:
     needs: [determine-tags, build-frontend]
     if: |
       needs.determine-tags.outputs.should_build == 'true' &&
-      (github.ref == 'refs/heads/main' ||
-       (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main'))
+      needs.determine-tags.outputs.head_branch == 'main'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.determine-tags.outputs.head_sha }}
           fetch-depth: 0
 
       - name: Set up Node
@@ -289,6 +268,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.determine-tags.outputs.head_sha }}
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
@@ -306,6 +287,7 @@ jobs:
         id: chart
         env:
           SHA_SHORT: ${{ needs.determine-tags.outputs.sha_short }}
+          GIT_TAG: ${{ needs.determine-tags.outputs.git_tag }}
         run: |
           REPO_NAME="${{ github.repository }}"
           REPO_LOWER=$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]')
@@ -314,9 +296,9 @@ jobs:
           BASE_VERSION=$(grep -E '^version:' "$CHART_DIR/Chart.yaml" | head -1 | awk '{print $2}' | tr -d '"')
 
           # Pick the stable channel tag — versioned for vX.Y.Z, "main" for main builds.
-          if [[ "${{ github.ref }}" =~ ^refs/tags/v ]]; then
-            VERSION_TAG="${{ github.ref_name }}"
-            CHANNEL_VERSION="${VERSION_TAG#v}"
+          # GIT_TAG comes from determine-tags (git tag --points-at the verified SHA).
+          if [ -n "$GIT_TAG" ]; then
+            CHANNEL_VERSION="${GIT_TAG#v}"
           else
             CHANNEL_VERSION="${BASE_VERSION}-main"
           fi

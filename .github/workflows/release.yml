@@ -39,6 +39,31 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # AC-11 release gate: when triggered manually (workflow_dispatch), verify
+      # the latest CI run on main concluded successfully before publishing.
+      # The workflow_run path is already gated by the job-level `if`.
+      - name: Verify latest CI on main succeeded (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST_CONCLUSION=$(gh run list \
+            --workflow=CI \
+            --branch=main \
+            --limit=1 \
+            --json conclusion \
+            --jq '.[0].conclusion // "none"')
+
+          echo "Latest CI run conclusion on main: $LATEST_CONCLUSION"
+
+          if [ "$LATEST_CONCLUSION" != "success" ]; then
+            echo "❌ Refusing to release: latest CI on main is '$LATEST_CONCLUSION', not 'success'."
+            echo "   AC-11 requires lint, unit tests, coverage, frontend build, Docker build,"
+            echo "   manifest validation, Helm lint, and template rendering to all pass before publishing."
+            exit 1
+          fi
+          echo "✓ CI is green on main — proceeding with release."
+
       - name: Check if release needed
         id: check
         run: |

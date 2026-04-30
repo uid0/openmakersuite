@@ -2311,6 +2311,55 @@ class WorkOrderPhoto(models.Model):
         return f"Photo for WO {self.work_order.short_id} ({self.uploaded_at.date()})"
 
 
+class WorkOrderValidation(models.Model):
+    """
+    Audit record of a pre-finalization validation prompt acknowledgement.
+
+    AC-3 (oms-2da): before a work order can transition to ``completed`` (or
+    have a PDF generated for printing), the user must confirm the electrical
+    info, LOTO requirements, and required-fields checklist. One row is
+    created per acknowledgement; the latest row is what gates the finalize
+    action and is what the audit trail surfaces.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.CASCADE,
+        related_name="validations",
+    )
+    validated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_order_validations",
+    )
+    validated_at = models.DateTimeField(auto_now_add=True)
+    electrical_acknowledged = models.BooleanField(default=False)
+    loto_acknowledged = models.BooleanField(default=False)
+    required_fields_acknowledged = models.BooleanField(default=False)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-validated_at"]
+        indexes = [
+            models.Index(fields=["work_order", "-validated_at"], name="wov_wo_validated_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Validation for WO {self.work_order.short_id} @ {self.validated_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def is_complete(self) -> bool:
+        """All three acknowledgements present."""
+        return (
+            self.electrical_acknowledged
+            and self.loto_acknowledged
+            and self.required_fields_acknowledged
+        )
+
+
 class WorkOrderSubmission(models.Model):
     """
     An inbound, emailed copy of a completed work order PDF.
@@ -2325,11 +2374,13 @@ class WorkOrderSubmission(models.Model):
     STATUS_RECEIVED = "received"
     STATUS_APPLIED = "applied"
     STATUS_FAILED = "failed"
+    STATUS_PENDING_REVIEW = "pending_review"
 
     STATUS_CHOICES = [
         (STATUS_RECEIVED, "Received"),
         (STATUS_APPLIED, "Applied"),
         (STATUS_FAILED, "Failed"),
+        (STATUS_PENDING_REVIEW, "Pending review"),
     ]
 
     SOURCE_EMAIL = "email"
@@ -2415,6 +2466,16 @@ class WorkOrderSubmission(models.Model):
         default=dict,
         blank=True,
         help_text="Snapshot of checkbox values extracted from the PDF",
+    )
+    pending_changes = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "AC-4 (oms-2da): list of CV detections whose confidence is below "
+            "the auto-apply threshold. Each entry: "
+            "{kind, target_id, value, confidence, label}. Reviewer accepts or "
+            "rejects via the work-order-submissions endpoints."
+        ),
     )
     postmark_message_id = models.CharField(
         max_length=200,

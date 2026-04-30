@@ -321,6 +321,20 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
 
     submission.work_order = work_order
 
+    # AC-4 (oms-2da): run image-based CV detections (signatures, OCR'd
+    # handwritten notes) and split them into auto-apply vs human-review by
+    # confidence threshold. AcroForm checkbox values are already binary 1.0
+    # confidence and remain on the auto-apply path.
+    try:
+        cv_detections = _cv_detect_completion(io.BytesIO(pdf_bytes))
+    except Exception:  # noqa: BLE001 - CV failures must not block ingest
+        logger.exception("CV detection failed for submission %s", submission.id)
+        cv_detections = []
+
+    from .work_order_cv import auto_apply_or_queue
+
+    auto_cv, queue_cv = auto_apply_or_queue(cv_detections)
+
     now = timezone.now()
     completion_note = "Completed via emailed paper work order."
 
@@ -381,10 +395,86 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
             ),
         )
 
-    submission.status = WorkOrderSubmission.STATUS_APPLIED
+    # Apply auto-confidence CV detections inline; queue the rest.
+    cv_notes_to_append: list[str] = []
+    for det in auto_cv:
+        if det.kind == "signature":
+            cv_notes_to_append.append(
+                f"Signature detected on paper form (confidence {det.confidence:.2f})."
+            )
+        elif det.kind == "handwritten" and isinstance(det.value, str) and det.value:
+            cv_notes_to_append.append(
+                f'Handwritten note (OCR, confidence {det.confidence:.2f}): "{det.value}"'
+            )
+    if cv_notes_to_append:
+        existing = work_order.notes or ""
+        combined = existing + ("\n" if existing else "") + "\n".join(cv_notes_to_append)
+        work_order.notes = combined.strip()
+
+    submission.pending_changes = [d.to_dict() for d in queue_cv]
+
+    # If we have any low-confidence detections, the submission is held for
+    # human review rather than marked applied — the digital UI surfaces the
+    # pending list for accept/reject.
+    if queue_cv:
+        submission.status = WorkOrderSubmission.STATUS_PENDING_REVIEW
+    else:
+        submission.status = WorkOrderSubmission.STATUS_APPLIED
     submission.parse_error = ""
-    submission.save(update_fields=["status", "work_order", "parsed_fields", "parse_error"])
+    submission.save(
+        update_fields=[
+            "status",
+            "work_order",
+            "parsed_fields",
+            "parse_error",
+            "pending_changes",
+        ]
+    )
     return submission
+
+
+def _cv_detect_completion(pdf_stream) -> list:
+    """Run image-based CV over a PDF's embedded page images.
+
+    Returns a list of ``Detection`` objects from
+    ``inventory.services.work_order_cv``. Skips images that look like QR
+    codes (those are the WO-ID payloads, not signatures or notes).
+    """
+    from .work_order_cv import Detection, detect_signature, ocr_handwritten
+
+    reader = PdfReader(pdf_stream)
+    detections: list = []
+    for image_bytes in _iter_pdf_images(reader):
+        if not image_bytes:
+            continue
+        if _looks_like_qr_payload(image_bytes):
+            continue
+        # Signature detection: look for ink mass — a sparse handwritten
+        # signature scribble in the signoff block.
+        is_signed, sig_conf = detect_signature(image_bytes)
+        if sig_conf > 0:
+            detections.append(
+                Detection(
+                    kind="signature",
+                    target_id=None,
+                    value=is_signed,
+                    confidence=sig_conf,
+                    label="Signature block",
+                )
+            )
+        # OCR for handwritten notes (best-effort — needs tesseract).
+        text, ocr_conf = ocr_handwritten(image_bytes)
+        if text:
+            detections.append(
+                Detection(
+                    kind="handwritten",
+                    target_id=None,
+                    value=text,
+                    confidence=ocr_conf,
+                    label="Handwritten note",
+                )
+            )
+    return detections
 
 
 # ─────────────────────────────────────────────────────────────────────────────

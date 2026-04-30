@@ -18,7 +18,10 @@ The production setup uses:
 
 ## Prerequisites
 
-1. A server with Docker and Docker Compose installed
+1. A server with Docker and Docker Compose installed — see
+   [`deploy/PREREQUISITES.md`](../deploy/PREREQUISITES.md) for distro-specific
+   install steps (Ubuntu/Debian, Fedora/RHEL, Arch) covering Docker, Compose,
+   kubectl, Helm, Git, Node, and Python.
 2. Domain pointing to your server: `dallas.openmakersuite.net`
 3. (Optional) SSL certificate for HTTPS
 

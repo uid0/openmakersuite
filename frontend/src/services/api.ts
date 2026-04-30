@@ -733,7 +733,7 @@ export const workOrderAPI = {
   updateWorkOrder: (id: string, data: Partial<WorkOrder>) =>
     api.patch<WorkOrder>(`/inventory/work-orders/${id}/`, data),
 
-  getPdfUrl: (id: string) => `/inventory/work-orders/${id}/pdf/`,
+  getPdfUrl: (id: string) => `${API_BASE_URL}/inventory/work-orders/${id}/pdf/`,
 
   generateWorkOrder: (maintenanceItemId: string, data?: { due_date?: string; notes?: string }) =>
     api.post<WorkOrder>(`/inventory/maintenance-items/${maintenanceItemId}/generate_work_order/`, data || {}),

@@ -7,6 +7,12 @@ dashboard, optional in-cluster PostgreSQL and Redis (or external instances),
 Ingress with TLS hooks, persistence for static/media, secrets, and a one-shot
 migrations Job.
 
+## Prerequisites
+
+`helm` 3 and a `kubectl` whose minor version is within ±1 of your cluster's
+control-plane version. For a per-distro install walkthrough (Ubuntu/Debian,
+Fedora/RHEL, Arch) see [`../../PREREQUISITES.md`](../../PREREQUISITES.md).
+
 ## Quick start
 
 ```bash

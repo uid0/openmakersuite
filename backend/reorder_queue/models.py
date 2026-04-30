@@ -302,6 +302,19 @@ class PurchaseOrder(models.Model):
         self.estimated_total = total
         return total
 
+    @property
+    def active_estimated_total(self) -> Decimal:
+        """Estimated total cost from non-voided line items only."""
+        return sum(
+            (item.estimated_cost for item in self.items.all() if not item.is_voided),
+            start=Decimal("0.00"),
+        )
+
+    @property
+    def has_active_items(self) -> bool:
+        """True when at least one line item has not been voided."""
+        return self.items.filter(is_voided=False).exists()
+
     def auto_generate_po_number(self) -> str:
         """Auto-generate a PO number if not set."""
         if not self.po_number:

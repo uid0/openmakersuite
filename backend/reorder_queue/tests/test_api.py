@@ -1223,3 +1223,86 @@ class TestPurchaseOrderMetadataAndAttachments:
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert purchase_order.attachments.count() == 0
+
+
+@pytest.mark.integration
+class TestPurchaseOrderListVoidedItems:
+    """oms-a8o: hide fully-voided POs from list and exclude voided items from total."""
+
+    def _make_po(self, user, *, lines):
+        supplier = SupplierFactory()
+        purchase_order = PurchaseOrder.objects.create(
+            supplier=supplier,
+            status=PurchaseOrder.SENT,
+            created_by=user,
+            estimated_total=Decimal("0.00"),
+        )
+        for quantity, unit_cost, is_voided in lines:
+            PurchaseOrderItem.objects.create(
+                purchase_order=purchase_order,
+                item_supplier=ItemSupplierFactory(supplier=supplier),
+                quantity_ordered=quantity,
+                unit_cost_ordered=Decimal(unit_cost),
+                is_voided=is_voided,
+            )
+        purchase_order.calculate_estimated_total()
+        purchase_order.save()
+        return purchase_order
+
+    def test_list_excludes_po_with_all_items_voided(self, authenticated_client):
+        client, user = authenticated_client
+        all_voided = self._make_po(user, lines=[(2, "5.00", True), (3, "10.00", True)])
+        kept = self._make_po(user, lines=[(1, "7.00", False)])
+
+        url = reverse("purchaseorder-list")
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        results = response.data.get("results", response.data)
+        ids = {row["id"] for row in results}
+        assert kept.id in ids
+        assert all_voided.id not in ids
+
+    def test_list_total_excludes_voided_line_items(self, authenticated_client):
+        client, user = authenticated_client
+        po = self._make_po(
+            user,
+            lines=[
+                (2, "5.00", False),  # 10.00 active
+                (3, "10.00", True),  # 30.00 voided
+                (1, "7.00", False),  # 7.00 active
+            ],
+        )
+
+        url = reverse("purchaseorder-list")
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        results = response.data.get("results", response.data)
+        row = next(r for r in results if r["id"] == po.id)
+        assert Decimal(row["estimated_total"]) == Decimal("17.00")
+
+    def test_detail_total_excludes_voided_line_items(self, authenticated_client):
+        client, user = authenticated_client
+        po = self._make_po(
+            user,
+            lines=[(4, "2.50", False), (1, "100.00", True)],  # 10.00 active, 100.00 voided
+        )
+
+        url = reverse("purchaseorder-detail", kwargs={"pk": po.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert Decimal(response.data["estimated_total"]) == Decimal("10.00")
+
+    def test_detail_still_accessible_for_fully_voided_po(self, authenticated_client):
+        """Fully-voided POs are hidden from list but remain retrievable for audit."""
+        client, user = authenticated_client
+        po = self._make_po(user, lines=[(2, "5.00", True)])
+
+        url = reverse("purchaseorder-detail", kwargs={"pk": po.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["id"] == po.id
+        assert Decimal(response.data["estimated_total"]) == Decimal("0.00")

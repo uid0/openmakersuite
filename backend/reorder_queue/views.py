@@ -428,6 +428,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 | Q(notes__icontains=search)
             )
 
+        # Hide POs from the list when every line item has been voided
+        # (or when the PO has no line items at all). Detail views still allow
+        # direct access so audit history isn't lost.
+        if self.action == "list":
+            queryset = queryset.annotate(
+                _active_item_count=Count("items", filter=Q(items__is_voided=False))
+            ).filter(_active_item_count__gt=0)
+
         return queryset
 
     def get_serializer_class(self):

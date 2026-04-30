@@ -223,6 +223,11 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     total_received_quantity = serializers.IntegerField(read_only=True)
     is_fully_received = serializers.BooleanField(read_only=True)
     days_since_ordered = serializers.IntegerField(read_only=True)
+    estimated_total = serializers.SerializerMethodField()
+
+    def get_estimated_total(self, obj) -> Decimal:
+        """Return the active estimated total, excluding voided line items."""
+        return obj.active_estimated_total
 
     class Meta:
         model = PurchaseOrder

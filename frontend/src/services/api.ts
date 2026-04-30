@@ -3,7 +3,7 @@
  */
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NotificationPreferences, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -1654,6 +1654,167 @@ export interface ThirdPartyWorkOrderDto {
   updated_at: string;
   closed_at: string | null;
 }
+
+// Electrical Circuits & Network Drops (oms-tt5 / oms-a5f)
+export interface BreakerListParams {
+  location?: number | string;
+  panel?: string;
+  is_active?: boolean;
+}
+export interface OutletListParams {
+  location?: number | string;
+  breaker?: number | string;
+  is_active?: boolean;
+}
+export interface LightSwitchListParams {
+  location?: number | string;
+  controls_location?: number | string;
+  is_active?: boolean;
+}
+export interface NetworkDropListParams {
+  location?: number | string;
+  drop_type?: NetworkDropType;
+  is_active?: boolean;
+}
+
+const electricalBase = '/electrical-circuits';
+
+const buildOutletFormData = (data: Omit<Partial<Outlet>, 'photo'> & { photo?: File | null }) => {
+  const form = new FormData();
+  Object.entries(data).forEach(([key, value]) => {
+    if (value === undefined) return;
+    if (key === 'photo') {
+      if (value instanceof File) form.append('photo', value);
+      // Ignore string URLs / null on update (keeps existing image)
+      return;
+    }
+    if (value === null) {
+      form.append(key, '');
+      return;
+    }
+    form.append(key, String(value));
+  });
+  return form;
+};
+
+const buildNetworkDropFormData = (data: Omit<Partial<NetworkDrop>, 'photo'> & { photo?: File | null }) => {
+  const form = new FormData();
+  Object.entries(data).forEach(([key, value]) => {
+    if (value === undefined) return;
+    if (key === 'photo') {
+      if (value instanceof File) form.append('photo', value);
+      return;
+    }
+    if (value === null) {
+      form.append(key, '');
+      return;
+    }
+    form.append(key, String(value));
+  });
+  return form;
+};
+
+export const electricalCircuitsAPI = {
+  // Breakers
+  listBreakers: (params?: BreakerListParams) =>
+    api.get<{ results: Breaker[] } | Breaker[]>(`${electricalBase}/breakers/`, { params })
+      .then((response) => ({ ...response, data: normalizeResults<Breaker>(response.data) })),
+  getBreaker: (id: number | string) =>
+    api.get<Breaker>(`${electricalBase}/breakers/${id}/`),
+  createBreaker: (data: Partial<Breaker>) =>
+    api.post<Breaker>(`${electricalBase}/breakers/`, data),
+  updateBreaker: (id: number | string, data: Partial<Breaker>) =>
+    api.patch<Breaker>(`${electricalBase}/breakers/${id}/`, data),
+  deleteBreaker: (id: number | string) =>
+    api.delete(`${electricalBase}/breakers/${id}/`),
+
+  // Outlets
+  listOutlets: (params?: OutletListParams) =>
+    api.get<{ results: Outlet[] } | Outlet[]>(`${electricalBase}/outlets/`, { params })
+      .then((response) => ({ ...response, data: normalizeResults<Outlet>(response.data) })),
+  getOutlet: (id: number | string) =>
+    api.get<Outlet>(`${electricalBase}/outlets/${id}/`),
+  createOutlet: (data: Omit<Partial<Outlet>, 'photo'> & { photo?: File | null }) => {
+    if (data.photo instanceof File) {
+      return api.post<Outlet>(`${electricalBase}/outlets/`, buildOutletFormData(data), {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.post<Outlet>(`${electricalBase}/outlets/`, data);
+  },
+  updateOutlet: (id: number | string, data: Omit<Partial<Outlet>, 'photo'> & { photo?: File | null }) => {
+    if (data.photo instanceof File) {
+      return api.patch<Outlet>(`${electricalBase}/outlets/${id}/`, buildOutletFormData(data), {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.patch<Outlet>(`${electricalBase}/outlets/${id}/`, data);
+  },
+  deleteOutlet: (id: number | string) =>
+    api.delete(`${electricalBase}/outlets/${id}/`),
+
+  // Light switches
+  listLightSwitches: (params?: LightSwitchListParams) =>
+    api.get<{ results: LightSwitch[] } | LightSwitch[]>(`${electricalBase}/light-switches/`, { params })
+      .then((response) => ({ ...response, data: normalizeResults<LightSwitch>(response.data) })),
+  getLightSwitch: (id: number | string) =>
+    api.get<LightSwitch>(`${electricalBase}/light-switches/${id}/`),
+  createLightSwitch: (data: Partial<LightSwitch>) =>
+    api.post<LightSwitch>(`${electricalBase}/light-switches/`, data),
+  updateLightSwitch: (id: number | string, data: Partial<LightSwitch>) =>
+    api.patch<LightSwitch>(`${electricalBase}/light-switches/${id}/`, data),
+  deleteLightSwitch: (id: number | string) =>
+    api.delete(`${electricalBase}/light-switches/${id}/`),
+
+  // Network drops
+  listNetworkDrops: (params?: NetworkDropListParams) =>
+    api.get<{ results: NetworkDrop[] } | NetworkDrop[]>(`${electricalBase}/network-drops/`, { params })
+      .then((response) => ({ ...response, data: normalizeResults<NetworkDrop>(response.data) })),
+  getNetworkDrop: (id: number | string) =>
+    api.get<NetworkDrop>(`${electricalBase}/network-drops/${id}/`),
+  createNetworkDrop: (data: Omit<Partial<NetworkDrop>, 'photo'> & { photo?: File | null }) => {
+    if (data.photo instanceof File) {
+      return api.post<NetworkDrop>(`${electricalBase}/network-drops/`, buildNetworkDropFormData(data), {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.post<NetworkDrop>(`${electricalBase}/network-drops/`, data);
+  },
+  updateNetworkDrop: (id: number | string, data: Omit<Partial<NetworkDrop>, 'photo'> & { photo?: File | null }) => {
+    if (data.photo instanceof File) {
+      return api.patch<NetworkDrop>(`${electricalBase}/network-drops/${id}/`, buildNetworkDropFormData(data), {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.patch<NetworkDrop>(`${electricalBase}/network-drops/${id}/`, data);
+  },
+  deleteNetworkDrop: (id: number | string) =>
+    api.delete(`${electricalBase}/network-drops/${id}/`),
+};
+
+export const OUTLET_TYPE_OPTIONS = [
+  { value: 'standard', label: 'Standard 120V' },
+  { value: '240v', label: '240V' },
+  { value: 'nema_5_15', label: 'NEMA 5-15 (120V 15A)' },
+  { value: 'nema_5_20', label: 'NEMA 5-20 (120V 20A)' },
+  { value: 'nema_6_15', label: 'NEMA 6-15 (240V 15A)' },
+  { value: 'nema_6_20', label: 'NEMA 6-20 (240V 20A)' },
+  { value: 'nema_l6_30', label: 'NEMA L6-30 (240V 30A locking)' },
+  { value: 'nema_14_30', label: 'NEMA 14-30 (240V 30A)' },
+  { value: 'nema_14_50', label: 'NEMA 14-50 (240V 50A)' },
+  { value: 'usb', label: 'USB charging' },
+  { value: 'other', label: 'Other' },
+];
+
+export const NETWORK_DROP_TYPE_OPTIONS = [
+  { value: 'data', label: 'Data jack' },
+  { value: 'voice', label: 'Voice / phone' },
+  { value: 'patch_panel', label: 'Patch panel termination' },
+  { value: 'ap', label: 'Wireless access point' },
+  { value: 'camera', label: 'Camera' },
+  { value: 'iot', label: 'IoT sensor' },
+  { value: 'other', label: 'Other' },
+];
 
 export const thirdPartyMaintenanceAPI = {
   getAssetWoStatus: (assetId: string, vendorId?: string) =>

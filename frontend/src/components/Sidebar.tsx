@@ -114,6 +114,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
         { path: '/facilities/tv-dashboard', label: 'TV Dashboard', icon: '📺' },
         { path: '/facilities/logistics', label: 'Logistics', icon: '🚛' },
         { path: '/facilities/forgekey-devices', label: 'ForgeKey Devices', icon: '📡', requiresStaff: true },
+        { path: '/facilities/electrical', label: 'Electrical & Network', icon: '⚡', requiresStaff: true },
       ],
     },
     {

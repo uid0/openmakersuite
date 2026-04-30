@@ -1172,3 +1172,93 @@ export interface KioskPayload {
   weather_url?: string;
   generated_at: string;
 }
+
+// Electrical Circuits & Network Drops (oms-tt5 / oms-a5f)
+
+export type OutletType =
+  | 'standard'
+  | '240v'
+  | 'nema_5_15'
+  | 'nema_5_20'
+  | 'nema_6_15'
+  | 'nema_6_20'
+  | 'nema_l6_30'
+  | 'nema_14_30'
+  | 'nema_14_50'
+  | 'usb'
+  | 'other';
+
+export type NetworkDropType =
+  | 'data'
+  | 'voice'
+  | 'patch_panel'
+  | 'ap'
+  | 'camera'
+  | 'iot'
+  | 'other';
+
+export interface Breaker {
+  id: number;
+  location: number;
+  location_name: string;
+  panel: string;
+  breaker_number: string;
+  amperage: number;
+  voltage: number;
+  poles: number;
+  description: string;
+  notes: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Outlet {
+  id: number;
+  location: number;
+  location_name: string;
+  identifier: string;
+  breaker: number | null;
+  breaker_label: string | null;
+  outlet_type: OutletType;
+  description: string;
+  plugged_in_notes: string;
+  photo: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LightSwitch {
+  id: number;
+  location: number;
+  location_name: string;
+  identifier: string;
+  controls_location: number | null;
+  controls_location_name: string | null;
+  breaker: number | null;
+  breaker_label: string | null;
+  description: string;
+  notes: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NetworkDrop {
+  id: number;
+  location: number;
+  location_name: string;
+  identifier: string;
+  drop_type: NetworkDropType;
+  patch_panel: string;
+  patch_port: string;
+  mac_address: string;
+  ip_address: string | null;
+  description: string;
+  notes: string;
+  photo: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}

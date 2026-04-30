@@ -1801,7 +1801,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
         from django.db.models import Count
         from django.db.models.functions import TruncDate
 
-        from inventory.models import Asset, AssetPart
+        from inventory.models import Asset, AssetPart, LocationProblem
         from location_checkins.models import LocationFeedback, LocationTask, SecurityReport
 
         # 1. Number of Open Item Requests
@@ -1831,13 +1831,32 @@ class AnalyticsViewSet(viewsets.ViewSet):
             .distinct()
         )
 
+        # Locations with open LocationProblem reports (oms-0yz). Anything still
+        # in REPORTED/IN_PROGRESS counts toward the dashboard's problem total.
+        open_location_problems_qs = LocationProblem.objects.filter(
+            status__in=[LocationProblem.REPORTED, LocationProblem.IN_PROGRESS]
+        )
+        locations_with_lp = open_location_problems_qs.values_list(
+            "location_id", flat=True
+        ).distinct()
+
         # Combine all unique location IDs
         all_problem_location_ids = set(
             list(locations_with_tasks)
             + list(locations_with_security)
             + list(locations_with_feedback)
+            + list(locations_with_lp)
         )
         open_locations_with_problems = len(all_problem_location_ids)
+
+        # Urgent / high severity open problems trigger the dashboard alert mode.
+        urgent_location_problems = open_location_problems_qs.filter(
+            severity__in=[
+                LocationProblem.SEVERITY_HIGH,
+                LocationProblem.SEVERITY_URGENT,
+            ]
+        ).count()
+        alert_active = urgent_location_problems > 0
 
         # 3. Number of Assets with Overdue Maintenance
         # Assets with parts that need replacement (calculated property)
@@ -1941,6 +1960,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
             {
                 "open_item_requests": open_item_requests,
                 "open_locations_with_problems": open_locations_with_problems,
+                "urgent_location_problems": urgent_location_problems,
+                "alert_active": alert_active,
                 "assets_overdue_maintenance": overdue_maintenance_count,
                 "pm_overdue": pm_overdue,
                 "pm_due_this_week": pm_due_this_week,

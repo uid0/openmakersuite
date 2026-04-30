@@ -278,6 +278,13 @@ DEFAULT_FROM_EMAIL = config(
     default="noreply@openmakersuite.example",
 )
 
+# Logistics distribution-list address that receives high/urgent LocationProblem
+# alerts (oms-0yz). Empty disables email alerts.
+LOGISTICS_ALERT_EMAIL = config(
+    "LOGISTICS_ALERT_EMAIL",
+    default="logistics@dallasmakerspace.org",
+)
+
 # WHMCS API credentials for the maker box (personal storage bin) verification
 # flow. All four are sourced from environment variables; if URL/identifier/
 # secret are missing the maker_boxes service degrades to a 503 response from

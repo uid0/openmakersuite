@@ -56,4 +56,46 @@ describe('LogisticsDashboard', () => {
     // Check that time is displayed in footer
     expect(screen.getByText(/\d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument();
   });
+
+  it('shows the urgent alert banner when alert_active is true', async () => {
+    const getLogisticsDashboardMock = analyticsAPI.getLogisticsDashboard as jest.Mock;
+    getLogisticsDashboardMock.mockResolvedValue({
+      data: {
+        ...mockDashboardData,
+        urgent_location_problems: 2,
+        alert_active: true,
+      },
+    });
+
+    const { container } = render(<LogisticsDashboard />);
+
+    await waitFor(() => {
+      expect(getLogisticsDashboardMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText(/URGENT LOCATION PROBLEMS \(2\) OPEN/)).toBeInTheDocument();
+    expect(container.querySelector('.logistics-dashboard--alert')).not.toBeNull();
+  });
+
+  it('omits the urgent alert banner when no urgent problems are open', async () => {
+    const getLogisticsDashboardMock = analyticsAPI.getLogisticsDashboard as jest.Mock;
+    getLogisticsDashboardMock.mockResolvedValue({
+      data: {
+        ...mockDashboardData,
+        urgent_location_problems: 0,
+        alert_active: false,
+      },
+    });
+
+    const { container } = render(<LogisticsDashboard />);
+
+    await waitFor(() => {
+      expect(getLogisticsDashboardMock).toHaveBeenCalledTimes(1);
+    });
+
+    await screen.findByText('Open Item Requests');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(container.querySelector('.logistics-dashboard--alert')).toBeNull();
+  });
 });

@@ -453,3 +453,46 @@ def send_asset_problem_webhook(problem_id: str) -> Dict[str, Any]:
         # In production, queue the webhook task
         send_webhook_notification.delay("asset_problem_reported", payload)
         return {"queued": True, "event_type": "asset_problem_reported"}
+
+
+@shared_task
+def send_location_problem_webhook(problem_id: str) -> Dict[str, Any]:
+    """Trigger the ``location_problem_reported`` webhook for a LocationProblem.
+
+    Mirrors :func:`send_asset_problem_webhook`. Called from the Location
+    ``report_problem`` action so subscribers (logistics, facilities tools)
+    can react to new reports — including urgent leak / lighting / HVAC
+    issues raised through the new oms-0yz flow.
+    """
+    from inventory.models import LocationProblem
+
+    try:
+        problem = LocationProblem.objects.select_related("location").get(id=problem_id)
+    except LocationProblem.DoesNotExist:
+        logger.error(f"LocationProblem {problem_id} not found")
+        return {"error": "LocationProblem not found"}
+
+    payload = {
+        "event": "location_problem_reported",
+        "timestamp": timezone.now().isoformat(),
+        "data": {
+            "id": str(problem.id),
+            "location_id": problem.location_id,
+            "location_name": problem.location.name,
+            "status": problem.status,
+            "severity": problem.severity,
+            "reported_by": problem.reported_by,
+            "description": problem.description,
+            "reported_at": problem.reported_at.isoformat(),
+            "admin_url": f"/admin/inventory/locationproblem/{problem.id}/",
+            "frontend_url": f"/maintenance/location-problems/{problem.id}",
+        },
+    }
+
+    from celery import current_app
+
+    if current_app.conf.task_always_eager:
+        return send_webhook_notification.run("location_problem_reported", payload)
+    else:
+        send_webhook_notification.delay("location_problem_reported", payload)
+        return {"queued": True, "event_type": "location_problem_reported"}

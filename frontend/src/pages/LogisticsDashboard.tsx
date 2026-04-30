@@ -21,6 +21,8 @@ interface QRScanDay {
 interface LogisticsDashboardResponse {
   open_item_requests: number;
   open_locations_with_problems: number;
+  urgent_location_problems: number;
+  alert_active: boolean;
   assets_overdue_maintenance: number;
   pm_overdue: number;
   pm_due_this_week: number;
@@ -59,6 +61,8 @@ const LogisticsDashboard: React.FC = () => {
       const dashboardData: LogisticsDashboardResponse = {
         open_item_requests: Number(rawData.open_item_requests) || 0,
         open_locations_with_problems: Number(rawData.open_locations_with_problems) || 0,
+        urgent_location_problems: Number(rawData.urgent_location_problems) || 0,
+        alert_active: Boolean(rawData.alert_active),
         assets_overdue_maintenance: Number(rawData.assets_overdue_maintenance) || 0,
         pm_overdue: Number(rawData.pm_overdue) || 0,
         pm_due_this_week: Number(rawData.pm_due_this_week) || 0,
@@ -357,8 +361,19 @@ const LogisticsDashboard: React.FC = () => {
     );
   }
 
+  const alertActive = Boolean(data.alert_active) || (data.urgent_location_problems ?? 0) > 0;
+
   return (
-    <div className="logistics-dashboard">
+    <div className={`logistics-dashboard${alertActive ? ' logistics-dashboard--alert' : ''}`}>
+      {alertActive && (
+        <div className="logistics-alert-banner" role="alert">
+          <span className="logistics-alert-banner__icon" aria-hidden>⚠️</span>
+          <span className="logistics-alert-banner__text">
+            URGENT LOCATION PROBLEM
+            {data.urgent_location_problems > 1 ? `S (${data.urgent_location_problems})` : ''} OPEN
+          </span>
+        </div>
+      )}
       {/* Bouncing DVD Logo */}
       {siteSettings?.logo_url && (
         <div className="bouncing-logo-container">

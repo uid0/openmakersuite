@@ -290,6 +290,30 @@ env:
     host: emqx
     port: 1883
     apiUrl: ""
+  # Outbound email transport. Defaults to console (development-safe). Set
+  # `backend` to "anymail.backends.postmark.EmailBackend" (with
+  # secrets.values.POSTMARK_SERVER_TOKEN) or
+  # "django.core.mail.backends.smtp.EmailBackend" (with `host`/`port`/`useTls`
+  # and secrets.values.EMAIL_HOST_USER/EMAIL_HOST_PASSWORD).
+  email:
+    backend: ""
+    host: ""
+    port: ""
+    useTls: ""
+    defaultFrom: ""
+    # Distribution list that receives high/urgent LocationProblem alerts.
+    # Empty disables email alerts.
+    logisticsAlert: ""
+  # Public iframe URLs embedded by kiosk shared-content blocks. Override per
+  # site so the same chart renders the local traffic/weather feed.
+  publicUrls:
+    traffic: ""
+    weather: ""
+    github: ""
+  # WHMCS API endpoint (URL is non-secret; credentials live under
+  # secrets.values).
+  whmcs:
+    apiUrl: ""
   extra: {}
 
 # Sensitive values land in a chart-managed Secret unless `existingSecret`
@@ -307,7 +331,11 @@ secrets:
     EMQX_API_KEY: ""
     EMQX_API_SECRET: ""
     FORGEKEY_FIRMWARE_SIGNING_KEY: ""
-    EMAIL_HOST: ""
     EMAIL_HOST_USER: ""
     EMAIL_HOST_PASSWORD: ""
-    DEFAULT_FROM_EMAIL: ""
+    POSTMARK_SERVER_TOKEN: ""
+    POSTMARK_INBOUND_TOKEN: ""
+    LOCATION_PING_TOKEN: ""
+    WHMCS_API_IDENTIFIER: ""
+    WHMCS_API_SECRET: ""
+    WHMCS_API_ACCESSKEY: ""

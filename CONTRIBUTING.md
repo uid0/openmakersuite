@@ -52,16 +52,19 @@ This will:
 
 1. Create `backend/.venv` (if missing) and install `pre-commit`.
 2. Install pre-commit hooks for the `pre-commit` and `commit-msg` git hook stages.
-3. Run `npm install` in `frontend/`.
+3. Run `npm install` in `frontend/`, which fires the `prepare` script that wires Husky into `.husky/` (sets `core.hooksPath`).
 
 ### Hooks
 
 | Hook stage | Tooling | What it checks | Skip with |
 |------------|---------|----------------|-----------|
 | `pre-commit` | pre-commit framework | black, isort, flake8, bandit, file cleanups, npm lock sync, TS compile | `git commit --no-verify` |
-| `commit-msg` | conventional-pre-commit | Commit message follows [Conventional Commits](https://www.conventionalcommits.org/) (`<type>(<scope>): <subject>`) | `git commit --no-verify` |
+| `commit-msg` | conventional-pre-commit (Python) and `@commitlint/config-conventional` via Husky | Commit message follows [Conventional Commits](https://www.conventionalcommits.org/) (`<type>(<scope>): <subject>`). Both checks enforce the same spec; either path catches violations. | `git commit --no-verify` |
+| `pre-push` | Husky → `npm run lint` + `npm run test:fast` | Frontend lint + fast Jest run, but only when commits being pushed touched `frontend/` | `git push --no-verify` |
 
 > Use `--no-verify` only for true emergencies. CI re-runs the same gates and will reject violations regardless.
+
+Husky lives at the repo root (`.husky/`). Frontend-only contributors who don't install the Python `pre-commit` framework still get commit-msg + pre-push validation as long as `cd frontend && npm install` has run (the `prepare` script wires `core.hooksPath`).
 
 ### What CI enforces (required vs advisory)
 

@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+# Husky commit-msg hook (conventional-commits validation).
+# Mirrors the pre-commit framework's `conventional-pre-commit` gate so
+# frontend-only contributors without the Python toolchain still get
+# commit-message validation.
+# Skip with: git commit --no-verify
+
+if [ ! -x frontend/node_modules/.bin/commitlint ]; then
+  echo "⚠ commit-msg: frontend/node_modules/.bin/commitlint missing — run 'cd frontend && npm install' to enable hook"
+  exit 0
+fi
+
+# Resolve the commit-msg path to absolute before changing directories.
+case "$1" in
+  /*) MSG_FILE="$1" ;;
+  *)  MSG_FILE="$PWD/$1" ;;
+esac
+
+cd frontend || exit 0
+exec ./node_modules/.bin/commitlint --edit "$MSG_FILE"

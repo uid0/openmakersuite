@@ -12,15 +12,19 @@ import MaintenanceItemFormPage from './pages/MaintenanceItemFormPage';
 import AssetReportPage from './pages/AssetReportPage';
 import AssetScanPage from './pages/AssetScanPage';
 import AssetsPage from './pages/AssetsPage';
+import BreakerFormPage from './pages/BreakerFormPage';
+import BreakerTracePage from './pages/BreakerTracePage';
 import CategoryFormPage from './pages/CategoryFormPage';
 import CategoryListPage from './pages/CategoryListPage';
 import ChecklistCompletionPage from './pages/ChecklistCompletionPage';
 import CodeEntryPage from './pages/CodeEntryPage';
 import DashboardPage from './pages/DashboardPage';
 import DonationItemScanPage from './pages/DonationItemScanPage';
+import ElectricalCircuitsPage from './pages/ElectricalCircuitsPage';
 import FixtureScanPage from './pages/FixtureScanPage';
 import ForgeKeyDevicesPage from './pages/ForgeKeyDevicesPage';
 import HomePage from './pages/HomePage';
+import LightSwitchFormPage from './pages/LightSwitchFormPage';
 import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
 import InventoryItemFormPage from './pages/InventoryItemFormPage';
 import InventoryListPage from './pages/InventoryListPage';
@@ -36,6 +40,8 @@ import MakerBoxAdminPage from './pages/MakerBoxAdminPage';
 import MakerBoxScanPage from './pages/MakerBoxScanPage';
 import MaintenanceDashboard from './pages/MaintenanceDashboard';
 import MaintenanceDashboardPage from './pages/MaintenanceDashboardPage';
+import NetworkDropFormPage from './pages/NetworkDropFormPage';
+import OutletFormPage from './pages/OutletFormPage';
 import ThirdPartyWorkOrderPage from './pages/ThirdPartyWorkOrderPage';
 import WorkOrderPage from './pages/WorkOrderPage';
 import PurchaseOrderFormPage from './pages/PurchaseOrderFormPage';
@@ -181,6 +187,18 @@ function AppContent() {
           <Route path="/facilities/logistics" element={<LogisticsDashboard />} />
           <Route path="/facilities/maker-boxes/scan" element={<WorkspaceLayout><MakerBoxScanPage /></WorkspaceLayout>} />
           <Route path="/facilities/maker-boxes" element={<WorkspaceLayout><MakerBoxAdminPage /></WorkspaceLayout>} />
+
+          {/* Electrical circuits & network drops (oms-a5f) */}
+          <Route path="/facilities/electrical" element={<WorkspaceLayout><ElectricalCircuitsPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/breakers/new" element={<WorkspaceLayout><BreakerFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/breakers/:id/edit" element={<WorkspaceLayout><BreakerFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/breakers/:id/trace" element={<WorkspaceLayout><BreakerTracePage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/outlets/new" element={<WorkspaceLayout><OutletFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/outlets/:id/edit" element={<WorkspaceLayout><OutletFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/light-switches/new" element={<WorkspaceLayout><LightSwitchFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/light-switches/:id/edit" element={<WorkspaceLayout><LightSwitchFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/network-drops/new" element={<WorkspaceLayout><NetworkDropFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/network-drops/:id/edit" element={<WorkspaceLayout><NetworkDropFormPage /></WorkspaceLayout>} />
 
           {/* Preventive Maintenance */}
           <Route path="/maintenance" element={<WorkspaceLayout><MaintenanceDashboardPage /></WorkspaceLayout>} />

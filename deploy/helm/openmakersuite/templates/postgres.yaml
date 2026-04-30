@@ -1,0 +1,104 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "openmakersuite.postgresHost" . }}
+  labels:
+    {{- include "openmakersuite.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "postgresql") | nindent 4 }}
+spec:
+  serviceName: {{ include "openmakersuite.postgresHost" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "openmakersuite.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "postgresql") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "openmakersuite.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "postgresql") | nindent 8 }}
+    spec:
+      {{- include "openmakersuite.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgresql.auth.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openmakersuite.postgresSecretName" . }}
+                  key: {{ include "openmakersuite.postgresSecretPasswordKey" . }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.postgresql.auth.username }}
+                - -d
+                - {{ .Values.postgresql.auth.database }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.postgresql.auth.username }}
+                - -d
+                - {{ .Values.postgresql.auth.database }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      {{- if not .Values.postgresql.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.postgresql.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml .Values.postgresql.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.persistence.size | quote }}
+        {{- with .Values.postgresql.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openmakersuite.postgresHost" . }}
+  labels:
+    {{- include "openmakersuite.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "postgresql") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.postgresql.service.port }}
+      targetPort: postgres
+      protocol: TCP
+      name: postgres
+  selector:
+    {{- include "openmakersuite.componentSelectorLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "postgresql") | nindent 4 }}
+{{- end }}

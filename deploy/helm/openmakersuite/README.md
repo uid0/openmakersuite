@@ -63,6 +63,28 @@ helm install oms ./deploy/helm/openmakersuite \
 All probes are tunable under `<component>.probes.{liveness,readiness,startup}`
 and can be disabled by setting `enabled: false` per probe.
 
+## Configuration sources
+
+Where each setting category lives:
+
+| Category                | Helm values path                                                                       | Rendered as                       |
+| ----------------------- | -------------------------------------------------------------------------------------- | --------------------------------- |
+| Hostnames / CORS / CSRF | `domain`, `extraAllowedHosts`, `extraCsrfTrustedOrigins`, `extraCorsAllowedOrigins`    | ConfigMap `<rel>-openmakersuite-env` |
+| Database URL            | `postgresql.*` (bundled) or `externalDatabase.url` / `existingSecret`                  | Secret `<rel>-openmakersuite-database` |
+| Redis URL               | `redis.*` (bundled) or `externalRedis.url` / `existingSecret`                          | Secret `<rel>-openmakersuite-redis`    |
+| Sentry                  | `env.sentry.{environment,release}` + `secrets.values.SENTRY_DSN`                       | ConfigMap (env) + Secret (DSN)    |
+| Email transport         | `env.email.{backend,host,port,useTls,defaultFrom,logisticsAlert}`                      | ConfigMap                         |
+| Email credentials       | `secrets.values.{EMAIL_HOST_USER,EMAIL_HOST_PASSWORD,POSTMARK_SERVER_TOKEN}`           | Secret                            |
+| Inbound webhooks        | `secrets.values.{POSTMARK_INBOUND_TOKEN,LOCATION_PING_TOKEN}`                          | Secret                            |
+| Public iframe URLs      | `env.publicUrls.{traffic,weather,github}`                                              | ConfigMap                         |
+| WHMCS API               | `env.whmcs.apiUrl` + `secrets.values.WHMCS_API_{IDENTIFIER,SECRET,ACCESSKEY}`          | ConfigMap (URL) + Secret (creds)  |
+| EMQX MQTT               | `env.emqx.*` + `secrets.values.{EMQX_*,MQTT_BROKER_*}`                                 | ConfigMap + Secret                |
+| ForgeKey signing key    | `secrets.values.FORGEKEY_FIRMWARE_SIGNING_KEY`                                         | Secret                            |
+
+`backend.extraEnv`, `frontend.extraEnv`, and `celery.extraEnv` accept raw
+container env entries for anything outside this list (including
+`valueFrom.secretKeyRef` references to externally managed Secrets).
+
 ## Secrets handling
 
 Sensitive values (Django `SECRET_KEY`, Sentry DSN, EMQX credentials, mail

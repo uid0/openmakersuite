@@ -123,6 +123,13 @@ curl-based checks plus a short browser pass covering frontend, backend
 health, API docs, admin, DB, Redis, static/media, and the unauthenticated
 public endpoints. Anything red there is a failed release.
 
+## Upgrades and rollbacks
+
+For the full upgrade flow against a cluster that already holds data — backup,
+version pinning, migrations, smoke tests, `helm rollback` on failure, and the
+destructive-migration recovery path — see
+[`../../UPGRADE_ROLLBACK.md`](../../UPGRADE_ROLLBACK.md).
+
 ## Validating local changes
 
 ```bash

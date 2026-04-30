@@ -98,55 +98,22 @@ class WorkOrderIdField(Flowable):
 
 def _build_electrical_rows(asset) -> list:
     """
-    Build a list of (label, value) rows describing how an asset is powered.
+    Compatibility wrapper — delegates to the shared work-order context
+    service so digital + PDF render the same data (oms-2da AC-1/AC-2).
 
-    Returns an empty list when the asset has no electrical / lockout data
-    worth surfacing — the caller uses that to skip the section entirely so
-    paper work orders for non-powered fixtures (e.g., shelves, soap
-    dispensers) stay short.
+    Includes the asset-level rows plus LOTO rows so the PDF section
+    behaviour stays identical to the pre-refactor output.
     """
-    rows: list = []
+    from inventory.services.work_order_context import build_electrical_context, build_loto_context
 
-    wiring_display = asset.get_wiring_type_display() if asset.wiring_type else ""
-    if asset.wiring_type and asset.wiring_type not in (
-        asset.WIRING_NONE,
-        asset.WIRING_UNKNOWN,
-        "",
-    ):
-        rows.append(["Wiring", wiring_display])
+    elec = build_electrical_context(asset)
+    rows: list = list(elec["rows"])  # copy so callers can mutate
 
-    if asset.power_draw_watts:
-        rows.append(["Rated Power Draw", f"{asset.power_draw_watts} W"])
-
-    if asset.suite:
-        rows.append(["Suite", asset.suite])
-    if asset.electrical_box:
-        rows.append(["Electrical Box", asset.electrical_box])
-    if asset.breaker_location:
-        rows.append(["Breaker", asset.breaker_location])
-    elif asset.circuit:
-        # Fall back to the legacy free-text circuit field when no structured
-        # breaker location has been recorded yet.
-        rows.append(["Circuit", asset.circuit])
-
-    if asset.has_interlock:
-        interlock_label = asset.get_interlock_type_display() if asset.interlock_type else "Yes"
-        rows.append(["Interlock", interlock_label])
-        if asset.interlock_responsible:
-            rows.append(["Interlock Responsible", asset.interlock_responsible])
-
-    if asset.lockout_type and asset.lockout_type not in (
-        asset.LOCKOUT_NONE,
-        asset.LOCKOUT_UNKNOWN,
-        "",
-    ):
-        rows.append(["Lockout Type", asset.get_lockout_type_display()])
-    if asset.lockout_responsible:
-        rows.append(["Lockout Responsible", asset.lockout_responsible])
-
-    if asset.has_network_drop:
-        rows.append(["Network Drop", asset.network_drop_location or "Yes (location not recorded)"])
-
+    loto = build_loto_context(asset)
+    if loto["is_required"]:
+        rows.append(["Lockout Type", loto["lockout_type"]])
+    if loto["lockout_responsible"]:
+        rows.append(["Lockout Responsible", loto["lockout_responsible"]])
     return rows
 
 
@@ -374,6 +341,46 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
             story.append(Spacer(1, 2))
             story.append(Paragraph("Lockout Procedure:", label_style))
             story.append(Paragraph(asset.lockout_instructions, small_style))
+
+        # AC-1 (oms-2da): include joined electrical_circuits records so the
+        # printed form matches the digital view.
+        from inventory.services.work_order_context import build_electrical_context
+
+        elec_ctx = build_electrical_context(asset)
+        circuits_rows: list = []
+        for outlet in elec_ctx["outlets"]:
+            br = outlet.get("breaker") or {}
+            br_label = br.get("label") or "—"
+            circuits_rows.append(
+                ["Outlet", outlet["identifier"], outlet["outlet_type_display"], br_label]
+            )
+        for drop in elec_ctx["network_drops"]:
+            patch = drop["patch_panel"] or "—"
+            if drop["patch_port"]:
+                patch = f"{patch} / port {drop['patch_port']}"
+            circuits_rows.append(
+                ["Network Drop", drop["identifier"], drop["drop_type_display"], patch]
+            )
+        if circuits_rows:
+            story.append(Spacer(1, 4))
+            story.append(Paragraph("Circuits at this location:", label_style))
+            circuits_table = Table(
+                [["Kind", "Identifier", "Type", "Feeds / Patch"]] + circuits_rows,
+                colWidths=[1.0 * inch, 2.0 * inch, 1.7 * inch, 2.5 * inch],
+            )
+            circuits_table.setStyle(
+                TableStyle(
+                    [
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 8),
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("PADDING", (0, 0), (-1, -1), 3),
+                    ]
+                )
+            )
+            story.append(circuits_table)
         story.append(Spacer(1, 8))
 
     # ── Task description ──────────────────────────────────────────────────────

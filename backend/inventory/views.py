@@ -47,6 +47,7 @@ from .models import (
     WorkOrderMaterialUsage,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
+    WorkOrderValidation,
 )
 from .serializers import (
     AssetPartSerializer,
@@ -78,6 +79,7 @@ from .serializers import (
     WorkOrderPhotoSerializer,
     WorkOrderSerializer,
     WorkOrderTaskCompletionSerializer,
+    WorkOrderValidationSerializer,
 )
 
 
@@ -3023,12 +3025,71 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=wo_status)
         return queryset
 
+    @staticmethod
+    def _has_complete_validation(work_order) -> bool:
+        """AC-3: True iff the WO has at least one fully-acknowledged validation."""
+        return work_order.validations.filter(
+            electrical_acknowledged=True,
+            loto_acknowledged=True,
+            required_fields_acknowledged=True,
+        ).exists()
+
+    def _check_completion_gate(self, request):
+        """AC-3: 412 if a status=completed transition lacks validation."""
+        instance = self.get_object()
+        new_status = request.data.get("status")
+        if (
+            new_status == WorkOrder.STATUS_COMPLETED
+            and instance.status != WorkOrder.STATUS_COMPLETED
+            and not self._has_complete_validation(instance)
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "This work order requires a validation acknowledgement "
+                        "(electrical, LOTO, required fields) before it can be "
+                        "marked completed."
+                    ),
+                    "code": "validation_required",
+                },
+                status=status.HTTP_412_PRECONDITION_FAILED,
+            )
+        return None
+
+    def update(self, request, *args, **kwargs):
+        gate = self._check_completion_gate(request)
+        if gate is not None:
+            return gate
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        gate = self._check_completion_gate(request)
+        if gate is not None:
+            return gate
+        return super().partial_update(request, *args, **kwargs)
+
     @action(detail=True, methods=["get"])
     def pdf(self, request, pk=None):
-        """Generate a printable PDF work order form."""
+        """Generate a printable PDF work order form.
+
+        AC-3 (oms-2da): gated on at least one fully-acknowledged validation
+        record. The frontend shows the validation modal when this returns 412
+        and retries after the user submits the checklist.
+        """
         from .utils.work_order_pdf import generate_work_order_pdf
 
         work_order = self.get_object()
+        if not self._has_complete_validation(work_order):
+            return Response(
+                {
+                    "detail": (
+                        "Confirm the validation checklist (electrical, LOTO, "
+                        "required fields) before generating a PDF."
+                    ),
+                    "code": "validation_required",
+                },
+                status=status.HTTP_412_PRECONDITION_FAILED,
+            )
         base_url = request.build_absolute_uri("/").rstrip("/")
         pdf_bytes = generate_work_order_pdf(work_order, base_url=base_url)
 
@@ -3036,6 +3097,46 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         short_id = work_order.short_id.replace(" ", "-")
         response["Content-Disposition"] = f'inline; filename="work-order-{short_id}.pdf"'
         return response
+
+    @action(detail=True, methods=["post"], url_path="validate")
+    def validate_checklist(self, request, pk=None):
+        """AC-3: record a pre-finalization validation acknowledgement.
+
+        Body: ``{electrical_acknowledged, loto_acknowledged,
+        required_fields_acknowledged, notes?}``. All three flags must be
+        truthy or the resulting record is treated as incomplete (and won't
+        unlock finalize / PDF).
+        """
+        work_order = self.get_object()
+        electrical = bool(request.data.get("electrical_acknowledged"))
+        loto = bool(request.data.get("loto_acknowledged"))
+        required_fields = bool(request.data.get("required_fields_acknowledged"))
+        notes = (request.data.get("notes") or "").strip()
+
+        if not (electrical and loto and required_fields):
+            return Response(
+                {
+                    "detail": (
+                        "All three acknowledgements (electrical, LOTO, "
+                        "required fields) are required."
+                    ),
+                    "code": "incomplete_acknowledgement",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        record = WorkOrderValidation.objects.create(
+            work_order=work_order,
+            validated_by=request.user if request.user.is_authenticated else None,
+            electrical_acknowledged=electrical,
+            loto_acknowledged=loto,
+            required_fields_acknowledged=required_fields,
+            notes=notes,
+        )
+        return Response(
+            WorkOrderValidationSerializer(record, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def add_photo(self, request, pk=None):
@@ -3171,6 +3272,107 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 ),
                 "completed_items": completed_items,
                 "errors": errors,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="submissions/(?P<submission_id>[^/.]+)/apply-pending",
+    )
+    def apply_pending_changes(self, request, pk=None, submission_id=None):
+        """AC-4: accept all CV-derived pending changes on a submission.
+
+        ``signature`` detections become a notes line on the work order;
+        ``handwritten`` detections append their OCR'd text to the WO notes.
+        After application, ``pending_changes`` is cleared and the submission
+        moves from ``pending_review`` to ``applied``.
+        """
+        work_order = self.get_object()
+        try:
+            submission = work_order.submissions.get(id=submission_id)
+        except WorkOrderSubmission.DoesNotExist:
+            return Response(
+                {"detail": "Submission not found for this work order."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        pending = list(submission.pending_changes or [])
+        if not pending:
+            return Response(
+                {
+                    "detail": "No pending changes to apply.",
+                    "submission_status": submission.status,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        applied: list[str] = []
+        for change in pending:
+            kind = change.get("kind")
+            value = change.get("value")
+            confidence = change.get("confidence", 0.0)
+            if kind == "signature":
+                applied.append(
+                    f"Signature accepted by reviewer " f"(original confidence {confidence:.2f})."
+                )
+            elif kind == "handwritten" and isinstance(value, str) and value:
+                applied.append(
+                    f'Handwritten note accepted (confidence {confidence:.2f}): "{value}"'
+                )
+
+        if applied:
+            existing = work_order.notes or ""
+            combined = existing + ("\n" if existing else "") + "\n".join(applied)
+            work_order.notes = combined.strip()
+            work_order.save(update_fields=["notes", "updated_at"])
+
+        submission.pending_changes = []
+        submission.status = WorkOrderSubmission.STATUS_APPLIED
+        submission.save(update_fields=["pending_changes", "status"])
+
+        return Response(
+            {
+                "detail": f"Applied {len(applied)} pending change(s).",
+                "submission_status": submission.status,
+                "applied_count": len(applied),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="submissions/(?P<submission_id>[^/.]+)/discard-pending",
+    )
+    def discard_pending_changes(self, request, pk=None, submission_id=None):
+        """AC-4: reject (drop) all CV-derived pending changes on a submission.
+
+        Submission keeps its applied checkbox state but the queued detections
+        are discarded and status moves to ``applied`` (since the auto-applied
+        portion is committed even when the queued portion is rejected).
+        """
+        work_order = self.get_object()
+        try:
+            submission = work_order.submissions.get(id=submission_id)
+        except WorkOrderSubmission.DoesNotExist:
+            return Response(
+                {"detail": "Submission not found for this work order."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        dropped = len(submission.pending_changes or [])
+        submission.pending_changes = []
+        if submission.status == WorkOrderSubmission.STATUS_PENDING_REVIEW:
+            submission.status = WorkOrderSubmission.STATUS_APPLIED
+        submission.save(update_fields=["pending_changes", "status"])
+
+        return Response(
+            {
+                "detail": f"Discarded {dropped} pending change(s).",
+                "submission_status": submission.status,
+                "dropped_count": dropped,
             },
             status=status.HTTP_200_OK,
         )

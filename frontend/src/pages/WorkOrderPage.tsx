@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Alert,
   Badge,
   Box,
   Button,
@@ -10,6 +11,7 @@ import {
   Group,
   Image,
   Loader,
+  Modal,
   Select,
   Stack,
   Text,
@@ -20,12 +22,15 @@ import {
 import { notifications } from '@mantine/notifications';
 import {
   IconAlertTriangle,
+  IconBolt,
   IconCamera,
   IconCheck,
   IconClipboard,
   IconDownload,
   IconFileText,
+  IconLock,
   IconPhoto,
+  IconRobot,
   IconTag,
   IconUpload,
 } from '@tabler/icons-react';
@@ -62,6 +67,18 @@ const WorkOrderPage: React.FC = () => {
   const [savingNotes, setSavingNotes] = useState(false);
   const resetPhotoRef = useRef<() => void>(null);
 
+  // AC-3: validation prompt state.
+  const [validationOpen, setValidationOpen] = useState(false);
+  const [validationKind, setValidationKind] = useState<'finalize' | 'pdf'>('finalize');
+  const [ackElectrical, setAckElectrical] = useState(false);
+  const [ackLoto, setAckLoto] = useState(false);
+  const [ackRequired, setAckRequired] = useState(false);
+  const [validationNotes, setValidationNotes] = useState('');
+  const [savingValidation, setSavingValidation] = useState(false);
+
+  // AC-4: per-submission pending-review action state.
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+
   const loadWorkOrder = useCallback(async () => {
     if (!id) return;
     try {
@@ -85,6 +102,16 @@ const WorkOrderPage: React.FC = () => {
 
   const handleStatusChange = async (newStatus: string | null) => {
     if (!workOrder || !newStatus) return;
+    // AC-3: gate finalization on validation acknowledgement.
+    if (newStatus === 'completed' && !workOrder.validation?.is_complete) {
+      setValidationKind('finalize');
+      setAckElectrical(false);
+      setAckLoto(false);
+      setAckRequired(false);
+      setValidationNotes('');
+      setValidationOpen(true);
+      return;
+    }
     setSavingStatus(true);
     try {
       const res = await workOrderAPI.updateWorkOrder(workOrder.id, {
@@ -97,14 +124,119 @@ const WorkOrderPage: React.FC = () => {
         color: 'green',
         icon: <IconCheck size={16} />,
       });
-    } catch {
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number; data?: { detail?: string } } };
+      if (e.response?.status === 412) {
+        // Backend says we still need validation — open the modal.
+        setValidationKind('finalize');
+        setValidationOpen(true);
+      } else {
+        notifications.show({
+          title: 'Error',
+          message: e.response?.data?.detail || 'Failed to update status.',
+          color: 'red',
+        });
+      }
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
+  const handleSubmitValidation = async () => {
+    if (!workOrder) return;
+    if (!ackElectrical || !ackLoto || !ackRequired) return;
+    setSavingValidation(true);
+    try {
+      await workOrderAPI.validateChecklist(workOrder.id, {
+        electrical_acknowledged: ackElectrical,
+        loto_acknowledged: ackLoto,
+        required_fields_acknowledged: ackRequired,
+        notes: validationNotes,
+      });
+      setValidationOpen(false);
+      await loadWorkOrder();
       notifications.show({
-        title: 'Error',
-        message: 'Failed to update status.',
+        title: 'Validated',
+        message:
+          validationKind === 'pdf'
+            ? 'Validation recorded. The PDF can now be generated.'
+            : 'Validation recorded. The work order can now be marked completed.',
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+      if (validationKind === 'finalize') {
+        // Re-attempt finalization now that the gate is open.
+        await handleStatusChange('completed');
+      } else {
+        // Open the PDF in a new tab now that the gate is open.
+        window.open(workOrderAPI.getPdfUrl(workOrder.id), '_blank', 'noopener,noreferrer');
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      notifications.show({
+        title: 'Validation failed',
+        message: e.response?.data?.detail || 'Could not record validation.',
         color: 'red',
       });
     } finally {
-      setSavingStatus(false);
+      setSavingValidation(false);
+    }
+  };
+
+  const handlePrintPdf = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!workOrder?.validation?.is_complete) {
+      e.preventDefault();
+      setValidationKind('pdf');
+      setAckElectrical(false);
+      setAckLoto(false);
+      setAckRequired(false);
+      setValidationNotes('');
+      setValidationOpen(true);
+    }
+  };
+
+  const handleApplyPending = async (submissionId: string) => {
+    if (!workOrder) return;
+    setPendingActionId(submissionId);
+    try {
+      await workOrderAPI.applyPendingChanges(workOrder.id, submissionId);
+      await loadWorkOrder();
+      notifications.show({
+        title: 'Applied',
+        message: 'Auto-detected changes accepted.',
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch {
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to apply pending changes.',
+        color: 'red',
+      });
+    } finally {
+      setPendingActionId(null);
+    }
+  };
+
+  const handleDiscardPending = async (submissionId: string) => {
+    if (!workOrder) return;
+    setPendingActionId(submissionId);
+    try {
+      await workOrderAPI.discardPendingChanges(workOrder.id, submissionId);
+      await loadWorkOrder();
+      notifications.show({
+        title: 'Discarded',
+        message: 'Auto-detected changes rejected.',
+        color: 'gray',
+      });
+    } catch {
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to discard pending changes.',
+        color: 'red',
+      });
+    } finally {
+      setPendingActionId(null);
     }
   };
 
@@ -259,6 +391,7 @@ const WorkOrderPage: React.FC = () => {
                 href={workOrderAPI.getPdfUrl(workOrder.id)}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={handlePrintPdf}
               >
                 <IconFileText size={20} />
               </ActionIcon>
@@ -277,6 +410,166 @@ const WorkOrderPage: React.FC = () => {
           mt="xs"
         />
       </Card>
+
+      {/* AC-1 Electrical info — present even when empty so the section is
+          visibly accounted for (per bead AC-1: 'do not omit silently'). */}
+      <Card withBorder p="md" radius="md" mb="md">
+        <Group mb="sm" gap="xs">
+          <IconBolt size={18} />
+          <Title order={5}>Electrical</Title>
+        </Group>
+        {workOrder.electrical && !workOrder.electrical.is_empty ? (
+          <Stack gap="xs">
+            {workOrder.electrical.rows.length > 0 && (
+              <Stack gap={4}>
+                {workOrder.electrical.rows.map(([label, value]) => (
+                  <Group key={label} gap="xs" wrap="nowrap">
+                    <Text size="xs" c="dimmed" fw={600} style={{ minWidth: 140 }}>
+                      {label}
+                    </Text>
+                    <Text size="sm">{value}</Text>
+                  </Group>
+                ))}
+              </Stack>
+            )}
+            {workOrder.electrical.outlets.length > 0 && (
+              <Box>
+                <Text size="xs" c="dimmed" fw={600} mb={4}>
+                  Outlets at this location
+                </Text>
+                <Stack gap={2}>
+                  {workOrder.electrical.outlets.map((o) => (
+                    <Text key={o.id} size="sm">
+                      <b>{o.identifier}</b> · {o.outlet_type_display}
+                      {o.breaker ? ` · ${o.breaker.label}` : ''}
+                    </Text>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+            {workOrder.electrical.network_drops.length > 0 && (
+              <Box>
+                <Text size="xs" c="dimmed" fw={600} mb={4}>
+                  Network drops at this location
+                </Text>
+                <Stack gap={2}>
+                  {workOrder.electrical.network_drops.map((d) => (
+                    <Text key={d.id} size="sm">
+                      <b>{d.identifier}</b> · {d.drop_type_display}
+                      {d.patch_panel ? ` · ${d.patch_panel}` : ''}
+                      {d.patch_port ? ` / port ${d.patch_port}` : ''}
+                    </Text>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">
+            No electrical circuits associated with this asset's location.
+          </Text>
+        )}
+      </Card>
+
+      {/* AC-2 LOTO — visible even when not required (per bead). */}
+      <Card withBorder p="md" radius="md" mb="md">
+        <Group mb="sm" gap="xs">
+          <IconLock size={18} />
+          <Title order={5}>Lockout / Tagout</Title>
+        </Group>
+        {workOrder.loto?.is_required ? (
+          <Stack gap="xs">
+            <Group gap="xs">
+              <Text size="xs" c="dimmed" fw={600} style={{ minWidth: 140 }}>
+                Lockout type
+              </Text>
+              <Text size="sm">{workOrder.loto.lockout_type}</Text>
+            </Group>
+            {workOrder.loto.lockout_responsible && (
+              <Group gap="xs">
+                <Text size="xs" c="dimmed" fw={600} style={{ minWidth: 140 }}>
+                  Responsible
+                </Text>
+                <Text size="sm">{workOrder.loto.lockout_responsible}</Text>
+              </Group>
+            )}
+            {workOrder.loto.lockout_instructions && (
+              <Box>
+                <Text size="xs" c="dimmed" fw={600} mb={4}>
+                  Procedure
+                </Text>
+                <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+                  {workOrder.loto.lockout_instructions}
+                </Text>
+              </Box>
+            )}
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">No LOTO required for this asset.</Text>
+        )}
+      </Card>
+
+      {/* AC-4 Pending CV-derived changes (auto-detected from paper form). */}
+      {workOrder.submissions.some((s) => (s.pending_changes?.length ?? 0) > 0) && (
+        <Card withBorder p="md" radius="md" mb="md" style={{ borderColor: '#ffd43b' }}>
+          <Group mb="sm" gap="xs">
+            <IconRobot size={18} />
+            <Title order={5}>Auto-detected from paper form (pending review)</Title>
+          </Group>
+          <Stack gap="md">
+            {workOrder.submissions
+              .filter((s) => (s.pending_changes?.length ?? 0) > 0)
+              .map((sub) => (
+                <Box
+                  key={sub.id}
+                  p="sm"
+                  style={{
+                    borderRadius: 8,
+                    backgroundColor: '#fff9db',
+                    border: '1px solid #ffe066',
+                  }}
+                >
+                  <Text size="xs" c="dimmed" mb={6}>
+                    Submission {sub.subject || sub.id} ·{' '}
+                    {new Date(sub.received_at).toLocaleString()}
+                  </Text>
+                  <Stack gap={4} mb="sm">
+                    {sub.pending_changes.map((c, idx) => (
+                      <Group key={idx} gap="xs">
+                        <Badge size="xs" variant="light" color="yellow">
+                          {Math.round(c.confidence * 100)}%
+                        </Badge>
+                        <Text size="sm">
+                          <b>{c.label || c.kind}:</b>{' '}
+                          {typeof c.value === 'string' ? c.value : String(c.value)}
+                        </Text>
+                      </Group>
+                    ))}
+                  </Stack>
+                  <Group gap="xs">
+                    <Button
+                      size="xs"
+                      color="green"
+                      leftSection={<IconCheck size={14} />}
+                      loading={pendingActionId === sub.id}
+                      onClick={() => handleApplyPending(sub.id)}
+                    >
+                      Accept all
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="default"
+                      loading={pendingActionId === sub.id}
+                      onClick={() => handleDiscardPending(sub.id)}
+                    >
+                      Reject all
+                    </Button>
+                  </Group>
+                </Box>
+              ))}
+          </Stack>
+        </Card>
+      )}
 
       {/* Task Steps */}
       {workOrder.task_completions.length > 0 && (
@@ -570,6 +863,63 @@ const WorkOrderPage: React.FC = () => {
       >
         Back to Dashboard
       </Button>
+
+      {/* AC-3 Validation prompt */}
+      <Modal
+        opened={validationOpen}
+        onClose={() => setValidationOpen(false)}
+        title={
+          validationKind === 'pdf'
+            ? 'Validate before generating PDF'
+            : 'Validate before finalizing'
+        }
+        centered
+      >
+        <Stack gap="sm">
+          <Alert color="blue" variant="light">
+            Confirm the work order is ready
+            {validationKind === 'pdf' ? ' to print' : ' to be marked completed'}.
+            All three items must be acknowledged.
+          </Alert>
+          <Checkbox
+            checked={ackElectrical}
+            onChange={(e) => setAckElectrical(e.currentTarget.checked)}
+            label="Electrical info reviewed and correct"
+          />
+          <Checkbox
+            checked={ackLoto}
+            onChange={(e) => setAckLoto(e.currentTarget.checked)}
+            label="Lockout/Tagout requirements reviewed and acknowledged"
+          />
+          <Checkbox
+            checked={ackRequired}
+            onChange={(e) => setAckRequired(e.currentTarget.checked)}
+            label="All required fields are present"
+          />
+          <Textarea
+            value={validationNotes}
+            onChange={(e) => setValidationNotes(e.currentTarget.value)}
+            placeholder="Optional notes recorded with this validation…"
+            autosize
+            minRows={2}
+            maxRows={5}
+          />
+          <Group justify="flex-end" gap="xs">
+            <Button variant="default" onClick={() => setValidationOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              color="green"
+              leftSection={<IconCheck size={16} />}
+              onClick={handleSubmitValidation}
+              loading={savingValidation}
+              disabled={!ackElectrical || !ackLoto || !ackRequired}
+            >
+              Confirm
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Container>
   );
 };

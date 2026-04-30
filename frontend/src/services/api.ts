@@ -774,6 +774,26 @@ export const workOrderAPI = {
     });
   },
 
+  validateChecklist: (
+    id: string,
+    data: {
+      electrical_acknowledged: boolean;
+      loto_acknowledged: boolean;
+      required_fields_acknowledged: boolean;
+      notes?: string;
+    }
+  ) => api.post(`/inventory/work-orders/${id}/validate/`, data),
+
+  applyPendingChanges: (workOrderId: string, submissionId: string) =>
+    api.post(
+      `/inventory/work-orders/${workOrderId}/submissions/${submissionId}/apply-pending/`,
+    ),
+
+  discardPendingChanges: (workOrderId: string, submissionId: string) =>
+    api.post(
+      `/inventory/work-orders/${workOrderId}/submissions/${submissionId}/discard-pending/`,
+    ),
+
   getDueThisWeek: () =>
     api.get<MaintenanceItem[]>('/inventory/maintenance-items/due_this_week/'),
 

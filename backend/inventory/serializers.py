@@ -29,6 +29,7 @@ from .models import (
     WorkOrderPhoto,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
+    WorkOrderValidation,
 )
 
 
@@ -1454,6 +1455,7 @@ class WorkOrderSubmissionSerializer(serializers.ModelSerializer):
             "submitted_by",
             "submitted_by_name",
             "parse_error",
+            "pending_changes",
         ]
         read_only_fields = fields
 
@@ -1467,6 +1469,41 @@ class WorkOrderSubmissionSerializer(serializers.ModelSerializer):
     def get_submitted_by_name(self, obj):
         if obj.submitted_by:
             return obj.submitted_by.get_full_name() or obj.submitted_by.username
+        return None
+
+
+class WorkOrderValidationSerializer(serializers.ModelSerializer):
+    """AC-3 audit trail of pre-finalization validation acknowledgements."""
+
+    validated_by_name = serializers.SerializerMethodField()
+    is_complete = serializers.ReadOnlyField()
+
+    class Meta:
+        model = WorkOrderValidation
+        fields = [
+            "id",
+            "work_order",
+            "validated_by",
+            "validated_by_name",
+            "validated_at",
+            "electrical_acknowledged",
+            "loto_acknowledged",
+            "required_fields_acknowledged",
+            "is_complete",
+            "notes",
+        ]
+        read_only_fields = [
+            "id",
+            "work_order",
+            "validated_by",
+            "validated_by_name",
+            "validated_at",
+            "is_complete",
+        ]
+
+    def get_validated_by_name(self, obj):
+        if obj.validated_by:
+            return obj.validated_by.get_full_name() or obj.validated_by.username
         return None
 
 
@@ -1484,6 +1521,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     material_usage = WorkOrderMaterialUsageSerializer(many=True, read_only=True)
     photos = WorkOrderPhotoSerializer(many=True, read_only=True)
     submissions = serializers.SerializerMethodField()
+    electrical = serializers.SerializerMethodField()
+    loto = serializers.SerializerMethodField()
+    validation = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkOrder
@@ -1507,6 +1547,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "material_usage",
             "photos",
             "submissions",
+            "electrical",
+            "loto",
+            "validation",
             "created_at",
             "updated_at",
         ]
@@ -1519,6 +1562,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "material_usage",
             "photos",
             "submissions",
+            "electrical",
+            "loto",
+            "validation",
         ]
 
     def get_submissions(self, obj):
@@ -1529,6 +1575,22 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         if obj.assigned_to:
             return obj.assigned_to.get_full_name() or obj.assigned_to.username
         return None
+
+    def get_electrical(self, obj):
+        from .services.work_order_context import build_electrical_context
+
+        return build_electrical_context(obj.maintenance_item.asset)
+
+    def get_loto(self, obj):
+        from .services.work_order_context import build_loto_context
+
+        return build_loto_context(obj.maintenance_item.asset)
+
+    def get_validation(self, obj):
+        latest = obj.validations.order_by("-validated_at").first()
+        if latest is None:
+            return None
+        return WorkOrderValidationSerializer(latest, context=self.context).data
 
 
 class WorkOrderListSerializer(serializers.ModelSerializer):

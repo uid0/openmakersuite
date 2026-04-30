@@ -522,17 +522,97 @@ export interface WorkOrderPhoto {
   uploaded_at: string;
 }
 
+export interface WorkOrderSubmissionPendingChange {
+  kind: string;
+  target_id: string | null;
+  value: unknown;
+  confidence: number;
+  label: string;
+}
+
 export interface WorkOrderSubmission {
   id: string;
   pdf_url: string | null;
   received_at: string;
-  status: 'received' | 'applied' | 'failed';
+  status: 'received' | 'applied' | 'failed' | 'pending_review';
   source: 'email' | 'manual';
   from_email: string;
   subject: string;
   submitted_by: number | null;
   submitted_by_name: string | null;
   parse_error: string;
+  pending_changes: WorkOrderSubmissionPendingChange[];
+}
+
+export interface WorkOrderElectricalOutlet {
+  id: number;
+  identifier: string;
+  outlet_type: string;
+  outlet_type_display: string;
+  description: string;
+  plugged_in_notes: string;
+  breaker:
+    | {
+        id: number;
+        panel: string;
+        breaker_number: string;
+        amperage: number;
+        voltage: number;
+        label: string;
+      }
+    | null;
+}
+
+export interface WorkOrderElectricalBreaker {
+  id: number;
+  panel: string;
+  breaker_number: string;
+  amperage: number;
+  voltage: number;
+  poles: number;
+  description: string;
+  label: string;
+}
+
+export interface WorkOrderNetworkDrop {
+  id: number;
+  identifier: string;
+  drop_type: string;
+  drop_type_display: string;
+  patch_panel: string;
+  patch_port: string;
+  ip_address: string | null;
+  description: string;
+}
+
+export interface WorkOrderElectricalContext {
+  rows: [string, string][];
+  outlets: WorkOrderElectricalOutlet[];
+  breakers: WorkOrderElectricalBreaker[];
+  network_drops: WorkOrderNetworkDrop[];
+  is_empty: boolean;
+}
+
+export interface WorkOrderLotoContext {
+  lockout_type: string;
+  lockout_type_code: string;
+  lockout_instructions: string;
+  lockout_responsible: string;
+  is_required: boolean;
+  is_empty: boolean;
+}
+
+export interface WorkOrderValidationRecord {
+  id: string;
+  work_order: string;
+  validated_by: number | null;
+  validated_by_name: string | null;
+  validated_at: string;
+  electrical_acknowledged: boolean;
+  loto_acknowledged: boolean;
+  required_fields_acknowledged: boolean;
+  is_complete: boolean;
+  notes: string;
 }
 
 export interface WorkOrder {
@@ -555,6 +635,9 @@ export interface WorkOrder {
   material_usage: WorkOrderMaterialUsage[];
   photos: WorkOrderPhoto[];
   submissions: WorkOrderSubmission[];
+  electrical?: WorkOrderElectricalContext;
+  loto?: WorkOrderLotoContext;
+  validation?: WorkOrderValidationRecord | null;
   task_completion_count?: number;
   task_total_count?: number;
   created_at: string;

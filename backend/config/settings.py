@@ -85,6 +85,7 @@ INSTALLED_APPS = [
     "vendors",
     "maintenance_orders",
     "electrical_circuits",
+    "loto",
 ]
 
 MIDDLEWARE = [

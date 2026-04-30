@@ -38,7 +38,43 @@ We are committed to providing a welcoming and inclusive environment. Please be r
 
 ## Development Setup
 
-See the [README.md](README.md) for basic setup instructions.
+See the [README.md](README.md) for basic application setup instructions (Docker, env vars, etc).
+
+### Local dev tooling (one-time, per clone)
+
+After cloning, install the local hooks and frontend deps with:
+
+```bash
+make setup-dev          # or: ./scripts/setup-dev.sh
+```
+
+This will:
+
+1. Create `backend/.venv` (if missing) and install `pre-commit`.
+2. Install pre-commit hooks for the `pre-commit` and `commit-msg` git hook stages.
+3. Run `npm install` in `frontend/`.
+
+### Hooks
+
+| Hook stage | Tooling | What it checks | Skip with |
+|------------|---------|----------------|-----------|
+| `pre-commit` | pre-commit framework | black, isort, flake8, bandit, file cleanups, npm lock sync, TS compile | `git commit --no-verify` |
+| `commit-msg` | conventional-pre-commit | Commit message follows [Conventional Commits](https://www.conventionalcommits.org/) (`<type>(<scope>): <subject>`) | `git commit --no-verify` |
+
+> Use `--no-verify` only for true emergencies. CI re-runs the same gates and will reject violations regardless.
+
+### What CI enforces (required vs advisory)
+
+The `.github/workflows/ci.yml` workflow defines the required gates. Branch protection requires `✅ CI Complete`, which aggregates:
+
+- **Backend Lint** (black/isort/flake8) — required, parallel with tests so lint failures fail fast.
+- **Backend Tests** (pytest + migrations) — required.
+- **Frontend Tests** (jest + build + Playwright e2e) — required. Playwright runs with `continue-on-error` (advisory).
+- **Docker Build Test** — required.
+- **Code Quality & Security** (bandit, pip-audit, gitleaks) — required.
+- **Deploy Validation** (helm lint, helm template, kubeconform) — required.
+
+CI uses path filters: doc-only changes (`docs/**`, `*.md`, `.criteria/**`, README) skip the heavy jobs and `✅ CI Complete` still passes.
 
 ### Code Style
 

@@ -111,6 +111,16 @@ repos:
         pass_filenames: false
         always_run: false
 
+  # Commit message lint (Conventional Commits).
+  # Hook stage: commit-msg. Activated by `pre-commit install --hook-type commit-msg`
+  # which is what `make setup-dev` and scripts/setup-dev.sh run.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [--strict, feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert]
+
 # CI configuration
 ci:
   autofix_commit_msg: |

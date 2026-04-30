@@ -19,6 +19,11 @@ on:
           - minor
           - major
 
+# Releases must complete — never cancel an in-progress release run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   packages: write

@@ -1,4 +1,4 @@
-.PHONY: help build up down logs shell test test-backend test-frontend coverage migrate superuser clean
+.PHONY: help build up down logs shell test test-backend test-frontend coverage migrate superuser clean setup-dev install-hooks
 
 DOCKER_COMPOSE ?= $(shell docker compose version >/dev/null 2>&1 && echo "docker compose")
 ifeq ($(strip $(DOCKER_COMPOSE)),)
@@ -161,11 +161,16 @@ ps:  ## Show running containers
 stats:  ## Show container resource usage
 	docker stats $$($(DOCKER_COMPOSE) ps -q)
 
-# Pre-commit hooks
-install-hooks:  ## Install pre-commit hooks
+# Developer-machine setup (pre-commit + Husky + npm install)
+setup-dev:  ## Install all dev hooks (pre-commit, Husky) and frontend deps
+	./scripts/setup-dev.sh
+
+# Pre-commit hooks (in-container; prefer `make setup-dev` for host setup)
+install-hooks:  ## Install pre-commit hooks (in-container)
 	@echo "Installing pre-commit hooks..."
 	$(DOCKER_COMPOSE) exec backend pip install pre-commit
 	$(DOCKER_COMPOSE) exec backend pre-commit install
+	$(DOCKER_COMPOSE) exec backend pre-commit install --hook-type commit-msg
 	@echo "✅ Pre-commit hooks installed!"
 	@echo "Hooks will run automatically on git commit"
 

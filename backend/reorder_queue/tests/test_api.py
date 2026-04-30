@@ -1234,7 +1234,9 @@ class TestPurchaseOrderListVoidHandling:
     Detail retrieval is unaffected — deep links to fully-voided POs still work.
     """
 
-    def _make_po_with_items(self, user, *, item_count=2, unit_cost=Decimal("10.00")):
+    def _make_po_with_items(self, user, *, item_count=2, unit_cost=None):
+        if unit_cost is None:
+            unit_cost = Decimal("10.00")
         supplier = SupplierFactory()
         purchase_order = PurchaseOrder.objects.create(
             supplier=supplier,

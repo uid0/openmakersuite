@@ -1826,6 +1826,147 @@ export const OUTLET_TYPE_OPTIONS = [
   { value: 'other', label: 'Other' },
 ];
 
+// LOTO (lockout / tagout) — oms-78j
+export type LOTODeviceType =
+  | 'padlock'
+  | 'hasp'
+  | 'tag'
+  | 'key'
+  | 'valve_cover'
+  | 'breaker_lock'
+  | 'plug_lock'
+  | 'other';
+
+export type LOTODeviceStatus = 'available' | 'in_use' | 'missing' | 'retired';
+
+export type LOTOEnergySourceType =
+  | 'electrical'
+  | 'hydraulic'
+  | 'pneumatic'
+  | 'mechanical'
+  | 'thermal'
+  | 'chemical'
+  | 'gravitational'
+  | 'other';
+
+export interface LOTODevice {
+  id: number;
+  device_type: LOTODeviceType;
+  device_type_display: string;
+  label: string;
+  location: number | null;
+  location_name: string | null;
+  assigned_to: number | null;
+  assigned_to_username: string | null;
+  status: LOTODeviceStatus;
+  status_display: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LOTODeviceSummary {
+  id: number;
+  device_type: LOTODeviceType;
+  device_type_display: string;
+  label: string;
+  status: LOTODeviceStatus;
+}
+
+export interface AssetEnergySource {
+  id: number;
+  asset: string;
+  asset_name: string;
+  source_type: LOTOEnergySourceType;
+  source_type_display: string;
+  magnitude: string;
+  isolation_point: string;
+  required_devices: number[];
+  required_devices_detail: LOTODeviceSummary[];
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetLOTORequirements {
+  asset_id: string;
+  asset_name: string;
+  lockout_type: string;
+  lockout_type_display: string;
+  lockout_instructions: string;
+  lockout_responsible: string;
+  is_required: boolean;
+  energy_sources: AssetEnergySource[];
+}
+
+export interface LOTODeviceListParams {
+  status?: LOTODeviceStatus;
+  device_type?: LOTODeviceType;
+  location?: number | string;
+  assigned_to?: number | string;
+}
+
+const lotoBase = '/loto';
+
+export const lotoAPI = {
+  listDevices: (params?: LOTODeviceListParams) =>
+    api.get<{ results: LOTODevice[] } | LOTODevice[]>(`${lotoBase}/devices/`, { params })
+      .then((response) => ({ ...response, data: normalizeResults<LOTODevice>(response.data) })),
+  getDevice: (id: number | string) =>
+    api.get<LOTODevice>(`${lotoBase}/devices/${id}/`),
+  createDevice: (data: Partial<LOTODevice>) =>
+    api.post<LOTODevice>(`${lotoBase}/devices/`, data),
+  updateDevice: (id: number | string, data: Partial<LOTODevice>) =>
+    api.patch<LOTODevice>(`${lotoBase}/devices/${id}/`, data),
+  deleteDevice: (id: number | string) =>
+    api.delete(`${lotoBase}/devices/${id}/`),
+  listEnergySources: (params?: { asset?: string; source_type?: LOTOEnergySourceType }) =>
+    api.get<{ results: AssetEnergySource[] } | AssetEnergySource[]>(
+      `${lotoBase}/energy-sources/`,
+      { params }
+    ).then((response) => ({
+      ...response,
+      data: normalizeResults<AssetEnergySource>(response.data),
+    })),
+  createEnergySource: (data: Partial<AssetEnergySource>) =>
+    api.post<AssetEnergySource>(`${lotoBase}/energy-sources/`, data),
+  updateEnergySource: (id: number | string, data: Partial<AssetEnergySource>) =>
+    api.patch<AssetEnergySource>(`${lotoBase}/energy-sources/${id}/`, data),
+  deleteEnergySource: (id: number | string) =>
+    api.delete(`${lotoBase}/energy-sources/${id}/`),
+  getAssetRequirements: (assetId: string) =>
+    api.get<AssetLOTORequirements>(`${lotoBase}/assets/${assetId}/loto-requirements/`),
+};
+
+export const LOTO_DEVICE_TYPE_OPTIONS: { value: LOTODeviceType; label: string }[] = [
+  { value: 'padlock', label: 'Padlock' },
+  { value: 'hasp', label: 'Hasp' },
+  { value: 'tag', label: 'Tag' },
+  { value: 'key', label: 'Key' },
+  { value: 'valve_cover', label: 'Valve cover' },
+  { value: 'breaker_lock', label: 'Breaker lock' },
+  { value: 'plug_lock', label: 'Plug lock' },
+  { value: 'other', label: 'Other' },
+];
+
+export const LOTO_DEVICE_STATUS_OPTIONS: { value: LOTODeviceStatus; label: string }[] = [
+  { value: 'available', label: 'Available' },
+  { value: 'in_use', label: 'In use' },
+  { value: 'missing', label: 'Missing' },
+  { value: 'retired', label: 'Retired' },
+];
+
+export const LOTO_ENERGY_SOURCE_OPTIONS: { value: LOTOEnergySourceType; label: string }[] = [
+  { value: 'electrical', label: 'Electrical' },
+  { value: 'hydraulic', label: 'Hydraulic' },
+  { value: 'pneumatic', label: 'Pneumatic' },
+  { value: 'mechanical', label: 'Mechanical / stored motion' },
+  { value: 'thermal', label: 'Thermal' },
+  { value: 'chemical', label: 'Chemical' },
+  { value: 'gravitational', label: 'Gravitational / suspended load' },
+  { value: 'other', label: 'Other' },
+];
+
 export const NETWORK_DROP_TYPE_OPTIONS = [
   { value: 'data', label: 'Data jack' },
   { value: 'voice', label: 'Voice / phone' },

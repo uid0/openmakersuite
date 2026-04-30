@@ -5,7 +5,14 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import AssetDetailPage from '../../pages/AssetDetailPage';
-import { assetPartsAPI, assetsAPI, maintenanceAPI, workOrderAPI } from '../../services/api';
+import {
+  AssetLOTORequirements,
+  assetPartsAPI,
+  assetsAPI,
+  lotoAPI,
+  maintenanceAPI,
+  workOrderAPI,
+} from '../../services/api';
 import { Asset, AssetProblem, MaintenanceItem, WorkOrder } from '../../types';
 
 jest.mock('../../services/api');
@@ -19,6 +26,7 @@ const mockAssetsAPI = assetsAPI as jest.Mocked<typeof assetsAPI>;
 const mockAssetPartsAPI = assetPartsAPI as jest.Mocked<typeof assetPartsAPI>;
 const mockMaintenanceAPI = maintenanceAPI as jest.Mocked<typeof maintenanceAPI>;
 const mockWorkOrderAPI = workOrderAPI as jest.Mocked<typeof workOrderAPI>;
+const mockLotoAPI = lotoAPI as jest.Mocked<typeof lotoAPI>;
 
 describe('AssetDetailPage', () => {
   const mockAsset: Asset = {
@@ -144,6 +152,22 @@ describe('AssetDetailPage', () => {
       headers: {},
       config: {} as any,
     } as any);
+    mockLotoAPI.getAssetRequirements.mockResolvedValue({
+      data: {
+        asset_id: 'test-id',
+        asset_name: 'Test Asset',
+        lockout_type: '',
+        lockout_type_display: '',
+        lockout_instructions: '',
+        lockout_responsible: '',
+        is_required: false,
+        energy_sources: [],
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    });
     mockAssetsAPI.getTagUrl.mockImplementation(
       (id: string, size: 'standard' | 'large' = 'standard', download = false) => {
         const params = new URLSearchParams({ size });
@@ -619,6 +643,81 @@ describe('AssetDetailPage', () => {
       await waitFor(() => {
         expect(screen.getByText(/Cloned "Monthly inspection"/)).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('LOTO section (oms-78j AC-4)', () => {
+    it('shows "No LOTO required" when no lockout configured', async () => {
+      render(
+        <MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter>
+      );
+      await waitFor(() => {
+        expect(screen.getByText(/Lockout \/ Tagout/)).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('asset-loto-empty')).toBeInTheDocument();
+    });
+
+    it('renders LOTO details and energy sources when required', async () => {
+      const requirements: AssetLOTORequirements = {
+        asset_id: 'test-id',
+        asset_name: 'Test Asset',
+        lockout_type: 'loto',
+        lockout_type_display: 'LOTO (Lockout / Tagout)',
+        lockout_instructions: 'Lock breaker, tag valve, verify zero energy.',
+        lockout_responsible: 'Maintenance lead',
+        is_required: true,
+        energy_sources: [
+          {
+            id: 1,
+            asset: 'test-id',
+            asset_name: 'Test Asset',
+            source_type: 'electrical',
+            source_type_display: 'Electrical',
+            magnitude: '240V',
+            isolation_point: 'Panel A / 12',
+            required_devices: [10],
+            required_devices_detail: [
+              {
+                id: 10,
+                device_type: 'padlock',
+                device_type_display: 'Padlock',
+                label: 'PAD-001',
+                status: 'available',
+              },
+            ],
+            notes: '',
+            created_at: '2026-04-30T00:00:00Z',
+            updated_at: '2026-04-30T00:00:00Z',
+          },
+        ],
+      };
+      mockLotoAPI.getAssetRequirements.mockResolvedValueOnce({
+        data: requirements,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+
+      render(
+        <MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('LOTO (Lockout / Tagout)')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Maintenance lead')).toBeInTheDocument();
+      expect(
+        screen.getByText('Lock breaker, tag valve, verify zero energy.')
+      ).toBeInTheDocument();
+      expect(screen.getByText('Energy Sources')).toBeInTheDocument();
+      expect(screen.getByText('Electrical')).toBeInTheDocument();
+      expect(screen.getByText('Panel A / 12')).toBeInTheDocument();
+      expect(screen.getByText('Padlock PAD-001')).toBeInTheDocument();
     });
   });
 });

@@ -4,7 +4,14 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { assetPartsAPI, assetsAPI, maintenanceAPI, workOrderAPI } from '../services/api';
+import {
+  AssetLOTORequirements,
+  assetPartsAPI,
+  assetsAPI,
+  lotoAPI,
+  maintenanceAPI,
+  workOrderAPI,
+} from '../services/api';
 import '../styles/AssetDetailPage.css';
 import { Asset, AssetProblem, MaintenanceItem, WorkOrder } from '../types';
 import { formatDateOnly } from '../utils/dates';
@@ -35,6 +42,7 @@ const AssetDetailPage: React.FC = () => {
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [cloneToast, setCloneToast] = useState<string | null>(null);
   const [tagSize, setTagSize] = useState<'standard' | 'large'>('standard');
+  const [loto, setLoto] = useState<AssetLOTORequirements | null>(null);
 
   const loadAssetDetails = useCallback(async () => {
     if (!id) return;
@@ -53,6 +61,15 @@ const AssetDetailPage: React.FC = () => {
       setProblems(problemsResponse.data);
       setMaintenanceItems(maintenanceResponse.data);
       setRecentWorkOrders(workOrdersResponse.data?.results ?? []);
+
+      try {
+        const lotoResp = await lotoAPI.getAssetRequirements(id);
+        setLoto(lotoResp.data);
+      } catch (lotoErr) {
+        // Non-fatal — surface as no LOTO data rather than blocking the page.
+        console.warn('LOTO requirements unavailable for asset', id, lotoErr);
+        setLoto(null);
+      }
     } catch (err: any) {
       console.error('Error loading asset details:', err);
       setError(err.response?.data?.detail || 'Failed to load asset details');
@@ -507,6 +524,76 @@ const AssetDetailPage: React.FC = () => {
             </div>
           </section>
         )}
+
+        {/* Lockout / Tagout */}
+        <section className="asset-detail-section" data-testid="asset-loto-section">
+          <h2>Lockout / Tagout (LOTO)</h2>
+          {loto && loto.is_required ? (
+            <>
+              <div className="info-grid">
+                {loto.lockout_type_display && (
+                  <div className="info-item">
+                    <span className="info-label">Lockout Type:</span>
+                    <span className="info-value">{loto.lockout_type_display}</span>
+                  </div>
+                )}
+                {loto.lockout_responsible && (
+                  <div className="info-item">
+                    <span className="info-label">Responsible:</span>
+                    <span className="info-value">{loto.lockout_responsible}</span>
+                  </div>
+                )}
+              </div>
+              {loto.lockout_instructions && (
+                <div className="info-item" style={{ marginTop: '0.5rem' }}>
+                  <span className="info-label">Procedure:</span>
+                  <span
+                    className="info-value"
+                    style={{ whiteSpace: 'pre-wrap' }}
+                  >
+                    {loto.lockout_instructions}
+                  </span>
+                </div>
+              )}
+              {loto.energy_sources.length > 0 && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <h3>Energy Sources</h3>
+                  <table className="parts-table">
+                    <thead>
+                      <tr>
+                        <th>Type</th>
+                        <th>Magnitude</th>
+                        <th>Isolation Point</th>
+                        <th>Required Devices</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loto.energy_sources.map((src) => (
+                        <tr key={src.id}>
+                          <td>{src.source_type_display}</td>
+                          <td>{src.magnitude || '—'}</td>
+                          <td>{src.isolation_point || '—'}</td>
+                          <td>
+                            {src.required_devices_detail.length === 0
+                              ? '—'
+                              : src.required_devices_detail
+                                  .map(
+                                    (d) =>
+                                      `${d.device_type_display} ${d.label}`
+                                  )
+                                  .join(', ')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          ) : (
+            <p data-testid="asset-loto-empty">No LOTO required.</p>
+          )}
+        </section>
 
         {/* Part Replacement Tracking */}
         {asset.parts && asset.parts.length > 0 && (

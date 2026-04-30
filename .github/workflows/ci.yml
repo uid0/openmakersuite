@@ -47,6 +47,13 @@ jobs:
               - '.github/workflows/ci.yml'
             deploy:
               - 'deploy/**'
+              - 'docker-compose.prod.yml'
+              - 'docker-compose.yml'
+              - '.env.prod.example'
+              - '.env.example'
+              - 'deploy.sh'
+              - 'scripts/**'
+              - 'nginx/**'
               - '.github/workflows/ci.yml'
             security:
               - 'backend/**'
@@ -403,6 +410,117 @@ jobs:
             backend/bandit-report.json
             backend/safety-report.json
 
+  deploy-artifacts:
+    name: Deploy Artifacts (Compose + Scripts + Env)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint shell scripts (bash -n)
+        run: |
+          # Syntax-check every shell script we ship. AC-36: CI must catch a
+          # broken deploy.sh / smoke / backup / restore script before merge.
+          fail=0
+          while IFS= read -r script; do
+            echo "→ $script"
+            if ! bash -n "$script"; then
+              echo "❌ syntax error in $script"
+              fail=1
+            fi
+          done < <(find . \
+              -path './node_modules' -prune -o \
+              -path './frontend/node_modules' -prune -o \
+              -path './backend/.venv' -prune -o \
+              \( -name '*.sh' -type f \) -print | sort)
+          [ "$fail" = 0 ]
+
+      - name: Render docker-compose.prod.yml
+        run: |
+          # Confirm the compose file parses and resolves all variables. We
+          # supply minimal stand-in env values so `compose config` doesn't
+          # bail on unresolved `${...}` references — the goal is syntax +
+          # template validation, not real-deploy values.
+          set -e
+          cat > .env <<'EOF'
+          DOMAIN=ci.example.com
+          LETSENCRYPT_EMAIL=ci@ci.example.com
+          LETSENCRYPT_DOMAINS=ci.example.com
+          DEBUG=0
+          SECRET_KEY=ci-secret-key-not-for-production-only-for-compose-render-validation
+          ALLOWED_HOSTS=ci.example.com
+          CSRF_TRUSTED_ORIGINS=https://ci.example.com
+          CORS_ALLOWED_ORIGINS=https://ci.example.com
+          POSTGRES_DB=oms
+          POSTGRES_USER=oms
+          POSTGRES_PASSWORD=ci-password-1234567890
+          REDIS_URL=redis://redis:6379/0
+          CELERY_BROKER_URL=redis://redis:6379/0
+          FRONTEND_URL=https://ci.example.com
+          GIT_HASH=ci
+          REACT_APP_SENTRY_DSN=
+          GITHUB_URL=https://github.com/uid0/openmakersuite
+          EMQX_DASHBOARD_PASSWORD=Strong1Password
+          EOF
+          docker compose -f docker-compose.prod.yml --env-file .env config -q
+          docker compose -f docker-compose.yml config -q
+          rm -f .env
+
+      - name: Run prod env validator against happy-path env
+        run: |
+          # Drive scripts/validate-prod-env.sh with a synthesised env that
+          # should pass. If the validator regresses to false-positive on
+          # safe inputs, this catches it.
+          cat > /tmp/good.env <<'EOF'
+          DOMAIN=ci.example.com
+          LETSENCRYPT_EMAIL=ci@ci.example.com
+          LETSENCRYPT_DOMAINS=ci.example.com
+          DEBUG=0
+          SECRET_KEY=ci-secret-key-not-for-production-only-validator-test-padding-padding
+          ALLOWED_HOSTS=ci.example.com
+          CSRF_TRUSTED_ORIGINS=https://ci.example.com
+          CORS_ALLOWED_ORIGINS=https://ci.example.com
+          POSTGRES_DB=oms
+          POSTGRES_USER=oms
+          POSTGRES_PASSWORD=ci-password-1234567890
+          REDIS_URL=redis://redis:6379/0
+          CELERY_BROKER_URL=redis://redis:6379/0
+          FRONTEND_URL=https://ci.example.com
+          EMQX_DASHBOARD_PASSWORD=Strong1Password
+          EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+          EMAIL_HOST=smtp.example.com
+          DEFAULT_FROM_EMAIL=noreply@ci.example.com
+          POSTMARK_INBOUND_TOKEN=tok
+          LOCATION_PING_TOKEN=tok
+          EOF
+          bash scripts/validate-prod-env.sh /tmp/good.env
+
+      - name: Validator rejects shipped placeholder env
+        run: |
+          # The .env.prod.example file MUST fail validation — it contains
+          # placeholder secrets by design. If the validator passes it, we
+          # have a regression.
+          if bash scripts/validate-prod-env.sh .env.prod.example; then
+            echo "❌ scripts/validate-prod-env.sh accepted .env.prod.example"
+            echo "   Placeholder values must always fail; loosen with care."
+            exit 1
+          fi
+          echo "✅ Validator correctly rejects placeholder env"
+
+      - name: Build production Docker images
+        run: |
+          # AC-36: production Docker builds must be a CI gate, not just a
+          # deploy-time discovery. Build both prod images from scratch.
+          docker build -f backend/Dockerfile.prod -t oms-backend:ci backend/
+          docker build -f frontend/Dockerfile.prod -t oms-frontend:ci \
+              --build-arg REACT_APP_API_URL=/api \
+              --build-arg REACT_APP_GIT_HASH=ci \
+              --build-arg REACT_APP_GITHUB_URL=https://github.com/uid0/openmakersuite \
+              frontend/
+
   deploy-validation:
     name: Deploy Validation (Helm + K8s)
     runs-on: ubuntu-latest
@@ -584,7 +702,7 @@ jobs:
   ci-complete:
     name: ✅ CI Complete
     runs-on: ubuntu-latest
-    needs: [changes, backend-lint, backend-tests, frontend-tests, docker-build, security, deploy-validation]
+    needs: [changes, backend-lint, backend-tests, frontend-tests, docker-build, security, deploy-validation, deploy-artifacts]
     if: always()
     steps:
       - name: Check all jobs succeeded or were skipped
@@ -600,16 +718,18 @@ jobs:
           DOCKER="${{ needs.docker-build.result }}"
           SECURITY="${{ needs.security.result }}"
           DEPLOY="${{ needs.deploy-validation.result }}"
+          DEPLOY_ART="${{ needs.deploy-artifacts.result }}"
 
-          echo "Backend lint:  $BACKEND_LINT"
-          echo "Backend tests: $BACKEND"
-          echo "Frontend:      $FRONTEND"
-          echo "Docker:        $DOCKER"
-          echo "Security:      $SECURITY"
-          echo "Deploy:        $DEPLOY"
+          echo "Backend lint:    $BACKEND_LINT"
+          echo "Backend tests:   $BACKEND"
+          echo "Frontend:        $FRONTEND"
+          echo "Docker:          $DOCKER"
+          echo "Security:        $SECURITY"
+          echo "Deploy:          $DEPLOY"
+          echo "Deploy artifacts:$DEPLOY_ART"
 
           fail=0
-          for r in "$BACKEND_LINT" "$BACKEND" "$FRONTEND" "$DOCKER" "$SECURITY" "$DEPLOY"; do
+          for r in "$BACKEND_LINT" "$BACKEND" "$FRONTEND" "$DOCKER" "$SECURITY" "$DEPLOY" "$DEPLOY_ART"; do
             ok "$r" || fail=1
           done
 

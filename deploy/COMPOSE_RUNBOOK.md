@@ -4,8 +4,11 @@ Manual Docker Compose commands for day-2 operations on an OpenMakerSuite host.
 This is the command-level reference for operators running the
 `docker-compose.prod.yml` stack. For first-time setup see
 [`docs/DEPLOYMENT.MD`](../docs/DEPLOYMENT.MD); for prerequisites see
-[`PREREQUISITES.md`](PREREQUISITES.md); for post-deploy validation see
-[`SMOKE_TESTS.md`](SMOKE_TESTS.md).
+[`PREREQUISITES.md`](PREREQUISITES.md); for what each port exposes and how
+to harden the host firewall see [`NETWORK_EXPOSURE.md`](NETWORK_EXPOSURE.md);
+for post-deploy validation see [`SMOKE_TESTS.md`](SMOKE_TESTS.md); for
+backup/restore see [`BACKUP_RESTORE.md`](BACKUP_RESTORE.md); for upgrades
+and rollbacks see [`UPGRADE_ROLLBACK.md`](UPGRADE_ROLLBACK.md).
 
 > **`docker compose` (v2), not `docker-compose` (v1).** v1 is end-of-life and
 > does not parse the bundled `docker-compose.prod.yml` correctly. Every

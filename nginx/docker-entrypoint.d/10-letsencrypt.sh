@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-DOMAIN="${DOMAIN:-dallas.openmakersuite.net}"
+DOMAIN="${DOMAIN:-oms.example.com}"
 LETSENCRYPT_DOMAINS="${LETSENCRYPT_DOMAINS:-}"
 
 if [ -z "$LETSENCRYPT_DOMAINS" ]; then

@@ -3,13 +3,24 @@ set -e
 
 git pull
 
-echo "🚀 Deploying Dallas Makerspace Inventory Management System..."
+echo "🚀 Deploying OpenMakerSuite Inventory Management System..."
 
 # Check if .env file exists
 if [ ! -f .env ]; then
     echo "❌ Error: .env file not found!"
     echo "Please create a .env file from .env.prod.example"
     exit 1
+fi
+
+# Refuse to deploy when .env still has placeholders or unsafe defaults.
+# scripts/validate-prod-env.sh exits non-zero with a list of every issue.
+if [ -x scripts/validate-prod-env.sh ]; then
+    if ! scripts/validate-prod-env.sh .env; then
+        echo "❌ Aborting deploy — production environment is not safe to deploy."
+        exit 1
+    fi
+else
+    echo "⚠️  scripts/validate-prod-env.sh missing — skipping pre-deploy env validation."
 fi
 
 # Load environment variables
@@ -192,7 +203,7 @@ fi
 echo "✅ Deployment complete!"
 echo ""
 echo "📍 Your application is now running at:"
-echo "   http://${DOMAIN:-dallas.openmakersuite.net}"
+echo "   http://${DOMAIN:-oms.example.com}"
 echo ""
 echo "🔧 Useful commands:"
 echo "   View logs:    $COMPOSE logs -f"

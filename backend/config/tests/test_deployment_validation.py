@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+
 def _find_repo_root():
     """Walk up from this file until we hit a directory that looks like the
     OpenMakerSuite repo root (has both `.criteria/` and `docker-compose.prod.yml`).

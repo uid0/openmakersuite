@@ -72,6 +72,26 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Notify the SessionExpiredBanner (mounted in the layout) so the user gets
+// an actionable recovery prompt with their attempted route preserved.
+// Throwing on a missing window keeps this safe under SSR/jsdom.
+const notifySessionExpired = () => {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+    return;
+  }
+  try {
+    const detail = { pathname: window.location?.pathname };
+    window.dispatchEvent(new CustomEvent('oms:session-expired', { detail }));
+  } catch {
+    // Older browsers without CustomEvent support — fall back to a plain Event.
+    try {
+      window.dispatchEvent(new Event('oms:session-expired'));
+    } catch {
+      // Nothing else we can do; the API call still rejects below.
+    }
+  }
+};
+
 // Track if we're currently refreshing to avoid multiple refresh attempts
 let isRefreshing = false;
 let failedQueue: Array<{
@@ -142,6 +162,7 @@ api.interceptors.response.use(
         localStorage.removeItem('is_staff');
         isRefreshing = false;
         processQueue(error, null);
+        notifySessionExpired();
         return Promise.reject(error);
       }
 
@@ -174,6 +195,7 @@ api.interceptors.response.use(
         localStorage.removeItem('is_staff');
         isRefreshing = false;
         processQueue(refreshError, null);
+        notifySessionExpired();
         // Return the original error if refresh failed, as it's more informative
         return Promise.reject(error);
       }

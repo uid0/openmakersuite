@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { authAPI } from '../services/api';
+import { consumePendingReturnTo } from './SessionExpiredBanner';
 import '../styles/AuthSection.css';
 
 interface AuthSectionProps {
@@ -55,9 +56,16 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       setLoginUsername('');
       setLoginPassword('');
       onAuthChange(true, loginUsername);
-      
+
       // Dispatch custom event for NavigationBar
       window.dispatchEvent(new Event('authChange'));
+
+      // If the user was bounced here by a session-expired banner, return them
+      // to the workflow they were attempting (AC-17).
+      const returnTo = consumePendingReturnTo();
+      if (returnTo && returnTo !== window.location.pathname) {
+        window.location.assign(returnTo);
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');
     } finally {

@@ -38,6 +38,13 @@ deploy/k8s/
         └── secret-redis-patch.yaml
 ```
 
+## Prerequisites
+
+`kubectl` 1.14+ on your workstation pointed at a cluster you can deploy to.
+For a step-by-step install walkthrough on Ubuntu/Debian, Fedora/RHEL, or Arch
+(plus Docker/Helm/Git/Node/Python), see
+[`../PREREQUISITES.md`](../PREREQUISITES.md).
+
 ## Quick start (bundled DB + Redis)
 
 ```bash

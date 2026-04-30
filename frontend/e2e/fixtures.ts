@@ -282,3 +282,118 @@ export async function isLoggedIn(page: Page): Promise<boolean> {
     return !!localStorage.getItem('token');
   });
 }
+
+/**
+ * Create a category via the API. Categories are required by inventory items.
+ * Returns the created category id.
+ */
+export async function createTestCategory(
+  name: string,
+  token: string
+): Promise<{ id: number; name: string }> {
+  const response = await fetch(`${API_BASE_URL}/inventory/categories/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to create category: ${response.statusText}. Body: ${await response.text()}`
+    );
+  }
+  return response.json();
+}
+
+/**
+ * Create a location via the API. Locations are required by inventory items.
+ */
+export async function createTestLocation(
+  name: string,
+  token: string
+): Promise<{ id: number; name: string }> {
+  const response = await fetch(`${API_BASE_URL}/inventory/locations/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to create location: ${response.statusText}. Body: ${await response.text()}`
+    );
+  }
+  return response.json();
+}
+
+/**
+ * Create an inventory item via the API. Used by the public-to-staff e2e loop
+ * to seed an item that an unauthenticated user can scan.
+ */
+export async function createTestInventoryItem(
+  payload: {
+    name: string;
+    category: number | string;
+    location: number | string;
+    current_stock?: number;
+    minimum_stock?: number;
+    reorder_quantity?: number;
+    description?: string;
+    sku?: string;
+  },
+  token: string
+): Promise<any> {
+  const body = {
+    current_stock: 0,
+    minimum_stock: 1,
+    reorder_quantity: 10,
+    description: 'Public-to-staff e2e seeded item',
+    ...payload,
+  };
+  const response = await fetch(`${API_BASE_URL}/inventory/items/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to create inventory item: ${response.statusText}. Body: ${await response.text()}`
+    );
+  }
+  return response.json();
+}
+
+/**
+ * Approve a reorder request via the staff API. Used to demonstrate staff
+ * triage of a public submission in the public-to-staff e2e loop.
+ */
+export async function approveReorderRequest(
+  requestId: number | string,
+  token: string,
+  notes = 'Approved via e2e test'
+): Promise<any> {
+  const response = await fetch(
+    `${API_BASE_URL}/reorders/requests/${requestId}/approve/`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ admin_notes: notes }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Failed to approve reorder: ${response.statusText}. Body: ${await response.text()}`
+    );
+  }
+  return response.json();
+}

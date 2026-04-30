@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oms-flower
+  namespace: openmakersuite
+  labels:
+    app.kubernetes.io/name: openmakersuite
+    app.kubernetes.io/part-of: openmakersuite
+    app.kubernetes.io/component: flower
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5555
+      targetPort: flower
+      protocol: TCP
+      name: flower
+  selector:
+    app.kubernetes.io/name: openmakersuite
+    app.kubernetes.io/component: flower

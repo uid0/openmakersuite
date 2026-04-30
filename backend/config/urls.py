@@ -10,9 +10,14 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from auth_views import create_test_membership, login_user, logout_user, refresh_token, register_user
+from config.health import livez, readyz
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # Health probes (AC-11 liveness, AC-12 readiness). Liveness is dep-free;
+    # readiness verifies database, cache, and Celery broker.
+    path("api/health/livez/", livez, name="health-livez"),
+    path("api/health/readyz/", readyz, name="health-readyz"),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "api/docs/",

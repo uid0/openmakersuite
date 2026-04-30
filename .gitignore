@@ -40,10 +40,14 @@ ENV/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+coverage.xml
+.coverage
+htmlcov/
 backend/media
 backend/.coverage
 backend/bandit-report.json
 backend/coverage.xml
+backend/htmlcov/
 /staticfiles
 /static
 
@@ -60,6 +64,9 @@ frontend/build
 frontend/test-results/
 frontend/playwright-report/
 frontend/coverage/**
+playwright-report/
+test-results/
+coverage/
 .DS_Store
 .env.local
 .env.development.local

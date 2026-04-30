@@ -85,7 +85,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           cd backend
-          pytest -n auto --cov=inventory --cov=reorder_queue --cov=config --cov=membership --cov=forgekey --cov-report=xml --cov-report=term -v
+          pytest -n auto
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
           SECRET_KEY: test-secret-key-for-ci-only
@@ -148,17 +148,14 @@ jobs:
           npm ci --verbose
           # Verify installation
           ls -la node_modules/.bin/react-scripts || (echo "❌ react-scripts not found after npm ci!" && exit 1)
+          npm ls @mantine/core @mantine/modals html5-qrcode recharts react-grid-layout
         env:
           NODE_OPTIONS: "--dns-result-order=ipv4first"
 
-      - name: Run tests (with coverage on main/develop)
+      - name: Run tests with coverage
         run: |
           cd frontend
-          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            npm test -- --maxWorkers=4 --ci --watchAll=false --coverage
-          else
-            npm test -- --maxWorkers=4 --ci --watchAll=false
-          fi
+          npm run test:ci:coverage
         env:
           CI: true
           NODE_OPTIONS: "--dns-result-order=ipv4first"
@@ -171,8 +168,26 @@ jobs:
           CI: false
           NODE_OPTIONS: "--dns-result-order=ipv4first"
 
+      - name: Install Playwright browsers
+        run: |
+          cd frontend
+          npx playwright install --with-deps
+
+      - name: Run Playwright E2E tests
+        continue-on-error: true
+        run: |
+          cd frontend
+          python3 ../scripts/serve-spa.py build 3000 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          sleep 2
+          env -u CI npm run test:e2e
+        env:
+          NODE_OPTIONS: "--dns-result-order=ipv4first"
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          PLAYWRIGHT_API_URL: http://localhost:8000/api
+
       - name: Verify coverage files exist
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
         run: |
           cd frontend
           if [ ! -f coverage/clover.xml ]; then
@@ -187,7 +202,6 @@ jobs:
           ls -lh coverage/clover.xml coverage/lcov.info
 
       - name: Upload coverage to Codecov
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
         uses: codecov/codecov-action@v4
         with:
           files: ./frontend/coverage/clover.xml,./frontend/coverage/lcov.info

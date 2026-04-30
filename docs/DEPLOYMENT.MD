@@ -213,7 +213,8 @@ docker-compose -f docker-compose.prod.yml exec backend python manage.py shell
 # Access database
 docker-compose -f docker-compose.prod.yml exec db psql -U makerspace -d makerspace_inventory
 
-# Backup database
+# Backup database (quick form — see deploy/BACKUP_RESTORE.md for the full
+# playbook covering media, secrets, and Kubernetes)
 docker-compose -f docker-compose.prod.yml exec db pg_dump -U makerspace makerspace_inventory > backup.sql
 
 # Restore database
@@ -276,7 +277,7 @@ docker stats
 - [ ] Configure HTTPS with SSL certificate
 - [ ] Set proper `ALLOWED_HOSTS`
 - [ ] Configure firewall (allow only 80, 443)
-- [ ] Regular backups of database
+- [ ] Regular backups of database and media (see [`deploy/BACKUP_RESTORE.md`](../deploy/BACKUP_RESTORE.md))
 - [ ] Keep Docker images updated
 - [ ] Review nginx access logs regularly
 

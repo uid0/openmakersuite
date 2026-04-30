@@ -366,3 +366,120 @@ registry workflow.
    interval (30 s) to make sure the new container stays healthy.
 4. File a bead capturing the cause of the bad deploy so the next attempt
    doesn't repeat it.
+
+## 10. Workers and scheduled tasks
+
+OpenMakerSuite splits the application across three process roles. The full
+task inventory and per-task policy lives in
+[`docs/CELERY_TASKS.md`](../docs/CELERY_TASKS.md); this section covers the
+process-level deployment.
+
+| Role | Service | Required? | Command | Purpose |
+| --- | --- | --- | --- | --- |
+| Web | `backend` | **Required** | `gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120` | Serves HTTP API and admin. Liveness/readiness probes hit `/api/health/livez/` and `/api/health/readyz/`. |
+| Worker | `celery` | **Required** for any feature that uses `.delay()` (webhooks, reorder/donation/vendor/forgekey/location flows) | `celery -A config worker -l info` | Pulls tasks off the Redis broker. The bundled compose file runs a single replica on the default queue; scale with `$COMPOSE up -d --scale celery=N` if throughput requires it. |
+| Beat | *(not bundled)* | **Optional today** — only needed for the scheduled tasks in `CELERY_BEAT_SCHEDULE` (quarterly donor updates, daily vendor compliance digest) | `celery -A config beat -l info` | The bundled `docker-compose.prod.yml` does **not** define a beat service. If you need scheduled tasks, run beat as a sidecar (see below). |
+| Flower | `flower` | Optional | `celery -A config flower --port=5555 --broker=$CELERY_BROKER_URL` | Live worker / queue / inflight task UI. **Do not expose port 5555 publicly** — it has no auth in the bundled config. Restrict via the host firewall or a private overlay network and tunnel through SSH for operator access. |
+
+### Bringing up worker + flower
+
+```bash
+$COMPOSE up -d celery flower
+$COMPOSE ps celery flower
+```
+
+### Adding a beat sidecar (when scheduled tasks must fire)
+
+Add a service block to a compose override (e.g. `docker-compose.beat.yml`)
+rather than editing `docker-compose.prod.yml` directly so the upstream
+file stays clean:
+
+```yaml
+services:
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    command: celery -A config beat -l info
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - SKIP_DB_MIGRATIONS=1
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+```
+
+Bring it up with both files merged:
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.beat.yml up -d celery_beat
+```
+
+> **Run exactly one beat process per environment.** Two beat schedulers
+> against the same broker double-fire every periodic task.
+
+### Worker health check
+
+The Celery worker container does not expose an HTTP probe; verify with
+`celery inspect ping`, which round-trips a control message through the
+broker:
+
+```bash
+$COMPOSE exec -T celery celery -A config inspect ping
+# → -> celery@<container>: OK
+#         pong
+```
+
+A non-zero exit or empty output means the worker can't reach Redis or has
+deadlocked — restart with `$COMPOSE restart celery` and inspect logs.
+
+### Verifying the beat schedule is loaded
+
+```bash
+$COMPOSE exec -T celery_beat celery -A config inspect scheduled
+# Lists tasks queued by beat for future execution; empty until a tick fires.
+```
+
+To confirm the schedule entries themselves (independent of whether beat is
+actually running):
+
+```bash
+$COMPOSE exec -T backend python manage.py shell -c "
+from django.conf import settings
+for name, entry in settings.CELERY_BEAT_SCHEDULE.items():
+    print(name, '->', entry['task'], 'every', entry['schedule'], 's')
+"
+```
+
+### Verification steps after deploy
+
+After any deploy that touches worker, beat, or task code, run these
+checks (also covered by [`SMOKE_TESTS.md`](SMOKE_TESTS.md) §6):
+
+1. `$COMPOSE ps celery` — service is `running`.
+2. `$COMPOSE exec -T celery celery -A config inspect ping` — returns `pong`.
+3. Trigger a known task and confirm it lands as `SUCCESS` in
+   `/admin/django_celery_results/taskresult/`. The lowest-impact option
+   is `config.celery.debug_task`:
+   ```bash
+   $COMPOSE exec -T backend python manage.py shell -c \
+       "from config.celery import debug_task; debug_task.delay()"
+   ```
+4. Tail `$COMPOSE logs -f celery` for at least one task lifecycle so that
+   `Received task` and `succeeded` lines both appear.
+
+### Recovering failed tasks
+
+Failed tasks show `status=FAILURE` in
+`/admin/django_celery_results/taskresult/` with the traceback and the
+original args/kwargs. Webhook deliveries also accumulate per-row
+`failure_count` / `last_error` on `/admin/reorder_queue/webhook/`. Replay
+paths per task are documented in
+[`docs/CELERY_TASKS.md`](../docs/CELERY_TASKS.md#failed-task-recovery-ac-31).

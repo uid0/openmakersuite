@@ -697,6 +697,9 @@ class AssetSerializer(serializers.ModelSerializer):
     # Parts/consumables
     parts = AssetPartSerializer(source="asset_parts", many=True, read_only=True)
 
+    # Power / electrical computed flag
+    is_forgekey_managed = serializers.ReadOnlyField()
+
     class Meta:
         model = Asset
         fields = [
@@ -741,6 +744,21 @@ class AssetSerializer(serializers.ModelSerializer):
             "needs_ventilation",
             "is_chargeable",
             "mac_address",
+            # Power / electrical
+            "power_draw_watts",
+            "wiring_type",
+            "suite",
+            "electrical_box",
+            "breaker_location",
+            "has_interlock",
+            "interlock_type",
+            "interlock_responsible",
+            "lockout_type",
+            "lockout_instructions",
+            "lockout_responsible",
+            "has_network_drop",
+            "network_drop_location",
+            "is_forgekey_managed",
             # Scanning tracking
             "last_scanned_at",
             # Group ownership
@@ -791,6 +809,7 @@ class AssetSerializer(serializers.ModelSerializer):
             "can_unlock",
             "qr_code_url",
             "qr_code_scan_url",
+            "is_forgekey_managed",
             "created_at",
             "updated_at",
         ]

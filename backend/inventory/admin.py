@@ -857,6 +857,31 @@ class AssetAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Power & Electrical",
+            {
+                "fields": (
+                    "power_draw_watts",
+                    "wiring_type",
+                    "suite",
+                    "electrical_box",
+                    "breaker_location",
+                    "has_interlock",
+                    "interlock_type",
+                    "interlock_responsible",
+                    "lockout_type",
+                    "lockout_instructions",
+                    "lockout_responsible",
+                    "has_network_drop",
+                    "network_drop_location",
+                ),
+                "description": (
+                    "How this asset is powered, where its breaker lives, and how to "
+                    "lock it out for service. Surfaced on printed work orders so the "
+                    "tech can lock out and verify before working on the device."
+                ),
+            },
+        ),
+        (
             "Ownership",
             {
                 "fields": (

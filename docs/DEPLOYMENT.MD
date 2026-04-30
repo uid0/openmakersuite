@@ -2,6 +2,10 @@
 
 This guide explains how to deploy the application to `dallas.openmakersuite.net`.
 
+For day-2 operations (manual builds, migrations, backups, restores, log
+inspection, upgrades, and rollbacks) see the
+[Docker Compose Operations Runbook](../deploy/COMPOSE_RUNBOOK.md).
+
 ## Architecture
 
 The production setup uses:

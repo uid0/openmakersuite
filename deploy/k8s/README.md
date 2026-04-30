@@ -116,6 +116,14 @@ images:
 | Postgres   | `pg_isready` against the configured user/database |
 | Redis      | `redis-cli ping`                                  |
 
+## Smoke tests
+
+After applying the manifests and running the migrations Job, walk through
+[`../SMOKE_TESTS.md`](../SMOKE_TESTS.md) — eight curl-based checks plus a
+short browser pass that cover frontend, backend health, API docs, admin,
+DB, Redis, static/media, and the unauthenticated public endpoints. Anything
+red there is a failed deploy.
+
 ## When to use this vs the Helm chart
 
 - **Helm chart** (`deploy/helm/openmakersuite/`) — preferred for installs

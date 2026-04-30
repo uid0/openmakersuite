@@ -87,6 +87,14 @@ The bundled Postgres password works the same way: set
 hook by default. Set `migrations.useHooks=false` to ship it as a regular Job
 instead, or `migrations.enabled=false` to skip it entirely.
 
+## Smoke tests
+
+After `helm install`/`upgrade` finishes and the migrations hook completes,
+walk through [`../../SMOKE_TESTS.md`](../../SMOKE_TESTS.md) — eight
+curl-based checks plus a short browser pass covering frontend, backend
+health, API docs, admin, DB, Redis, static/media, and the unauthenticated
+public endpoints. Anything red there is a failed release.
+
 ## Validating local changes
 
 ```bash

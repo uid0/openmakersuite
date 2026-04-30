@@ -912,7 +912,7 @@ class TestPurchaseOrderMarkDelivered:
         response = client.post(url, {}, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "delivery_date" in response.data
+        assert "delivery_date" in response.data["error"]["details"]
 
     def test_mark_delivered_requires_authentication(self, api_client):
         """AC-1: unauthenticated request must be rejected."""

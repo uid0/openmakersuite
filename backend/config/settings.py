@@ -183,6 +183,10 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+    # AC-7: route every DRF exception through the standardized error envelope
+    # so frontend / integration clients can switch on ``error.code``. See
+    # docs/API_ERROR_CONTRACT.md for the documented shape.
+    "EXCEPTION_HANDLER": "config.api_errors.standardized_exception_handler",
 }
 
 # JWT Token Configuration

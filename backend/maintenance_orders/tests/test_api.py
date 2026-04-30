@@ -80,7 +80,7 @@ class TestThirdPartyWorkOrderAPI:
             format="json",
         )
         assert resp.status_code == 400
-        assert "asset" in resp.json()
+        assert "asset" in resp.json()["error"]["details"]
 
     def test_emergency_work_order_can_skip_asset(self, admin_client, vendor):
         client, _ = admin_client

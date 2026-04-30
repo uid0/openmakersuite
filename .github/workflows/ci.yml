@@ -163,6 +163,34 @@ jobs:
           ALLOWED_HOSTS: localhost,127.0.0.1
           REDIS_URL: redis://localhost:6379/0
 
+      - name: Validate OpenAPI schema (AC-10)
+        run: |
+          # Generate the schema with structural OpenAPI 3 validation. A
+          # validation failure exits non-zero and fails this job. The
+          # backend test suite (config/tests/test_schema.py) additionally
+          # asserts that critical workflow paths remain in the contract.
+          cd backend
+          python manage.py spectacular \
+            --validate \
+            --file /tmp/openapi-schema.yaml
+          # Sanity check: a non-empty file means generation succeeded.
+          test -s /tmp/openapi-schema.yaml
+          echo "✅ OpenAPI schema generated and validated ($(wc -c < /tmp/openapi-schema.yaml) bytes)"
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
+          SECRET_KEY: test-secret-key-for-ci-only
+          DEBUG: 1
+          ALLOWED_HOSTS: localhost,127.0.0.1
+          REDIS_URL: redis://localhost:6379/0
+
+      - name: Upload OpenAPI schema artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-schema
+          path: /tmp/openapi-schema.yaml
+          if-no-files-found: ignore
+
       - name: Verify coverage file exists
         run: |
           if [ ! -f backend/coverage.xml ]; then

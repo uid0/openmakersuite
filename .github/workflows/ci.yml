@@ -320,11 +320,184 @@ jobs:
             backend/bandit-report.json
             backend/safety-report.json
 
+  deploy-validation:
+    name: Deploy Validation (Helm + K8s)
+    runs-on: ubuntu-latest
+
+    env:
+      HELM_VERSION: v3.16.2
+      KUBECONFORM_VERSION: 0.6.7
+      KUBE_VERSION: "1.29.0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+          kubeconform -v
+
+      - name: helm lint (strict)
+        run: helm lint --strict deploy/helm/openmakersuite
+
+      - name: helm template — render configurations
+        run: |
+          mkdir -p /tmp/render
+          CHART=deploy/helm/openmakersuite
+
+          echo "::group::default (bundled DB + Redis)"
+          helm template oms "$CHART" > /tmp/render/helm-default.yaml
+          echo "::endgroup::"
+
+          echo "::group::external database"
+          helm template oms "$CHART" \
+            --set postgresql.enabled=false \
+            --set externalDatabase.url=postgresql://oms:secret@db.example.com:5432/oms \
+            > /tmp/render/helm-extdb.yaml
+          echo "::endgroup::"
+
+          echo "::group::external redis"
+          helm template oms "$CHART" \
+            --set redis.enabled=false \
+            --set externalRedis.url=redis://redis.example.com:6379/0 \
+            > /tmp/render/helm-extredis.yaml
+          echo "::endgroup::"
+
+          echo "::group::ingress enabled"
+          helm template oms "$CHART" \
+            --set ingress.enabled=true \
+            --set ingress.className=nginx \
+            > /tmp/render/helm-ingress.yaml
+          echo "::endgroup::"
+
+          echo "::group::persistence disabled"
+          helm template oms "$CHART" \
+            --set persistence.static.enabled=false \
+            --set persistence.media.enabled=false \
+            > /tmp/render/helm-nopersist.yaml
+          echo "::endgroup::"
+
+          for f in /tmp/render/helm-*.yaml; do
+            test -s "$f" || { echo "❌ empty render: $f"; exit 1; }
+          done
+
+      - name: helm template — assert configuration shape
+        run: |
+          fail=0
+          assert_kind_count() {
+            local file="$1" kind="$2" expected="$3"
+            local actual
+            actual=$(grep -cE "^kind: ${kind}\$" "$file" || true)
+            if [ "$actual" != "$expected" ]; then
+              echo "❌ $file: expected $expected '$kind' resource(s), got $actual"
+              fail=1
+            else
+              echo "✓ $file: $actual '$kind' resource(s)"
+            fi
+          }
+
+          # Default: bundled postgres StatefulSet, no Ingress, both PVCs present.
+          assert_kind_count /tmp/render/helm-default.yaml StatefulSet 1
+          assert_kind_count /tmp/render/helm-default.yaml Ingress 0
+          assert_kind_count /tmp/render/helm-default.yaml PersistentVolumeClaim 2
+
+          # External DB: no bundled StatefulSet.
+          assert_kind_count /tmp/render/helm-extdb.yaml StatefulSet 0
+
+          # External Redis: bundled redis Deployment is gone. Verify by name.
+          if awk '/^kind: Deployment$/{f=1; next} /^---$/{f=0} f && /^  name: .*-redis$/' \
+               /tmp/render/helm-extredis.yaml | grep -q .; then
+            echo "❌ helm-extredis.yaml: bundled redis Deployment is still present"
+            fail=1
+          else
+            echo "✓ helm-extredis.yaml: bundled redis Deployment removed"
+          fi
+
+          # Ingress enabled: exactly one Ingress resource.
+          assert_kind_count /tmp/render/helm-ingress.yaml Ingress 1
+
+          # Persistence disabled: no PVCs.
+          assert_kind_count /tmp/render/helm-nopersist.yaml PersistentVolumeClaim 0
+
+          exit $fail
+
+      - name: kubectl kustomize — render k8s bundles
+        run: |
+          mkdir -p /tmp/render
+          kubectl kustomize deploy/k8s/base \
+            > /tmp/render/k8s-base.yaml
+          kubectl kustomize deploy/k8s/overlays/external-services \
+            > /tmp/render/k8s-external.yaml
+
+          for f in /tmp/render/k8s-*.yaml; do
+            test -s "$f" || { echo "❌ empty render: $f"; exit 1; }
+          done
+
+      - name: kubectl kustomize — assert overlay shape
+        run: |
+          fail=0
+          # Base bundle ships a postgres StatefulSet; overlay should drop it.
+          base_ss=$(grep -cE "^kind: StatefulSet\$" /tmp/render/k8s-base.yaml || true)
+          ext_ss=$(grep -cE "^kind: StatefulSet\$" /tmp/render/k8s-external.yaml || true)
+          if [ "$base_ss" -lt 1 ]; then
+            echo "❌ k8s base bundle is missing the postgres StatefulSet (got $base_ss)"
+            fail=1
+          fi
+          if [ "$ext_ss" != "0" ]; then
+            echo "❌ external-services overlay still emits a StatefulSet (got $ext_ss)"
+            fail=1
+          fi
+
+          # Overlay should drop the bundled redis Deployment too.
+          if awk '/^kind: Deployment$/{f=1; next} /^---$/{f=0} f && /^  name: .*-redis$/' \
+               /tmp/render/k8s-external.yaml | grep -q .; then
+            echo "❌ external-services overlay still emits a redis Deployment"
+            fail=1
+          fi
+
+          [ "$fail" = 0 ] && echo "✓ external-services overlay drops bundled DB + Redis workloads"
+          exit $fail
+
+      - name: kubeconform — validate all rendered manifests
+        run: |
+          # Validate every render against the targeted Kubernetes version.
+          # `-strict` flags duplicate/unknown fields; `-ignore-missing-schemas`
+          # only kicks in for CRDs, none of which we ship from these manifests.
+          kubeconform \
+            -strict \
+            -ignore-missing-schemas \
+            -kubernetes-version "${KUBE_VERSION}" \
+            -summary \
+            /tmp/render/helm-default.yaml \
+            /tmp/render/helm-extdb.yaml \
+            /tmp/render/helm-extredis.yaml \
+            /tmp/render/helm-ingress.yaml \
+            /tmp/render/helm-nopersist.yaml \
+            /tmp/render/k8s-base.yaml \
+            /tmp/render/k8s-external.yaml
+
+      - name: Upload rendered manifests on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-renders
+          path: /tmp/render/
+
   # Add a final job that signals completion for release workflow
   ci-complete:
     name: ✅ CI Complete
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-tests, docker-build, security]
+    needs: [backend-tests, frontend-tests, docker-build, security, deploy-validation]
     if: always()
     steps:
       - name: Check all jobs succeeded
@@ -333,7 +506,8 @@ jobs:
           if [[ "${{ needs.backend-tests.result }}" == "success" && \
                 "${{ needs.frontend-tests.result }}" == "success" && \
                 "${{ needs.docker-build.result }}" == "success" && \
-                "${{ needs.security.result }}" == "success" ]]; then
+                "${{ needs.security.result }}" == "success" && \
+                "${{ needs.deploy-validation.result }}" == "success" ]]; then
             echo "✅ All CI checks passed - ready for release!"
             exit 0
           else
@@ -342,5 +516,6 @@ jobs:
             echo "  Frontend: ${{ needs.frontend-tests.result }}"
             echo "  Docker: ${{ needs.docker-build.result }}"
             echo "  Security: ${{ needs.security.result }}"
+            echo "  Deploy: ${{ needs.deploy-validation.result }}"
             exit 1
           fi

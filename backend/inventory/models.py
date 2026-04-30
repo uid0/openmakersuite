@@ -1125,6 +1125,140 @@ class Asset(models.Model):
         help_text="MAC address for electronic/networked assets (e.g., AA:BB:CC:11:22:33).",
     )
 
+    # Power & electrical tracking
+    WIRING_120V_PLUG = "120v_plug"
+    WIRING_240V_PLUG = "240v_plug"
+    WIRING_HARDWIRED = "hardwired"
+    WIRING_BATTERY = "battery"
+    WIRING_PNEUMATIC = "pneumatic"
+    WIRING_NONE = "none"
+    WIRING_UNKNOWN = "unknown"
+
+    WIRING_TYPE_CHOICES = [
+        (WIRING_120V_PLUG, "120V Plug"),
+        (WIRING_240V_PLUG, "240V Plug"),
+        (WIRING_HARDWIRED, "Hardwired"),
+        (WIRING_BATTERY, "Battery"),
+        (WIRING_PNEUMATIC, "Pneumatic / non-electric"),
+        (WIRING_NONE, "No power required"),
+        (WIRING_UNKNOWN, "Unknown"),
+    ]
+
+    power_draw_watts = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Rated power draw in watts (nameplate rating, when known).",
+    )
+    wiring_type = models.CharField(
+        max_length=20,
+        choices=WIRING_TYPE_CHOICES,
+        default=WIRING_UNKNOWN,
+        blank=True,
+        help_text="How this asset is wired or supplied with power.",
+    )
+    suite = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Suite or area of the building where this asset's power drop originates.",
+    )
+    electrical_box = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Electrical box / panel enclosure that supplies this asset.",
+    )
+    breaker_location = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Specific breaker label / number serving this asset (e.g., 'Panel A, Breaker 12').",
+    )
+
+    # Interlock tracking
+    INTERLOCK_NONE = "none"
+    INTERLOCK_FORGEKEY = "forgekey"
+    INTERLOCK_KEY_SWITCH = "key_switch"
+    INTERLOCK_E_STOP = "e_stop"
+    INTERLOCK_CONTACTOR = "contactor"
+    INTERLOCK_OTHER = "other"
+    INTERLOCK_UNKNOWN = "unknown"
+
+    INTERLOCK_TYPE_CHOICES = [
+        (INTERLOCK_NONE, "None"),
+        (INTERLOCK_FORGEKEY, "ForgeKey-controlled"),
+        (INTERLOCK_KEY_SWITCH, "Key switch"),
+        (INTERLOCK_E_STOP, "E-Stop"),
+        (INTERLOCK_CONTACTOR, "Contactor / relay"),
+        (INTERLOCK_OTHER, "Other"),
+        (INTERLOCK_UNKNOWN, "Unknown"),
+    ]
+
+    has_interlock = models.BooleanField(
+        default=False,
+        help_text="Whether this asset has a hardware interlock that prevents operation.",
+    )
+    interlock_type = models.CharField(
+        max_length=20,
+        choices=INTERLOCK_TYPE_CHOICES,
+        default=INTERLOCK_UNKNOWN,
+        blank=True,
+        help_text="How the interlock is implemented.",
+    )
+    interlock_responsible = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Person or group responsible for the interlock (when not managed by ForgeKey).",
+    )
+
+    # Lockout / Tagout tracking
+    LOCKOUT_LOTO = "loto"
+    LOCKOUT_PLUG = "plug_lockout"
+    LOCKOUT_BREAKER = "breaker_lockout"
+    LOCKOUT_KEY = "key_lockout"
+    LOCKOUT_VALVE = "valve_lockout"
+    LOCKOUT_FORGEKEY = "forgekey"
+    LOCKOUT_NONE = "none"
+    LOCKOUT_UNKNOWN = "unknown"
+
+    LOCKOUT_TYPE_CHOICES = [
+        (LOCKOUT_LOTO, "LOTO (Lockout / Tagout)"),
+        (LOCKOUT_PLUG, "Plug lockout"),
+        (LOCKOUT_BREAKER, "Breaker lockout"),
+        (LOCKOUT_KEY, "Key lockout"),
+        (LOCKOUT_VALVE, "Valve lockout"),
+        (LOCKOUT_FORGEKEY, "ForgeKey-managed"),
+        (LOCKOUT_NONE, "None"),
+        (LOCKOUT_UNKNOWN, "Unknown"),
+    ]
+
+    lockout_type = models.CharField(
+        max_length=20,
+        choices=LOCKOUT_TYPE_CHOICES,
+        default=LOCKOUT_UNKNOWN,
+        blank=True,
+        help_text="How the asset is locked out for service.",
+    )
+    lockout_instructions = models.TextField(
+        blank=True,
+        help_text="Step-by-step instructions for safely locking out this asset before service.",
+    )
+    lockout_responsible = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Person or group responsible for performing/verifying lockout.",
+    )
+
+    # Network drop tracking
+    has_network_drop = models.BooleanField(
+        default=False,
+        help_text="Whether this asset has a wired network drop nearby.",
+    )
+    network_drop_location = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Where the network drop is located (jack label, switch port, etc.).",
+    )
+
     # Scanning tracking
     last_scanned_at = models.DateTimeField(
         null=True,
@@ -1372,6 +1506,23 @@ class Asset(models.Model):
         return False
 
     # Note: Lock/unlock methods have been moved to forgekey.models.DeviceLockout
+
+    @property
+    def is_forgekey_managed(self) -> bool:
+        """
+        Return True if this asset has at least one ForgeKey AssetDevice
+        configured to control its power, or if the asset is explicitly marked
+        as ForgeKey-controlled via interlock_type / lockout_type.
+        """
+        if self.interlock_type == self.INTERLOCK_FORGEKEY:
+            return True
+        if self.lockout_type == self.LOCKOUT_FORGEKEY:
+            return True
+        try:
+            return self.forgekey_devices.exists()
+        except Exception:
+            # forgekey app may not be installed in some test contexts
+            return False
 
 
 class AssetPart(models.Model):

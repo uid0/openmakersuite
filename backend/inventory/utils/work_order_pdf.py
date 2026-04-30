@@ -96,6 +96,60 @@ class WorkOrderIdField(Flowable):
         )
 
 
+def _build_electrical_rows(asset) -> list:
+    """
+    Build a list of (label, value) rows describing how an asset is powered.
+
+    Returns an empty list when the asset has no electrical / lockout data
+    worth surfacing — the caller uses that to skip the section entirely so
+    paper work orders for non-powered fixtures (e.g., shelves, soap
+    dispensers) stay short.
+    """
+    rows: list = []
+
+    wiring_display = asset.get_wiring_type_display() if asset.wiring_type else ""
+    if asset.wiring_type and asset.wiring_type not in (
+        asset.WIRING_NONE,
+        asset.WIRING_UNKNOWN,
+        "",
+    ):
+        rows.append(["Wiring", wiring_display])
+
+    if asset.power_draw_watts:
+        rows.append(["Rated Power Draw", f"{asset.power_draw_watts} W"])
+
+    if asset.suite:
+        rows.append(["Suite", asset.suite])
+    if asset.electrical_box:
+        rows.append(["Electrical Box", asset.electrical_box])
+    if asset.breaker_location:
+        rows.append(["Breaker", asset.breaker_location])
+    elif asset.circuit:
+        # Fall back to the legacy free-text circuit field when no structured
+        # breaker location has been recorded yet.
+        rows.append(["Circuit", asset.circuit])
+
+    if asset.has_interlock:
+        interlock_label = asset.get_interlock_type_display() if asset.interlock_type else "Yes"
+        rows.append(["Interlock", interlock_label])
+        if asset.interlock_responsible:
+            rows.append(["Interlock Responsible", asset.interlock_responsible])
+
+    if asset.lockout_type and asset.lockout_type not in (
+        asset.LOCKOUT_NONE,
+        asset.LOCKOUT_UNKNOWN,
+        "",
+    ):
+        rows.append(["Lockout Type", asset.get_lockout_type_display()])
+    if asset.lockout_responsible:
+        rows.append(["Lockout Responsible", asset.lockout_responsible])
+
+    if asset.has_network_drop:
+        rows.append(["Network Drop", asset.network_drop_location or "Yes (location not recorded)"])
+
+    return rows
+
+
 def _make_qr_image(url: str, size_inches: float = 1.5) -> Image:
     """Generate a QR code image from a URL."""
     qr = qrcode.QRCode(
@@ -263,6 +317,64 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
     )
     story.append(asset_table)
     story.append(Spacer(1, 8))
+
+    # ── Electrical / Lockout safety section ───────────────────────────────────
+    # Surfaced on every work order whose asset uses power so the tech has the
+    # information needed to lock the device out before touching it. If the
+    # asset is ForgeKey-managed, that is also indicated so the tech knows
+    # power can be cut from the digital console.
+    electrical_rows = _build_electrical_rows(asset)
+    if electrical_rows:
+        story.append(Paragraph("Power &amp; Lockout Safety", subheading_style))
+        if asset.is_forgekey_managed:
+            story.append(
+                Paragraph(
+                    "<b>This asset is managed by ForgeKey.</b> Use the digital "
+                    "console to power the device on/off and verify wiring "
+                    "before performing service.",
+                    small_style,
+                )
+            )
+        else:
+            responsible = asset.interlock_responsible or asset.lockout_responsible
+            if responsible:
+                story.append(
+                    Paragraph(
+                        f"<b>Not managed by ForgeKey.</b> Interlock / lockout "
+                        f"responsibility: {responsible}",
+                        small_style,
+                    )
+                )
+            else:
+                story.append(
+                    Paragraph(
+                        "<b>Not managed by ForgeKey.</b> Confirm interlock "
+                        "responsibility before energizing.",
+                        small_style,
+                    )
+                )
+        electrical_table = Table(
+            electrical_rows,
+            colWidths=[1.7 * inch, 5.5 * inch],
+        )
+        electrical_table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#fff4e0")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("PADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(electrical_table)
+        if asset.lockout_instructions:
+            story.append(Spacer(1, 2))
+            story.append(Paragraph("Lockout Procedure:", label_style))
+            story.append(Paragraph(asset.lockout_instructions, small_style))
+        story.append(Spacer(1, 8))
 
     # ── Task description ──────────────────────────────────────────────────────
     if item.description:

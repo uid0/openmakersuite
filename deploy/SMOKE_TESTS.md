@@ -214,3 +214,8 @@ After the curl checks pass, do a quick manual pass in a browser:
 If all eight automated checks and the three browser checks pass, the deploy
 is smoke-clean. Anything else is a fail — surface the failing check before
 declaring the release healthy.
+
+For upgrades (not first-time installs), run these checks both **before** the
+upgrade (to confirm a clean baseline) and **after** the upgrade per the flow
+in [`UPGRADE_ROLLBACK.md`](./UPGRADE_ROLLBACK.md). A red post-upgrade check
+is the rollback trigger documented there.

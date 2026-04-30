@@ -292,4 +292,5 @@ If every command in your path's block succeeds, the host is ready. Continue
 with [`docs/DEPLOYMENT.MD`](../docs/DEPLOYMENT.MD) for the deploy itself,
 [`deploy/SMOKE_TESTS.md`](./SMOKE_TESTS.md) for post-deploy validation, and
 [`deploy/BACKUP_RESTORE.md`](./BACKUP_RESTORE.md) for the backup/restore
-playbook.
+playbook, and [`deploy/UPGRADE_ROLLBACK.md`](./UPGRADE_ROLLBACK.md) once you
+start upgrading an existing install.

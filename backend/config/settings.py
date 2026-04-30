@@ -83,6 +83,7 @@ INSTALLED_APPS = [
     "maker_boxes",
     "vendors",
     "maintenance_orders",
+    "electrical_circuits",
 ]
 
 MIDDLEWARE = [

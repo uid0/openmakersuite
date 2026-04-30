@@ -402,7 +402,41 @@ The application reads `AWS_STORAGE_BUCKET_NAME` and credentials at startup;
 to point at the restored bucket, update those values in `oms-secrets` (or
 `.env`) and roll the backend.
 
-## 7. Restore drill
+## 7. Post-restore verification (required)
+
+Every restore — whether a real disaster recovery, an upgrade rollback, or
+a quarterly drill — must be followed by the post-restore checklist below.
+A backup that "applied without errors" is not a verified restore until
+each of these is green. Map directly to the [smoke tests](SMOKE_TESTS.md):
+
+| Surface              | Smoke test                | What a restore proves                                                        |
+|----------------------|---------------------------|------------------------------------------------------------------------------|
+| **Frontend SPA**     | §1 in SMOKE_TESTS.md      | The shell loads, branding is restored, frontend bundle is intact.            |
+| **Backend liveness** | §2 dashboard `/health/`   | Backend connects to the restored Postgres, migrations are at the dump's level. |
+| **Admin login**      | §4 admin login            | `SECRET_KEY` survived (sessions valid), restored user table is queryable.    |
+| **Public QR scan**   | §9 public QR / kiosk      | Item lookups resolve against restored inventory data. *AC-25 gate.*          |
+| **Media access**     | §7 static + media         | Restored `/media/` files serve over HTTP without 5xx; uploaded images load.  |
+| **Database**         | §5 pending migrations     | `showmigrations` reports zero pending — schema matches the running code.     |
+| **Workers**          | §6 Celery `inspect ping`  | Worker reaches the restored broker (Redis state is reproducible — only check that the worker is healthy). |
+
+Run the table top-to-bottom. If any row fails, the restore is incomplete:
+
+- Frontend / admin / public QR / media red → restore probably ran but the
+  application can't see it. Check that backend Pods/containers were
+  scaled back up after the restore (§§ 1–3 above scale them to zero) and
+  that the Pod is mounting the same `media` claim/volume the restore
+  wrote into.
+- Database migrations red → backup predates the running code. Run
+  `python manage.py migrate --noinput` *before* re-enabling traffic.
+- Public QR returns 5xx → restored inventory rows are missing or the
+  schema is drifted. Compare `pg_restore` output for table-level errors
+  and reload the dump if needed.
+
+Document the result in the deploy log: backup file, restore start/end
+time, which smoke checks passed, and (for drills) the namespace teardown
+timestamp.
+
+## 8. Restore drill
 
 A backup that has never been restored is a hypothesis, not a backup. At
 least once per quarter:
@@ -411,8 +445,8 @@ least once per quarter:
 2. Restore PostgreSQL into it from the most recent dump.
 3. Restore media into it.
 4. Apply config + secrets manifests pointed at the DR namespace.
-5. Run the [smoke tests](SMOKE_TESTS.md) against `kubectl port-forward` of
-   the DR backend Service.
+5. Run the §7 post-restore verification checklist (every row must pass)
+   against `kubectl port-forward` of the DR backend Service.
 6. If every smoke check passes, the backup chain is healthy. Tear the DR
    namespace down (`kubectl delete ns openmakersuite-dr`).
 

@@ -97,3 +97,4 @@ Thumbs.db
 
 # Per-developer overrides (CLAUDE.md itself is committed — project conventions)
 CLAUDE.local.md
+backend/.venv/

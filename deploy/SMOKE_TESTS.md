@@ -200,6 +200,108 @@ curl -fsS "$SCHEME://$HOST/api/dashboard/inventory-summary/" | jq .
   token, or membership state. If a real visitor would see a broken lobby
   display or an unbranded login page, one of these calls will fail first.
 
+## 9. Public QR / kiosk scan workflow
+
+A real visitor's first interaction with the system is scanning a QR code
+that resolves through `/api/inventory/items/lookup/` (item QRs) or the
+public location-checkin webhook. Both must answer without auth.
+
+```bash
+# Item lookup endpoint (returns 404 with JSON on a fresh deploy — that
+# proves routing + JSON serializer + DB are all working):
+curl -fsS -o /dev/null -w '%{http_code}\n' \
+    "$SCHEME://$HOST/api/inventory/items/lookup/?qr_code=__smoke_test__"
+# → 404 is expected (no such item); 5xx or HTML means routing is broken
+
+# Public location-checkin webhook (returns 503 unless LOCATION_PING_TOKEN is
+# set; either is acceptable, what matters is the route exists):
+curl -fsS -o /dev/null -w '%{http_code}\n' \
+    -X POST "$SCHEME://$HOST/api/location-checkins/webhook/" \
+    -H 'Content-Type: application/json' \
+    --data '{}'
+# → 401, 403, or 503 (intentional gate); 5xx other than 503 = bug
+```
+
+After a backup/restore, the public QR workflow above is the AC-25 gate:
+restored items must lookup-resolve identically to before the restore.
+
+## 10. Scheduled tasks (Celery beat)
+
+Celery beat ships scheduled work for donation updates, vendor compliance
+checks, and retention cleanups. Verify the scheduler registered the entries
+the code expects:
+
+```bash
+# Bundled / k8s
+kubectl -n openmakersuite exec deploy/oms-celery -- \
+    celery -A config inspect scheduled
+kubectl -n openmakersuite exec deploy/oms-celery -- \
+    celery -A config inspect registered | grep -E '(donation|vendor|retention|cleanup)'
+
+# Docker Compose
+docker compose -f docker-compose.prod.yml exec -T celery_worker \
+    celery -A config inspect scheduled
+docker compose -f docker-compose.prod.yml exec -T celery_worker \
+    celery -A config inspect registered | grep -E '(donation|vendor|retention|cleanup)'
+```
+
+- **Pass:** `inspect registered` lists at least the donation, vendor, and
+  retention task names; `inspect scheduled` returns OK (an empty list is
+  fine — it just means none are due in the next interval).
+- **Fail modes:** `inspect` errors out → broker URL or worker config is
+  wrong (see #6); the registered set is missing an expected task →
+  `CELERY_BEAT_SCHEDULE` regression in `backend/config/settings.py`.
+
+## 11. EMQX / MQTT broker
+
+The MQTT broker is part of the product surface (ForgeKey devices, IoT
+location pings). A green deploy must answer on the dashboard, accept TCP
+connections on `1883`, and be reachable from the backend container.
+
+```bash
+# Dashboard reachable through the proxied path (preferred — no host firewall
+# rule required):
+curl -fsS -o /dev/null -w '%{http_code}\n' "$SCHEME://$HOST/mqttadmin/"
+# → 200 (login page) or 302 (redirect to login)
+
+# OR direct dashboard host bind (only works when 18083 is bound on the host):
+curl -fsS -o /dev/null -w '%{http_code}\n' "http://$HOST:18083/"
+
+# Backend can talk to the broker over the docker network:
+docker compose -f docker-compose.prod.yml exec -T backend \
+    python -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('emqx',1883)); print('ok')"
+# → ok
+```
+
+A failure here is usually one of: EMQX dashboard rejected the bootstrap
+admin (check `EMQX_DASHBOARD_PASSWORD` complexity — see deploy.sh / the
+validator), the `mqttadmin` proxy block is missing from
+`nginx/templates/default.conf.template`, or 1883 is firewalled inside the
+docker network.
+
+## 12. Webhook + email configuration
+
+Any deploy that integrates Postmark or SMTP needs the inbound webhook
+gate and the outbound mail backend confirmed. These are config-only checks
+— they fail loudly when env is wrong.
+
+```bash
+# Postmark inbound webhook — should return 503 when token is unset and 401
+# (or 200 on a real Postmark POST) when set. Anything else is a bug.
+curl -sS -o /dev/null -w '%{http_code}\n' \
+    -X POST "$SCHEME://$HOST/api/work-orders/postmark-inbound/" \
+    -H 'Content-Type: application/json' --data '{}'
+
+# Outbound email backend — confirm Django will not silently fall back to the
+# console backend in production:
+docker compose -f docker-compose.prod.yml exec -T backend \
+    python -c 'from django.conf import settings; print(settings.EMAIL_BACKEND)'
+# → must NOT be django.core.mail.backends.console.EmailBackend
+```
+
+`scripts/validate-prod-env.sh` already gates the deploy on `EMAIL_BACKEND`
+not being the console backend; this check is a runtime confirmation.
+
 ## Browser walk-through
 
 After the curl checks pass, do a quick manual pass in a browser:
@@ -210,8 +312,10 @@ After the curl checks pass, do a quick manual pass in a browser:
    the superuser created above.
 3. `$SCHEME://$HOST/api/docs/` — Swagger UI lists endpoints and "Try it out"
    works for `GET /api/dashboard/health/`.
+4. Scan or open one item-detail QR (`$SCHEME://$HOST/items/<id>/`) — the SPA
+   resolves the item and the `/media/` photo URL renders.
 
-If all eight automated checks and the three browser checks pass, the deploy
+If all twelve automated checks and the four browser checks pass, the deploy
 is smoke-clean. Anything else is a fail — surface the failing check before
 declaring the release healthy.
 

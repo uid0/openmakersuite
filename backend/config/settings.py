@@ -285,7 +285,7 @@ DEFAULT_FROM_EMAIL = config(
 # alerts (oms-0yz). Empty disables email alerts.
 LOGISTICS_ALERT_EMAIL = config(
     "LOGISTICS_ALERT_EMAIL",
-    default="logistics@dallasmakerspace.org",
+    default="",
 )
 
 # WHMCS API credentials for the maker box (personal storage bin) verification
@@ -313,7 +313,7 @@ LOCATION_PING_TOKEN = config("LOCATION_PING_TOKEN", default="")
 # content block, so updating the env var changes every screen at once.
 TRAFFIC_URL = config(
     "TRAFFIC_URL",
-    default="https://embed.waze.com/iframe?zoom=14&lat=32.945552&lon=-96.912503&ct=livemap",
+    default="",
 )
 
 # Redis configuration

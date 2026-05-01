@@ -117,8 +117,10 @@ def get_public_key_pem() -> str:
         active = FirmwareSigningKey.get_active()
         if active and active.public_key_pem:
             return active.public_key_pem
-    except Exception:
-        pass
+    except Exception as exc:
+        # DB unavailable / table missing — fall through to deriving from the
+        # loaded private key. We log so an unexpected DB failure isn't silent.
+        logger.warning("Falling back to derived public key: DB lookup failed (%s)", exc)
     pub = load_signing_key().public_key()
     return pub.public_bytes(
         encoding=serialization.Encoding.PEM,

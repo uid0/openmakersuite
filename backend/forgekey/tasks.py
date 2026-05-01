@@ -271,6 +271,65 @@ def process_mqtt_firmware_update_response(
         logger.error(f"Error processing firmware update response from {mac_address}: {e}")
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def trigger_ota(self, device_id: str, firmware_id: str, requested_by_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Publish an OTA trigger to a single device.
+
+    Args:
+        device_id: UUID of the ESP32Device receiving the OTA.
+        firmware_id: UUID of the FirmwareVersion to deploy.
+        requested_by_id: Optional auth user id recorded on the
+            DeviceFirmwareUpdate row.
+
+    Returns a dict describing the dispatched update. Retries on broker
+    rejection; lookup failures are terminal (no retry).
+    """
+    from .models import DeviceFirmwareUpdate, ESP32Device, FirmwareVersion
+    from .services.ota_dispatch import OTADispatchError, publish_ota_trigger
+
+    try:
+        device = ESP32Device.objects.get(id=device_id)
+    except ESP32Device.DoesNotExist:
+        logger.warning("trigger_ota: unknown device_id=%s", device_id)
+        return {"success": False, "error": "device_not_found", "device_id": device_id}
+
+    try:
+        firmware = FirmwareVersion.objects.get(id=firmware_id)
+    except FirmwareVersion.DoesNotExist:
+        logger.warning("trigger_ota: unknown firmware_id=%s", firmware_id)
+        return {"success": False, "error": "firmware_not_found", "firmware_id": firmware_id}
+
+    requested_by = None
+    if requested_by_id is not None:
+        from django.contrib.auth import get_user_model
+
+        try:
+            requested_by = get_user_model().objects.get(pk=requested_by_id)
+        except Exception:
+            requested_by = None
+
+    try:
+        record = publish_ota_trigger(device, firmware, requested_by=requested_by)
+    except OTADispatchError as exc:
+        logger.error("trigger_ota broker failure for device=%s: %s", device.mac_address, exc)
+        # Mark the most recent pending row as failed so an operator can see what happened.
+        DeviceFirmwareUpdate.objects.filter(
+            device=device,
+            firmware_version=firmware,
+            status=DeviceFirmwareUpdate.STATUS_PENDING,
+        ).order_by("-requested_at").first()
+        raise self.retry(exc=exc)
+
+    return {
+        "success": True,
+        "device_id": str(device.id),
+        "mac_address": device.mac_address,
+        "firmware_id": str(firmware.id),
+        "update_id": str(record.id),
+    }
+
+
 @shared_task
 def prune_device_photos(retention_days: int = 30) -> Dict[str, Any]:
     """

@@ -237,13 +237,20 @@ class FirmwareVersionAdmin(admin.ModelAdmin):
     search_fields = ["version", "device_type__name", "release_notes", "sha256"]
     readonly_fields = ["id", "created_at", "sha256"]
     raw_id_fields = ["device_type", "created_by"]
-    actions = ["dispatch_firmware_update"]
+    actions = ["dispatch_firmware_update", "deploy_ota_to_fleet"]
+
+    def save_model(self, request, obj, form, change):
+        # Mirror the legacy ``created_by`` field into the AC-1 "uploaded_by"
+        # contract: whoever clicks Save in the admin owns the upload.
+        if not change and obj.created_by_id is None and request.user.is_authenticated:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
 
     @admin.display(description="SHA-256 (short)")
     def sha256_short(self, obj):
         return obj.sha256[:12] if obj.sha256 else "—"
 
-    @admin.action(description="Dispatch firmware update via MQTT")
+    @admin.action(description="Dispatch firmware update via MQTT (retained advert)")
     def dispatch_firmware_update(self, request, queryset):
         from .services.firmware_dispatch import dispatch_to_device_type
 
@@ -254,6 +261,34 @@ class FirmwareVersionAdmin(admin.ModelAdmin):
         self.message_user(
             request,
             f"Dispatched {queryset.count()} firmware version(s) to {total} device(s).",
+            level=messages.SUCCESS,
+        )
+
+    @admin.action(description="Deploy OTA to fleet (one-shot trigger per matching device)")
+    def deploy_ota_to_fleet(self, request, queryset):
+        """Queue a ``trigger_ota`` celery task per active device whose
+        ``device_type`` matches the firmware. Each device receives a one-shot
+        signed-URL trigger on ``forgekey/<mac>/ota/trigger`` and is expected
+        to report back on ``forgekey/<mac>/ota/status``."""
+        from .models import ESP32Device
+        from .tasks import trigger_ota
+
+        firmware_count = 0
+        device_count = 0
+        for firmware in queryset:
+            firmware_count += 1
+            device_ids = list(
+                ESP32Device.objects.filter(
+                    device_type=firmware.device_type, is_active=True
+                ).values_list("id", flat=True)
+            )
+            for device_id in device_ids:
+                trigger_ota.delay(str(device_id), str(firmware.id), request.user.id)
+                device_count += 1
+        self.message_user(
+            request,
+            f"Queued OTA triggers for {device_count} device(s) across "
+            f"{firmware_count} firmware version(s).",
             level=messages.SUCCESS,
         )
 

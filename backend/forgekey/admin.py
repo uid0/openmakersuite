@@ -2,7 +2,12 @@
 Admin interface for ForgeKey models.
 """
 
+import logging
+
+from django import forms
 from django.contrib import admin, messages
+from django.db import transaction
+from django.utils import timezone
 from django.utils.html import format_html
 
 from .models import (
@@ -14,10 +19,18 @@ from .models import (
     DeviceUsage,
     ESP32Device,
     ESP32DevicePhoto,
+    FirmwareSigningKey,
     FirmwareVersion,
     OperationalMode,
     PowerMeterReading,
 )
+from .services.firmware_signing import (
+    FirmwareSigningError,
+    derive_public_pem,
+    generate_signing_keypair,
+)
+
+audit_logger = logging.getLogger("forgekey.audit")
 
 
 @admin.register(DeviceType)
@@ -237,13 +250,20 @@ class FirmwareVersionAdmin(admin.ModelAdmin):
     search_fields = ["version", "device_type__name", "release_notes", "sha256"]
     readonly_fields = ["id", "created_at", "sha256"]
     raw_id_fields = ["device_type", "created_by"]
-    actions = ["dispatch_firmware_update"]
+    actions = ["dispatch_firmware_update", "deploy_ota_to_fleet"]
+
+    def save_model(self, request, obj, form, change):
+        # Mirror the legacy ``created_by`` field into the AC-1 "uploaded_by"
+        # contract: whoever clicks Save in the admin owns the upload.
+        if not change and obj.created_by_id is None and request.user.is_authenticated:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
 
     @admin.display(description="SHA-256 (short)")
     def sha256_short(self, obj):
         return obj.sha256[:12] if obj.sha256 else "—"
 
-    @admin.action(description="Dispatch firmware update via MQTT")
+    @admin.action(description="Dispatch firmware update via MQTT (retained advert)")
     def dispatch_firmware_update(self, request, queryset):
         from .services.firmware_dispatch import dispatch_to_device_type
 
@@ -254,6 +274,34 @@ class FirmwareVersionAdmin(admin.ModelAdmin):
         self.message_user(
             request,
             f"Dispatched {queryset.count()} firmware version(s) to {total} device(s).",
+            level=messages.SUCCESS,
+        )
+
+    @admin.action(description="Deploy OTA to fleet (one-shot trigger per matching device)")
+    def deploy_ota_to_fleet(self, request, queryset):
+        """Queue a ``trigger_ota`` celery task per active device whose
+        ``device_type`` matches the firmware. Each device receives a one-shot
+        signed-URL trigger on ``forgekey/<mac>/ota/trigger`` and is expected
+        to report back on ``forgekey/<mac>/ota/status``."""
+        from .models import ESP32Device
+        from .tasks import trigger_ota
+
+        firmware_count = 0
+        device_count = 0
+        for firmware in queryset:
+            firmware_count += 1
+            device_ids = list(
+                ESP32Device.objects.filter(
+                    device_type=firmware.device_type, is_active=True
+                ).values_list("id", flat=True)
+            )
+            for device_id in device_ids:
+                trigger_ota.delay(str(device_id), str(firmware.id), request.user.id)
+                device_count += 1
+        self.message_user(
+            request,
+            f"Queued OTA triggers for {device_count} device(s) across "
+            f"{firmware_count} firmware version(s).",
             level=messages.SUCCESS,
         )
 
@@ -274,3 +322,173 @@ class DeviceFirmwareUpdateAdmin(admin.ModelAdmin):
     search_fields = ["device__mac_address", "device__name", "firmware_version__version"]
     readonly_fields = ["id", "requested_at"]
     raw_id_fields = ["device", "firmware_version", "requested_by"]
+
+
+class FirmwareSigningKeyForm(forms.ModelForm):
+    """Form for uploading or generating a new firmware signing keypair.
+
+    Two modes are supported, mutually exclusive:
+      * ``private_key_pem`` filled in — operator pasted an externally
+        generated P-256 PKCS#8 PEM. The form derives the matching public
+        key and encrypts the private PEM with the SECRET_KEY-derived KEK.
+      * ``generate_new`` checked — server generates a fresh P-256 keypair
+        on save (private PEM never crosses the form).
+    """
+
+    private_key_pem = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 8, "cols": 80, "style": "font-family: monospace;"}),
+        required=False,
+        help_text=(
+            "Paste a PKCS#8 PEM-encoded ECDSA(P-256) private key. "
+            "Leave blank and tick 'Generate new keypair' to have the server create one."
+        ),
+    )
+    generate_new = forms.BooleanField(
+        required=False,
+        help_text=(
+            "Generate a fresh P-256 keypair on the server. "
+            "Tick this OR paste a private key — not both."
+        ),
+    )
+
+    class Meta:
+        model = FirmwareSigningKey
+        fields = ["label", "description", "is_active"]
+
+    def clean(self):
+        cleaned = super().clean()
+        private_pem = (cleaned.get("private_key_pem") or "").strip()
+        generate_new = bool(cleaned.get("generate_new"))
+
+        if self.instance.pk:
+            # Editing an existing row — uploads aren't allowed via this form;
+            # operators rotate by creating a new row instead.
+            return cleaned
+
+        if private_pem and generate_new:
+            raise forms.ValidationError(
+                "Provide a private key OR tick 'Generate new keypair', not both."
+            )
+        if not private_pem and not generate_new:
+            raise forms.ValidationError(
+                "Either paste a private key PEM or tick 'Generate new keypair'."
+            )
+
+        if private_pem:
+            try:
+                public_pem = derive_public_pem(private_pem)
+            except FirmwareSigningError as exc:
+                raise forms.ValidationError(f"Invalid signing key: {exc}") from exc
+            cleaned["_resolved_private_pem"] = private_pem
+            cleaned["_resolved_public_pem"] = public_pem
+        else:
+            generated_private, generated_public = generate_signing_keypair()
+            cleaned["_resolved_private_pem"] = generated_private
+            cleaned["_resolved_public_pem"] = generated_public
+        return cleaned
+
+
+@admin.register(FirmwareSigningKey)
+class FirmwareSigningKeyAdmin(admin.ModelAdmin):
+    """Admin for ECDSA(P-256) firmware signing keypairs.
+
+    Saving a row that is_active=True deactivates every other active row in
+    the same transaction; the prior key gets rotated_at / rotated_by set
+    so operators can audit when a key was retired and by whom.
+    """
+
+    form = FirmwareSigningKeyForm
+    list_display = [
+        "label",
+        "is_active",
+        "created_at",
+        "created_by",
+        "rotated_at",
+        "rotated_by",
+    ]
+    list_filter = ["is_active", "created_at"]
+    search_fields = ["label", "description"]
+    readonly_fields = [
+        "id",
+        "public_key_pem",
+        "created_at",
+        "created_by",
+        "rotated_at",
+        "rotated_by",
+    ]
+    fields = (
+        "id",
+        "label",
+        "description",
+        "is_active",
+        "private_key_pem",
+        "generate_new",
+        "public_key_pem",
+        "created_at",
+        "created_by",
+        "rotated_at",
+        "rotated_by",
+    )
+
+    def has_change_permission(self, request, obj=None):
+        # Existing rows are intentionally read-mostly; rotation happens by
+        # creating a new row. Allow toggling is_active (e.g., emergency
+        # disable) but not editing the keypair itself.
+        return super().has_change_permission(request, obj)
+
+    def get_readonly_fields(self, request, obj=None):
+        ro = list(super().get_readonly_fields(request, obj))
+        if obj is not None:
+            # Once written, the encrypted private PEM is immutable — operators
+            # rotate by adding a new row.
+            ro.extend(["label", "private_key_pem", "generate_new"])
+        return ro
+
+    def save_model(self, request, obj, form, change):
+        cleaned = form.cleaned_data
+        if not change:
+            private_pem = cleaned.get("_resolved_private_pem")
+            public_pem = cleaned.get("_resolved_public_pem")
+            if not private_pem or not public_pem:
+                raise forms.ValidationError("Internal error: signing key not resolved.")
+            obj.public_key_pem = public_pem
+            obj.private_key_pem_encrypted = FirmwareSigningKey.encrypt_private_pem(private_pem)
+            if obj.created_by_id is None and request.user.is_authenticated:
+                obj.created_by = request.user
+
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+            if obj.is_active:
+                # Deactivate every other active row.
+                others = FirmwareSigningKey.objects.filter(is_active=True).exclude(pk=obj.pk)
+                affected = list(others.values_list("pk", "label"))
+                others.update(
+                    is_active=False,
+                    rotated_at=timezone.now(),
+                    rotated_by=request.user if request.user.is_authenticated else None,
+                )
+                for pk, label in affected:
+                    audit_logger.info(
+                        "forgekey.firmware_signing_key.rotated retired_id=%s "
+                        "retired_label=%s replacement_id=%s replacement_label=%s "
+                        "actor_id=%s actor_username=%s",
+                        pk,
+                        label,
+                        obj.pk,
+                        obj.label,
+                        getattr(request.user, "id", None),
+                        getattr(request.user, "username", None),
+                    )
+                audit_logger.info(
+                    "forgekey.firmware_signing_key.activated id=%s label=%s "
+                    "actor_id=%s actor_username=%s",
+                    obj.pk,
+                    obj.label,
+                    getattr(request.user, "id", None),
+                    getattr(request.user, "username", None),
+                )
+
+    def has_delete_permission(self, request, obj=None):
+        # Block deletion entirely — keypairs must be retired (is_active=False),
+        # not removed, so the audit history stays intact.
+        return False

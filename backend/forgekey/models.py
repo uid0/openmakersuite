@@ -811,6 +811,88 @@ class OccupancyEvent(models.Model):
         return max(delta, 0)
 
 
+class FirmwareSigningKey(models.Model):
+    """
+    Database-managed ECDSA(P-256) firmware signing keypair.
+
+    The private key PEM is encrypted at rest with Fernet using a KEK
+    derived from ``settings.SECRET_KEY`` (see
+    ``forgekey.services.firmware_signing._fernet``); the public key is
+    stored in cleartext so build pipelines and the public-key endpoint
+    can serve it without unwrapping the secret. Only one row may be
+    active at a time — rotation deactivates the prior active key in the
+    same transaction. The legacy ``FORGEKEY_FIRMWARE_SIGNING_KEY``
+    environment variable is consulted as a fallback when no active row
+    exists, so existing deployments keep working without a data
+    migration.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    label = models.CharField(
+        max_length=120,
+        help_text="Human-readable label for this keypair (e.g., 'prod-2026-q2').",
+    )
+    public_key_pem = models.TextField(
+        help_text="PEM-encoded SubjectPublicKeyInfo. Embedded into firmware builds.",
+    )
+    private_key_pem_encrypted = models.BinaryField(
+        help_text="Fernet ciphertext of the PEM-encoded private key.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this keypair is the one used to sign new firmware.",
+    )
+    description = models.TextField(blank=True, help_text="Free-form notes for operators.")
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="firmware_signing_keys_created",
+        help_text="User who uploaded / generated this keypair",
+    )
+    rotated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this key was retired (set automatically on rotation).",
+    )
+    rotated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="firmware_signing_keys_rotated",
+        help_text="User who retired this key",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["is_active", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        flag = "active" if self.is_active else "retired"
+        return f"{self.label} [{flag}]"
+
+    def decrypt_private_pem(self) -> str:
+        from .services.firmware_signing import _fernet
+
+        ciphertext = bytes(self.private_key_pem_encrypted)
+        return _fernet().decrypt(ciphertext).decode("utf-8")
+
+    @classmethod
+    def encrypt_private_pem(cls, pem: str) -> bytes:
+        from .services.firmware_signing import _fernet
+
+        return _fernet().encrypt(pem.encode("utf-8"))
+
+    @classmethod
+    def get_active(cls) -> Optional["FirmwareSigningKey"]:
+        return cls.objects.filter(is_active=True).order_by("-created_at").first()
+
+
 class DeviceFirmwareUpdate(models.Model):
     """
     Tracks firmware update requests and status for ESP32 devices.

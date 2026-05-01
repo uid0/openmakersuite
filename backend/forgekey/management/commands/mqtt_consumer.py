@@ -29,7 +29,7 @@ from django.utils import timezone as dj_timezone
 
 import paho.mqtt.client as mqtt
 
-from forgekey.models import ESP32Device, OccupancyEvent
+from forgekey.models import DeviceFirmwareUpdate, ESP32Device, OccupancyEvent
 from forgekey.utils import normalize_mac_address, normalize_sensor_kind
 
 logger = logging.getLogger(__name__)
@@ -185,6 +185,99 @@ def handle_status_message(topic: str, payload: bytes) -> bool:
     return True
 
 
+def handle_ota_status_message(topic: str, payload: bytes) -> bool:
+    """Apply an inbound OTA status report to the matching DeviceFirmwareUpdate.
+
+    Expected payload shape (firmware contract — fo-e68):
+      ``{"update_id": "<uuid>", "status": "in_progress|completed|failed",
+         "error_message": "<optional>", "version": "<optional>"}``
+
+    Returns ``True`` if a row was updated, ``False`` if dropped.
+    """
+    parts = topic.split("/")
+    if len(parts) < 4:
+        logger.warning("Dropping OTA status message: malformed topic %r", topic)
+        return False
+    mac = _mac_from_topic_segment(parts[1])
+    if mac is None:
+        logger.warning("Dropping OTA status message: bad MAC segment %r in %r", parts[1], topic)
+        return False
+
+    try:
+        body = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning("Dropping OTA status on %s: invalid JSON (%s)", topic, exc)
+        return False
+    if not isinstance(body, dict):
+        logger.warning("Dropping OTA status on %s: payload is not an object", topic)
+        return False
+
+    update_id = body.get("update_id")
+    status_value = (body.get("status") or "").lower()
+    if not update_id or not status_value:
+        logger.warning("Dropping OTA status on %s: missing update_id/status", topic)
+        return False
+
+    try:
+        device = ESP32Device.objects.get(mac_address=mac)
+    except ESP32Device.DoesNotExist:
+        logger.info("Dropping OTA status: unknown MAC %s on topic %s", mac, topic)
+        return False
+
+    try:
+        update = DeviceFirmwareUpdate.objects.select_related("firmware_version").get(
+            id=update_id, device=device
+        )
+    except DeviceFirmwareUpdate.DoesNotExist:
+        logger.info(
+            "Dropping OTA status: no DeviceFirmwareUpdate for device=%s update_id=%s",
+            mac,
+            update_id,
+        )
+        return False
+
+    error_message = body.get("error_message") or body.get("error") or ""
+    progress = body.get("progress")
+
+    if status_value in ("started", "in_progress", "downloading", "applying"):
+        update.status = DeviceFirmwareUpdate.STATUS_IN_PROGRESS
+        if update.started_at is None:
+            update.started_at = dj_timezone.now()
+    elif status_value in ("completed", "success", "applied"):
+        update.status = DeviceFirmwareUpdate.STATUS_COMPLETED
+        update.completed_at = dj_timezone.now()
+        applied_version = body.get("version") or update.firmware_version.version
+        if isinstance(applied_version, str) and applied_version:
+            ESP32Device.objects.filter(pk=device.pk).update(firmware_version=applied_version)
+    elif status_value in ("failed", "error", "rejected"):
+        update.status = DeviceFirmwareUpdate.STATUS_FAILED
+        update.completed_at = dj_timezone.now()
+        if error_message:
+            update.error_message = str(error_message)[:2000]
+    elif status_value in ("cancelled", "canceled"):
+        update.status = DeviceFirmwareUpdate.STATUS_CANCELLED
+        update.completed_at = dj_timezone.now()
+    else:
+        logger.info(
+            "OTA status %r on %s for update_id=%s — no state change",
+            status_value,
+            topic,
+            update_id,
+        )
+        return False
+
+    update.save()
+    if progress is not None:
+        logger.info(
+            "OTA progress device=%s update=%s status=%s progress=%s",
+            mac,
+            update.id,
+            status_value,
+            progress,
+        )
+    return True
+
+
 def _topic_matches_occupancy(topic: str) -> bool:
     parts = topic.split("/")
     return len(parts) == 4 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[3] == "occupancy"
@@ -195,6 +288,16 @@ def _topic_matches_status(topic: str) -> bool:
     return len(parts) == 3 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[2] == "status"
 
 
+def _topic_matches_ota_status(topic: str) -> bool:
+    parts = topic.split("/")
+    return (
+        len(parts) == 4
+        and parts[0] == settings.MQTT_TOPIC_PREFIX
+        and parts[2] == "ota"
+        and parts[3] == "status"
+    )
+
+
 def dispatch_message(topic: str, payload: bytes) -> None:
     """Route an inbound MQTT message to the appropriate handler.
 
@@ -202,7 +305,9 @@ def dispatch_message(topic: str, payload: bytes) -> None:
     network loop. Used by the paho ``on_message`` callback and by tests.
     """
     try:
-        if _topic_matches_occupancy(topic):
+        if _topic_matches_ota_status(topic):
+            handle_ota_status_message(topic, payload)
+        elif _topic_matches_occupancy(topic):
             handle_occupancy_message(topic, payload)
         elif _topic_matches_status(topic):
             handle_status_message(topic, payload)
@@ -246,19 +351,27 @@ class Command(BaseCommand):
 
         occupancy_filter = f"{prefix}/+/+/occupancy"
         status_filter = f"{prefix}/+/status"
+        ota_status_filter = f"{prefix}/+/ota/status"
 
         def on_connect(c, userdata, flags, rc, properties=None):
             if rc != 0:
                 logger.error("MQTT consumer connect failed rc=%s", rc)
                 return
             logger.info(
-                "MQTT consumer connected to %s:%s; subscribing to %s and %s",
+                "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s",
                 host,
                 port,
                 occupancy_filter,
                 status_filter,
+                ota_status_filter,
             )
-            c.subscribe([(occupancy_filter, 1), (status_filter, 1)])
+            c.subscribe(
+                [
+                    (occupancy_filter, 1),
+                    (status_filter, 1),
+                    (ota_status_filter, 1),
+                ]
+            )
 
         def on_disconnect(c, userdata, rc, properties=None):
             if rc != 0:

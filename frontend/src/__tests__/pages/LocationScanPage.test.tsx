@@ -8,6 +8,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { NotificationProvider } from '../../contexts/NotificationContext';
 import LocationScanPage from '../../pages/LocationScanPage';
 import * as api from '../../services/api';
+import { promptInput, showError } from '../../utils/dialogs';
 
 // Mock the API
 jest.mock('../../services/api');
@@ -16,7 +17,6 @@ jest.mock('../../utils/dialogs', () => ({
   promptInput: jest.fn(() => Promise.resolve(null)),
   showError: jest.fn(),
 }));
-import { promptInput, showError } from '../../utils/dialogs';
 
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({

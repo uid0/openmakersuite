@@ -10,6 +10,116 @@ import '../styles/InventoryList.css';
 import { InventoryItem } from '../types';
 import { showError, showInfo } from '../utils/dialogs';
 
+interface InventoryCardProps {
+  item: InventoryItem;
+  onSwipeLeft: (itemId: string) => void;
+  onSwipeRight: (itemId: string) => void;
+  onClick: (itemId: string) => void;
+}
+
+const InventoryCard: React.FC<InventoryCardProps> = ({
+  item,
+  onSwipeLeft,
+  onSwipeRight,
+  onClick,
+}) => {
+  const swipeHandlers = useSwipeable({
+    onSwipedLeft: () => onSwipeLeft(item.id),
+    onSwipedRight: () => onSwipeRight(item.id),
+    delta: 50,
+    trackMouse: false,
+  });
+
+  return (
+    <div
+      {...swipeHandlers}
+      className={`inventory-card ${item.needs_reorder ? 'low-stock' : ''}`}
+      onClick={() => onClick(item.id)}
+    >
+      {item.thumbnail && (
+        <div className="item-image">
+          <img src={item.thumbnail} alt={item.name} />
+        </div>
+      )}
+
+      <div className="item-details">
+        <h3 className="item-name">{item.name}</h3>
+        <p className="item-sku">SKU: {item.sku}</p>
+
+        {item.category_name && (
+          <span className="item-category">{item.category_name}</span>
+        )}
+
+        <div className="item-stock">
+          {item.use_case_based_reorder ? (
+            <>
+              <div className="stock-row">
+                <span className="stock-label">Current Cases:</span>
+                <span
+                  className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
+                >
+                  {item.current_cases.toFixed(1)}
+                </span>
+              </div>
+              <div className="stock-row">
+                <span className="stock-label">Minimum Cases:</span>
+                <span className="stock-value">{item.minimum_cases}</span>
+              </div>
+              <div className="stock-row units-detail">
+                <span className="stock-label">Units:</span>
+                <span className="stock-value-small">{item.current_stock}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="stock-row">
+                <span className="stock-label">Current:</span>
+                <span
+                  className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
+                >
+                  {item.current_stock}
+                </span>
+              </div>
+              <div className="stock-row">
+                <span className="stock-label">Minimum:</span>
+                <span className="stock-value">{item.minimum_stock}</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {item.needs_reorder && (
+          <div className="reorder-badge">
+            ⚠️ Needs Reorder (
+            {item.use_case_based_reorder
+              ? `${item.reorder_cases} cases`
+              : `${item.reorder_quantity} units`
+            })
+          </div>
+        )}
+
+        {item.has_pending_reorder && (
+          <div className="pending-badge">
+            🔄 Reorder in Progress
+          </div>
+        )}
+
+        {item.location && (
+          <div className="item-location">
+            📍 {item.location}
+          </div>
+        )}
+
+        {item.unit_cost && (
+          <div className="item-price">
+            ${parseFloat(item.unit_cost).toFixed(2)} per unit
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const InventoryList: React.FC = () => {
   const navigate = useNavigate();
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -151,106 +261,15 @@ const InventoryList: React.FC = () => {
         </div>
       ) : (
         <div className="inventory-grid">
-          {filteredItems.map((item) => {
-            const swipeHandlers = useSwipeable({
-              onSwipedLeft: () => handleSwipeLeft(item.id),
-              onSwipedRight: () => handleSwipeRight(item.id),
-              delta: 50,
-              trackMouse: false,
-            });
-
-            return (
-              <div
-                key={item.id}
-                {...swipeHandlers}
-                className={`inventory-card ${item.needs_reorder ? 'low-stock' : ''}`}
-                onClick={() => handleItemClick(item.id)}
-              >
-              {item.thumbnail && (
-                <div className="item-image">
-                  <img src={item.thumbnail} alt={item.name} />
-                </div>
-              )}
-
-              <div className="item-details">
-                <h3 className="item-name">{item.name}</h3>
-                <p className="item-sku">SKU: {item.sku}</p>
-
-                {item.category_name && (
-                  <span className="item-category">{item.category_name}</span>
-                )}
-
-                <div className="item-stock">
-                  {item.use_case_based_reorder ? (
-                    // Case-based display
-                    <>
-                      <div className="stock-row">
-                        <span className="stock-label">Current Cases:</span>
-                        <span
-                          className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
-                        >
-                          {item.current_cases.toFixed(1)}
-                        </span>
-                      </div>
-                      <div className="stock-row">
-                        <span className="stock-label">Minimum Cases:</span>
-                        <span className="stock-value">{item.minimum_cases}</span>
-                      </div>
-                      <div className="stock-row units-detail">
-                        <span className="stock-label">Units:</span>
-                        <span className="stock-value-small">{item.current_stock}</span>
-                      </div>
-                    </>
-                  ) : (
-                    // Traditional unit-based display
-                    <>
-                      <div className="stock-row">
-                        <span className="stock-label">Current:</span>
-                        <span
-                          className={`stock-value ${item.needs_reorder ? 'low' : 'good'}`}
-                        >
-                          {item.current_stock}
-                        </span>
-                      </div>
-                      <div className="stock-row">
-                        <span className="stock-label">Minimum:</span>
-                        <span className="stock-value">{item.minimum_stock}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {item.needs_reorder && (
-                  <div className="reorder-badge">
-                    ⚠️ Needs Reorder (
-                    {item.use_case_based_reorder
-                      ? `${item.reorder_cases} cases`
-                      : `${item.reorder_quantity} units`
-                    })
-                  </div>
-                )}
-
-                {item.has_pending_reorder && (
-                  <div className="pending-badge">
-                    🔄 Reorder in Progress
-                  </div>
-                )}
-
-                {item.location && (
-                  <div className="item-location">
-                    📍 {item.location}
-                  </div>
-                )}
-
-                {item.unit_cost && (
-                  <div className="item-price">
-                    ${parseFloat(item.unit_cost).toFixed(2)} per unit
-                  </div>
-                )}
-              </div>
-            </div>
-            );
-          })}
+          {filteredItems.map((item) => (
+            <InventoryCard
+              key={item.id}
+              item={item}
+              onSwipeLeft={handleSwipeLeft}
+              onSwipeRight={handleSwipeRight}
+              onClick={handleItemClick}
+            />
+          ))}
         </div>
       )}
     </div>

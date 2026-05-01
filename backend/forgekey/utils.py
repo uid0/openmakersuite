@@ -154,3 +154,19 @@ def get_mqtt_ping_topic(mac_address: str, sensor_kind: str) -> str:
     """
     kind = normalize_sensor_kind(sensor_kind)
     return f"{settings.MQTT_TOPIC_PREFIX}/{_firmware_contract_mac(mac_address)}/{kind}/occupancy"
+
+
+def get_mqtt_ota_trigger_topic(mac_address: str) -> str:
+    """MQTT topic the firmware listens on for OTA download triggers.
+
+    Firmware contract: ``forgekey/<lowercase-no-sep-mac>/ota/trigger``.
+    """
+    return f"{settings.MQTT_TOPIC_PREFIX}/{_firmware_contract_mac(mac_address)}/ota/trigger"
+
+
+def get_mqtt_ota_status_topic(mac_address: str) -> str:
+    """MQTT topic the firmware publishes OTA progress / completion to.
+
+    Firmware contract: ``forgekey/<lowercase-no-sep-mac>/ota/status``.
+    """
+    return f"{settings.MQTT_TOPIC_PREFIX}/{_firmware_contract_mac(mac_address)}/ota/status"

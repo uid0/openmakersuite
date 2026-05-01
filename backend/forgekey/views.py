@@ -6,8 +6,10 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 
 from django.conf import settings
+from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 
 from rest_framework import status, viewsets
@@ -51,6 +53,12 @@ from .serializers import (
     PowerMeterReadingSerializer,
 )
 from .services.device_commands import DeviceCommandError, publish_command
+from .services.firmware_download_token import verify_download_token
+from .services.firmware_signing import (
+    FirmwareSigningError,
+    get_public_key_pem,
+    is_signing_configured,
+)
 from .tasks import disable_device, enable_device, request_device_status
 from .utils import (
     generate_device_jwt,
@@ -895,3 +903,186 @@ class DeviceFirmwareUpdateViewSet(viewsets.ModelViewSet):
         serializer.save(requested_by=self.request.user)
         # TODO: Trigger firmware update via MQTT
         # This would send the firmware file and signature to the device
+
+
+_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+def _parse_range(header: str, size: int):
+    """Parse a single-range ``Range`` header. Returns ``(start, end)`` or ``None``.
+
+    ``end`` is inclusive. We accept the common forms:
+      * ``bytes=START-END``  (both bounds)
+      * ``bytes=START-``     (open-ended; up to size-1)
+      * ``bytes=-SUFFIX``    (last SUFFIX bytes)
+    Multi-range requests are not supported; returning ``None`` causes the
+    caller to fall back to a full 200 response.
+    """
+    if not header:
+        return None
+    m = _RANGE_RE.match(header.strip())
+    if not m:
+        return None
+    start_s, end_s = m.group(1), m.group(2)
+    if start_s == "" and end_s == "":
+        return None
+    if start_s == "":
+        suffix = int(end_s)
+        if suffix <= 0:
+            return None
+        start = max(0, size - suffix)
+        end = size - 1
+    else:
+        start = int(start_s)
+        end = int(end_s) if end_s else size - 1
+    if start >= size or end < start:
+        return None
+    end = min(end, size - 1)
+    return start, end
+
+
+def _stream_file_chunk(file_obj, start: int, length: int, *, chunk_size: int = 64 * 1024):
+    file_obj.seek(start)
+    remaining = length
+    while remaining > 0:
+        read_size = min(chunk_size, remaining)
+        data = file_obj.read(read_size)
+        if not data:
+            break
+        remaining -= len(data)
+        yield data
+
+
+class ForgeKeyFirmwareDownloadView(APIView):
+    """
+    GET /api/forgekey/firmware/<id>/download
+
+    Authorized either by:
+      * a short-lived HMAC token (``token`` + ``exp`` query params) issued
+        by ``forgekey.services.firmware_download_token.make_download_token``
+        and embedded in the MQTT trigger payload, or
+      * a device JWT in the ``Authorization: Bearer <token>`` header
+        (``mac`` query param identifies the device for verification).
+
+    Supports the HTTP ``Range`` header so an ESP32 can resume an interrupted
+    download. Multi-range requests are not supported — the response falls
+    back to a full 200 in that case.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, firmware_id):
+        firmware = FirmwareVersion.objects.filter(pk=firmware_id, is_active=True).first()
+        if firmware is None:
+            return Response(
+                {"detail": "Firmware not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not self._authorize(request, firmware_id):
+            return Response(
+                {"detail": "Invalid or expired firmware download token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not firmware.firmware_file:
+            return Response(
+                {"detail": "Firmware binary is missing."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            size = firmware.firmware_file.size
+        except (FileNotFoundError, OSError):
+            return Response(
+                {"detail": "Firmware binary is missing."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        range_header = request.headers.get("range") or request.META.get("HTTP_RANGE", "")
+        rng = _parse_range(range_header, size)
+
+        download_name = (
+            firmware.firmware_file.name.rsplit("/", 1)[-1] if firmware.firmware_file.name else f"firmware-{firmware.version}.bin"
+        )
+        content_type = "application/octet-stream"
+
+        if rng is None:
+            # Full content. Use FileResponse so we get a streaming body.
+            handle = firmware.firmware_file.open("rb")
+            response = FileResponse(handle, content_type=content_type)
+            response["Content-Length"] = str(size)
+            response["Accept-Ranges"] = "bytes"
+            response["Content-Disposition"] = f'attachment; filename="{download_name}"'
+            return response
+
+        start, end = rng
+        length = end - start + 1
+        handle = firmware.firmware_file.open("rb")
+        response = StreamingHttpResponse(
+            _stream_file_chunk(handle, start, length),
+            status=status.HTTP_206_PARTIAL_CONTENT,
+            content_type=content_type,
+        )
+        response["Content-Length"] = str(length)
+        response["Content-Range"] = f"bytes {start}-{end}/{size}"
+        response["Accept-Ranges"] = "bytes"
+        response["Content-Disposition"] = f'attachment; filename="{download_name}"'
+        return response
+
+    @staticmethod
+    def _authorize(request, firmware_id: str) -> bool:
+        token = request.query_params.get("token") or request.GET.get("token")
+        exp = request.query_params.get("exp") or request.GET.get("exp")
+        if token and exp:
+            try:
+                exp_int = int(exp)
+            except (TypeError, ValueError):
+                return False
+            if verify_download_token(str(firmware_id), token, exp_int):
+                return True
+
+        # Fallback: device JWT (Authorization: Bearer <jwt>) tied to a MAC
+        # supplied via ``?mac=`` so we can derive the device-specific secret.
+        auth = request.headers.get("authorization", "")
+        mac = request.query_params.get("mac") or request.GET.get("mac") or ""
+        if auth.lower().startswith("bearer ") and mac:
+            jwt_token = auth.split(" ", 1)[1].strip()
+            try:
+                normalized = normalize_mac_address(mac)
+            except Exception:
+                return False
+            payload = verify_device_jwt(jwt_token, normalized)
+            if payload and payload.get("mac") == normalized:
+                return True
+        return False
+
+
+class ForgeKeyFirmwarePublicKeyView(APIView):
+    """
+    GET /api/forgekey/firmware/public-key
+
+    Returns the active ECDSA(P-256) public key in PEM form. Used by:
+      * Firmware build scripts that bake the verifying key into the image.
+      * Operator tooling that wants to verify a firmware artifact offline.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        if not is_signing_configured():
+            return Response(
+                {"detail": "Firmware signing is not configured."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            pem = get_public_key_pem()
+        except FirmwareSigningError as exc:
+            logger.warning("Cannot return firmware public key: %s", exc)
+            return Response(
+                {"detail": "Firmware signing key is misconfigured."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return HttpResponse(pem, content_type="application/x-pem-file")

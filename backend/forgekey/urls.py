@@ -17,6 +17,8 @@ from .views import (
     FirmwareVersionViewSet,
     ForgeKeyDevicePhotoUploadView,
     ForgeKeyDeviceRegisterView,
+    ForgeKeyFirmwareDownloadView,
+    ForgeKeyFirmwarePublicKeyView,
     OperationalModeViewSet,
     PowerMeterReadingViewSet,
 )
@@ -45,6 +47,16 @@ urlpatterns = [
         "devices/<str:mac>/photo/",
         ForgeKeyDevicePhotoUploadView.as_view(),
         name="device-photo-upload",
+    ),
+    path(
+        "firmware/public-key",
+        ForgeKeyFirmwarePublicKeyView.as_view(),
+        name="firmware-public-key",
+    ),
+    path(
+        "firmware/<uuid:firmware_id>/download",
+        ForgeKeyFirmwareDownloadView.as_view(),
+        name="firmware-download",
     ),
     path("", include(router.urls)),
 ]

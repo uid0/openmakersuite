@@ -40,6 +40,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "prebuild": "npx --yes update-browserslist-db@latest",
     "build": "react-scripts build",
     "test": "TZ=America/Chicago react-scripts test --maxWorkers=4",
     "test:coverage": "TZ=America/Chicago react-scripts test --maxWorkers=4 --coverage --watchAll=false",

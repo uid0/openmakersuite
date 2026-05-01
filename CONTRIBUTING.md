@@ -79,6 +79,10 @@ The `.github/workflows/ci.yml` workflow defines the required gates. Branch prote
 
 CI uses path filters: doc-only changes (`docs/**`, `*.md`, `.criteria/**`, README) skip the heavy jobs and `✅ CI Complete` still passes.
 
+### Frontend builds keep `caniuse-lite` fresh automatically
+
+`frontend/package.json` defines a `prebuild` script that runs `npx --yes update-browserslist-db@latest` before every `npm run build` (npm runs `prebuild` automatically as part of the `build` lifecycle). This refreshes the bundled browserslist database so webpack/react-scripts don't warn about a stale `caniuse-lite`. No manual action is required — local builds, CI, and Docker production builds all pick this up by invoking `npm run build`.
+
 ### Code Style
 
 **Python (Backend):**

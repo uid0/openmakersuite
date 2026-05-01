@@ -6,6 +6,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import InventoryItemFormPage from '../../pages/InventoryItemFormPage';
 import * as api from '../../services/api';
+import { showError } from '../../utils/dialogs';
 
 // Mock the API
 jest.mock('../../services/api');
@@ -14,7 +15,6 @@ jest.mock('../../utils/dialogs', () => ({
   promptInput: jest.fn(() => Promise.resolve(null)),
   showError: jest.fn(),
 }));
-import { showError } from '../../utils/dialogs';
 
 // Mock qrcode.react
 jest.mock('qrcode.react', () => ({

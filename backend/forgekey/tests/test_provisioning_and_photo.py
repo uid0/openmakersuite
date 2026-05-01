@@ -151,6 +151,13 @@ class TestRegister:
             format="multipart",
         )
         assert resp.status_code == 401
+        body = resp.json()
+        assert body["code"] == "token_mismatch"
+        # Fingerprints must differ and neither must contain the actual token.
+        assert body["expected_token_fingerprint"]
+        assert body["supplied_token_fingerprint"]
+        assert body["expected_token_fingerprint"] != body["supplied_token_fingerprint"]
+        assert PROVISIONING_TOKEN not in resp.content.decode()
         assert ESP32Device.objects.filter(mac_address="AA:BB:CC:DD:EE:02").exists() is False
 
     def test_register_placeholder_token_returns_401(
@@ -167,6 +174,7 @@ class TestRegister:
             format="multipart",
         )
         assert resp.status_code == 401
+        assert resp.json()["code"] == "token_placeholder"
         assert ESP32Device.objects.filter(mac_address="AA:BB:CC:DD:EE:03").exists() is False
 
     def test_register_missing_token_returns_401(
@@ -182,6 +190,85 @@ class TestRegister:
             format="multipart",
         )
         assert resp.status_code == 401
+        body = resp.json()
+        assert body["code"] == "token_missing"
+        assert body["supplied_token_length"] == 0
+
+    def test_register_server_unconfigured_returns_distinct_code(
+        self, api_client, settings, people_counter_type, register_url
+    ):
+        """When the server has no token configured, the response distinguishes
+        that from a client-side header problem so operators see the real cause."""
+        settings.FORGEKEY_PROVISIONING_TOKEN = ""
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:05",
+            "device_type": DeviceType.TYPE_PEOPLE_COUNTER,
+        }
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN="anything-here",
+            format="multipart",
+        )
+        assert resp.status_code == 401
+        body = resp.json()
+        assert body["code"] == "server_unconfigured"
+        assert body["expected_token_length"] == 0
+
+    def test_register_server_placeholder_token_returns_unconfigured(
+        self, api_client, settings, people_counter_type, register_url
+    ):
+        settings.FORGEKEY_PROVISIONING_TOKEN = "REPLACE_ME_PROVISIONING_TOKEN"
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:06",
+            "device_type": DeviceType.TYPE_PEOPLE_COUNTER,
+        }
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN="REPLACE_ME_PROVISIONING_TOKEN",
+            format="multipart",
+        )
+        assert resp.status_code == 401
+        # Server unconfigured takes precedence over token_placeholder so
+        # operators are pointed at the backend, not the device.
+        assert resp.json()["code"] == "server_unconfigured"
+
+    def test_register_strips_whitespace_around_token(
+        self, api_client, settings, people_counter_type, register_url
+    ):
+        """A trailing newline in the env var or device-side string must not
+        cause a spurious 401 — the most common copy/paste failure mode."""
+        settings.FORGEKEY_PROVISIONING_TOKEN = PROVISIONING_TOKEN + "\n"
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:07",
+            "device_type": DeviceType.TYPE_PEOPLE_COUNTER,
+        }
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN=f"  {PROVISIONING_TOKEN}  ",
+            format="multipart",
+        )
+        assert resp.status_code == 201, resp.content
+
+    def test_register_mismatch_response_does_not_leak_token(
+        self, api_client, people_counter_type, register_url
+    ):
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:08",
+            "device_type": DeviceType.TYPE_PEOPLE_COUNTER,
+        }
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN="completely-wrong",
+            format="multipart",
+        )
+        assert resp.status_code == 401
+        body_text = resp.content.decode()
+        assert PROVISIONING_TOKEN not in body_text
+        assert "completely-wrong" not in body_text
 
     def test_register_firmware_contract_payload(
         self, api_client, people_counter_type, register_url

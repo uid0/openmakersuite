@@ -1555,11 +1555,61 @@ export interface ForgeKeyDevice {
   updated_at: string;
 }
 
+export interface ForgeKeyOccupancyEvent {
+  id: string;
+  device: string;
+  sensor_kind: string;
+  count_in: number;
+  count_out: number;
+  occupancy_delta: number;
+  event_timestamp_utc: string;
+  ingested_at: string;
+  raw_payload: Record<string, unknown>;
+}
+
+export interface ForgeKeyOccupancyResponse {
+  device: string;
+  since: string;
+  current_occupancy: number;
+  events: ForgeKeyOccupancyEvent[];
+}
+
+export interface ForgeKeyCommandResponse {
+  status: string;
+  device: string;
+  topic: string;
+  dispatched_at: string;
+}
+
 export const forgekeyAPI = {
   listDevices: () =>
     api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/'),
+  getDevice: (id: string) => api.get<ForgeKeyDevice>(`/forgekey/devices/${id}/`),
   updateDevice: (id: string, data: Partial<ForgeKeyDevice>) =>
     api.patch<ForgeKeyDevice>(`/forgekey/devices/${id}/`, data),
+  getOccupancy: (id: string, since: string = '24h') =>
+    api.get<ForgeKeyOccupancyResponse>(`/forgekey/devices/${id}/occupancy/`, {
+      params: { since },
+    }),
+  restart: (id: string) =>
+    api.post<ForgeKeyCommandResponse>(`/forgekey/devices/${id}/command/restart/`),
+  capturePhoto: (id: string, uploadUrl?: string) =>
+    api.post<ForgeKeyCommandResponse>(
+      `/forgekey/devices/${id}/command/capture-photo/`,
+      uploadUrl ? { upload_url: uploadUrl } : {},
+    ),
+  blink: (id: string, opts: { pattern?: string; duration_s?: number } = {}) =>
+    api.post<ForgeKeyCommandResponse>(`/forgekey/devices/${id}/command/blink/`, opts),
+  firmwareUpdate: (
+    id: string,
+    body:
+      | { firmware_version_id: string }
+      | { version: string; url: string },
+  ) =>
+    api.post<ForgeKeyCommandResponse>(
+      `/forgekey/devices/${id}/command/firmware-update/`,
+      body,
+    ),
 };
 
 export const makerBoxesAPI = {

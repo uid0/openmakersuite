@@ -22,6 +22,7 @@ import DashboardPage from './pages/DashboardPage';
 import DonationItemScanPage from './pages/DonationItemScanPage';
 import ElectricalCircuitsPage from './pages/ElectricalCircuitsPage';
 import FixtureScanPage from './pages/FixtureScanPage';
+import ForgeKeyDeviceDetailPage from './pages/ForgeKeyDeviceDetailPage';
 import ForgeKeyDevicesPage from './pages/ForgeKeyDevicesPage';
 import HomePage from './pages/HomePage';
 import LightSwitchFormPage from './pages/LightSwitchFormPage';
@@ -148,6 +149,7 @@ function AppContent() {
           <Route path="/inventory/assets" element={<WorkspaceLayout><AssetsPage /></WorkspaceLayout>} />
           <Route path="/inventory/admin" element={<WorkspaceLayout><AdminDashboard /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-devices" element={<WorkspaceLayout><ForgeKeyDevicesPage /></WorkspaceLayout>} />
+          <Route path="/facilities/forgekey-devices/:id" element={<WorkspaceLayout><ForgeKeyDeviceDetailPage /></WorkspaceLayout>} />
           <Route path="/inventory/code-entry" element={<Navigate to="/inventory/scan" replace />} />
           <Route path="/inventory/transparency" element={<WorkspaceLayout><TransparencyPage /></WorkspaceLayout>} />
           <Route path="/inventory/scan" element={<WorkspaceLayout><CodeEntryPage /></WorkspaceLayout>} />

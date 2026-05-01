@@ -13,6 +13,7 @@ from .models import (
     DeviceUsage,
     ESP32Device,
     FirmwareVersion,
+    OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
 )
@@ -124,6 +125,27 @@ class FirmwareVersionSerializer(serializers.ModelSerializer):
         model = FirmwareVersion
         fields = "__all__"
         read_only_fields = ["id", "created_at"]
+
+
+class OccupancyEventSerializer(serializers.ModelSerializer):
+    """Serializer for OccupancyEvent rows, used by the device-detail chart."""
+
+    occupancy_delta = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = OccupancyEvent
+        fields = [
+            "id",
+            "device",
+            "sensor_kind",
+            "count_in",
+            "count_out",
+            "occupancy_delta",
+            "event_timestamp_utc",
+            "ingested_at",
+            "raw_payload",
+        ]
+        read_only_fields = ["id", "ingested_at", "occupancy_delta"]
 
 
 class DeviceFirmwareUpdateSerializer(serializers.ModelSerializer):

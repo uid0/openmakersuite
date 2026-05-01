@@ -13,7 +13,12 @@ from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import (
+    AllowAny,
+    IsAdminUser,
+    IsAuthenticated,
+    IsAuthenticatedOrReadOnly,
+)
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -28,6 +33,7 @@ from .models import (
     ESP32DevicePhoto,
     FirmwareVersion,
     LockoutLevel,
+    OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
 )
@@ -40,9 +46,11 @@ from .serializers import (
     DeviceUsageSerializer,
     ESP32DeviceSerializer,
     FirmwareVersionSerializer,
+    OccupancyEventSerializer,
     OperationalModeSerializer,
     PowerMeterReadingSerializer,
 )
+from .services.device_commands import DeviceCommandError, publish_command
 from .tasks import disable_device, enable_device, request_device_status
 from .utils import (
     generate_device_jwt,
@@ -413,6 +421,190 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
         device = self.get_object()
         request_device_status.delay(device.mac_address)
         return Response({"status": "status request sent", "device": device.mac_address})
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="command/restart",
+        permission_classes=[IsAdminUser],
+    )
+    def command_restart(self, request, pk=None):
+        """Tell the device to reboot."""
+        device = self.get_object()
+        return self._dispatch_command(device, request.user, {"cmd": "restart"}, "restart")
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="command/capture-photo",
+        permission_classes=[IsAdminUser],
+    )
+    def command_capture_photo(self, request, pk=None):
+        """Tell the device to capture and upload a single photo."""
+        device = self.get_object()
+        payload: dict = {"cmd": "capture"}
+        upload_url = request.data.get("upload_url")
+        if upload_url:
+            payload["upload_url"] = upload_url
+        return self._dispatch_command(device, request.user, payload, "capture_photo")
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="command/blink",
+        permission_classes=[IsAdminUser],
+    )
+    def command_blink(self, request, pk=None):
+        """Blink the device's onboard indicator."""
+        device = self.get_object()
+        payload: dict = {"cmd": "blink"}
+        pattern = request.data.get("pattern")
+        if pattern:
+            payload["pattern"] = pattern
+        try:
+            duration_s = request.data.get("duration_s")
+            if duration_s is not None:
+                payload["duration_s"] = int(duration_s)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "duration_s must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return self._dispatch_command(device, request.user, payload, "blink")
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="command/firmware-update",
+        permission_classes=[IsAdminUser],
+    )
+    def command_firmware_update(self, request, pk=None):
+        """Trigger an OTA firmware update.
+
+        Accepts either a ``firmware_version_id`` (preferred — reuses the
+        existing dispatch service so a ``DeviceFirmwareUpdate`` audit row is
+        recorded) or an explicit ``version`` + ``url`` pair for ad-hoc
+        rollbacks.
+        """
+        device = self.get_object()
+        firmware_version_id = request.data.get("firmware_version_id")
+        if firmware_version_id:
+            try:
+                firmware = FirmwareVersion.objects.get(id=firmware_version_id)
+            except FirmwareVersion.DoesNotExist:
+                return Response(
+                    {"detail": "firmware_version_id does not exist."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            from .services.firmware_dispatch import publish_firmware_update
+
+            try:
+                records = publish_firmware_update(device, firmware, requested_by=request.user)
+            except RuntimeError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+            logger.info(
+                "forgekey.audit firmware_update device=%s mac=%s firmware=%s actor=%s",
+                device.id,
+                device.mac_address,
+                firmware.version,
+                getattr(request.user, "username", None),
+            )
+            return Response(
+                {
+                    "status": "firmware_update dispatched",
+                    "device": device.mac_address,
+                    "firmware_version": firmware.version,
+                    "update_id": str(records[0].id) if records else None,
+                }
+            )
+
+        version = request.data.get("version")
+        url = request.data.get("url")
+        if not version or not url:
+            return Response(
+                {
+                    "detail": (
+                        "firmware_version_id is required, or supply both "
+                        "'version' and 'url' for an ad-hoc dispatch."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payload = {"cmd": "ota", "version": version, "url": url}
+        return self._dispatch_command(device, request.user, payload, "firmware_update")
+
+    @action(detail=True, methods=["get"], url_path="occupancy")
+    def occupancy(self, request, pk=None):
+        """Return recent occupancy events for charting in the UI."""
+        device = self.get_object()
+        since = request.query_params.get("since", "24h")
+        try:
+            cutoff = _parse_since_window(since)
+        except ValueError:
+            return Response(
+                {"detail": "since must be like '24h', '7d', or an ISO timestamp."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        events_qs = OccupancyEvent.objects.filter(
+            device=device,
+            event_timestamp_utc__gte=cutoff,
+        ).order_by("event_timestamp_utc")
+        # Cap to a reasonable upper bound so a chatty device can't OOM the
+        # frontend; the chart only needs a few hundred points.
+        events = list(events_qs[:1000])
+
+        return Response(
+            {
+                "device": device.mac_address,
+                "since": cutoff.isoformat(),
+                "current_occupancy": OccupancyEvent.current_occupancy_for(device),
+                "events": OccupancyEventSerializer(events, many=True).data,
+            }
+        )
+
+    def _dispatch_command(self, device, actor, payload, audit_action):
+        try:
+            topic = publish_command(device, payload, actor=actor, audit_action=audit_action)
+        except DeviceCommandError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(
+            {
+                "status": f"{audit_action} command sent",
+                "device": device.mac_address,
+                "topic": topic,
+                "dispatched_at": payload.get("timestamp", timezone.now().isoformat()),
+            }
+        )
+
+
+def _parse_since_window(raw: str):
+    """Parse a ``since`` query param into a UTC cutoff timestamp.
+
+    Supports the ``Nh`` / ``Nd`` / ``Nm`` shorthands and ISO-8601 strings.
+    Raises ``ValueError`` on anything else.
+    """
+    from datetime import datetime, timedelta
+
+    text = (raw or "").strip()
+    if not text:
+        return timezone.now() - timedelta(hours=24)
+    if text[-1] in {"h", "H"}:
+        return timezone.now() - timedelta(hours=int(text[:-1]))
+    if text[-1] in {"d", "D"}:
+        return timezone.now() - timedelta(days=int(text[:-1]))
+    if text[-1] in {"m", "M"}:
+        return timezone.now() - timedelta(minutes=int(text[:-1]))
+    candidate = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise ValueError(f"unparseable since: {raw!r}") from exc
+    if parsed.tzinfo is None:
+        from datetime import timezone as dt_tz
+
+        parsed = parsed.replace(tzinfo=dt_tz.utc)
+    return parsed
 
 
 class AssetDeviceViewSet(viewsets.ModelViewSet):

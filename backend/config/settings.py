@@ -382,6 +382,7 @@ MQTT_BROKER_PASSWORD = config("MQTT_BROKER_PASSWORD", default="")
 MQTT_TOPIC_PREFIX = config("MQTT_TOPIC_PREFIX", default="forgekey")
 MQTT_CLIENT_ID = config("MQTT_CLIENT_ID", default="forgekey-server")
 MQTT_KEEPALIVE = config("MQTT_KEEPALIVE", default=60, cast=int)
+MQTT_BROKER_TLS = config("MQTT_BROKER_TLS", default=False, cast=bool)
 
 # EMQX broker — dashboard password is rendered into the bootstrap_users_file
 # by deploy.sh on every deploy; the API key/secret pair is generated in the

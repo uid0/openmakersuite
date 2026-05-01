@@ -18,6 +18,7 @@ from forgekey.models import (
     ESP32Device,
     FirmwareVersion,
     LockoutLevel,
+    OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
 )
@@ -157,6 +158,22 @@ class FirmwareVersionFactory(DjangoModelFactory):
     signature = factory.Sequence(lambda n: f"signature_{n}")
     is_active = True
     created_by = SubFactory(UserFactory)
+
+
+class OccupancyEventFactory(DjangoModelFactory):
+    """Factory for creating OccupancyEvent instances."""
+
+    class Meta:
+        model = OccupancyEvent
+
+    device = SubFactory(ESP32DeviceFactory)
+    sensor_kind = "people_counter"
+    count_in = 1
+    count_out = 0
+    event_timestamp_utc = factory.LazyFunction(
+        lambda: __import__("django.utils", fromlist=["timezone"]).timezone.now()
+    )
+    raw_payload = factory.LazyAttribute(lambda obj: {"in": obj.count_in, "out": obj.count_out})
 
 
 class DeviceFirmwareUpdateFactory(DjangoModelFactory):

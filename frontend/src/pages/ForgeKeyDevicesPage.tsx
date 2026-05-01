@@ -5,7 +5,7 @@
  * counters) to a default Location.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { ForgeKeyDevice, forgekeyAPI, inventoryAPI } from '../services/api';
 import { Location } from '../types';
 
@@ -107,7 +107,9 @@ const ForgeKeyDevicesPage: React.FC = () => {
               return (
                 <tr key={device.id} style={{ borderTop: '1px solid #ddd' }}>
                   <td style={{ padding: '0.25rem' }}>
-                    {device.name || <em style={{ color: '#777' }}>unnamed</em>}
+                    <Link to={`/facilities/forgekey-devices/${device.id}`}>
+                      {device.name || <em style={{ color: '#777' }}>unnamed</em>}
+                    </Link>
                   </td>
                   <td style={{ padding: '0.25rem', fontFamily: 'monospace' }}>{device.mac_address}</td>
                   <td style={{ padding: '0.25rem' }}>{device.device_type_name ?? '—'}</td>

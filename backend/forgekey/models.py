@@ -734,6 +734,83 @@ class ESP32DevicePhoto(models.Model):
         return f"{self.device.mac_address} photo @ {self.received_at:%Y-%m-%d %H:%M:%S}"
 
 
+class OccupancyEvent(models.Model):
+    """
+    A single occupancy event published over MQTT by a ForgeKey people-counter
+    device. The firmware contract is one event per crossing, with ``count_in``
+    and ``count_out`` carrying the per-event delta (typically one of them is 1
+    and the other 0). ``raw_payload`` stores the full original message body so
+    we can recover from forward-compatible firmware changes without a schema
+    migration.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        ESP32Device,
+        on_delete=models.CASCADE,
+        related_name="occupancy_events",
+        help_text="Device that published this event",
+    )
+    sensor_kind = models.CharField(
+        max_length=50,
+        help_text="Sensor kind extracted from the MQTT topic (e.g. 'people_counter')",
+    )
+    count_in = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="People entering during this event",
+    )
+    count_out = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="People leaving during this event",
+    )
+    event_timestamp_utc = models.DateTimeField(
+        help_text="Device-supplied event time (UTC). Falls back to server time if absent.",
+    )
+    ingested_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the backend persisted this event",
+    )
+    raw_payload = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Original MQTT message body, kept for forward compatibility",
+    )
+
+    class Meta:
+        ordering = ["-event_timestamp_utc"]
+        indexes = [
+            models.Index(fields=["device", "event_timestamp_utc"]),
+            models.Index(fields=["event_timestamp_utc"]),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"{self.device.mac_address} {self.sensor_kind} "
+            f"+{self.count_in}/-{self.count_out} @ {self.event_timestamp_utc:%Y-%m-%d %H:%M:%S}"
+        )
+
+    @property
+    def occupancy_delta(self) -> int:
+        """Signed change in occupancy contributed by this event."""
+        return int(self.count_in) - int(self.count_out)
+
+    @classmethod
+    def current_occupancy_for(cls, device: "ESP32Device") -> int:
+        """Sum of (count_in - count_out) across all events for a device.
+
+        Returns the running occupancy assuming the table is the source of
+        truth from the device's installation onward. Negative values are
+        clamped to zero — those indicate missed enter events, not negative
+        people.
+        """
+        agg = cls.objects.filter(device=device).aggregate(
+            total_in=models.Sum("count_in"),
+            total_out=models.Sum("count_out"),
+        )
+        delta = (agg["total_in"] or 0) - (agg["total_out"] or 0)
+        return max(delta, 0)
+
+
 class DeviceFirmwareUpdate(models.Model):
     """
     Tracks firmware update requests and status for ESP32 devices.

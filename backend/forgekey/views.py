@@ -994,7 +994,7 @@ class ForgeKeyFirmwareDownloadView(APIView):
 
         try:
             size = firmware.firmware_file.size
-        except (FileNotFoundError, OSError):
+        except OSError:
             return Response(
                 {"detail": "Firmware binary is missing."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -1004,7 +1004,9 @@ class ForgeKeyFirmwareDownloadView(APIView):
         rng = _parse_range(range_header, size)
 
         download_name = (
-            firmware.firmware_file.name.rsplit("/", 1)[-1] if firmware.firmware_file.name else f"firmware-{firmware.version}.bin"
+            firmware.firmware_file.name.rsplit("/", 1)[-1]
+            if firmware.firmware_file.name
+            else f"firmware-{firmware.version}.bin"
         )
         content_type = "application/octet-stream"
 

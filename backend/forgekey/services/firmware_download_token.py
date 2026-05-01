@@ -21,7 +21,6 @@ from typing import Optional, Tuple
 
 from django.conf import settings
 
-
 DEFAULT_TTL_SECONDS = 300
 
 
@@ -40,7 +39,9 @@ def _digest(firmware_id: str, expiry_unix: int) -> bytes:
     return hmac.new(_key(), _scope() + b"|" + msg, hashlib.sha256).digest()
 
 
-def make_download_token(firmware_id: str, *, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> Tuple[str, int]:
+def make_download_token(
+    firmware_id: str, *, ttl_seconds: int = DEFAULT_TTL_SECONDS
+) -> Tuple[str, int]:
     """Mint a short-lived token. Returns ``(token, expiry_unix)``."""
     expiry_unix = int(time.time()) + max(int(ttl_seconds), 1)
     raw = _digest(str(firmware_id), expiry_unix)

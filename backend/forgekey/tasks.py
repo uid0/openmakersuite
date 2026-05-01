@@ -272,7 +272,9 @@ def process_mqtt_firmware_update_response(
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
-def trigger_ota(self, device_id: str, firmware_id: str, requested_by_id: Optional[int] = None) -> Dict[str, Any]:
+def trigger_ota(
+    self, device_id: str, firmware_id: str, requested_by_id: Optional[int] = None
+) -> Dict[str, Any]:
     """
     Publish an OTA trigger to a single device.
 

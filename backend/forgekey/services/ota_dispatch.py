@@ -42,7 +42,7 @@ def _firmware_size(firmware: FirmwareVersion) -> Optional[int]:
         return None
     try:
         return int(firmware.firmware_file.size)
-    except (FileNotFoundError, OSError, ValueError):
+    except (OSError, ValueError):
         return None
 
 
@@ -57,7 +57,9 @@ def _public_base_url() -> str:
     return base.rstrip("/")
 
 
-def build_download_url(firmware: FirmwareVersion, *, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> Dict[str, Any]:
+def build_download_url(
+    firmware: FirmwareVersion, *, ttl_seconds: int = DEFAULT_TTL_SECONDS
+) -> Dict[str, Any]:
     """Mint a signed URL for the firmware binary.
 
     Returns a dict with ``url``, ``token``, and ``exp`` so callers can log
@@ -76,7 +78,9 @@ def build_download_url(firmware: FirmwareVersion, *, ttl_seconds: int = DEFAULT_
     return {"url": url, "token": token, "exp": expiry, "path": path}
 
 
-def build_ota_payload(firmware: FirmwareVersion, *, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> Dict[str, Any]:
+def build_ota_payload(
+    firmware: FirmwareVersion, *, ttl_seconds: int = DEFAULT_TTL_SECONDS
+) -> Dict[str, Any]:
     """Build the JSON payload published to ``forgekey/<mac>/ota/trigger``.
 
     Schema (per oms-k2f / fo-e68):

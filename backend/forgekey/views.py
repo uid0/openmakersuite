@@ -63,9 +63,9 @@ PLACEHOLDER_PROVISIONING_TOKEN = "REPLACE_ME_PROVISIONING_TOKEN"  # nosec B105
 # diagnostic instead of a generic 401. Safe to expose: they identify the
 # failure mode without revealing any part of the configured secret.
 AUTH_ERR_SERVER_UNCONFIGURED = "server_unconfigured"
-AUTH_ERR_TOKEN_MISSING = "token_missing"
-AUTH_ERR_TOKEN_PLACEHOLDER = "token_placeholder"
-AUTH_ERR_TOKEN_MISMATCH = "token_mismatch"
+AUTH_ERR_TOKEN_MISSING = "token_missing"  # nosec B105 — error code, not a password
+AUTH_ERR_TOKEN_PLACEHOLDER = "token_placeholder"  # nosec B105 — error code, not a password
+AUTH_ERR_TOKEN_MISMATCH = "token_mismatch"  # nosec B105 — error code, not a password
 
 
 def _token_fingerprint(token: str) -> str:

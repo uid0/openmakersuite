@@ -2,6 +2,8 @@
 Views for ForgeKey API.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 
@@ -57,15 +59,93 @@ logger = logging.getLogger(__name__)
 JPEG_MAGIC = b"\xff\xd8\xff"
 PLACEHOLDER_PROVISIONING_TOKEN = "REPLACE_ME_PROVISIONING_TOKEN"  # nosec B105
 
+# Stable error codes returned to the device so firmware can log a meaningful
+# diagnostic instead of a generic 401. Safe to expose: they identify the
+# failure mode without revealing any part of the configured secret.
+AUTH_ERR_SERVER_UNCONFIGURED = "server_unconfigured"
+AUTH_ERR_TOKEN_MISSING = "token_missing"  # nosec B105 — error code, not a password
+AUTH_ERR_TOKEN_PLACEHOLDER = "token_placeholder"  # nosec B105 — error code, not a password
+AUTH_ERR_TOKEN_MISMATCH = "token_mismatch"  # nosec B105 — error code, not a password
+
+
+def _token_fingerprint(token: str) -> str:
+    """Short, non-reversible fingerprint of a token for operator diagnosis.
+
+    Returns the first 8 hex chars of SHA-256(token). High-entropy tokens are
+    not recoverable from this prefix, so it is safe to log/return; operators
+    can compare fingerprints across the device, the OMS env, and the rotate
+    command without exposing the secret itself.
+    """
+    if not token:
+        return ""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]
+
+
+def _classify_provisioning_token(request) -> tuple[bool, str | None, dict]:
+    """Validate the provisioning token and classify any failure.
+
+    Returns ``(ok, error_code, diagnostics)``. ``diagnostics`` contains
+    non-secret fields suitable for the response body and server logs:
+    ``expected_fp``, ``supplied_fp``, ``expected_len``, ``supplied_len``.
+    """
+    raw_expected = getattr(settings, "FORGEKEY_PROVISIONING_TOKEN", "") or ""
+    expected = raw_expected.strip()
+    raw_supplied = request.headers.get("x-forgekey-provisioning-token", "") or ""
+    supplied = raw_supplied.strip()
+
+    diagnostics = {
+        "expected_fp": _token_fingerprint(expected),
+        "supplied_fp": _token_fingerprint(supplied),
+        "expected_len": len(expected),
+        "supplied_len": len(supplied),
+    }
+
+    if not expected or expected == PLACEHOLDER_PROVISIONING_TOKEN:
+        return False, AUTH_ERR_SERVER_UNCONFIGURED, diagnostics
+    if not supplied:
+        return False, AUTH_ERR_TOKEN_MISSING, diagnostics
+    if supplied == PLACEHOLDER_PROVISIONING_TOKEN:
+        return False, AUTH_ERR_TOKEN_PLACEHOLDER, diagnostics
+    if not hmac.compare_digest(supplied, expected):
+        return False, AUTH_ERR_TOKEN_MISMATCH, diagnostics
+    return True, None, diagnostics
+
+
+# Human-readable hints paired with each error code. Kept short so they fit
+# inside ESP32 serial logs.
+_AUTH_ERR_DETAILS = {
+    AUTH_ERR_SERVER_UNCONFIGURED: (
+        "Server has no provisioning token configured. "
+        "Set FORGEKEY_PROVISIONING_TOKEN on the backend."
+    ),
+    AUTH_ERR_TOKEN_MISSING: ("Request is missing the X-ForgeKey-Provisioning-Token header."),
+    AUTH_ERR_TOKEN_PLACEHOLDER: (
+        "Device sent the placeholder provisioning token; "
+        "publish the real token via rotate_provisioning_token."
+    ),
+    AUTH_ERR_TOKEN_MISMATCH: (
+        "Provisioning token does not match the server's configured value. "
+        "Compare token fingerprints to identify the drift."
+    ),
+}
+
+
+def _provisioning_auth_error_response(error_code: str, diagnostics: dict) -> Response:
+    """Build a 401 response that distinguishes the failure mode."""
+    payload = {
+        "detail": _AUTH_ERR_DETAILS.get(error_code, "Provisioning auth failed."),
+        "code": error_code,
+        "expected_token_fingerprint": diagnostics["expected_fp"],
+        "supplied_token_fingerprint": diagnostics["supplied_fp"],
+        "expected_token_length": diagnostics["expected_len"],
+        "supplied_token_length": diagnostics["supplied_len"],
+    }
+    return Response(payload, status=status.HTTP_401_UNAUTHORIZED)
+
 
 def _provisioning_token_valid(request) -> bool:
-    expected = getattr(settings, "FORGEKEY_PROVISIONING_TOKEN", "")
-    if not expected or expected == PLACEHOLDER_PROVISIONING_TOKEN:
-        return False
-    supplied = request.headers.get("x-forgekey-provisioning-token", "")
-    if not supplied or supplied == PLACEHOLDER_PROVISIONING_TOKEN:
-        return False
-    return supplied == expected
+    ok, _err, _diag = _classify_provisioning_token(request)
+    return ok
 
 
 class ForgeKeyDeviceRegisterView(APIView):
@@ -85,11 +165,20 @@ class ForgeKeyDeviceRegisterView(APIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request):
-        if not _provisioning_token_valid(request):
-            return Response(
-                {"detail": "Invalid or missing provisioning token."},
-                status=status.HTTP_401_UNAUTHORIZED,
+        ok, error_code, diagnostics = _classify_provisioning_token(request)
+        if not ok:
+            logger.warning(
+                "ForgeKey register: provisioning auth failed code=%s "
+                "expected_fp=%s expected_len=%d supplied_fp=%s supplied_len=%d "
+                "remote=%s",
+                error_code,
+                diagnostics["expected_fp"] or "<empty>",
+                diagnostics["expected_len"],
+                diagnostics["supplied_fp"] or "<empty>",
+                diagnostics["supplied_len"],
+                request.META.get("REMOTE_ADDR", "?"),
             )
+            return _provisioning_auth_error_response(error_code, diagnostics)
 
         # Metadata may arrive either as top-level multipart fields or as a
         # JSON blob under the "metadata" field — accept both shapes.

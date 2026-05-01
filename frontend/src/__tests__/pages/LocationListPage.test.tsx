@@ -6,6 +6,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import LocationListPage from '../../pages/LocationListPage';
 import * as api from '../../services/api';
+import { confirmDelete, showError, showSuccess } from '../../utils/dialogs';
 
 // Mock the API
 jest.mock('../../services/api');
@@ -16,7 +17,6 @@ jest.mock('../../utils/dialogs', () => ({
   showError: jest.fn(),
   showSuccess: jest.fn(),
 }));
-import { confirmDelete, showError, showSuccess } from '../../utils/dialogs';
 
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({

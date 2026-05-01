@@ -14,6 +14,7 @@
 #   - REDIS_URL, CELERY_BROKER_URL (must be set)
 #   - EMQX_DASHBOARD_PASSWORD (8+ chars, mixed case, digit, non-placeholder)
 #   - ForgeKey: FORGEKEY_FIRMWARE_SIGNING_KEY (if set, must look like PEM)
+#   - ForgeKey: FORGEKEY_PROVISIONING_TOKEN (warned if empty/placeholder)
 #   - Webhook tokens: POSTMARK_INBOUND_TOKEN, LOCATION_PING_TOKEN (warned if empty)
 #   - Email: EMAIL_BACKEND must not be the console backend in prod
 #   - Sentry: if SENTRY_DSN set, must look like a DSN URL
@@ -195,6 +196,15 @@ if [ -n "${FORGEKEY_FIRMWARE_SIGNING_KEY:-}" ]; then
         *"-----BEGIN "*"PRIVATE KEY-----"*) ;;
         *) err "FORGEKEY_FIRMWARE_SIGNING_KEY does not look like a PEM private key (no '-----BEGIN ... PRIVATE KEY-----' header)." ;;
     esac
+fi
+
+# --- 8a. ForgeKey provisioning token ----------------------------------------
+# Without this set, every ESP32 device-registration request returns 401
+# server_unconfigured. Warned (not errored) to keep deployments without the
+# ForgeKey integration from being blocked.
+
+if [ -z "${FORGEKEY_PROVISIONING_TOKEN:-}" ] || is_placeholder "${FORGEKEY_PROVISIONING_TOKEN:-}" || [ "${FORGEKEY_PROVISIONING_TOKEN:-}" = "REPLACE_ME_PROVISIONING_TOKEN" ]; then
+    warn "FORGEKEY_PROVISIONING_TOKEN is empty or a placeholder — ESP32 device registration will return 401 server_unconfigured. Generate with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
 fi
 
 # --- 9. Email ---------------------------------------------------------------

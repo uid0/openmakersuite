@@ -185,7 +185,9 @@ selected releases.
 
 ## Required environment variables
 
-Set these in `.env` (development) and `.env.prod` (production):
+Set these in `.env` (both development and production — `docker-compose.prod.yml`
+loads the production stack from `.env`, not `.env.prod`. The `.env.prod.example`
+template is copied to `.env` during initial setup, despite the name).
 
 | Variable                          | Description                                                                                    |
 | --------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -235,13 +237,13 @@ TLS); the dashboard is reachable on port `18083`.
 
 ### First-deploy checklist
 
-1. Set `EMQX_DASHBOARD_PASSWORD` in `.env.prod` to a strong value before
+1. Set `EMQX_DASHBOARD_PASSWORD` in `.env` to a strong value before
    `docker compose up -d`. EMQX bakes this into the dashboard's default
    `admin` user on first boot.
 2. Open `https://<host>:18083` and log in as `admin`. Rotate the password
    immediately if you reused a placeholder.
 3. Generate an API key under **System → API Keys**. Copy the key and
-   secret into `EMQX_API_KEY` / `EMQX_API_SECRET` in `.env.prod` and
+   secret into `EMQX_API_KEY` / `EMQX_API_SECRET` in `.env` and
    restart the `backend` service so it picks up the new values.
 4. (Optional) Create a dedicated MQTT user under **Access Control →
    Authentication** and set `MQTT_BROKER_USERNAME` /

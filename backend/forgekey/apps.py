@@ -1,4 +1,16 @@
+import hashlib
+import logging
+
 from django.apps import AppConfig
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+
+def _token_fingerprint(token: str) -> str:
+    if not token:
+        return ""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]
 
 
 class ForgekeyConfig(AppConfig):
@@ -9,3 +21,17 @@ class ForgekeyConfig(AppConfig):
     def ready(self) -> None:
         # Import for side-effect: registers system checks.
         from . import checks  # noqa: F401
+
+        token = (getattr(settings, "FORGEKEY_PROVISIONING_TOKEN", "") or "").strip()
+        if token:
+            logger.info(
+                "ForgeKey provisioning token configured (length=%d, fingerprint=%s)",
+                len(token),
+                _token_fingerprint(token),
+            )
+        else:
+            logger.warning(
+                "ForgeKey provisioning token NOT configured "
+                "(FORGEKEY_PROVISIONING_TOKEN is empty); device registration "
+                "will return 401 server_unconfigured for every request."
+            )

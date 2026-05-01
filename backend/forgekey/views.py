@@ -1000,7 +1000,7 @@ class ForgeKeyFirmwareDownloadView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        range_header = request.headers.get("range") or request.META.get("HTTP_RANGE", "")
+        range_header = request.headers.get("range", "")
         rng = _parse_range(range_header, size)
 
         download_name = (

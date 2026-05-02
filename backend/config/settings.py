@@ -49,6 +49,16 @@ CSRF_TRUSTED_ORIGINS = config(
 # Trust X-Forwarded-Proto header from proxy to determine if request is HTTPS
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# Spool uploaded files larger than this to /tmp instead of holding them in
+# the gunicorn worker heap. Django's default (2.5 MiB) is fine for form posts
+# but lets a 3MP ESP32 device photo (5–10 MB) sit on the heap until the
+# request completes — a per-request RSS spike that contributed to the
+# backend OOM in oms-9t2. 1 MiB keeps small admin uploads in memory while
+# routing all device photo uploads through TemporaryFileUploadHandler.
+FILE_UPLOAD_MAX_MEMORY_SIZE = config(
+    "FILE_UPLOAD_MAX_MEMORY_SIZE", default=1 * 1024 * 1024, cast=int
+)
+
 # Application definition
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -383,6 +393,12 @@ MQTT_TOPIC_PREFIX = config("MQTT_TOPIC_PREFIX", default="forgekey")
 MQTT_CLIENT_ID = config("MQTT_CLIENT_ID", default="forgekey-server")
 MQTT_KEEPALIVE = config("MQTT_KEEPALIVE", default=60, cast=int)
 MQTT_BROKER_TLS = config("MQTT_BROKER_TLS", default=False, cast=bool)
+# Cooldown after a failed MQTT connect before we try again. Without this, a
+# broker outage causes every send_mqtt_command() call to instantiate a fresh
+# paho.Client + fail, leaking sockets/buffers — see oms-9t2.
+MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = config(
+    "MQTT_CONNECT_RETRY_COOLDOWN_SECONDS", default=30, cast=int
+)
 
 # EMQX broker — dashboard password is rendered into the bootstrap_users_file
 # by deploy.sh on every deploy; the API key/secret pair is generated in the

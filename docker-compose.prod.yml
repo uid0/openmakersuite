@@ -80,7 +80,25 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     logging: *default-logging
-    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120
+    # --max-requests + --max-requests-jitter recycles each worker after ~1000
+    # requests so any slow leak (paho buffer growth, sentry buffer, multipart
+    # spool retention) is bounded by the recycle window instead of unbounded
+    # process lifetime. --graceful-timeout 30 lets in-flight requests finish
+    # before SIGKILL on recycle. See docs/INCIDENTS/oom-backend.md (oms-9t2).
+    command: >-
+      gunicorn config.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers 4
+      --timeout 120
+      --max-requests 1000
+      --max-requests-jitter 100
+      --graceful-timeout 30
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
@@ -132,7 +150,15 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     logging: *default-logging
-    command: celery -A config worker -l info
+    # --max-tasks-per-child mirrors the gunicorn --max-requests recycle so
+    # per-task leaks in MQTT publish, image processing, etc. are bounded.
+    command: celery -A config worker -l info --max-tasks-per-child=200
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
     volumes:
       - media_volume:/app/media
     env_file:

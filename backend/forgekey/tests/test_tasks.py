@@ -181,11 +181,9 @@ class TestMQTTTasks:
     @patch("forgekey.tasks.settings")
     def test_get_mqtt_client_creation(self, mock_settings, mock_client_class):
         """Test MQTT client creation."""
-        import forgekey.tasks
-        from forgekey.tasks import get_mqtt_client
+        from forgekey.tasks import _reset_mqtt_client_state_for_tests, get_mqtt_client
 
-        # Reset the global client
-        forgekey.tasks._mqtt_client = None
+        _reset_mqtt_client_state_for_tests()
 
         mock_settings.MQTT_CLIENT_ID = "test-client"
         mock_settings.MQTT_BROKER_HOST = "localhost"
@@ -193,6 +191,7 @@ class TestMQTTTasks:
         mock_settings.MQTT_KEEPALIVE = 60
         mock_settings.MQTT_BROKER_USERNAME = ""  # nosec B105
         mock_settings.MQTT_BROKER_PASSWORD = ""  # nosec B105
+        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 30
 
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
@@ -207,11 +206,9 @@ class TestMQTTTasks:
     @patch("forgekey.tasks.settings")
     def test_get_mqtt_client_with_auth(self, mock_settings, mock_client_class):
         """Test MQTT client creation with authentication."""
-        import forgekey.tasks
-        from forgekey.tasks import get_mqtt_client
+        from forgekey.tasks import _reset_mqtt_client_state_for_tests, get_mqtt_client
 
-        # Reset the global client
-        forgekey.tasks._mqtt_client = None
+        _reset_mqtt_client_state_for_tests()
 
         mock_settings.MQTT_CLIENT_ID = "test-client"
         mock_settings.MQTT_BROKER_HOST = "localhost"
@@ -219,6 +216,7 @@ class TestMQTTTasks:
         mock_settings.MQTT_KEEPALIVE = 60
         mock_settings.MQTT_BROKER_USERNAME = "user"
         mock_settings.MQTT_BROKER_PASSWORD = "pass"  # nosec B105
+        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 30
 
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
@@ -232,11 +230,9 @@ class TestMQTTTasks:
     @patch("forgekey.tasks.settings")
     def test_get_mqtt_client_connection_error(self, mock_settings, mock_client_class):
         """Test MQTT client connection error handling."""
-        import forgekey.tasks
-        from forgekey.tasks import get_mqtt_client
+        from forgekey.tasks import _reset_mqtt_client_state_for_tests, get_mqtt_client
 
-        # Reset the global client
-        forgekey.tasks._mqtt_client = None
+        _reset_mqtt_client_state_for_tests()
 
         mock_settings.MQTT_CLIENT_ID = "test-client"
         mock_settings.MQTT_BROKER_HOST = "localhost"
@@ -244,6 +240,7 @@ class TestMQTTTasks:
         mock_settings.MQTT_KEEPALIVE = 60
         mock_settings.MQTT_BROKER_USERNAME = ""  # nosec B105
         mock_settings.MQTT_BROKER_PASSWORD = ""  # nosec B105
+        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 30
 
         mock_client = MagicMock()
         mock_client.connect.side_effect = Exception("Connection refused")
@@ -251,6 +248,149 @@ class TestMQTTTasks:
 
         with pytest.raises(Exception, match="Connection refused"):
             get_mqtt_client()
+
+
+@pytest.mark.django_db
+class TestMQTTClientCooldown:
+    """Circuit breaker around get_mqtt_client(): when the broker is unreachable,
+    repeated calls within the cooldown window must short-circuit instead of
+    instantiating a fresh paho.Client every time. Per-call instantiation under
+    a broker outage was the root cause of the backend OOM (oms-9t2).
+    """
+
+    @patch("paho.mqtt.client.Client")
+    @patch("forgekey.tasks.settings")
+    def test_repeated_failures_inside_cooldown_do_not_reinstantiate(
+        self, mock_settings, mock_client_class
+    ):
+        from forgekey.tasks import (
+            MQTTConnectCooldown,
+            _reset_mqtt_client_state_for_tests,
+            get_mqtt_client,
+        )
+
+        _reset_mqtt_client_state_for_tests()
+
+        mock_settings.MQTT_CLIENT_ID = "test-client"
+        mock_settings.MQTT_BROKER_HOST = "localhost"
+        mock_settings.MQTT_BROKER_PORT = 1883
+        mock_settings.MQTT_KEEPALIVE = 60
+        mock_settings.MQTT_BROKER_USERNAME = ""  # nosec B105
+        mock_settings.MQTT_BROKER_PASSWORD = ""  # nosec B105
+        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 30
+
+        mock_client = MagicMock()
+        mock_client.connect.side_effect = Exception("Connection refused")
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(Exception, match="Connection refused"):
+            get_mqtt_client()
+        assert mock_client_class.call_count == 1
+
+        # 50 more calls within the cooldown window should all raise the
+        # cooldown sentinel WITHOUT instantiating another paho.Client. This is
+        # the assertion that would have caught oms-9t2 in CI.
+        for _ in range(50):
+            with pytest.raises(MQTTConnectCooldown):
+                get_mqtt_client()
+        assert mock_client_class.call_count == 1, (
+            "paho.Client must not be re-instantiated during cooldown — "
+            "leaks here are what OOM'd the backend container."
+        )
+
+    @patch("paho.mqtt.client.Client")
+    @patch("forgekey.tasks.settings")
+    def test_failed_connect_releases_partial_client_resources(
+        self, mock_settings, mock_client_class
+    ):
+        from forgekey.tasks import _reset_mqtt_client_state_for_tests, get_mqtt_client
+
+        _reset_mqtt_client_state_for_tests()
+
+        mock_settings.MQTT_CLIENT_ID = "test-client"
+        mock_settings.MQTT_BROKER_HOST = "localhost"
+        mock_settings.MQTT_BROKER_PORT = 1883
+        mock_settings.MQTT_KEEPALIVE = 60
+        mock_settings.MQTT_BROKER_USERNAME = ""  # nosec B105
+        mock_settings.MQTT_BROKER_PASSWORD = ""  # nosec B105
+        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 30
+
+        mock_client = MagicMock()
+        mock_client.connect.side_effect = Exception("Connection refused")
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(Exception, match="Connection refused"):
+            get_mqtt_client()
+
+        # Even on failed connect we must call loop_stop + disconnect on the
+        # half-built client so its background thread + socket are released.
+        mock_client.loop_stop.assert_called_once()
+        mock_client.disconnect.assert_called_once()
+
+    @patch("paho.mqtt.client.Client")
+    @patch("forgekey.tasks.settings")
+    def test_cooldown_expiry_allows_retry(self, mock_settings, mock_client_class):
+        from forgekey.tasks import (
+            MQTTConnectCooldown,
+            _reset_mqtt_client_state_for_tests,
+            get_mqtt_client,
+        )
+
+        _reset_mqtt_client_state_for_tests()
+
+        mock_settings.MQTT_CLIENT_ID = "test-client"
+        mock_settings.MQTT_BROKER_HOST = "localhost"
+        mock_settings.MQTT_BROKER_PORT = 1883
+        mock_settings.MQTT_KEEPALIVE = 60
+        mock_settings.MQTT_BROKER_USERNAME = ""  # nosec B105
+        mock_settings.MQTT_BROKER_PASSWORD = ""  # nosec B105
+        # Zero cooldown means each call gets through — proves the gate is
+        # gated on the cooldown setting, not hard-coded.
+        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 0
+
+        mock_client = MagicMock()
+        mock_client.connect.side_effect = Exception("Connection refused")
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(Exception, match="Connection refused"):
+            get_mqtt_client()
+        with pytest.raises(Exception, match="Connection refused"):
+            get_mqtt_client()
+        # Two failed connects, two paho.Client instantiations — the cooldown
+        # is what bounds this in production.
+        assert mock_client_class.call_count == 2
+
+        # And MQTTConnectCooldown is never raised because cooldown is 0.
+        with pytest.raises(Exception) as exc_info:
+            get_mqtt_client()
+        assert not isinstance(exc_info.value, MQTTConnectCooldown)
+
+    @patch("paho.mqtt.client.Client")
+    @patch("forgekey.tasks.settings")
+    def test_successful_connect_clears_cooldown(self, mock_settings, mock_client_class):
+        from forgekey.tasks import _reset_mqtt_client_state_for_tests, get_mqtt_client
+
+        _reset_mqtt_client_state_for_tests()
+
+        mock_settings.MQTT_CLIENT_ID = "test-client"
+        mock_settings.MQTT_BROKER_HOST = "localhost"
+        mock_settings.MQTT_BROKER_PORT = 1883
+        mock_settings.MQTT_KEEPALIVE = 60
+        mock_settings.MQTT_BROKER_USERNAME = ""  # nosec B105
+        mock_settings.MQTT_BROKER_PASSWORD = ""  # nosec B105
+        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 30
+
+        mock_client = MagicMock()  # connect succeeds (no side_effect)
+        mock_client_class.return_value = mock_client
+
+        first = get_mqtt_client()
+        # Singleton: subsequent calls return the same instance, no new
+        # paho.Client instantiations, no cooldown checks at all.
+        for _ in range(20):
+            assert get_mqtt_client() is first
+        assert mock_client_class.call_count == 1
+        mock_client.connect.assert_called_once()
+        mock_client.loop_start.assert_called_once()
 
     def test_process_mqtt_firmware_update_response_completed(self):
         """Test processing firmware update response - completed."""

@@ -59,7 +59,15 @@ from .services.firmware_signing import (
     get_public_key_pem,
     is_signing_configured,
 )
-from .tasks import disable_device, enable_device, request_device_status
+from .tasks import (
+    disable_device,
+    enable_device,
+    process_mqtt_firmware_update_response,
+    process_mqtt_occupancy,
+    process_mqtt_power_reading,
+    process_mqtt_status_message,
+    request_device_status,
+)
 from .utils import (
     generate_device_jwt,
     get_mqtt_firmware_topic,
@@ -385,6 +393,177 @@ class ForgeKeyDevicePhotoUploadView(APIView):
             if payload and payload.get("mac") == mac:
                 return True
         return _provisioning_token_valid(request)
+
+
+class MqttWebhookView(APIView):
+    """
+    POST /api/forgekey/mqtt-webhook/
+
+    EMQX WebHook bridge target. EMQX is configured to POST every published
+    MQTT message matching the configured topic filters to this endpoint as
+    JSON. We authenticate the request, parse the topic + payload, and
+    dispatch to the matching processor Celery task. Returns 204 once the
+    task is queued so EMQX does not block on Celery completion.
+
+    Auth (in order):
+      1. If ``settings.FORGEKEY_WEBHOOK_ALLOWED_IPS`` is set, REMOTE_ADDR
+         must match one of the entries.
+      2. The ``X-ForgeKey-Webhook-Secret`` header must match
+         ``settings.FORGEKEY_WEBHOOK_SECRET`` (constant-time compare).
+
+    Both checks run before any payload parsing so unauthenticated spam
+    cannot consume CPU on JSON decode or DB lookups.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+
+    OCCUPANCY_SUFFIX = "occupancy"
+    STATUS_SUFFIX = "status"
+    POWER_SUFFIX = "power"
+    FIRMWARE_RESPONSE_SUFFIX = ("firmware", "response")
+
+    def post(self, request):
+        if not self._ip_allowed(request):
+            logger.warning(
+                "ForgeKey webhook: IP %s not in allowlist",
+                request.META.get("REMOTE_ADDR", "?"),
+            )
+            return Response(
+                {"detail": "Source IP not allowed."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not self._secret_valid(request):
+            logger.warning(
+                "ForgeKey webhook: secret mismatch from %s",
+                request.META.get("REMOTE_ADDR", "?"),
+            )
+            return Response(
+                {"detail": "Invalid webhook secret."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        body = request.data
+        if not isinstance(body, dict):
+            return Response(
+                {"detail": "Request body must be a JSON object."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        topic = body.get("topic")
+        if not isinstance(topic, str) or not topic:
+            return Response(
+                {"detail": "topic is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # EMQX sends payload as a JSON-encoded string by default; some bridge
+        # configurations forward it as a parsed object. Accept both.
+        raw_payload = body.get("payload")
+        if isinstance(raw_payload, str):
+            try:
+                message_data = json.loads(raw_payload) if raw_payload else {}
+            except json.JSONDecodeError:
+                logger.warning("ForgeKey webhook: malformed JSON payload on topic %s", topic)
+                return Response(
+                    {"detail": "payload is not valid JSON."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        elif isinstance(raw_payload, dict) or raw_payload is None:
+            message_data = raw_payload or {}
+        else:
+            return Response(
+                {"detail": "payload must be a JSON object or string."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        parts = topic.split("/")
+        # Topic shape: <prefix>/<mac-segment>/[<sensor>/]<suffix...>
+        if len(parts) < 3:
+            return Response(
+                {"detail": "topic is too short to extract a MAC."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            mac = normalize_mac_address(parts[1])
+        except Exception:
+            return Response(
+                {"detail": "topic MAC segment is malformed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        dispatched = self._dispatch(parts, mac, message_data)
+        if not dispatched:
+            logger.info("ForgeKey webhook: ignoring unrouted topic %s", topic)
+            # Still 204 — EMQX should not retry topics we deliberately drop.
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @staticmethod
+    def _ip_allowed(request) -> bool:
+        allowed = getattr(settings, "FORGEKEY_WEBHOOK_ALLOWED_IPS", []) or []
+        if not allowed:
+            return True
+        return request.META.get("REMOTE_ADDR", "") in allowed
+
+    @staticmethod
+    def _secret_valid(request) -> bool:
+        expected = getattr(settings, "FORGEKEY_WEBHOOK_SECRET", "") or ""
+        if not expected:
+            # Fail closed: an empty configured secret means the deployment
+            # forgot to set FORGEKEY_WEBHOOK_SECRET; we refuse all traffic.
+            return False
+        supplied = request.headers.get("x-forgekey-webhook-secret", "") or ""
+        return hmac.compare_digest(supplied, expected)
+
+    def _dispatch(self, parts: list[str], mac: str, message_data: dict) -> bool:
+        """Route the parsed message; return True if a task was queued."""
+        last = parts[-1]
+        # Status: <prefix>/<mac>/status (3 parts, last == "status")
+        if len(parts) == 3 and last == self.STATUS_SUFFIX:
+            process_mqtt_status_message.delay(mac, message_data)
+            return True
+
+        # Firmware response: <prefix>/<mac>/firmware/response
+        if (
+            len(parts) >= 4
+            and parts[-2] == self.FIRMWARE_RESPONSE_SUFFIX[0]
+            and parts[-1] == self.FIRMWARE_RESPONSE_SUFFIX[1]
+        ):
+            update_id = message_data.get("update_id") if isinstance(message_data, dict) else None
+            status_value = message_data.get("status") if isinstance(message_data, dict) else None
+            error_message = (
+                message_data.get("error_message") if isinstance(message_data, dict) else None
+            )
+            if not update_id or not status_value:
+                logger.warning(
+                    "ForgeKey webhook: firmware response missing update_id/status for %s",
+                    mac,
+                )
+                return False
+            process_mqtt_firmware_update_response.delay(
+                mac, str(update_id), str(status_value), error_message
+            )
+            return True
+
+        # Occupancy: <prefix>/<mac>/<sensor>/occupancy (4 parts)
+        if len(parts) == 4 and last == self.OCCUPANCY_SUFFIX:
+            sensor_kind = normalize_sensor_kind(parts[2])
+            process_mqtt_occupancy.delay(mac, sensor_kind, message_data or {})
+            return True
+
+        # Power: <prefix>/<mac>/power or <prefix>/<mac>/<sensor>/power
+        if last == self.POWER_SUFFIX and len(parts) in (3, 4):
+            asset_id = message_data.get("asset_id") if isinstance(message_data, dict) else None
+            if not asset_id:
+                logger.warning("ForgeKey webhook: power reading from %s missing asset_id", mac)
+                return False
+            process_mqtt_power_reading.delay(mac, str(asset_id), message_data)
+            return True
+
+        return False
 
 
 class DeviceTypeViewSet(viewsets.ModelViewSet):

@@ -414,6 +414,21 @@ FORGEKEY_FIRMWARE_SIGNING_KEY = config("FORGEKEY_FIRMWARE_SIGNING_KEY", default=
 # by the prune_device_photos celery task.
 FORGEKEY_PHOTO_RETENTION_DAYS = config("FORGEKEY_PHOTO_RETENTION_DAYS", default=30, cast=int)
 
+# Shared secret EMQX must send in the X-ForgeKey-Webhook-Secret header on
+# WebHook bridge POSTs to /api/forgekey/mqtt-webhook/. Empty disables the
+# endpoint (returns 503) so a misconfigured deployment fails closed instead
+# of silently accepting unauthenticated traffic.
+FORGEKEY_WEBHOOK_SECRET = config("FORGEKEY_WEBHOOK_SECRET", default="")
+
+# Optional comma-separated IP allowlist for the MQTT webhook. When set, the
+# request's REMOTE_ADDR must match one of these entries or the request is
+# rejected before the secret check runs. Leave empty to skip IP filtering.
+FORGEKEY_WEBHOOK_ALLOWED_IPS = [
+    entry.strip()
+    for entry in config("FORGEKEY_WEBHOOK_ALLOWED_IPS", default="").split(",")
+    if entry.strip()
+]
+
 # Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {
     "TITLE": "Makerspace Inventory Management API",

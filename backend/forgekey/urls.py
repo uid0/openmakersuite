@@ -19,6 +19,7 @@ from .views import (
     ForgeKeyDeviceRegisterView,
     ForgeKeyFirmwareDownloadView,
     ForgeKeyFirmwarePublicKeyView,
+    MqttWebhookView,
     OperationalModeViewSet,
     PowerMeterReadingViewSet,
 )
@@ -57,6 +58,11 @@ urlpatterns = [
         "firmware/<uuid:firmware_id>/download",
         ForgeKeyFirmwareDownloadView.as_view(),
         name="firmware-download",
+    ),
+    path(
+        "mqtt-webhook/",
+        MqttWebhookView.as_view(),
+        name="mqtt-webhook",
     ),
     path("", include(router.urls)),
 ]

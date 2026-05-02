@@ -393,9 +393,20 @@ EMQX_API_KEY = config("EMQX_API_KEY", default="")
 EMQX_API_SECRET = config("EMQX_API_SECRET", default="")
 
 # ForgeKey JWT Configuration
+#
+# Device JWTs are signed with ES256 (ECDSA P-256) so EMQX's JWT authenticator
+# can verify them by fetching the matching public key from /api/forgekey/jwks/.
+# The PEM may include literal "\n" newlines (env-friendly). FORGEKEY_SHARED_SECRET
+# is retained for legacy callers but unused by the JWT path.
 FORGEKEY_SHARED_SECRET = config("FORGEKEY_SHARED_SECRET", default="change-me-in-production")
-FORGEKEY_JWT_ALGORITHM = "HS256"
-FORGEKEY_JWT_EXPIRATION_SECONDS = 3600  # 1 hour
+FORGEKEY_JWT_ALGORITHM = "ES256"
+FORGEKEY_JWT_EXPIRATION_SECONDS = config(
+    "FORGEKEY_JWT_EXPIRATION_SECONDS", default=2592000, cast=int  # 30 days
+)
+FORGEKEY_JWT_ISSUER = config("FORGEKEY_JWT_ISSUER", default="openmakersuite")
+FORGEKEY_JWT_AUDIENCE = config("FORGEKEY_JWT_AUDIENCE", default="forgekey")
+FORGEKEY_JWT_KEY_ID = config("FORGEKEY_JWT_KEY_ID", default="forgekey-jwt-1")
+FORGEKEY_JWT_SIGNING_KEY = config("FORGEKEY_JWT_SIGNING_KEY", default="").replace("\\n", "\n")
 
 # ForgeKey provisioning token — devices send this in
 # X-ForgeKey-Provisioning-Token to call the registration endpoint.

@@ -2,13 +2,14 @@
 Utility functions for ForgeKey.
 """
 
-import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from django.conf import settings
 
 import jwt
+
+from .services.jwt_signing import JwtSigningError, get_jwt_public_key_pem, load_jwt_signing_key
 
 
 def normalize_mac_address(mac_address: str) -> str:
@@ -27,35 +28,90 @@ def normalize_mac_address(mac_address: str) -> str:
     return ":".join(mac[i : i + 2] for i in range(0, len(mac), 2))
 
 
-def generate_device_jwt(mac_address: str, payload: Optional[Dict] = None) -> str:
+def _device_acl_claims(mac_address: str, sensor_kind: Optional[str] = None) -> Dict:
+    """Build the per-device EMQX ACL claims for a given MAC.
+
+    Returns a least-privilege grant: the device may publish only to its own
+    telemetry / status / OTA-status / firmware-response topics, and subscribe
+    only to its own command / firmware / config / OTA-trigger topics. No
+    wildcards, no cross-device traffic.
     """
-    Generate a JWT token for an ESP32 device based on its MAC address.
+    contract_mac = _firmware_contract_mac(mac_address)
+    prefix = f"{settings.MQTT_TOPIC_PREFIX}/{contract_mac}"
+    pub_topics = [
+        f"{prefix}/status",
+        f"{prefix}/firmware/response",
+        f"{prefix}/ota/status",
+    ]
+    # Sensor-kind-specific occupancy stream. Devices typically know one kind
+    # but for first-registration calls where sensor_kind is unknown, we grant
+    # both well-known occupancy topics so the device can pick.
+    kind = normalize_sensor_kind(sensor_kind) if sensor_kind else ""
+    if kind:
+        pub_topics.insert(0, f"{prefix}/{kind}/occupancy")
+    else:
+        pub_topics = [
+            f"{prefix}/people_counter/occupancy",
+            f"{prefix}/door_counter/occupancy",
+        ] + pub_topics
+    sub_topics = [
+        f"{prefix}/command",
+        f"{prefix}/firmware",
+        f"{prefix}/config",
+        f"{prefix}/ota/trigger",
+    ]
+    return {"pub": pub_topics, "sub": sub_topics}
+
+
+def generate_device_jwt(
+    mac_address: str,
+    payload: Optional[Dict] = None,
+    sensor_kind: Optional[str] = None,
+) -> str:
+    """
+    Generate an ES256-signed JWT for an ESP32 device.
+
+    The token is verifiable by EMQX via the JWKS endpoint
+    (``/api/forgekey/jwks/``). Claims include standard registered claims
+    (``iss``, ``aud``, ``sub``, ``iat``, ``exp``) plus ``mac`` and an ``acl``
+    claim that EMQX maps to per-device pub/sub permissions.
 
     Args:
-        mac_address: MAC address of the device
-        payload: Additional payload data to include in the token
+        mac_address: MAC address of the device (any format).
+        payload: Extra claims to merge into the token.
+        sensor_kind: Optional device-type code; narrows the ``acl.pub`` grant
+            to only the matching occupancy topic when known.
 
     Returns:
-        JWT token string
+        Compact-serialized JWT string.
+
+    Raises:
+        JwtSigningError: if ``FORGEKEY_JWT_SIGNING_KEY`` is unconfigured or
+            unparseable.
     """
-    secret = _get_device_secret(mac_address)
+    private_key = load_jwt_signing_key()
+    normalized_mac = normalize_mac_address(mac_address)
 
     if payload is None:
         payload = {}
 
     now = datetime.now(timezone.utc)
-    payload.update(
-        {
-            "mac": normalize_mac_address(mac_address),
-            "iat": int(now.timestamp()),
-            "exp": int(now.timestamp()) + settings.FORGEKEY_JWT_EXPIRATION_SECONDS,
-        }
-    )
+    claims = {
+        "iss": settings.FORGEKEY_JWT_ISSUER,
+        "aud": settings.FORGEKEY_JWT_AUDIENCE,
+        "sub": normalized_mac,
+        "mac": normalized_mac,
+        "iat": int(now.timestamp()),
+        "exp": int(now.timestamp()) + settings.FORGEKEY_JWT_EXPIRATION_SECONDS,
+        "acl": _device_acl_claims(normalized_mac, sensor_kind=sensor_kind),
+    }
+    claims.update(payload)
 
     token = jwt.encode(
-        payload,
-        secret,
+        claims,
+        private_key,
         algorithm=settings.FORGEKEY_JWT_ALGORITHM,
+        headers={"kid": settings.FORGEKEY_JWT_KEY_ID},
     )
 
     return token
@@ -63,40 +119,34 @@ def generate_device_jwt(mac_address: str, payload: Optional[Dict] = None) -> str
 
 def verify_device_jwt(token: str, mac_address: str) -> Optional[Dict]:
     """
-    Verify a JWT token from an ESP32 device.
+    Verify a device JWT and confirm it is bound to ``mac_address``.
 
     Args:
-        token: JWT token string
-        mac_address: Expected MAC address of the device
+        token: Compact JWT string.
+        mac_address: Expected MAC address (any format).
 
     Returns:
-        Decoded payload if valid, None otherwise
+        Decoded claim dict on success, ``None`` on any signature, expiry,
+        audience, issuer, or MAC-binding failure.
     """
     try:
-        secret = _get_device_secret(mac_address)
+        public_pem = get_jwt_public_key_pem()
+    except JwtSigningError:
+        return None
+    try:
         payload = jwt.decode(
             token,
-            secret,
+            public_pem,
             algorithms=[settings.FORGEKEY_JWT_ALGORITHM],
+            audience=settings.FORGEKEY_JWT_AUDIENCE,
+            issuer=settings.FORGEKEY_JWT_ISSUER,
         )
-        return payload
     except jwt.InvalidTokenError:
         return None
-
-
-def _get_device_secret(mac_address: str) -> str:
-    """
-    Generate a secret for a device based on its MAC address and shared secret.
-
-    Args:
-        mac_address: MAC address of the device
-
-    Returns:
-        Secret string for JWT signing
-    """
-    normalized_mac = mac_address.upper().replace("-", ":")
-    message = f"{normalized_mac}:{settings.FORGEKEY_SHARED_SECRET}"
-    return hashlib.sha256(message.encode()).hexdigest()
+    expected_mac = normalize_mac_address(mac_address)
+    if payload.get("mac") != expected_mac:
+        return None
+    return payload
 
 
 def get_mqtt_topic(mac_address: str, topic_type: str) -> str:

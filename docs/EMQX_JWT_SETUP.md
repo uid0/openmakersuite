@@ -1,5 +1,10 @@
 # EMQX JWT Authentication Setup Guide
 
+> **Superseded.** This guide describes an older HS256 / shared-secret setup.
+> The current production flow is ES256 with a JWKS-backed authenticator —
+> see [`EMQX_CONFIGURATION.md`](EMQX_CONFIGURATION.md). The content below is
+> kept for historical reference only.
+
 ## Overview
 This guide walks you through setting up EMQX to accept JWT tokens as MQTT passwords for authentication.
 

@@ -101,17 +101,22 @@ def get_mqtt_client() -> mqtt.Client:
         client.loop_start()
     except Exception as e:
         # Record the failure timestamp so the next call short-circuits instead
-        # of leaking another paho.Client. Best-effort cleanup of the partially
-        # initialized client to release its socket/thread.
+        # of leaking another paho.Client, then best-effort release the
+        # partially initialized client's socket/thread. Both cleanup calls may
+        # raise on a never-connected client (the network thread or socket may
+        # not exist yet); we log + swallow because re-raising here would mask
+        # the real connect failure below.
         _mqtt_connect_failed_at = time.monotonic()
         try:
             client.loop_stop()
-        except Exception:
-            pass
+        except Exception as cleanup_exc:
+            logger.warning("MQTT cleanup: loop_stop() failed after failed connect: %s", cleanup_exc)
         try:
             client.disconnect()
-        except Exception:
-            pass
+        except Exception as cleanup_exc:
+            logger.warning(
+                "MQTT cleanup: disconnect() failed after failed connect: %s", cleanup_exc
+            )
         logger.error(f"Failed to connect to MQTT broker: {e}")
         raise
 

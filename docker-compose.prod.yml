@@ -130,13 +130,25 @@ services:
       redis:
         condition: service_healthy
       emqx:
-        condition: service_healthy
+        # service_started (not service_healthy): backend MQTT connect is lazy
+        # (forgekey.tasks.get_mqtt_client) and the EMQX REST API is only used
+        # during provisioning. Blocking backend boot on EMQX reaching healthy
+        # extends the dependency chain that contributed to oms-801, where the
+        # 60s EMQX start_period plus a slow first-healthcheck could push
+        # backend startup past the 120s gunicorn worker timeout.
+        condition: service_started
     healthcheck:
+      # Liveness, not readiness (oms-801): /api/health/livez/ is dep-free and
+      # returns 200 if the gunicorn worker is alive. The previous probe hit
+      # /api/dashboard/health/ which executes a DB query, so a transient DB
+      # hiccup turns the healthcheck red and triggers a container restart even
+      # when the process is fine. Readiness is exposed at /api/health/readyz/
+      # for callers that do need the dependency check.
       test:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/dashboard/health/', timeout=5)"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/livez/', timeout=5)"
       interval: 30s
       timeout: 5s
       retries: 3

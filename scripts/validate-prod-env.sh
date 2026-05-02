@@ -207,6 +207,21 @@ if [ -z "${FORGEKEY_PROVISIONING_TOKEN:-}" ] || is_placeholder "${FORGEKEY_PROVI
     warn "FORGEKEY_PROVISIONING_TOKEN is empty or a placeholder — ESP32 device registration will return 401 server_unconfigured. Generate with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
 fi
 
+# --- 8b. ForgeKey JWT signing key (PR #306) ---------------------------------
+# Required for the EMQX JWKS endpoint and for issuing per-device JWTs at
+# registration. Without it the JWKS endpoint returns 503 and EMQX rejects
+# every device connection. The PEM may include literal "\n" newlines for
+# env-file friendliness, so the validator only checks for the BEGIN header.
+
+if [ -n "${FORGEKEY_JWT_SIGNING_KEY:-}" ]; then
+    case "$FORGEKEY_JWT_SIGNING_KEY" in
+        *"-----BEGIN "*"PRIVATE KEY-----"*) ;;
+        *) err "FORGEKEY_JWT_SIGNING_KEY does not look like a PEM private key (no '-----BEGIN ... PRIVATE KEY-----' header). Generate with: openssl ecparam -genkey -name prime256v1 -noout | awk '{printf \"%s\\\\n\", \$0}'" ;;
+    esac
+else
+    warn "FORGEKEY_JWT_SIGNING_KEY is empty — the /api/forgekey/jwks/ endpoint will return 503 and EMQX cannot authenticate ESP32 devices. Generate with: openssl ecparam -genkey -name prime256v1 -noout | awk '{printf \"%s\\\\n\", \$0}'"
+fi
+
 # --- 9. Email ---------------------------------------------------------------
 
 case "${EMAIL_BACKEND:-}" in

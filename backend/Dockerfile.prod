@@ -42,6 +42,9 @@ ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 EXPOSE 8000
 
-# Health check
+# Liveness healthcheck (oms-801): hit /api/health/livez/, which performs no
+# DB or broker I/O, so a gunicorn worker that is alive but waiting on a slow
+# dependency does not cause a container restart loop. Use stdlib urllib so
+# the check works whether or not `requests` is installed.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/api/health/', timeout=5)" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/livez/', timeout=5)" || exit 1

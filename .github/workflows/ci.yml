@@ -578,6 +578,108 @@ jobs:
               --build-arg REACT_APP_GITHUB_URL=https://github.com/uid0/openmakersuite \
               frontend/
 
+  prod-stack-smoke:
+    # oms-801 / AC-5: boot the prod docker-compose stack with a minimal env
+    # and verify the backend serves a request within 60 seconds. Production
+    # workers timed out at 120s without ever serving a request after the
+    # PR #303-#308 batch shipped; this gate would have caught that locally.
+    name: Prod Stack Smoke (livez within 60s)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docker == 'true' || needs.changes.outputs.deploy == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Render minimal prod .env + bootstrap files
+        run: |
+          # Minimum env that satisfies validate-prod-env.sh + lets the prod
+          # compose come up. The forgekey JWT signing key is set to a real
+          # ephemeral keypair so a regression that loads it at boot would
+          # fail with a malformed-PEM error here, not silently pass.
+          jwt_pem=$(openssl ecparam -genkey -name prime256v1 -noout)
+          jwt_env=$(printf '%s' "$jwt_pem" | awk '{printf "%s\\n", $0}')
+
+          cat > .env <<EOF
+          DOMAIN=ci.example.com
+          LETSENCRYPT_EMAIL=ci@ci.example.com
+          LETSENCRYPT_DOMAINS=ci.example.com
+          DEBUG=0
+          SECRET_KEY=ci-secret-key-not-for-production-only-validator-test-padding-padding
+          ALLOWED_HOSTS=ci.example.com,localhost,127.0.0.1
+          CSRF_TRUSTED_ORIGINS=https://ci.example.com
+          CORS_ALLOWED_ORIGINS=https://ci.example.com
+          POSTGRES_DB=oms
+          POSTGRES_USER=oms
+          POSTGRES_PASSWORD=ci-password-1234567890
+          REDIS_URL=redis://redis:6379/0
+          CELERY_BROKER_URL=redis://redis:6379/0
+          FRONTEND_URL=https://ci.example.com
+          GIT_HASH=ci
+          REACT_APP_SENTRY_DSN=
+          GITHUB_URL=https://github.com/uid0/openmakersuite
+          EMQX_DASHBOARD_PASSWORD=Strong1Password
+          FORGEKEY_PROVISIONING_TOKEN=ci-provisioning-token-not-for-production-padding
+          FORGEKEY_JWT_SIGNING_KEY=${jwt_env}
+          SENTRY_DSN=
+          EOF
+
+          # bootstrap_users for EMQX is normally rendered by deploy.sh; the
+          # smoke just needs a syntactically valid file so the volume mount
+          # doesn't fail.
+          mkdir -p scripts/emqx
+          echo "admin:Strong1Password" > scripts/emqx/bootstrap-admins.txt
+
+      - name: Boot backend stack (db + redis + emqx + backend)
+        run: |
+          # frontend/nginx are skipped — we only need the API path to verify
+          # gunicorn workers boot and serve livez.
+          docker compose -f docker-compose.prod.yml --env-file .env \
+              up -d --build db redis emqx backend
+
+      - name: Wait for backend to serve /api/health/livez/ within 60s
+        run: |
+          deadline=$(( $(date +%s) + 60 ))
+          backend_id=$(docker compose -f docker-compose.prod.yml ps -q backend)
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            # Hit livez from inside the backend container so we don't depend
+            # on host port mapping or DNS.
+            if docker exec "$backend_id" python -c \
+                "import urllib.request; r=urllib.request.urlopen('http://localhost:8000/api/health/livez/', timeout=5); import sys; sys.exit(0 if r.status==200 else 1)" \
+                2>/dev/null; then
+              echo "✅ /api/health/livez/ returned 200 within $(( 60 - (deadline - $(date +%s)) ))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ backend did not serve /api/health/livez/ within 60s"
+          exit 1
+
+      - name: Show backend logs on failure
+        if: failure()
+        run: |
+          echo "::group::backend logs"
+          docker compose -f docker-compose.prod.yml logs backend || true
+          echo "::endgroup::"
+          echo "::group::db logs"
+          docker compose -f docker-compose.prod.yml logs db || true
+          echo "::endgroup::"
+          echo "::group::redis logs"
+          docker compose -f docker-compose.prod.yml logs redis || true
+          echo "::endgroup::"
+          echo "::group::emqx logs"
+          docker compose -f docker-compose.prod.yml logs emqx || true
+          echo "::endgroup::"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f docker-compose.prod.yml down -v || true
+
   deploy-validation:
     name: Deploy Validation (Helm + K8s)
     runs-on: ubuntu-latest
@@ -759,7 +861,7 @@ jobs:
   ci-complete:
     name: ✅ CI Complete
     runs-on: ubuntu-latest
-    needs: [changes, backend-lint, backend-tests, frontend-lint, frontend-tests, docker-build, security, deploy-validation, deploy-artifacts]
+    needs: [changes, backend-lint, backend-tests, frontend-lint, frontend-tests, docker-build, security, deploy-validation, deploy-artifacts, prod-stack-smoke]
     if: always()
     steps:
       - name: Check all jobs succeeded or were skipped
@@ -777,6 +879,7 @@ jobs:
           SECURITY="${{ needs.security.result }}"
           DEPLOY="${{ needs.deploy-validation.result }}"
           DEPLOY_ART="${{ needs.deploy-artifacts.result }}"
+          PROD_SMOKE="${{ needs.prod-stack-smoke.result }}"
 
           echo "Backend lint:    $BACKEND_LINT"
           echo "Backend tests:   $BACKEND"
@@ -786,9 +889,10 @@ jobs:
           echo "Security:        $SECURITY"
           echo "Deploy:          $DEPLOY"
           echo "Deploy artifacts:$DEPLOY_ART"
+          echo "Prod smoke:      $PROD_SMOKE"
 
           fail=0
-          for r in "$BACKEND_LINT" "$BACKEND" "$FRONTEND_LINT" "$FRONTEND" "$DOCKER" "$SECURITY" "$DEPLOY" "$DEPLOY_ART"; do
+          for r in "$BACKEND_LINT" "$BACKEND" "$FRONTEND_LINT" "$FRONTEND" "$DOCKER" "$SECURITY" "$DEPLOY" "$DEPLOY_ART" "$PROD_SMOKE"; do
             ok "$r" || fail=1
           done
 

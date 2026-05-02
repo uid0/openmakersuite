@@ -23,8 +23,31 @@ else
     echo "⚠️  scripts/validate-prod-env.sh missing — skipping pre-deploy env validation."
 fi
 
-# Load environment variables
-export $(cat .env | grep -v '^#' | xargs)
+# Load environment variables.
+#
+# We can't use `export $(cat .env | xargs)`: values with embedded spaces
+# (notably the FORGEKEY_JWT_SIGNING_KEY PEM, whose header line contains
+# literal whitespace and which uses literal `\n` separators between lines)
+# get word-split by xargs and fed to `export` as separate tokens — `export`
+# then errors with "not a valid identifier" on every token after the first,
+# and `set -e` aborts the deploy before any downstream check runs
+# (oms-eqvnc / gh #311).
+#
+# Parse line-by-line, accept any value (including spaces and `\n`),
+# strip surrounding quotes if present.
+while IFS= read -r raw_line || [ -n "$raw_line" ]; do
+    raw_line="${raw_line%$'\r'}"
+    [[ -z "$raw_line" || "$raw_line" =~ ^[[:space:]]*# ]] && continue
+    if [[ "$raw_line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+        env_key="${BASH_REMATCH[1]}"
+        env_value="${BASH_REMATCH[2]}"
+        if [[ "$env_value" =~ ^\"(.*)\"$ ]] || [[ "$env_value" =~ ^\'(.*)\'$ ]]; then
+            env_value="${BASH_REMATCH[1]}"
+        fi
+        export "$env_key=$env_value"
+    fi
+done < .env
+unset raw_line env_key env_value
 
 # Get git hash for build
 export GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")

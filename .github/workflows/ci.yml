@@ -141,6 +141,20 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Check for migration drift
+        run: |
+          # Fails if any app has model changes not reflected in a committed
+          # migration. Prevents PRs that edit models without running
+          # `manage.py makemigrations` from merging.
+          cd backend
+          python manage.py makemigrations --check --dry-run
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
+          SECRET_KEY: test-secret-key-for-ci-only
+          DEBUG: 1
+          ALLOWED_HOSTS: localhost,127.0.0.1
+          REDIS_URL: redis://localhost:6379/0
+
       - name: Run migrations
         run: |
           cd backend

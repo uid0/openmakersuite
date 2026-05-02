@@ -540,6 +540,82 @@ jobs:
           docker compose -f docker-compose.yml config -q
           rm -f .env
 
+      - name: deploy.sh loads .env with a multiline PEM JWT key
+        run: |
+          # oms-eqvnc / gh #311: deploy.sh used `export $(cat .env | xargs)`,
+          # which word-splits values whose first token contains whitespace
+          # (e.g. an EC PEM header) and aborts the script on the first such
+          # variable. Vars *after* it never get exported, so the subsequent
+          # EMQX_DASHBOARD_PASSWORD complexity check appears to fail with
+          # empty input. This step builds a .env containing a real
+          # ec-prime256v1 PEM rendered with the awk recipe documented in
+          # .env.prod.example, runs deploy.sh up through the env-load block,
+          # and asserts every variable (including ones placed after the JWT
+          # key) gets exported.
+          set -e
+          workdir=$(mktemp -d)
+          cp deploy.sh "$workdir/deploy.sh"
+          mkdir -p "$workdir/scripts"
+          cat > "$workdir/scripts/validate-prod-env.sh" <<'EOF'
+          #!/bin/bash
+          exit 0
+          EOF
+          chmod +x "$workdir/scripts/validate-prod-env.sh"
+
+          jwt_pem=$(openssl ecparam -genkey -name prime256v1 -noout)
+          jwt_env=$(printf '%s' "$jwt_pem" | awk '{printf "%s\\n", $0}')
+          cat > "$workdir/.env" <<EOF
+          # leading comment
+          DOMAIN=ci.example.com
+          POSTGRES_USER=oms
+          POSTGRES_DB=oms
+          FORGEKEY_JWT_SIGNING_KEY=${jwt_env}
+          EMQX_DASHBOARD_PASSWORD=Strong1Password
+          EMQX_API_KEY=ci-api-key-loaded-after-jwt
+          EMQX_API_SECRET=ci-api-secret-loaded-after-jwt
+          EOF
+
+          # Truncate deploy.sh after the env-load block, stub `git pull`,
+          # then echo the variables we need to assert.
+          sed -i '1,/^done < \.env$/!d' "$workdir/deploy.sh"
+          sed -i 's|^git pull$|: # git pull stubbed for env-load test|' "$workdir/deploy.sh"
+          cat >> "$workdir/deploy.sh" <<'EOF'
+          unset raw_line env_key env_value
+          printf 'ASSERT_DOMAIN=%s\n' "$DOMAIN"
+          printf 'ASSERT_EMQX_DASHBOARD_PASSWORD=%s\n' "$EMQX_DASHBOARD_PASSWORD"
+          printf 'ASSERT_EMQX_API_KEY=%s\n' "$EMQX_API_KEY"
+          printf 'ASSERT_EMQX_API_SECRET=%s\n' "$EMQX_API_SECRET"
+          printf 'ASSERT_JWT_LEN=%s\n' "${#FORGEKEY_JWT_SIGNING_KEY}"
+          EOF
+
+          ( cd "$workdir" && bash deploy.sh ) > "$workdir/out" 2>&1 || {
+              echo "❌ deploy.sh aborted while loading .env with a multiline PEM"
+              cat "$workdir/out"
+              exit 1
+          }
+
+          assert_eq() {
+              local key="$1" expected="$2"
+              local got
+              got=$(grep "^${key}=" "$workdir/out" | head -1 | cut -d= -f2-)
+              if [ "$got" != "$expected" ]; then
+                  echo "❌ $key: expected '$expected', got '$got'"
+                  cat "$workdir/out"
+                  exit 1
+              fi
+          }
+          assert_eq ASSERT_DOMAIN                ci.example.com
+          assert_eq ASSERT_EMQX_DASHBOARD_PASSWORD Strong1Password
+          assert_eq ASSERT_EMQX_API_KEY          ci-api-key-loaded-after-jwt
+          assert_eq ASSERT_EMQX_API_SECRET       ci-api-secret-loaded-after-jwt
+          jwt_len=$(grep '^ASSERT_JWT_LEN=' "$workdir/out" | head -1 | cut -d= -f2-)
+          if [ "${jwt_len:-0}" -lt 100 ]; then
+              echo "❌ FORGEKEY_JWT_SIGNING_KEY length $jwt_len < 100, value got truncated"
+              cat "$workdir/out"
+              exit 1
+          fi
+          echo "✅ deploy.sh loads .env with multiline PEM (vars after JWT key all set, JWT len=$jwt_len)"
+
       - name: Run prod env validator against happy-path env
         run: |
           # Drive scripts/validate-prod-env.sh with a synthesised env that

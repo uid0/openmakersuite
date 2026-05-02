@@ -2,7 +2,17 @@
 
 from django.contrib import admin
 
-from .models import Breaker, LightSwitch, NetworkDrop, Outlet
+from .models import (
+    Breaker,
+    LightSwitch,
+    NetworkDrop,
+    Outlet,
+    PowerBreaker,
+    PowerCircuit,
+    PowerOutlet,
+    PowerPanel,
+    PowerPort,
+)
 
 
 @admin.register(Breaker)
@@ -67,3 +77,98 @@ class NetworkDropAdmin(admin.ModelAdmin):
         "location__name",
     ]
     autocomplete_fields = ["location"]
+
+
+class PowerBreakerInline(admin.TabularInline):
+    model = PowerBreaker
+    extra = 0
+    fields = ["position", "pole_count", "amperage", "phase", "status", "label", "needs_review"]
+    show_change_link = True
+
+
+class PowerCircuitInline(admin.TabularInline):
+    model = PowerCircuit
+    extra = 0
+    fields = ["label", "conductor_size", "conductor_length_ft", "max_load_amps", "needs_review"]
+    show_change_link = True
+
+
+class PowerOutletInline(admin.TabularInline):
+    model = PowerOutlet
+    extra = 0
+    fields = ["label", "outlet_type", "location", "status", "needs_review"]
+    autocomplete_fields = ["location"]
+    show_change_link = True
+
+
+@admin.register(PowerPanel)
+class PowerPanelAdmin(admin.ModelAdmin):
+    list_display = [
+        "name",
+        "location",
+        "phase_configuration",
+        "voltage",
+        "main_breaker_amperage",
+        "needs_review",
+    ]
+    list_filter = ["phase_configuration", "voltage", "needs_review", "location"]
+    search_fields = ["name", "manufacturer", "model", "location__name"]
+    autocomplete_fields = ["location"]
+    inlines = [PowerBreakerInline]
+
+
+@admin.register(PowerBreaker)
+class PowerBreakerAdmin(admin.ModelAdmin):
+    list_display = [
+        "panel",
+        "position",
+        "pole_count",
+        "amperage",
+        "phase",
+        "status",
+        "label",
+        "needs_review",
+    ]
+    list_filter = ["status", "pole_count", "phase", "needs_review", "panel"]
+    search_fields = ["panel__name", "position", "label", "panel__location__name"]
+    autocomplete_fields = ["panel"]
+    inlines = [PowerCircuitInline]
+
+
+@admin.register(PowerCircuit)
+class PowerCircuitAdmin(admin.ModelAdmin):
+    list_display = [
+        "label",
+        "breaker",
+        "conductor_size",
+        "conductor_length_ft",
+        "max_load_amps",
+        "needs_review",
+    ]
+    list_filter = ["needs_review", "breaker__panel"]
+    search_fields = ["label", "breaker__panel__name", "breaker__position"]
+    autocomplete_fields = ["breaker"]
+    inlines = [PowerOutletInline]
+
+
+@admin.register(PowerOutlet)
+class PowerOutletAdmin(admin.ModelAdmin):
+    list_display = [
+        "label",
+        "outlet_type",
+        "circuit",
+        "location",
+        "status",
+        "needs_review",
+    ]
+    list_filter = ["outlet_type", "status", "needs_review", "location"]
+    search_fields = ["label", "location_description", "location__name"]
+    autocomplete_fields = ["circuit", "location", "legacy_outlet"]
+
+
+@admin.register(PowerPort)
+class PowerPortAdmin(admin.ModelAdmin):
+    list_display = ["asset", "label", "port_type", "max_draw_amps"]
+    list_filter = ["port_type"]
+    search_fields = ["label", "asset__name", "asset__asset_tag"]
+    autocomplete_fields = ["asset"]

@@ -442,6 +442,21 @@ class TestPhotoUpload:
         assert resp.status_code == 400
         assert ESP32DevicePhoto.objects.filter(device=device).count() == 0
 
+    def test_file_upload_threshold_keeps_device_photos_off_the_heap(self):
+        """oms-9t2 regression: the gunicorn web container OOM'd in part because
+        ESP32 device photos (3 MP, 5–10 MB JPEGs) were held in worker heap by
+        Django's MemoryFileUploadHandler. FILE_UPLOAD_MAX_MEMORY_SIZE must stay
+        small enough that any realistic device photo spools to /tmp via
+        TemporaryFileUploadHandler. If you bump this, you need a separate plan
+        for bounding worker RSS during photo upload bursts."""
+        from django.conf import settings
+
+        assert settings.FILE_UPLOAD_MAX_MEMORY_SIZE <= 2 * 1024 * 1024, (
+            f"FILE_UPLOAD_MAX_MEMORY_SIZE={settings.FILE_UPLOAD_MAX_MEMORY_SIZE} "
+            "is large enough that ESP32 device photos may be buffered in heap; "
+            "see docs/INCIDENTS/oom-backend.md."
+        )
+
 
 # ---------------------------------------------------------------------------
 # AC: firmware dispatch via MQTT

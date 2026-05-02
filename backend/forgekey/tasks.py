@@ -4,6 +4,7 @@ Celery tasks for ForgeKey MQTT operations.
 
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from typing import Any, Dict, Optional
@@ -21,52 +22,106 @@ logger = logging.getLogger(__name__)
 
 # Global MQTT client instance (will be initialized on first use)
 _mqtt_client: Optional[mqtt.Client] = None
+# Monotonic timestamp of the last failed connect, or 0 if last attempt succeeded.
+# Used as a circuit breaker: when the broker is unreachable, refuse new
+# get_mqtt_client() calls for MQTT_CONNECT_RETRY_COOLDOWN_SECONDS instead of
+# instantiating a fresh paho.Client + retrying every call. (oms-9t2)
+_mqtt_connect_failed_at: float = 0.0
+
+
+class MQTTConnectCooldown(Exception):
+    """Raised when get_mqtt_client() is called inside the cooldown window
+    following a failed connect. Surfaces as a Celery task retry, but without
+    the per-call client instantiation that was leaking memory in production.
+    """
+
+
+def _reset_mqtt_client_state_for_tests() -> None:
+    """Test helper: clear the singleton + cooldown so each test starts fresh."""
+    global _mqtt_client, _mqtt_connect_failed_at
+    _mqtt_client = None
+    _mqtt_connect_failed_at = 0.0
 
 
 def get_mqtt_client() -> mqtt.Client:
     """
     Get or create the MQTT client instance.
     This is a singleton pattern to reuse the same client across tasks.
-    """
-    global _mqtt_client
 
-    if _mqtt_client is None:
-        client = mqtt.Client(
-            client_id=settings.MQTT_CLIENT_ID,
-            protocol=mqtt.MQTTv5,
+    If a previous connect attempt failed within
+    ``settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS``, this raises
+    :class:`MQTTConnectCooldown` *without* instantiating a new paho.Client —
+    that per-call instantiation under broker outage was the root cause of the
+    backend OOM (oms-9t2).
+    """
+    global _mqtt_client, _mqtt_connect_failed_at
+
+    if _mqtt_client is not None:
+        return _mqtt_client
+
+    cooldown = getattr(settings, "MQTT_CONNECT_RETRY_COOLDOWN_SECONDS", 30)
+    if _mqtt_connect_failed_at:
+        elapsed = time.monotonic() - _mqtt_connect_failed_at
+        if elapsed < cooldown:
+            raise MQTTConnectCooldown(
+                f"MQTT broker connect failed {elapsed:.1f}s ago; "
+                f"refusing reconnect for another {cooldown - elapsed:.1f}s"
+            )
+
+    client = mqtt.Client(
+        client_id=settings.MQTT_CLIENT_ID,
+        protocol=mqtt.MQTTv5,
+    )
+
+    if settings.MQTT_BROKER_USERNAME:
+        client.username_pw_set(
+            settings.MQTT_BROKER_USERNAME,
+            settings.MQTT_BROKER_PASSWORD,
         )
 
-        if settings.MQTT_BROKER_USERNAME:
-            client.username_pw_set(
-                settings.MQTT_BROKER_USERNAME,
-                settings.MQTT_BROKER_PASSWORD,
-            )
+    def on_connect(client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            logger.info("MQTT client connected successfully")
+        else:
+            logger.error(f"MQTT client connection failed with code {rc}")
 
-        def on_connect(client, userdata, flags, rc, properties=None):
-            if rc == 0:
-                logger.info("MQTT client connected successfully")
-            else:
-                logger.error(f"MQTT client connection failed with code {rc}")
+    def on_disconnect(client, userdata, rc, properties=None):
+        if rc != 0:
+            logger.warning(f"MQTT client disconnected unexpectedly (rc={rc})")
 
-        def on_disconnect(client, userdata, rc, properties=None):
-            if rc != 0:
-                logger.warning(f"MQTT client disconnected unexpectedly (rc={rc})")
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
 
-        client.on_connect = on_connect
-        client.on_disconnect = on_disconnect
-
+    try:
+        client.connect(
+            settings.MQTT_BROKER_HOST,
+            settings.MQTT_BROKER_PORT,
+            settings.MQTT_KEEPALIVE,
+        )
+        client.loop_start()
+    except Exception as e:
+        # Record the failure timestamp so the next call short-circuits instead
+        # of leaking another paho.Client, then best-effort release the
+        # partially initialized client's socket/thread. Both cleanup calls may
+        # raise on a never-connected client (the network thread or socket may
+        # not exist yet); we log + swallow because re-raising here would mask
+        # the real connect failure below.
+        _mqtt_connect_failed_at = time.monotonic()
         try:
-            client.connect(
-                settings.MQTT_BROKER_HOST,
-                settings.MQTT_BROKER_PORT,
-                settings.MQTT_KEEPALIVE,
+            client.loop_stop()
+        except Exception as cleanup_exc:
+            logger.warning("MQTT cleanup: loop_stop() failed after failed connect: %s", cleanup_exc)
+        try:
+            client.disconnect()
+        except Exception as cleanup_exc:
+            logger.warning(
+                "MQTT cleanup: disconnect() failed after failed connect: %s", cleanup_exc
             )
-            client.loop_start()
-            _mqtt_client = client
-        except Exception as e:
-            logger.error(f"Failed to connect to MQTT broker: {e}")
-            raise
+        logger.error(f"Failed to connect to MQTT broker: {e}")
+        raise
 
+    _mqtt_client = client
+    _mqtt_connect_failed_at = 0.0
     return _mqtt_client
 
 

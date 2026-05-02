@@ -59,6 +59,7 @@ from .services.firmware_signing import (
     get_public_key_pem,
     is_signing_configured,
 )
+from .services.jwt_signing import JwtSigningError, get_jwt_jwks, is_jwt_signing_configured
 from .tasks import (
     disable_device,
     enable_device,
@@ -297,10 +298,20 @@ class ForgeKeyDeviceRegisterView(APIView):
 
         device.save()
 
-        token = generate_device_jwt(mac)
         sensor_kind_for_topic = device_type_code or (
             device.device_type.code if device.device_type_id else ""
         )
+        try:
+            token = generate_device_jwt(mac, sensor_kind=sensor_kind_for_topic)
+        except JwtSigningError as exc:
+            logger.error("ForgeKey register: JWT signing key misconfigured: %s", exc)
+            return Response(
+                {
+                    "detail": "Device JWT signing is not configured on the server.",
+                    "error_code": "jwt_signing_unconfigured",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response(
             {
                 "device_id": str(device.id),
@@ -1267,3 +1278,40 @@ class ForgeKeyFirmwarePublicKeyView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         return HttpResponse(pem, content_type="application/x-pem-file")
+
+
+class ForgeKeyJWKSView(APIView):
+    """
+    GET /api/forgekey/jwks/
+
+    Returns the active device-JWT verification public key as a JWK Set so
+    EMQX can fetch + cache it and verify ES256-signed device JWTs without
+    storing the key locally. Public by definition; one-hour cache lets EMQX
+    pick up rotations promptly while keeping request volume negligible.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        if not is_jwt_signing_configured():
+            return Response(
+                {"detail": "Device JWT signing is not configured."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            jwks = get_jwt_jwks()
+        except JwtSigningError as exc:
+            logger.warning("Cannot serve JWKS: %s", exc)
+            return Response(
+                {"detail": "Device JWT signing key is misconfigured."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        # Plain HttpResponse so DRF's renderer doesn't overwrite the JWKS
+        # media type with ``application/json``.
+        response = HttpResponse(
+            json.dumps(jwks),
+            content_type="application/jwk-set+json",
+        )
+        response["Cache-Control"] = "public, max-age=3600"
+        return response

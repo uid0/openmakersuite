@@ -19,6 +19,7 @@ from .views import (
     ForgeKeyDeviceRegisterView,
     ForgeKeyFirmwareDownloadView,
     ForgeKeyFirmwarePublicKeyView,
+    ForgeKeyJWKSView,
     MqttWebhookView,
     OperationalModeViewSet,
     PowerMeterReadingViewSet,
@@ -53,6 +54,11 @@ urlpatterns = [
         "firmware/public-key",
         ForgeKeyFirmwarePublicKeyView.as_view(),
         name="firmware-public-key",
+    ),
+    path(
+        "jwks/",
+        ForgeKeyJWKSView.as_view(),
+        name="device-jwks",
     ),
     path(
         "firmware/<uuid:firmware_id>/download",

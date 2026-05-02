@@ -56,6 +56,24 @@ def sample_image():
 
 
 @pytest.fixture(autouse=True, scope="session")
+def configure_forgekey_jwt_signing_key():
+    """Provide a real ES256 keypair so device-JWT issuance works in tests.
+
+    Generated once per session — production code refuses to sign without
+    ``FORGEKEY_JWT_SIGNING_KEY`` and tests should not have to mock the entire
+    crypto path. The matching public key is derived on demand by the
+    ``jwt_signing`` service.
+    """
+    from django.conf import settings as django_settings
+
+    from forgekey.services.jwt_signing import generate_jwt_signing_keypair
+
+    private_pem, _ = generate_jwt_signing_keypair()
+    django_settings.FORGEKEY_JWT_SIGNING_KEY = private_pem
+    yield
+
+
+@pytest.fixture(autouse=True, scope="session")
 def use_locmem_cache():
     """Route cache operations to local memory to avoid Redis during tests."""
     from django.conf import settings as django_settings

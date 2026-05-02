@@ -4,7 +4,8 @@ Celery tasks for ForgeKey MQTT operations.
 
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 from typing import Any, Dict, Optional
 
 from django.conf import settings
@@ -13,7 +14,7 @@ from django.utils import timezone
 import paho.mqtt.client as mqtt
 from celery import shared_task
 
-from .models import ESP32Device, ESP32DevicePhoto, PowerMeterReading
+from .models import ESP32Device, ESP32DevicePhoto, OccupancyEvent, PowerMeterReading
 from .utils import get_mqtt_command_topic, normalize_mac_address
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,83 @@ def process_mqtt_status_message(mac_address: str, message_data: Dict[str, Any]) 
         logger.warning(f"Received status message from unknown device: {mac_address}")
     except Exception as e:
         logger.error(f"Error processing status message from {mac_address}: {e}")
+
+
+def _coerce_event_timestamp(raw: Any) -> datetime:
+    """Best-effort parse of a device-supplied event timestamp.
+
+    Mirrors the long-running consumer's behavior: accept ISO-8601 (with or
+    without trailing ``Z``) or epoch seconds; fall back to current server
+    time on anything unparseable.
+    """
+    if isinstance(raw, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(raw), tz=dt_timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return timezone.now()
+    if isinstance(raw, str) and raw:
+        candidate = raw.strip()
+        if candidate.endswith("Z"):
+            candidate = candidate[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            return timezone.now()
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_timezone.utc)
+        return parsed
+    return timezone.now()
+
+
+@shared_task
+def process_mqtt_occupancy(
+    mac_address: str, sensor_kind: str, message_data: Dict[str, Any]
+) -> None:
+    """Persist a single occupancy event from an EMQX webhook dispatch.
+
+    Mirrors the long-running consumer's ``handle_occupancy_message`` so the
+    two ingest paths converge on the same model state.
+    """
+    try:
+        normalized_mac = normalize_mac_address(mac_address)
+    except Exception:
+        logger.warning("Dropping occupancy event: malformed MAC %r", mac_address)
+        return
+
+    if not isinstance(message_data, dict):
+        logger.warning("Dropping occupancy event from %s: payload is not an object", normalized_mac)
+        return
+
+    try:
+        device = ESP32Device.objects.get(mac_address=normalized_mac)
+    except ESP32Device.DoesNotExist:
+        logger.info("Dropping occupancy event: unknown MAC %s", normalized_mac)
+        return
+
+    try:
+        count_in = max(int(message_data.get("in", 0)), 0)
+        count_out = max(int(message_data.get("out", 0)), 0)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Dropping occupancy event from %s: non-integer in/out values",
+            normalized_mac,
+        )
+        return
+
+    OccupancyEvent.objects.create(
+        device=device,
+        sensor_kind=sensor_kind or "",
+        count_in=count_in,
+        count_out=count_out,
+        event_timestamp_utc=_coerce_event_timestamp(message_data.get("ts")),
+        raw_payload=message_data,
+    )
+    # Touch last_seen so dashboards reflect liveness, not just last boot.
+    ESP32Device.objects.filter(pk=device.pk).update(
+        last_seen=timezone.now(),
+        is_online=True,
+    )
+    logger.info("Recorded occupancy event for device %s", normalized_mac)
 
 
 @shared_task

@@ -81,7 +81,7 @@ class TestJWTGeneration:
         assert header["kid"] == settings.FORGEKEY_JWT_KEY_ID
 
     def test_generated_token_carries_required_claims(self):
-        token = generate_device_jwt(self.MAC, sensor_kind="people_counter")
+        token = generate_device_jwt(self.MAC)
         payload = verify_device_jwt(token, self.MAC)
         assert payload is not None
         assert payload["iss"] == settings.FORGEKEY_JWT_ISSUER
@@ -91,36 +91,20 @@ class TestJWTGeneration:
         assert "iat" in payload and "exp" in payload
         assert payload["exp"] > payload["iat"]
 
-    def test_acl_claim_grants_least_privilege_per_device(self):
-        token = generate_device_jwt(self.MAC, sensor_kind="people_counter")
+    def test_acl_claim_grants_per_mac_wildcard(self):
+        token = generate_device_jwt(self.MAC)
         payload = verify_device_jwt(token, self.MAC)
         contract_mac = "aabbccddeeff"
         prefix = f"{settings.MQTT_TOPIC_PREFIX}/{contract_mac}"
         acl = payload["acl"]
-        # Pub: only this device's own telemetry / status / OTA / firmware-response.
-        assert f"{prefix}/people_counter/occupancy" in acl["pub"]
-        assert f"{prefix}/status" in acl["pub"]
-        assert f"{prefix}/firmware/response" in acl["pub"]
-        assert f"{prefix}/ota/status" in acl["pub"]
-        # Sub: only this device's command / firmware / config / OTA-trigger inbox.
-        assert acl["sub"] == [
-            f"{prefix}/command",
-            f"{prefix}/firmware",
-            f"{prefix}/config",
-            f"{prefix}/ota/trigger",
-        ]
-        # No wildcards anywhere.
-        for topic in acl["pub"] + acl["sub"]:
-            assert "+" not in topic and "#" not in topic
-            assert contract_mac in topic
-
-    def test_unknown_sensor_kind_grants_both_well_known_occupancy_topics(self):
-        token = generate_device_jwt(self.MAC)  # no sensor_kind
-        payload = verify_device_jwt(token, self.MAC)
-        contract_mac = "aabbccddeeff"
-        pubs = payload["acl"]["pub"]
-        assert f"{settings.MQTT_TOPIC_PREFIX}/{contract_mac}/people_counter/occupancy" in pubs
-        assert f"{settings.MQTT_TOPIC_PREFIX}/{contract_mac}/door_counter/occupancy" in pubs
+        # Per-MAC wildcard: device may pub/sub anywhere under its own MAC
+        # namespace, including future topics (e.g. /capabilities) without
+        # requiring backend changes. The MAC namespace is the security
+        # boundary — different MAC means different prefix.
+        assert acl == {
+            "pub": [f"{prefix}/#"],
+            "sub": [f"{prefix}/#"],
+        }
 
     def test_verify_invalid_jwt(self):
         invalid = "invalid.token.here"  # nosec B105 — fixed test sentinel

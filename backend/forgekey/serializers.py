@@ -7,6 +7,7 @@ from rest_framework import serializers
 from .models import (
     AssetAuthorization,
     AssetDevice,
+    DeviceCommand,
     DeviceFirmwareUpdate,
     DeviceLockout,
     DeviceType,
@@ -146,6 +147,29 @@ class OccupancyEventSerializer(serializers.ModelSerializer):
             "raw_payload",
         ]
         read_only_fields = ["id", "ingested_at", "occupancy_delta"]
+
+
+class DeviceCommandSerializer(serializers.ModelSerializer):
+    """Serializer for the recent-commands history table on device-detail."""
+
+    sent_by_username = serializers.CharField(source="sent_by.username", read_only=True)
+    effective_ack_status = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = DeviceCommand
+        fields = [
+            "id",
+            "command",
+            "payload",
+            "sent_by",
+            "sent_by_username",
+            "sent_at",
+            "ack_status",
+            "effective_ack_status",
+            "ack_at",
+            "ack_payload",
+        ]
+        read_only_fields = fields
 
 
 class DeviceFirmwareUpdateSerializer(serializers.ModelSerializer):

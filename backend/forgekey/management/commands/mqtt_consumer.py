@@ -182,6 +182,20 @@ def handle_status_message(topic: str, payload: bytes) -> bool:
     if rows == 0:
         logger.info("Dropping status message: unknown MAC %s on topic %s", mac, topic)
         return False
+
+    # Firmware ack channel: a status payload may include
+    # ``cmd_ack: {"command_id": ..., "status": ..., "error": ...}`` to mark a
+    # specific :class:`DeviceCommand` row as acked. Lives in status (not a
+    # separate topic) so the firmware needs no new MQTT subscription.
+    ack = body.get("cmd_ack") if isinstance(body, dict) else None
+    if isinstance(ack, dict):
+        from forgekey.services.device_commands import apply_command_ack
+
+        apply_command_ack(
+            command_id=str(ack.get("command_id") or ""),
+            status=str(ack.get("status") or ""),
+            ack_payload=ack,
+        )
     return True
 
 

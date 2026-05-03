@@ -227,7 +227,9 @@ class TestCommandEndpoints:
         assert response.status_code == 200, response.data
         assert mock_pub.called
         _device_arg, payload = mock_pub.call_args.args
-        assert payload == {"cmd": "restart"}
+        assert payload["cmd"] == "restart"
+        # The view injects an audit row id so firmware can echo back the ack.
+        assert "command_id" in payload
         kwargs = mock_pub.call_args.kwargs
         assert kwargs["audit_action"] == "restart"
 
@@ -265,7 +267,10 @@ class TestCommandEndpoints:
 
         assert response.status_code == 200
         _device_arg, payload = mock_pub.call_args.args
-        assert payload == {"cmd": "blink", "pattern": "sos", "duration_s": 5}
+        assert payload["cmd"] == "blink"
+        assert payload["pattern"] == "sos"
+        assert payload["duration_s"] == 5
+        assert "command_id" in payload
 
     def test_firmware_update_adhoc_publish(self, admin_api_client):
         device = ESP32DeviceFactory(mac_address="AA:BB:CC:DD:EE:05")
@@ -278,11 +283,10 @@ class TestCommandEndpoints:
 
         assert response.status_code == 200, response.data
         _device_arg, payload = mock_pub.call_args.args
-        assert payload == {
-            "cmd": "ota",
-            "version": "2.3.4",
-            "url": "https://example.test/fw.bin",
-        }
+        assert payload["cmd"] == "ota"
+        assert payload["version"] == "2.3.4"
+        assert payload["url"] == "https://example.test/fw.bin"
+        assert "command_id" in payload
 
     def test_firmware_update_requires_version_or_id(self, admin_api_client):
         device = ESP32DeviceFactory(mac_address="AA:BB:CC:DD:EE:06")

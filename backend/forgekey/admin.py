@@ -13,6 +13,7 @@ from django.utils.html import format_html
 from .models import (
     AssetAuthorization,
     AssetDevice,
+    DeviceCommand,
     DeviceFirmwareUpdate,
     DeviceLockout,
     DeviceType,
@@ -491,4 +492,30 @@ class FirmwareSigningKeyAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         # Block deletion entirely — keypairs must be retired (is_active=False),
         # not removed, so the audit history stays intact.
+        return False
+
+
+@admin.register(DeviceCommand)
+class DeviceCommandAdmin(admin.ModelAdmin):
+    """Read-only audit view of commands dispatched to devices."""
+
+    list_display = ["sent_at", "device", "command", "ack_status", "sent_by"]
+    list_filter = ["command", "ack_status"]
+    search_fields = ["device__mac_address", "command", "sent_by__username"]
+    readonly_fields = [
+        "id",
+        "device",
+        "command",
+        "payload",
+        "sent_by",
+        "sent_at",
+        "ack_status",
+        "ack_at",
+        "ack_payload",
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
         return False

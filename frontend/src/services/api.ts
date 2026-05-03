@@ -1575,7 +1575,28 @@ export interface ForgeKeyCommandResponse {
   status: string;
   device: string;
   topic: string;
+  command_id?: string;
   dispatched_at: string;
+}
+
+export type ForgeKeyAckStatus = 'pending' | 'acked' | 'error' | 'timeout';
+
+export interface ForgeKeyDeviceCommand {
+  id: string;
+  command: string;
+  payload: Record<string, unknown>;
+  sent_by: number | null;
+  sent_by_username: string | null;
+  sent_at: string;
+  ack_status: ForgeKeyAckStatus;
+  effective_ack_status: ForgeKeyAckStatus;
+  ack_at: string | null;
+  ack_payload: Record<string, unknown> | null;
+}
+
+export interface ForgeKeyRecentCommandsResponse {
+  device: string;
+  results: ForgeKeyDeviceCommand[];
 }
 
 export const forgekeyAPI = {
@@ -1608,6 +1629,18 @@ export const forgekeyAPI = {
     api.post<ForgeKeyCommandResponse>(
       `/forgekey/devices/${id}/command/firmware-update/`,
       body,
+    ),
+  ping: (id: string) =>
+    api.post<ForgeKeyCommandResponse>(`/forgekey/devices/${id}/command/ping/`),
+  identify: (id: string, opts: { duration_s?: number } = {}) =>
+    api.post<ForgeKeyCommandResponse>(
+      `/forgekey/devices/${id}/command/identify/`,
+      opts,
+    ),
+  recentCommands: (id: string, limit: number = 10) =>
+    api.get<ForgeKeyRecentCommandsResponse>(
+      `/forgekey/devices/${id}/recent-commands/`,
+      { params: { limit } },
     ),
 };
 

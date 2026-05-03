@@ -8,6 +8,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import DeviceControlsCard from '../components/DeviceControlsCard';
 import {
   ForgeKeyCommandResponse,
   ForgeKeyDevice,
@@ -17,7 +18,7 @@ import {
 
 const POLL_INTERVAL_MS = 30_000;
 
-type ControlKey = 'restart' | 'capture' | 'blink' | 'ota';
+type ControlKey = 'ota' | 'blink';
 
 interface ControlState {
   pending: boolean;
@@ -39,10 +40,8 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [otaInputs, setOtaInputs] = useState({ version: '', url: '' });
   const [controls, setControls] = useState<Record<ControlKey, ControlState>>({
-    restart: initialControl,
-    capture: initialControl,
-    blink: initialControl,
     ota: initialControl,
+    blink: initialControl,
   });
 
   const loadAll = useCallback(async () => {
@@ -175,6 +174,8 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
             )}
           </section>
 
+          <DeviceControlsCard device={device} />
+
           <CapabilitiesSection
             device={device}
             onBlink={() =>
@@ -185,60 +186,35 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
             blinkState={controls.blink}
           />
 
-          <section aria-label="Device controls">
-            <h3>Device Controls</h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <ControlButton
-                label="Restart"
-                state={controls.restart}
-                onClick={() => runCommand('restart', () => forgekeyAPI.restart(id))}
+          <section aria-label="OTA firmware update">
+            <h4 style={{ marginBottom: '0.25rem' }}>OTA firmware update</h4>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                placeholder="version (e.g. 2.3.4)"
+                value={otaInputs.version}
+                onChange={(e) => setOtaInputs((p) => ({ ...p, version: e.target.value }))}
+              />
+              <input
+                type="text"
+                placeholder="signed firmware URL"
+                value={otaInputs.url}
+                onChange={(e) => setOtaInputs((p) => ({ ...p, url: e.target.value }))}
+                style={{ flex: '1 1 20rem', minWidth: '12rem' }}
               />
               <ControlButton
-                label="Capture photo"
-                state={controls.capture}
-                onClick={() => runCommand('capture', () => forgekeyAPI.capturePhoto(id))}
-              />
-              <ControlButton
-                label="Blink"
-                state={controls.blink}
+                label="Send OTA"
+                state={controls.ota}
+                disabled={!otaInputs.version || !otaInputs.url}
                 onClick={() =>
-                  runCommand('blink', () =>
-                    forgekeyAPI.blink(id, { pattern: 'sos', duration_s: 5 }),
+                  runCommand('ota', () =>
+                    forgekeyAPI.firmwareUpdate(id, {
+                      version: otaInputs.version,
+                      url: otaInputs.url,
+                    }),
                   )
                 }
               />
-            </div>
-
-            <div style={{ marginTop: '1rem' }}>
-              <h4 style={{ marginBottom: '0.25rem' }}>OTA firmware update</h4>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <input
-                  type="text"
-                  placeholder="version (e.g. 2.3.4)"
-                  value={otaInputs.version}
-                  onChange={(e) => setOtaInputs((p) => ({ ...p, version: e.target.value }))}
-                />
-                <input
-                  type="text"
-                  placeholder="signed firmware URL"
-                  value={otaInputs.url}
-                  onChange={(e) => setOtaInputs((p) => ({ ...p, url: e.target.value }))}
-                  style={{ minWidth: '20rem' }}
-                />
-                <ControlButton
-                  label="Send OTA"
-                  state={controls.ota}
-                  disabled={!otaInputs.version || !otaInputs.url}
-                  onClick={() =>
-                    runCommand('ota', () =>
-                      forgekeyAPI.firmwareUpdate(id, {
-                        version: otaInputs.version,
-                        url: otaInputs.url,
-                      }),
-                    )
-                  }
-                />
-              </div>
             </div>
           </section>
         </>

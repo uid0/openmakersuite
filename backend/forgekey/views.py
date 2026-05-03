@@ -27,6 +27,7 @@ from rest_framework.views import APIView
 from .models import (
     AssetAuthorization,
     AssetDevice,
+    DeviceCommand,
     DeviceFirmwareUpdate,
     DeviceLockout,
     DeviceType,
@@ -42,6 +43,7 @@ from .models import (
 from .serializers import (
     AssetAuthorizationSerializer,
     AssetDeviceSerializer,
+    DeviceCommandSerializer,
     DeviceFirmwareUpdateSerializer,
     DeviceLockoutSerializer,
     DeviceTypeSerializer,
@@ -665,6 +667,78 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
     @action(
         detail=True,
         methods=["post"],
+        url_path="command/ping",
+        permission_classes=[IsAdminUser],
+    )
+    def command_ping(self, request, pk=None):
+        """Force a device to publish its current status payload now."""
+        device = self.get_object()
+        return self._dispatch_command(device, request.user, {"cmd": "status"}, "ping")
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="command/identify",
+        permission_classes=[IsAdminUser],
+    )
+    def command_identify(self, request, pk=None):
+        """Run the firmware's 'find-me' routine — extended blink with countdown.
+
+        Distinct from ``blink`` so the audit log + history table call out
+        physical-finding usage. Defaults to a 30-second pattern; callers can
+        override ``duration_s``.
+        """
+        device = self.get_object()
+        try:
+            duration_raw = request.data.get("duration_s", 30)
+            duration_s = int(duration_raw) if duration_raw is not None else 30
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "duration_s must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if duration_s <= 0 or duration_s > 600:
+            return Response(
+                {"detail": "duration_s must be between 1 and 600."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payload = {"cmd": "identify", "duration_s": duration_s}
+        return self._dispatch_command(device, request.user, payload, "identify")
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="recent-commands",
+        permission_classes=[IsAdminUser],
+    )
+    def recent_commands(self, request, pk=None):
+        """Return the last N commands sent to this device, with ack state.
+
+        Drives the live ack feedback + history table on the device-detail
+        page. ``limit`` is capped at 100 so a chatty UI poll can't pull the
+        whole audit log.
+        """
+        device = self.get_object()
+        try:
+            limit = int(request.query_params.get("limit", 10))
+        except (TypeError, ValueError):
+            limit = 10
+        limit = max(1, min(limit, 100))
+        commands = list(
+            DeviceCommand.objects.filter(device=device)
+            .select_related("sent_by")
+            .order_by("-sent_at")[:limit]
+        )
+        return Response(
+            {
+                "device": device.mac_address,
+                "results": DeviceCommandSerializer(commands, many=True).data,
+            }
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
         url_path="command/capture-photo",
         permission_classes=[IsAdminUser],
     )
@@ -793,16 +867,36 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
         )
 
     def _dispatch_command(self, device, actor, payload, audit_action):
+        # Persist an audit row first so the firmware can echo its UUID back
+        # on the status topic and the UI can render live ack feedback. The
+        # row is dropped on broker failure to avoid orphan history entries.
+        actor_user = (
+            actor if (actor is not None and getattr(actor, "is_authenticated", False)) else None
+        )
+        record = DeviceCommand.objects.create(
+            device=device,
+            command=audit_action or payload.get("cmd") or "unknown",
+            payload={},
+            sent_by=actor_user,
+        )
+        full_payload = dict(payload)
+        full_payload["command_id"] = str(record.id)
+
         try:
-            topic = publish_command(device, payload, actor=actor, audit_action=audit_action)
+            topic = publish_command(device, full_payload, actor=actor, audit_action=audit_action)
         except DeviceCommandError as exc:
+            record.delete()
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+        record.payload = full_payload
+        record.save(update_fields=["payload"])
         return Response(
             {
                 "status": f"{audit_action} command sent",
                 "device": device.mac_address,
                 "topic": topic,
-                "dispatched_at": payload.get("timestamp", timezone.now().isoformat()),
+                "command_id": str(record.id),
+                "dispatched_at": full_payload.get("timestamp", timezone.now().isoformat()),
             }
         )
 

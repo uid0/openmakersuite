@@ -303,7 +303,7 @@ class ForgeKeyDeviceRegisterView(APIView):
             device.device_type.code if device.device_type_id else ""
         )
         try:
-            token = generate_device_jwt(mac, sensor_kind=sensor_kind_for_topic)
+            token = generate_device_jwt(mac)
         except JwtSigningError as exc:
             logger.error("ForgeKey register: JWT signing key misconfigured: %s", exc)
             return Response(

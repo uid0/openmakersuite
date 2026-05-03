@@ -28,45 +28,26 @@ def normalize_mac_address(mac_address: str) -> str:
     return ":".join(mac[i : i + 2] for i in range(0, len(mac), 2))
 
 
-def _device_acl_claims(mac_address: str, sensor_kind: Optional[str] = None) -> Dict:
+def _device_acl_claims(mac_address: str) -> Dict:
     """Build the per-device EMQX ACL claims for a given MAC.
 
-    Returns a least-privilege grant: the device may publish only to its own
-    telemetry / status / OTA-status / firmware-response topics, and subscribe
-    only to its own command / firmware / config / OTA-trigger topics. No
-    wildcards, no cross-device traffic.
+    Grants pub/sub on the device's entire MAC-scoped namespace
+    (``<prefix>/<mac>/#``). The MAC namespace is the security boundary —
+    different MAC means different prefix, so cross-device traffic is still
+    impossible. Wildcarding here means new per-device topics (capabilities,
+    future telemetry streams) work without re-issuing JWTs or backend changes.
     """
     contract_mac = _firmware_contract_mac(mac_address)
     prefix = f"{settings.MQTT_TOPIC_PREFIX}/{contract_mac}"
-    pub_topics = [
-        f"{prefix}/status",
-        f"{prefix}/firmware/response",
-        f"{prefix}/ota/status",
-    ]
-    # Sensor-kind-specific occupancy stream. Devices typically know one kind
-    # but for first-registration calls where sensor_kind is unknown, we grant
-    # both well-known occupancy topics so the device can pick.
-    kind = normalize_sensor_kind(sensor_kind) if sensor_kind else ""
-    if kind:
-        pub_topics.insert(0, f"{prefix}/{kind}/occupancy")
-    else:
-        pub_topics = [
-            f"{prefix}/people_counter/occupancy",
-            f"{prefix}/door_counter/occupancy",
-        ] + pub_topics
-    sub_topics = [
-        f"{prefix}/command",
-        f"{prefix}/firmware",
-        f"{prefix}/config",
-        f"{prefix}/ota/trigger",
-    ]
-    return {"pub": pub_topics, "sub": sub_topics}
+    return {
+        "pub": [f"{prefix}/#"],
+        "sub": [f"{prefix}/#"],
+    }
 
 
 def generate_device_jwt(
     mac_address: str,
     payload: Optional[Dict] = None,
-    sensor_kind: Optional[str] = None,
 ) -> str:
     """
     Generate an ES256-signed JWT for an ESP32 device.
@@ -79,8 +60,6 @@ def generate_device_jwt(
     Args:
         mac_address: MAC address of the device (any format).
         payload: Extra claims to merge into the token.
-        sensor_kind: Optional device-type code; narrows the ``acl.pub`` grant
-            to only the matching occupancy topic when known.
 
     Returns:
         Compact-serialized JWT string.
@@ -103,7 +82,7 @@ def generate_device_jwt(
         "mac": normalized_mac,
         "iat": int(now.timestamp()),
         "exp": int(now.timestamp()) + settings.FORGEKEY_JWT_EXPIRATION_SECONDS,
-        "acl": _device_acl_claims(normalized_mac, sensor_kind=sensor_kind),
+        "acl": _device_acl_claims(normalized_mac),
     }
     claims.update(payload)
 

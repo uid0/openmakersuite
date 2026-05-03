@@ -352,6 +352,92 @@ class TestRegister:
         valid = body.get("valid_device_types") or []
         assert DeviceType.TYPE_PEOPLE_COUNTER in valid
 
+    def test_register_returns_public_mqtt_broker_coordinates(
+        self, api_client, settings, people_counter_type, register_url
+    ):
+        """Firmware persists broker host/port/tls from this response to NVS so
+        the broker can be re-pointed without a rebuild + reflash (oms-84x)."""
+        settings.PUBLIC_MQTT_BROKER_HOST = "dms.openmakersuite.net"
+        settings.PUBLIC_MQTT_BROKER_PORT = 8883
+        settings.PUBLIC_MQTT_BROKER_USE_TLS = True
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:20",
+            "device_type": DeviceType.TYPE_PEOPLE_COUNTER,
+        }
+
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN=PROVISIONING_TOKEN,
+            format="multipart",
+        )
+
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["mqtt_broker_host"] == "dms.openmakersuite.net"
+        assert body["mqtt_broker_port"] == 8883
+        assert body["mqtt_broker_use_tls"] is True
+
+    def test_register_falls_back_to_internal_broker_host_when_public_unset(
+        self, api_client, settings, people_counter_type, register_url
+    ):
+        """Dev convenience: when PUBLIC_MQTT_BROKER_HOST is empty, fall back
+        to MQTT_BROKER_HOST so docker-compose setups without the public var
+        still produce a usable response."""
+        settings.PUBLIC_MQTT_BROKER_HOST = ""
+        settings.MQTT_BROKER_HOST = "emqx"
+        settings.PUBLIC_MQTT_BROKER_PORT = 1883
+        settings.PUBLIC_MQTT_BROKER_USE_TLS = False
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:21",
+            "device_type": DeviceType.TYPE_PEOPLE_COUNTER,
+        }
+
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN=PROVISIONING_TOKEN,
+            format="multipart",
+        )
+
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["mqtt_broker_host"] == "emqx"
+        assert body["mqtt_broker_port"] == 1883
+        assert body["mqtt_broker_use_tls"] is False
+
+    def test_register_response_remains_superset_for_pre_84x_firmware(
+        self, api_client, people_counter_type, register_url
+    ):
+        """AC-3 backward-compat: the new broker fields are additive — the
+        legacy keys (mqtt_topic_for_firmware/pings, jwt_token, device_id)
+        existing firmware reads are still present and unchanged."""
+        meta = {
+            "mac_address": "AA:BB:CC:DD:EE:22",
+            "device_type": DeviceType.TYPE_PEOPLE_COUNTER,
+        }
+
+        resp = api_client.post(
+            register_url,
+            data={"photo": _jpeg(), "metadata": json.dumps(meta)},
+            HTTP_X_FORGEKEY_PROVISIONING_TOKEN=PROVISIONING_TOKEN,
+            format="multipart",
+        )
+
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        legacy_keys = {
+            "device_id",
+            "mqtt_topic_for_firmware",
+            "mqtt_topic_for_pings",
+            "jwt_token",
+            "created",
+        }
+        assert legacy_keys <= set(body)
+        for key in legacy_keys - {"created"}:
+            assert body[key] not in (None, "")
+        assert body["created"] is True
+
 
 class TestSeedDeviceTypesMigration:
     """Migration 0004 must seed every TYPE_CHOICES code so a fresh DB can

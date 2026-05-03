@@ -43,8 +43,9 @@ services:
       - DATABASE_URL=postgresql://makerspace:${POSTGRES_PASSWORD:-development_password_only}@db:5432/makerspace_inventory
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - SENTRY_DSN=${SENTRY_DSN:-https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952}
-      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
+      - HIGHLIGHT_PROJECT_ID=${HIGHLIGHT_PROJECT_ID:-}
+      - HIGHLIGHT_OTLP_ENDPOINT=${HIGHLIGHT_OTLP_ENDPOINT:-}
+      - HIGHLIGHT_ENVIRONMENT=${HIGHLIGHT_ENVIRONMENT:-development}
     depends_on:
       db:
         condition: service_healthy
@@ -64,8 +65,9 @@ services:
       - DATABASE_URL=postgresql://makerspace:${POSTGRES_PASSWORD:-development_password_only}@db:5432/makerspace_inventory
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - SENTRY_DSN=${SENTRY_DSN:-https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952}
-      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
+      - HIGHLIGHT_PROJECT_ID=${HIGHLIGHT_PROJECT_ID:-}
+      - HIGHLIGHT_OTLP_ENDPOINT=${HIGHLIGHT_OTLP_ENDPOINT:-}
+      - HIGHLIGHT_ENVIRONMENT=${HIGHLIGHT_ENVIRONMENT:-development}
     depends_on:
       db:
         condition: service_healthy
@@ -105,7 +107,9 @@ services:
       - "3000:3000"
     environment:
       - REACT_APP_API_URL=http://localhost:8000
-      - REACT_APP_SENTRY_DSN=${REACT_APP_SENTRY_DSN:-https://48f74e122b301e64b6a7f8bebd8b59c4@o4510248461074432.ingest.us.sentry.io/4510248471691264}
+      - REACT_APP_HIGHLIGHT_PROJECT_ID=${REACT_APP_HIGHLIGHT_PROJECT_ID:-}
+      - REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=${REACT_APP_HIGHLIGHT_OTLP_ENDPOINT:-}
+      - REACT_APP_HIGHLIGHT_ENVIRONMENT=${REACT_APP_HIGHLIGHT_ENVIRONMENT:-development}
       - REACT_APP_GIT_HASH=${GIT_HASH:-dev}
       - REACT_APP_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
     depends_on:

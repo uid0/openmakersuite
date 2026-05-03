@@ -81,10 +81,11 @@ services:
       dockerfile: Dockerfile.prod
     logging: *default-logging
     # --max-requests + --max-requests-jitter recycles each worker after ~1000
-    # requests so any slow leak (paho buffer growth, sentry buffer, multipart
-    # spool retention) is bounded by the recycle window instead of unbounded
-    # process lifetime. --graceful-timeout 30 lets in-flight requests finish
-    # before SIGKILL on recycle. See docs/INCIDENTS/oom-backend.md (oms-9t2).
+    # requests so any slow leak (paho buffer growth, OTel exporter queue,
+    # multipart spool retention) is bounded by the recycle window instead of
+    # unbounded process lifetime. --graceful-timeout 30 lets in-flight
+    # requests finish before SIGKILL on recycle.
+    # See docs/INCIDENTS/oom-backend.md (oms-9t2).
     command: >-
       gunicorn config.wsgi:application
       --bind 0.0.0.0:8000
@@ -119,8 +120,10 @@ services:
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-oms.example.com}
       - CORS_ALLOWED_ORIGINS=https://${DOMAIN:-oms.example.com}
       - FRONTEND_URL=https://${DOMAIN:-oms.example.com}
-      - SENTRY_RELEASE=${GIT_HASH}
-      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
+      - HIGHLIGHT_PROJECT_ID=${HIGHLIGHT_PROJECT_ID:-}
+      - HIGHLIGHT_OTLP_ENDPOINT=${HIGHLIGHT_OTLP_ENDPOINT:-}
+      - HIGHLIGHT_ENVIRONMENT=${HIGHLIGHT_ENVIRONMENT:-production}
+      - HIGHLIGHT_SERVICE_VERSION=${GIT_HASH:-}
       - MQTT_BROKER_HOST=emqx
       - MQTT_BROKER_PORT=1883
       - MQTT_BROKER_USERNAME=${MQTT_BROKER_USERNAME:-}
@@ -185,8 +188,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - SKIP_DB_MIGRATIONS=1
-      - SENTRY_RELEASE=${GIT_HASH}
-      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
+      - HIGHLIGHT_PROJECT_ID=${HIGHLIGHT_PROJECT_ID:-}
+      - HIGHLIGHT_OTLP_ENDPOINT=${HIGHLIGHT_OTLP_ENDPOINT:-}
+      - HIGHLIGHT_ENVIRONMENT=${HIGHLIGHT_ENVIRONMENT:-production}
+      - HIGHLIGHT_SERVICE_VERSION=${GIT_HASH:-}
     depends_on:
       db:
         condition: service_healthy
@@ -202,7 +207,9 @@ services:
       dockerfile: Dockerfile.prod
       args:
         - REACT_APP_API_URL=/api
-        - REACT_APP_SENTRY_DSN=${REACT_APP_SENTRY_DSN}
+        - REACT_APP_HIGHLIGHT_PROJECT_ID=${REACT_APP_HIGHLIGHT_PROJECT_ID:-}
+        - REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=${REACT_APP_HIGHLIGHT_OTLP_ENDPOINT:-}
+        - REACT_APP_HIGHLIGHT_ENVIRONMENT=${REACT_APP_HIGHLIGHT_ENVIRONMENT:-production}
         - REACT_APP_GIT_HASH=${GIT_HASH}
         - REACT_APP_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
     logging: *default-logging

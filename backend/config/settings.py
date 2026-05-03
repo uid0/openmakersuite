@@ -7,11 +7,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
-import sentry_sdk
+import highlight_io
 from decouple import config
-from sentry_sdk.integrations.celery import CeleryIntegration
-from sentry_sdk.integrations.django import DjangoIntegration
-from sentry_sdk.integrations.redis import RedisIntegration
+from highlight_io.integrations.django import DjangoIntegration
 
 try:
     import passkeys
@@ -502,36 +500,31 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-# Sentry Configuration
-SENTRY_DSN = config(
-    "SENTRY_DSN",
-    default="https://af885209b7663c58d3fe82ace2863941@o4510248461074432.ingest.us.sentry.io/4510248465661952",
-)
-SENTRY_ENVIRONMENT = config("SENTRY_ENVIRONMENT", default="development")
-SENTRY_RELEASE = config("SENTRY_RELEASE", default=None)
+# Highlight Configuration (oms-fjs — replaces Sentry).
+# - HIGHLIGHT_PROJECT_ID is the verbose project id from the Highlight dashboard.
+#   Empty/unset => SDK is not initialized (mirrors the prior Sentry behaviour).
+# - HIGHLIGHT_OTLP_ENDPOINT defaults to the Highlight cloud collector. For the
+#   self-hosted stack, point it at the OTel collector on the Highlight host
+#   (e.g. https://otel.highlight.example.org:4317). gRPC over HTTPS.
+# - HIGHLIGHT_SERVICE_VERSION should be the deploy git SHA so source maps and
+#   release context line up between frontend and backend.
+HIGHLIGHT_PROJECT_ID = config("HIGHLIGHT_PROJECT_ID", default="")
+HIGHLIGHT_OTLP_ENDPOINT = config("HIGHLIGHT_OTLP_ENDPOINT", default="")
+HIGHLIGHT_ENVIRONMENT = config("HIGHLIGHT_ENVIRONMENT", default="development")
+HIGHLIGHT_SERVICE_VERSION = config("HIGHLIGHT_SERVICE_VERSION", default="")
 
-if SENTRY_DSN:
-    sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        integrations=[
-            DjangoIntegration(),
-            CeleryIntegration(),
-            RedisIntegration(),
-        ],
-        enable_logs=True,
-        environment=SENTRY_ENVIRONMENT,
-        release=SENTRY_RELEASE,
-        # Set traces_sample_rate to 1.0 to capture 100% of transactions for performance monitoring.
-        # Adjust this value in production to reduce overhead
-        traces_sample_rate=1.0 if DEBUG else 0.1,
-        # Set profiles_sample_rate to profile 100% of sampled transactions.
-        profiles_sample_rate=1.0 if DEBUG else 0.1,
-        # If you wish to associate users to errors (assuming you send personal data to Sentry)
-        send_default_pii=True,
-        # Capture SQL queries
-        _experiments={
-            "profiles_sample_rate": 1.0 if DEBUG else 0.1,
-        },
+if HIGHLIGHT_PROJECT_ID:
+    # CeleryIntegration is enabled automatically as part of the SDK's
+    # DEFAULT_INTEGRATIONS list (see highlight_io.integrations.all). Django
+    # is opt-in and must be passed explicitly.
+    highlight_io.H(
+        HIGHLIGHT_PROJECT_ID,
+        integrations=[DjangoIntegration()],
+        otlp_endpoint=HIGHLIGHT_OTLP_ENDPOINT or highlight_io.H.OTLP_HTTP,
+        instrument_logging=True,
+        service_name="oms-backend",
+        service_version=HIGHLIGHT_SERVICE_VERSION,
+        environment=HIGHLIGHT_ENVIRONMENT,
     )
 
 # Logging configuration

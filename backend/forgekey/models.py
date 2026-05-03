@@ -147,6 +147,20 @@ class ESP32Device(models.Model):
         blank=True,
         help_text="Last-reported IP address of the device",
     )
+    capabilities = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "List of capability identifiers announced by firmware over the "
+            "<prefix>/<mac>/capabilities MQTT topic (e.g. ['people_counter', "
+            "'status_led']). Refreshed on every retained announcement."
+        ),
+    )
+    capabilities_announced_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the device last published its capability set.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

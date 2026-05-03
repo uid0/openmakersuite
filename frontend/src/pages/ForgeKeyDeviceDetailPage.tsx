@@ -175,6 +175,16 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
             )}
           </section>
 
+          <CapabilitiesSection
+            device={device}
+            onBlink={() =>
+              runCommand('blink', () =>
+                forgekeyAPI.blink(id, { pattern: 'sos', duration_s: 5 }),
+              )
+            }
+            blinkState={controls.blink}
+          />
+
           <section aria-label="Device controls">
             <h3>Device Controls</h3>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -238,6 +248,143 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
     </div>
   );
 };
+
+// Per-capability render registry. Capabilities not present here render the
+// generic "UI not yet implemented" badge defined in CapabilitiesSection.
+const KNOWN_CAPABILITIES: Record<string, { icon: string; label: string }> = {
+  people_counter: { icon: '👥', label: 'People counter' },
+  mmwave_presence: { icon: '📡', label: 'mmWave presence' },
+  button: { icon: '🔘', label: 'Button' },
+  status_led: { icon: '💡', label: 'Status LED' },
+};
+
+interface CapabilitiesSectionProps {
+  device: ForgeKeyDevice;
+  blinkState: ControlState;
+  onBlink: () => void;
+}
+
+const CapabilitiesSection: React.FC<CapabilitiesSectionProps> = ({
+  device,
+  blinkState,
+  onBlink,
+}) => {
+  const capabilities = device.capabilities || [];
+  if (capabilities.length === 0) {
+    return (
+      <section aria-label="Device capabilities">
+        <h3>Capabilities</h3>
+        <p style={{ color: '#777' }}>
+          No capabilities announced yet. Devices publish their capability set
+          on boot via the <code>capabilities</code> MQTT topic.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section aria-label="Device capabilities">
+      <h3>Capabilities</h3>
+      <p style={{ color: '#555', marginTop: 0 }}>
+        Last announced:{' '}
+        {device.capabilities_announced_at
+          ? new Date(device.capabilities_announced_at).toLocaleString()
+          : '—'}
+      </p>
+      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        {capabilities.map((cap) => (
+          <li
+            key={cap}
+            data-testid={`capability-${cap}`}
+            style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '0.5rem 0.75rem' }}
+          >
+            <CapabilityRow
+              capability={cap}
+              blinkState={blinkState}
+              onBlink={onBlink}
+              device={device}
+            />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+};
+
+interface CapabilityRowProps {
+  capability: string;
+  device: ForgeKeyDevice;
+  blinkState: ControlState;
+  onBlink: () => void;
+}
+
+const CapabilityRow: React.FC<CapabilityRowProps> = ({
+  capability,
+  device,
+  blinkState,
+  onBlink,
+}) => {
+  const meta = KNOWN_CAPABILITIES[capability];
+  const header = meta ? (
+    <strong>
+      <span aria-hidden="true">{meta.icon} </span>
+      {meta.label}
+    </strong>
+  ) : (
+    <span
+      title="UI not yet implemented"
+      style={{ color: '#777', fontStyle: 'italic' }}
+      data-testid={`capability-generic-${capability}`}
+    >
+      Detected: {capability}
+    </span>
+  );
+
+  let body: React.ReactNode = null;
+  if (capability === 'people_counter') {
+    body = (
+      <small style={{ color: '#555' }}>
+        See the occupancy chart above for live counts.
+      </small>
+    );
+  } else if (capability === 'mmwave_presence') {
+    body = <MmwavePresenceWidget device={device} />;
+  } else if (capability === 'button') {
+    body = <ButtonEventWidget device={device} />;
+  } else if (capability === 'status_led') {
+    body = (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span style={{ color: '#555' }}>State: —</span>
+        <button type="button" onClick={onBlink} disabled={blinkState.pending}>
+          {blinkState.pending ? 'Blinking…' : 'Blink LED'}
+        </button>
+        {blinkState.lastError && (
+          <small style={{ color: '#c0392b' }}>{blinkState.lastError}</small>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      {header}
+      {body}
+    </div>
+  );
+};
+
+const MmwavePresenceWidget: React.FC<{ device: ForgeKeyDevice }> = () => (
+  // Backend processor for mmwave events not yet wired (paired firmware bead).
+  // Render a placeholder so the section is present the moment a device
+  // announces this capability; data plane lands in a follow-up.
+  <small style={{ color: '#777' }}>
+    Presence: <strong>—</strong> · last changed: —
+  </small>
+);
+
+const ButtonEventWidget: React.FC<{ device: ForgeKeyDevice }> = () => (
+  <small style={{ color: '#777' }}>No recent button events.</small>
+);
 
 interface ControlButtonProps {
   label: string;

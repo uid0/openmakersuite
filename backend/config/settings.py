@@ -392,6 +392,18 @@ MQTT_TOPIC_PREFIX = config("MQTT_TOPIC_PREFIX", default="forgekey")
 MQTT_CLIENT_ID = config("MQTT_CLIENT_ID", default="forgekey-server")
 MQTT_KEEPALIVE = config("MQTT_KEEPALIVE", default=60, cast=int)
 MQTT_BROKER_TLS = config("MQTT_BROKER_TLS", default=False, cast=bool)
+
+# Public-facing MQTT broker coordinates returned to ForgeKey devices in the
+# registration response. Distinct from MQTT_BROKER_HOST above, which is the
+# internal hostname (e.g. "emqx") the BACKEND uses to publish commands;
+# devices on the public internet can't resolve that. PUBLIC_MQTT_BROKER_HOST
+# is the externally-resolvable hostname devices persist to NVS so the broker
+# can be re-pointed without a firmware rebuild + reflash. Falls back to
+# MQTT_BROKER_HOST in the registration view when unset for dev convenience.
+PUBLIC_MQTT_BROKER_HOST = config("PUBLIC_MQTT_BROKER_HOST", default="")
+PUBLIC_MQTT_BROKER_PORT = config("PUBLIC_MQTT_BROKER_PORT", default=1883, cast=int)
+PUBLIC_MQTT_BROKER_USE_TLS = config("PUBLIC_MQTT_BROKER_USE_TLS", default=False, cast=bool)
+
 # Cooldown after a failed MQTT connect before we try again. Without this, a
 # broker outage causes every send_mqtt_command() call to instantiate a fresh
 # paho.Client + fail, leaking sockets/buffers — see oms-9t2.

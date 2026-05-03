@@ -17,7 +17,7 @@
 #   - ForgeKey: FORGEKEY_PROVISIONING_TOKEN (warned if empty/placeholder)
 #   - Webhook tokens: POSTMARK_INBOUND_TOKEN, LOCATION_PING_TOKEN (warned if empty)
 #   - Email: EMAIL_BACKEND must not be the console backend in prod
-#   - Sentry: if SENTRY_DSN set, must look like a DSN URL
+#   - Highlight: if HIGHLIGHT_OTLP_ENDPOINT set, must be an https:// URL
 #   - Cookie security: SESSION_COOKIE_SECURE, CSRF_COOKIE_SECURE inferred from
 #     DEBUG=0 in settings.py — verified by Django's deployment check below
 #
@@ -241,12 +241,16 @@ if [ -z "${DEFAULT_FROM_EMAIL:-}" ] || is_placeholder "${DEFAULT_FROM_EMAIL:-}";
     warn "DEFAULT_FROM_EMAIL is unset or a placeholder. Outbound mail will use Django's default."
 fi
 
-# --- 10. Sentry -------------------------------------------------------------
+# --- 10. Highlight ----------------------------------------------------------
+# HIGHLIGHT_PROJECT_ID may be empty (disables the SDK). When the operator
+# overrides the OTLP collector for a self-hosted deploy, it must be an https
+# endpoint — http would mean either a misconfigured production stack or
+# unencrypted telemetry leaving the host.
 
-if [ -n "${SENTRY_DSN:-}" ]; then
-    case "$SENTRY_DSN" in
-        https://*@*) ;;
-        *) err "SENTRY_DSN does not look like a Sentry DSN URL (expected https://<key>@<host>/<id>)." ;;
+if [ -n "${HIGHLIGHT_OTLP_ENDPOINT:-}" ]; then
+    case "$HIGHLIGHT_OTLP_ENDPOINT" in
+        https://*) ;;
+        *) err "HIGHLIGHT_OTLP_ENDPOINT must be https:// for production (got: $HIGHLIGHT_OTLP_ENDPOINT)." ;;
     esac
 fi
 

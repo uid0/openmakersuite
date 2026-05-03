@@ -1,7 +1,7 @@
 /**
  * Main App Component
  */
-import * as Sentry from '@sentry/react';
+import { ErrorBoundary } from '@highlight-run/react';
 import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'react-router-dom';
 import ErrorFallback from './components/ErrorFallback';
 import WorkspaceLayout from './components/WorkspaceLayout';
@@ -68,8 +68,9 @@ import WebhookFormPage from './pages/WebhookFormPage';
 import WebhookListPage from './pages/WebhookListPage';
 import './styles/App.css';
 
-// Wrap routes with Sentry for better error tracking
-const SentryRoutes = Sentry.withSentryRouting(Routes);
+// Highlight auto-instruments History API navigation, so route changes are
+// captured on the session timeline without a router-specific HOC (no
+// equivalent of Sentry.withSentryRouting is required).
 
 // Redirect components for dynamic routes
 const RedirectTVDashboardLocation = () => {
@@ -120,13 +121,13 @@ const RedirectChecklist = () => {
 function AppContent() {
   return (
     <div className="App">
-      <Sentry.ErrorBoundary
-        fallback={({ error, resetError, eventId }) => (
-          <ErrorFallback error={error} resetError={resetError} eventId={eventId} />
+      <ErrorBoundary
+        fallback={({ error, resetError }) => (
+          <ErrorFallback error={error} resetError={resetError} />
         )}
         showDialog={false}
       >
-        <SentryRoutes>
+        <Routes>
           {/* Home/Landing */}
           <Route path="/" element={<HomePage />} />
 
@@ -247,8 +248,8 @@ function AppContent() {
 
           {/* Other routes */}
           <Route path="/thanks" element={<WorkspaceLayout><ThanksPage /></WorkspaceLayout>} />
-        </SentryRoutes>
-      </Sentry.ErrorBoundary>
+        </Routes>
+      </ErrorBoundary>
     </div>
   );
 }

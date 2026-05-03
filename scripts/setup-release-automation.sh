@@ -87,68 +87,62 @@ check_workflow_files() {
     print_success "Workflow files found"
 }
 
-setup_sentry_secrets() {
-    print_info "Setting up Sentry integration..."
+setup_highlight_secrets() {
+    print_info "Setting up Highlight integration..."
 
-    echo "To integrate with Sentry for release tracking, you need:"
-    echo "1. A Sentry account (https://sentry.io/signup/)"
-    echo "2. A Sentry project for your application"
-    echo "3. An authentication token with project:releases scope"
+    echo "To integrate with Highlight for source-map upload, you need:"
+    echo "1. A Highlight project (self-hosted or app.highlight.io)"
+    echo "2. The verbose project id (Settings > General > Project ID)"
+    echo "3. An organization-level upload API key (Settings > General > API)"
+    echo "4. (Self-host only) The collector OTLP endpoint URL"
     echo ""
 
-    read -p "Do you want to configure Sentry secrets now? (y/n): " -n 1 -r
+    read -p "Do you want to configure Highlight secrets now? (y/n): " -n 1 -r
     echo
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        # Get Sentry organization
-        read -p "Enter your Sentry organization slug: " SENTRY_ORG
-        if [ -z "$SENTRY_ORG" ]; then
-            print_warning "Sentry organization not provided, skipping Sentry setup"
+        read -p "Enter your Highlight project id: " HIGHLIGHT_PROJECT_ID
+        if [ -z "$HIGHLIGHT_PROJECT_ID" ]; then
+            print_warning "Highlight project id not provided, skipping Highlight setup"
             return
         fi
 
-        # Get Sentry project
-        read -p "Enter your Sentry project slug: " SENTRY_PROJECT
-        if [ -z "$SENTRY_PROJECT" ]; then
-            print_warning "Sentry project not provided, skipping Sentry setup"
-            return
-        fi
-
-        # Get Sentry auth token
-        echo "Create an auth token at: https://sentry.io/settings/account/api/auth-tokens/"
-        echo "Ensure it has 'project:releases' scope"
-        read -s -p "Enter your Sentry auth token: " SENTRY_AUTH_TOKEN
+        echo "Create an upload key at app.highlight.io > Settings > General > API."
+        read -s -p "Enter your Highlight API key (upload): " HIGHLIGHT_API_KEY
         echo
 
-        if [ -z "$SENTRY_AUTH_TOKEN" ]; then
-            print_warning "Sentry auth token not provided, skipping Sentry setup"
+        if [ -z "$HIGHLIGHT_API_KEY" ]; then
+            print_warning "Highlight API key not provided, skipping Highlight setup"
             return
         fi
 
-        # Set GitHub secrets
+        read -p "Enter your self-host OTLP endpoint (https://...; blank for cloud): " HIGHLIGHT_OTLP_ENDPOINT
+
         print_info "Setting GitHub secrets..."
 
-        if gh secret set SENTRY_ORG --body "$SENTRY_ORG"; then
-            print_success "SENTRY_ORG secret set"
+        if gh secret set REACT_APP_HIGHLIGHT_PROJECT_ID --body "$HIGHLIGHT_PROJECT_ID"; then
+            print_success "REACT_APP_HIGHLIGHT_PROJECT_ID secret set"
         else
-            print_error "Failed to set SENTRY_ORG secret"
+            print_error "Failed to set REACT_APP_HIGHLIGHT_PROJECT_ID secret"
         fi
 
-        if gh secret set SENTRY_PROJECT --body "$SENTRY_PROJECT"; then
-            print_success "SENTRY_PROJECT secret set"
+        if gh secret set HIGHLIGHT_API_KEY --body "$HIGHLIGHT_API_KEY"; then
+            print_success "HIGHLIGHT_API_KEY secret set"
         else
-            print_error "Failed to set SENTRY_PROJECT secret"
+            print_error "Failed to set HIGHLIGHT_API_KEY secret"
         fi
 
-        if gh secret set SENTRY_AUTH_TOKEN --body "$SENTRY_AUTH_TOKEN"; then
-            print_success "SENTRY_AUTH_TOKEN secret set"
-        else
-            print_error "Failed to set SENTRY_AUTH_TOKEN secret"
+        if [ -n "$HIGHLIGHT_OTLP_ENDPOINT" ]; then
+            if gh secret set REACT_APP_HIGHLIGHT_OTLP_ENDPOINT --body "$HIGHLIGHT_OTLP_ENDPOINT"; then
+                print_success "REACT_APP_HIGHLIGHT_OTLP_ENDPOINT secret set"
+            else
+                print_error "Failed to set REACT_APP_HIGHLIGHT_OTLP_ENDPOINT secret"
+            fi
         fi
 
-        print_success "Sentry integration configured!"
+        print_success "Highlight integration configured!"
     else
-        print_warning "Skipping Sentry setup. You can configure it later by running this script again."
+        print_warning "Skipping Highlight setup. You can configure it later by running this script again."
     fi
 }
 
@@ -237,8 +231,8 @@ show_summary() {
     echo "• ✅ Multi-architecture Docker images"
     echo "• ✅ GitHub Releases with deployment bundles"
 
-    if gh secret list | grep -q "SENTRY_"; then
-        echo "• ✅ Sentry release tracking"
+    if gh secret list | grep -q "HIGHLIGHT_"; then
+        echo "• ✅ Highlight source-map upload"
     fi
 
     if gh secret list | grep -q "SLACK_"; then
@@ -265,7 +259,7 @@ main() {
     check_prerequisites
     check_workflow_files
     setup_container_registry
-    setup_sentry_secrets
+    setup_highlight_secrets
     setup_slack_notifications
     test_release_trigger
     show_summary

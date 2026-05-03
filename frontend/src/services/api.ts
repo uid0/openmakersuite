@@ -1,7 +1,7 @@
 /**
  * API service for communicating with the Django backend
  */
-import * as Sentry from '@sentry/react';
+import { H } from 'highlight.run';
 import axios from 'axios';
 import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
@@ -201,34 +201,29 @@ api.interceptors.response.use(
       }
     }
 
-    // Log API errors to Sentry
+    // Log API errors to Highlight. H.consume accepts a structured payload that
+    // shows up as searchable attributes on the error event in the dashboard.
     if (error.response) {
-      // The request was made and the server responded with a status code
-      // that falls out of the range of 2xx
-      Sentry.captureException(error, {
-        contexts: {
-          api: {
-            url: error.config?.url,
-            method: error.config?.method,
-            status: error.response.status,
-            data: error.response.data,
-          },
+      H.consume(error, {
+        source: 'api',
+        payload: {
+          url: error.config?.url,
+          method: error.config?.method,
+          status: error.response.status,
+          data: error.response.data,
         },
       });
     } else if (error.request) {
-      // The request was made but no response was received
-      Sentry.captureException(error, {
-        contexts: {
-          api: {
-            url: error.config?.url,
-            method: error.config?.method,
-            error: 'No response received',
-          },
+      H.consume(error, {
+        source: 'api',
+        payload: {
+          url: error.config?.url,
+          method: error.config?.method,
+          error: 'No response received',
         },
       });
     } else {
-      // Something happened in setting up the request that triggered an Error
-      Sentry.captureException(error);
+      H.consumeError(error);
     }
     return Promise.reject(error);
   }
@@ -1551,6 +1546,8 @@ export interface ForgeKeyDevice {
   boot_count: number | null;
   free_heap: number | null;
   ip: string | null;
+  capabilities: string[];
+  capabilities_announced_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1582,8 +1579,10 @@ export interface ForgeKeyCommandResponse {
 }
 
 export const forgekeyAPI = {
-  listDevices: () =>
-    api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/'),
+  listDevices: (opts: { capability?: string } = {}) =>
+    api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
+      params: opts.capability ? { capability: opts.capability } : undefined,
+    }),
   getDevice: (id: string) => api.get<ForgeKeyDevice>(`/forgekey/devices/${id}/`),
   updateDevice: (id: string, data: Partial<ForgeKeyDevice>) =>
     api.patch<ForgeKeyDevice>(`/forgekey/devices/${id}/`, data),

@@ -9,6 +9,8 @@ empty signatures and devices on signature-verifying firmware will refuse them.
 
 from __future__ import annotations
 
+import os
+
 from django.conf import settings
 from django.core.checks import Tags, Warning, register
 
@@ -18,6 +20,8 @@ W_INVALID = "forgekey.W003"
 W_PROVISIONING_TOKEN = "forgekey.W004"  # nosec B105 — Django check ID, not a password
 W_EMQX_PASSWORD = "forgekey.W005"  # nosec B105 — Django check ID, not a password
 W_EMQX_API = "forgekey.W006"
+W_DOCKER_ALLOWED_HOSTS = "forgekey.W007"
+DOCKER_BACKEND_HOSTNAME = "backend"
 
 PLACEHOLDER_PROVISIONING_TOKEN = "REPLACE_ME_PROVISIONING_TOKEN"  # nosec B105
 PLACEHOLDER_EMQX_PASSWORD = "change-me-on-first-deploy"  # nosec B105
@@ -25,6 +29,20 @@ PLACEHOLDER_EMQX_PASSWORD = "change-me-on-first-deploy"  # nosec B105
 
 def _is_production() -> bool:
     return not getattr(settings, "DEBUG", False)
+
+
+def _running_in_docker() -> bool:
+    """Heuristic: presence of /.dockerenv (mounted by `docker run`) or a
+    DOCKER-style cgroup. We accept either signal so the check still fires in
+    rootless containers and on hosts that strip /.dockerenv."""
+    if os.path.exists("/.dockerenv"):
+        return True
+    try:
+        with open("/proc/1/cgroup", encoding="utf-8") as fh:
+            cgroup = fh.read()
+    except OSError:
+        return False
+    return "docker" in cgroup or "containerd" in cgroup or "kubepods" in cgroup
 
 
 def _looks_like_placeholder(pem: str) -> bool:
@@ -156,6 +174,46 @@ def check_emqx_dashboard_password(app_configs, **kwargs):
                 id=W_EMQX_PASSWORD,
             )
         )
+    return warnings
+
+
+@register(Tags.security)
+def check_docker_allowed_hosts(app_configs, **kwargs):
+    """W007: warn when running in docker without `backend` in ALLOWED_HOSTS.
+
+    EMQX (running on the same docker network) fetches JWKS from
+    ``http://backend:8000/api/forgekey/jwks/`` and Django returns 400 unless
+    the `backend` service hostname is in ALLOWED_HOSTS — see oms-zad. Catch
+    the misconfiguration at startup instead of when the first device fails to
+    connect.
+    """
+    warnings = []
+    if not _running_in_docker():
+        return warnings
+    if not _is_production():
+        return warnings
+
+    allowed = getattr(settings, "ALLOWED_HOSTS", []) or []
+    normalized = {(h or "").strip().lower() for h in allowed}
+    if "*" in normalized or DOCKER_BACKEND_HOSTNAME in normalized:
+        return warnings
+
+    warnings.append(
+        Warning(
+            f"ALLOWED_HOSTS does not include '{DOCKER_BACKEND_HOSTNAME}' but "
+            "this process appears to be running inside a docker container. "
+            "EMQX fetches JWKS via http://backend:8000/api/forgekey/jwks/ on "
+            "the docker network; Django will return 400 Bad Request and EMQX "
+            "will reject every device CONNECT.",
+            hint=(
+                "Add 'backend' to ALLOWED_HOSTS in .env, e.g. "
+                "ALLOWED_HOSTS=oms.example.com,backend,localhost. "
+                "docker-compose.prod.yml also appends 'backend' defensively, "
+                "so this warning usually means an override is overriding it."
+            ),
+            id=W_DOCKER_ALLOWED_HOSTS,
+        )
+    )
     return warnings
 
 

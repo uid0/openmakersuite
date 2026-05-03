@@ -111,7 +111,11 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-oms.example.com,localhost}
+      # Always append `backend,localhost` so EMQX (which fetches JWKS via
+      # http://backend:8000/api/forgekey/jwks/ on the docker network) and
+      # in-container healthchecks always pass Django ALLOWED_HOSTS even if an
+      # operator forgets to include them in .env. Duplicates are harmless.
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-oms.example.com,localhost},backend,localhost
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-oms.example.com}
       - CORS_ALLOWED_ORIGINS=https://${DOMAIN:-oms.example.com}
       - FRONTEND_URL=https://${DOMAIN:-oms.example.com}

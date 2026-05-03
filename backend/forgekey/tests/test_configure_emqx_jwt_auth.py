@@ -44,11 +44,16 @@ def _v5_listeners(items=None):
     return _resp(items)
 
 
-def _route_get(api_url, *, nodes=None, listeners=None, authentication=None):
+def _ok_jwks():
+    return _resp({"keys": [{"kty": "EC", "crv": "P-256", "kid": "k1"}]})
+
+
+def _route_get(api_url, *, nodes=None, listeners=None, authentication=None, jwks=None):
     """Build a side_effect for ``requests.get`` keyed by URL suffix."""
     nodes = nodes if nodes is not None else _v5_nodes()
     listeners = listeners if listeners is not None else _v5_listeners()
     authentication = authentication if authentication is not None else _resp([])
+    jwks = jwks if jwks is not None else _ok_jwks()
 
     def _side_effect(url, *args, **kwargs):
         if url.endswith("/nodes"):
@@ -57,6 +62,8 @@ def _route_get(api_url, *, nodes=None, listeners=None, authentication=None):
             return listeners
         if url.endswith("/authentication"):
             return authentication
+        if "/jwks" in url:
+            return jwks
         raise AssertionError(f"unexpected GET to {url}")
 
     return _side_effect
@@ -237,7 +244,10 @@ class TestConfigureEmqxJwtAuth:
         """AC-4: failure to detect version surfaces a clear error."""
         _settings_present(settings)
         with mock.patch("forgekey.management.commands.configure_emqx_jwt_auth.requests") as req:
-            req.get.return_value = _resp(status_code=403, text="forbidden")
+            req.get.side_effect = _route_get(
+                settings.EMQX_API_URL,
+                nodes=_resp(status_code=403, text="forbidden"),
+            )
             with pytest.raises(CommandError, match="GET /nodes failed"):
                 call_command(
                     "configure_emqx_jwt_auth",
@@ -260,3 +270,95 @@ class TestConfigureEmqxJwtAuth:
                     f"--jwks-url={JWKS_URL}",
                     stdout=StringIO(),
                 )
+
+
+@pytest.mark.unit
+class TestJwksPreflight:
+    """oms-zad: pre-flight JWKS reachability check before configuring EMQX."""
+
+    def test_jwks_400_blocks_with_allowed_hosts_hint(self, settings):
+        _settings_present(settings)
+        with mock.patch("forgekey.management.commands.configure_emqx_jwt_auth.requests") as req:
+            req.get.side_effect = _route_get(
+                settings.EMQX_API_URL,
+                jwks=_resp(status_code=400, text="<html>Bad Request (400)</html>"),
+            )
+            with pytest.raises(CommandError, match=r"ALLOWED_HOSTS"):
+                call_command(
+                    "configure_emqx_jwt_auth",
+                    f"--jwks-url={JWKS_URL}",
+                    stdout=StringIO(),
+                )
+            req.post.assert_not_called()  # never wrote EMQX config
+
+    def test_jwks_503_blocks_with_status_code(self, settings):
+        _settings_present(settings)
+        with mock.patch("forgekey.management.commands.configure_emqx_jwt_auth.requests") as req:
+            req.get.side_effect = _route_get(
+                settings.EMQX_API_URL,
+                jwks=_resp(status_code=503, text="signing key not configured"),
+            )
+            with pytest.raises(CommandError, match=r"returned 503"):
+                call_command(
+                    "configure_emqx_jwt_auth",
+                    f"--jwks-url={JWKS_URL}",
+                    stdout=StringIO(),
+                )
+            req.post.assert_not_called()
+
+    def test_jwks_connection_error_surfaces_clear_error(self, settings):
+        _settings_present(settings)
+        import requests as real_requests  # noqa: WPS433
+
+        def _boom(url, *a, **kw):
+            if "/jwks" in url:
+                raise real_requests.ConnectionError("name resolution failed")
+            raise AssertionError(f"unexpected GET to {url}")
+
+        with mock.patch("forgekey.management.commands.configure_emqx_jwt_auth.requests") as req:
+            req.RequestException = real_requests.RequestException
+            req.get.side_effect = _boom
+            with pytest.raises(CommandError, match=r"JWKS pre-flight"):
+                call_command(
+                    "configure_emqx_jwt_auth",
+                    f"--jwks-url={JWKS_URL}",
+                    stdout=StringIO(),
+                )
+            req.post.assert_not_called()
+
+    def test_jwks_empty_keys_blocks(self, settings):
+        _settings_present(settings)
+        with mock.patch("forgekey.management.commands.configure_emqx_jwt_auth.requests") as req:
+            req.get.side_effect = _route_get(
+                settings.EMQX_API_URL,
+                jwks=_resp({"keys": []}),
+            )
+            with pytest.raises(CommandError, match=r"non-empty `keys` array"):
+                call_command(
+                    "configure_emqx_jwt_auth",
+                    f"--jwks-url={JWKS_URL}",
+                    stdout=StringIO(),
+                )
+
+    def test_skip_jwks_check_bypasses_preflight(self, settings):
+        """--skip-jwks-check skips the GET so it doesn't fail on a 400."""
+        _settings_present(settings)
+        with mock.patch("forgekey.management.commands.configure_emqx_jwt_auth.requests") as req:
+            # Provide good responses for everything except JWKS, which we
+            # don't expect to be called.
+            req.get.side_effect = _route_get(
+                settings.EMQX_API_URL,
+                jwks=_resp(status_code=400, text="should not be hit"),
+            )
+            req.post.return_value = _resp(status_code=201)
+            req.put.side_effect = _route_put()
+            call_command(
+                "configure_emqx_jwt_auth",
+                f"--jwks-url={JWKS_URL}",
+                "--skip-jwks-check",
+                stdout=StringIO(),
+            )
+            # Pre-flight skipped: only EMQX URLs hit, never the JWKS URL.
+            for c in req.get.call_args_list:
+                assert "/jwks" not in c.args[0]
+            req.post.assert_called()  # configuration proceeded

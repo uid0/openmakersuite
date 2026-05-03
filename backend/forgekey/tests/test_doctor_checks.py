@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from unittest import mock
+
 import pytest
 
 from forgekey.checks import (
+    W_DOCKER_ALLOWED_HOSTS,
     W_EMQX_API,
     W_EMQX_PASSWORD,
     W_PROVISIONING_TOKEN,
+    check_docker_allowed_hosts,
     check_emqx_api_credentials,
     check_emqx_dashboard_password,
     check_forgekey_provisioning_token,
@@ -100,3 +104,39 @@ class TestEmqxApiCredentialsCheck:
         prod.EMQX_API_KEY = "key"
         prod.EMQX_API_SECRET = "secret"
         assert check_emqx_api_credentials(app_configs=None) == []
+
+
+class TestDockerAllowedHostsCheck:
+    """oms-zad: W007 warns when running in docker without 'backend' in ALLOWED_HOSTS."""
+
+    def test_no_warnings_in_debug_even_in_docker(self, settings):
+        settings.DEBUG = True
+        settings.ALLOWED_HOSTS = ["oms.example.com"]
+        with mock.patch("forgekey.checks._running_in_docker", return_value=True):
+            assert check_docker_allowed_hosts(app_configs=None) == []
+
+    def test_no_warnings_outside_docker(self, prod):
+        prod.ALLOWED_HOSTS = ["oms.example.com"]
+        with mock.patch("forgekey.checks._running_in_docker", return_value=False):
+            assert check_docker_allowed_hosts(app_configs=None) == []
+
+    def test_warns_in_docker_without_backend(self, prod):
+        prod.ALLOWED_HOSTS = ["oms.example.com", "localhost"]
+        with mock.patch("forgekey.checks._running_in_docker", return_value=True):
+            warnings = check_docker_allowed_hosts(app_configs=None)
+        assert [w.id for w in warnings] == [W_DOCKER_ALLOWED_HOSTS]
+
+    def test_no_warning_when_backend_present(self, prod):
+        prod.ALLOWED_HOSTS = ["oms.example.com", "backend", "localhost"]
+        with mock.patch("forgekey.checks._running_in_docker", return_value=True):
+            assert check_docker_allowed_hosts(app_configs=None) == []
+
+    def test_no_warning_when_wildcard(self, prod):
+        prod.ALLOWED_HOSTS = ["*"]
+        with mock.patch("forgekey.checks._running_in_docker", return_value=True):
+            assert check_docker_allowed_hosts(app_configs=None) == []
+
+    def test_case_insensitive_match(self, prod):
+        prod.ALLOWED_HOSTS = ["oms.example.com", "Backend"]
+        with mock.patch("forgekey.checks._running_in_docker", return_value=True):
+            assert check_docker_allowed_hosts(app_configs=None) == []

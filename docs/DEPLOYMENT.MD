@@ -183,6 +183,37 @@ docker-compose -f docker-compose.prod.yml exec nginx ls -la /app/frontend
 - Check `env_file:` section in docker-compose.prod.yml
 - Restart containers after changing .env
 
+### Issue: EMQX rejects every device CONNECT (JWKS 400)
+
+**Problem**: After enabling JWT auth (`configure_emqx_jwt_auth`), no devices
+can connect. From inside the EMQX container:
+
+```bash
+docker-compose -f docker-compose.prod.yml exec emqx \
+    curl -s http://backend:8000/api/forgekey/jwks/
+# <html>Bad Request (400)</html>
+```
+
+**Root cause**: EMQX fetches JWKS via the docker service name
+(`Host: backend:8000`), but `ALLOWED_HOSTS` lists only the public hostname
+plus `localhost`. Django rejects the request with 400, so EMQX never gets a
+public key and refuses every CONNECT.
+
+**Solution**: Add `backend` to `ALLOWED_HOSTS`:
+
+```bash
+# .env
+ALLOWED_HOSTS=oms.example.com,www.oms.example.com,backend,localhost
+docker-compose -f docker-compose.prod.yml up -d backend
+```
+
+`docker-compose.prod.yml` also appends `backend,localhost` to whatever you
+set, so this is the belt-and-suspenders configuration. The Django check
+`forgekey.W007` warns about this at startup when running in docker, and
+`configure_emqx_jwt_auth` now pre-flights the JWKS URL before writing EMQX
+config — pass `--skip-jwks-check` only if you already verified manually.
+Tracked: oms-zad.
+
 ### Issue: Database connection failed
 
 **Problem**: Backend can't connect to PostgreSQL
@@ -279,7 +310,7 @@ docker stats
 - [ ] Use strong `POSTGRES_PASSWORD`
 - [ ] Set `DEBUG=0` in production
 - [ ] Configure HTTPS with SSL certificate
-- [ ] Set proper `ALLOWED_HOSTS`
+- [ ] Set proper `ALLOWED_HOSTS` (must include `backend` for in-cluster JWKS — see EMQX troubleshooting above)
 - [ ] Configure firewall (allow only 80, 443)
 - [ ] Regular backups of database and media (see [`deploy/BACKUP_RESTORE.md`](../deploy/BACKUP_RESTORE.md))
 - [ ] Keep Docker images updated

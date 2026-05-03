@@ -33,6 +33,7 @@ from inventory.models import (
     WorkOrderTaskCompletion,
 )
 from inventory.services.work_order_ingest import (
+    _decode_qr_payloads,
     apply_submission,
     extract_work_order_id,
     parse_work_order_pdf,
@@ -41,6 +42,33 @@ from inventory.tests.factories import AssetFactory
 from inventory.utils.work_order_pdf import generate_work_order_pdf
 
 pytestmark = pytest.mark.django_db
+
+
+def _qr_decoder_available() -> bool:
+    """True if at least one QR decoder backend (cv2 or pyzbar) is functional.
+
+    Both are listed in requirements.txt, but pyzbar additionally needs the
+    system libzbar0 shared library, and opencv-python-headless is occasionally
+    skipped in lean dev envs. When neither backend can decode, the QR fallback
+    cannot return a UUID — the QR-dependent tests below would fail for a
+    purely environmental reason. Skip them in that case so the suite reflects
+    the code under test rather than the host's package state.
+    """
+    sample = io.BytesIO()
+    qr = qrcode.QRCode(box_size=10, border=4)
+    qr.add_data("probe")
+    qr.make(fit=True)
+    qr.make_image(fill_color="black", back_color="white").save(sample, format="PNG")
+    return bool(_decode_qr_payloads(sample.getvalue()))
+
+
+qr_decoder_required = pytest.mark.skipif(
+    not _qr_decoder_available(),
+    reason=(
+        "No working QR decoder (cv2 or pyzbar+libzbar0) — install "
+        "opencv-python-headless or libzbar0 to exercise QR-fallback tests."
+    ),
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -199,6 +227,7 @@ class TestExtractWorkOrderId:
         assert got == wo_id
         assert errors == []  # acroform succeeded on first try, nothing to surface
 
+    @qr_decoder_required
     def test_extracts_id_from_qr_code(self):
         wo_id = str(uuid.uuid4())
         reader = PdfReader(io.BytesIO(_pdf_with_qr_only(wo_id)))
@@ -317,6 +346,7 @@ class TestImageOnlyPdfIngest:
     """The user-reported scenario: a scanned PDF where text extraction is
     empty. The QR fallback must rescue it."""
 
+    @qr_decoder_required
     def test_scanned_pdf_extracts_via_qr(self):
         wo = _make_work_order(num_tasks=1)
         original = generate_work_order_pdf(wo, base_url="http://example.com")
@@ -330,6 +360,7 @@ class TestImageOnlyPdfIngest:
         parsed = parse_work_order_pdf(scanned)
         assert parsed["work_order_id"] == str(wo.id)
 
+    @qr_decoder_required
     def test_scanned_pdf_apply_submission_succeeds(self):
         wo = _make_work_order(num_tasks=1)
         original = generate_work_order_pdf(wo, base_url="http://example.com")

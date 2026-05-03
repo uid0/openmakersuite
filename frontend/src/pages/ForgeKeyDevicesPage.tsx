@@ -19,30 +19,34 @@ const ForgeKeyDevicesPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [capabilityFilter, setCapabilityFilter] = useState<string>('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [devRes, locRes] = await Promise.all([
-        forgekeyAPI.listDevices(),
-        inventoryAPI.listLocations(),
-      ]);
-      const rows = Array.isArray(devRes.data) ? devRes.data : devRes.data.results ?? [];
-      setDevices(rows);
-      setLocations(locRes.data.results);
-      setError(null);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Failed to load ForgeKey devices.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (capability: string) => {
+      setLoading(true);
+      try {
+        const [devRes, locRes] = await Promise.all([
+          forgekeyAPI.listDevices(capability ? { capability } : undefined),
+          inventoryAPI.listLocations(),
+        ]);
+        const rows = Array.isArray(devRes.data) ? devRes.data : devRes.data.results ?? [];
+        setDevices(rows);
+        setLocations(locRes.data.results);
+        setError(null);
+      } catch (err: any) {
+        setError(err?.response?.data?.detail || 'Failed to load ForgeKey devices.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (isStaff || isSuperuser) {
-      load();
+      load(capabilityFilter);
     }
-  }, [load, isStaff, isSuperuser]);
+  }, [load, isStaff, isSuperuser, capabilityFilter]);
 
   const locationLookup = useMemo(() => {
     const map = new Map<number, Location>();
@@ -83,6 +87,25 @@ const ForgeKeyDevicesPage: React.FC = () => {
         traffic counts and sensor readings roll up to the right space.
       </p>
 
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
+        <label htmlFor="capability-filter" style={{ color: '#555' }}>
+          Filter by capability:
+        </label>
+        <input
+          id="capability-filter"
+          type="text"
+          placeholder="e.g. mmwave_presence"
+          value={capabilityFilter}
+          onChange={(e) => setCapabilityFilter(e.target.value.trim())}
+          style={{ minWidth: '14rem' }}
+        />
+        {capabilityFilter && (
+          <button type="button" onClick={() => setCapabilityFilter('')}>
+            Clear
+          </button>
+        )}
+      </div>
+
       {error && <p style={{ color: '#c0392b' }}>{error}</p>}
 
       {loading ? (
@@ -94,6 +117,7 @@ const ForgeKeyDevicesPage: React.FC = () => {
               <th style={{ textAlign: 'left', padding: '0.25rem' }}>Device</th>
               <th style={{ textAlign: 'left', padding: '0.25rem' }}>MAC</th>
               <th style={{ textAlign: 'left', padding: '0.25rem' }}>Type</th>
+              <th style={{ textAlign: 'left', padding: '0.25rem' }}>Capabilities</th>
               <th style={{ textAlign: 'left', padding: '0.25rem' }}>Location</th>
               <th style={{ textAlign: 'left', padding: '0.25rem' }}>Last seen</th>
               <th style={{ textAlign: 'left', padding: '0.25rem' }}>Online</th>
@@ -113,6 +137,28 @@ const ForgeKeyDevicesPage: React.FC = () => {
                   </td>
                   <td style={{ padding: '0.25rem', fontFamily: 'monospace' }}>{device.mac_address}</td>
                   <td style={{ padding: '0.25rem' }}>{device.device_type_name ?? '—'}</td>
+                  <td style={{ padding: '0.25rem' }}>
+                    {device.capabilities && device.capabilities.length > 0 ? (
+                      <span style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                        {device.capabilities.map((cap) => (
+                          <span
+                            key={cap}
+                            style={{
+                              background: '#eef',
+                              padding: '0.05rem 0.4rem',
+                              borderRadius: '3px',
+                              fontSize: '0.8rem',
+                              fontFamily: 'monospace',
+                            }}
+                          >
+                            {cap}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#999' }}>—</span>
+                    )}
+                  </td>
                   <td style={{ padding: '0.25rem' }}>
                     <select
                       aria-label={`Location for ${device.name || device.mac_address}`}
@@ -159,8 +205,10 @@ const ForgeKeyDevicesPage: React.FC = () => {
             })}
             {devices.length === 0 && (
               <tr>
-                <td colSpan={6} style={{ padding: '0.5rem', color: '#777' }}>
-                  No ForgeKey devices registered yet.
+                <td colSpan={7} style={{ padding: '0.5rem', color: '#777' }}>
+                  {capabilityFilter
+                    ? `No devices match capability "${capabilityFilter}".`
+                    : 'No ForgeKey devices registered yet.'}
                 </td>
               </tr>
             )}

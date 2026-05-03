@@ -323,6 +323,82 @@ def process_mqtt_occupancy(
     logger.info("Recorded occupancy event for device %s", normalized_mac)
 
 
+def _normalize_capabilities(raw: Any) -> list[str]:
+    """Coerce a capabilities payload value into a clean ``list[str]``.
+
+    Drops non-strings, blanks, and duplicates while preserving first-seen
+    order so the UI sees a stable ordering across announcements.
+    """
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        candidate = item.strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        result.append(candidate)
+    return result
+
+
+@shared_task
+def process_mqtt_device_capabilities(mac_address: str, message_data: Dict[str, Any]) -> None:
+    """Persist a capability announcement from an ESP32 device.
+
+    Firmware publishes a retained QoS-1 message to
+    ``<prefix>/<mac>/capabilities`` at boot:
+
+        {"capabilities": ["people_counter", "status_led"],
+         "firmware_version": "1.2.0"}
+
+    We overwrite the device's capability list on every announcement (firmware
+    is source of truth) and stamp ``capabilities_announced_at`` so admins can
+    spot stale rows. ``firmware_version`` is opportunistically applied so the
+    capability message doubles as a status beacon at boot.
+    """
+    try:
+        normalized_mac = normalize_mac_address(mac_address)
+    except Exception:
+        logger.warning("Dropping capabilities event: malformed MAC %r", mac_address)
+        return
+
+    if not isinstance(message_data, dict):
+        logger.warning(
+            "Dropping capabilities event from %s: payload is not an object",
+            normalized_mac,
+        )
+        return
+
+    try:
+        device = ESP32Device.objects.get(mac_address=normalized_mac)
+    except ESP32Device.DoesNotExist:
+        logger.info("Dropping capabilities event: unknown MAC %s", normalized_mac)
+        return
+
+    capabilities = _normalize_capabilities(message_data.get("capabilities"))
+
+    update_fields = ["capabilities", "capabilities_announced_at", "last_seen", "is_online"]
+    device.capabilities = capabilities
+    device.capabilities_announced_at = timezone.now()
+    device.last_seen = timezone.now()
+    device.is_online = True
+
+    fw = message_data.get("firmware_version")
+    if isinstance(fw, str) and fw:
+        device.firmware_version = fw
+        update_fields.append("firmware_version")
+
+    device.save(update_fields=update_fields)
+    logger.info(
+        "Recorded capabilities for device %s: %s",
+        normalized_mac,
+        capabilities,
+    )
+
+
 @shared_task
 def process_mqtt_power_reading(
     mac_address: str, asset_id: str, reading_data: Dict[str, Any]

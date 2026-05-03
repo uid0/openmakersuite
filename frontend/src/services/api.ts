@@ -1546,6 +1546,8 @@ export interface ForgeKeyDevice {
   boot_count: number | null;
   free_heap: number | null;
   ip: string | null;
+  capabilities: string[];
+  capabilities_announced_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1577,8 +1579,10 @@ export interface ForgeKeyCommandResponse {
 }
 
 export const forgekeyAPI = {
-  listDevices: () =>
-    api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/'),
+  listDevices: (opts: { capability?: string } = {}) =>
+    api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
+      params: opts.capability ? { capability: opts.capability } : undefined,
+    }),
   getDevice: (id: string) => api.get<ForgeKeyDevice>(`/forgekey/devices/${id}/`),
   updateDevice: (id: string, data: Partial<ForgeKeyDevice>) =>
     api.patch<ForgeKeyDevice>(`/forgekey/devices/${id}/`, data),

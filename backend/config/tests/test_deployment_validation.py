@@ -124,7 +124,7 @@ class TestProductionEnvValidatorAC23:
             ("EMQX_DASHBOARD_PASSWORD", "Short1", "8 characters"),
             ("DOMAIN", "change-me", "DOMAIN"),
             ("LETSENCRYPT_EMAIL", "", "LETSENCRYPT_EMAIL"),
-            ("SENTRY_DSN", "not-a-dsn", "SENTRY_DSN"),
+            ("HIGHLIGHT_OTLP_ENDPOINT", "http://otel.example.org:4317", "HIGHLIGHT_OTLP_ENDPOINT"),
             ("FORGEKEY_FIRMWARE_SIGNING_KEY", "not-a-pem", "FORGEKEY_FIRMWARE_SIGNING_KEY"),
         ],
     )

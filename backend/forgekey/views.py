@@ -63,6 +63,7 @@ from .services.jwt_signing import JwtSigningError, get_jwt_jwks, is_jwt_signing_
 from .tasks import (
     disable_device,
     enable_device,
+    process_mqtt_device_capabilities,
     process_mqtt_firmware_update_response,
     process_mqtt_occupancy,
     process_mqtt_power_reading,
@@ -433,6 +434,7 @@ class MqttWebhookView(APIView):
     OCCUPANCY_SUFFIX = "occupancy"
     STATUS_SUFFIX = "status"
     POWER_SUFFIX = "power"
+    CAPABILITIES_SUFFIX = "capabilities"
     FIRMWARE_RESPONSE_SUFFIX = ("firmware", "response")
 
     def post(self, request):
@@ -537,6 +539,11 @@ class MqttWebhookView(APIView):
             process_mqtt_status_message.delay(mac, message_data)
             return True
 
+        # Capabilities: <prefix>/<mac>/capabilities (3 parts, last == "capabilities")
+        if len(parts) == 3 and last == self.CAPABILITIES_SUFFIX:
+            process_mqtt_device_capabilities.delay(mac, message_data or {})
+            return True
+
         # Firmware response: <prefix>/<mac>/firmware/response
         if (
             len(parts) >= 4
@@ -591,6 +598,27 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
     queryset = ESP32Device.objects.select_related("device_type").all()
     serializer_class = ESP32DeviceSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        capability = self.request.query_params.get("capability")
+        if capability:
+            from django.db import connection
+
+            if connection.features.supports_json_field_contains:
+                # Postgres path — index-friendly, used in production.
+                qs = qs.filter(capabilities__contains=[capability])
+            else:
+                # SQLite fallback (tests). The capability list is small per
+                # device and the device count is bounded, so a Python-side
+                # filter is acceptable here.
+                ids = [
+                    d.id
+                    for d in qs.values_list("id", "capabilities", named=True)
+                    if capability in (d.capabilities or [])
+                ]
+                qs = qs.filter(id__in=ids)
+        return qs
 
     @action(detail=True, methods=["post"])
     def enable(self, request, pk=None):

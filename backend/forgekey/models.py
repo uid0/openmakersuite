@@ -967,3 +967,83 @@ class DeviceFirmwareUpdate(models.Model):
 
     def __str__(self) -> str:
         return f"{self.device.mac_address} - {self.firmware_version.version} - {self.get_status_display()}"
+
+
+class DeviceCommand(models.Model):
+    """Audit row for a single command dispatched to a device.
+
+    Each row represents one MQTT publish on the device's ``command`` topic,
+    plus the eventual ack the firmware echoes back over its ``status`` topic.
+    The UI polls these rows to render live ack feedback (oms-zta) and the
+    recent-commands history table.
+    """
+
+    ACK_PENDING = "pending"
+    ACK_OK = "acked"
+    ACK_ERROR = "error"
+    ACK_TIMEOUT = "timeout"
+
+    ACK_CHOICES = [
+        (ACK_PENDING, "Pending"),
+        (ACK_OK, "Acknowledged"),
+        (ACK_ERROR, "Error"),
+        (ACK_TIMEOUT, "Timed out"),
+    ]
+
+    # How long a pending ack is considered "live" before it's reported as
+    # timed out by the recent-commands endpoint. Mirrors the frontend's 10s
+    # ack window so the UI and DB agree on what 'no ack' looks like.
+    ACK_TIMEOUT_SECONDS = 10
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        ESP32Device,
+        on_delete=models.CASCADE,
+        related_name="commands",
+    )
+    command = models.CharField(
+        max_length=64,
+        help_text="Logical command name, e.g. 'restart', 'blink', 'identify'.",
+    )
+    payload = models.JSONField(
+        default=dict,
+        help_text="Full MQTT payload published to the device.",
+    )
+    sent_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="device_commands_sent",
+    )
+    sent_at = models.DateTimeField(auto_now_add=True)
+    ack_status = models.CharField(
+        max_length=16,
+        choices=ACK_CHOICES,
+        default=ACK_PENDING,
+    )
+    ack_at = models.DateTimeField(null=True, blank=True)
+    ack_payload = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-sent_at"]
+        indexes = [
+            models.Index(fields=["device", "-sent_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.device.mac_address} - {self.command} ({self.ack_status})"
+
+    @property
+    def effective_ack_status(self) -> str:
+        """Return ``timeout`` for old pending rows; otherwise the stored status.
+
+        Avoids requiring a sweeper task to flip stale pending rows — the
+        recent-commands endpoint and admin both call through this property.
+        """
+        if self.ack_status != self.ACK_PENDING:
+            return self.ack_status
+        age = (timezone.now() - self.sent_at).total_seconds()
+        if age > self.ACK_TIMEOUT_SECONDS:
+            return self.ACK_TIMEOUT
+        return self.ACK_PENDING

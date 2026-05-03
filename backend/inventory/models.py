@@ -1173,6 +1173,14 @@ class Asset(models.Model):
         blank=True,
         help_text="Specific breaker label / number serving this asset (e.g., 'Panel A, Breaker 12').",
     )
+    is_critical = models.BooleanField(
+        default=False,
+        help_text=(
+            "Marks the asset as a critical load. Critical loads are surfaced "
+            "separately in trip-impact reports so operators can plan around "
+            "outages of fire alarms, network APs, freezers, etc."
+        ),
+    )
 
     # Interlock tracking
     INTERLOCK_NONE = "none"

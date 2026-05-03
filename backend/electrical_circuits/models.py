@@ -14,6 +14,9 @@ for backward compatibility while consumers migrate.
 
 from __future__ import annotations
 
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -665,3 +668,151 @@ class PowerPort(models.Model):
 
     def __str__(self) -> str:
         return f"{self.asset.name} / {self.label} ({self.port_type})"
+
+
+class Cable(models.Model):
+    """
+    A physical cable connecting two endpoints in the makerspace (oms-i6g).
+
+    Generic on both ends so the same model captures power runs (PowerOutlet
+    ↔ PowerPort) and the volunteer-controlled segments of the network plant
+    (devices.Interface ↔ devices.NetworkDrop). Endpoints upstream of the
+    devices.NetworkDrop (the IT-managed switch fabric, IDF patch panels) are
+    intentionally not modeled.
+
+    Validation in :meth:`clean` enforces that the two endpoints form a
+    compatible pair for ``cable_type``: power cables must connect a
+    PowerOutlet to a PowerPort, network cables must connect an Interface to
+    a NetworkDrop. Order does not matter — either side may be ``endpoint_a``.
+    """
+
+    CABLE_TYPE_POWER = "power"
+    CABLE_TYPE_NETWORK = "network"
+    CABLE_TYPE_CHOICES = [
+        (CABLE_TYPE_POWER, "Power"),
+        (CABLE_TYPE_NETWORK, "Network"),
+    ]
+
+    STATUS_CONNECTED = "connected"
+    STATUS_PLANNED = "planned"
+    STATUS_DECOMMISSIONED = "decommissioned"
+    STATUS_CHOICES = [
+        (STATUS_CONNECTED, "Connected"),
+        (STATUS_PLANNED, "Planned"),
+        (STATUS_DECOMMISSIONED, "Decommissioned"),
+    ]
+
+    # Power side endpoints: (electrical_circuits, poweroutlet),
+    #                      (electrical_circuits, powerport)
+    # Network side endpoints: (devices, interface), (devices, networkdrop)
+    _POWER_ENDPOINT_PAIR = frozenset(
+        {
+            ("electrical_circuits", "poweroutlet"),
+            ("electrical_circuits", "powerport"),
+        }
+    )
+    _NETWORK_ENDPOINT_PAIR = frozenset(
+        {
+            ("devices", "interface"),
+            ("devices", "networkdrop"),
+        }
+    )
+
+    cable_type = models.CharField(
+        max_length=10,
+        choices=CABLE_TYPE_CHOICES,
+        help_text="Determines which endpoint pairing is valid (power vs network).",
+    )
+
+    endpoint_a_content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    endpoint_a_object_id = models.CharField(max_length=64)
+    endpoint_a = GenericForeignKey("endpoint_a_content_type", "endpoint_a_object_id")
+
+    endpoint_b_content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    endpoint_b_object_id = models.CharField(max_length=64)
+    endpoint_b = GenericForeignKey("endpoint_b_content_type", "endpoint_b_object_id")
+
+    color = models.CharField(
+        max_length=30,
+        blank=True,
+        help_text="Optional cable color (useful in dense racks).",
+    )
+    length_ft = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Approximate cable length in feet.",
+    )
+    label = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="Optional cable label (e.g., printed sleeve text).",
+    )
+    status = models.CharField(
+        max_length=15,
+        choices=STATUS_CHOICES,
+        default=STATUS_CONNECTED,
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["cable_type", "label"]
+        indexes = [
+            models.Index(
+                fields=["endpoint_a_content_type", "endpoint_a_object_id"],
+                name="ec_cable_endpoint_a_idx",
+            ),
+            models.Index(
+                fields=["endpoint_b_content_type", "endpoint_b_object_id"],
+                name="ec_cable_endpoint_b_idx",
+            ),
+            models.Index(fields=["cable_type"]),
+            models.Index(fields=["status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_cable_type_display()} cable {self.label or f'#{self.pk}'}"
+
+    def _endpoint_key(self, content_type: ContentType | None) -> tuple[str, str] | None:
+        if content_type is None:
+            return None
+        return (content_type.app_label, content_type.model)
+
+    def clean(self) -> None:
+        super().clean()
+        a_key = self._endpoint_key(self.endpoint_a_content_type)
+        b_key = self._endpoint_key(self.endpoint_b_content_type)
+        if a_key is None or b_key is None:
+            raise ValidationError("Both endpoints are required.")
+
+        pair = frozenset({a_key, b_key})
+        if self.cable_type == self.CABLE_TYPE_POWER:
+            if pair != self._POWER_ENDPOINT_PAIR:
+                raise ValidationError("Power cables must connect a PowerOutlet to a PowerPort.")
+        elif self.cable_type == self.CABLE_TYPE_NETWORK:
+            if pair != self._NETWORK_ENDPOINT_PAIR:
+                raise ValidationError(
+                    "Network cables must connect a devices.Interface to a " "devices.NetworkDrop."
+                )
+        else:
+            raise ValidationError(
+                f"Unknown cable_type {self.cable_type!r}.",
+            )
+
+        if self.endpoint_a_content_type_id == self.endpoint_b_content_type_id and str(
+            self.endpoint_a_object_id
+        ) == str(self.endpoint_b_object_id):
+            raise ValidationError("A cable cannot connect an endpoint to itself.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)

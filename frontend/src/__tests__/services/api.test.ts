@@ -1,13 +1,12 @@
 /**
  * Tests for API service
  */
-import * as Sentry from '@sentry/react';
+import { H } from 'highlight.run';
 import MockAdapter from 'axios-mock-adapter';
 import api, { assetPartsAPI, assetsAPI, authAPI, checklistsAPI, inventoryAPI, reorderAPI, resolveApiBaseUrl, workOrderAPI } from '../../services/api';
 
-jest.mock('@sentry/react', () => ({
-  captureException: jest.fn(),
-}));
+// highlight.run is globally mocked in setupTests.ts; the cast keeps jest's
+// mock helpers available without re-declaring the module shape here.
 
 describe('API Service', () => {
   let mock: MockAdapter;
@@ -15,7 +14,8 @@ describe('API Service', () => {
   beforeEach(() => {
     mock = new MockAdapter(api);
     localStorage.clear();
-    (Sentry.captureException as jest.Mock).mockClear();
+    (H.consume as jest.Mock).mockClear();
+    (H.consumeError as jest.Mock).mockClear();
   });
 
   afterEach(() => {
@@ -427,7 +427,7 @@ describe('API Service', () => {
       await inventoryAPI.getItem('test-id');
     });
 
-    test('captures response errors with sentry context', async () => {
+    test('captures response errors with highlight context', async () => {
       const errorPayload = { detail: 'boom' };
 
       mock
@@ -436,14 +436,13 @@ describe('API Service', () => {
 
       await expect(inventoryAPI.getItem('error')).rejects.toBeDefined();
 
-      expect(Sentry.captureException).toHaveBeenCalledWith(expect.any(Error), {
-        contexts: expect.objectContaining({
-          api: expect.objectContaining({ status: 500, data: errorPayload }),
-        }),
+      expect(H.consume).toHaveBeenCalledWith(expect.any(Error), {
+        source: 'api',
+        payload: expect.objectContaining({ status: 500, data: errorPayload }),
       });
     });
 
-    test('captures network errors with sentry context', async () => {
+    test('captures network errors with highlight context', async () => {
       const handler = (api as any).interceptors.response.handlers[0].rejected;
       const networkError = Object.assign(new Error('Network Error'), {
         request: {},
@@ -452,13 +451,12 @@ describe('API Service', () => {
 
       await expect(handler(networkError)).rejects.toBe(networkError);
 
-      expect(Sentry.captureException).toHaveBeenCalledWith(networkError, {
-        contexts: expect.objectContaining({
-          api: expect.objectContaining({
-            url: '/inventory/items/network/',
-            method: 'get',
-            error: 'No response received',
-          }),
+      expect(H.consume).toHaveBeenCalledWith(networkError, {
+        source: 'api',
+        payload: expect.objectContaining({
+          url: '/inventory/items/network/',
+          method: 'get',
+          error: 'No response received',
         }),
       });
     });
@@ -469,7 +467,7 @@ describe('API Service', () => {
 
       await expect(handler(setupError)).rejects.toBe(setupError);
 
-      expect(Sentry.captureException).toHaveBeenCalledWith(setupError);
+      expect(H.consumeError).toHaveBeenCalledWith(setupError);
     });
   });
 

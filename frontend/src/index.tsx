@@ -10,9 +10,9 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { NotificationProvider } from './contexts/NotificationContext';
 import './styles/index.css';
-import { initSentry } from './utils/sentry';
+import { initHighlight } from './utils/highlight';
 
-initSentry();
+initHighlight();
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement

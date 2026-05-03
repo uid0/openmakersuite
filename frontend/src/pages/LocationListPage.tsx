@@ -26,7 +26,7 @@ const LocationListPage: React.FC = () => {
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load locations');
       console.error('Error loading locations:', err);
-      // Re-throw to trigger Sentry error boundary if it's a critical error
+      // Re-throw to trigger the Highlight error boundary if it's a critical error
       if (!err.response) {
         throw err;
       }

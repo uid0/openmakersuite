@@ -345,57 +345,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  sentry-integration:
-    name: 📊 Sentry Release Integration
-    runs-on: ubuntu-latest
-    needs: [check-prerequisites, generate-version, sign-and-release]
-    if: needs.check-prerequisites.outputs.should_release == 'true'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create Sentry release
-        uses: getsentry/action-release@v1
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
-        with:
-          version: ${{ needs.generate-version.outputs.new_tag }}
-          environment: production
-          ignore_missing: true
-          ignore_empty: true
-
-      - name: Associate commits with Sentry release
-        run: |
-          NEW_TAG="${{ needs.generate-version.outputs.new_tag }}"
-          LAST_RELEASE="${{ needs.check-prerequisites.outputs.last_release }}"
-
-          # Install Sentry CLI
-          curl -sL https://sentry.io/get-cli/ | bash
-
-          # Set commits for this release
-          if [ "$LAST_RELEASE" != "v0.0.0" ]; then
-            sentry-cli releases set-commits "$NEW_TAG" --commit "${{ github.repository }}@${LAST_RELEASE}..HEAD"
-          else
-            sentry-cli releases set-commits "$NEW_TAG" --auto
-          fi
-
-          # Finalize the release in Sentry
-          sentry-cli releases finalize "$NEW_TAG"
-
-          echo "✅ Sentry release $NEW_TAG created and finalized"
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+  # Highlight has no "create release + set-commits" REST flow analogous to
+  # Sentry's `sentry-cli releases`. Release/version tagging happens at
+  # source-map upload time via @highlight-run/sourcemap-uploader --appVersion
+  # in docker-build.yml, which is the only piece the dashboard needs to
+  # resolve minified frames. Removing the dedicated release job keeps the
+  # release pipeline shorter (oms-fjs).
 
   notify-success:
     name: 🎉 Notification
     runs-on: ubuntu-latest
-    needs: [check-prerequisites, generate-version, sign-and-release, sentry-integration]
+    needs: [check-prerequisites, generate-version, sign-and-release]
     if: needs.check-prerequisites.outputs.should_release == 'true'
     steps:
       - name: Send success notification
@@ -406,11 +366,11 @@ jobs:
           echo "🎉 SUCCESS: Release $NEW_TAG has been created and published!"
           echo "📦 Release URL: $RELEASE_URL"
           echo "🔐 Cryptographically signed with Sigstore"
-          echo "📊 Associated with Sentry for monitoring"
+          echo "📊 Highlight source maps tagged with this version"
 
           # If Slack webhook is configured, send notification
           if [ ! -z "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
             curl -X POST -H 'Content-type: application/json' \
-              --data "{\"text\":\"🚀 *OpenMakerSuite $NEW_TAG Released!*\n📦 <$RELEASE_URL|Download Release>\n🔐 Cryptographically signed\n📊 Sentry monitoring enabled\"}" \
+              --data "{\"text\":\"🚀 *OpenMakerSuite $NEW_TAG Released!*\n📦 <$RELEASE_URL|Download Release>\n🔐 Cryptographically signed\n📊 Highlight monitoring enabled\"}" \
               "${{ secrets.SLACK_WEBHOOK_URL }}"
           fi

@@ -81,25 +81,26 @@ services:
       dockerfile: Dockerfile.prod
     logging: *default-logging
     # --max-requests + --max-requests-jitter recycles each worker after ~1000
-    # requests so any slow leak (paho buffer growth, OTel exporter queue,
-    # multipart spool retention) is bounded by the recycle window instead of
-    # unbounded process lifetime. --graceful-timeout 30 lets in-flight
-    # requests finish before SIGKILL on recycle.
-    # See docs/INCIDENTS/oom-backend.md (oms-9t2).
-    command: >-
-      gunicorn config.wsgi:application
-      --bind 0.0.0.0:8000
-      --workers 4
-      --timeout 120
+    # requests so any slow leak (paho buffer growth, sentry buffer, multipart
+    # spool retention) is bounded by the recycle window instead of unbounded
+    # process lifetime. --graceful-timeout 30 lets in-flight requests finish
+    # before SIGKILL on recycle. See docs/INCIDENTS/oom-backend.md (oms-9t2).
+    command: >-                                                                                                                                                                              
+      gunicorn config.wsgi:application                                                                                                                                                       
+      --bind 0.0.0.0:8000                                                                                                                                                                    
+      --workers 4                                                                                                                                                                            
+      --threads 8                                                                                                                                                                            
+      --worker-class gthread                                                                                                                                                                 
+      --timeout 120                                                                                                                                                                          
       --max-requests 1000
       --max-requests-jitter 100
       --graceful-timeout 30
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G
         reservations:
-          memory: 512M
+          memory: 1G
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media

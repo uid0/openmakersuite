@@ -73,6 +73,16 @@ class Command(BaseCommand):
             action="store_true",
             help="Print the requests that would be made without sending them.",
         )
+        parser.add_argument(
+            "--skip-jwks-check",
+            action="store_true",
+            help=(
+                "Skip the JWKS-URL reachability pre-flight check (oms-zad). "
+                "By default the command GETs --jwks-url before configuring "
+                "EMQX so a 400/404 from a misconfigured ALLOWED_HOSTS fails "
+                "fast with a clear error instead of silently breaking MQTT."
+            ),
+        )
 
     def handle(self, *args, **options):
         api_url = (getattr(settings, "EMQX_API_URL", "") or "").rstrip("/")
@@ -90,6 +100,7 @@ class Command(BaseCommand):
         refresh = int(options["refresh_interval"])
         dry_run = bool(options["dry_run"])
         disable_anon = not bool(options["keep_anonymous"])
+        skip_jwks_check = bool(options["skip_jwks_check"])
 
         verify_claims = {
             "iss": getattr(settings, "FORGEKEY_JWT_ISSUER", "openmakersuite"),
@@ -108,6 +119,8 @@ class Command(BaseCommand):
         auth = (api_key, api_secret)
         if dry_run:
             self.stdout.write("[dry-run] EMQX requests that would be issued:")
+            if not skip_jwks_check:
+                self.stdout.write(f"  GET    {jwks_url}  # JWKS reachability pre-flight (oms-zad)")
             self.stdout.write(f"  GET    {api_url}/nodes  # detect EMQX version")
             self.stdout.write(f"  GET    {api_url}/authentication")
             self.stdout.write(f"  POST   {api_url}/authentication  body={authenticator_body}")
@@ -117,6 +130,10 @@ class Command(BaseCommand):
                     "  (5.x) GET    /listeners; PUT /listeners/<id>  body+={'enable_authn': True}"
                 )
             return
+
+        if not skip_jwks_check:
+            self._verify_jwks_reachable(jwks_url)
+            self.stdout.write(self.style.SUCCESS(f"JWKS endpoint reachable at {jwks_url}."))
 
         major, version = self._emqx_version(api_url, auth)
         self.stdout.write(self.style.NOTICE(f"EMQX {version} detected (major={major})."))
@@ -148,6 +165,55 @@ class Command(BaseCommand):
                 )
         else:
             self.stdout.write(self.style.WARNING("Skipped disabling anonymous connections."))
+
+    @staticmethod
+    def _verify_jwks_reachable(jwks_url: str) -> None:
+        """Pre-flight: GET ``jwks_url`` and fail with a clear hint on non-200.
+
+        The 400 we hit on a fresh deploy comes from Django rejecting the
+        ``Host: backend:8000`` header EMQX sends because ``ALLOWED_HOSTS`` is
+        missing the docker service name. Detect that before writing config so
+        operators see the cause instead of an opaque MQTT auth failure.
+        """
+        try:
+            resp = requests.get(jwks_url, timeout=DEFAULT_TIMEOUT_SECONDS)
+        except requests.RequestException as exc:
+            raise CommandError(
+                f"JWKS pre-flight: GET {jwks_url} raised {exc.__class__.__name__}: {exc}. "
+                "Verify the URL is reachable from this container; if EMQX runs "
+                "on the same docker network use http://backend:8000/api/forgekey/jwks/."
+            ) from exc
+
+        if resp.status_code == 400:
+            body = (resp.text or "").strip()[:200]
+            raise CommandError(
+                f"JWKS pre-flight: GET {jwks_url} returned 400 (likely "
+                "ALLOWED_HOSTS misconfiguration). Add the Host header value "
+                "(e.g. `backend`) to ALLOWED_HOSTS in .env and redeploy. "
+                f"Response body: {body}"
+            )
+        if resp.status_code != 200:
+            body = (resp.text or "").strip()[:200]
+            raise CommandError(
+                f"JWKS pre-flight: GET {jwks_url} returned {resp.status_code}; "
+                "EMQX would not be able to fetch the public key. "
+                f"Response body: {body}"
+            )
+
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise CommandError(
+                f"JWKS pre-flight: GET {jwks_url} did not return JSON: {exc}. "
+                "Ensure the URL points at /api/forgekey/jwks/, not the SPA."
+            ) from exc
+
+        keys = (payload or {}).get("keys") if isinstance(payload, dict) else None
+        if not keys:
+            raise CommandError(
+                f"JWKS pre-flight: GET {jwks_url} returned JSON without a "
+                "non-empty `keys` array; FORGEKEY_JWT_SIGNING_KEY may be unset."
+            )
 
     @staticmethod
     def _emqx_version(api_url: str, auth) -> tuple[int, str]:

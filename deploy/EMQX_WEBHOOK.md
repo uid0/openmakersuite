@@ -28,6 +28,19 @@ In the EMQX dashboard:
      - `Content-Type: application/json`
      - `X-ForgeKey-Webhook-Secret: <FORGEKEY_WEBHOOK_SECRET value>`
    - Connection pool: defaults are fine.
+   - **Resilience knobs (oms-4jw)** — set these so the connector recovers
+     from a transient backend outage without needing a manual restart:
+     - **Connect timeout**: `5s` (short, since the backend is on the same
+       docker network).
+     - **Request timeout**: `10s`.
+     - **Health check interval**: `15s`. EMQX re-resolves the URL and
+       re-establishes the resource on each tick, which clears any cached
+       nxdomain from a backend bounce.
+     - **Auto restart interval**: leave at the EMQX default; the resource
+       manager retries with backoff when the health check fails.
+     If your EMQX was provisioned with a longer health-check interval and
+     the connector is currently stuck on a cached nxdomain, see
+     `docs/INCIDENTS/emqx-jwks-nxdomain.md` for force-recovery procedures.
 
 2. **Integration → Rules → Create**
    - SQL:

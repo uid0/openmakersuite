@@ -60,7 +60,9 @@ If you prefer the dashboard, you can do the same by hand:
 2. Pick **JWT**.
 3. **Use JWKS**: yes.
 4. **JWKS URL**: `https://oms.example/api/forgekey/jwks/`.
-5. **Refresh interval**: `300` (seconds).
+5. **Refresh interval**: `30` (seconds). Doubles as the post-failure retry
+   cadence — see "Recovery from JWKS fetch failure" below for why we keep
+   this short.
 6. **JWT From**: `password`.
 7. **Verify Claims**: add `iss = openmakersuite` and `aud = forgekey`.
 8. **ACL Claim Name**: `acl`.
@@ -84,6 +86,32 @@ If the device fails to connect:
 - Visit `<jwks-url>` from a browser — it must return JSON (`{"keys":[...]}`).
 - In the EMQX dashboard, **Diagnose → Log** filters by client; the JWT
   validation failure reason is logged there.
+
+## Recovery from JWKS fetch failure (oms-4jw)
+
+The JWKS authenticator's `refresh_interval` (30 seconds by default) doubles as
+a retry cadence. If EMQX boots before the backend's container is reachable on
+the docker network — common with `docker compose up` from cold — the initial
+JWKS fetch hits `nxdomain` and EMQX caches that failure. Subsequent device
+auth attempts fail with "JWKS endpoint unreachable" until the next refresh
+tick fetches successfully.
+
+With the 30s default, recovery is automatic within ~30 seconds of the backend
+becoming reachable. If you raised the interval (or you are running an EMQX
+that was provisioned with the legacy 300s value), the recovery window grows
+to match. Two ways to force-recover:
+
+1. **Restart EMQX**: `docker compose restart emqx`. EMQX re-fetches JWKS on
+   startup. Use this when devices need to connect right now and you don't
+   want to wait for the next refresh tick.
+2. **Re-run `configure_emqx_jwt_auth` after deleting the existing
+   authenticator** (Authentication → Authentication → trash icon → re-run the
+   management command). Required if you want to update an existing
+   authenticator's `refresh_interval`; the command's idempotent path
+   intentionally skips creating a duplicate but does **not** rewrite an
+   existing authenticator's settings.
+
+See `docs/INCIDENTS/emqx-jwks-nxdomain.md` for the full runbook.
 
 ## Key rotation
 

@@ -60,8 +60,15 @@ class Command(BaseCommand):
         parser.add_argument(
             "--refresh-interval",
             type=int,
-            default=300,
-            help="Seconds EMQX caches the JWKS before re-fetching (default: 300).",
+            default=30,
+            help=(
+                "Seconds EMQX caches the JWKS before re-fetching (default: 30). "
+                "Doubles as the post-failure retry cadence: when EMQX boots before "
+                "the backend is reachable on the docker network, the initial JWKS "
+                "fetch hits nxdomain and EMQX caches the failure until the next "
+                "refresh tick. A short interval bounds the recovery window so a "
+                "backend restart doesn't permanently break MQTT auth (oms-4jw)."
+            ),
         )
         parser.add_argument(
             "--keep-anonymous",

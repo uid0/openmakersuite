@@ -130,6 +130,10 @@ class TestConfigureEmqxJwtAuth:
         assert post_call.kwargs["json"]["mechanism"] == "jwt"
         assert post_call.kwargs["json"]["use_jwks"] is True
         assert post_call.kwargs["json"]["endpoint"] == JWKS_URL
+        # oms-4jw: default refresh_interval must be short enough that EMQX
+        # recovers from a transient nxdomain (backend bouncing) within the
+        # next refresh tick instead of staying broken for the legacy 300s.
+        assert post_call.kwargs["json"]["refresh_interval"] == 30
         # On 5.x we never PUT /configs/mqtt — that endpoint is gone.
         for put_call in req.put.call_args_list:
             assert "/configs/mqtt" not in put_call.args[0]
@@ -142,6 +146,21 @@ class TestConfigureEmqxJwtAuth:
         out = stdout.getvalue()
         assert "5.4.1" in out
         assert "EMQX 5.x" in out
+
+    def test_refresh_interval_flag_overrides_default(self, settings):
+        """oms-4jw: --refresh-interval is forwarded to EMQX so operators can tune."""
+        _settings_present(settings)
+        with mock.patch("forgekey.management.commands.configure_emqx_jwt_auth.requests") as req:
+            req.get.side_effect = _route_get(settings.EMQX_API_URL)
+            req.post.return_value = _resp(status_code=201)
+            req.put.side_effect = _route_put()
+            call_command(
+                "configure_emqx_jwt_auth",
+                f"--jwks-url={JWKS_URL}",
+                "--refresh-interval=15",
+                stdout=StringIO(),
+            )
+        assert req.post.call_args.kwargs["json"]["refresh_interval"] == 15
 
     def test_v5_idempotent_when_listeners_already_enforce_authn(self, settings):
         """AC-2: re-running on 5.x with auth already enforced does not error or PUT."""

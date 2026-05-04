@@ -447,15 +447,22 @@ class FirmwareSigningKeyAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         cleaned = form.cleaned_data
-        if not change:
+        try:
             private_pem = cleaned.get("_resolved_private_pem")
             public_pem = cleaned.get("_resolved_public_pem")
             if not private_pem or not public_pem:
-                raise forms.ValidationError("Internal error: signing key not resolved.")
+                raise forms.ValidationError("Internal error: signing key data missing.")
             obj.public_key_pem = public_pem
+            # Attempt to encrypt the private PEM using the system's secret key derivation
             obj.private_key_pem_encrypted = FirmwareSigningKey.encrypt_private_pem(private_pem)
-            if obj.created_by_id is None and request.user.is_authenticated:
-                obj.created_by = request.user
+        except Exception as e:
+            # Catch any exception during encryption or assignment (e.g., missing dependencies, bad KEK)
+            audit_logger.error(
+                "Failed to process/save signing key data for label %s: %s", obj.label, e
+            )
+            raise forms.ValidationError(
+                f"Could not save the keypair due to a critical processing error: {type(e).__name__}. Check server logs."
+            ) from e
 
         with transaction.atomic():
             super().save_model(request, obj, form, change)

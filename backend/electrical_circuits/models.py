@@ -460,6 +460,15 @@ class PowerBreaker(models.Model):
     )
     notes = models.TextField(blank=True)
     needs_review = models.BooleanField(default=False)
+    required_loto_devices = models.ManyToManyField(
+        "loto.LOTODevice",
+        blank=True,
+        related_name="breakers",
+        help_text=(
+            "LOTO devices required to safely isolate this breaker. Propagates "
+            "to AssetEnergySource rows derived from cables fed by this breaker."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -132,6 +132,7 @@ class PowerBreakerAdmin(admin.ModelAdmin):
     list_filter = ["status", "pole_count", "phase", "needs_review", "panel"]
     search_fields = ["panel__name", "position", "label", "panel__location__name"]
     autocomplete_fields = ["panel"]
+    filter_horizontal = ["required_loto_devices"]
     inlines = [PowerCircuitInline]
 
 

@@ -526,6 +526,15 @@ HIGHLIGHT_OTLP_ENDPOINT = config("HIGHLIGHT_OTLP_ENDPOINT", default="")
 HIGHLIGHT_ENVIRONMENT = config("HIGHLIGHT_ENVIRONMENT", default="development")
 HIGHLIGHT_SERVICE_VERSION = config("HIGHLIGHT_SERVICE_VERSION", default="")
 
+# Readiness probe — which checks gate HTTP 200 vs 503 (oms-aam).
+# Comma-separated list. Defaults to db/cache/broker (the historical
+# contract). Optional checks (celery_worker, emqx, object_store, telemetry)
+# always report status but only flap traffic when explicitly listed here.
+READYZ_REQUIRED_CHECKS = config(
+    "READYZ_REQUIRED_CHECKS",
+    default="database,cache,broker",
+)
+
 if HIGHLIGHT_PROJECT_ID:
     # CeleryIntegration is enabled automatically as part of the SDK's
     # DEFAULT_INTEGRATIONS list (see highlight_io.integrations.all). Django

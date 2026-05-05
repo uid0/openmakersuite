@@ -80,12 +80,14 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     """
     API endpoint for reorder requests.
 
-    Public endpoint - allows unauthenticated QR code scanning for creating requests.
-    Admin actions require JWT authentication.
+    All actions require JWT authentication. Reorder request payloads include
+    purchasing-sensitive fields (cost, invoice, supplier URLs), so anonymous
+    access is not permitted on any action — see GH #327.
     """
 
     # Only JWT, no session auth needed
     authentication_classes = (JWTAuthentication,)
+    permission_classes = [IsAuthenticated]
     queryset = (
         ReorderRequest.objects.select_related(
             "item", "item__category", "item__location", "reviewed_by"
@@ -98,14 +100,6 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return ReorderRequestCreateSerializer
         return ReorderRequestSerializer
-
-    def get_permissions(self):
-        """Allow anyone to create reorder requests and view pending, but require auth for admin actions."""
-        # Public actions that don't require authentication
-        if self.action in ["create", "list", "retrieve", "pending"]:
-            return [AllowAny()]
-        # Admin actions require authentication
-        return [IsAuthenticated()]
 
     def create(self, request, *args, **kwargs):
         """Create a new reorder request."""

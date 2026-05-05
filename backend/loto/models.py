@@ -174,6 +174,26 @@ class AssetEnergySource(models.Model):
         related_name="energy_sources",
         help_text="LOTO devices required to isolate this source.",
     )
+    derived_from = models.ForeignKey(
+        "electrical_circuits.Cable",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="derived_energy_sources",
+        help_text=(
+            "Power cable this row was auto-derived from. NULL for manual entries "
+            "(hydraulic, pneumatic, etc.) and for derived rows whose source cable "
+            "was hard-deleted."
+        ),
+    )
+    is_stale = models.BooleanField(
+        default=False,
+        help_text=(
+            "True when the cable that derived this row was decommissioned or "
+            "removed. Kept (rather than deleted) so the LOTO audit trail "
+            "survives equipment moves."
+        ),
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -183,6 +203,7 @@ class AssetEnergySource(models.Model):
         indexes = [
             models.Index(fields=["asset"]),
             models.Index(fields=["source_type"]),
+            models.Index(fields=["derived_from"]),
         ]
 
     def __str__(self) -> str:

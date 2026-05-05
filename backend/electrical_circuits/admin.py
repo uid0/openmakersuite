@@ -4,6 +4,7 @@ from django.contrib import admin
 
 from .models import (
     Breaker,
+    Cable,
     LightSwitch,
     NetworkDrop,
     Outlet,
@@ -132,6 +133,7 @@ class PowerBreakerAdmin(admin.ModelAdmin):
     list_filter = ["status", "pole_count", "phase", "needs_review", "panel"]
     search_fields = ["panel__name", "position", "label", "panel__location__name"]
     autocomplete_fields = ["panel"]
+    filter_horizontal = ["required_loto_devices"]
     inlines = [PowerCircuitInline]
 
 
@@ -172,3 +174,10 @@ class PowerPortAdmin(admin.ModelAdmin):
     list_filter = ["port_type"]
     search_fields = ["label", "asset__name", "asset__asset_tag"]
     autocomplete_fields = ["asset"]
+
+
+@admin.register(Cable)
+class CableAdmin(admin.ModelAdmin):
+    list_display = ["__str__", "cable_type", "status", "label", "color", "length_ft"]
+    list_filter = ["cable_type", "status"]
+    search_fields = ["label", "notes"]

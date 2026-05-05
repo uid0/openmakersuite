@@ -65,11 +65,13 @@ class AssetEnergySourceSerializer(serializers.ModelSerializer):
             "isolation_point",
             "required_devices",
             "required_devices_detail",
+            "derived_from",
+            "is_stale",
             "notes",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "derived_from", "is_stale", "created_at", "updated_at"]
 
 
 class AssetLOTORequirementsSerializer(serializers.Serializer):

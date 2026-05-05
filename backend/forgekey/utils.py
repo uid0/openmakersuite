@@ -2,6 +2,7 @@
 Utility functions for ForgeKey.
 """
 
+import time
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
@@ -10,6 +11,11 @@ from django.conf import settings
 import jwt
 
 from .services.jwt_signing import JwtSigningError, get_jwt_public_key_pem, load_jwt_signing_key
+
+SERVER_JWT_SUBJECT = "oms-backend"
+# Refresh the cached server JWT this many seconds before its `exp`. Bounds the
+# worst-case clock-skew window between OMS and EMQX.
+_SERVER_JWT_REFRESH_BUFFER_SECONDS = 60
 
 
 def normalize_mac_address(mac_address: str) -> str:
@@ -93,6 +99,75 @@ def generate_device_jwt(
         headers={"kid": settings.FORGEKEY_JWT_KEY_ID},
     )
 
+    return token
+
+
+_server_jwt_cache: Dict[str, object] = {"token": None, "cached_at": 0.0, "exp": 0}
+
+
+def invalidate_server_jwt_cache() -> None:
+    """Drop the cached server JWT so the next call re-signs.
+
+    Called from the MQTT connect-failure path (oms-y5p AC-3): if EMQX rejects
+    our credential we mint a fresh one rather than retrying with the same
+    (possibly clock-skewed or expired) token.
+    """
+    _server_jwt_cache["token"] = None
+    _server_jwt_cache["cached_at"] = 0.0
+    _server_jwt_cache["exp"] = 0
+
+
+def generate_server_jwt() -> str:
+    """ES256-signed JWT for the OMS backend's own MQTT connection.
+
+    Issued by the same signing key that signs device JWTs; EMQX verifies it via
+    the JWKS endpoint with no extra configuration. Subject is ``oms-backend``
+    and the ACL grants pub/sub on the entire ``MQTT_TOPIC_PREFIX`` namespace
+    so the backend can dispatch commands to every device and consume status
+    from any of them.
+
+    Cached per-process for ``FORGEKEY_SERVER_JWT_CACHE_SECONDS`` so we don't
+    re-sign on every MQTT connect, with a small refresh buffer before ``exp``
+    to absorb clock skew.
+
+    Raises:
+        JwtSigningError: if ``FORGEKEY_JWT_SIGNING_KEY`` is unconfigured.
+    """
+    now = time.time()
+    cached_token = _server_jwt_cache["token"]
+    cached_at = float(_server_jwt_cache["cached_at"])
+    cached_exp = int(_server_jwt_cache["exp"])
+    cache_ttl = getattr(settings, "FORGEKEY_SERVER_JWT_CACHE_SECONDS", 60 * 60 * 24)
+    if (
+        cached_token
+        and now - cached_at < cache_ttl
+        and now < cached_exp - _SERVER_JWT_REFRESH_BUFFER_SECONDS
+    ):
+        return str(cached_token)
+
+    private_key = load_jwt_signing_key()
+    iat = int(now)
+    exp = iat + getattr(settings, "FORGEKEY_SERVER_JWT_EXPIRATION_SECONDS", 60 * 60 * 24 * 365)
+    claims = {
+        "iss": settings.FORGEKEY_JWT_ISSUER,
+        "aud": settings.FORGEKEY_JWT_AUDIENCE,
+        "sub": SERVER_JWT_SUBJECT,
+        "iat": iat,
+        "exp": exp,
+        "acl": {
+            "pub": [f"{settings.MQTT_TOPIC_PREFIX}/#"],
+            "sub": [f"{settings.MQTT_TOPIC_PREFIX}/#"],
+        },
+    }
+    token = jwt.encode(
+        claims,
+        private_key,
+        algorithm=settings.FORGEKEY_JWT_ALGORITHM,
+        headers={"kid": settings.FORGEKEY_JWT_KEY_ID},
+    )
+    _server_jwt_cache["token"] = token
+    _server_jwt_cache["cached_at"] = now
+    _server_jwt_cache["exp"] = exp
     return token
 
 

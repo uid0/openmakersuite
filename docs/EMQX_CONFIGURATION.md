@@ -113,6 +113,38 @@ to match. Two ways to force-recover:
 
 See `docs/INCIDENTS/emqx-jwks-nxdomain.md` for the full runbook.
 
+## Backend authentication (oms-y5p)
+
+The OMS backend itself also speaks MQTT — it publishes commands (blink,
+restart, capture, OTA triggers) to devices and consumes status messages. With
+`mqtt.allow_anonymous = false` the backend needs a credential too, and EMQX's
+JWT authenticator does not accept literal username/password pairs.
+
+The backend solves this by **issuing its own server JWT**, signed with the
+same `FORGEKEY_JWT_SIGNING_KEY` that signs device JWTs. EMQX verifies it via
+the same JWKS endpoint with no extra configuration:
+
+- **Username**: `oms-backend`
+- **Password**: a self-signed ES256 JWT with `sub=oms-backend`, the standard
+  `iss` / `aud` claims, and an `acl` claim granting `pub`/`sub` on the entire
+  `MQTT_TOPIC_PREFIX/#` namespace so the backend can talk to every device.
+- **Caching**: the JWT is cached in-process for
+  `FORGEKEY_SERVER_JWT_CACHE_SECONDS` (default 24 hours) so we don't re-sign
+  on every MQTT connect. The token's own `exp` is
+  `FORGEKEY_SERVER_JWT_EXPIRATION_SECONDS` (default 1 year) and the cache is
+  refreshed shortly before expiry. On any MQTT connect failure the cache is
+  invalidated so the next reconnect mints a fresh credential.
+
+There is **no separate user-management** for the backend — no Built-in DB
+entry, no extra password env var to rotate. As long as
+`FORGEKEY_JWT_SIGNING_KEY` is set (which it must be for device auth to work
+at all), the backend can authenticate.
+
+If `MQTT_BROKER_USERNAME` / `MQTT_BROKER_PASSWORD` are set in the environment,
+the backend's `forgekey.W008` system check warns at startup — those literal
+credentials are ignored by the JWT authenticator and silently break every
+command publish. Unset them.
+
 ## Key rotation
 
 To rotate the device-JWT signing key:

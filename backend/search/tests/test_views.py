@@ -26,22 +26,32 @@ User = get_user_model()
 class TestGlobalSearchView:
     """Tests for global search endpoint."""
 
-    def test_global_search_empty_query(self, api_client):
+    def test_global_search_requires_authentication(self, api_client):
+        """Anonymous callers cannot reach the cross-app search surface
+        because it returns SKUs, asset serials, and supplier names."""
+        url = reverse("global-search")
+        response = api_client.get(url, {"q": "anything"})
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_global_search_empty_query(self, authenticated_client):
         """Test that empty query returns empty results."""
+        client, _ = authenticated_client
         url = reverse("global-search")
-        response = api_client.get(url, {"q": ""})
+        response = client.get(url, {"q": ""})
         assert response.status_code == status.HTTP_200_OK
         assert response.data["results"] == []
 
-    def test_global_search_no_query(self, api_client):
+    def test_global_search_no_query(self, authenticated_client):
         """Test that missing query returns empty results."""
+        client, _ = authenticated_client
         url = reverse("global-search")
-        response = api_client.get(url)
+        response = client.get(url)
         assert response.status_code == status.HTTP_200_OK
         assert response.data["results"] == []
 
-    def test_global_search_inventory_item(self, api_client, db):
+    def test_global_search_inventory_item(self, authenticated_client, db):
         """Test searching for inventory items."""
+        client, _ = authenticated_client
         category = CategoryFactory()
         location = LocationFactory()
         InventoryItemFactory(
@@ -53,7 +63,7 @@ class TestGlobalSearchView:
         )
 
         url = reverse("global-search")
-        response = api_client.get(url, {"q": "Test Inventory"})
+        response = client.get(url, {"q": "Test Inventory"})
         assert response.status_code == status.HTTP_200_OK
         results = response.data["results"]
         assert len(results) > 0
@@ -61,8 +71,9 @@ class TestGlobalSearchView:
         assert len(inventory_results) > 0
         assert inventory_results[0]["title"] == "Test Inventory Item"
 
-    def test_global_search_asset(self, api_client, db):
+    def test_global_search_asset(self, authenticated_client, db):
         """Test searching for assets."""
+        client, _ = authenticated_client
         category = CategoryFactory()
         location = LocationFactory()
         Asset.objects.create(
@@ -74,26 +85,27 @@ class TestGlobalSearchView:
         )
 
         url = reverse("global-search")
-        response = api_client.get(url, {"q": "Test Asset"})
+        response = client.get(url, {"q": "Test Asset"})
         assert response.status_code == status.HTTP_200_OK
         results = response.data["results"]
         asset_results = [r for r in results if r["type"] == "asset"]
         assert len(asset_results) > 0
         assert asset_results[0]["title"] == "Test Asset"
 
-    def test_global_search_supplier(self, api_client, db):
+    def test_global_search_supplier(self, authenticated_client, db):
         """Test searching for suppliers."""
+        client, _ = authenticated_client
         SupplierFactory(name="Test Supplier", supplier_type=Supplier.ONLINE)
 
         url = reverse("global-search")
-        response = api_client.get(url, {"q": "Test Supplier"})
+        response = client.get(url, {"q": "Test Supplier"})
         assert response.status_code == status.HTTP_200_OK
         results = response.data["results"]
         supplier_results = [r for r in results if r["type"] == "supplier"]
         assert len(supplier_results) > 0
         assert supplier_results[0]["title"] == "Test Supplier"
 
-    def test_global_search_purchase_order(self, api_client, db, authenticated_client):
+    def test_global_search_purchase_order(self, authenticated_client, db):
         """Test searching for purchase orders."""
         client, user = authenticated_client
         supplier = SupplierFactory()
@@ -111,35 +123,38 @@ class TestGlobalSearchView:
         po_results = [r for r in results if r["type"] == "purchase_order"]
         assert len(po_results) > 0
 
-    def test_global_search_location(self, api_client, db):
+    def test_global_search_location(self, authenticated_client, db):
         """Test searching for locations."""
+        client, _ = authenticated_client
         LocationFactory(name="Test Location")
 
         url = reverse("global-search")
-        response = api_client.get(url, {"q": "Test Location"})
+        response = client.get(url, {"q": "Test Location"})
         assert response.status_code == status.HTTP_200_OK
         results = response.data["results"]
         location_results = [r for r in results if r["type"] == "location"]
         assert len(location_results) > 0
         assert location_results[0]["title"] == "Test Location"
 
-    def test_global_search_limit(self, api_client, db):
+    def test_global_search_limit(self, authenticated_client, db):
         """Test that limit parameter works."""
+        client, _ = authenticated_client
         # Create multiple items
         for i in range(15):
             InventoryItemFactory(name=f"Item {i}", description="Test")
 
         url = reverse("global-search")
-        response = api_client.get(url, {"q": "Item", "limit": 5})
+        response = client.get(url, {"q": "Item", "limit": 5})
         assert response.status_code == status.HTTP_200_OK
         results = response.data["results"]
         inventory_results = [r for r in results if r["type"] == "inventory"]
         assert len(inventory_results) <= 5
 
-    def test_global_search_invalid_limit(self, api_client):
+    def test_global_search_invalid_limit(self, authenticated_client):
         """Test that invalid limit defaults to 10."""
+        client, _ = authenticated_client
         url = reverse("global-search")
-        response = api_client.get(url, {"q": "Test", "limit": "invalid"})
+        response = client.get(url, {"q": "Test", "limit": "invalid"})
         assert response.status_code == status.HTTP_200_OK
         # Should not raise an error
 

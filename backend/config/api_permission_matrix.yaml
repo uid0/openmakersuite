@@ -1,0 +1,1866 @@
+# Auto-generated snapshot of permission_classes for every DRF view.
+# Source of truth for docs/API_PERMISSION_MATRIX.md.
+# Regenerate with: python manage.py check_permission_matrix --write
+#
+# Tests in config/tests/test_permission_matrix.py fail when this file
+# drifts from the actual URL conf — update both the YAML and the
+# Markdown matrix in the same PR that changes permission_classes.
+views:
+  auth_views.create_test_membership:
+    permission_classes:
+    - AllowAny
+  auth_views.login_user:
+    permission_classes:
+    - AllowAny
+  auth_views.logout_user:
+    permission_classes:
+    - AllowAny
+  auth_views.refresh_token:
+    permission_classes:
+    - AllowAny
+  auth_views.register_user:
+    permission_classes:
+    - AllowAny
+  checklists.views.ChecklistCompletionViewSet:
+    actions:
+      complete:
+        permission_classes:
+        - AllowAny
+      list:
+        permission_classes:
+        - AllowAny
+      retrieve:
+        permission_classes:
+        - AllowAny
+      scan:
+        permission_classes:
+        - AllowAny
+  checklists.views.ChecklistViewSet:
+    actions:
+      available:
+        permission_classes:
+        - AllowAny
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      get_detail:
+        permission_classes:
+        - AllowAny
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      start:
+        permission_classes:
+        - AllowAny
+      update:
+        permission_classes:
+        - IsAuthenticated
+  config.flower_proxy.flower_proxy:
+    permission_classes:
+    - <default>
+  config.health.livez:
+    permission_classes:
+    - <default>
+  config.health.readyz:
+    permission_classes:
+    - <default>
+  customization.views.site_settings:
+    permission_classes:
+    - AllowAny
+  dashboard.views.add_dashboard_message:
+    permission_classes:
+    - IsAuthenticated
+  dashboard.views.dashboard_health:
+    permission_classes:
+    - <default>
+  dashboard.views.get_asset_problems_data:
+    permission_classes:
+    - IsAuthenticated
+  dashboard.views.get_dashboard_config:
+    permission_classes:
+    - IsAuthenticated
+  dashboard.views.get_dashboard_messages:
+    permission_classes:
+    - AllowAny
+  dashboard.views.get_deliveries_data:
+    permission_classes:
+    - IsAuthenticated
+  dashboard.views.get_inventory_summary:
+    permission_classes:
+    - AllowAny
+  dashboard.views.get_low_stock_data:
+    permission_classes:
+    - IsAuthenticated
+  dashboard.views.get_pending_reorders_data:
+    permission_classes:
+    - IsAuthenticated
+  dashboard.views.get_qr_scans_data:
+    permission_classes:
+    - IsAuthenticated
+  dashboard.views.get_user_widgets:
+    permission_classes:
+    - IsAuthenticated
+  dashboard.views.save_user_widgets:
+    permission_classes:
+    - IsAuthenticated
+  dashboard.views.update_dashboard_config:
+    permission_classes:
+    - IsAuthenticated
+  donations.views.DispositionViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  donations.views.DonationItemViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      download_label:
+        permission_classes:
+        - IsAuthenticated
+      generate_qr_code:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  donations.views.DonationViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      download_tax_receipt:
+        permission_classes:
+        - IsAuthenticated
+      generate_sticker_sheet:
+        permission_classes:
+        - IsAuthenticated
+      generate_tax_receipt:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      quarterly_report:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+      yearly_report:
+        permission_classes:
+        - IsAuthenticated
+  donations.views.TaxReceiptViewSet:
+    actions:
+      download_pdf:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      regenerate:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+  donations.views.lookup_donation_item_by_code:
+    permission_classes:
+    - AllowAny
+  donations.views.lookup_tax_receipt:
+    permission_classes:
+    - AllowAny
+  donations.views.upload_signature:
+    permission_classes:
+    - IsAuthenticated
+  electrical_circuits.views.BreakerViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  electrical_circuits.views.LightSwitchViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  electrical_circuits.views.NetworkDropListReportView:
+    permission_classes:
+    - IsAuthenticated
+  electrical_circuits.views.NetworkDropViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  electrical_circuits.views.OutletViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  electrical_circuits.views.PanelDirectoryReportView:
+    permission_classes:
+    - IsAuthenticated
+  forgekey.views.AssetAuthorizationViewSet:
+    actions:
+      add_via_classroom_mode:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  forgekey.views.AssetDeviceViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  forgekey.views.DeviceFirmwareUpdateViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  forgekey.views.DeviceLockoutViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      unlock:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  forgekey.views.DeviceTypeViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  forgekey.views.DeviceUsageViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      end_session:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  forgekey.views.ESP32DeviceViewSet:
+    actions:
+      command_blink:
+        permission_classes:
+        - IsAdminUser
+      command_capture_photo:
+        permission_classes:
+        - IsAdminUser
+      command_firmware_update:
+        permission_classes:
+        - IsAdminUser
+      command_identify:
+        permission_classes:
+        - IsAdminUser
+      command_ping:
+        permission_classes:
+        - IsAdminUser
+      command_restart:
+        permission_classes:
+        - IsAdminUser
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      disable:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      enable:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      occupancy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      recent_commands:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      status:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  forgekey.views.FirmwareVersionViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  forgekey.views.ForgeKeyDevicePhotoUploadView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.ForgeKeyDeviceRegisterView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.ForgeKeyFirmwareDownloadView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.ForgeKeyFirmwarePublicKeyView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.ForgeKeyJWKSView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.MqttWebhookView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.OperationalModeViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      disable_classroom_mode:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      enable_classroom_mode:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  forgekey.views.PowerMeterReadingViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  index_cards.views.IndexCardBatchGenerateView:
+    permission_classes:
+    - IsAuthenticatedOrReadOnly
+  index_cards.views.IndexCardPreviewView:
+    permission_classes:
+    - IsAuthenticatedOrReadOnly
+  index_cards.views.TestSheetGenerateView:
+    permission_classes:
+    - IsAuthenticatedOrReadOnly
+  inventory.views.AssetPartViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      mark_replaced:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.AssetProblemViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      upload_photo:
+        permission_classes:
+        - AllowAny
+  inventory.views.AssetReportViewSet:
+    actions:
+      assets_by_status:
+        permission_classes:
+        - IsAuthenticated
+      export:
+        permission_classes:
+        - IsAuthenticated
+      maintenance_due:
+        permission_classes:
+        - IsAuthenticated
+      tco:
+        permission_classes:
+        - IsAuthenticated
+      utilization:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.AssetViewSet:
+    actions:
+      checklists:
+        permission_classes:
+        - AllowAny
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      disable:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      download_label:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      download_label_escp:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      download_label_preview:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      download_labels_batch:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      enable:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      generate_qr:
+        permission_classes:
+        - AllowAny
+      get_problems:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      lock:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      maintenance_items:
+        permission_classes:
+        - AllowAny
+      my_sig_assets:
+        permission_classes:
+        - IsAuthenticated
+      not_checked_in:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      qr_code:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      report_problem:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      resolve_problem:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      scan:
+        permission_classes:
+        - AllowAny
+      tag:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      unlock:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.CategoryViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.FixtureRefillRequestViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      resolve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.FixtureViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      download_card:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      resolve_all:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      scan:
+        permission_classes:
+        - AllowAny
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.InventoryItemViewSet:
+    actions:
+      checklists:
+        permission_classes:
+        - AllowAny
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      download_blank_card:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      download_card:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      generate_qr:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      log_usage:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      low_stock:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      my_sig_inventory:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      qr_code:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      reordered:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      scan:
+        permission_classes:
+        - AllowAny
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.InventoryReconciliationViewSet:
+    actions:
+      batch:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      location_export:
+        permission_classes:
+        - IsAuthenticated
+      location_grid:
+        permission_classes:
+        - IsAuthenticated
+      upload_csv:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.InventoryReportViewSet:
+    actions:
+      export:
+        permission_classes:
+        - IsAuthenticated
+      reorder_frequency:
+        permission_classes:
+        - IsAuthenticated
+      stock_by_category:
+        permission_classes:
+        - IsAuthenticated
+      value_by_location:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.ItemSupplierViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      mark_discontinued:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      price_history:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.LocationProblemViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      promote_to_standard_work_order:
+        permission_classes:
+        - IsAuthenticated
+      promote_to_third_party_work_order:
+        permission_classes:
+        - IsAuthenticated
+      resolve:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.LocationViewSet:
+    actions:
+      checklists:
+        permission_classes:
+        - AllowAny
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      fixtures:
+        permission_classes:
+        - AllowAny
+      generate_qr:
+        permission_classes:
+        - AllowAny
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      problems:
+        permission_classes:
+        - AllowAny
+      qr_code:
+        permission_classes:
+        - AllowAny
+      report_problem:
+        permission_classes:
+        - AllowAny
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.MaintenanceDashboardViewSet:
+    actions:
+      active_work_orders:
+        permission_classes:
+        - IsAuthenticated
+      dashboard:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.MaintenanceItemViewSet:
+    actions:
+      check_material_stock:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      clone:
+        permission_classes:
+        - IsAuthenticated
+      complete:
+        permission_classes:
+        - IsAuthenticated
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      due_this_month:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      due_this_week:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      generate_work_order:
+        permission_classes:
+        - IsAuthenticated
+      generate_work_orders_bulk:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.MaintenanceLogViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.MaintenanceMaterialViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.MaintenanceTaskViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.PriceHistoryViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      recent_changes:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.SupplierViewSet:
+    actions:
+      analytics:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.UsageLogViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.WorkOrderViewSet:
+    actions:
+      add_photo:
+        permission_classes:
+        - IsAuthenticated
+      apply_pending_changes:
+        permission_classes:
+        - IsAuthenticated
+      complete_task:
+        permission_classes:
+        - IsAuthenticated
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      discard_pending_changes:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      pdf:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      toggle_material:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+      upload_pdf:
+        permission_classes:
+        - IsAuthenticated
+      validate_checklist:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.lookup_by_code:
+    permission_classes:
+    - AllowAny
+  inventory.views.postmark_inbound_work_order:
+    permission_classes:
+    - AllowAny
+  location_checkins.views.LocationCheckInViewSet:
+    actions:
+      checkin:
+        permission_classes:
+        - AllowAny
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  location_checkins.views.LocationFeedbackViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      submit:
+        permission_classes:
+        - AllowAny
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  location_checkins.views.LocationTaskViewSet:
+    actions:
+      complete:
+        permission_classes:
+        - IsAuthenticated
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  location_checkins.views.SecurityReportViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      report:
+        permission_classes:
+        - AllowAny
+      resolve:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  location_checkins.views.TopLocationsReportView:
+    permission_classes:
+    - IsAuthenticated
+  location_checkins.views.TrafficReportView:
+    permission_classes:
+    - IsAuthenticated
+  location_checkins.views.location_ping_webhook:
+    permission_classes:
+    - AllowAny
+  loto.views.AssetEnergySourceViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  loto.views.AssetLOTORequirementsView:
+    permission_classes:
+    - IsAuthenticated
+  loto.views.LOTODeviceViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  maintenance_orders.views.AssetWarrantyViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  maintenance_orders.views.EmergencyAuthorizationViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  maintenance_orders.views.RecoveryTaskViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  maintenance_orders.views.ThirdPartyWorkOrderAssetViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  maintenance_orders.views.ThirdPartyWorkOrderAttachmentViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  maintenance_orders.views.ThirdPartyWorkOrderAuditLogViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  maintenance_orders.views.ThirdPartyWorkOrderQuoteViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  maintenance_orders.views.ThirdPartyWorkOrderViewSet:
+    actions:
+      advance_to_financial_review:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      advance_to_scheduled:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      advance_to_sourcing:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      audit_log:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      authorize_emergency:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      close:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      override_variance:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      record_keyfob_return:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      set_nte:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      sign_off:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      vendor_arrived:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      waive_quote_requirement:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  maintenance_orders.views.asset_wo_status:
+    permission_classes:
+    - IsAuthenticated
+  maker_boxes.views.MakerBoxViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      email_pickup:
+        permission_classes:
+        - IsAuthenticated
+      label:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      manual_label:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      scan:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  membership.views.SIGAdminViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  membership.views.SIGMemberViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+  membership.views.SIGViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      details:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  membership.views.UserProfileViewSet:
+    actions:
+      me:
+        permission_classes:
+        - IsAuthenticated
+      update_me:
+        permission_classes:
+        - IsAuthenticated
+  membership.views.change_password:
+    permission_classes:
+    - IsAuthenticated
+  membership.views.register_user_with_token:
+    permission_classes: []
+  membership.views.validate_registration_token:
+    permission_classes: []
+  notifications.views.NotificationPreferenceView:
+    permission_classes:
+    - IsAuthenticated
+  notifications.views.NotificationViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      mark_all_read:
+        permission_classes:
+        - IsAuthenticated
+      mark_read:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  reorder_queue.views.AnalyticsViewSet:
+    actions:
+      lead_time_trends:
+        permission_classes:
+        - IsAuthenticated
+      logistics_dashboard:
+        permission_classes:
+        - AllowAny
+      supplier_performance:
+        permission_classes:
+        - IsAuthenticated
+      transparency:
+        permission_classes:
+        - AllowAny
+  reorder_queue.views.OrderReceiptViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      pending_orders:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      scan_barcode:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  reorder_queue.views.PurchaseOrderViewSet:
+    actions:
+      confirm_order:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      create_optimized_order:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      dashboard_summary:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy_attachment:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      mark_delivered:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      reorder_data:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      send_to_supplier:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update_item:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      upload_attachment:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      void:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      void_item:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  reorder_queue.views.PurchasingReportViewSet:
+    actions:
+      export:
+        permission_classes:
+        - IsAuthenticated
+      lead_time_analysis:
+        permission_classes:
+        - IsAuthenticated
+      price_trends:
+        permission_classes:
+        - IsAuthenticated
+      spend_by_category:
+        permission_classes:
+        - IsAuthenticated
+      spend_by_supplier:
+        permission_classes:
+        - IsAuthenticated
+  reorder_queue.views.ReorderRequestViewSet:
+    actions:
+      approve:
+        permission_classes:
+        - IsAuthenticated
+      by_supplier:
+        permission_classes:
+        - IsAuthenticated
+      cancel:
+        permission_classes:
+        - IsAuthenticated
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      generate_cart_links:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      mark_ordered:
+        permission_classes:
+        - IsAuthenticated
+      mark_received:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      pending:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      sig_pending:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  reorder_queue.views.WebHookViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      test:
+        permission_classes:
+        - IsAuthenticated
+      test_status:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  screens.views.ScreenContentBlockViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  screens.views.ScreenViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      rotate_token:
+        permission_classes:
+        - IsAuthenticated
+      status_overview:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  screens.views.SystemMessageViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
+  screens.views.kiosk_heartbeat:
+    permission_classes:
+    - AllowAny
+  screens.views.kiosk_payload:
+    permission_classes:
+    - AllowAny
+  search.views.get_recent_searches:
+    permission_classes:
+    - IsAuthenticated
+  search.views.global_search:
+    permission_classes:
+    - IsAuthenticated
+  search.views.save_recent_search:
+    permission_classes:
+    - IsAuthenticated
+  vendors.views.VendorViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly

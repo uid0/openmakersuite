@@ -106,20 +106,12 @@ below are public.
 
 | Method | Path | Class | Notes |
 | --- | --- | --- | --- |
-| POST/GET | `reorders/requests/` (`create`, `list`, `retrieve`, `pending`) | public | `ReorderRequestViewSet.get_permissions()` opens these actions to anonymous reporters who scan a low-stock QR code. Object-level filtering hides cost data. **Abuse control:** required (per-IP throttle on `create`). |
-| POST | `reorders/requests/<id>/{approve,reject,fulfill,...}` | member | Workflow state transitions require an authenticated user. |
+| any | `reorders/requests/...` (CRUD + workflow `@action`s) | member | `IsAuthenticated` on `ReorderRequestViewSet` since gh #327 / PR #341 — every action, including `list`, `retrieve`, `create`, and `pending`, rejects anonymous callers because the serializer carries purchasing-sensitive fields (`actual_cost`, `invoice_number`, `supplier_url`). |
 | any | `reorders/purchase-orders/...` | member-rw | `IsAuthenticatedOrReadOnly` — anonymous reads exist for the queue dashboard; writes need login. Cost data is filtered in the serializer. |
 | any | `reorders/order-receipts/...` | member | `IsAuthenticated` on `OrderReceiptViewSet`. |
 | any | `reorders/analytics/...` | member-rw | `IsAuthenticated` for the API; the `kanban-print` and `kanban-multi-print` `@action`s are explicitly `AllowAny` so kiosks can render PDFs without a session. |
 | any | `reorders/webhooks/...` | member | `IsAuthenticated` on `WebHookViewSet`. |
 | any | `reorders/reports/...` | member | `IsAuthenticated` on `PurchasingReportViewSet`. |
-
-> **Known intent gap (gh #328 follow-up):** the original matrix declared
-> reorders staff-only because they "move money". The current code allows
-> anonymous reorder _requests_ from the QR-scan flow but gates approval
-> and PO writes behind auth. If staff-only across the board is the
-> desired final state, file a follow-up to gate `requests/list` and the
-> public `kanban-print` actions behind staff group membership.
 
 ## Index cards (`/api/index-cards/`)
 

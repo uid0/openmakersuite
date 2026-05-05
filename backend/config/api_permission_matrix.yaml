@@ -1706,16 +1706,16 @@ views:
         - IsAuthenticated
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       generate_cart_links:
         permission_classes:
         - IsAuthenticated
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       mark_ordered:
         permission_classes:
         - IsAuthenticated
@@ -1724,19 +1724,19 @@ views:
         - IsAuthenticated
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       pending:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
       sig_pending:
         permission_classes:
         - IsAuthenticated
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAuthenticated
   reorder_queue.views.WebHookViewSet:
     actions:
       create:

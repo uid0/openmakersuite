@@ -16,10 +16,13 @@ from forgekey.services.jwt_signing import (
     get_jwt_public_key_pem,
 )
 from forgekey.utils import (
+    SERVER_JWT_SUBJECT,
     generate_device_jwt,
+    generate_server_jwt,
     get_mqtt_command_topic,
     get_mqtt_data_topic,
     get_mqtt_status_topic,
+    invalidate_server_jwt_cache,
     normalize_mac_address,
     verify_device_jwt,
 )
@@ -152,3 +155,100 @@ class TestJWTGeneration:
             issuer=settings.FORGEKEY_JWT_ISSUER,
         )
         assert payload["mac"] == normalize_mac_address(self.MAC)
+
+
+@pytest.mark.unit
+class TestServerJWT:
+    """oms-y5p: backend mints its own ES256 JWT to authenticate to EMQX."""
+
+    def setup_method(self):
+        invalidate_server_jwt_cache()
+
+    def teardown_method(self):
+        invalidate_server_jwt_cache()
+
+    def test_returns_compact_es256_token_signed_by_jwks_key(self):
+        """AC-1: token verifies against the same JWKS the device JWTs use."""
+        token = generate_server_jwt()
+        assert isinstance(token, str)
+        assert token.count(".") == 2
+
+        header_b64 = token.split(".")[0]
+        header_b64 += "=" * (-len(header_b64) % 4)
+        header = json.loads(base64.urlsafe_b64decode(header_b64))
+        assert header["alg"] == "ES256"
+        assert header["kid"] == settings.FORGEKEY_JWT_KEY_ID
+
+        public_pem = get_jwt_public_key_pem()
+        payload = jwt.decode(
+            token,
+            public_pem,
+            algorithms=["ES256"],
+            audience=settings.FORGEKEY_JWT_AUDIENCE,
+            issuer=settings.FORGEKEY_JWT_ISSUER,
+        )
+        assert payload["sub"] == SERVER_JWT_SUBJECT
+        assert payload["iss"] == settings.FORGEKEY_JWT_ISSUER
+        assert payload["aud"] == settings.FORGEKEY_JWT_AUDIENCE
+        assert payload["exp"] > payload["iat"]
+
+    def test_acl_grants_broad_pubsub_under_topic_prefix(self):
+        """AC-1: server JWT can pub/sub anywhere under MQTT_TOPIC_PREFIX so it
+        can dispatch to and consume from every device."""
+        token = generate_server_jwt()
+        public_pem = get_jwt_public_key_pem()
+        payload = jwt.decode(
+            token,
+            public_pem,
+            algorithms=["ES256"],
+            audience=settings.FORGEKEY_JWT_AUDIENCE,
+            issuer=settings.FORGEKEY_JWT_ISSUER,
+        )
+        prefix = settings.MQTT_TOPIC_PREFIX
+        assert payload["acl"] == {
+            "pub": [f"{prefix}/#"],
+            "sub": [f"{prefix}/#"],
+        }
+
+    def test_signing_unconfigured_raises(self, settings):
+        settings.FORGEKEY_JWT_SIGNING_KEY = ""
+        with pytest.raises(JwtSigningError):
+            generate_server_jwt()
+
+    def test_token_is_cached_within_ttl(self):
+        """AC-3: don't re-sign every connect — cached token is reused."""
+        first = generate_server_jwt()
+        second = generate_server_jwt()
+        assert first == second
+
+    def test_cache_can_be_invalidated(self):
+        """AC-3: connect-failure path drops the cache; next call re-signs."""
+        first = generate_server_jwt()
+        invalidate_server_jwt_cache()
+        # Sleep a hair so iat moves forward and the new signature differs.
+        import time as _time
+
+        _time.sleep(1.1)
+        second = generate_server_jwt()
+        assert first != second
+
+    def test_cache_refreshes_when_ttl_elapsed(self, settings):
+        """AC-3: cached token must not be reused past FORGEKEY_SERVER_JWT_CACHE_SECONDS."""
+        settings.FORGEKEY_SERVER_JWT_CACHE_SECONDS = 0
+        first = generate_server_jwt()
+        import time as _time
+
+        _time.sleep(1.1)
+        second = generate_server_jwt()
+        assert first != second
+
+    def test_cache_refreshes_before_expiry(self, settings):
+        """AC-3: refresh shortly before exp so EMQX never sees a stale token."""
+        # exp = 30s from now, refresh buffer is 60s → next call must re-sign.
+        settings.FORGEKEY_SERVER_JWT_EXPIRATION_SECONDS = 30
+        first = generate_server_jwt()
+        import time as _time
+
+        _time.sleep(1.1)
+        second = generate_server_jwt()
+        assert first != second

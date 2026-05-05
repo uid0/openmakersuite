@@ -7,10 +7,12 @@ from unittest import mock
 import pytest
 
 from forgekey.checks import (
+    W_BACKEND_LITERAL_MQTT_PASSWORD,
     W_DOCKER_ALLOWED_HOSTS,
     W_EMQX_API,
     W_EMQX_PASSWORD,
     W_PROVISIONING_TOKEN,
+    check_backend_mqtt_uses_jwt,
     check_docker_allowed_hosts,
     check_emqx_api_credentials,
     check_emqx_dashboard_password,
@@ -140,3 +142,38 @@ class TestDockerAllowedHostsCheck:
         prod.ALLOWED_HOSTS = ["oms.example.com", "Backend"]
         with mock.patch("forgekey.checks._running_in_docker", return_value=True):
             assert check_docker_allowed_hosts(app_configs=None) == []
+
+
+class TestBackendMqttUsesJwtCheck:
+    """oms-y5p AC-4: W008 warns when literal MQTT_BROKER credentials are set,
+    because EMQX's JWT authenticator silently rejects them and every device
+    command publish then fails."""
+
+    def test_no_warnings_in_debug(self, settings):
+        settings.DEBUG = True
+        settings.MQTT_BROKER_USERNAME = "literal-user"
+        settings.MQTT_BROKER_PASSWORD = "literal-pass"  # nosec B105
+        assert check_backend_mqtt_uses_jwt(app_configs=None) == []
+
+    def test_no_warning_when_unset(self, prod):
+        prod.MQTT_BROKER_USERNAME = ""
+        prod.MQTT_BROKER_PASSWORD = ""
+        assert check_backend_mqtt_uses_jwt(app_configs=None) == []
+
+    def test_warns_when_username_set(self, prod):
+        prod.MQTT_BROKER_USERNAME = "oms-backend"
+        prod.MQTT_BROKER_PASSWORD = ""
+        warnings = check_backend_mqtt_uses_jwt(app_configs=None)
+        assert [w.id for w in warnings] == [W_BACKEND_LITERAL_MQTT_PASSWORD]
+
+    def test_warns_when_password_set(self, prod):
+        prod.MQTT_BROKER_USERNAME = ""
+        prod.MQTT_BROKER_PASSWORD = "literal-secret"  # nosec B105
+        warnings = check_backend_mqtt_uses_jwt(app_configs=None)
+        assert [w.id for w in warnings] == [W_BACKEND_LITERAL_MQTT_PASSWORD]
+
+    def test_warns_when_both_set(self, prod):
+        prod.MQTT_BROKER_USERNAME = "user"
+        prod.MQTT_BROKER_PASSWORD = "pw"  # nosec B105
+        warnings = check_backend_mqtt_uses_jwt(app_configs=None)
+        assert [w.id for w in warnings] == [W_BACKEND_LITERAL_MQTT_PASSWORD]

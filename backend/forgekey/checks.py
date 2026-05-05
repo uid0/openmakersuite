@@ -21,6 +21,7 @@ W_PROVISIONING_TOKEN = "forgekey.W004"  # nosec B105 — Django check ID, not a 
 W_EMQX_PASSWORD = "forgekey.W005"  # nosec B105 — Django check ID, not a password
 W_EMQX_API = "forgekey.W006"
 W_DOCKER_ALLOWED_HOSTS = "forgekey.W007"
+W_BACKEND_LITERAL_MQTT_PASSWORD = "forgekey.W008"  # nosec B105 — Django check ID, not a password
 DOCKER_BACKEND_HOSTNAME = "backend"
 
 PLACEHOLDER_PROVISIONING_TOKEN = "REPLACE_ME_PROVISIONING_TOKEN"  # nosec B105
@@ -212,6 +213,40 @@ def check_docker_allowed_hosts(app_configs, **kwargs):
                 "so this warning usually means an override is overriding it."
             ),
             id=W_DOCKER_ALLOWED_HOSTS,
+        )
+    )
+    return warnings
+
+
+@register(Tags.security)
+def check_backend_mqtt_uses_jwt(app_configs, **kwargs):
+    """W008 (oms-y5p): warn when literal MQTT_BROKER_USERNAME/PASSWORD are
+    configured. Since oms-y5p the backend self-issues an ES256 server JWT and
+    EMQX's JWT authenticator (with anonymous disabled) will reject literal
+    username/password credentials — silently dropping every command publish.
+    """
+    warnings = []
+    if not _is_production():
+        return warnings
+
+    username = (getattr(settings, "MQTT_BROKER_USERNAME", "") or "").strip()
+    password = (getattr(settings, "MQTT_BROKER_PASSWORD", "") or "").strip()
+    if not username and not password:
+        return warnings
+
+    warnings.append(
+        Warning(
+            "MQTT_BROKER_USERNAME / MQTT_BROKER_PASSWORD are set, but the "
+            "backend now mints its own ES256 server JWT (oms-y5p). EMQX's JWT "
+            "authenticator will reject these literal credentials and every "
+            "device command will silently fail to publish.",
+            hint=(
+                "Unset MQTT_BROKER_USERNAME and MQTT_BROKER_PASSWORD in .env. "
+                "The backend authenticates as 'oms-backend' using a JWT "
+                "signed with FORGEKEY_JWT_SIGNING_KEY — no separate "
+                "user-management is needed."
+            ),
+            id=W_BACKEND_LITERAL_MQTT_PASSWORD,
         )
     )
     return warnings

@@ -435,6 +435,19 @@ FORGEKEY_JWT_AUDIENCE = config("FORGEKEY_JWT_AUDIENCE", default="forgekey")
 FORGEKEY_JWT_KEY_ID = config("FORGEKEY_JWT_KEY_ID", default="forgekey-jwt-1")
 FORGEKEY_JWT_SIGNING_KEY = config("FORGEKEY_JWT_SIGNING_KEY", default="").replace("\\n", "\n")
 
+# Server-JWT (oms-y5p): the backend authenticates to EMQX as 'oms-backend'
+# using a self-issued ES256 JWT signed with the same key as device JWTs.
+# The token's exp is intentionally long (1 year) because rotation is driven by
+# FORGEKEY_JWT_KEY_ID changes, not by token churn. Within a process the JWT is
+# cached for FORGEKEY_SERVER_JWT_CACHE_SECONDS so we don't re-sign on every
+# MQTT connect.
+FORGEKEY_SERVER_JWT_EXPIRATION_SECONDS = config(
+    "FORGEKEY_SERVER_JWT_EXPIRATION_SECONDS", default=60 * 60 * 24 * 365, cast=int
+)
+FORGEKEY_SERVER_JWT_CACHE_SECONDS = config(
+    "FORGEKEY_SERVER_JWT_CACHE_SECONDS", default=60 * 60 * 24, cast=int  # 24h
+)
+
 # ForgeKey provisioning token — devices send this in
 # X-ForgeKey-Provisioning-Token to call the registration endpoint.
 FORGEKEY_PROVISIONING_TOKEN = config("FORGEKEY_PROVISIONING_TOKEN", default="")

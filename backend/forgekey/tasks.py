@@ -16,7 +16,14 @@ import paho.mqtt.client as mqtt
 from celery import shared_task
 
 from .models import ESP32Device, ESP32DevicePhoto, OccupancyEvent, PowerMeterReading
-from .utils import get_mqtt_command_topic, normalize_mac_address
+from .services.jwt_signing import JwtSigningError, is_jwt_signing_configured
+from .utils import (
+    SERVER_JWT_SUBJECT,
+    generate_server_jwt,
+    get_mqtt_command_topic,
+    invalidate_server_jwt_cache,
+    normalize_mac_address,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +48,7 @@ def _reset_mqtt_client_state_for_tests() -> None:
     global _mqtt_client, _mqtt_connect_failed_at
     _mqtt_client = None
     _mqtt_connect_failed_at = 0.0
+    invalidate_server_jwt_cache()
 
 
 def get_mqtt_client() -> mqtt.Client:
@@ -73,7 +81,18 @@ def get_mqtt_client() -> mqtt.Client:
         protocol=mqtt.MQTTv5,
     )
 
-    if settings.MQTT_BROKER_USERNAME:
+    # Prefer the server-JWT pattern (oms-y5p): a self-issued ES256 JWT signed
+    # with the device-JWT key. EMQX verifies it via the same JWKS endpoint, so
+    # no separate user-management is required. Fall back to literal
+    # MQTT_BROKER_USERNAME / MQTT_BROKER_PASSWORD only when JWT signing is
+    # unconfigured — exists for dev rigs that haven't enrolled in JWT auth yet.
+    if is_jwt_signing_configured():
+        try:
+            client.username_pw_set(SERVER_JWT_SUBJECT, generate_server_jwt())
+        except JwtSigningError as exc:
+            logger.error("Failed to mint server JWT for MQTT: %s", exc)
+            raise
+    elif settings.MQTT_BROKER_USERNAME:
         client.username_pw_set(
             settings.MQTT_BROKER_USERNAME,
             settings.MQTT_BROKER_PASSWORD,
@@ -107,6 +126,10 @@ def get_mqtt_client() -> mqtt.Client:
         # not exist yet); we log + swallow because re-raising here would mask
         # the real connect failure below.
         _mqtt_connect_failed_at = time.monotonic()
+        # The credential we passed may have been rejected (expired token, key
+        # rotation, clock skew). Drop the cached server JWT so the next attempt
+        # mints a fresh one — see oms-y5p AC-3.
+        invalidate_server_jwt_cache()
         try:
             client.loop_stop()
         except Exception as cleanup_exc:

@@ -38,14 +38,16 @@ mobile-first.
 | Public transparency dashboard | `/inventory/transparency` (`TransparencyPage.tsx`) | public | Public read-only; no member data; offline shows informative error |
 | Tax receipt self-service lookup | `/settings/tax-receipt/lookup` (`TaxReceiptLookupPage.tsx`) | public | Public donor lookup; never lists other donors |
 
-Tests: `e2e/asset-scan.spec.ts`, `__tests__/pages/ScanPage.test.tsx`,
+Tests: `e2e/asset-scan.spec.ts`, `e2e/code-entry-fallback.spec.ts`,
+`__tests__/pages/ScanPage.test.tsx`,
 `__tests__/pages/AssetScanPage.test.tsx`,
 `__tests__/pages/LocationScanPage.test.tsx`,
 `__tests__/pages/TransparencyPage.test.tsx`.
 
-Coverage gaps: `CodeEntryPage`, `FixtureScanPage`, `DonationItemScanPage`,
-`MakerBoxScanPage`, `TaxReceiptLookupPage`, and `ThanksPage` have no dedicated
-unit test today — manual verification only.
+Coverage gaps: `FixtureScanPage`, `DonationItemScanPage`, `MakerBoxScanPage`,
+`TaxReceiptLookupPage`, and `ThanksPage` have no dedicated unit test today —
+manual verification only. `CodeEntryPage` is covered by
+`e2e/code-entry-fallback.spec.ts`.
 
 ---
 
@@ -65,7 +67,8 @@ Authenticated staff and members manage the inventory catalog and reorder workflo
 | Reorder triage / pending requests | `/inventory/admin` (`AdminDashboard.tsx`) | staff | Pending reorders surface; duplicate-suppression visible |
 | Inventory report (CSV / charts) | `/reports/inventory` (`InventoryReportPage.tsx`) | staff | Empty-state when no data; chart loading state |
 
-Tests: `__tests__/pages/InventoryListPage.test.tsx`,
+Tests: `e2e/inventory-browse.spec.ts`, `e2e/public-to-staff.spec.ts`,
+`__tests__/pages/InventoryListPage.test.tsx`,
 `__tests__/pages/InventoryItemDetailPage.test.tsx`,
 `__tests__/pages/InventoryItemFormPage.test.tsx`,
 `__tests__/pages/InventoryReconciliationPage.test.tsx`,

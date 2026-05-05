@@ -30,6 +30,11 @@ django-imagekit==5.0.0
 # API Documentation
 drf-spectacular==0.29.0
 
+# Used by config/permission_matrix.py for the API permission matrix snapshot
+# (gh #328). drf-spectacular pulls this in transitively today, but we pin it
+# directly so the matrix loader does not depend on that.
+PyYAML==6.0.3
+
 # Utilities
 python-slugify==8.0.4
 requests==2.33.0

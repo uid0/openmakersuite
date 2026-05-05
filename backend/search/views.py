@@ -6,7 +6,7 @@ from django.db.models import Q
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from inventory.models import Asset, InventoryItem, Location, Supplier
@@ -21,10 +21,13 @@ from .serializers import (
 
 
 @api_view(["GET"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def global_search(request):
     """
     Global search endpoint that searches across all major entity types.
+
+    Member-only: cross-app results include inventory SKUs, asset serials,
+    and supplier names that the public-facing matrix excludes.
 
     Query parameters:
     - q: Search query string

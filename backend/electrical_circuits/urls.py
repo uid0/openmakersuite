@@ -4,6 +4,12 @@ from django.urls import include, path
 
 from rest_framework.routers import DefaultRouter
 
+from .safety_views import (
+    AssetPowerChainView,
+    PowerBreakerTripImpactView,
+    PowerCircuitLoadView,
+    PowerPanelTopologyView,
+)
 from .views import (
     BreakerViewSet,
     LightSwitchViewSet,
@@ -30,5 +36,38 @@ urlpatterns = [
         "reports/network-drop-list.pdf",
         NetworkDropListReportView.as_view(),
         name="electrical-network-drop-list-pdf",
+    ),
+]
+
+
+# Safety query endpoints (oms-b25 [4/7]). Mounted by config.urls under
+# /api/electrical/ so the URLs match the AC-1..AC-4 paths exactly.
+safety_urlpatterns = [
+    path(
+        "breakers/<int:pk>/trip-impact/",
+        PowerBreakerTripImpactView.as_view(),
+        name="electrical-breaker-trip-impact",
+    ),
+    path(
+        "circuits/<int:pk>/load/",
+        PowerCircuitLoadView.as_view(),
+        name="electrical-circuit-load",
+    ),
+    path(
+        "panels/<int:pk>/topology/",
+        PowerPanelTopologyView.as_view(),
+        name="electrical-panel-topology",
+    ),
+]
+
+
+# Mounted by config.urls under /api/assets/ so AC-4's literal path
+# (``/api/assets/<id>/power-chain/``) resolves without straying into
+# the inventory app's CRUD routes.
+asset_power_chain_urlpatterns = [
+    path(
+        "<uuid:pk>/power-chain/",
+        AssetPowerChainView.as_view(),
+        name="asset-power-chain",
     ),
 ]

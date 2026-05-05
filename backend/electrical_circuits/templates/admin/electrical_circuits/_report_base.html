@@ -1,0 +1,41 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .ec-report-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 1em;
+  }
+  .ec-report-table th,
+  .ec-report-table td {
+    border: 1px solid #ccc;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .ec-report-table th {
+    background: #f3f3f3;
+  }
+  .ec-load-green { background: #d6f5d6; }
+  .ec-load-yellow { background: #fff5cc; }
+  .ec-load-red { background: #f7c7c7; }
+  .ec-load-unknown { background: #eee; color: #555; font-style: italic; }
+  .ec-critical { color: #b00; font-weight: bold; }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a> &rsaquo;
+  <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a> &rsaquo;
+  {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+{% block report_body %}{% endblock %}
+{% endblock %}

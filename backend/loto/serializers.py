@@ -53,6 +53,8 @@ class AssetEnergySourceSerializer(serializers.ModelSerializer):
         source="required_devices", many=True, read_only=True
     )
 
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
     class Meta:
         model = AssetEnergySource
         fields = [
@@ -65,11 +67,19 @@ class AssetEnergySourceSerializer(serializers.ModelSerializer):
             "isolation_point",
             "required_devices",
             "required_devices_detail",
+            "derived_from",
+            "status",
+            "status_display",
             "notes",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "derived_from",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class AssetLOTORequirementsSerializer(serializers.Serializer):

@@ -98,6 +98,17 @@ class LOTODevice(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_AVAILABLE,
     )
+    secured_breakers = models.ManyToManyField(
+        "electrical_circuits.PowerBreaker",
+        blank=True,
+        related_name="lockout_devices",
+        help_text=(
+            "PowerBreakers this device is required to lock out. Used by the "
+            "LOTO derivation pipeline (oms-qc3) to populate "
+            "AssetEnergySource.required_devices for any asset cabled "
+            "downstream of the breaker."
+        ),
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -149,6 +160,13 @@ class AssetEnergySource(models.Model):
         (SOURCE_OTHER, "Other"),
     ]
 
+    STATUS_ACTIVE = "active"
+    STATUS_HISTORICAL = "historical"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_HISTORICAL, "Historical (cable removed/decommissioned)"),
+    ]
+
     asset = models.ForeignKey(
         Asset,
         on_delete=models.CASCADE,
@@ -174,15 +192,46 @@ class AssetEnergySource(models.Model):
         related_name="energy_sources",
         help_text="LOTO devices required to isolate this source.",
     )
+    derived_from = models.ForeignKey(
+        "electrical_circuits.Cable",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="derived_energy_sources",
+        help_text=(
+            "Power cable this energy source was auto-derived from (oms-qc3). "
+            "NULL for manual entries and for derived rows whose cable was "
+            "later deleted (those rows are also marked status=historical)."
+        ),
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACTIVE,
+        help_text=(
+            "Active = the source is current. Historical = the cable backing "
+            "this derived source was decommissioned or removed; the row is "
+            "preserved for audit instead of being deleted."
+        ),
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["asset_id", "source_type"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["derived_from"],
+                condition=models.Q(derived_from__isnull=False),
+                name="loto_energy_source_unique_per_cable",
+            ),
+        ]
         indexes = [
             models.Index(fields=["asset"]),
             models.Index(fields=["source_type"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["derived_from"]),
         ]
 
     def __str__(self) -> str:

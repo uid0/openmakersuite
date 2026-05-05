@@ -22,8 +22,8 @@ class LOTODeviceAdmin(admin.ModelAdmin):
 
 @admin.register(AssetEnergySource)
 class AssetEnergySourceAdmin(admin.ModelAdmin):
-    list_display = ["asset", "source_type", "magnitude", "isolation_point"]
-    list_filter = ["source_type"]
+    list_display = ["asset", "source_type", "magnitude", "isolation_point", "status", "derived_from"]
+    list_filter = ["source_type", "status"]
     search_fields = [
         "asset__name",
         "asset__asset_tag",
@@ -31,5 +31,6 @@ class AssetEnergySourceAdmin(admin.ModelAdmin):
         "magnitude",
         "notes",
     ]
-    autocomplete_fields = ["asset"]
+    autocomplete_fields = ["asset", "derived_from"]
     filter_horizontal = ["required_devices"]
+    readonly_fields = ["derived_from"]

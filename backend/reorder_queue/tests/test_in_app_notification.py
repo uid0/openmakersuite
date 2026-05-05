@@ -26,9 +26,11 @@ class TestReorderRequestInAppNotification:
             username="admin", email="a@x.test", password="x", is_staff=True
         )
         non_admin = User.objects.create_user(username="regular", email="r@x.test", password="x")
+        requester = User.objects.create_user(username="requester", email="req@x.test", password="x")
         item = InventoryItemFactory(name="Widget A")
 
         client = APIClient()
+        client.force_authenticate(user=requester)
         resp = client.post(
             reverse("reorderrequest-list"),
             data={

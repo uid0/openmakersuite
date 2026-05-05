@@ -22,16 +22,14 @@ class SimpleReorderViewTests(TestCase):
         self.request = ReorderRequestFactory()
 
     def test_reorder_list_unauthenticated(self):
-        """Test reorder list without authentication."""
+        """Anonymous list requests are rejected (gh #327)."""
         response = self.client.get("/api/reorders/requests/")
-        # Just check we get a response
-        self.assertIn(response.status_code, [200, 401, 403])
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_reorder_detail_unauthenticated(self):
-        """Test reorder detail without authentication."""
+        """Anonymous retrieve requests are rejected (gh #327)."""
         response = self.client.get(f"/api/reorders/requests/{self.request.id}/")
-        # Just check we get a response
-        self.assertIn(response.status_code, [200, 401, 403])
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_authenticated_reorder_requests(self):
         """Test some authenticated reorder requests."""
@@ -49,7 +47,7 @@ class SimpleReorderViewTests(TestCase):
             self.assertIsNotNone(response.status_code)
 
     def test_create_reorder_request(self):
-        """Test creating a simple reorder request."""
+        """Authenticated users can create a reorder request."""
         from inventory.tests.factories import InventoryItemFactory
 
         item = InventoryItemFactory()
@@ -62,7 +60,26 @@ class SimpleReorderViewTests(TestCase):
         }
 
         client = APIClient(enforce_csrf_checks=True)
+        client.force_authenticate(user=self.user)
 
         response = client.post("/api/reorders/requests/", data, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_create_reorder_request_anonymous_denied(self):
+        """Anonymous users cannot create reorder requests (gh #327)."""
+        from inventory.tests.factories import InventoryItemFactory
+
+        item = InventoryItemFactory()
+
+        data = {
+            "item": item.id,
+            "quantity": 10,
+            "priority": "normal",
+            "request_notes": "Test request",
+        }
+
+        client = APIClient()
+        response = client.post("/api/reorders/requests/", data, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

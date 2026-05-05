@@ -1,0 +1,41 @@
+{% extends "admin/electrical_circuits/_report_base.html" %}
+
+{% block report_body %}
+<p>Circuits with ≥2 connected assets, sorted by criticality (most
+critical loads first, then total device count).</p>
+
+<table class="ec-report-table" id="shared-circuit-audit">
+  <thead>
+    <tr>
+      <th>Panel</th>
+      <th>Breaker</th>
+      <th>Circuit</th>
+      <th># Devices</th>
+      <th># Critical</th>
+      <th>Assets</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.panel.name }}</td>
+      <td>{{ row.breaker.position }} ({{ row.breaker.amperage }}A)</td>
+      <td>{{ row.circuit.label|default:row.circuit.pk }}</td>
+      <td>{{ row.device_count }}</td>
+      <td {% if row.critical_count %}class="ec-critical"{% endif %}>{{ row.critical_count }}</td>
+      <td>
+        {% for asset in row.connected_devices %}
+          {% if asset.is_critical %}
+            <span class="ec-critical">{{ asset.name }}</span>{% if not forloop.last %}, {% endif %}
+          {% else %}
+            {{ asset.name }}{% if not forloop.last %}, {% endif %}
+          {% endif %}
+        {% endfor %}
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6"><em>No circuits are shared by multiple assets.</em></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

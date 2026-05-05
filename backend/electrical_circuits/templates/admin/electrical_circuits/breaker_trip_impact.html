@@ -1,0 +1,41 @@
+{% extends "admin/electrical_circuits/_report_base.html" %}
+
+{% block report_body %}
+<p>For each breaker, the assets that lose power if it trips. Critical
+loads are highlighted.</p>
+
+<table class="ec-report-table" id="breaker-trip-impact">
+  <thead>
+    <tr>
+      <th>Panel</th>
+      <th>Breaker</th>
+      <th># Assets</th>
+      <th># Critical</th>
+      <th>Affected assets</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr {% if row.critical_count %}class="ec-load-red"{% endif %}>
+      <td>{{ row.panel.name }}</td>
+      <td>{{ row.breaker.position }} ({{ row.breaker.amperage }}A)</td>
+      <td>{{ row.asset_count }}</td>
+      <td {% if row.critical_count %}class="ec-critical"{% endif %}>{{ row.critical_count }}</td>
+      <td>
+        {% for asset in row.assets %}
+          {% if asset.is_critical %}
+            <span class="ec-critical">{{ asset.name }}</span>{% if not forloop.last %}, {% endif %}
+          {% else %}
+            {{ asset.name }}{% if not forloop.last %}, {% endif %}
+          {% endif %}
+        {% empty %}
+          <em>none</em>
+        {% endfor %}
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="5"><em>No breakers configured.</em></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,7 +1,13 @@
 """Admin interfaces for electrical circuits and network drops."""
 
 from django.contrib import admin
+from django.urls import path
 
+from .admin_reports import (
+    breaker_trip_impact_view,
+    circuit_load_report_view,
+    shared_circuit_audit_view,
+)
 from .models import (
     Breaker,
     LightSwitch,
@@ -134,6 +140,19 @@ class PowerBreakerAdmin(admin.ModelAdmin):
     autocomplete_fields = ["panel"]
     inlines = [PowerCircuitInline]
 
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "trip-impact/",
+                self.admin_site.admin_view(
+                    lambda request: breaker_trip_impact_view(self, request)
+                ),
+                name="electrical_circuits_powerbreaker_trip_impact",
+            ),
+        ]
+        return custom + urls
+
 
 @admin.register(PowerCircuit)
 class PowerCircuitAdmin(admin.ModelAdmin):
@@ -149,6 +168,26 @@ class PowerCircuitAdmin(admin.ModelAdmin):
     search_fields = ["label", "breaker__panel__name", "breaker__position"]
     autocomplete_fields = ["breaker"]
     inlines = [PowerOutletInline]
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "load-report/",
+                self.admin_site.admin_view(
+                    lambda request: circuit_load_report_view(self, request)
+                ),
+                name="electrical_circuits_powercircuit_load_report",
+            ),
+            path(
+                "shared-circuit-audit/",
+                self.admin_site.admin_view(
+                    lambda request: shared_circuit_audit_view(self, request)
+                ),
+                name="electrical_circuits_powercircuit_shared_audit",
+            ),
+        ]
+        return custom + urls
 
 
 @admin.register(PowerOutlet)

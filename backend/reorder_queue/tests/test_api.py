@@ -37,8 +37,9 @@ class TestReorderRequestAPI:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data["results"]) == 3
 
-    def test_create_reorder_request_public(self, api_client):
-        """Test anyone can create a reorder request."""
+    def test_create_reorder_request_authenticated(self, authenticated_client):
+        """Authenticated users can create a reorder request."""
+        client, _user = authenticated_client
         item = InventoryItemFactory()
 
         url = reverse("reorderrequest-list")
@@ -49,22 +50,84 @@ class TestReorderRequestAPI:
             "request_notes": "We are running low",
             "priority": "high",
         }
-        response = api_client.post(url, data, format="json")
+        response = client.post(url, data, format="json")
 
         assert response.status_code == status.HTTP_201_CREATED
         assert str(response.data["item"]) == str(item.id)
         assert response.data["quantity"] == 25
         assert response.data["status"] == "pending"
 
-    def test_create_reorder_request_minimal(self, api_client):
+    def test_create_reorder_request_minimal(self, authenticated_client):
         """Test creating request with minimal required fields."""
+        client, _user = authenticated_client
+        item = InventoryItemFactory()
+
+        url = reverse("reorderrequest-list")
+        data = {"item": str(item.id), "quantity": 10}
+        response = client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+    def test_create_reorder_request_anonymous_denied(self, api_client):
+        """Anonymous users cannot create reorder requests (gh #327)."""
         item = InventoryItemFactory()
 
         url = reverse("reorderrequest-list")
         data = {"item": str(item.id), "quantity": 10}
         response = api_client.post(url, data, format="json")
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_list_reorder_requests_anonymous_denied(self, api_client):
+        """Anonymous users cannot list reorder requests (gh #327)."""
+        ReorderRequestFactory.create_batch(2)
+
+        url = reverse("reorderrequest-list")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_retrieve_reorder_request_anonymous_denied(self, api_client):
+        """Anonymous users cannot retrieve a reorder request (gh #327)."""
+        request_obj = ReorderRequestFactory()
+
+        url = reverse("reorderrequest-detail", kwargs={"pk": request_obj.pk})
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_pending_reorder_requests_anonymous_denied(self, api_client):
+        """Anonymous users cannot view the pending queue (gh #327)."""
+        ReorderRequestFactory(status="pending")
+
+        url = reverse("reorderrequest-pending")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    @pytest.mark.parametrize(
+        "action_name,method,detail",
+        [
+            ("by-supplier", "get", False),
+            ("sig-pending", "get", False),
+            ("generate-cart-links", "get", False),
+            ("approve", "post", True),
+            ("mark-ordered", "post", True),
+            ("mark-received", "post", True),
+            ("cancel", "post", True),
+        ],
+    )
+    def test_admin_actions_anonymous_denied(self, api_client, action_name, method, detail):
+        """All admin reorder actions reject anonymous callers (gh #327)."""
+        if detail:
+            request_obj = ReorderRequestFactory(status="pending")
+            url = reverse(f"reorderrequest-{action_name}", kwargs={"pk": request_obj.pk})
+        else:
+            url = reverse(f"reorderrequest-{action_name}")
+
+        response = getattr(api_client, method)(url, {}, format="json")
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
     def test_retrieve_reorder_request(self, authenticated_client):
         """Test retrieving a single reorder request."""

@@ -7,9 +7,9 @@ Update it in the same PR whenever a task is added, removed, or its policy
 changes — this register is the source of truth for the task-worker
 proficiency baseline.
 
-For deployment of the worker and the (future) beat process, see
+For deployment of the worker and beat processes, see
 [`deploy/COMPOSE_RUNBOOK.md`](../deploy/COMPOSE_RUNBOOK.md) §10 and
-[`deploy/SMOKE_TESTS.md`](../deploy/SMOKE_TESTS.md) §6.
+[`deploy/SMOKE_TESTS.md`](../deploy/SMOKE_TESTS.md) §10.
 
 For the failure-recovery surface, see [§ Failed task recovery](#failed-task-recovery-ac-31).
 
@@ -17,11 +17,20 @@ For the failure-recovery surface, see [§ Failed task recovery](#failed-task-rec
 
 OMS runs a single Celery worker against the Redis broker
 (`docker-compose.prod.yml` `celery` service, command
-`celery -A config worker -l info`). All tasks share the **default** queue —
-no per-task queue routing is configured. Tasks compete for the same worker
-pool. If a high-volume webhook task starves a maintenance task, that's a
-signal to introduce queues; until then keep all tasks on `celery` (default)
-to keep operator surface area minimal.
+`celery -A config worker -l info`) plus a single beat scheduler
+(`celery_beat` service, command
+`celery -A config beat -l info --schedule=/app/.beat-state/celerybeat-schedule`).
+The beat schedule file is shelved on a named volume (`celery_beat_state`) so
+`last_run_at` survives container restarts — without it the 90-day donor
+task would never fire on a stack that gets re-deployed weekly. Run exactly
+one beat replica per environment; two schedulers against the same broker
+double-fire every periodic task.
+
+All tasks share the **default** queue — no per-task queue routing is
+configured. Tasks compete for the same worker pool. If a high-volume
+webhook task starves a maintenance task, that's a signal to introduce
+queues; until then keep all tasks on `celery` (default) to keep operator
+surface area minimal.
 
 The hard global timeout is `CELERY_TASK_TIME_LIMIT = 30 * 60` (30 min). No
 soft time limit is configured. Per-task `time_limit` overrides are not in
@@ -93,7 +102,7 @@ operator surface for inspecting status, args, and tracebacks
 | `forgekey.tasks.process_mqtt_status_message` | `.delay()` from MQTT status message handler | Updates `ESP32Device.is_online`, `last_seen`, `firmware_version` | None | 30 min global | **Yes** — last-write-wins on a single device row | Replay from MQTT log if needed. |
 | `forgekey.tasks.process_mqtt_power_reading` | `.delay()` from MQTT power-reading handler | Inserts a `PowerMeterReading` row | None | 30 min global | **No** — append-only; replay creates duplicate readings | If duplicate readings ship, delete the offending rows by `received_at`. Avoid replaying this task. |
 | `forgekey.tasks.process_mqtt_firmware_update_response` | `.delay()` from MQTT firmware response handler | Updates `DeviceFirmwareUpdate` row + `ESP32Device.firmware_version` | None | 30 min global | **Yes** — idempotent state transition keyed on `update_id` + `device` | Replay from MQTT log if needed. |
-| `forgekey.tasks.prune_device_photos` | **Not currently scheduled.** Defined for beat use; see [Gaps](#gaps). | Deletes `ESP32DevicePhoto` rows older than `retention_days` (default 30) | None | 30 min global | **Yes** — re-running with the same cutoff is a no-op | Run manually: `celery -A config call forgekey.tasks.prune_device_photos`. |
+| `forgekey.tasks.prune_device_photos` | Beat: every 86,400 s (daily) — see `CELERY_BEAT_SCHEDULE["forgekey-prune-device-photos"]`. The `retention_days` kwarg is sourced from `FORGEKEY_PHOTO_RETENTION_DAYS` (default 30). | Deletes `ESP32DevicePhoto` rows older than `retention_days` | None | 30 min global | **Yes** — re-running with the same cutoff is a no-op | Re-run manually: `celery -A config call forgekey.tasks.prune_device_photos`. |
 | `forgekey.tasks.mark_stale_devices_offline` | Beat: every 1,800 s (30 min) — see `CELERY_BEAT_SCHEDULE["forgekey-mark-stale-devices-offline"]`. The `threshold_hours` kwarg is sourced from `FORGEKEY_DEVICE_OFFLINE_THRESHOLD_HOURS` (default 5). | Updates `ESP32Device.is_online=False` for rows whose `last_seen` is older than the threshold (gh #349) | None | 30 min global | **Yes** — re-running with the same cutoff is a no-op (already-offline rows are filtered at the WHERE clause) | Run manually: `celery -A config call forgekey.tasks.mark_stale_devices_offline`. |
 
 ### config (debug)
@@ -152,16 +161,6 @@ replay wholesale** — see its row above for the per-donor recovery path.
 The following gaps are tracked here because they affect operator
 expectations even though the work to close them has not landed:
 
-- **No `celery beat` process is deployed.** `CELERY_BEAT_SCHEDULE` is
-  populated in `backend/config/settings.py`, but
-  `docker-compose.prod.yml` defines only the `celery` worker service.
-  Until a beat container is added, the scheduled tasks above (donor
-  updates, vendor compliance digest) **do not fire** in production.
-  Operators running a beat process today must do so manually — see
-  [`deploy/COMPOSE_RUNBOOK.md`](../deploy/COMPOSE_RUNBOOK.md) §10.
-- **`forgekey.tasks.prune_device_photos` is not in `CELERY_BEAT_SCHEDULE`.**
-  It is a maintenance task that needs to be added to the schedule once
-  a beat process exists; until then it must be run on a host cron.
 - **Per-queue routing is not configured.** A spike in webhook traffic
   can starve maintenance tasks. Introduce queues only when monitoring
   shows it's needed.

@@ -85,13 +85,13 @@ services:
     # spool retention) is bounded by the recycle window instead of unbounded
     # process lifetime. --graceful-timeout 30 lets in-flight requests finish
     # before SIGKILL on recycle. See docs/INCIDENTS/oom-backend.md (oms-9t2).
-    command: >-                                                                                                                                                                              
-      gunicorn config.wsgi:application                                                                                                                                                       
-      --bind 0.0.0.0:8000                                                                                                                                                                    
-      --workers 4                                                                                                                                                                            
-      --threads 8                                                                                                                                                                            
-      --worker-class gthread                                                                                                                                                                 
-      --timeout 120                                                                                                                                                                          
+    command: >-
+      gunicorn config.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers 4
+      --threads 8
+      --worker-class gthread
+      --timeout 120
       --max-requests 1000
       --max-requests-jitter 100
       --graceful-timeout 30
@@ -250,6 +250,64 @@ services:
     networks:
       - app-network
 
+  celery_beat:
+    # Single-replica scheduler that fires CELERY_BEAT_SCHEDULE entries
+    # (quarterly donor updates, daily vendor compliance digest, daily
+    # ForgeKey photo prune, every-30-min stale-device sweep). Run exactly
+    # one beat per environment: a second scheduler against the same Redis
+    # broker double-fires every periodic task. Scale via
+    # `--scale celery=N` if the worker pool needs more throughput, but
+    # leave celery_beat at 1 replica.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    logging: *default-logging
+    # --schedule keeps the shelved last_run_at outside /tmp so a container
+    # restart doesn't reset every entry's timer (the 90-day donor task
+    # would otherwise never fire on a stack that gets re-deployed weekly).
+    # --pidfile under the same persistent path so the lockfile survives
+    # the same way.
+    command: >-
+      celery -A config beat -l info
+      --schedule=/app/.beat-state/celerybeat-schedule
+      --pidfile=/app/.beat-state/celerybeat.pid
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+    volumes:
+      - celery_beat_state:/app/.beat-state
+    env_file:
+      - .env
+    environment:
+      - DEBUG=0
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      # Beat doesn't run migrations — celery worker / backend already do —
+      # but it does need to import the same Django settings to load
+      # CELERY_BEAT_SCHEDULE.
+      - SKIP_DB_MIGRATIONS=1
+      - HIGHLIGHT_PROJECT_ID=${HIGHLIGHT_PROJECT_ID:-}
+      - HIGHLIGHT_OTLP_ENDPOINT=${HIGHLIGHT_OTLP_ENDPOINT:-}
+      - HIGHLIGHT_ENVIRONMENT=${HIGHLIGHT_ENVIRONMENT:-production}
+      - HIGHLIGHT_SERVICE_VERSION=${GIT_HASH:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery:
+        # Beat only enqueues messages; it doesn't need the worker to be
+        # healthy to start. Wait for celery to be `service_started` so
+        # `docker compose up -d` brings them up in a sensible order, but
+        # don't gate on health — that would couple beat restarts to
+        # worker restarts unnecessarily.
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - app-network
+
   frontend:
     build:
       context: ./frontend
@@ -346,6 +404,7 @@ volumes:
   certbot_challenges:
   emqx_data:
   emqx_log:
+  celery_beat_state:
 
 networks:
   app-network:

@@ -393,6 +393,13 @@ CELERY_BEAT_SCHEDULE = {
             ),
         },
     },
+    "forgekey-prune-device-photos": {
+        "task": "forgekey.tasks.prune_device_photos",
+        "schedule": 86400.0,  # daily — drops ESP32DevicePhoto rows past retention
+        "kwargs": {
+            "retention_days": config("FORGEKEY_PHOTO_RETENTION_DAYS", default=30, cast=int),
+        },
+    },
 }
 
 # MQTT Configuration for ForgeKey
@@ -474,7 +481,10 @@ FORGEKEY_FIRMWARE_SIGNING_KEY = config("FORGEKEY_FIRMWARE_SIGNING_KEY", default=
 )
 
 # ForgeKey periodic-photo retention (days). Photos older than this are pruned
-# by the prune_device_photos celery task.
+# by the prune_device_photos celery task. The same env var is read in
+# CELERY_BEAT_SCHEDULE above to pass the value as a kwarg to the scheduled
+# run, so changing it here changes both the per-call default and what beat
+# fires daily.
 FORGEKEY_PHOTO_RETENTION_DAYS = config("FORGEKEY_PHOTO_RETENTION_DAYS", default=30, cast=int)
 
 # Shared secret EMQX must send in the X-ForgeKey-Webhook-Secret header on

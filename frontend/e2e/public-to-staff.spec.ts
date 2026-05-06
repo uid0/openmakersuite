@@ -1,20 +1,21 @@
 /**
  * E2E: Public-to-staff loop (AC-21)
  *
- * Verifies the full proficiency loop:
+ * Verifies the full proficiency loop end-to-end through the UI:
  *   1. An unauthenticated user opens a public inventory scan URL.
  *   2. The scan auto-submits a reorder request.
  *   3. A staff/admin user logs in and sees the request in the admin queue.
- *   4. The staff user approves it; the reorder transitions out of "pending".
+ *   4. The staff user clicks Approve on the row in the dashboard UI; the
+ *      reorder transitions out of "pending".
  *
- * The path through public scan → admin approval is the load-bearing
- * makerspace operating loop for the inventory journey, so it stands in for
- * the wider product proficiency contract.
+ * Step 4 deliberately drives the UI (not the API) so the spec proves the
+ * full triage path — including dashboard row rendering and the approve
+ * action button — works for an unscripted staff user. This is the
+ * "UI-complete staff triage path" called out in issue #332.
  */
 import { expect, test } from '@playwright/test';
 import {
   API_BASE_URL,
-  approveReorderRequest,
   checkBackendAvailable,
   createActiveMembershipForUser,
   createTestCategory,
@@ -110,21 +111,42 @@ test.describe('Public-to-staff proficiency loop', () => {
     await page.goto('/inventory/admin');
     await dismissWebpackOverlay(page);
 
-    // The admin dashboard renders pending reorder requests. We do not assert
-    // the row contents pixel-perfectly because the dashboard sorts and filters
-    // — instead, prove the staff user reached the admin surface authenticated.
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible({
       timeout: 15000,
     });
 
-    // Step 4: staff approves the request via the staff API. This is the
-    // "triage or resolve" half of AC-21. We do it via the API (rather than
-    // hunting through dashboard UI) so the test stays deterministic across
-    // dashboard layout changes — the contract is that staff CAN approve, not
-    // that any specific button exists.
+    // Step 4: staff approves the request through the dashboard UI. We locate
+    // the row by item name (the dashboard renders a table where the item
+    // name appears in a cell), then click the Approve action for that row.
+    // This is what makes the spec UI-complete: the staff triage path is
+    // exercised end-to-end through clicks, not API calls.
     if (created.status === 'pending') {
-      const approved = await approveReorderRequest(created.id, adminToken);
-      expect(approved.status).toBe('approved');
+      const itemRow = page.locator('tr', { hasText: item.name }).first();
+      await expect(itemRow).toBeVisible({ timeout: 15000 });
+
+      // The Approve button has title="Approve" — addressable, accessible,
+      // and stable across dashboard sort/filter reflows.
+      await itemRow.getByRole('button', { name: 'Approve' }).click();
+
+      // The dashboard reloads requests after approve. Wait for the row to
+      // either disappear from the default "pending" filter or its status
+      // badge to flip to approved. We poll the API as the source of truth
+      // for status because the dashboard's filter state is "pending" by
+      // default — an approved row may simply leave the visible set.
+      await expect
+        .poll(
+          async () => {
+            const r = await fetch(
+              `${API_BASE_URL}/reorders/requests/${created.id}/`,
+              { headers: { Authorization: `Bearer ${adminToken}` } }
+            );
+            if (!r.ok) return 'fetch-failed';
+            const body = await r.json();
+            return body.status;
+          },
+          { timeout: 15000 }
+        )
+        .not.toBe('pending');
     }
 
     // Final assertion: the reorder is no longer pending — the proficiency

@@ -16,9 +16,9 @@ Each row maps a critical journey or surface to the test owner(s) responsible for
 
 | Critical path                                                  | Coverage   | Owner test(s)                                                                                                  |
 | -------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------- |
-| API permission matrix (AC-1, AC-2)                             | unit       | `backend/config/tests/test_*_permissions.py` per app; matrix doc at `docs/API_PERMISSION_MATRIX.md`.           |
-| Public QR / report endpoints stay anonymous-writable (AC-5)    | integration| `backend/inventory/tests/test_api.py::TestAssetProblemAPI`, `backend/checklists/tests/test_photo.py`.          |
-| Public write abuse controls (AC-6)                             | integration| `backend/inventory/tests/test_*_rate_limit*` + `inventory/utils/rate_limiting.py` unit tests.                  |
+| API permission matrix (AC-1, AC-2)                             | unit       | `backend/config/tests/test_permission_matrix.py`; matrix doc at `docs/API_PERMISSION_MATRIX.md`.               |
+| Public QR / report endpoints stay anonymous-writable (AC-5)    | integration| `backend/inventory/tests/test_asset_problem_photo.py::TestAssetProblemPhotoUpload`, `backend/checklists/tests/test_photo.py`. |
+| Public write abuse controls (AC-6)                             | integration| `backend/inventory/tests/test_rate_limiting.py` (covers `inventory/utils/rate_limiting.py`).                   |
 | Standardized API error envelope (AC-7)                         | integration| `backend/config/tests/test_api_errors.py` (this is the contract enforcement point).                            |
 | List behavior — pagination, ordering, filtering (AC-8)         | integration| `backend/config/tests/test_list_contract.py::Test{Supplier,InventoryItem,Asset}ListContract`.                  |
 | N+1 query bounds (AC-9)                                        | integration| `backend/config/tests/test_list_contract.py::TestQueryCountBounds`.                                            |
@@ -29,24 +29,24 @@ Each row maps a critical journey or surface to the test owner(s) responsible for
 
 | Critical path                                              | Coverage    | Owner test(s)                                                                                                |
 | ---------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------ |
-| Public QR scan → checklist completion (anonymous)          | integration | `backend/checklists/tests/test_public_scan.py`, `backend/checklists/tests/test_photo.py`.                    |
-| Public asset problem report                                | integration | `backend/inventory/tests/test_asset_problem_*.py`.                                                           |
+| Public QR scan → checklist completion (anonymous)          | integration | `backend/checklists/tests/test_api.py`, `backend/checklists/tests/test_photo.py`.                            |
+| Public asset problem report                                | integration | `backend/inventory/tests/test_asset_problem_notification.py`, `test_asset_problem_photo.py`.                 |
 | Public location problem report                             | integration | `backend/inventory/tests/test_location_problem.py`.                                                          |
-| Public donation submission                                 | integration | `backend/donations/tests/test_*public*.py`.                                                                  |
+| Public donation submission                                 | integration | `backend/donations/tests/test_signals.py`, `test_email_service.py`, `test_tasks.py`.                         |
 | Public-to-staff loop (scan → triage → resolution)          | e2e         | `frontend/e2e/public-to-staff.spec.ts` (see `docs/frontend-e2e-playwright.md`).                              |
 
 ### Frontend journeys
 
 | Critical path                                              | Coverage | Owner test(s)                                                                                                |
 | ---------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
-| Inventory browse + search                                  | unit + e2e | `frontend/src/pages/Inventory*.test.tsx`, `frontend/e2e/inventory-browse.spec.ts`.                         |
-| Reorder triage                                             | unit + e2e | `frontend/src/pages/Reorder*.test.tsx`, `frontend/e2e/reorder-triage.spec.ts`.                             |
-| Asset problem reporting (staff side)                       | unit + e2e | `frontend/src/pages/AssetProblem*.test.tsx`.                                                                 |
-| Maintenance work order review                              | e2e        | `frontend/e2e/work-order-review.spec.ts`.                                                                    |
-| Logistics dashboard                                        | unit       | `frontend/src/pages/Dashboard*.test.tsx`.                                                                    |
-| Kiosk display                                              | manual     | Documented checklist in `docs/FRONTEND_JOURNEY_INVENTORY.md`. Hardware-dependent.                            |
-| ForgeKey device management                                 | unit + e2e | `frontend/src/pages/ForgeKey*.test.tsx`, `frontend/e2e/forgekey.spec.ts`.                                    |
-| Settings + webhooks                                        | unit       | `frontend/src/pages/Settings*.test.tsx`.                                                                     |
+| Inventory browse + search                                  | unit + e2e | `frontend/src/__tests__/pages/InventoryListPage.test.tsx`, `InventoryItemDetailPage.test.tsx`; e2e in `frontend/e2e/inventory-browse.spec.ts`. |
+| Reorder triage                                             | unit + e2e | `frontend/src/__tests__/pages/AdminDashboard.test.tsx`; e2e in `frontend/e2e/admin-dashboard-assets.spec.ts` and `public-to-staff.spec.ts`. |
+| Asset problem reporting (staff side)                       | unit + e2e | `frontend/src/__tests__/pages/AssetDetailPage.test.tsx`, `AssetScanPage.test.tsx`; e2e in `frontend/e2e/asset-scan.spec.ts`. |
+| Maintenance work order review                              | unit       | `frontend/src/__tests__/pages/ThirdPartyWorkOrderPage.test.tsx`, `MaintenanceDashboard.test.tsx`. Dedicated work-order e2e: gap. |
+| Logistics dashboard                                        | unit       | `frontend/src/__tests__/pages/LogisticsDashboard.test.tsx`, `DashboardPage.test.tsx`.                        |
+| Kiosk display                                              | unit + manual | `frontend/src/__tests__/pages/KioskDisplayPage.test.tsx`; hardware verification per `docs/FRONTEND_JOURNEY_INVENTORY.md`. |
+| ForgeKey device management                                 | unit       | `frontend/src/__tests__/pages/ForgeKeyDevicesPage.test.tsx`, `ForgeKeyDeviceDetailPage.test.tsx`. Dedicated e2e: gap. |
+| Settings + webhooks                                        | unit       | `frontend/src/__tests__/pages/UserProfilePage.test.tsx`, `WebhookListPage.test.tsx`.                         |
 
 ### Task workers
 
@@ -63,7 +63,7 @@ Each row maps a critical journey or surface to the test owner(s) responsible for
 | ---------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ |
 | Production env validation (AC-23)                          | CI         | `.github/workflows/ci.yml` `Run prod env validator …` step + `scripts/validate-prod-env.sh`.                 |
 | Backup / restore scripts (AC-25)                           | CI + manual| `.github/workflows/ci.yml` `Lint shell scripts` step + manual quarterly drill in `deploy/BACKUP_RESTORE.md`. |
-| Production smoke checks (AC-35)                            | CI + manual| `scripts/smoke.sh` (CI lints; operator runs against staging post-deploy).                                    |
+| Production smoke checks (AC-35)                            | CI + manual| `.github/workflows/ci.yml` `Prod Stack Smoke (livez within 60s)` job + manual runbook in `deploy/SMOKE_TESTS.md`. |
 | Deployment artifact validation (AC-36)                     | CI         | `.github/workflows/ci.yml` `Render docker-compose.prod.yml`, `helm lint`, `kubeconform` jobs.                |
 
 ## AC-38: Proficiency metrics
@@ -72,12 +72,12 @@ The metrics table is the operator-facing dashboard summary. Each metric has a ta
 
 | Metric                                            | Target           | Current          | Measurement source                                                                                                                  |
 | ------------------------------------------------- | ---------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Critical-path e2e coverage                        | 100% of `docs/FRONTEND_JOURNEY_INVENTORY.md` rows have a Playwright spec | Partial — public-to-staff loop covered (oms-0uw); kiosk + ForgeKey hardware paths remain manual | Run `frontend/e2e` and cross-reference inventory.                          |
+| Critical-path e2e coverage                        | 100% of `docs/FRONTEND_JOURNEY_INVENTORY.md` rows have a Playwright spec | Partial — `frontend/e2e/` covers public-to-staff loop UI-complete (`public-to-staff.spec.ts`), inventory browse + search (`inventory-browse.spec.ts`), mobile code-entry fallback (`code-entry-fallback.spec.ts`), asset-scan, admin-dashboard-assets, and SIG dashboard; reorder triage, work-order review, and ForgeKey e2e remain gaps | Run `frontend/e2e` and cross-reference inventory.                          |
 | Permission coverage                               | Every API permission row in `docs/API_PERMISSION_MATRIX.md` has at least one passing test | Partial — covered for public/anonymous + staff write boundaries; SIG-admin matrix in progress | Run `pytest -k permission` and reconcile against matrix.                            |
 | Worker health (broker reachability)               | `/api/health/readyz/` returns 200 with `broker: ok` for all configured workers              | Mitigated — readyz probe covers default broker (AC-12)                                          | `curl /api/health/readyz/` from the deployed cluster.                                  |
 | Backup restore age                                | Most recent verified restore drill ≤ 90 days                                                | Open — drill cadence not yet enforced (R-03 in risk register)                                   | Operator log; tracked in `deploy/BACKUP_RESTORE.md`.                                   |
 | Dependency age                                    | Backend Python deps ≤ 6 months out of date; frontend deps ≤ 12 months                       | Partial — `pip-audit` runs in pre-commit, no enforced cadence on frontend                       | `pip-audit` + `npm audit --audit-level=high`.                                          |
-| Deployment smoke status                           | `scripts/smoke.sh` green within 24h of every production deploy                              | Partial — script exists, post-deploy enforcement is operator-driven                             | `scripts/smoke.sh` artifacts captured in operator runbook.                             |
+| Deployment smoke status                           | `deploy/SMOKE_TESTS.md` runbook executed within 24h of every production deploy              | Partial — runbook exists; CI's `Prod Stack Smoke (livez within 60s)` enforces livez within 60s, but post-deploy operator enforcement is manual | CI smoke job in `.github/workflows/ci.yml`; operator-captured outputs of `deploy/SMOKE_TESTS.md`. |
 | OpenAPI schema validity                           | `manage.py spectacular --validate` exit 0 on every PR                                       | Mitigated — enforced as a CI step on the backend job (AC-10)                                    | `.github/workflows/ci.yml` `Validate OpenAPI schema (AC-10)` step.                     |
 | API list-endpoint query bounds                    | All endpoints in `docs/API_LIST_CONTRACT.md` stay within the documented query budget        | Mitigated — `test_list_contract.py::TestQueryCountBounds` enforces (AC-9)                        | `pytest backend/config/tests/test_list_contract.py`.                                   |
 

@@ -203,20 +203,18 @@ class TestMQTTTasks:
         mock_client.loop_start.assert_called_once()
 
     @patch("paho.mqtt.client.Client")
-    @patch("forgekey.tasks.settings")
-    def test_get_mqtt_client_with_auth(self, mock_settings, mock_client_class):
-        """Test MQTT client creation with authentication."""
+    def test_get_mqtt_client_uses_server_jwt(self, mock_client_class):
+        """oms-y5p AC-2: backend authenticates with a self-signed server JWT.
+
+        EMQX's JWT authenticator (with anonymous disabled) accepts no other
+        credential, so this must be the default path whenever
+        FORGEKEY_JWT_SIGNING_KEY is configured (always true in tests via the
+        session-level conftest).
+        """
         from forgekey.tasks import _reset_mqtt_client_state_for_tests, get_mqtt_client
+        from forgekey.utils import SERVER_JWT_SUBJECT, verify_device_jwt  # noqa: F401
 
         _reset_mqtt_client_state_for_tests()
-
-        mock_settings.MQTT_CLIENT_ID = "test-client"
-        mock_settings.MQTT_BROKER_HOST = "localhost"
-        mock_settings.MQTT_BROKER_PORT = 1883
-        mock_settings.MQTT_KEEPALIVE = 60
-        mock_settings.MQTT_BROKER_USERNAME = "user"
-        mock_settings.MQTT_BROKER_PASSWORD = "pass"  # nosec B105
-        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 30
 
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
@@ -224,7 +222,41 @@ class TestMQTTTasks:
         client = get_mqtt_client()
 
         assert client is not None
-        mock_client.username_pw_set.assert_called_once_with("user", "pass")
+        mock_client.username_pw_set.assert_called_once()
+        username, password = mock_client.username_pw_set.call_args[0]
+        assert username == SERVER_JWT_SUBJECT
+        # Compact JWT: header.payload.signature
+        assert password.count(".") == 2
+
+    @patch("paho.mqtt.client.Client")
+    @patch("forgekey.tasks.settings")
+    def test_get_mqtt_client_falls_back_to_literal_creds(
+        self, mock_settings, mock_client_class, settings
+    ):
+        """When JWT signing is unconfigured (dev rigs), fall back to literal
+        MQTT_BROKER_USERNAME/PASSWORD. Production never hits this path because
+        forgekey.W008 warns and the JWT key must be set for device auth too.
+        """
+        from forgekey.tasks import _reset_mqtt_client_state_for_tests, get_mqtt_client
+
+        _reset_mqtt_client_state_for_tests()
+        # Disable JWT signing so the fallback branch is taken.
+        settings.FORGEKEY_JWT_SIGNING_KEY = ""
+
+        mock_settings.MQTT_CLIENT_ID = "test-client"
+        mock_settings.MQTT_BROKER_HOST = "localhost"
+        mock_settings.MQTT_BROKER_PORT = 1883
+        mock_settings.MQTT_KEEPALIVE = 60
+        mock_settings.MQTT_BROKER_USERNAME = "legacy-user"
+        mock_settings.MQTT_BROKER_PASSWORD = "legacy-pass"  # nosec B105
+        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 30
+
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+
+        get_mqtt_client()
+
+        mock_client.username_pw_set.assert_called_once_with("legacy-user", "legacy-pass")
 
     @patch("paho.mqtt.client.Client")
     @patch("forgekey.tasks.settings")

@@ -38,12 +38,16 @@ mobile-first.
 | Public transparency dashboard | `/inventory/transparency` (`TransparencyPage.tsx`) | public | Public read-only; no member data; offline shows informative error |
 | Tax receipt self-service lookup | `/settings/tax-receipt/lookup` (`TaxReceiptLookupPage.tsx`) | public | Public donor lookup; never lists other donors |
 
-Tests: `e2e/asset-scan.spec.ts`, `__tests__/pages/ScanPage.test.tsx`,
-`__tests__/pages/CodeEntryPage.test.tsx`, `__tests__/pages/FixtureScanPage.test.tsx`,
+Tests: `e2e/asset-scan.spec.ts`, `e2e/code-entry-fallback.spec.ts`,
+`__tests__/pages/ScanPage.test.tsx`,
+`__tests__/pages/AssetScanPage.test.tsx`,
 `__tests__/pages/LocationScanPage.test.tsx`,
-`__tests__/pages/DonationItemScanPage.test.tsx`,
-`__tests__/pages/MakerBoxScanPage.test.tsx`,
 `__tests__/pages/TransparencyPage.test.tsx`.
+
+Coverage gaps: `FixtureScanPage`, `DonationItemScanPage`, `MakerBoxScanPage`,
+`TaxReceiptLookupPage`, and `ThanksPage` have no dedicated unit test today —
+manual verification only. `CodeEntryPage` is covered by
+`e2e/code-entry-fallback.spec.ts`.
 
 ---
 
@@ -63,12 +67,17 @@ Authenticated staff and members manage the inventory catalog and reorder workflo
 | Reorder triage / pending requests | `/inventory/admin` (`AdminDashboard.tsx`) | staff | Pending reorders surface; duplicate-suppression visible |
 | Inventory report (CSV / charts) | `/reports/inventory` (`InventoryReportPage.tsx`) | staff | Empty-state when no data; chart loading state |
 
-Tests: `__tests__/pages/InventoryListPage.test.tsx`,
+Tests: `e2e/inventory-browse.spec.ts`, `e2e/public-to-staff.spec.ts`,
+`__tests__/pages/InventoryListPage.test.tsx`,
+`__tests__/pages/InventoryItemDetailPage.test.tsx`,
 `__tests__/pages/InventoryItemFormPage.test.tsx`,
+`__tests__/pages/InventoryReconciliationPage.test.tsx`,
 `__tests__/pages/LocationListPage.test.tsx`,
-`__tests__/pages/LocationFormPage.test.tsx`,
-`__tests__/pages/AdminDashboard.test.tsx`,
-`__tests__/pages/InventoryReportPage.test.tsx`.
+`__tests__/pages/AdminDashboard.test.tsx`.
+
+Coverage gaps: `CategoryListPage`, `CategoryFormPage`, `LocationFormPage`,
+`LocationDetailPage`, and `InventoryReportPage` have no dedicated unit test
+today.
 
 ---
 
@@ -84,12 +93,14 @@ Staff create purchase orders, receive deliveries, and track supplier relationshi
 | Purchasing report (CSV / charts) | `/reports/purchasing` (`PurchasingReportPage.tsx`) | staff | Empty-state when no data |
 | Browse / edit suppliers | `/inventory/suppliers`, `/inventory/suppliers/:id`, `/inventory/suppliers/:id/edit` (`SupplierListPage.tsx`, `SupplierDetailPage.tsx`, `SupplierFormPage.tsx`) | staff | Lead-time and price-trend charts have empty-state |
 
-Tests: `__tests__/pages/PurchaseOrderListPage.test.tsx`,
-`__tests__/pages/PurchaseOrderFormPage.test.tsx`,
+Tests: `__tests__/pages/PurchaseOrderFormPage.test.tsx`,
 `__tests__/pages/PurchaseOrderPage.test.tsx`,
-`__tests__/pages/PurchasingReportPage.test.tsx`,
 `__tests__/pages/SupplierListPage.test.tsx`,
+`__tests__/pages/SupplierDetailPage.test.tsx`,
 `__tests__/pages/SupplierFormPage.test.tsx`.
+
+Coverage gaps: `PurchaseOrderListPage` and `PurchasingReportPage` have no
+dedicated unit test today.
 
 ---
 
@@ -110,16 +121,17 @@ Staff manage assets, preventive maintenance, and work orders for facility safety
 | Location problem detail / resolution | `/maintenance/location-problems/:id` (`LocationProblemDetailPage.tsx`) | staff | Status transitions; assignee picker; comment thread |
 | Checklist completion | `/facilities/checklist/:checklistId/complete/:completionId` (`ChecklistCompletionPage.tsx`) | public/member | Long-running form — must survive offline + duplicate submit |
 
-Tests: `__tests__/pages/AssetsPage.test.tsx`,
-`__tests__/pages/AssetDetailPage.test.tsx`,
+Tests: `__tests__/pages/AssetDetailPage.test.tsx`,
 `__tests__/pages/AssetFormPage.test.tsx`,
-`__tests__/pages/MaintenanceItemFormPage.test.tsx`,
-`__tests__/pages/AssetReportPage.test.tsx`,
 `__tests__/pages/MaintenanceDashboard.test.tsx`,
-`__tests__/pages/WorkOrderPage.test.tsx`,
+`__tests__/pages/MaintenanceDashboardPage.test.tsx`,
 `__tests__/pages/ThirdPartyWorkOrderPage.test.tsx`,
-`__tests__/pages/LocationProblemDetailPage.test.tsx`,
-`__tests__/pages/ChecklistCompletionPage.test.tsx`.
+`__tests__/pages/ChecklistCompletionPage.test.tsx`,
+`e2e/admin-dashboard-assets.spec.ts`.
+
+Coverage gaps: `AssetsPage`, `MaintenanceItemFormPage`, `AssetReportPage`,
+`WorkOrderPage`, and `LocationProblemDetailPage` have no dedicated unit test
+today.
 
 ---
 
@@ -133,7 +145,10 @@ Staff manage day-to-day operational triage from a single landing dashboard.
 | TV dashboard (read-only display) | `/facilities/tv-dashboard`, `/facilities/tv-dashboard/:location` (`TVDashboard.tsx`) | public/staff | Auto-refresh; readable kiosk state on dependency failure |
 
 Tests: `__tests__/pages/LogisticsDashboard.test.tsx`,
-`__tests__/pages/TVDashboard.test.tsx`.
+`__tests__/pages/DashboardPage.test.tsx`.
+
+Coverage gap: `TVDashboard` has no dedicated unit test today (kiosk-style
+display, primarily verified manually).
 
 ---
 
@@ -148,8 +163,10 @@ Public displays (kiosks, screens, TV dashboards) must run unattended.
 | Public kiosk display | `/kiosk/:slug` (`KioskDisplayPage.tsx`) | public | Auto-refresh; offline shows fallback content; no auth required |
 
 Tests: `__tests__/pages/ScreensListPage.test.tsx`,
-`__tests__/pages/ScreenEditPage.test.tsx`,
-`__tests__/pages/KioskDisplayPage.test.tsx`.
+`__tests__/pages/KioskDisplayPage.test.tsx`,
+`__tests__/components/screens/SharedWeatherBlock.test.tsx`.
+
+Coverage gap: `ScreenEditPage` has no dedicated unit test today.
 
 ---
 
@@ -163,9 +180,12 @@ Staff and admins manage networked door / equipment lockout devices.
 | Electrical circuits / breakers / outlets | `/facilities/electrical/*` (`ElectricalCircuitsPage.tsx`, `BreakerFormPage.tsx`, `BreakerTracePage.tsx`, `OutletFormPage.tsx`, `LightSwitchFormPage.tsx`, `NetworkDropFormPage.tsx`) | staff | Loading per panel; tree-view; trace operations gated by permissions |
 
 Tests: `__tests__/pages/ForgeKeyDevicesPage.test.tsx`,
+`__tests__/pages/ForgeKeyDeviceDetailPage.test.tsx`,
 `__tests__/pages/ElectricalCircuitsPage.test.tsx`,
-`__tests__/pages/BreakerFormPage.test.tsx`,
 `__tests__/pages/BreakerTracePage.test.tsx`.
+
+Coverage gap: `BreakerFormPage`, `OutletFormPage`, `LightSwitchFormPage`, and
+`NetworkDropFormPage` have no dedicated unit test today.
 
 ---
 
@@ -182,10 +202,10 @@ Authenticated users manage their account, site configuration, and integrations.
 | View webhook history | `/settings/webhooks/:id` (`WebhookDetailPage.tsx`) | admin | Recent deliveries with retry count |
 
 Tests: `__tests__/pages/UserProfilePage.test.tsx`,
-`__tests__/pages/SiteSettingsPage.test.tsx`,
-`__tests__/pages/WebhookListPage.test.tsx`,
-`__tests__/pages/WebhookFormPage.test.tsx`,
-`__tests__/pages/WebhookDetailPage.test.tsx`.
+`__tests__/pages/WebhookListPage.test.tsx`.
+
+Coverage gap: `SiteSettingsPage`, `WebhookFormPage`, and `WebhookDetailPage`
+have no dedicated unit test today.
 
 ---
 
@@ -204,11 +224,17 @@ These are not single-page workflows but underpin every journey above.
 | Error fallback (Sentry boundary) | `ErrorFallback.tsx` | mixed | Catches React render exceptions; shows recovery action |
 
 Tests: `__tests__/components/Sidebar.test.tsx`,
-`__tests__/components/CommandPalette.test.tsx`,
+`__tests__/components/Breadcrumbs.test.tsx`,
+`__tests__/components/Footer.test.tsx`,
+`__tests__/components/WorkspaceLayout.test.tsx`,
 `__tests__/components/NotificationBanner.test.tsx`,
+`__tests__/components/NotificationBadge.test.tsx`,
 `__tests__/components/AuthSection.test.tsx`,
-`__tests__/components/OfflineIndicator.test.tsx`,
-`__tests__/components/ErrorFallback.test.tsx`.
+`__tests__/components/SessionExpiredBanner.test.tsx`,
+`__tests__/components/StatusState.test.tsx`.
+
+Coverage gap: `CommandPalette`, `OfflineIndicator`, `InstallPrompt`, and
+`ErrorFallback` have no dedicated unit test today.
 
 ---
 

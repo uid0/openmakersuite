@@ -31,4 +31,7 @@ urlpatterns = [
     ),
     path("widget-data/qr-scans/", views.get_qr_scans_data, name="get_qr_scans_data"),
     path("widget-data/deliveries/", views.get_deliveries_data, name="get_deliveries_data"),
+    # Audit feed (gh #359 / #334) — staff-only review surface across all
+    # per-domain audit tables.
+    path("audit-feed/", views.get_audit_feed, name="get_audit_feed"),
 ]

@@ -82,6 +82,9 @@ views:
   dashboard.views.dashboard_health:
     permission_classes:
     - <default>
+  dashboard.views.get_audit_feed:
+    permission_classes:
+    - IsAdminUser
   dashboard.views.get_asset_problems_data:
     permission_classes:
     - IsAuthenticated

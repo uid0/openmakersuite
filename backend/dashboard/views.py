@@ -2,13 +2,17 @@
 API views for dashboard configuration management.
 """
 
+from datetime import datetime
+
 from django.http import JsonResponse
+from django.utils import timezone as dj_timezone
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
+from .audit_feed import collect_events
 from .models import DashboardConfig, DashboardMessage, DashboardWidget
 from .serializers import DashboardWidgetSerializer
 
@@ -658,3 +662,72 @@ def get_deliveries_data(request):
 
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _parse_audit_feed_dt(value):
+    """Parse an ISO-ish datetime from a query param; return None on bad input."""
+    if not value:
+        return None
+    try:
+        # Accept "2026-05-07" and "2026-05-07T10:00:00Z" / "+00:00"
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = dj_timezone.make_aware(parsed)
+    return parsed
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def get_audit_feed(request):
+    """Return the unified audit-event feed across all domain audit tables.
+
+    Query parameters (all optional):
+      domain       — restrict to a single domain (forgekey, purchase_orders,
+                     webhooks, donations, maintenance, vendors,
+                     customization, third_party_work_orders)
+      entity_type  — restrict to a normalized entity_type string
+      entity_id    — restrict to a specific entity id (string match)
+      action       — restrict to a single action choice (per-domain
+                     value, e.g. "po_void" or "settings_update")
+      actor_id     — restrict to events performed by a specific user
+      since        — ISO-format datetime; events at or after this
+      until        — ISO-format datetime; events at or before this
+      limit        — max rows returned (default 200, capped at 1000)
+
+    Staff-only (IsAdminUser). Audit data is sensitive review material;
+    do not expose to non-staff. Per gh #359 / #334.
+    """
+    params = request.query_params
+
+    actor_id = params.get("actor_id") or None
+    domain = params.get("domain") or None
+    entity_type = params.get("entity_type") or None
+    entity_id = params.get("entity_id") or None
+    action = params.get("action") or None
+    since = _parse_audit_feed_dt(params.get("since"))
+    until = _parse_audit_feed_dt(params.get("until"))
+
+    try:
+        limit = int(params.get("limit", 200))
+    except (TypeError, ValueError):
+        limit = 200
+
+    events = collect_events(
+        actor_id=actor_id,
+        action=action,
+        domain=domain,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        since=since,
+        until=until,
+        limit=limit,
+    )
+
+    return Response(
+        {
+            "count": len(events),
+            "events": events,
+        }
+    )

@@ -4,9 +4,11 @@ Models for reorder queue management.
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from typing import Optional
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
 from django.db import IntegrityError, models, transaction
@@ -907,3 +909,86 @@ class WebHook(models.Model):
         self.last_triggered_at = timezone.now()
         self.last_error = error_message[:1000]  # Limit error message length
         self.save(update_fields=["failure_count", "last_triggered_at", "last_error"])
+
+
+class PurchaseOrderAuditEvent(models.Model):
+    """Append-only audit log for safety-critical purchase-order mutations.
+
+    Captures actor, timestamp, affected entity (PO / line item / attachment),
+    notes, and metadata for each meaningful state change. Rows are written
+    by ``reorder_queue.audit.record_event`` and never updated or deleted by
+    application code.
+
+    Per gh #353 / #334. Pattern mirrors
+    ``forgekey.models.ForgeKeyAuditEvent`` (gh #352) so the eventual unified
+    review surface (gh #359) can join across domains cleanly.
+    """
+
+    ACTION_PO_CREATE = "po_create"
+    ACTION_PO_VOID = "po_void"
+    ACTION_PO_LINE_VOID = "po_line_void"
+    ACTION_PO_MARK_DELIVERED = "po_mark_delivered"
+    ACTION_ATTACHMENT_ADD = "attachment_add"
+    ACTION_ATTACHMENT_REMOVE = "attachment_remove"
+
+    ACTION_CHOICES = [
+        (ACTION_PO_CREATE, "Purchase order created"),
+        (ACTION_PO_VOID, "Purchase order voided"),
+        (ACTION_PO_LINE_VOID, "Purchase order line item voided"),
+        (ACTION_PO_MARK_DELIVERED, "Purchase order marked delivered"),
+        (ACTION_ATTACHMENT_ADD, "Attachment added"),
+        (ACTION_ATTACHMENT_REMOVE, "Attachment removed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="purchase_order_audit_actions",
+        help_text="User who performed the action; null for system-initiated events.",
+    )
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    # Optional FKs to the entities involved. At least one is set per row;
+    # SET_NULL on delete so the audit trail survives entity teardown.
+    purchase_order = models.ForeignKey(
+        "PurchaseOrder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    line_item = models.ForeignKey(
+        "PurchaseOrderItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    attachment = models.ForeignKey(
+        "PurchaseOrderAttachment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    notes = models.TextField(blank=True)
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Action-specific payload (delivery date, void reason, attachment filename, etc).",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["purchase_order", "-created_at"], name="po_audit_po_idx"),
+            models.Index(fields=["actor", "-created_at"], name="po_audit_actor_idx"),
+            models.Index(fields=["action", "-created_at"], name="po_audit_action_idx"),
+        ]
+
+    def __str__(self) -> str:
+        target = self.purchase_order_id or self.line_item_id or self.attachment_id
+        return f"{self.action} ({target}) @ {self.created_at:%Y-%m-%d %H:%M}"

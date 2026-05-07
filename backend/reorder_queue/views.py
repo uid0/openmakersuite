@@ -18,6 +18,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from inventory.models import InventoryItem
 
+from .audit import record_event as record_audit_event
 from .models import (
     DeliveryItem,
     LeadTimeLog,
@@ -437,6 +438,18 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return PurchaseOrderCreateSerializer
         return PurchaseOrderSerializer
+
+    def perform_create(self, serializer):
+        purchase_order = serializer.save()
+        record_audit_event(
+            action="po_create",
+            actor=self.request.user,
+            purchase_order=purchase_order,
+            metadata={
+                "supplier_id": purchase_order.supplier_id,
+                "po_number": purchase_order.po_number,
+            },
+        )
 
     @action(detail=False, methods=["post"])
     def create_optimized_order(self, request):
@@ -982,6 +995,19 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 purchase_order.status = PurchaseOrder.PARTIALLY_RECEIVED
             purchase_order.save()
 
+        record_audit_event(
+            action="po_mark_delivered",
+            actor=request.user,
+            purchase_order=purchase_order,
+            notes=data.get("receipt_notes", ""),
+            metadata={
+                "delivery_date": delivery_datetime.isoformat(),
+                "tracking_number": data.get("tracking_number", ""),
+                "carrier": data.get("carrier", ""),
+                "fully_received": purchase_order.status == PurchaseOrder.RECEIVED,
+            },
+        )
+
         response_serializer = self.get_serializer(purchase_order)
         return Response(response_serializer.data)
 
@@ -1111,6 +1137,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         line_item.save()
 
+        record_audit_event(
+            action="po_line_void",
+            actor=request.user,
+            line_item=line_item,
+            notes=line_item.void_reason or "",
+        )
+
         from .serializers import PurchaseOrderItemSerializer
 
         serializer = PurchaseOrderItemSerializer(line_item)
@@ -1169,6 +1202,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 void_reason="PO voided",
             )
 
+        record_audit_event(
+            action="po_void",
+            actor=user,
+            purchase_order=purchase_order,
+            notes=reason,
+            metadata={"po_number": purchase_order.po_number},
+        )
+
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)
 
@@ -1192,7 +1233,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer.save(purchase_order=purchase_order, uploaded_by=request.user)
+        attachment = serializer.save(purchase_order=purchase_order, uploaded_by=request.user)
+        record_audit_event(
+            action="attachment_add",
+            actor=request.user,
+            purchase_order=purchase_order,
+            attachment=attachment,
+            metadata={"filename": getattr(attachment.file, "name", "") or ""},
+        )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(
@@ -1218,6 +1266,16 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # Record audit BEFORE delete: SET_NULL on the FK means the audit row
+        # survives, but we want the filename in metadata while we still have
+        # the field on hand.
+        record_audit_event(
+            action="attachment_remove",
+            actor=user,
+            purchase_order=purchase_order,
+            attachment=attachment,
+            metadata={"filename": getattr(attachment.file, "name", "") or ""},
+        )
         attachment.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 

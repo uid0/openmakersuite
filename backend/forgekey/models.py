@@ -1047,3 +1047,101 @@ class DeviceCommand(models.Model):
         if age > self.ACK_TIMEOUT_SECONDS:
             return self.ACK_TIMEOUT
         return self.ACK_PENDING
+
+
+class ForgeKeyAuditEvent(models.Model):
+    """Append-only audit log for safety-critical ForgeKey device actions.
+
+    Captures actor, timestamp, affected entities, and free-form notes for
+    each safety- or access-relevant mutation: authorization grants and
+    revocations, device lockouts and unlocks, firmware update requests.
+    Rows are written by ``forgekey.audit.record_event`` and never updated
+    or deleted by application code (admin removal requires raw SQL).
+
+    Per gh #352 / #334. Pattern mirrors
+    ``maintenance_orders.ThirdPartyWorkOrderAuditLog`` so future per-domain
+    audit logs land with the same shape and the eventual unified review
+    surface (gh #359) can join across them cleanly.
+    """
+
+    ACTION_AUTHORIZATION_GRANT = "authorization_grant"
+    ACTION_AUTHORIZATION_REVOKE = "authorization_revoke"
+    ACTION_LOCKOUT_CREATE = "lockout_create"
+    ACTION_LOCKOUT_UNLOCK = "lockout_unlock"
+    ACTION_FIRMWARE_REQUEST = "firmware_request"
+
+    ACTION_CHOICES = [
+        (ACTION_AUTHORIZATION_GRANT, "Authorization granted"),
+        (ACTION_AUTHORIZATION_REVOKE, "Authorization revoked"),
+        (ACTION_LOCKOUT_CREATE, "Device locked out"),
+        (ACTION_LOCKOUT_UNLOCK, "Device unlocked"),
+        (ACTION_FIRMWARE_REQUEST, "Firmware update requested"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="forgekey_audit_actions",
+        help_text="User who performed the action; null for system-initiated events.",
+    )
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    # Optional FKs to the entities involved. At least one is set per row;
+    # SET_NULL on delete so the audit trail survives entity teardown.
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="forgekey_audit_events",
+    )
+    device = models.ForeignKey(
+        "ESP32Device",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    authorization = models.ForeignKey(
+        "AssetAuthorization",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    lockout = models.ForeignKey(
+        "DeviceLockout",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    firmware_update = models.ForeignKey(
+        "DeviceFirmwareUpdate",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    notes = models.TextField(blank=True)
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Action-specific payload (lockout level, firmware version, etc).",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["asset", "-created_at"], name="fk_audit_asset_idx"),
+            models.Index(fields=["device", "-created_at"], name="fk_audit_device_idx"),
+            models.Index(fields=["actor", "-created_at"], name="fk_audit_actor_idx"),
+            models.Index(fields=["action", "-created_at"], name="fk_audit_action_idx"),
+        ]
+
+    def __str__(self) -> str:
+        target = self.asset_id or self.device_id or self.authorization_id or self.lockout_id
+        return f"{self.action} ({target}) @ {self.created_at:%Y-%m-%d %H:%M}"

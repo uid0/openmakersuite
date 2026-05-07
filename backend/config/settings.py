@@ -381,6 +381,18 @@ CELERY_BEAT_SCHEDULE = {
         "task": "vendors.flag_expiring_compliance",
         "schedule": 86400.0,  # daily — emails Logistics a TDLR/COI digest
     },
+    "forgekey-mark-stale-devices-offline": {
+        "task": "forgekey.tasks.mark_stale_devices_offline",
+        # Every 30 min — combined with the threshold below this gives a worst-
+        # case time-to-offline of (threshold + 30min). At threshold=5h that
+        # lands inside the 4-6h SLA on gh #349.
+        "schedule": 1800.0,
+        "kwargs": {
+            "threshold_hours": config(
+                "FORGEKEY_DEVICE_OFFLINE_THRESHOLD_HOURS", default=5, cast=int
+            ),
+        },
+    },
 }
 
 # MQTT Configuration for ForgeKey

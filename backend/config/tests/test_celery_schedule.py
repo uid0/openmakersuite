@@ -22,6 +22,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "vendors.flag_expiring_compliance",
         86400.0,  # 1 day
     ),
+    "forgekey-mark-stale-devices-offline": (
+        "forgekey.tasks.mark_stale_devices_offline",
+        1800.0,  # 30 min
+    ),
 }
 
 

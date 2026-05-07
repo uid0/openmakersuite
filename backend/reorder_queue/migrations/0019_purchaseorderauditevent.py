@@ -12,7 +12,12 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("reorder_queue", "0018_purchaseorder_sales_order_number_and_more"),
+        # Depend on the existing leaf migration, NOT 0018 directly.
+        # `0008_webhook_location_problem_event` is a merge migration (its
+        # filename is "0008" but it depends on 0018 via the dep graph) and
+        # is the actual leaf node on origin/main. Pointing at 0018 instead
+        # would create a divergent leaf and `migrate --check` fails CI.
+        ("reorder_queue", "0008_webhook_location_problem_event"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

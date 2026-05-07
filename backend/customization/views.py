@@ -7,7 +7,14 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import SiteSettings
+from .audit import (
+    diff_audited_fields,
+)
+from .audit import record_event as record_settings_audit_event
+from .audit import (
+    snapshot,
+)
+from .models import SiteSettings, SiteSettingsAuditEvent
 from .serializers import SiteSettingsSerializer, SiteSettingsUpdateSerializer
 
 
@@ -54,7 +61,19 @@ def site_settings(request):
     )
 
     if serializer.is_valid():
+        before = snapshot(settings_obj)
         serializer.save()
+        # Refresh to ensure file fields reflect post-save state when the
+        # storage backend renames on upload.
+        settings_obj.refresh_from_db()
+        changes = diff_audited_fields(before, settings_obj)
+        if changes:
+            record_settings_audit_event(
+                action=SiteSettingsAuditEvent.ACTION_SETTINGS_UPDATE,
+                actor=request.user,
+                site_settings=settings_obj,
+                metadata={"changes": changes},
+            )
         # Return updated settings using the read serializer
         read_serializer = SiteSettingsSerializer(settings_obj, context={"request": request})
         return Response(read_serializer.data, status=status.HTTP_200_OK)

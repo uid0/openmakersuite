@@ -10,6 +10,7 @@ apply to service vendors (TDLR licensing, COI tracking).
 
 import uuid
 
+from django.conf import settings
 from django.db import models
 
 
@@ -112,3 +113,76 @@ class Vendor(models.Model):
         if not self.coi_expires_at:
             return False
         return timezone.now().date() > self.coi_expires_at
+
+
+class VendorAuditEvent(models.Model):
+    """Append-only audit log for vendor compliance and lifecycle actions.
+
+    Captures actor, action, vendor reference, notes, and per-action metadata
+    (incl. before/after for compliance-field changes so reviewers can answer
+    'who changed the COI date and to what?'). Rows are written by
+    ``vendors.audit.record_event`` and never updated or deleted by
+    application code.
+
+    Per gh #356 / #334. Mirrors the per-domain audit tables in #352-#355.
+    """
+
+    ACTION_VENDOR_CREATE = "vendor_create"
+    ACTION_VENDOR_DEACTIVATE = "vendor_deactivate"
+    ACTION_VENDOR_REACTIVATE = "vendor_reactivate"
+    ACTION_COMPLIANCE_UPDATE = "compliance_update"
+
+    ACTION_CHOICES = [
+        (ACTION_VENDOR_CREATE, "Vendor created"),
+        (ACTION_VENDOR_DEACTIVATE, "Vendor deactivated"),
+        (ACTION_VENDOR_REACTIVATE, "Vendor reactivated"),
+        (ACTION_COMPLIANCE_UPDATE, "Compliance fields updated"),
+    ]
+
+    # Compliance fields the audit hook tracks for diff capture.
+    COMPLIANCE_FIELDS = (
+        "tdlr_license_number",
+        "tdlr_license_expires_at",
+        "coi_provider",
+        "coi_policy_number",
+        "coi_expires_at",
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vendor_audit_actions",
+        help_text="User who performed the action; null for system-initiated events.",
+    )
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    notes = models.TextField(blank=True)
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Action-specific payload. For compliance_update, includes a "
+            "'changes' dict mapping field name -> {before, after}."
+        ),
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["vendor", "-created_at"], name="vendor_audit_vendor_idx"),
+            models.Index(fields=["actor", "-created_at"], name="vendor_audit_actor_idx"),
+            models.Index(fields=["action", "-created_at"], name="vendor_audit_action_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.action} ({self.vendor_id}) @ {self.created_at:%Y-%m-%d %H:%M}"

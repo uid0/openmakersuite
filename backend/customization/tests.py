@@ -2,11 +2,17 @@
 Tests for customization app.
 """
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 import pytest
+from rest_framework.test import APIClient
 
-from .models import SiteSettings
+from .audit import diff_audited_fields, record_event, snapshot
+from .models import SiteSettings, SiteSettingsAuditEvent
+
+User = get_user_model()
 
 
 @pytest.mark.unit
@@ -151,3 +157,115 @@ class TestSiteSettingsAPI:
         assert data["dashboard_title"] == "Custom Dashboard"
         assert data["dashboard_subtitle"] == "Custom Subtitle"
         assert data["show_logo_on_dashboard"] is False
+
+
+@pytest.mark.django_db
+class TestSiteSettingsAudit:
+    """Test SiteSettings audit helpers and API integration."""
+
+    def test_settings_update_records_audit_event(self):
+        """PATCH with a real change records one audit event."""
+        user = User.objects.create_user(
+            username="superuser",
+            password="testpass123",
+            is_staff=True,
+            is_superuser=True,
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+        settings = SiteSettings.get()
+
+        response = client.patch("/api/customization/settings/", {"site_name": "New Name"})
+
+        assert response.status_code == 200
+        assert SiteSettingsAuditEvent.objects.count() == 1
+
+        event = SiteSettingsAuditEvent.objects.get()
+        assert event.action == SiteSettingsAuditEvent.ACTION_SETTINGS_UPDATE
+        assert event.actor == user
+        assert event.site_settings == settings
+        assert event.metadata["changes"]["site_name"]["before"] == "Makerspace Inventory"
+        assert event.metadata["changes"]["site_name"]["after"] == "New Name"
+
+    def test_settings_update_no_event_on_empty_diff(self):
+        """PATCH with an unchanged value should not record an event."""
+        user = User.objects.create_user(
+            username="superuser-noop",
+            password="testpass123",
+            is_staff=True,
+            is_superuser=True,
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+        settings = SiteSettings.get()
+
+        response = client.patch(
+            "/api/customization/settings/",
+            {"site_name": settings.site_name},
+        )
+
+        assert response.status_code == 200
+        assert SiteSettingsAuditEvent.objects.count() == 0
+
+    def test_settings_update_unauthenticated_no_event(self):
+        """Unauthenticated PATCH is rejected and does not record an event."""
+        SiteSettings.get()
+        client = APIClient()
+
+        response = client.patch("/api/customization/settings/", {"site_name": "Blocked"})
+
+        assert response.status_code == 401
+        assert SiteSettingsAuditEvent.objects.count() == 0
+
+    def test_settings_update_non_superuser_no_event(self):
+        """Non-superuser staff cannot update settings or create audit rows."""
+        user = User.objects.create_user(
+            username="staff-user",
+            password="testpass123",
+            is_staff=True,
+            is_superuser=False,
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+        SiteSettings.get()
+
+        response = client.patch("/api/customization/settings/", {"site_name": "Blocked"})
+
+        assert response.status_code == 403
+        assert SiteSettingsAuditEvent.objects.count() == 0
+
+    def test_diff_audited_fields_returns_empty_when_unchanged(self):
+        """Diff helper returns an empty dict when audited fields match."""
+        settings = SiteSettings.get()
+        before = snapshot(settings)
+
+        assert diff_audited_fields(before, settings) == {}
+
+    def test_diff_audited_fields_summarizes_file_field_by_filename(self):
+        """Diff helper reduces file-field changes to a filename string."""
+        settings = SiteSettings.get()
+        before = snapshot(settings)
+        settings.logo = SimpleUploadedFile(
+            "audit-logo.png",
+            b"fake-image-bytes",
+            content_type="image/png",
+        )
+
+        changes = diff_audited_fields(before, settings)
+
+        assert changes["logo"]["before"] is None
+        assert isinstance(changes["logo"]["after"], str)
+        assert changes["logo"]["after"].endswith("audit-logo.png")
+
+    def test_record_event_with_anonymous_actor_creates_row_with_null_actor(self):
+        """record_event stores a null actor when called anonymously."""
+        settings = SiteSettings.get()
+
+        event = record_event(
+            action=SiteSettingsAuditEvent.ACTION_SETTINGS_UPDATE,
+            site_settings=settings,
+            actor=None,
+        )
+
+        assert SiteSettingsAuditEvent.objects.count() == 1
+        assert event.actor is None

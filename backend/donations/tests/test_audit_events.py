@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from django.urls import reverse
+from django.utils import timezone
 
 import pytest
 
@@ -19,6 +20,14 @@ from donations.tests.factories import (
 from forgekey.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
+
+
+# DonationFactory.date_received defaults to ``timezone.now()`` (a
+# datetime) but ``Donation.date_received`` is a DateField. DRF serializers
+# refuse to coerce datetime -> date on read and 500 the
+# generate_tax_receipt response. Pass an explicit date so the codepath
+# under test is the audit hook, not a pre-existing factory shape bug.
+_TODAY = timezone.now().date()
 
 
 def test_donation_create_records_audit_event(api_client):
@@ -46,7 +55,7 @@ def test_donation_create_records_audit_event(api_client):
 
 def test_tax_receipt_issued_records_audit_event(api_client):
     actor = UserFactory()
-    donation = DonationFactory(donor_email="")
+    donation = DonationFactory(donor_email="", date_received=_TODAY)
     api_client.force_authenticate(user=actor)
 
     with patch("donations.views.TaxReceiptPDFGenerator") as generator_cls:
@@ -72,7 +81,7 @@ def test_tax_receipt_issued_records_audit_event(api_client):
 
 def test_tax_receipt_regenerate_records_audit_event(api_client):
     actor = UserFactory(is_staff=True, is_superuser=True)
-    tax_receipt = TaxReceiptFactory(donation__donor_email="")
+    tax_receipt = TaxReceiptFactory(donation__donor_email="", donation__date_received=_TODAY)
     api_client.force_authenticate(user=actor)
 
     with patch("donations.views.TaxReceiptPDFGenerator") as generator_cls:

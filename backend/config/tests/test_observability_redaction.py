@@ -38,12 +38,13 @@ def test_redacts_password_key_variants(key):
     assert redact({key: "secret-value"}) == {key: REDACTED}
 
 
-@pytest.mark.parametrize("key", ["api_key", "api-key", "apikey"])
+@pytest.mark.parametrize("key", ["api_key", "api-key", "apikey", "apiKey", "API_KEY"])
 def test_redacts_api_key_variants(key):
+    # The regex ``api[_-]?key`` runs with re.IGNORECASE, so camelCase
+    # and SHOUTING_CASE both match. Default-deny on key names — every
+    # spelling of "api key" lands as REDACTED.
+    assert is_sensitive_key(key) is True
     assert redact({key: "secret-value"}) == {key: REDACTED}
-
-    assert is_sensitive_key("apiKey") is False
-    assert redact({"apiKey": "secret-value"}) == {"apiKey": "secret-value"}
 
 
 def test_redacts_signature_key():

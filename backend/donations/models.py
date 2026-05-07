@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils import timezone
@@ -551,3 +552,92 @@ class TaxReceipt(models.Model):
     def __str__(self) -> str:
         copy_text = " (Copy)" if self.is_copy else ""
         return f"Tax Receipt {self.serial_number} - {self.donation.donor_name}{copy_text}"
+
+
+class DonationAuditEvent(models.Model):
+    """Append-only audit log for donation, tax-receipt, and disposition actions.
+
+    Captures actor, timestamp, affected entity, notes, and metadata for each
+    safety- or financial-relevant mutation. Rows are written by
+    ``donations.audit.record_event`` and never updated or deleted by
+    application code.
+
+    Per gh #354 / #334. Pattern mirrors
+    ``forgekey.ForgeKeyAuditEvent`` (gh #352) and
+    ``reorder_queue.PurchaseOrderAuditEvent`` (gh #353) so the eventual
+    unified review surface (gh #359) can join across domains cleanly.
+    """
+
+    ACTION_DONATION_CREATE = "donation_create"
+    ACTION_TAX_RECEIPT_ISSUED = "tax_receipt_issued"
+    ACTION_TAX_RECEIPT_REGENERATE = "tax_receipt_regenerate"
+    ACTION_ITEM_DISPOSED = "item_disposed"
+
+    ACTION_CHOICES = [
+        (ACTION_DONATION_CREATE, "Donation created"),
+        (ACTION_TAX_RECEIPT_ISSUED, "Tax receipt issued"),
+        (ACTION_TAX_RECEIPT_REGENERATE, "Tax receipt regenerated"),
+        (ACTION_ITEM_DISPOSED, "Donation item disposed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="donation_audit_actions",
+        help_text="User who performed the action; null for system-initiated events.",
+    )
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    # Optional FKs to entities involved. At least one is set per row;
+    # SET_NULL on delete so the audit trail survives entity teardown.
+    donation = models.ForeignKey(
+        Donation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    donation_item = models.ForeignKey(
+        DonationItem,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    tax_receipt = models.ForeignKey(
+        TaxReceipt,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    disposition = models.ForeignKey(
+        Disposition,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    notes = models.TextField(blank=True)
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Action-specific payload (serial number, disposition method, etc).",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["donation", "-created_at"], name="don_audit_donation_idx"),
+            models.Index(fields=["actor", "-created_at"], name="don_audit_actor_idx"),
+            models.Index(fields=["action", "-created_at"], name="don_audit_action_idx"),
+        ]
+
+    def __str__(self) -> str:
+        target = (
+            self.donation_id or self.donation_item_id or self.tax_receipt_id or self.disposition_id
+        )
+        return f"{self.action} ({target}) @ {self.created_at:%Y-%m-%d %H:%M}"

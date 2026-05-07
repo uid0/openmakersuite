@@ -2,6 +2,9 @@
 Models for site customization.
 """
 
+import uuid
+
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -156,3 +159,66 @@ class SiteSettings(models.Model):
         if not obj:
             obj = cls.objects.create()
         return obj
+
+
+class SiteSettingsAuditEvent(models.Model):
+    """Append-only audit log for SiteSettings updates.
+
+    Captures actor, action, settings reference, notes, and a per-field
+    diff in metadata. Rows are written by
+    ``customization.audit.record_event`` and never updated or deleted by
+    application code.
+
+    Per gh #358 / #334. Mirrors the per-domain audit tables in
+    #352-#357.
+
+    File fields (``logo``, ``favicon``) are diffed by filename only —
+    the binary content is never stored in the audit row.
+    """
+
+    ACTION_SETTINGS_UPDATE = "settings_update"
+
+    ACTION_CHOICES = [
+        (ACTION_SETTINGS_UPDATE, "Site settings updated"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="site_settings_audit_actions",
+        help_text="User who performed the action; null for system-initiated events.",
+    )
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    site_settings = models.ForeignKey(
+        SiteSettings,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    notes = models.TextField(blank=True)
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Action-specific payload. For settings_update, includes a "
+            "'changes' dict mapping field name -> {before, after}. "
+            "File fields are summarized by filename only — binary "
+            "content is never stored here."
+        ),
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["site_settings", "-created_at"], name="settings_audit_ss_idx"),
+            models.Index(fields=["actor", "-created_at"], name="settings_audit_actor_idx"),
+            models.Index(fields=["action", "-created_at"], name="settings_audit_action_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.action} @ {self.created_at:%Y-%m-%d %H:%M}"

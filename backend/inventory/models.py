@@ -2683,3 +2683,69 @@ class StockReconciliation(models.Model):
             f"{self.item.name}: {self.projected_count} -> {self.actual_count} "
             f"({self.delta:+d}) [{self.reason}]"
         )
+
+
+class MaintenanceAuditEvent(models.Model):
+    """Append-only audit log for preventive-maintenance work-order and
+    location-problem mutations not already covered by
+    ``maintenance_orders.ThirdPartyWorkOrderAuditLog``.
+
+    Per gh #355 / #334. Pattern mirrors the per-domain audit tables in
+    forgekey (#352), reorder_queue (#353), and donations (#354) so the
+    eventual unified review surface (#359) can join cleanly.
+    """
+
+    ACTION_WO_CREATE = "wo_create"
+    ACTION_WO_COMPLETE = "wo_complete"
+    ACTION_LOCATION_PROBLEM_RESOLVE = "location_problem_resolve"
+
+    ACTION_CHOICES = [
+        (ACTION_WO_CREATE, "Work order created"),
+        (ACTION_WO_COMPLETE, "Work order completed"),
+        (ACTION_LOCATION_PROBLEM_RESOLVE, "Location problem resolved"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="maintenance_audit_actions",
+        help_text="User who performed the action; null for system-initiated events.",
+    )
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    work_order = models.ForeignKey(
+        "WorkOrder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    location_problem = models.ForeignKey(
+        "LocationProblem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    notes = models.TextField(blank=True)
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Action-specific payload (status transition, severity, etc).",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["work_order", "-created_at"], name="maint_audit_wo_idx"),
+            models.Index(fields=["location_problem", "-created_at"], name="maint_audit_lp_idx"),
+            models.Index(fields=["actor", "-created_at"], name="maint_audit_actor_idx"),
+            models.Index(fields=["action", "-created_at"], name="maint_audit_action_idx"),
+        ]
+
+    def __str__(self) -> str:
+        target = self.work_order_id or self.location_problem_id
+        return f"{self.action} ({target}) @ {self.created_at:%Y-%m-%d %H:%M}"

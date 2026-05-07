@@ -325,6 +325,9 @@ views:
       retrieve:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      revoke:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly

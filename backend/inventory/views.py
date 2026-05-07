@@ -24,6 +24,7 @@ from rest_framework.permissions import (
 )
 from rest_framework.response import Response
 
+from .audit import record_event as record_maintenance_audit_event
 from .models import (
     Asset,
     AssetPart,
@@ -2275,6 +2276,17 @@ class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
                 problem.resolved_by = getattr(request.user, "handle", None) or request.user.username
         problem.save()
 
+        record_maintenance_audit_event(
+            action="location_problem_resolve",
+            actor=request.user,
+            location_problem=problem,
+            notes=problem.resolution_notes or "",
+            metadata={
+                "new_status": new_status,
+                "severity": problem.severity,
+            },
+        )
+
         serializer = LocationProblemSerializer(problem, context={"request": request})
         return Response(serializer.data)
 
@@ -3055,6 +3067,37 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_412_PRECONDITION_FAILED,
             )
         return None
+
+    def perform_create(self, serializer):
+        work_order = serializer.save()
+        record_maintenance_audit_event(
+            action="wo_create",
+            actor=self.request.user,
+            work_order=work_order,
+            metadata={
+                "maintenance_item_id": str(work_order.maintenance_item_id),
+                "due_date": work_order.due_date.isoformat() if work_order.due_date else None,
+            },
+        )
+
+    def perform_update(self, serializer):
+        old_status = serializer.instance.status
+        work_order = serializer.save()
+        if (
+            work_order.status == WorkOrder.STATUS_COMPLETED
+            and old_status != WorkOrder.STATUS_COMPLETED
+        ):
+            record_maintenance_audit_event(
+                action="wo_complete",
+                actor=self.request.user,
+                work_order=work_order,
+                metadata={
+                    "previous_status": old_status,
+                    "completed_at": (
+                        work_order.completed_at.isoformat() if work_order.completed_at else None
+                    ),
+                },
+            )
 
     def update(self, request, *args, **kwargs):
         gate = self._check_completion_gate(request)

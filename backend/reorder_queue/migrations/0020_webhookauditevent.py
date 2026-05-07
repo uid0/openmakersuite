@@ -13,6 +13,16 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
+        # Chained on the audit migration introduced in #353/PR #361 so
+        # the per-app migration tree stays linear (single leaf) once
+        # both land. Pointing this at 0008 (the prior leaf) instead
+        # would unblock CI here but create a multi-leaf situation on
+        # main after both PRs merge — Django's `validate_consistency`
+        # then fails any subsequent PR with "Conflicting migrations
+        # detected; multiple leaf nodes."
+        #
+        # Trade-off: this PR's CI stays BLOCKED until #361's migration
+        # is on main. Auto-merge picks it up the moment that happens.
         ("reorder_queue", "0019_purchaseorderauditevent"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]

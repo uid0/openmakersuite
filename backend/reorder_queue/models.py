@@ -1016,7 +1016,9 @@ class WebhookAuditEvent(models.Model):
     ACTION_WEBHOOK_DELETE = "webhook_delete"
     ACTION_WEBHOOK_DISABLE = "webhook_disable"
     ACTION_WEBHOOK_ENABLE = "webhook_enable"
-    ACTION_WEBHOOK_SECRET_ROTATE = "webhook_secret_rotate"
+    ACTION_WEBHOOK_SECRET_ROTATE = (
+        "webhook_secret_rotate"  # nosec B105 — action name, not a credential
+    )
 
     ACTION_CHOICES = [
         (ACTION_WEBHOOK_CREATE, "Webhook created"),

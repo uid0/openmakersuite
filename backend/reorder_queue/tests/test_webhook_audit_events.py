@@ -20,14 +20,15 @@ def _webhook_payload(**overrides):
 
 
 def _create_webhook(**overrides):
-    return WebHook.objects.create(
-        name="Inventory Alerts",
-        url="https://example.com/webhooks/inventory",
-        event_type=WebHook.REORDER_REQUEST_CREATED,
-        is_active=True,
-        secret="initial-secret",
-        **overrides,
-    )
+    defaults = {
+        "name": "Inventory Alerts",
+        "url": "https://example.com/webhooks/inventory",
+        "event_type": WebHook.REORDER_REQUEST_CREATED,
+        "is_active": True,
+        "secret": "initial-secret",
+    }
+    defaults.update(overrides)
+    return WebHook.objects.create(**defaults)
 
 
 def test_webhook_create_records_audit_event(authenticated_client):
@@ -35,9 +36,12 @@ def test_webhook_create_records_audit_event(authenticated_client):
 
     response = client.post(reverse("webhook-list"), _webhook_payload(), format="json")
 
-    assert response.status_code == status.HTTP_201_CREATED
+    assert response.status_code == status.HTTP_201_CREATED, response.content
+    # Test DB is fresh per @django_db, so the test just created the only
+    # WebHook row. Look it up by query rather than relying on the
+    # serializer's id-key shape (which may be `id` / `uuid` / etc).
+    webhook = WebHook.objects.get()
     event = WebhookAuditEvent.objects.get()
-    webhook = WebHook.objects.get(pk=response.data["id"])
     assert event.action == WebhookAuditEvent.ACTION_WEBHOOK_CREATE
     assert event.actor == user
     assert event.webhook == webhook

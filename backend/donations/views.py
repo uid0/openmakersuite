@@ -15,6 +15,7 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
+from .audit import record_event as record_audit_event
 from .models import Disposition, Donation, DonationItem, TaxReceipt
 from .serializers import (
     DispositionSerializer,
@@ -51,6 +52,18 @@ class DonationViewSet(viewsets.ModelViewSet):
         if status_filter:
             queryset = queryset.filter(status=status_filter)
         return queryset.select_related("received_by", "reviewed_by").prefetch_related("items")
+
+    def perform_create(self, serializer):
+        donation = serializer.save()
+        record_audit_event(
+            action="donation_create",
+            actor=self.request.user,
+            donation=donation,
+            metadata={
+                "donation_number": donation.donation_number,
+                "donor_name": donation.donor_name,
+            },
+        )
 
     @action(detail=True, methods=["post"])
     def generate_sticker_sheet(self, request, pk=None):
@@ -168,6 +181,17 @@ class DonationViewSet(viewsets.ModelViewSet):
                     "tax_receipt_number",
                     "tax_receipt_issued_at",
                 ]
+            )
+
+            record_audit_event(
+                action="tax_receipt_issued",
+                actor=request.user,
+                donation=donation,
+                tax_receipt=tax_receipt,
+                metadata={
+                    "serial_number": str(tax_receipt.serial_number),
+                    "signature_user_id": (signature_user.id if signature_user else request.user.id),
+                },
             )
 
             # Send email to donor
@@ -296,6 +320,19 @@ class DispositionViewSet(viewsets.ModelViewSet):
             "donation_item", "donation_item__donation", "disposed_by", "created_asset"
         )
 
+    def perform_create(self, serializer):
+        disposition = serializer.save()
+        record_audit_event(
+            action="item_disposed",
+            actor=self.request.user,
+            disposition=disposition,
+            donation_item=disposition.donation_item,
+            metadata={
+                "disposition_type": disposition.disposition_type,
+                "disposition_id": str(disposition.id),
+            },
+        )
+
 
 class TaxReceiptViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for TaxReceipt operations."""
@@ -393,6 +430,21 @@ class TaxReceiptViewSet(viewsets.ReadOnlyModelViewSet):
             # Update tax receipt with PDF path
             tax_receipt.pdf_file = pdf_path
             tax_receipt.save()
+
+            record_audit_event(
+                action="tax_receipt_regenerate",
+                actor=request.user,
+                tax_receipt=tax_receipt,
+                metadata={
+                    "serial_number": str(tax_receipt.serial_number),
+                    "is_copy": tax_receipt.is_copy,
+                    "signature_user_id": (
+                        signature_user.id
+                        if signature_user
+                        else (tax_receipt.issued_by.id if tax_receipt.issued_by else None)
+                    ),
+                },
+            )
 
             serializer = TaxReceiptSerializer(tax_receipt)
             return Response(serializer.data)

@@ -644,3 +644,117 @@ class TestPhotoRetention:
         assert result["deleted"] == 1
         assert ESP32DevicePhoto.objects.filter(pk=recent.pk).exists()
         assert not ESP32DevicePhoto.objects.filter(pk=old.pk).exists()
+
+
+class TestStaleDeviceOfflineSweep:
+    def test_stale_device_flips_offline(self, people_counter_type):
+        from forgekey.tasks import mark_stale_devices_offline
+
+        device = ESP32DeviceFactory(
+            device_type=people_counter_type,
+            is_online=True,
+        )
+
+        stale_at = timezone.now() - timedelta(hours=6)
+        ESP32Device.objects.filter(pk=device.pk).update(last_seen=stale_at)
+
+        result = mark_stale_devices_offline()
+
+        device.refresh_from_db()
+        assert result["updated"] == 1
+        assert device.is_online is False
+
+    def test_fresh_device_unchanged(self, people_counter_type):
+        from forgekey.tasks import mark_stale_devices_offline
+
+        device = ESP32DeviceFactory(
+            device_type=people_counter_type,
+            is_online=True,
+        )
+
+        recent_at = timezone.now() - timedelta(minutes=10)
+        ESP32Device.objects.filter(pk=device.pk).update(last_seen=recent_at)
+
+        result = mark_stale_devices_offline()
+
+        device.refresh_from_db()
+        assert result["updated"] == 0
+        assert device.is_online is True
+
+    def test_null_last_seen_device_ignored(self, people_counter_type):
+        from forgekey.tasks import mark_stale_devices_offline
+
+        device = ESP32DeviceFactory(
+            device_type=people_counter_type,
+            is_online=True,
+        )
+
+        ESP32Device.objects.filter(pk=device.pk).update(last_seen=None)
+
+        result = mark_stale_devices_offline()
+
+        device.refresh_from_db()
+        assert result["updated"] == 0
+        assert device.is_online is True
+
+    def test_threshold_kwarg_override(self, people_counter_type):
+        from forgekey.tasks import mark_stale_devices_offline
+
+        stale_by_four = ESP32DeviceFactory(
+            device_type=people_counter_type,
+            is_online=True,
+        )
+        stale_by_six = ESP32DeviceFactory(
+            device_type=people_counter_type,
+            is_online=True,
+        )
+
+        now = timezone.now()
+        ESP32Device.objects.filter(pk=stale_by_four.pk).update(last_seen=now - timedelta(hours=4))
+        ESP32Device.objects.filter(pk=stale_by_six.pk).update(last_seen=now - timedelta(hours=6))
+
+        result = mark_stale_devices_offline(threshold_hours=5)
+
+        stale_by_four.refresh_from_db()
+        stale_by_six.refresh_from_db()
+        assert result["updated"] == 1
+        assert stale_by_four.is_online is True
+        assert stale_by_six.is_online is False
+
+    def test_already_offline_device_skipped(self, people_counter_type):
+        from forgekey.tasks import mark_stale_devices_offline
+
+        device = ESP32DeviceFactory(
+            device_type=people_counter_type,
+            is_online=False,
+        )
+
+        stale_at = timezone.now() - timedelta(hours=6)
+        ESP32Device.objects.filter(pk=device.pk).update(last_seen=stale_at)
+
+        result = mark_stale_devices_offline()
+
+        device.refresh_from_db()
+        assert result["updated"] == 0
+        assert device.is_online is False
+
+    def test_multiple_stale_in_one_run(self, people_counter_type):
+        from forgekey.tasks import mark_stale_devices_offline
+
+        devices = [
+            ESP32DeviceFactory(device_type=people_counter_type, is_online=True),
+            ESP32DeviceFactory(device_type=people_counter_type, is_online=True),
+            ESP32DeviceFactory(device_type=people_counter_type, is_online=True),
+        ]
+
+        stale_at = timezone.now() - timedelta(hours=6)
+        ESP32Device.objects.filter(pk__in=[device.pk for device in devices]).update(
+            last_seen=stale_at
+        )
+
+        result = mark_stale_devices_offline()
+
+        for device in devices:
+            device.refresh_from_db()
+            assert device.is_online is False
+        assert result["updated"] == 3

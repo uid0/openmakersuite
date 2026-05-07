@@ -18,8 +18,13 @@
 #   - Webhook tokens: POSTMARK_INBOUND_TOKEN, LOCATION_PING_TOKEN (warned if empty)
 #   - Email: EMAIL_BACKEND must not be the console backend in prod
 #   - Highlight: if HIGHLIGHT_OTLP_ENDPOINT set, must be an https:// URL
-#   - Cookie security: SESSION_COOKIE_SECURE, CSRF_COOKIE_SECURE inferred from
-#     DEBUG=0 in settings.py — verified by Django's deployment check below
+#   - Sentry: if SENTRY_DSN / REACT_APP_SENTRY_DSN set, must be an https:// URL.
+#     A warning fires when neither Highlight nor Sentry is configured (no
+#     observability sink — production errors will only land in container logs).
+#   - Cookie security: SESSION_COOKIE_SECURE and CSRF_COOKIE_SECURE default to
+#     `not DEBUG` in settings.py. Operators who explicitly override either to
+#     a falsy value when DEBUG=0 are warned — this re-enables plaintext cookies
+#     and breaks the secure-by-default deploy contract.
 #
 # Exit codes:
 #   0 — environment is safe for production deploy
@@ -252,6 +257,59 @@ if [ -n "${HIGHLIGHT_OTLP_ENDPOINT:-}" ]; then
         https://*) ;;
         *) err "HIGHLIGHT_OTLP_ENDPOINT must be https:// for production (got: $HIGHLIGHT_OTLP_ENDPOINT)." ;;
     esac
+fi
+
+# --- 10a. Sentry -------------------------------------------------------------
+# Highlight replaced Sentry per oms-fjs (#319), but the backend still honours
+# SENTRY_DSN as a fallback path (see backend/config/health.py). Treat Sentry
+# DSNs as optional-but-validated: empty is fine, but any value that's set must
+# be an https:// URL — http leaks events in plaintext, and a typo would
+# silently disable error reporting in production.
+
+if [ -n "${SENTRY_DSN:-}" ]; then
+    case "$SENTRY_DSN" in
+        https://*) ;;
+        *) err "SENTRY_DSN must be an https:// URL for production (got: $SENTRY_DSN)." ;;
+    esac
+fi
+
+if [ -n "${REACT_APP_SENTRY_DSN:-}" ]; then
+    case "$REACT_APP_SENTRY_DSN" in
+        https://*) ;;
+        *) err "REACT_APP_SENTRY_DSN must be an https:// URL for production (got: $REACT_APP_SENTRY_DSN)." ;;
+    esac
+fi
+
+# Observability presence policy: production needs at least one error sink so
+# crashes don't disappear into container logs the operator never reads.
+# Warn (not error) so air-gapped or self-hosted-without-telemetry deploys can
+# proceed if the operator has accepted that trade-off.
+
+if [ -z "${HIGHLIGHT_PROJECT_ID:-}" ] && [ -z "${SENTRY_DSN:-}" ]; then
+    warn "Neither HIGHLIGHT_PROJECT_ID nor SENTRY_DSN is set — production errors will only appear in container logs. Configure one for visibility into crashes and 5xx responses."
+fi
+
+# --- 10b. Cookie security ----------------------------------------------------
+# settings.py defaults SESSION_COOKIE_SECURE / CSRF_COOKIE_SECURE to `not DEBUG`,
+# so DEBUG=0 enables them automatically. But the env-driven config() lookup
+# means an operator can still override either to "False"/"0"/"off" and ship a
+# production deploy that emits cookies over plaintext HTTP. Warn loudly when
+# that happens — the override is almost never intentional in prod.
+
+is_falsy() {
+    case "${1,,}" in
+        ""|0|false|off|no) return 0 ;;
+    esac
+    return 1
+}
+
+# Only warn when the env explicitly sets the value to a falsy literal — an
+# unset variable inherits the secure default and is fine.
+if [ "${SESSION_COOKIE_SECURE+set}" = set ] && is_falsy "${SESSION_COOKIE_SECURE}"; then
+    warn "SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE} — production with DEBUG=0 should leave this unset (defaults to True) so session cookies are not sent over plaintext HTTP."
+fi
+if [ "${CSRF_COOKIE_SECURE+set}" = set ] && is_falsy "${CSRF_COOKIE_SECURE}"; then
+    warn "CSRF_COOKIE_SECURE=${CSRF_COOKIE_SECURE} — production with DEBUG=0 should leave this unset (defaults to True) so CSRF tokens are not sent over plaintext HTTP."
 fi
 
 # --- 11. Webhook / IoT shared secrets ---------------------------------------

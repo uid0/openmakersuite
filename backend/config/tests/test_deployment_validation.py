@@ -126,6 +126,8 @@ class TestProductionEnvValidatorAC23:
             ("LETSENCRYPT_EMAIL", "", "LETSENCRYPT_EMAIL"),
             ("HIGHLIGHT_OTLP_ENDPOINT", "http://otel.example.org:4317", "HIGHLIGHT_OTLP_ENDPOINT"),
             ("FORGEKEY_FIRMWARE_SIGNING_KEY", "not-a-pem", "FORGEKEY_FIRMWARE_SIGNING_KEY"),
+            ("SENTRY_DSN", "http://abc@o0.ingest.sentry.io/123", "SENTRY_DSN"),
+            ("REACT_APP_SENTRY_DSN", "http://abc@o0.ingest.sentry.io/123", "REACT_APP_SENTRY_DSN"),
         ],
     )
     def test_unsafe_value_rejected(self, tmp_path, key, value, fragment):
@@ -155,6 +157,72 @@ class TestProductionEnvValidatorAC23:
         result = _run_validator(env)
         assert result.returncode == 0, result.stdout
         assert "Warnings" in result.stdout
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "SENTRY_DSN",
+            "REACT_APP_SENTRY_DSN",
+        ],
+    )
+    def test_sentry_https_value_allowed(self, tmp_path, key):
+        env = _write_env(
+            tmp_path,
+            overrides={key: "https://abc@o0.ingest.sentry.io/123"},
+        )
+        result = _run_validator(env)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "SENTRY_DSN",
+            "REACT_APP_SENTRY_DSN",
+        ],
+    )
+    def test_empty_sentry_value_allowed(self, tmp_path, key):
+        env = _write_env(tmp_path, overrides={key: ""})
+        result = _run_validator(env)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_observability_warning_when_highlight_and_sentry_both_unset(self, tmp_path):
+        env = _write_env(
+            tmp_path,
+            overrides={"HIGHLIGHT_PROJECT_ID": "", "SENTRY_DSN": ""},
+        )
+        result = _run_validator(env)
+        assert result.returncode == 0, result.stdout
+        assert "Neither HIGHLIGHT_PROJECT_ID nor SENTRY_DSN" in result.stdout
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"HIGHLIGHT_PROJECT_ID": "proj_123", "SENTRY_DSN": ""},
+            {"HIGHLIGHT_PROJECT_ID": "", "SENTRY_DSN": "https://abc@o0.ingest.sentry.io/123"},
+        ],
+    )
+    def test_observability_warning_absent_when_highlight_or_sentry_present(
+        self, tmp_path, overrides
+    ):
+        env = _write_env(tmp_path, overrides=overrides)
+        result = _run_validator(env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Neither HIGHLIGHT_PROJECT_ID nor SENTRY_DSN" not in result.stdout
+
+    @pytest.mark.parametrize("value", ["False", "false", "0", "off", "no", ""])
+    @pytest.mark.parametrize("key", ["SESSION_COOKIE_SECURE", "CSRF_COOKIE_SECURE"])
+    def test_cookie_secure_falsy_override_warns(self, tmp_path, key, value):
+        env = _write_env(tmp_path, overrides={key: value})
+        result = _run_validator(env)
+        assert result.returncode == 0, result.stdout
+        assert key in result.stdout
+
+    @pytest.mark.parametrize("key", ["SESSION_COOKIE_SECURE", "CSRF_COOKIE_SECURE"])
+    def test_cookie_secure_unset_has_no_warning(self, tmp_path, key):
+        env = _write_env(tmp_path)
+        result = _run_validator(env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert key not in result.stdout
 
 
 class TestNoOperatorSpecificDefaultsAC24:

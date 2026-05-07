@@ -160,6 +160,14 @@ class DonationViewSet(viewsets.ModelViewSet):
                 issued_by=request.user,
                 is_copy=False,
             )
+            # ``issued_date`` is a DateField defaulting to ``timezone.now``
+            # (a datetime). Django stores it as a date, but the in-memory
+            # instance returned from ``create()`` keeps the datetime — and
+            # ``TaxReceiptSerializer`` (DRF) refuses to coerce datetime ->
+            # date on read, surfacing as an "Expected `date`, got
+            # `datetime`" 500. Refresh from DB so the field reflects the
+            # stored value before any serializer touches it.
+            tax_receipt.refresh_from_db()
 
             # Generate PDF
             generator = TaxReceiptPDFGenerator(is_copy=False)

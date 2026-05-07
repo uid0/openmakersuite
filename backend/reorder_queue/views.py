@@ -28,6 +28,7 @@ from .models import (
     PurchaseOrderItem,
     ReorderRequest,
     WebHook,
+    WebhookAuditEvent,
 )
 from .serializers import (
     BarcodeReceiptSerializer,
@@ -44,6 +45,8 @@ from .serializers import (
     WebHookSerializer,
     WebHookTestResultSerializer,
 )
+from .webhook_audit import diff_audited_fields as diff_webhook_audited_fields
+from .webhook_audit import record_event as record_webhook_audit_event
 
 
 def _create_lead_time_log(po_item, delivery_date):
@@ -2041,6 +2044,82 @@ class WebHookViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return WebHookCreateSerializer
         return WebHookSerializer
+
+    def perform_create(self, serializer):
+        webhook = serializer.save()
+        record_webhook_audit_event(
+            action=WebhookAuditEvent.ACTION_WEBHOOK_CREATE,
+            actor=self.request.user,
+            webhook=webhook,
+            metadata={
+                "name": webhook.name,
+                "url": webhook.url,
+                "event_type": webhook.event_type,
+            },
+        )
+
+    def perform_update(self, serializer):
+        # Snapshot pre-save attrs so we can detect:
+        #   * config changes (webhook_update with diff)
+        #   * is_active flip (webhook_disable / webhook_enable)
+        #   * secret rotation (webhook_secret_rotate; value never recorded)
+        instance = serializer.instance
+        before_attrs = {name: getattr(instance, name) for name in WebhookAuditEvent.AUDITED_FIELDS}
+        before_secret = instance.secret
+        before_active = instance.is_active
+
+        webhook = serializer.save()
+
+        if webhook.secret != before_secret:
+            record_webhook_audit_event(
+                action=WebhookAuditEvent.ACTION_WEBHOOK_SECRET_ROTATE,
+                actor=self.request.user,
+                webhook=webhook,
+            )
+
+        # Build a synthetic 'before' for the diff helper. Using attribute
+        # cloning avoids hitting the DB again and keeps the helper pure.
+        synthetic_before = WebHook(**before_attrs)
+        changes = diff_webhook_audited_fields(synthetic_before, webhook)
+        # is_active flips are surfaced as their own action — pull them out
+        # of the generic 'webhook_update' diff so reviewers see the
+        # lifecycle event explicitly.
+        is_active_changed = "is_active" in changes
+        if is_active_changed:
+            changes.pop("is_active")
+        if changes:
+            record_webhook_audit_event(
+                action=WebhookAuditEvent.ACTION_WEBHOOK_UPDATE,
+                actor=self.request.user,
+                webhook=webhook,
+                metadata={"changes": changes},
+            )
+        if before_active != webhook.is_active:
+            record_webhook_audit_event(
+                action=(
+                    WebhookAuditEvent.ACTION_WEBHOOK_ENABLE
+                    if webhook.is_active
+                    else WebhookAuditEvent.ACTION_WEBHOOK_DISABLE
+                ),
+                actor=self.request.user,
+                webhook=webhook,
+            )
+
+    def perform_destroy(self, instance):
+        # Record audit BEFORE delete so the metadata captures identifying
+        # fields while we still have the row. The webhook FK on the audit
+        # row is SET_NULL on cascade, so the audit row survives the delete.
+        record_webhook_audit_event(
+            action=WebhookAuditEvent.ACTION_WEBHOOK_DELETE,
+            actor=self.request.user,
+            webhook=instance,
+            metadata={
+                "name": instance.name,
+                "url": instance.url,
+                "event_type": instance.event_type,
+            },
+        )
+        instance.delete()
 
     @action(detail=True, methods=["post"], url_path="test", url_name="test")
     def test(self, request, pk=None):

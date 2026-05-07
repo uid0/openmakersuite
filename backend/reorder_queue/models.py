@@ -992,3 +992,89 @@ class PurchaseOrderAuditEvent(models.Model):
     def __str__(self) -> str:
         target = self.purchase_order_id or self.line_item_id or self.attachment_id
         return f"{self.action} ({target}) @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class WebhookAuditEvent(models.Model):
+    """Append-only audit log for webhook configuration + lifecycle events.
+
+    Captures actor, action, webhook reference, notes, and per-action
+    metadata (incl. delta for config-field changes). Rows are written by
+    ``reorder_queue.webhook_audit.record_event`` and never updated or
+    deleted by application code.
+
+    Per gh #357 / #334. Mirrors the per-domain audit tables in #352-#356.
+
+    Inbound auth failures and outbound delivery failures are intentionally
+    NOT captured here — both are high-volume per-event and are summarized
+    on the WebHook row itself (failure_count + last_error). A future
+    aggregated-stat table can land separately if event-level capture
+    becomes operationally necessary.
+    """
+
+    ACTION_WEBHOOK_CREATE = "webhook_create"
+    ACTION_WEBHOOK_UPDATE = "webhook_update"
+    ACTION_WEBHOOK_DELETE = "webhook_delete"
+    ACTION_WEBHOOK_DISABLE = "webhook_disable"
+    ACTION_WEBHOOK_ENABLE = "webhook_enable"
+    ACTION_WEBHOOK_SECRET_ROTATE = "webhook_secret_rotate"
+
+    ACTION_CHOICES = [
+        (ACTION_WEBHOOK_CREATE, "Webhook created"),
+        (ACTION_WEBHOOK_UPDATE, "Webhook config updated"),
+        (ACTION_WEBHOOK_DELETE, "Webhook deleted"),
+        (ACTION_WEBHOOK_DISABLE, "Webhook disabled"),
+        (ACTION_WEBHOOK_ENABLE, "Webhook enabled"),
+        (ACTION_WEBHOOK_SECRET_ROTATE, "Webhook secret rotated"),
+    ]
+
+    # Non-secret config fields the audit hook tracks for diff capture.
+    # ``secret`` is intentionally excluded — its value never appears in
+    # audit metadata; only the fact that it changed is recorded via the
+    # `webhook_secret_rotate` action.
+    AUDITED_FIELDS = (
+        "name",
+        "url",
+        "event_type",
+        "is_active",
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="webhook_audit_actions",
+        help_text="User who performed the action; null for system-initiated events.",
+    )
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    webhook = models.ForeignKey(
+        WebHook,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_events",
+    )
+    notes = models.TextField(blank=True)
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Action-specific payload. For webhook_update, includes a "
+            "'changes' dict mapping field name -> {before, after}. The "
+            "webhook secret is NEVER included — only the fact that it "
+            "changed is recorded."
+        ),
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["webhook", "-created_at"], name="webhook_audit_wh_idx"),
+            models.Index(fields=["actor", "-created_at"], name="webhook_audit_actor_idx"),
+            models.Index(fields=["action", "-created_at"], name="webhook_audit_action_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.action} ({self.webhook_id}) @ {self.created_at:%Y-%m-%d %H:%M}"

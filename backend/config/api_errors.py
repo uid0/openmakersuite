@@ -43,6 +43,8 @@ from rest_framework.exceptions import (
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 
+from .observability_redaction import redact as _redact_for_logs
+
 
 class ErrorCode:
     """Stable machine-readable error codes returned at ``error.code``."""
@@ -202,7 +204,12 @@ def standardized_exception_handler(exc, context):
 
     body: dict[str, Any] = {"code": code, "message": message}
     if details is not None and details != message:
-        body["details"] = details
+        # Scrub sensitive keys and value-shape secrets from the details
+        # payload before they leave the process. AC-27: error envelopes
+        # are an observability surface; details can carry user-supplied
+        # field maps (e.g. validation errors over a registration form
+        # that includes a password field). Redact before serialization.
+        body["details"] = _redact_for_logs(details)
 
     response.data = {"error": body}
     return response

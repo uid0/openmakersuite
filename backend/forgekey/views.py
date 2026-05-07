@@ -24,6 +24,7 @@ from rest_framework.permissions import (
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .audit import record_event as record_audit_event
 from .models import (
     AssetAuthorization,
     AssetDevice,
@@ -998,7 +999,52 @@ class AssetAuthorizationViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Set authorized_by to current user when creating authorization."""
-        serializer.save(authorized_by=self.request.user)
+        actor = self.request.user
+        authorization = serializer.save(authorized_by=actor)
+        record_audit_event(
+            action="authorization_grant",
+            actor=actor,
+            authorization=authorization,
+            notes=authorization.notes or "",
+        )
+
+    @action(detail=True, methods=["post"])
+    def revoke(self, request, pk=None):
+        """Mark an authorization inactive and record the revocation in the audit log.
+
+        Use this in preference to a DELETE: DELETE removes the row entirely so
+        the audit trail loses both the original grant context and the revocation
+        actor. Revoking flips ``is_active=False`` and emits an
+        ``authorization_revoke`` row that points back at the (preserved)
+        authorization. (gh #352)
+        """
+        authorization = self.get_object()
+        actor = request.user
+
+        if not actor.is_authenticated:
+            return Response(
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not authorization.is_active:
+            return Response(
+                {"detail": "Authorization is already inactive."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        notes = (request.data.get("notes") or "").strip()
+        authorization.is_active = False
+        authorization.save(update_fields=["is_active"])
+        record_audit_event(
+            action="authorization_revoke",
+            actor=actor,
+            authorization=authorization,
+            notes=notes,
+        )
+
+        serializer = self.get_serializer(authorization)
+        return Response(serializer.data)
 
     @action(detail=False, methods=["post"])
     def add_via_classroom_mode(self, request):
@@ -1071,7 +1117,14 @@ class DeviceLockoutViewSet(viewsets.ModelViewSet):
         mode.mode = OperationalMode.MODE_LOCKED_OUT
         mode.save()
 
-        serializer.save(locked_by=user, lockout_level=lockout_level)
+        lockout = serializer.save(locked_by=user, lockout_level=lockout_level)
+        record_audit_event(
+            action="lockout_create",
+            actor=user,
+            lockout=lockout,
+            notes=lockout.reason or "",
+            metadata={"lockout_level": lockout_level},
+        )
 
     @action(detail=True, methods=["post"])
     def unlock(self, request, pk=None):
@@ -1101,6 +1154,13 @@ class DeviceLockoutViewSet(viewsets.ModelViewSet):
         lockout.unlocked_at = timezone.now()
         lockout.unlocked_by = user
         lockout.save()
+
+        record_audit_event(
+            action="lockout_unlock",
+            actor=user,
+            lockout=lockout,
+            metadata={"lockout_level": lockout.lockout_level},
+        )
 
         # If no other active lockouts, update operational mode
         if not other_lockouts.exists():

@@ -16,6 +16,7 @@ from typing import Iterable, List, Sequence, Union
 
 from django.db.models import QuerySet
 
+from ..audit import record_event as record_audit_event
 from ..models import DeviceFirmwareUpdate, ESP32Device, FirmwareVersion
 from ..tasks import get_mqtt_client
 from ..utils import get_mqtt_firmware_topic, normalize_mac_address
@@ -94,6 +95,16 @@ def publish_firmware_update(
             firmware_version=firmware,
             status=DeviceFirmwareUpdate.STATUS_PENDING,
             requested_by=requested_by,
+        )
+        record_audit_event(
+            action="firmware_request",
+            actor=requested_by,
+            firmware_update=record,
+            device=device,
+            metadata={
+                "firmware_version": firmware.version,
+                "dispatch_path": "mqtt",
+            },
         )
         records.append(record)
 

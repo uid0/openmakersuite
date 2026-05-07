@@ -583,3 +583,35 @@ def prune_device_photos(retention_days: int = 30) -> Dict[str, Any]:
         cutoff.isoformat(),
     )
     return {"deleted": deleted, "retention_days": retention_days}
+
+
+@shared_task
+def mark_stale_devices_offline(threshold_hours: int = 5) -> Dict[str, Any]:
+    """Flip ``ESP32Device.is_online`` to False for devices whose ``last_seen``
+    is older than ``threshold_hours`` (default 5).
+
+    Devices update ``last_seen`` + ``is_online=True`` on every MQTT message,
+    photo upload, and capability announcement. Nothing flips ``is_online``
+    back to False, so a device that crashes or loses power keeps appearing
+    online indefinitely (gh #349). This sweep task closes that gap by marking
+    devices offline once they go silent past the threshold.
+
+    Threshold is hours (configurable per scheduled instance via beat kwargs)
+    so operators can tune the SLA without a code change. Devices with a NULL
+    ``last_seen`` are skipped — they have never reported in, so flipping them
+    is_online=False would be redundant (the field already defaults to False
+    on creation).
+    """
+    cutoff = timezone.now() - timedelta(hours=threshold_hours)
+    qs = ESP32Device.objects.filter(
+        is_online=True,
+        last_seen__lt=cutoff,
+    )
+    updated = qs.update(is_online=False, updated_at=timezone.now())
+    logger.info(
+        "Marked %s ESP32Device row(s) offline (last_seen older than %s hours; cutoff=%s)",
+        updated,
+        threshold_hours,
+        cutoff.isoformat(),
+    )
+    return {"updated": updated, "threshold_hours": threshold_hours}

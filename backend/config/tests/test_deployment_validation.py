@@ -201,7 +201,9 @@ class TestProductionEnvValidatorAC23:
             {"HIGHLIGHT_PROJECT_ID": "", "SENTRY_DSN": "https://abc@o0.ingest.sentry.io/123"},
         ],
     )
-    def test_observability_warning_absent_when_highlight_or_sentry_present(self, tmp_path, overrides):
+    def test_observability_warning_absent_when_highlight_or_sentry_present(
+        self, tmp_path, overrides
+    ):
         env = _write_env(tmp_path, overrides=overrides)
         result = _run_validator(env)
         assert result.returncode == 0, result.stdout + result.stderr

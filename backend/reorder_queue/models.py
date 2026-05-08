@@ -15,7 +15,6 @@ from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from config.observability_redaction import redact
-
 from inventory.models import InventoryItem, ItemSupplier, Supplier
 
 User = get_user_model()

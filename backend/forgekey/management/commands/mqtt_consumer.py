@@ -30,7 +30,6 @@ from django.utils import timezone as dj_timezone
 import paho.mqtt.client as mqtt
 
 from config.observability_redaction import redact
-
 from forgekey.models import DeviceFirmwareUpdate, ESP32Device, OccupancyEvent
 from forgekey.utils import normalize_mac_address, normalize_sensor_kind
 

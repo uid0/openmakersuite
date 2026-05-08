@@ -7,6 +7,7 @@
  */
 import { H } from 'highlight.run';
 import React from 'react';
+import { redactError } from '../utils/redact';
 import './ErrorFallback.css';
 
 interface ErrorFallbackProps {
@@ -16,7 +17,11 @@ interface ErrorFallbackProps {
 
 const ErrorFallback: React.FC<ErrorFallbackProps> = ({ error, resetError }) => {
   React.useEffect(() => {
-    H.consumeError(error, 'ErrorFallback');
+    // gh #378: scrub the error message + stack before they reach Highlight.
+    // Errors thrown deep in the network code occasionally include the
+    // failed request URL (which can carry an embedded signing key) or
+    // an upstream's quoted Authorization header in the message string.
+    H.consumeError(redactError(error), 'ErrorFallback');
   }, [error]);
 
   return (

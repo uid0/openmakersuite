@@ -357,7 +357,11 @@ if TESTING:
     CELERY_CACHE_BACKEND = "memory"
 else:
     CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://192.168.1.36:6379/0")
-    CELERY_RESULT_BACKEND = "django-db"  # Store results in Django database
+    # gh #378: route through the redacting backend so traceback + result
+    # payloads are scrubbed before they reach TaskResult. Falls back to the
+    # standard django-db backend for tests (CELERY_RESULT_BACKEND="cache"
+    # under TESTING).
+    CELERY_RESULT_BACKEND = "config.celery_result_backend.RedactingDatabaseBackend"
     # Use Django cache for intermediate results
     CELERY_CACHE_BACKEND = "django-cache"
 

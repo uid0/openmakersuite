@@ -29,6 +29,7 @@ from django.utils import timezone as dj_timezone
 
 import paho.mqtt.client as mqtt
 
+from config.observability_redaction import redact
 from forgekey.models import DeviceFirmwareUpdate, ESP32Device, OccupancyEvent
 from forgekey.utils import normalize_mac_address, normalize_sensor_kind
 
@@ -129,7 +130,12 @@ def handle_occupancy_message(topic: str, payload: bytes) -> Optional[OccupancyEv
         count_in=count_in,
         count_out=count_out,
         event_timestamp_utc=event_ts,
-        raw_payload=body,
+        # gh #378: scrub the raw payload before persisting. Devices
+        # occasionally publish unexpected fields (debug auth headers,
+        # provisioning tokens reflected back from a misbehaving firmware
+        # build); redact strips secret-shaped values without dropping the
+        # operator-useful counts that the schema expects.
+        raw_payload=redact(body),
     )
     # Touch last_seen on every observed event so the dashboards reflect that
     # the device is publishing, not just that it last booted.
@@ -267,7 +273,11 @@ def handle_ota_status_message(topic: str, payload: bytes) -> bool:
         update.status = DeviceFirmwareUpdate.STATUS_FAILED
         update.completed_at = dj_timezone.now()
         if error_message:
-            update.error_message = str(error_message)[:2000]
+            # gh #378: device-supplied error text occasionally includes the
+            # signing-key fingerprint that was rejected, or a quoted auth
+            # header. Redact before truncation so the persisted value
+            # never reproduces the credential.
+            update.error_message = redact(str(error_message))[:2000]
     elif status_value in ("cancelled", "canceled"):
         update.status = DeviceFirmwareUpdate.STATUS_CANCELLED
         update.completed_at = dj_timezone.now()

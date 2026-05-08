@@ -1,4 +1,5 @@
 import { H, HighlightOptions } from 'highlight.run';
+import { redactString } from './redact';
 
 export interface HighlightEnvConfig {
   projectId?: string;
@@ -46,9 +47,62 @@ export function initHighlight(
     version: release || undefined,
     serviceName: 'oms-frontend',
     tracingOrigins: true,
+    // gh #378: header + body redaction for the network recording surface.
+    // Mirrors the backend's `_KEY_PATTERNS` in
+    // `config/observability_redaction.py` so the same secret-shaped
+    // names are scrubbed in both directions. The
+    // `requestResponseSanitizer` runs the value-shape pass over any
+    // remaining string content as a safety net for headers/bodies the
+    // key-name lists don't cover.
     networkRecording: {
       enabled: true,
       recordHeadersAndBody: true,
+      networkHeadersToRedact: [
+        'Authorization',
+        'X-Authorization',
+        'Cookie',
+        'Set-Cookie',
+        'X-CSRFToken',
+        'X-CSRF-Token',
+        'X-API-Key',
+        'X-Api-Key',
+        'X-Session-Key',
+        'X-Webhook-Signature',
+        'X-Forgekey-Token',
+      ],
+      networkBodyKeysToRedact: [
+        'token',
+        'access_token',
+        'refresh_token',
+        'id_token',
+        'csrf',
+        'csrf_token',
+        'csrfmiddlewaretoken',
+        'password',
+        'passwd',
+        'pwd',
+        'old_password',
+        'new_password',
+        'secret',
+        'api_key',
+        'api-key',
+        'apiKey',
+        'signing_key',
+        'private_key',
+        'session_key',
+        'bearer',
+        'authorization',
+        'signature',
+      ],
+      requestResponseSanitizer: (pair) => {
+        if (pair?.request?.body && typeof pair.request.body === 'string') {
+          pair.request.body = redactString(pair.request.body);
+        }
+        if (pair?.response?.body && typeof pair.response.body === 'string') {
+          pair.response.body = redactString(pair.response.body);
+        }
+        return pair;
+      },
     },
   };
   if (otlpEndpoint) {

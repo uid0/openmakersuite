@@ -13,6 +13,8 @@ from django.utils import timezone
 import requests
 from celery import shared_task
 
+from config.observability_redaction import redact
+
 logger = logging.getLogger(__name__)
 
 
@@ -127,8 +129,11 @@ def send_webhook_notification(
             )
 
         except requests.exceptions.RequestException as e:
-            # Record failure
-            error_message = str(e)
+            # gh #378: scrub the exception text before logging or storing it.
+            # Request exceptions frequently quote the outbound URL (which may
+            # carry an embedded webhook signing key) or the upstream response
+            # body, either of which can leak credentials.
+            error_message = redact(str(e))
             webhook.record_failure(error_message)
 
             results["failed"].append(
@@ -146,8 +151,8 @@ def send_webhook_notification(
                 raise
 
         except Exception as e:
-            # Catch any other exceptions
-            error_message = f"Unexpected error: {str(e)}"
+            # gh #378: redact before logging — see RequestException branch.
+            error_message = f"Unexpected error: {redact(str(e))}"
             webhook.record_failure(error_message)
 
             results["failed"].append(
@@ -158,7 +163,9 @@ def send_webhook_notification(
                 }
             )
 
-            logger.exception(f"Unexpected error delivering webhook '{webhook.name}': {e}")
+            logger.exception(
+                f"Unexpected error delivering webhook '{webhook.name}': {error_message}"
+            )
 
     return results
 

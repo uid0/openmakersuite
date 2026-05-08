@@ -10,12 +10,12 @@ import { Navigate, useParams } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import DeviceControlsCard from '../components/DeviceControlsCard';
 import {
-import { extractErrorMessage } from '../utils/extractErrorMessage';
   ForgeKeyCommandResponse,
   ForgeKeyDevice,
   ForgeKeyOccupancyResponse,
   forgekeyAPI,
 } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const POLL_INTERVAL_MS = 30_000;
 

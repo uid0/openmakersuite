@@ -8,11 +8,11 @@
  */
 import React, { useEffect, useState } from 'react';
 import {
-import { extractErrorMessage } from '../utils/extractErrorMessage';
   AssetWoStatusDto,
   ComplianceBucket,
   thirdPartyMaintenanceAPI,
 } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface Props {
   assetId: string | null;

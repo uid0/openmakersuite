@@ -16,12 +16,12 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-import { extractErrorMessage } from '../utils/extractErrorMessage';
   ForgeKeyCommandResponse,
   ForgeKeyDevice,
   ForgeKeyDeviceCommand,
   forgekeyAPI,
 } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const ACK_TIMEOUT_MS = 10_000;
 const POLL_INTERVAL_MS = 2_000;

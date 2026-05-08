@@ -8,6 +8,7 @@ import ColorPicker from '../components/ColorPicker';
 import { inventoryAPI } from '../services/api';
 import '../styles/CategoryFormPage.css';
 import { Category } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface CategoryFormData {
   name: string;
@@ -67,7 +68,7 @@ const CategoryFormPage: React.FC = () => {
         setError('Category not found');
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load category');
+      setError(extractErrorMessage(err, 'Failed to load category'));
       console.error('Error loading category:', err);
     } finally {
       setLoading(false);
@@ -130,7 +131,7 @@ const CategoryFormPage: React.FC = () => {
 
       navigate('/inventory/categories');
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to save category');
+      setError(extractErrorMessage(err, 'Failed to save category'));
       console.error('Error saving category:', err);
     } finally {
       setSaving(false);

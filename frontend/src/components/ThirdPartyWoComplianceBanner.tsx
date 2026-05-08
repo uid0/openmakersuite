@@ -8,6 +8,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import {
+import { extractErrorMessage } from '../utils/extractErrorMessage';
   AssetWoStatusDto,
   ComplianceBucket,
   thirdPartyMaintenanceAPI,
@@ -53,7 +54,7 @@ const ThirdPartyWoComplianceBanner: React.FC<Props> = ({ assetId, vendorId }) =>
       })
       .catch((err) => {
         if (!cancelled)
-          setError(err?.response?.data?.detail || 'Failed to load asset status');
+          setError(extractErrorMessage(err, 'Failed to load asset status'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

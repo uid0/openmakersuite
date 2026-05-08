@@ -133,7 +133,7 @@ const WorkOrderPage: React.FC = () => {
       } else {
         notifications.show({
           title: 'Error',
-          message: e.response?.data?.detail || 'Failed to update status.',
+          message: extractErrorMessage(e, 'Failed to update status.'),
           color: 'red',
         });
       }
@@ -175,7 +175,7 @@ const WorkOrderPage: React.FC = () => {
       const e = err as { response?: { data?: { detail?: string } } };
       notifications.show({
         title: 'Validation failed',
-        message: e.response?.data?.detail || 'Could not record validation.',
+        message: extractErrorMessage(e, 'Could not record validation.'),
         color: 'red',
       });
     } finally {

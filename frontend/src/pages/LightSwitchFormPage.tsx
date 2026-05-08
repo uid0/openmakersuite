@@ -22,6 +22,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { electricalCircuitsAPI, inventoryAPI } from '../services/api';
 import { Breaker, Location } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface FormState {
   location: number | null;
@@ -97,7 +98,7 @@ const LightSwitchFormPage: React.FC = () => {
         });
       })
       .catch((err) => {
-        setError(err.response?.data?.detail || 'Failed to load light switch');
+        setError(extractErrorMessage(err, 'Failed to load light switch'));
       })
       .finally(() => setLoading(false));
   }, [id, isEdit]);

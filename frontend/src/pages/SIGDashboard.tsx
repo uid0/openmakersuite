@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom';
 import { assetsAPI, inventoryAPI, reorderAPI, sigAPI } from '../services/api';
 import { Asset, InventoryItem, ReorderRequest, SIG } from '../types';
 import '../styles/SIGDashboard.css';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 type TabType = 'overview' | 'members' | 'assets' | 'inventory' | 'reorders';
 
@@ -90,8 +91,7 @@ const SIGDashboard: React.FC = () => {
       const detail =
         err?.response?.data?.name?.[0] ||
         err?.response?.data?.group_email?.[0] ||
-        err?.response?.data?.detail ||
-        'Failed to create SIG.';
+        extractErrorMessage(err, 'Failed to create SIG.');
       setCreateError(detail);
     } finally {
       setCreating(false);

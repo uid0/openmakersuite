@@ -161,7 +161,7 @@ const MaintenanceItemFormPage: React.FC = () => {
       navigate(`/assets/${assetId}`);
     } catch (err: any) {
       console.error('Error saving maintenance item:', err);
-      setError(err.response?.data?.detail || 'Failed to save maintenance item.');
+      setError(extractErrorMessage(err, 'Failed to save maintenance item.'));
     } finally {
       setSaving(false);
     }

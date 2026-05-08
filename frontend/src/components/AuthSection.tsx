@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { authAPI } from '../services/api';
 import { consumePendingReturnTo } from './SessionExpiredBanner';
 import '../styles/AuthSection.css';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface AuthSectionProps {
   onAuthChange: (isLoggedIn: boolean, username?: string) => void;
@@ -67,7 +68,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
         window.location.assign(returnTo);
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');
+      setError(extractErrorMessage(err, 'Login failed. Please check your credentials.'));
     } finally {
       setLoading(false);
     }
@@ -108,7 +109,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       // Dispatch custom event for NavigationBar
       window.dispatchEvent(new Event('authChange'));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Registration failed. Username may already exist.');
+      setError(extractErrorMessage(err, 'Registration failed. Username may already exist.'));
     } finally {
       setLoading(false);
     }

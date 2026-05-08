@@ -15,6 +15,7 @@ import {
   ReorderDataSupplier,
 } from '../services/api';
 import '../styles/PurchaseOrderFormPage.css';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface SelectedItem extends ReorderDataItem {
   selected: boolean;
@@ -72,7 +73,7 @@ const PurchaseOrderFormPage: React.FC = () => {
       setSuppliers(response.data.suppliers);
     } catch (err: any) {
       console.error('Error loading reorder data:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to load reorder data');
+      setError(extractErrorMessage(err, '') || err.message || 'Failed to load reorder data');
     } finally {
       setLoading(false);
     }
@@ -271,7 +272,7 @@ const PurchaseOrderFormPage: React.FC = () => {
             return;
           }
         } catch (err: any) {
-          setError(err.response?.data?.error || 'Barcode not found');
+          setError(extractErrorMessage(err, 'Barcode not found'));
           setSearchingProduct(false);
           return;
         }
@@ -370,7 +371,7 @@ const PurchaseOrderFormPage: React.FC = () => {
       console.error('Error searching for product:', err);
       // Only show error if this was a manual search (not auto-search)
       if (searchTerm !== undefined || barcode !== undefined) {
-        setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Failed to find product');
+        setError(err.response?.data?.error || extractErrorMessage(err, '') || err.message || 'Failed to find product');
       }
     } finally {
       setSearchingProduct(false);
@@ -487,7 +488,7 @@ const PurchaseOrderFormPage: React.FC = () => {
       navigate(`/purchasing/orders/${orderId}`);
     } catch (err: any) {
       console.error('Error creating purchase order:', err);
-      setError(err.response?.data?.detail || err.response?.data?.error || err.message || 'Failed to create purchase order');
+      setError(extractErrorMessage(err, '') || err.response?.data?.error || err.message || 'Failed to create purchase order');
       setSubmitting(false);
     }
   };

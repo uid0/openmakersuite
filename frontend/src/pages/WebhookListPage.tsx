@@ -21,6 +21,7 @@ import { webhooksAPI } from '../services/api';
 import '../styles/WebhookListPage.css';
 import { Webhook } from '../types';
 import { confirmDelete, showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const EVENT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All Event Types' },
@@ -93,7 +94,7 @@ const WebhookListPage: React.FC = () => {
         await loadWebhooks();
       } catch (err: any) {
         console.error('Error deleting webhook:', err);
-        showError(err.response?.data?.detail || 'Failed to delete webhook');
+        showError(extractErrorMessage(err, 'Failed to delete webhook'));
       }
     });
   };

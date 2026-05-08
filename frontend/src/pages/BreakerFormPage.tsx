@@ -19,6 +19,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { electricalCircuitsAPI, inventoryAPI } from '../services/api';
 import { Location } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface FormState {
   location: number | null;
@@ -87,7 +88,7 @@ const BreakerFormPage: React.FC = () => {
         });
       })
       .catch((err) => {
-        setError(err.response?.data?.detail || 'Failed to load breaker');
+        setError(extractErrorMessage(err, 'Failed to load breaker'));
       })
       .finally(() => setLoading(false));
   }, [id, isEdit]);

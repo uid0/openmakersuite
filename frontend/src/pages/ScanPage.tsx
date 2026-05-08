@@ -11,6 +11,7 @@ import '../styles/ScanPage.css';
 import { Checklist, InventoryItem, ItemSupplier } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { promptInput, showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const ScanPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
@@ -87,7 +88,7 @@ const ScanPage: React.FC = () => {
 
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load item');
+      setError(extractErrorMessage(err, 'Failed to load item'));
       console.error('Error loading item:', err);
     } finally {
       setLoading(false);
@@ -114,7 +115,7 @@ const ScanPage: React.FC = () => {
       const completion = await checklistsAPI.startChecklist(checklistId, userName);
       navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to start checklist');
+      showError(extractErrorMessage(err, 'Failed to start checklist'));
     }
   };
 
@@ -198,7 +199,7 @@ const ScanPage: React.FC = () => {
         navigate('/');
       }, 3000);
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to submit reorder request');
+      showError(extractErrorMessage(err, 'Failed to submit reorder request'));
       console.error('Error submitting reorder:', err);
     } finally {
       setSubmitting(false);

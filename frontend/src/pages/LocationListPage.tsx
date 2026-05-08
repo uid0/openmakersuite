@@ -9,6 +9,7 @@ import { inventoryAPI } from '../services/api';
 import '../styles/LocationListPage.css';
 import { Location } from '../types';
 import { confirmDelete, showError, showSuccess } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const LocationListPage: React.FC = () => {
   const [locations, setLocations] = useState<Location[]>([]);
@@ -24,7 +25,7 @@ const LocationListPage: React.FC = () => {
       setLocations(response.data.results);
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load locations');
+      setError(extractErrorMessage(err, 'Failed to load locations'));
       console.error('Error loading locations:', err);
       // Re-throw to trigger the Highlight error boundary if it's a critical error
       if (!err.response) {
@@ -134,7 +135,7 @@ const LocationListPage: React.FC = () => {
         await inventoryAPI.deleteLocation(id.toString());
         await loadLocations();
       } catch (err: any) {
-        showError(err.response?.data?.detail || 'Failed to delete location');
+        showError(extractErrorMessage(err, 'Failed to delete location'));
       }
     });
   };
@@ -145,7 +146,7 @@ const LocationListPage: React.FC = () => {
       await loadLocations();
       showSuccess('QR code generated successfully');
     } catch (err: any) {
-      showError(err.response?.data?.error || 'Failed to generate QR code');
+      showError(extractErrorMessage(err, 'Failed to generate QR code'));
     }
   };
 

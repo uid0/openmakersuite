@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { assetsAPI } from '../services/api';
 import { Asset } from '../types';
 import '../styles/AssetDetailModal.css';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface AssetDetailModalProps {
   assetId: string | null;
@@ -28,7 +29,7 @@ const AssetDetailModal: React.FC<AssetDetailModalProps> = ({ assetId, isOpen, on
       setAsset(response.data);
     } catch (err: any) {
       console.error('Error loading asset details:', err);
-      setError(err.response?.data?.detail || 'Failed to load asset details');
+      setError(extractErrorMessage(err, 'Failed to load asset details'));
     } finally {
       setLoading(false);
     }

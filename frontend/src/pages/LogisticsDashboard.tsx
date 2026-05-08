@@ -6,6 +6,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import '../styles/LogisticsDashboard.css';
 import { analyticsAPI, customizationAPI, locationCheckinAPI } from '../services/api';
 import { SiteSettings } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface TopLocationRow {
   location_id: number;
@@ -80,7 +81,7 @@ const LogisticsDashboard: React.FC = () => {
       console.error('Failed to load logistics dashboard data', err);
       console.error('Error response:', err.response);
       console.error('Error details:', err.response?.data || err.message);
-      setError(`Unable to load logistics data: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+      setError(`Unable to load logistics data: ${extractErrorMessage(err, '') || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }

@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { locationProblemsAPI } from '../services/api';
 import { LocationProblem, LocationProblemSeverity } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 export interface LocationProblemsPanelProps {
   locationId: string | number;
@@ -38,7 +39,7 @@ const LocationProblemsPanel: React.FC<LocationProblemsPanelProps> = ({
         setProblems(resp.data);
       } catch (err: any) {
         if (cancelled) return;
-        setError(err.response?.data?.detail || 'Failed to load problem reports');
+        setError(extractErrorMessage(err, 'Failed to load problem reports'));
       } finally {
         if (!cancelled) setLoading(false);
       }

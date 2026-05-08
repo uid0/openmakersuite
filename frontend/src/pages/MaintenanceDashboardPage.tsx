@@ -86,7 +86,7 @@ const MaintenanceDashboardPage: React.FC = () => {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err?.response?.data?.detail || 'Failed to load maintenance dashboard.');
+        setError(extractErrorMessage(err, 'Failed to load maintenance dashboard.'));
       })
       .finally(() => {
         if (cancelled) return;

@@ -9,6 +9,7 @@
  */
 import React, { useCallback, useState } from 'react';
 import { makerBoxesAPI, MakerBoxScanResult } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 type FormState = {
   binId: string;
@@ -39,7 +40,7 @@ const MakerBoxScanPage: React.FC = () => {
         const match = rows.find((b) => b.bin_id === response.data.bin_id);
         setBoxId(match ? match.id : null);
       } catch (err: any) {
-        const detail = err?.response?.data?.detail;
+        const detail = extractErrorMessage(err, '');
         setError(detail || 'Scan failed.');
         setResult(null);
         setBoxId(null);
@@ -58,7 +59,7 @@ const MakerBoxScanPage: React.FC = () => {
       const response = await makerBoxesAPI.emailPickup(boxId);
       setEmailSentTo(response.data.to);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Email failed to send.');
+      setError(extractErrorMessage(err, 'Email failed to send.'));
     } finally {
       setEmailSending(false);
     }

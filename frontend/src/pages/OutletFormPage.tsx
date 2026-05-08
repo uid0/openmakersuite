@@ -24,6 +24,7 @@ import {
   OUTLET_TYPE_OPTIONS,
 } from '../services/api';
 import { Breaker, Location, OutletType } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface FormState {
   location: number | null;
@@ -102,7 +103,7 @@ const OutletFormPage: React.FC = () => {
         setExistingPhoto(o.photo);
       })
       .catch((err) => {
-        setError(err.response?.data?.detail || 'Failed to load outlet');
+        setError(extractErrorMessage(err, 'Failed to load outlet'));
       })
       .finally(() => setLoading(false));
   }, [id, isEdit]);

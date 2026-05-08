@@ -10,6 +10,7 @@ import { checklistsAPI, inventoryAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Checklist, ChecklistCompletion, ChecklistStep } from '../types';
 import { confirmAction } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface PendingScan {
   step: ChecklistStep;
@@ -46,7 +47,7 @@ const ChecklistCompletionPage: React.FC = () => {
       setCompletion(completionResponse.data);
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to load checklist');
+      setError(extractErrorMessage(err, 'Failed to load checklist'));
       console.error('Error loading checklist:', err);
     } finally {
       setLoading(false);
@@ -119,7 +120,7 @@ const ChecklistCompletionPage: React.FC = () => {
       // Reload and prompt for completion
       await finalizeScan();
     } catch (err: any) {
-      notifications.showError('Failed to scan code', err.response?.data?.detail);
+      notifications.showError('Failed to scan code', extractErrorMessage(err, ''));
       console.error('Error scanning code:', err);
     } finally {
       setScanning(false);
@@ -143,7 +144,7 @@ const ChecklistCompletionPage: React.FC = () => {
             await loadData();
             notifications.showSuccess('Checklist Completed', 'Checklist completed successfully!');
           } catch (err: any) {
-            notifications.showError('Failed to complete checklist', err.response?.data?.detail);
+            notifications.showError('Failed to complete checklist', extractErrorMessage(err, ''));
             console.error('Error completing checklist:', err);
           }
         },
@@ -184,7 +185,7 @@ const ChecklistCompletionPage: React.FC = () => {
       setPhotoCaption('');
       await finalizeScan();
     } catch (err: any) {
-      notifications.showError('Failed to upload photo', err.response?.data?.detail);
+      notifications.showError('Failed to upload photo', extractErrorMessage(err, ''));
       console.error('Error uploading photo:', err);
     } finally {
       setSubmittingPhoto(false);
@@ -231,7 +232,7 @@ const ChecklistCompletionPage: React.FC = () => {
           await loadData();
           notifications.showSuccess('Checklist Completed', 'Checklist completed successfully!');
         } catch (err: any) {
-          notifications.showError('Failed to complete checklist', err.response?.data?.detail);
+          notifications.showError('Failed to complete checklist', extractErrorMessage(err, ''));
           console.error('Error completing checklist:', err);
         }
       },

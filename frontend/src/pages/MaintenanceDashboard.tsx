@@ -398,7 +398,7 @@ const MaintenanceDashboard: React.FC = () => {
     } catch (err: any) {
       notifications.show({
         title: 'Upload Failed',
-        message: err?.response?.data?.detail || 'Could not upload PDF.',
+        message: extractErrorMessage(err, 'Could not upload PDF.'),
         color: 'red',
       });
     } finally {

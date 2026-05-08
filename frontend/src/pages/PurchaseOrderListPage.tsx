@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderListPage.css';
 import { formatDateOnly } from '../utils/dates';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface PurchaseOrder {
   id: string;
@@ -44,7 +45,7 @@ const PurchaseOrderListPage: React.FC = () => {
         data: err?.response?.data,
         message: err?.message,
       });
-      setError(err.response?.data?.error || err.response?.data?.detail || err.message || 'Failed to load purchase orders');
+      setError(err.response?.data?.error || extractErrorMessage(err, '') || err.message || 'Failed to load purchase orders');
     } finally {
       setLoading(false);
     }

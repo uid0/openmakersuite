@@ -8,6 +8,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { makerBoxesAPI, MakerBox } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const STATUS_BADGE: Record<MakerBox['status'], { label: string; color: string }> = {
   valid: { label: 'Valid', color: '#1f8a3a' },
@@ -32,7 +33,7 @@ const MakerBoxAdminPage: React.FC = () => {
       setBoxes(rows);
       setError(null);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Failed to load maker boxes.');
+      setError(extractErrorMessage(err, 'Failed to load maker boxes.'));
     } finally {
       setLoading(false);
     }
@@ -57,7 +58,7 @@ const MakerBoxAdminPage: React.FC = () => {
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank');
       } catch (err: any) {
-        setError(err?.response?.data?.detail || 'Manual label generation failed.');
+        setError(extractErrorMessage(err, 'Manual label generation failed.'));
       } finally {
         setGenerating(false);
       }

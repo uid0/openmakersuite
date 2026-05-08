@@ -8,6 +8,7 @@ import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderPage.css';
 import { formatDateOnly, formatYmd } from '../utils/dates';
 import { confirmAction, promptInput, showError, showSuccess } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface PurchaseOrderItem {
   id: string;
@@ -99,7 +100,7 @@ const PurchaseOrderPage: React.FC = () => {
       setOrder(response.data);
     } catch (err: any) {
       console.error('Error loading purchase order:', err);
-      setError(err.response?.data?.error || 'Failed to load purchase order');
+      setError(extractErrorMessage(err, 'Failed to load purchase order'));
     } finally {
       setLoading(false);
     }
@@ -164,7 +165,7 @@ const PurchaseOrderPage: React.FC = () => {
       setEditingCostItemId(null);
       setLineCost('');
     } catch (err: any) {
-      showError(err.response?.data?.error || 'Failed to update line cost');
+      showError(extractErrorMessage(err, 'Failed to update line cost'));
       console.error('Error updating line cost:', err);
     } finally {
       setSaving(false);
@@ -181,7 +182,7 @@ const PurchaseOrderPage: React.FC = () => {
       setEditingItemId(null);
       setShipmentDate('');
     } catch (err: any) {
-      showError(err.response?.data?.error || 'Failed to update shipment date');
+      showError(extractErrorMessage(err, 'Failed to update shipment date'));
       console.error('Error updating shipment date:', err);
     } finally {
       setSaving(false);
@@ -205,7 +206,7 @@ const PurchaseOrderPage: React.FC = () => {
           setVoidingItemId(null);
           setVoidReason('');
         } catch (err: any) {
-          showError(err.response?.data?.error || 'Failed to void line item');
+          showError(extractErrorMessage(err, 'Failed to void line item'));
           console.error('Error voiding line item:', err);
         } finally {
           setSaving(false);
@@ -234,7 +235,7 @@ const PurchaseOrderPage: React.FC = () => {
           showSuccess('Purchase order voided');
           await loadOrder();
         } catch (err: any) {
-          showError(err.response?.data?.detail || 'Failed to void purchase order');
+          showError(extractErrorMessage(err, 'Failed to void purchase order'));
           console.error('Error voiding purchase order:', err);
         } finally {
           setSaving(false);
@@ -278,7 +279,7 @@ const PurchaseOrderPage: React.FC = () => {
       await loadOrder();
       handleCancelMarkDelivered();
     } catch (err: any) {
-      showError(err.response?.data?.error || 'Failed to mark purchase order as delivered');
+      showError(extractErrorMessage(err, 'Failed to mark purchase order as delivered'));
       console.error('Error marking delivered:', err);
     } finally {
       setSaving(false);
@@ -315,7 +316,7 @@ const PurchaseOrderPage: React.FC = () => {
       setEditingMetadata(false);
       showSuccess('Purchase order details updated');
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to update purchase order details');
+      showError(extractErrorMessage(err, 'Failed to update purchase order details'));
       console.error('Error updating PO metadata:', err);
     } finally {
       setSaving(false);
@@ -336,7 +337,7 @@ const PurchaseOrderPage: React.FC = () => {
       setAttachmentDescription('');
       showSuccess('Attachment uploaded');
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to upload attachment');
+      showError(extractErrorMessage(err, 'Failed to upload attachment'));
       console.error('Error uploading attachment:', err);
     } finally {
       setUploadingAttachment(false);
@@ -354,7 +355,7 @@ const PurchaseOrderPage: React.FC = () => {
           await loadOrder();
           showSuccess('Attachment deleted');
         } catch (err: any) {
-          showError(err.response?.data?.detail || 'Failed to delete attachment');
+          showError(extractErrorMessage(err, 'Failed to delete attachment'));
           console.error('Error deleting attachment:', err);
         } finally {
           setSaving(false);

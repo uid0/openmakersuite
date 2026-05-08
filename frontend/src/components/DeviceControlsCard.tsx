@@ -16,6 +16,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+import { extractErrorMessage } from '../utils/extractErrorMessage';
   ForgeKeyCommandResponse,
   ForgeKeyDevice,
   ForgeKeyDeviceCommand,
@@ -115,7 +116,7 @@ const DeviceControlsCard: React.FC<DeviceControlsCardProps> = ({ device }) => {
       return response.data.results;
     } catch (err) {
       const detail =
-        (err as any)?.response?.data?.detail || 'Failed to load recent commands.';
+        extractErrorMessage(err, 'Failed to load recent commands.');
       setHistoryError(detail);
       return null;
     }
@@ -223,7 +224,7 @@ const DeviceControlsCard: React.FC<DeviceControlsCardProps> = ({ device }) => {
         refreshHistory();
       } catch (err) {
         const detail =
-          (err as any)?.response?.data?.detail || 'Command failed.';
+          extractErrorMessage(err, 'Command failed.');
         setInFlight((prev) => ({
           ...prev,
           [def.key]: { pending: false, pendingCommandId: null, error: detail },

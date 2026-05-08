@@ -46,6 +46,7 @@ import {
   Outlet,
 } from '../types';
 import { confirmDelete, showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 type ActiveTab = 'breakers' | 'outlets' | 'switches' | 'drops';
 
@@ -104,7 +105,7 @@ const ElectricalCircuitsPage: React.FC = () => {
         setDrops(response.data.results);
       }
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to load records');
+      showError(extractErrorMessage(err, 'Failed to load records'));
     } finally {
       setLoading(false);
     }
@@ -120,7 +121,7 @@ const ElectricalCircuitsPage: React.FC = () => {
         await electricalCircuitsAPI.deleteBreaker(breaker.id);
         await reload();
       } catch (err: any) {
-        showError(err.response?.data?.detail || 'Failed to delete breaker');
+        showError(extractErrorMessage(err, 'Failed to delete breaker'));
       }
     });
   };
@@ -131,7 +132,7 @@ const ElectricalCircuitsPage: React.FC = () => {
         await electricalCircuitsAPI.deleteOutlet(outlet.id);
         await reload();
       } catch (err: any) {
-        showError(err.response?.data?.detail || 'Failed to delete outlet');
+        showError(extractErrorMessage(err, 'Failed to delete outlet'));
       }
     });
   };
@@ -142,7 +143,7 @@ const ElectricalCircuitsPage: React.FC = () => {
         await electricalCircuitsAPI.deleteLightSwitch(sw.id);
         await reload();
       } catch (err: any) {
-        showError(err.response?.data?.detail || 'Failed to delete light switch');
+        showError(extractErrorMessage(err, 'Failed to delete light switch'));
       }
     });
   };
@@ -153,7 +154,7 @@ const ElectricalCircuitsPage: React.FC = () => {
         await electricalCircuitsAPI.deleteNetworkDrop(drop.id);
         await reload();
       } catch (err: any) {
-        showError(err.response?.data?.detail || 'Failed to delete network drop');
+        showError(extractErrorMessage(err, 'Failed to delete network drop'));
       }
     });
   };

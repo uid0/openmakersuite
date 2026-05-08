@@ -397,8 +397,7 @@ class TestDeploymentArtifactsAC36:
             "causes restart loops on transient DB blips. Use livez/readyz."
         )
         assert "/api/health/livez/" in text, (
-            "Backend liveness probe must hit /api/health/livez/ "
-            "(dep-free up-check)."
+            "Backend liveness probe must hit /api/health/livez/ " "(dep-free up-check)."
         )
         assert "/api/health/readyz/" in text, (
             "Backend readiness probe must hit /api/health/readyz/ "
@@ -418,12 +417,12 @@ class TestDeploymentArtifactsAC36:
             "probes to /api/dashboard/health/ — see test_k8s_backend_uses_"
             "livez_readyz_probes for the rationale."
         )
-        assert "/api/health/livez/" in text, (
-            "Helm backend liveness default must be /api/health/livez/."
-        )
-        assert "/api/health/readyz/" in text, (
-            "Helm backend readiness default must be /api/health/readyz/."
-        )
+        assert (
+            "/api/health/livez/" in text
+        ), "Helm backend liveness default must be /api/health/livez/."
+        assert (
+            "/api/health/readyz/" in text
+        ), "Helm backend readiness default must be /api/health/readyz/."
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")

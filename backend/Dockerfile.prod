@@ -28,8 +28,11 @@ COPY . /app/
 # Ensure entrypoint script is executable
 RUN chmod +x /app/docker-entrypoint.sh
 
-# Create directories for static and media files
-RUN mkdir -p /app/staticfiles /app/media
+# Create directories for static, media, and Celery beat state. The beat
+# scheduler shelves last_run_at to /app/.beat-state/celerybeat-schedule so
+# the quarterly donor task survives container restarts; docker-compose
+# mounts a named volume here for the celery_beat service.
+RUN mkdir -p /app/staticfiles /app/media /app/.beat-state
 
 # Collect static files
 RUN python manage.py collectstatic --noinput || true

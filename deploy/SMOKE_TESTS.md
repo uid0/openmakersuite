@@ -141,7 +141,7 @@ For Docker Compose:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T redis redis-cli ping
-docker compose -f docker-compose.prod.yml exec -T celery_worker \
+docker compose -f docker-compose.prod.yml exec -T celery \
     celery -A config inspect ping
 ```
 
@@ -228,29 +228,53 @@ restored items must lookup-resolve identically to before the restore.
 ## 10. Scheduled tasks (Celery beat)
 
 Celery beat ships scheduled work for donation updates, vendor compliance
-checks, and retention cleanups. Verify the scheduler registered the entries
-the code expects:
+checks, and ForgeKey photo retention cleanup. The bundled
+`docker-compose.prod.yml` runs a dedicated `celery_beat` service alongside
+the worker; verify both that the scheduler is alive and that the worker
+has registered the entries the code expects.
+
+> The bundled `deploy/k8s/base` and `deploy/helm/openmakersuite` charts do
+> **not** include a beat Deployment yet. On those paths the scheduled
+> tasks below will not fire until you add one (mirror the celery worker
+> Deployment, swap `worker` for `beat -l info`, and pin replicas to 1).
+> The Compose path is the supported path for scheduled work today.
 
 ```bash
-# Bundled / k8s
-kubectl -n openmakersuite exec deploy/oms-celery -- \
+# Docker Compose — supported path
+docker compose -f docker-compose.prod.yml ps celery_beat
+docker compose -f docker-compose.prod.yml logs --tail=20 celery_beat \
+    | grep -E 'beat:.*Starting|Scheduler:'
+docker compose -f docker-compose.prod.yml exec -T celery \
     celery -A config inspect scheduled
-kubectl -n openmakersuite exec deploy/oms-celery -- \
-    celery -A config inspect registered | grep -E '(donation|vendor|retention|cleanup)'
+docker compose -f docker-compose.prod.yml exec -T celery \
+    celery -A config inspect registered \
+    | grep -E '(send_quarterly_donor_updates|flag_expiring_compliance|prune_device_photos)'
 
-# Docker Compose
-docker compose -f docker-compose.prod.yml exec -T celery_worker \
-    celery -A config inspect scheduled
-docker compose -f docker-compose.prod.yml exec -T celery_worker \
-    celery -A config inspect registered | grep -E '(donation|vendor|retention|cleanup)'
+# k8s (worker only — registered task list is still meaningful even
+# without beat, because every periodic task is also a regular
+# @shared_task that .delay() calls or replays exercise):
+kubectl -n openmakersuite exec deploy/oms-celery -- \
+    celery -A config inspect registered \
+    | grep -E '(send_quarterly_donor_updates|flag_expiring_compliance|prune_device_photos)'
 ```
 
-- **Pass:** `inspect registered` lists at least the donation, vendor, and
-  retention task names; `inspect scheduled` returns OK (an empty list is
-  fine — it just means none are due in the next interval).
-- **Fail modes:** `inspect` errors out → broker URL or worker config is
-  wrong (see #6); the registered set is missing an expected task →
-  `CELERY_BEAT_SCHEDULE` regression in `backend/config/settings.py`.
+- **Pass:** `celery_beat` is `running`; recent logs include
+  `beat: Starting...` and a `Scheduler:` line with no traceback after it;
+  `inspect registered` lists every scheduled task name; `inspect scheduled`
+  returns OK (an empty list is fine — it just means none are due in the
+  next inspect window).
+- **Fail modes:**
+  - `celery_beat` not running → check `docker compose logs celery_beat`
+    for an import error in `CELERY_BEAT_SCHEDULE` or a broker connect
+    failure.
+  - `inspect` errors out → broker URL or worker config is wrong (see #6).
+  - The registered set is missing an expected task → `CELERY_BEAT_SCHEDULE`
+    regression in `backend/config/settings.py`; the unit test in
+    `backend/config/tests/test_celery_schedule.py` should have caught
+    this in CI.
+  - Two beat containers found → split-brain. A second scheduler against
+    the same broker double-fires every periodic task. Stop one
+    immediately (`docker compose stop celery_beat` on the duplicate).
 
 ## 11. EMQX / MQTT broker
 

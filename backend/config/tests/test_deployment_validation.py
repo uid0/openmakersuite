@@ -381,6 +381,50 @@ class TestDeploymentArtifactsAC36:
             "90-day donor task can drift indefinitely on weekly redeploys."
         )
 
+    def test_k8s_backend_uses_livez_readyz_probes(self):
+        """AC-11/AC-12/AC-33: the raw k8s manifests must probe livez (live)
+        and readyz (ready), not the legacy /api/dashboard/health/ path.
+
+        livez is dep-free so a slow DB can't cause restart loops; readyz
+        503s on dependency failure so kubelet sheds traffic without
+        flapping the pod. Drift back to /api/dashboard/health/ recreates
+        the failure mode behind github #329 / #375.
+        """
+        text = (REPO_ROOT / "deploy" / "k8s" / "base" / "backend-deployment.yaml").read_text()
+        assert "/api/dashboard/health/" not in text, (
+            "deploy/k8s/base/backend-deployment.yaml must not probe "
+            "/api/dashboard/health/ — that path executes a DB query and "
+            "causes restart loops on transient DB blips. Use livez/readyz."
+        )
+        assert "/api/health/livez/" in text, (
+            "Backend liveness probe must hit /api/health/livez/ "
+            "(dep-free up-check)."
+        )
+        assert "/api/health/readyz/" in text, (
+            "Backend readiness probe must hit /api/health/readyz/ "
+            "(checks DB + cache + broker; 503s on failure)."
+        )
+
+    def test_helm_backend_uses_livez_readyz_probes(self):
+        """AC-11/AC-12/AC-33: Helm chart defaults must match the k8s + compose
+        liveness/readiness contract (livez for liveness, readyz for readiness).
+
+        Operators can override per-environment in values, but the shipped
+        defaults must not drift back to /api/dashboard/health/.
+        """
+        text = (REPO_ROOT / "deploy" / "helm" / "openmakersuite" / "values.yaml").read_text()
+        assert "/api/dashboard/health/" not in text, (
+            "deploy/helm/openmakersuite/values.yaml must not default backend "
+            "probes to /api/dashboard/health/ — see test_k8s_backend_uses_"
+            "livez_readyz_probes for the rationale."
+        )
+        assert "/api/health/livez/" in text, (
+            "Helm backend liveness default must be /api/health/livez/."
+        )
+        assert "/api/health/readyz/" in text, (
+            "Helm backend readiness default must be /api/health/readyz/."
+        )
+
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
 def test_validator_handles_quoted_values(tmp_path):

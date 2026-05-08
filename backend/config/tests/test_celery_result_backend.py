@@ -81,10 +81,7 @@ class TestRedactResult:
             "exc_module": "requests.exceptions",
         }
         scrubbed = _redact_result(prepared)
-        assert (
-            "abcdef0123456789ABCDEFabcdef0123456789ABCDEF"
-            not in scrubbed["exc_message"]
-        )
+        assert "abcdef0123456789ABCDEFabcdef0123456789ABCDEF" not in scrubbed["exc_message"]
         assert "401 for url" in scrubbed["exc_message"]
         assert scrubbed["exc_type"] == "RequestException"
 

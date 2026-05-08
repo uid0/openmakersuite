@@ -152,9 +152,7 @@ class TestMqttConsumer:
                 dispatch_message("forgekey/aabbccddeeff/people_counter/occupancy", b"{}")
         assert any("Unhandled error" in r.message for r in caplog.records)
 
-    def test_handle_occupancy_message_redacts_secret_shaped_payload_keys(
-        self, settings
-    ):
+    def test_handle_occupancy_message_redacts_secret_shaped_payload_keys(self, settings):
         """gh #378: payload keys that match the redactor's sensitive-name
         list are scrubbed before they hit OccupancyEvent.raw_payload."""
         settings.MQTT_TOPIC_PREFIX = "forgekey"

@@ -74,8 +74,7 @@ class TestWebHookModel(TestCase):
     def test_record_failure_redacts_bearer_token(self):
         """gh #378: Bearer tokens in error text must not survive to last_error."""
         msg = (
-            "401 Unauthorized: rejected "
-            "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"
+            "401 Unauthorized: rejected " "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"
         )
         self.webhook.record_failure(msg)
         self.webhook.refresh_from_db()

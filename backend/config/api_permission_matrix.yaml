@@ -82,12 +82,12 @@ views:
   dashboard.views.dashboard_health:
     permission_classes:
     - <default>
-  dashboard.views.get_audit_feed:
-    permission_classes:
-    - IsAdminUser
   dashboard.views.get_asset_problems_data:
     permission_classes:
     - IsAuthenticated
+  dashboard.views.get_audit_feed:
+    permission_classes:
+    - IsAdminUser
   dashboard.views.get_dashboard_config:
     permission_classes:
     - IsAuthenticated
@@ -1094,43 +1094,43 @@ views:
         - IsAuthenticated
       apply_pending_changes:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       complete_task:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       create:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       destroy:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       discard_pending_changes:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       list:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       partial_update:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       pdf:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       retrieve:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       toggle_material:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       update:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       upload_pdf:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
       validate_checklist:
         permission_classes:
-        - IsAuthenticated
+        - IsAuthenticatedOrStaffSigAdminWrite
   inventory.views.lookup_by_code:
     permission_classes:
     - AllowAny
@@ -1288,174 +1288,174 @@ views:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
   maintenance_orders.views.EmergencyAuthorizationViewSet:
     actions:
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
   maintenance_orders.views.RecoveryTaskViewSet:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
   maintenance_orders.views.ThirdPartyWorkOrderAssetViewSet:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
   maintenance_orders.views.ThirdPartyWorkOrderAttachmentViewSet:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
   maintenance_orders.views.ThirdPartyWorkOrderAuditLogViewSet:
     actions:
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
   maintenance_orders.views.ThirdPartyWorkOrderQuoteViewSet:
     actions:
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
   maintenance_orders.views.ThirdPartyWorkOrderViewSet:
     actions:
       advance_to_financial_review:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       advance_to_scheduled:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       advance_to_sourcing:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       audit_log:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       authorize_emergency:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       close:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       create:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       destroy:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       override_variance:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       partial_update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       record_keyfob_return:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       set_nte:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       sign_off:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       update:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       vendor_arrived:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
       waive_quote_requirement:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStaffOrSigAdmin
   maintenance_orders.views.asset_wo_status:
     permission_classes:
     - IsAuthenticated

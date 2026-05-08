@@ -174,3 +174,27 @@ def can_create_reorder_request(user, item):
 
     # SIG admins can create reorder requests for their SIG's inventory
     return is_sig_admin(user, item.owning_group)
+
+
+def is_staff_or_sig_admin(user) -> bool:
+    """Return True if the user is staff/superuser/Logistics or a SIG admin
+    of any SIG.
+
+    Used to gate maintenance work order writes (gh #374): the operator-set
+    rule is that staff and SIG leaders can add or modify work orders, while
+    other volunteers can only read non-third-party work orders. Logistics
+    has staff-equivalent reach in this codebase, so it is included alongside
+    staff for parity with `can_manage_sig_asset` / `can_manage_sig_inventory`.
+
+    Note: this is intentionally a *role* check, not a per-asset/per-SIG
+    check. A SIG admin may modify any work order, not just those owned by
+    their SIG. If finer scoping is needed later, extend the workflow
+    transitions in `maintenance_orders.transitions`.
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+    if is_logistics_member(user):
+        return True
+    return get_user_managed_sigs(user).exists()

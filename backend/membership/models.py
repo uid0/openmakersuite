@@ -383,3 +383,137 @@ class UserRegistrationToken(models.Model):
         """Get the registration URL for this token."""
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         return f"{frontend_url}/register/{self.token}"
+
+
+class Certification(models.Model):
+    """A skill / equipment certification a member can hold (gh #374 follow-up,
+    ForgeKey locker/door access).
+
+    Certifications gate access to assets, lockers, and rooms whose owning
+    SIG requires demonstrated competency before an unlock command will be
+    issued. The model is intentionally light: name, owning SIG, optional
+    description, active flag. Per-user grants live in ``UserCertification``
+    so revocation history is preserved.
+    """
+
+    name = models.CharField(
+        max_length=120,
+        unique=True,
+        help_text="Human-readable certification name (e.g. 'Laser cutter operator').",
+    )
+    slug = models.SlugField(
+        max_length=120,
+        unique=True,
+        help_text="Stable identifier used by code (e.g. devices referencing required certs).",
+    )
+    sig = models.ForeignKey(
+        Group,
+        on_delete=models.PROTECT,
+        related_name="certifications",
+        help_text=(
+            "SIG (Group) that owns this certification. SIG admins of this "
+            "group can grant + revoke per-user grants."
+        ),
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Optional notes — what the cert covers, prerequisites, etc.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive certifications stop gating access but stay on user records.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sig__name", "name"]
+        indexes = [
+            models.Index(fields=["sig", "is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.sig.name})"
+
+
+class UserCertification(models.Model):
+    """A per-user grant of a `Certification`.
+
+    A user is *currently* certified iff a matching row exists with
+    ``revoked_at`` null and the parent ``Certification.is_active`` is true.
+    Revocation is non-destructive: rows stay for audit history.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="certifications",
+        help_text="User who holds this certification.",
+    )
+    certification = models.ForeignKey(
+        Certification,
+        on_delete=models.PROTECT,
+        related_name="user_grants",
+        help_text="Which certification was granted.",
+    )
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="certifications_granted",
+        help_text="Staff or SIG admin who granted this certification.",
+    )
+    granted_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this grant was revoked. Null = currently active.",
+    )
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="certifications_revoked",
+        help_text="Staff or SIG admin who revoked this certification.",
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Optional grant/revoke context (training date, evaluator, etc.).",
+    )
+
+    class Meta:
+        ordering = ["-granted_at"]
+        indexes = [
+            models.Index(fields=["user", "certification", "revoked_at"]),
+            models.Index(fields=["certification", "revoked_at"]),
+        ]
+        constraints = [
+            # A given (user, certification) pair can have at most one
+            # *active* grant at a time. Multiple historical revoked rows are
+            # fine — that's the audit trail.
+            models.UniqueConstraint(
+                fields=["user", "certification"],
+                condition=models.Q(revoked_at__isnull=True),
+                name="unique_active_user_certification",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        status = "active" if self.revoked_at is None else "revoked"
+        return f"{self.user} → {self.certification} ({status})"
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None and self.certification.is_active
+
+    def revoke(self, *, by, when=None, notes: str = "") -> None:
+        """Mark this grant as revoked. Idempotent on already-revoked rows."""
+        if self.revoked_at is not None:
+            return
+        self.revoked_at = when or timezone.now()
+        self.revoked_by = by
+        if notes:
+            self.notes = (self.notes + "\n" if self.notes else "") + notes
+        self.save(update_fields=["revoked_at", "revoked_by", "notes"])

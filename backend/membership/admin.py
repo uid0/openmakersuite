@@ -14,7 +14,13 @@ from django.utils.html import format_html
 
 from inventory.services.qr_code_service import QRCodeService
 
-from .models import Membership, SIGAdmin, UserRegistrationToken
+from .models import (
+    Certification,
+    Membership,
+    SIGAdmin,
+    UserCertification,
+    UserRegistrationToken,
+)
 
 User = get_user_model()
 
@@ -505,3 +511,37 @@ class UserRegistrationTokenAdmin(admin.ModelAdmin):
                 qr_url,
             )
         return format_html('<span style="color: gray;">Token is not active</span>')
+
+
+@admin.register(Certification)
+class CertificationAdmin(admin.ModelAdmin):
+    list_display = ("name", "sig", "is_active", "created_at")
+    list_filter = ("is_active", "sig")
+    search_fields = ("name", "slug", "description")
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ("created_at", "updated_at")
+    ordering = ("sig__name", "name")
+
+
+@admin.register(UserCertification)
+class UserCertificationAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "certification",
+        "granted_at",
+        "revoked_at",
+        "granted_by",
+        "revoked_by",
+    )
+    list_filter = (
+        ("revoked_at", admin.EmptyFieldListFilter),
+        "certification__sig",
+    )
+    search_fields = (
+        "user__username",
+        "user__email",
+        "certification__name",
+    )
+    autocomplete_fields = ("user", "certification", "granted_by", "revoked_by")
+    readonly_fields = ("granted_at",)
+    ordering = ("-granted_at",)

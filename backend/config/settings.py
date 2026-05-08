@@ -401,6 +401,18 @@ CELERY_BEAT_SCHEDULE = {
             "retention_days": config("FORGEKEY_PHOTO_RETENTION_DAYS", default=30, cast=int),
         },
     },
+    "lockers-invalidate-expired-otps": {
+        "task": "lockers.tasks.invalidate_expired_otps",
+        # Every 15 min — OTPs default to a 60min TTL, so this keeps the
+        # active-OTP set bounded without excess churn on the row.
+        "schedule": 900.0,
+    },
+    "lockers-flag-propped-doors": {
+        "task": "lockers.tasks.flag_propped_doors",
+        # Every 5 min — matches the default propped-door threshold so a
+        # locker won't sit unflagged longer than ~10 min worst-case.
+        "schedule": 300.0,
+    },
 }
 
 # MQTT Configuration for ForgeKey

@@ -30,6 +30,14 @@ EXPECTED_BEAT_SCHEDULE = {
         "forgekey.tasks.prune_device_photos",
         86400.0,  # 1 day
     ),
+    "lockers-invalidate-expired-otps": (
+        "lockers.tasks.invalidate_expired_otps",
+        900.0,  # 15 min
+    ),
+    "lockers-flag-propped-doors": (
+        "lockers.tasks.flag_propped_doors",
+        300.0,  # 5 min
+    ),
 }
 
 

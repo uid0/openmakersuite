@@ -3,8 +3,23 @@
 The ForgeKey Django backend exposes `POST /api/forgekey/mqtt-webhook/`,
 which receives every published MQTT message that EMQX is configured to
 forward and dispatches it to the matching Celery processor task. This is
-the production ingest path for device telemetry — it removes the need
-for a long-running `mqtt_consumer` management command.
+**one of two** production ingest paths for device telemetry; the other
+is the long-running `mqtt_consumer` management command (run as the
+`mqtt_consumer` service in `docker-compose.prod.yml`, see the role table
+in `COMPOSE_RUNBOOK.md`).
+
+Pick exactly one. Running both at the same time will double-process
+every device message — `ESP32Device.last_seen` updates remain
+idempotent, but `PowerMeterReading` and `OccupancyEvent` rows are
+append-only and will duplicate. Choose:
+
+- **Webhook bridge (this doc)** when EMQX is the system of record and
+  you want the OMS backend to be a passive HTTP receiver. Requires EMQX
+  rule + connector configuration.
+- **`mqtt_consumer` service** when you want OMS to maintain its own
+  MQTT subscription with the JWT-authenticated server identity (oms-y5p)
+  and don't want to provision EMQX rules. Simpler operationally for a
+  single-replica deployment.
 
 ## Required Django settings
 

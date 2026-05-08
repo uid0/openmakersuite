@@ -13,11 +13,16 @@ so the two trust roots can be rotated independently.
 from __future__ import annotations
 
 import base64
+import json
+import time
 
 from django.conf import settings
 
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import (
+    decode_dss_signature,
+)
 
 
 class JwtSigningError(Exception):
@@ -113,6 +118,52 @@ def generate_jwt_signing_keypair() -> tuple[str, str]:
     return private_pem, public_pem
 
 
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def make_command_jwt(*, mac: str, cmd: str, exp_seconds: int = 60) -> str:
+    """Sign a short-TTL command JWT for a ForgeKey device.
+
+    The JWT is the credential the firmware verifies before acting on a
+    `forgekey/<mac>/cmd` MQTT message — used by the locker / door /
+    electronic-device pipeline (gh ForgeKey expansion, Phase 1).
+
+    Payload shape: ``{"mac": ..., "cmd": ..., "exp": <unix-seconds>}``.
+    Signed with ES256 using the same key that backs EMQX device-auth
+    JWTs, so firmware only carries one public-key trust root.
+
+    `exp_seconds` defaults to 60 — the TTL must be short enough that a
+    captured command can't be replayed minutes later. Caller is
+    responsible for picking a value compatible with their NTP-sync
+    posture; values above 300 are intentionally allowed but should be
+    rare and audited.
+    """
+    if exp_seconds <= 0:
+        raise ValueError("exp_seconds must be positive")
+
+    key = load_jwt_signing_key()
+    kid = getattr(settings, "FORGEKEY_JWT_KEY_ID", "forgekey-jwt-1")
+    header = {"alg": "ES256", "typ": "JWT", "kid": kid}
+    payload = {
+        "mac": mac,
+        "cmd": cmd,
+        "exp": int(time.time()) + exp_seconds,
+    }
+
+    header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+
+    der_signature = key.sign(signing_input, ec.ECDSA(hashes.SHA256()))
+    # ES256 wants r || s as 32-byte big-endian halves, not the DER
+    # encoding produced by `cryptography`.
+    r, s = decode_dss_signature(der_signature)
+    signature = r.to_bytes(32, "big") + s.to_bytes(32, "big")
+    signature_b64 = _b64url_encode(signature)
+    return f"{header_b64}.{payload_b64}.{signature_b64}"
+
+
 __all__ = (
     "JwtSigningError",
     "generate_jwt_signing_keypair",
@@ -120,4 +171,5 @@ __all__ = (
     "get_jwt_public_key_pem",
     "is_jwt_signing_configured",
     "load_jwt_signing_key",
+    "make_command_jwt",
 )

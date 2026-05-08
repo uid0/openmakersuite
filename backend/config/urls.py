@@ -39,6 +39,7 @@ urlpatterns = [
     path("api/index-cards/", include("index_cards.urls")),
     path("api/dashboard/", include("dashboard.urls")),
     path("api/forgekey/", include("forgekey.urls")),
+    path("api/lockers/", include("lockers.urls")),
     path("api/customization/", include("customization.urls")),
     path("api/location-checkins/", include("location_checkins.urls")),
     path("api/checklists/", include("checklists.urls")),

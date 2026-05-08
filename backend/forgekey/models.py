@@ -37,6 +37,14 @@ class DeviceType(models.Model):
     TYPE_PEOPLE_COUNTER = "people_counter"
     TYPE_ENV_SENSOR = "env_sensor"
     TYPE_DOOR_COUNTER = "door_counter"
+    # Locker / door / electronic-device controllers (gh ForgeKey expansion).
+    TYPE_LOCKER_LATCH = "locker_latch"
+    TYPE_DOOR_LATCH = "door_latch"
+    TYPE_OTP_KEYPAD = "otp_keypad"
+    TYPE_LED_STRIP = "led_strip"
+    TYPE_REED_SWITCH = "reed_switch"
+    TYPE_IR_BREAK = "ir_break"
+    TYPE_MORTISE_KEY = "mortise_key"
 
     TYPE_CHOICES = [
         (TYPE_INDICATOR, "Indicator/Status Light"),
@@ -51,6 +59,13 @@ class DeviceType(models.Model):
         (TYPE_PEOPLE_COUNTER, "People Counter"),
         (TYPE_ENV_SENSOR, "Environmental Sensor"),
         (TYPE_DOOR_COUNTER, "Door Counter"),
+        (TYPE_LOCKER_LATCH, "Locker latch controller"),
+        (TYPE_DOOR_LATCH, "Door latch controller"),
+        (TYPE_OTP_KEYPAD, "OTP keypad"),
+        (TYPE_LED_STRIP, "WS2818 LED strip controller"),
+        (TYPE_REED_SWITCH, "Door reed switch"),
+        (TYPE_IR_BREAK, "Inventory IR-break sensor"),
+        (TYPE_MORTISE_KEY, "Mortise key (admin override) sensor"),
     ]
 
     name = models.CharField(max_length=50, unique=True, help_text="Device type name")

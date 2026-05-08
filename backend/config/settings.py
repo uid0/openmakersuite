@@ -95,6 +95,7 @@ INSTALLED_APPS = [
     "electrical_circuits",
     "devices",
     "loto",
+    "lockers",
 ]
 
 MIDDLEWARE = [

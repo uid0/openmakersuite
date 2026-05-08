@@ -115,9 +115,7 @@ class TestWorkOrderViewSetPermissions:
 
     def test_sig_admin_can_create(self):
         user = _user("sigleader")
-        SIGAdmin.objects.create(
-            user=user, group=Group.objects.create(name="3D Printing SIG")
-        )
+        SIGAdmin.objects.create(user=user, group=Group.objects.create(name="3D Printing SIG"))
         resp = self._client(user).post(
             "/api/inventory/work-orders/",
             data=_wo_payload(),

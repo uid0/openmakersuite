@@ -6,6 +6,9 @@
 # drifts from the actual URL conf — update both the YAML and the
 # Markdown matrix in the same PR that changes permission_classes.
 views:
+  analytics.views.AnalyticsPulseView:
+    permission_classes:
+    - IsAnalyticsViewer
   auth_views.create_test_membership:
     permission_classes:
     - AllowAny
@@ -666,6 +669,9 @@ views:
       lock:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      log_hours:
+        permission_classes:
+        - IsStaffOrSigAdmin
       maintenance_items:
         permission_classes:
         - AllowAny

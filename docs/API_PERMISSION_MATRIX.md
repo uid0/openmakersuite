@@ -92,6 +92,7 @@ below are public.
 | GET  | `inventory/work-orders/...` | member | `IsAuthenticatedOrStaffSigAdminWrite` on `WorkOrderViewSet` — any authenticated user can read open + completed standard PM work orders (gh #374). |
 | POST/PATCH/PUT/DELETE | `inventory/work-orders/...` | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` denies writes to volunteers; staff and SIG leaders may add or modify (gh #374). |
 | any  | `inventory/maintenance-*` (CRUD) | member-rw | `IsAuthenticated` for log/task/dashboard; `IsAuthenticatedOrReadOnly` for material catalog. |
+| POST | `inventory/assets/<id>/log-hours/` | staff-or-sig-admin | `IsStaffOrSigAdmin` — atomically increments `Asset.hours_used` for utilization metrics + maintenance forecast. |
 
 ## Membership (`/api/membership/`)
 
@@ -262,6 +263,17 @@ below are public.
 | any | `electrical-circuits/network-drops/...` | member | Inventory of network drops. |
 | GET | `electrical-circuits/reports/panel-directory.pdf` | member | Printable panel directory PDF. |
 | GET | `electrical-circuits/reports/network-drop-list.pdf` | member | Printable network drop list PDF. |
+
+## Analytics (`/api/analytics/`)
+
+Read-only aggregate metrics for the executive dashboard and the monthly
+board email. The aggregation layer reads completed `WorkOrder`s, closed
+`ThirdPartyWorkOrder`s, and `Asset.hours_used` to expose ROI, utilization,
+category spend, and a maintenance forecast.
+
+| Method | Path | Class | Purpose | Notes |
+| --- | --- | --- | --- | --- |
+| GET | `analytics/pulse/` | staff-or-sig-admin | `IsAnalyticsViewer` — returns the full aggregate JSON used by both the dashboard and the monthly email. | 60-min django-redis cache keyed by `(start, end, bucket)`. PR2 will add a signed-URL bypass for board members without OMS accounts. |
 
 ## Flower (Celery monitoring)
 

@@ -25,7 +25,7 @@ from rest_framework.permissions import (
 from rest_framework.response import Response
 
 from config.api_errors import ErrorCode, error_response
-from membership.permissions import IsAuthenticatedOrStaffSigAdminWrite
+from membership.permissions import IsAuthenticatedOrStaffSigAdminWrite, IsStaffOrSigAdmin
 
 from .audit import record_event as record_maintenance_audit_event
 from .models import (
@@ -2062,6 +2062,40 @@ class AssetViewSet(viewsets.ModelViewSet):
 
         serializer = AssetProblemSerializer(problem, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="log-hours",
+        permission_classes=[IsStaffOrSigAdmin],
+    )
+    def log_hours(self, request, pk=None):
+        """Atomically add operating hours to ``Asset.hours_used``.
+
+        Body: ``{"hours": <positive int>}``. Used to feed analytics
+        utilization metrics and the maintenance forecast (gh #analytics).
+        Restricted to staff / SIG admins.
+        """
+        try:
+            increment = int(request.data.get("hours"))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "hours must be an integer"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if increment <= 0:
+            return Response(
+                {"detail": "hours must be positive"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        asset = self.get_object()
+        Asset.objects.filter(pk=asset.pk).update(hours_used=F("hours_used") + increment)
+        asset.refresh_from_db(fields=["hours_used"])
+        return Response(
+            {"asset_id": str(asset.id), "hours_used": asset.hours_used},
+            status=status.HTTP_200_OK,
+        )
 
 
 class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):

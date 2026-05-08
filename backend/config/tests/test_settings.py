@@ -10,7 +10,7 @@ class TestAllowedHostsLoopback:
     """Loopback addresses must always be permitted regardless of env value.
 
     Container healthchecks (docker-compose.prod.yml) probe
-    http://localhost:8000/api/dashboard/health/. If ALLOWED_HOSTS is supplied
+    http://localhost:8000/api/health/livez/. If ALLOWED_HOSTS is supplied
     via env without 'localhost', Django raises DisallowedHost on every probe
     and floods the logs (oms-ujj).
     """

@@ -43,11 +43,17 @@ backend:
   service:
     type: ClusterIP
     port: 8000
+  # Liveness uses /api/health/livez/ — dep-free, only proves the process
+  # is up so a slow DB or broker can't cause restart loops. Readiness uses
+  # /api/health/readyz/ — checks required deps (DB, cache, broker) and 503s
+  # on failure so traffic is shed without restarting the pod. Startup
+  # mirrors livez since startup probes only need to confirm the process
+  # came up at all. See docker-compose.prod.yml for the rationale.
   probes:
     liveness:
       enabled: true
       httpGet:
-        path: /api/dashboard/health/
+        path: /api/health/livez/
         port: http
       initialDelaySeconds: 30
       periodSeconds: 30
@@ -56,7 +62,7 @@ backend:
     readiness:
       enabled: true
       httpGet:
-        path: /api/dashboard/health/
+        path: /api/health/readyz/
         port: http
       initialDelaySeconds: 5
       periodSeconds: 10
@@ -65,7 +71,7 @@ backend:
     startup:
       enabled: false
       httpGet:
-        path: /api/dashboard/health/
+        path: /api/health/livez/
         port: http
       periodSeconds: 5
       failureThreshold: 30

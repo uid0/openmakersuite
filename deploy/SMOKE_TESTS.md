@@ -32,22 +32,43 @@ curl -fsSL "$SCHEME://$HOST/" | grep -q '<div id="root">'
   default nginx welcome page (build assets weren't copied into the volume),
   HTML missing the root div (wrong image tag, stale cached build).
 
-## 2. Backend health endpoint
+## 2. Backend health endpoints
+
+The backend exposes two probe endpoints — the same paths the Compose
+healthcheck and the Kubernetes/Helm liveness + readiness probes hit:
+
+```bash
+# Liveness — dep-free; just proves the gunicorn process is serving HTTP.
+curl -fsS "$SCHEME://$HOST/api/health/livez/" | jq .
+
+# Readiness — checks DB, cache, and broker; 503s when a required dep fails.
+curl -fsS "$SCHEME://$HOST/api/health/readyz/" | jq .
+```
+
+- **Pass (livez):** HTTP 200 with `{"status":"ok"}`. A non-200 means the
+  gunicorn process itself is wedged or the ingress isn't routing
+  `/api/health/...` to the backend.
+- **Pass (readyz):** HTTP 200 with per-check status (`database`, `cache`,
+  `broker`). HTTP 503 when a required check fails — the body lists which
+  ones, which is what kubelet uses to mark the pod NotReady and stop
+  sending traffic.
+- **Why two endpoints:** `livez` deliberately performs no I/O so a slow or
+  failed dependency cannot cause container restarts; `readyz` checks the
+  real dependencies and returns 503 so Kubernetes can shed traffic without
+  flapping the pod.
+- **Fail modes:** 502 (backend Pod crash-looping), 404 (ingress not routing
+  `/api/...` to backend), 503 from `readyz` with `database: fail`
+  (migrations pending or DB unreachable), 503 with `broker: fail` (Redis
+  down — webhook + scheduled-task delivery is degraded).
+
+For the deeper application-state view (active dashboard messages,
+maintenance mode, last config update), call `/api/dashboard/health/` —
+that endpoint is intentionally not what the probes hit, but it's useful
+for ad-hoc smoke checks:
 
 ```bash
 curl -fsS "$SCHEME://$HOST/api/dashboard/health/" | jq .
 ```
-
-- **Pass:** HTTP 200 with JSON `{"status":"healthy", ...}` including
-  `active_messages`, `maintenance_mode`, and `last_config_update`.
-- **Why this endpoint:** `dashboard.views.dashboard_health` reads
-  `DashboardConfig` and counts `DashboardMessage` rows, so a green response
-  proves the backend is up, the database is reachable, and migrations ran far
-  enough to create those tables. This is the same path the Kubernetes
-  liveness/readiness probes hit.
-- **Fail modes:** `{"status":"error", ...}` (DB unreachable or migrations
-  pending), 502 (backend Pod crash-looping), 404 (ingress not routing
-  `/api/...` to backend).
 
 ## 3. API documentation (OpenAPI + Swagger UI)
 

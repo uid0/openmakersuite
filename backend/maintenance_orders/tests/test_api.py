@@ -154,10 +154,34 @@ class TestThirdPartyWorkOrderAPI:
         )
         assert resp.status_code in (401, 403)
 
-    def test_non_staff_can_list(self, db, vendor):
+    def test_non_staff_cannot_list_third_party_work_orders(self, db, vendor):
+        """gh #374: third-party work orders are hidden from volunteers.
+
+        Operator-set rule: volunteers can read standard work orders that
+        aren't routed through a third-party vendor. The third-party surface
+        is restricted to staff + SIG admins so vendor relationships and
+        quote/cost data do not leak.
+        """
         user = User.objects.create_user(
             username="reader", email="r@example.com", password=get_random_string(24)
         )
+        client = APIClient()
+        client.force_authenticate(user=user)
+        ThirdPartyWorkOrder.objects.create(title="visible", vendor=vendor, asset=_make_asset())
+        resp = client.get("/api/maintenance-orders/work-orders/")
+        assert resp.status_code == 403
+
+    def test_sig_admin_can_list_third_party_work_orders(self, db, vendor):
+        """gh #374: SIG leaders retain operational reach over third-party WOs."""
+        from django.contrib.auth.models import Group
+
+        from membership.models import SIGAdmin
+
+        user = User.objects.create_user(
+            username="sigreader", email="sl@example.com", password=get_random_string(24)
+        )
+        sig = Group.objects.create(name="3D Printing SIG")
+        SIGAdmin.objects.create(user=user, group=sig)
         client = APIClient()
         client.force_authenticate(user=user)
         ThirdPartyWorkOrder.objects.create(title="visible", vendor=vendor, asset=_make_asset())

@@ -22,7 +22,7 @@ deploy/k8s/
 │   ├── postgres-service.yaml
 │   ├── redis-deployment.yaml
 │   ├── redis-service.yaml
-│   ├── backend-deployment.yaml    # gunicorn + Django, /api/dashboard/health/
+│   ├── backend-deployment.yaml    # gunicorn + Django, livez/readyz probes
 │   ├── backend-service.yaml
 │   ├── frontend-deployment.yaml   # nginx + built React assets
 │   ├── frontend-service.yaml
@@ -114,14 +114,19 @@ images:
 
 ## Health probes
 
-| Component  | Probe                                             |
-| ---------- | ------------------------------------------------- |
-| Backend    | HTTP `GET /api/dashboard/health/` (live + ready)  |
-| Frontend   | HTTP `GET /` against nginx                        |
-| Celery     | `celery -A config inspect ping` exec             |
-| Flower     | TCP socket on the flower port                     |
-| Postgres   | `pg_isready` against the configured user/database |
-| Redis      | `redis-cli ping`                                  |
+| Component           | Probe                                             |
+| ------------------- | ------------------------------------------------- |
+| Backend (liveness)  | HTTP `GET /api/health/livez/` — dep-free up-check |
+| Backend (readiness) | HTTP `GET /api/health/readyz/` — DB + cache + broker |
+| Frontend            | HTTP `GET /` against nginx                        |
+| Celery              | `celery -A config inspect ping` exec              |
+| Flower              | TCP socket on the flower port                     |
+| Postgres            | `pg_isready` against the configured user/database |
+| Redis               | `redis-cli ping`                                  |
+
+`livez` is deliberately I/O-free so a slow DB or broker can't cause restart
+loops; `readyz` returns 503 when a required dependency fails so traffic is
+shed without restarting the pod.
 
 ## Smoke tests
 

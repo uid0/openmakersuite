@@ -113,11 +113,13 @@ def test_command_jwt_rejects_negative_ttl(keypair):
 
 
 def test_command_jwt_signature_is_invalid_against_other_key(keypair):
+    from cryptography.exceptions import InvalidSignature
+
     private_pem, _ = keypair
     _, other_public = generate_jwt_signing_keypair()
     with _settings_with(private_pem):
         token = make_command_jwt(mac="AA:BB:CC:11:22:33", cmd="unlock")
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidSignature):
         _verify_es256(token, other_public)
 
 

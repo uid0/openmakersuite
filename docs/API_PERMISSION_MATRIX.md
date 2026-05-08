@@ -273,7 +273,8 @@ category spend, and a maintenance forecast.
 
 | Method | Path | Class | Purpose | Notes |
 | --- | --- | --- | --- | --- |
-| GET | `analytics/pulse/` | staff-or-sig-admin | `IsAnalyticsViewer` — returns the full aggregate JSON used by both the dashboard and the monthly email. | 60-min django-redis cache keyed by `(start, end, bucket)`. PR2 will add a signed-URL bypass for board members without OMS accounts. |
+| GET | `analytics/pulse/` | staff-or-sig-admin **or** signed-URL token | `IsAnalyticsViewer` — returns the full aggregate JSON used by both the dashboard and the monthly email. Authenticated staff/SIG admins are allowed; anyone presenting a valid `?token=...` minted by `analytics/share/` is also allowed (board-member bypass). | 60-min django-redis cache keyed by `(start, end, bucket)`. Token verifies signature + embedded TTL; rotating `ANALYTICS_SHARE_SALT` invalidates all outstanding tokens. |
+| POST | `analytics/share/` | staff-or-sig-admin | `IsAnalyticsSharer` — mints a signed token (`{"ttl_days": 1..365}`, defaults to 30). Returns the token + ttl; the frontend composes the shareable URL. | Pure HMAC-signed token (no DB row); authoritative kill-switch is the salt setting. |
 
 ## Flower (Celery monitoring)
 

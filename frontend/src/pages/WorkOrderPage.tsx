@@ -39,6 +39,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { workOrderAPI } from '../services/api';
 import { WorkOrder, WorkOrderStatus } from '../types';
 import { formatDateOnly } from '../utils/dates';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const STATUS_OPTIONS = [
   { value: 'open', label: 'Open' },

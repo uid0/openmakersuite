@@ -24,6 +24,7 @@ import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormTextarea } from '../components/forms/FormTextarea';
 import { maintenanceAPI } from '../services/api';
 import { MaintenanceMaterial } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 import { MaintenanceItemFormData, maintenanceItemFormSchema } from '../utils/formSchemas';
 
 interface PendingMaterial {

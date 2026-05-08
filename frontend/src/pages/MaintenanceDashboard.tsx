@@ -36,6 +36,7 @@ import { Link } from 'react-router-dom';
 import { maintenanceAPI, reorderAPI, workOrderAPI } from '../services/api';
 import { LowStockAlert, MaintenanceItem, WorkOrder, WorkOrderUploadResult } from '../types';
 import { parseYmd } from '../utils/dates';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const STATUS_COLORS: Record<string, string> = {
   open: 'blue',

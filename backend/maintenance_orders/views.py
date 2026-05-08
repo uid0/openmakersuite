@@ -9,10 +9,11 @@ from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from inventory.models import Asset
+from membership.permissions import IsStaffOrSigAdmin
 from vendors.models import Vendor
 
 from . import transitions as wo_transitions
@@ -40,17 +41,21 @@ from .signals import active_warranty_for
 
 
 class _StaffWriteMixin:
-    """Read for any authenticated user, write for staff only.
+    """Both read and write require staff / Logistics / SIG admin (gh #374).
 
-    Phase 2 will refine this to SIG-admin scoping by the asset's owning_group.
-    Until then we use a coarse staff gate so Ops can read but only admins
-    create/update.
+    Third-party work orders are intentionally NOT visible to general
+    volunteers — the operator-set rule is that volunteers see only
+    standard maintenance work orders, not anything that has been routed
+    through a third-party vendor.
+
+    Earlier this mixin allowed any authenticated user to read and only
+    staff to write. The current rule tightens read access to match the
+    write gate so neither surface leaks third-party state to volunteers.
+    SIG admins are included so SIG leaders retain operational reach over
+    work that touches their area.
     """
 
-    def get_permissions(self):
-        if self.action in ("list", "retrieve"):
-            return [IsAuthenticated()]
-        return [IsAdminUser()]
+    permission_classes = [IsStaffOrSigAdmin]
 
 
 def _decimal_or_none(value):

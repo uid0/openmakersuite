@@ -59,7 +59,11 @@ helm install oms ./deploy/helm/openmakersuite \
 
 ## Health probes
 
-- **Backend**: HTTP `/api/dashboard/health/` for liveness and readiness
+- **Backend liveness**: HTTP `/api/health/livez/` — dep-free up-check; never
+  503s on a slow DB or broker
+- **Backend readiness**: HTTP `/api/health/readyz/` — checks required deps
+  (DB, cache, broker) and 503s on failure so traffic is shed without
+  restarting the pod
 - **Frontend**: HTTP `/` against the nginx container
 - **Celery**: `celery inspect ping` exec probe
 - **Flower**: TCP socket on the flower port
@@ -67,7 +71,9 @@ helm install oms ./deploy/helm/openmakersuite \
 - **Redis**: `redis-cli ping`
 
 All probes are tunable under `<component>.probes.{liveness,readiness,startup}`
-and can be disabled by setting `enabled: false` per probe.
+and can be disabled by setting `enabled: false` per probe. Override
+`backend.probes.readiness.httpGet.path` if a fronting proxy gates `/api/`
+behind auth — `readyz` is unauthenticated by design.
 
 ## Configuration sources
 

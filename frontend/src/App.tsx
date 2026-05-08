@@ -6,6 +6,7 @@ import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'rea
 import ErrorFallback from './components/ErrorFallback';
 import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
+import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
 import AssetDetailPage from './pages/AssetDetailPage';
 import AssetFormPage from './pages/AssetFormPage';
 import MaintenanceItemFormPage from './pages/MaintenanceItemFormPage';
@@ -203,6 +204,10 @@ function AppContent() {
           <Route path="/facilities/electrical/light-switches/:id/edit" element={<WorkspaceLayout><LightSwitchFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/network-drops/new" element={<WorkspaceLayout><NetworkDropFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/network-drops/:id/edit" element={<WorkspaceLayout><NetworkDropFormPage /></WorkspaceLayout>} />
+
+          {/* Analytics dashboard */}
+          <Route path="/analytics" element={<WorkspaceLayout><AnalyticsDashboardPage /></WorkspaceLayout>} />
+          <Route path="/analytics/shared" element={<AnalyticsDashboardPage shared />} />
 
           {/* Preventive Maintenance */}
           <Route path="/maintenance" element={<WorkspaceLayout><MaintenanceDashboardPage /></WorkspaceLayout>} />

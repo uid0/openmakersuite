@@ -1,4 +1,4 @@
-"""Tests for ``/api/analytics/pulse/``."""
+"""Tests for ``/api/analytics/pulse/`` and ``/api/analytics/share/``."""
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -12,6 +12,7 @@ from django.utils.crypto import get_random_string
 import pytest
 from rest_framework.test import APIClient
 
+from analytics.services.share_token import mint_share_token
 from inventory.models import MaintenanceItem, WorkOrder
 from inventory.tests.factories import AssetFactory
 from membership.models import SIGAdmin
@@ -150,3 +151,96 @@ class TestPulseCache:
         cache.clear()
         third = client.get(url)
         assert third.json()["summary"]["internal_completed_count"] == baseline_count + 1
+
+
+class TestPulseShareToken:
+    URL = "/api/analytics/pulse/"
+
+    def test_anonymous_with_valid_token_allowed(self):
+        token = mint_share_token(ttl_days=7)
+        resp = _client().get(f"{self.URL}?token={token}")
+        assert resp.status_code == 200
+        assert "summary" in resp.json()
+
+    def test_anonymous_with_invalid_token_denied(self):
+        resp = _client().get(f"{self.URL}?token=garbage")
+        assert resp.status_code in (401, 403)
+
+    def test_authenticated_without_token_still_works(self):
+        # Token is optional — the role gate continues to work.
+        resp = _client(_user("admin", is_staff=True)).get(self.URL)
+        assert resp.status_code == 200
+
+    def test_volunteer_with_valid_token_allowed(self):
+        # Even a volunteer (who would be denied by role) gets in with token.
+        token = mint_share_token(ttl_days=7)
+        resp = _client(_user("volunteer")).get(f"{self.URL}?token={token}")
+        assert resp.status_code == 200
+
+
+class TestPulseMonthlyBudget:
+    URL = "/api/analytics/pulse/"
+
+    def test_budget_null_when_unset(self, settings):
+        if hasattr(settings, "MONTHLY_BUDGET_TOTAL"):
+            del settings.MONTHLY_BUDGET_TOTAL
+        resp = _client(_user("admin", is_staff=True)).get(self.URL)
+        assert resp.json()["monthly_budget"] is None
+
+    def test_budget_returned_when_set(self, settings):
+        settings.MONTHLY_BUDGET_TOTAL = "5000.00"
+        resp = _client(_user("admin", is_staff=True)).get(self.URL)
+        assert resp.json()["monthly_budget"] == "5000.00"
+
+    def test_budget_invalid_value_returns_null(self, settings):
+        settings.MONTHLY_BUDGET_TOTAL = "not a number"
+        resp = _client(_user("admin", is_staff=True)).get(self.URL)
+        assert resp.json()["monthly_budget"] is None
+
+
+class TestShareEndpoint:
+    URL = "/api/analytics/share/"
+
+    def test_anonymous_denied(self):
+        resp = _client().post(self.URL, data={}, format="json")
+        assert resp.status_code in (401, 403)
+
+    def test_volunteer_denied(self):
+        resp = _client(_user("volunteer")).post(self.URL, data={}, format="json")
+        assert resp.status_code == 403
+
+    def test_staff_can_mint_default_ttl(self):
+        resp = _client(_user("admin", is_staff=True)).post(self.URL, data={}, format="json")
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["ttl_days"] == 30
+        assert body["token"]
+        assert body["expires_in_days"] == 30
+
+    def test_staff_can_mint_custom_ttl(self):
+        resp = _client(_user("admin", is_staff=True)).post(
+            self.URL, data={"ttl_days": 7}, format="json"
+        )
+        assert resp.status_code == 201
+        assert resp.json()["ttl_days"] == 7
+
+    def test_minted_token_unlocks_pulse(self):
+        share_resp = _client(_user("admin", is_staff=True)).post(
+            self.URL, data={"ttl_days": 14}, format="json"
+        )
+        token = share_resp.json()["token"]
+        # Anonymous client uses the token.
+        pulse_resp = _client().get(f"/api/analytics/pulse/?token={token}")
+        assert pulse_resp.status_code == 200
+
+    def test_invalid_ttl_rejected(self):
+        client = _client(_user("admin", is_staff=True))
+        for bad in ("hello", -5, 0, 9999):
+            resp = client.post(self.URL, data={"ttl_days": bad}, format="json")
+            assert resp.status_code == 400
+
+    def test_sig_admin_can_mint(self):
+        user = _user("sig_lead")
+        SIGAdmin.objects.create(user=user, group=Group.objects.create(name="Wood SIG"))
+        resp = _client(user).post(self.URL, data={}, format="json")
+        assert resp.status_code == 201

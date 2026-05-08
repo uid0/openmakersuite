@@ -152,6 +152,32 @@ class TestMqttConsumer:
                 dispatch_message("forgekey/aabbccddeeff/people_counter/occupancy", b"{}")
         assert any("Unhandled error" in r.message for r in caplog.records)
 
+    def test_handle_occupancy_message_redacts_secret_shaped_payload_keys(
+        self, settings
+    ):
+        """gh #378: payload keys that match the redactor's sensitive-name
+        list are scrubbed before they hit OccupancyEvent.raw_payload."""
+        settings.MQTT_TOPIC_PREFIX = "forgekey"
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:11:22:36")
+        topic = f"forgekey/{_topic_segment(device.mac_address)}/people_counter/occupancy"
+        # A misbehaving firmware reflects a provisioning token back into
+        # the occupancy payload. The counts must persist; the token must not.
+        payload = json.dumps(
+            {
+                "in": 2,
+                "out": 1,
+                "device_token": "tok_abcdef0123456789",
+            }
+        ).encode("utf-8")
+
+        event = handle_occupancy_message(topic, payload)
+        assert event is not None
+        assert event.raw_payload["in"] == 2
+        assert event.raw_payload["out"] == 1
+        # The sensitive key is rewritten — not dropped — so dashboards
+        # still see the shape but not the value.
+        assert event.raw_payload["device_token"] == "***REDACTED***"
+
 
 # ---------------------------------------------------------------------------
 # AC-3: command publish service + endpoints

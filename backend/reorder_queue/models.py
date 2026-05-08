@@ -14,6 +14,8 @@ from django.core.validators import MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
+from config.observability_redaction import redact
+
 from inventory.models import InventoryItem, ItemSupplier, Supplier
 
 User = get_user_model()
@@ -904,10 +906,21 @@ class WebHook(models.Model):
         self.save(update_fields=["success_count", "last_triggered_at", "last_error"])
 
     def record_failure(self, error_message: str) -> None:
-        """Record a failed webhook delivery."""
+        """Record a failed webhook delivery.
+
+        ``error_message`` is scrubbed through ``observability_redaction.redact``
+        before storage (gh #378). Webhook delivery errors frequently quote the
+        outbound request's headers (Authorization / Cookie) or the upstream's
+        response body — both of which can carry secrets even when the webhook
+        config itself is benign. The redactor's value-shape pass strips
+        ``Bearer …`` tokens, JWTs, PEM blocks, and high-entropy hex/base64
+        sequences before the row is written, so reading ``last_error`` from
+        the admin or shell never re-leaks the credential.
+        """
         self.failure_count += 1
         self.last_triggered_at = timezone.now()
-        self.last_error = error_message[:1000]  # Limit error message length
+        # Truncate AFTER redaction so REDACTED placeholders don't get sliced.
+        self.last_error = redact(error_message)[:1000]
         self.save(update_fields=["failure_count", "last_triggered_at", "last_error"])
 
 

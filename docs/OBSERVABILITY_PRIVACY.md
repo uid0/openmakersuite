@@ -67,21 +67,48 @@ specific surfaces that cross trust boundaries.
 
 ## Wiring
 
-Reference call sites that already route through the redactor:
+All four named surfaces now route through the redactor (gh #378):
 
 - `config.api_errors.standardized_exception_handler` — DRF error
-  envelope `details` payload.
+  envelope `details` payload (gh #333).
+- `reorder_queue.models.WebHook.record_failure` — `last_error` is
+  scrubbed before storage; the calling task in
+  `reorder_queue.tasks.send_webhook_notification` also redacts the
+  exception text before logging or returning it.
+- `config.celery_result_backend.RedactingDatabaseBackend` — the
+  configured `CELERY_RESULT_BACKEND` (production only). Wraps the
+  `django_celery_results` `DatabaseBackend` so traceback strings and
+  result payloads are scrubbed before `TaskResult` rows are written.
+  `_redact_traceback` runs the value-shape pass; `_redact_result`
+  runs full recursive redaction for Mappings/lists, including the
+  `prepare_exception` dict (`exc_type`, `exc_message`,
+  `exc_module`) for failed tasks.
+- `forgekey.management.commands.mqtt_consumer.handle_occupancy_message`
+  — `OccupancyEvent.raw_payload` is scrubbed before persistence;
+  `handle_ota_status_message` scrubs the device-supplied
+  `error_message` before `DeviceFirmwareUpdate.error_message` is
+  written.
+- `frontend/src/utils/highlight.ts` — `initHighlight` configures
+  `networkHeadersToRedact` (Authorization, Cookie, X-CSRFToken,
+  X-Webhook-Signature, X-Forgekey-Token, etc.) and
+  `networkBodyKeysToRedact` (token, password, secret, etc.) on the
+  Highlight client, plus a `requestResponseSanitizer` that runs the
+  value-shape pass over residual string bodies. The
+  `frontend/src/utils/redact.ts` module mirrors the backend's
+  value-shape regex set so React `ErrorFallback` can scrub
+  `Error.message` + stack via `redactError(error)` before
+  `H.consumeError` ships the report.
 
-Surfaces that should adopt `redact()` next (tracked as follow-ups):
+## Tests pinning the rollout
 
-- Webhook delivery failure logging (`WebHook.record_failure` /
-  `last_error` field).
-- Celery task result `traceback` storage (sanitize before
-  `django_celery_results` writes the row).
-- ForgeKey MQTT consumer logger when an inbound message contains a
-  user payload.
-- Frontend error capture (Highlight integration) — sanitize React
-  error context before it ships to the collector.
+- `backend/config/tests/test_celery_result_backend.py` — traceback +
+  result redaction unit tests.
+- `backend/reorder_queue/tests/test_webhooks.py::test_record_failure_redacts_*`
+  — webhook `last_error` redaction.
+- `backend/forgekey/tests/test_mqtt_consumer.py::test_handle_occupancy_message_redacts_secret_shaped_payload_keys`
+  — MQTT consumer payload scrubbing.
+- `frontend/src/__tests__/utils/redact.test.ts` — frontend value-shape
+  + `redactError` unit tests.
 
 ## Operator obligation
 

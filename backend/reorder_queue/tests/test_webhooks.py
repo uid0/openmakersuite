@@ -71,6 +71,28 @@ class TestWebHookModel(TestCase):
         self.assertIsNotNone(self.webhook.last_triggered_at)
         self.assertEqual(self.webhook.last_error, error_message)
 
+    def test_record_failure_redacts_bearer_token(self):
+        """gh #378: Bearer tokens in error text must not survive to last_error."""
+        msg = (
+            "401 Unauthorized: rejected "
+            "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"
+        )
+        self.webhook.record_failure(msg)
+        self.webhook.refresh_from_db()
+        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in self.webhook.last_error
+        assert "Bearer eyJ" not in self.webhook.last_error
+        assert "***REDACTED***" in self.webhook.last_error
+        # Operator-useful context survives.
+        assert "401 Unauthorized" in self.webhook.last_error
+
+    def test_record_failure_redacts_high_entropy_token(self):
+        """gh #378: high-entropy tokens (32+ chars) must be scrubbed."""
+        msg = "upstream returned token=abcdef0123456789ABCDEFabcdef0123456789ABCDEF"
+        self.webhook.record_failure(msg)
+        self.webhook.refresh_from_db()
+        assert "abcdef0123456789ABCDEFabcdef0123456789ABCDEF" not in self.webhook.last_error
+        assert "upstream returned" in self.webhook.last_error
+
     def test_webhook_headers_field(self):
         """Test webhook headers JSON field."""
         headers = {

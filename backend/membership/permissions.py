@@ -4,7 +4,7 @@ Centralised so multiple apps (work orders, third-party work orders, etc.)
 can share the same role gate without re-implementing it inline.
 """
 
-from rest_framework.permissions import BasePermission, SAFE_METHODS
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 from .utils import is_staff_or_sig_admin
 

@@ -8,12 +8,12 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from rest_framework import status, viewsets
-from membership.permissions import IsStaffOrSigAdmin
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from inventory.models import Asset
+from membership.permissions import IsStaffOrSigAdmin
 from vendors.models import Vendor
 
 from . import transitions as wo_transitions

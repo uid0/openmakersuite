@@ -24,9 +24,8 @@ from rest_framework.permissions import (
 )
 from rest_framework.response import Response
 
-from membership.permissions import IsAuthenticatedOrStaffSigAdminWrite
-
 from config.api_errors import ErrorCode, error_response
+from membership.permissions import IsAuthenticatedOrStaffSigAdminWrite
 
 from .audit import record_event as record_maintenance_audit_event
 from .models import (

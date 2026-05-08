@@ -24,6 +24,7 @@ import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormTextarea } from '../components/forms/FormTextarea';
 import { maintenanceAPI } from '../services/api';
 import { MaintenanceMaterial } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 import { MaintenanceItemFormData, maintenanceItemFormSchema } from '../utils/formSchemas';
 
 interface PendingMaterial {
@@ -161,7 +162,7 @@ const MaintenanceItemFormPage: React.FC = () => {
       navigate(`/assets/${assetId}`);
     } catch (err: any) {
       console.error('Error saving maintenance item:', err);
-      setError(err.response?.data?.detail || 'Failed to save maintenance item.');
+      setError(extractErrorMessage(err, 'Failed to save maintenance item.'));
     } finally {
       setSaving(false);
     }

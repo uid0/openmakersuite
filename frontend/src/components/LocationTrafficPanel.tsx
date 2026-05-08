@@ -5,6 +5,7 @@ import { Group, SegmentedControl, Stack, Text } from '@mantine/core';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { locationCheckinAPI } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 export interface LocationTrafficPanelProps {
   locationId: string | number;
@@ -55,7 +56,7 @@ const LocationTrafficPanel: React.FC<LocationTrafficPanelProps> = ({ locationId 
         }
       } catch (err: any) {
         if (!cancelled) {
-          setError(err?.response?.data?.detail || 'Failed to load traffic data');
+          setError(extractErrorMessage(err, 'Failed to load traffic data'));
         }
       } finally {
         if (!cancelled) {

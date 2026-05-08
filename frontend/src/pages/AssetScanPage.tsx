@@ -12,6 +12,7 @@ import { assetProblemsAPI, assetsAPI, checklistsAPI, maintenanceAPI } from '../s
 import '../styles/ScanPage.css';
 import { Asset, Checklist, MaintenanceItem } from '../types';
 import { confirmDelete, promptInput, showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const AssetScanPage: React.FC = () => {
   const { assetId } = useParams<{ assetId: string }>();
@@ -70,7 +71,7 @@ const AssetScanPage: React.FC = () => {
       setAsset(assetResponse.data);
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to load asset');
+      setError(extractErrorMessage(err, 'Failed to load asset'));
       console.error('Error loading asset:', err);
     } finally {
       setLoading(false);
@@ -117,7 +118,7 @@ const AssetScanPage: React.FC = () => {
       setActionSuccess('Maintenance task marked complete');
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to log completion');
+      showError(extractErrorMessage(err, 'Failed to log completion'));
       console.error('Error completing maintenance task:', err);
     } finally {
       setCompletingTask(null);
@@ -129,7 +130,7 @@ const AssetScanPage: React.FC = () => {
       const completion = await checklistsAPI.startChecklist(checklistId, userName);
       navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to start checklist');
+      showError(extractErrorMessage(err, 'Failed to start checklist'));
     }
   };
 
@@ -155,7 +156,7 @@ const AssetScanPage: React.FC = () => {
       setActionSuccess('Asset enabled successfully');
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to enable asset');
+      showError(extractErrorMessage(err, 'Failed to enable asset'));
       console.error('Error enabling asset:', err);
     } finally {
       setSubmitting(false);
@@ -173,7 +174,7 @@ const AssetScanPage: React.FC = () => {
         setActionSuccess('Asset disabled successfully');
         setTimeout(() => setActionSuccess(null), 3000);
       } catch (err: any) {
-        showError(err.response?.data?.detail || 'Failed to disable asset');
+        showError(extractErrorMessage(err, 'Failed to disable asset'));
         console.error('Error disabling asset:', err);
       } finally {
         setSubmitting(false);
@@ -194,7 +195,7 @@ const AssetScanPage: React.FC = () => {
           setActionSuccess('Asset locked successfully');
           setTimeout(() => setActionSuccess(null), 3000);
         } catch (err: any) {
-          showError(err.response?.data?.error || err.response?.data?.detail || 'Failed to lock asset');
+          showError(extractErrorMessage(err, 'Failed to lock asset'));
           console.error('Error locking asset:', err);
         } finally {
           setSubmitting(false);
@@ -214,7 +215,7 @@ const AssetScanPage: React.FC = () => {
         setActionSuccess('Asset unlocked successfully');
         setTimeout(() => setActionSuccess(null), 3000);
       } catch (err: any) {
-        showError(err.response?.data?.error || err.response?.data?.detail || 'Failed to unlock asset');
+        showError(extractErrorMessage(err, 'Failed to unlock asset'));
         console.error('Error unlocking asset:', err);
       } finally {
         setSubmitting(false);
@@ -261,7 +262,7 @@ const AssetScanPage: React.FC = () => {
       );
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to report problem');
+      showError(extractErrorMessage(err, 'Failed to report problem'));
       console.error('Error reporting problem:', err);
     } finally {
       setSubmitting(false);

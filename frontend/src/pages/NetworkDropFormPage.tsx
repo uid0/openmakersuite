@@ -24,6 +24,7 @@ import {
   NETWORK_DROP_TYPE_OPTIONS,
 } from '../services/api';
 import { Location, NetworkDropType } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface FormState {
   location: number | null;
@@ -98,7 +99,7 @@ const NetworkDropFormPage: React.FC = () => {
         setExistingPhoto(d.photo);
       })
       .catch((err) => {
-        setError(err.response?.data?.detail || 'Failed to load network drop');
+        setError(extractErrorMessage(err, 'Failed to load network drop'));
       })
       .finally(() => setLoading(false));
   }, [id, isEdit]);

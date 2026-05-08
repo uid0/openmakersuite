@@ -9,6 +9,7 @@ import { inventoryAPI } from '../services/api';
 import '../styles/CategoryListPage.css';
 import { Category } from '../types';
 import { confirmDelete, showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const CategoryListPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -27,7 +28,7 @@ const CategoryListPage: React.FC = () => {
       setCategories(response.data.results);
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load categories');
+      setError(extractErrorMessage(err, 'Failed to load categories'));
       console.error('Error loading categories:', err);
     } finally {
       setLoading(false);
@@ -85,7 +86,7 @@ const CategoryListPage: React.FC = () => {
         await inventoryAPI.deleteCategory(id.toString());
         await loadCategories();
       } catch (err: any) {
-        showError(err.response?.data?.detail || 'Failed to delete category');
+        showError(extractErrorMessage(err, 'Failed to delete category'));
       }
     });
   };

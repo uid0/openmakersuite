@@ -9,6 +9,7 @@ import '../styles/ScanPage.css';
 import { Disposition, DispositionType, DonationItem, KeptDestination, SaleMethod } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const DonationItemScanPage: React.FC = () => {
   const { itemId } = useParams<{ itemId: string }>();
@@ -53,7 +54,7 @@ const DonationItemScanPage: React.FC = () => {
       const dispositionsResponse = await donationsAPI.getDispositions({ donation_item: itemId });
       setDispositions(dispositionsResponse.data.results);
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to load donation item');
+      setError(extractErrorMessage(err, 'Failed to load donation item'));
       console.error('Error loading donation item:', err);
     } finally {
       setLoading(false);
@@ -80,7 +81,7 @@ const DonationItemScanPage: React.FC = () => {
       setActionSuccess('Item information updated successfully');
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to update item');
+      showError(extractErrorMessage(err, 'Failed to update item'));
       console.error('Error updating item:', err);
     } finally {
       setSubmitting(false);
@@ -157,7 +158,7 @@ const DonationItemScanPage: React.FC = () => {
       
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to create disposition');
+      showError(extractErrorMessage(err, 'Failed to create disposition'));
       console.error('Error creating disposition:', err);
     } finally {
       setSubmitting(false);

@@ -10,6 +10,7 @@ import { fixturesAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Fixture, FixtureRefillRequest } from '../types';
 import { confirmAction, showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const FixtureScanPage: React.FC = () => {
   const { fixtureId } = useParams<{ fixtureId: string }>();
@@ -54,7 +55,7 @@ const FixtureScanPage: React.FC = () => {
 
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load fixture');
+      setError(extractErrorMessage(err, 'Failed to load fixture'));
       console.error('Error loading fixture:', err);
     } finally {
       setLoading(false);
@@ -81,7 +82,7 @@ const FixtureScanPage: React.FC = () => {
           }, 2000);
         } catch (err: any) {
           console.error('Error auto-submitting refill request:', err);
-          setError(err.response?.data?.error || 'Failed to submit refill request');
+          setError(extractErrorMessage(err, 'Failed to submit refill request'));
           setSubmitting(false);
         }
       }

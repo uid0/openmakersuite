@@ -15,6 +15,7 @@ import {
   ForgeKeyOccupancyResponse,
   forgekeyAPI,
 } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -55,7 +56,7 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
       setOccupancy(occRes.data);
       setLoadError(null);
     } catch (err: any) {
-      setLoadError(err?.response?.data?.detail || 'Failed to load device.');
+      setLoadError(extractErrorMessage(err, 'Failed to load device.'));
     } finally {
       setLoading(false);
     }
@@ -99,7 +100,7 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
           [key]: {
             pending: false,
             lastResult: prev[key].lastResult,
-            lastError: err?.response?.data?.detail || 'Command failed.',
+            lastError: extractErrorMessage(err, 'Command failed.'),
           },
         }));
       }

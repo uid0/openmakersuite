@@ -40,6 +40,7 @@ import {
   ThirdPartyWorkOrderDto,
   ThirdPartyWorkOrderStatus,
 } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const STATUS_TO_STEP: Record<ThirdPartyWorkOrderStatus, number> = {
   requested: 0,
@@ -100,11 +101,7 @@ const ThirdPartyWorkOrderPage: React.FC = () => {
         await fn();
         await fetchWo();
       } catch (err) {
-        const detail = (err as { response?: { data?: { detail?: unknown } } })
-          ?.response?.data?.detail;
-        setActionError(
-          typeof detail === 'string' ? detail : 'Action failed — see server logs',
-        );
+        setActionError(extractErrorMessage(err, 'Action failed — see server logs'));
       } finally {
         setActing(false);
       }

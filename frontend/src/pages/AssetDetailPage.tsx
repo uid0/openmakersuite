@@ -16,6 +16,7 @@ import '../styles/AssetDetailPage.css';
 import { Asset, AssetProblem, MaintenanceItem, WorkOrder } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const AssetDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -72,7 +73,7 @@ const AssetDetailPage: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Error loading asset details:', err);
-      setError(err.response?.data?.detail || 'Failed to load asset details');
+      setError(extractErrorMessage(err, 'Failed to load asset details'));
     } finally {
       setLoading(false);
     }
@@ -195,7 +196,7 @@ const AssetDetailPage: React.FC = () => {
       await assetsAPI.lockAsset(id);
       await loadAssetDetails();
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to lock asset');
+      showError(extractErrorMessage(err, 'Failed to lock asset'));
     } finally {
       setActionLoading(null);
     }
@@ -208,7 +209,7 @@ const AssetDetailPage: React.FC = () => {
       await assetsAPI.unlockAsset(id);
       await loadAssetDetails();
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to unlock asset');
+      showError(extractErrorMessage(err, 'Failed to unlock asset'));
     } finally {
       setActionLoading(null);
     }
@@ -220,7 +221,7 @@ const AssetDetailPage: React.FC = () => {
       await assetPartsAPI.markReplaced(partId);
       await loadAssetDetails();
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to mark part as replaced');
+      showError(extractErrorMessage(err, 'Failed to mark part as replaced'));
     } finally {
       setActionLoading(null);
     }
@@ -241,7 +242,7 @@ const AssetDetailPage: React.FC = () => {
       const options = response.data.results.filter((a) => a.id !== id);
       setCloneTargetOptions(options);
     } catch (err: any) {
-      setCloneError(err.response?.data?.detail || 'Failed to load assets');
+      setCloneError(extractErrorMessage(err, 'Failed to load assets'));
     }
   };
 
@@ -264,7 +265,7 @@ const AssetDetailPage: React.FC = () => {
       );
       closeCloneModal();
     } catch (err: any) {
-      setCloneError(err.response?.data?.detail || 'Failed to clone maintenance item');
+      setCloneError(extractErrorMessage(err, 'Failed to clone maintenance item'));
     } finally {
       setCloneSubmitting(false);
     }
@@ -284,7 +285,7 @@ const AssetDetailPage: React.FC = () => {
       setShowReportForm(false);
       await loadAssetDetails();
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to report problem');
+      showError(extractErrorMessage(err, 'Failed to report problem'));
       console.error('Error reporting problem:', err);
     } finally {
       setSubmittingProblem(false);
@@ -302,7 +303,7 @@ const AssetDetailPage: React.FC = () => {
       setResolvingStatus('resolved');
       await loadAssetDetails();
     } catch (err: any) {
-      showError(err.response?.data?.detail || 'Failed to resolve problem');
+      showError(extractErrorMessage(err, 'Failed to resolve problem'));
       console.error('Error resolving problem:', err);
     } finally {
       setActionLoading(null);
@@ -1005,7 +1006,7 @@ const AssetDetailPage: React.FC = () => {
                       await assetsAPI.generateQR(id);
                       await loadAssetDetails();
                     } catch (err: any) {
-                      showError(err.response?.data?.detail || 'Failed to generate QR code');
+                      showError(extractErrorMessage(err, 'Failed to generate QR code'));
                     }
                   }
                 }}

@@ -13,6 +13,7 @@ import { FormImageUpload } from '../components/forms/FormImageUpload';
 import { FormInput } from '../components/forms/FormInput';
 import { notificationsAPI, userAPI } from '../services/api';
 import { ChangePasswordRequest, NotificationPreferences, UserProfile } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 // Form schemas
 const profileSchema = z.object({
@@ -105,7 +106,7 @@ const UserProfilePage: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Error loading profile:', err);
-      setError(err.response?.data?.detail || 'Failed to load profile');
+      setError(extractErrorMessage(err, 'Failed to load profile'));
     } finally {
       setLoading(false);
     }
@@ -119,7 +120,7 @@ const UserProfilePage: React.FC = () => {
       setPreferences(response.data);
     } catch (err: any) {
       console.error('Error loading preferences:', err);
-      const errorMessage = err.response?.data?.detail || err.message || 'Failed to load notification preferences';
+      const errorMessage = extractErrorMessage(err, '') || err.message || 'Failed to load notification preferences';
       setPreferencesError(errorMessage);
       setError(`Failed to load notification preferences: ${errorMessage}`);
     } finally {
@@ -143,7 +144,7 @@ const UserProfilePage: React.FC = () => {
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
       console.error('Error updating profile:', err);
-      setError(err.response?.data?.detail || 'Failed to update profile');
+      setError(extractErrorMessage(err, 'Failed to update profile'));
     } finally {
       setSaving(false);
     }

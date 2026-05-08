@@ -23,6 +23,7 @@ import { FormSelect } from '../components/forms/FormSelect';
 import { FormTextarea } from '../components/forms/FormTextarea';
 import { inventoryAPI } from '../services/api';
 import { SupplierFormData, supplierSchema } from '../utils/formSchemas';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const SupplierFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -74,7 +75,7 @@ const SupplierFormPage: React.FC = () => {
       });
     } catch (err: any) {
       console.error('Error loading supplier:', err);
-      setError(err.response?.data?.detail || 'Failed to load supplier. Please try again.');
+      setError(extractErrorMessage(err, 'Failed to load supplier. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -95,7 +96,7 @@ const SupplierFormPage: React.FC = () => {
     } catch (err: any) {
       console.error('Error saving supplier:', err);
       setError(
-        err.response?.data?.detail ||
+        extractErrorMessage(err, '') ||
           err.response?.data?.message ||
           'Failed to save supplier. Please try again.'
       );

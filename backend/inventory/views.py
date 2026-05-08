@@ -24,6 +24,8 @@ from rest_framework.permissions import (
 )
 from rest_framework.response import Response
 
+from config.api_errors import ErrorCode, error_response
+
 from .audit import record_event as record_maintenance_audit_event
 from .models import (
     Asset,
@@ -317,7 +319,11 @@ class LocationViewSet(viewsets.ModelViewSet):
         location = self.get_object()
 
         if not location.qr_code:
-            return Response({"error": "QR code not generated yet"}, status=404)
+            return error_response(
+                ErrorCode.NOT_FOUND,
+                "QR code not generated yet",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
 
         from django.http import HttpResponse
 
@@ -729,7 +735,11 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 }
             )
         except Exception as e:
-            return Response({"error": str(e)}, status=500)
+            return error_response(
+                ErrorCode.SERVER_ERROR,
+                str(e),
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     def _get_client_ip(self, request):
         """Get client IP address from request."""
@@ -752,7 +762,11 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         item = self.get_object()
 
         if not item.qr_code:
-            return Response({"error": "QR code not generated yet"}, status=404)
+            return error_response(
+                ErrorCode.NOT_FOUND,
+                "QR code not generated yet",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
 
         from django.http import HttpResponse
 
@@ -1496,7 +1510,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         try:
             png_bytes = render_asset_tag(asset, size=size)
         except InvalidTagSizeError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(ErrorCode.VALIDATION_FAILED, str(exc))
 
         response = HttpResponse(png_bytes, content_type="image/png")
         if request.query_params.get("download") == "1":
@@ -1633,7 +1647,11 @@ class AssetViewSet(viewsets.ModelViewSet):
         try:
             assets = Asset.objects.filter(id__in=asset_ids)
             if not assets.exists():
-                return Response({"error": "No assets found"}, status=status.HTTP_404_NOT_FOUND)
+                return error_response(
+                    ErrorCode.NOT_FOUND,
+                    "No assets found",
+                    status_code=status.HTTP_404_NOT_FOUND,
+                )
 
             renderer = BrotherLabelRenderer()
             pdf_bytes = renderer.render_batch(list(assets))
@@ -1792,7 +1810,7 @@ class AssetViewSet(viewsets.ModelViewSet):
             )
 
         if not reason:
-            return Response({"error": "reason is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(ErrorCode.VALIDATION_FAILED, "reason is required")
 
         # Determine lockout level based on user's role
         lockout_level = self._get_user_lockout_level(user, asset)
@@ -1831,7 +1849,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         active_lockouts = DeviceLockout.objects.filter(asset=asset, is_active=True)
 
         if not active_lockouts.exists():
-            return Response({"error": "Asset is not locked"}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(ErrorCode.VALIDATION_FAILED, "Asset is not locked")
 
         # Check if user can unlock any of the lockouts
         unlockable_lockout = None
@@ -2945,7 +2963,7 @@ class InventoryReportViewSet(viewsets.ViewSet):
 
             return response_obj
 
-        return Response({"error": "Invalid report type"}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(ErrorCode.VALIDATION_FAILED, "Invalid report type")
 
 
 class MaintenanceMaterialViewSet(viewsets.ModelViewSet):
@@ -4333,7 +4351,7 @@ class AssetReportViewSet(viewsets.ViewSet):
 
             return response_obj
 
-        return Response({"error": "Invalid report type"}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(ErrorCode.VALIDATION_FAILED, "Invalid report type")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4388,7 +4406,11 @@ def postmark_inbound_work_order(request):
         )
     provided = request.headers.get("X-Postmark-Webhook-Token") or request.GET.get("token") or ""
     if provided != expected:
-        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+        return error_response(
+            ErrorCode.PERMISSION_DENIED,
+            "Forbidden.",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
 
     payload = request.data if isinstance(request.data, dict) else {}
     message_id = payload.get("MessageID", "") or ""
@@ -4602,7 +4624,7 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
                         reorders_created += 1
                     created_reconciliations.append(reconciliation)
         except DjangoValidationError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(ErrorCode.VALIDATION_FAILED, str(exc))
 
         output = StockReconciliationSerializer(created_reconciliations, many=True).data
         return Response(
@@ -4769,7 +4791,7 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
                     )
                     created += 1
         except DjangoValidationError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(ErrorCode.VALIDATION_FAILED, str(exc))
 
         return Response(
             {

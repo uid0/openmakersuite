@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { inventoryAPI } from '../services/api';
 import '../styles/LocationFormPage.css';
 import { Location } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface LocationFormData {
   name: string;
@@ -62,7 +63,7 @@ const LocationFormPage: React.FC = () => {
         is_active: location.is_active,
       });
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load location');
+      setError(extractErrorMessage(err, 'Failed to load location'));
       console.error('Error loading location:', err);
     } finally {
       setLoading(false);
@@ -125,7 +126,7 @@ const LocationFormPage: React.FC = () => {
 
       navigate('/inventory/locations');
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to save location');
+      setError(extractErrorMessage(err, 'Failed to save location'));
       console.error('Error saving location:', err);
     } finally {
       setSaving(false);

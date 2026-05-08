@@ -21,6 +21,7 @@ import { inventoryAPI } from '../services/api';
 import { Category, InventoryItem, ItemSupplier, Location, Supplier } from '../types';
 import { promptInput, showError } from '../utils/dialogs';
 import { InventoryItemFormData, inventoryItemSchema } from '../utils/formSchemas';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const InventoryItemFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -232,7 +233,7 @@ const InventoryItemFormPage: React.FC = () => {
       navigate(`/inventory/items/${savedItem.id}`);
     } catch (err: any) {
       console.error('Error saving item:', err);
-      setError(err.response?.data?.detail || 'Failed to save item. Please try again.');
+      setError(extractErrorMessage(err, 'Failed to save item. Please try again.'));
     } finally {
       setSaving(false);
     }

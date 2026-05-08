@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { ForgeKeyDevice, forgekeyAPI, inventoryAPI } from '../services/api';
 import { Location } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const ForgeKeyDevicesPage: React.FC = () => {
   const isStaff = typeof window !== 'undefined' && localStorage.getItem('is_staff') === 'true';
@@ -34,7 +35,7 @@ const ForgeKeyDevicesPage: React.FC = () => {
         setLocations(locRes.data.results);
         setError(null);
       } catch (err: any) {
-        setError(err?.response?.data?.detail || 'Failed to load ForgeKey devices.');
+        setError(extractErrorMessage(err, 'Failed to load ForgeKey devices.'));
       } finally {
         setLoading(false);
       }
@@ -67,7 +68,7 @@ const ForgeKeyDevicesPage: React.FC = () => {
         setSavedId(deviceId);
         setError(null);
       } catch (err: any) {
-        setError(err?.response?.data?.detail || 'Failed to update device location.');
+        setError(extractErrorMessage(err, 'Failed to update device location.'));
       } finally {
         setSavingId(null);
       }

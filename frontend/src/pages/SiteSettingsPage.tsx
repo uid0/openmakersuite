@@ -15,6 +15,7 @@ import { FormInput } from '../components/forms/FormInput';
 import { customizationAPI } from '../services/api';
 import '../styles/SiteSettingsPage.css';
 import { SiteSettings } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 // Form schema
 const siteSettingsSchema = z.object({
@@ -86,7 +87,7 @@ const SiteSettingsPage: React.FC = () => {
       });
     } catch (err: any) {
       console.error('Error loading site settings:', err);
-      setError(err.response?.data?.detail || 'Failed to load site settings');
+      setError(extractErrorMessage(err, 'Failed to load site settings'));
     } finally {
       setLoading(false);
     }
@@ -143,7 +144,7 @@ const SiteSettingsPage: React.FC = () => {
       });
     } catch (err: any) {
       console.error('Error updating site settings:', err);
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to update site settings');
+      setError(extractErrorMessage(err, 'Failed to update site settings'));
     } finally {
       setSaving(false);
     }

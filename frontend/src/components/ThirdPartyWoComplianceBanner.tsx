@@ -12,6 +12,7 @@ import {
   ComplianceBucket,
   thirdPartyMaintenanceAPI,
 } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface Props {
   assetId: string | null;
@@ -53,7 +54,7 @@ const ThirdPartyWoComplianceBanner: React.FC<Props> = ({ assetId, vendorId }) =>
       })
       .catch((err) => {
         if (!cancelled)
-          setError(err?.response?.data?.detail || 'Failed to load asset status');
+          setError(extractErrorMessage(err, 'Failed to load asset status'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

@@ -18,6 +18,7 @@ import { FormTextarea } from '../components/forms/FormTextarea';
 import { assetsAPI, inventoryAPI, sigAPI } from '../services/api';
 import { Asset, Category, InventoryItem, Location, SIG } from '../types';
 import { AssetFormData, assetFormSchema } from '../utils/formSchemas';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const AssetFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -228,7 +229,7 @@ const AssetFormPage: React.FC = () => {
       navigate(`/assets/${savedAsset.id}`);
     } catch (err: any) {
       console.error('Error saving asset:', err);
-      setError(err.response?.data?.detail || 'Failed to save asset. Please try again.');
+      setError(extractErrorMessage(err, 'Failed to save asset. Please try again.'));
     } finally {
       setSaving(false);
     }

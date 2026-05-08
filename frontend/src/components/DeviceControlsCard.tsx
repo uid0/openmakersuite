@@ -21,6 +21,7 @@ import {
   ForgeKeyDeviceCommand,
   forgekeyAPI,
 } from '../services/api';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const ACK_TIMEOUT_MS = 10_000;
 const POLL_INTERVAL_MS = 2_000;
@@ -115,7 +116,7 @@ const DeviceControlsCard: React.FC<DeviceControlsCardProps> = ({ device }) => {
       return response.data.results;
     } catch (err) {
       const detail =
-        (err as any)?.response?.data?.detail || 'Failed to load recent commands.';
+        extractErrorMessage(err, 'Failed to load recent commands.');
       setHistoryError(detail);
       return null;
     }
@@ -223,7 +224,7 @@ const DeviceControlsCard: React.FC<DeviceControlsCardProps> = ({ device }) => {
         refreshHistory();
       } catch (err) {
         const detail =
-          (err as any)?.response?.data?.detail || 'Command failed.';
+          extractErrorMessage(err, 'Command failed.');
         setInFlight((prev) => ({
           ...prev,
           [def.key]: { pending: false, pendingCommandId: null, error: detail },

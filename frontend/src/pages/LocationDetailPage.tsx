@@ -12,6 +12,7 @@ import { inventoryAPI } from '../services/api';
 import '../styles/LocationDetailPage.css';
 import { Location } from '../types';
 import { confirmDelete, showError, showSuccess } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const LocationDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -41,7 +42,7 @@ const LocationDetailPage: React.FC = () => {
       setLocation(response.data);
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load location');
+      setError(extractErrorMessage(err, 'Failed to load location'));
       console.error('Error loading location:', err);
     } finally {
       setLoading(false);
@@ -57,7 +58,7 @@ const LocationDetailPage: React.FC = () => {
       await loadLocation();
       showSuccess('QR code generated successfully');
     } catch (err: any) {
-      showError(err.response?.data?.error || 'Failed to generate QR code');
+      showError(extractErrorMessage(err, 'Failed to generate QR code'));
     } finally {
       setGeneratingQR(false);
     }
@@ -70,7 +71,7 @@ const LocationDetailPage: React.FC = () => {
         await inventoryAPI.deleteLocation(id);
         navigate('/inventory/locations');
       } catch (err: any) {
-        showError(err.response?.data?.detail || 'Failed to delete location');
+        showError(extractErrorMessage(err, 'Failed to delete location'));
       }
     });
   };

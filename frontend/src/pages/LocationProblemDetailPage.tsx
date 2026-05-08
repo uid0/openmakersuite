@@ -9,6 +9,7 @@ import { Link, useParams } from 'react-router-dom';
 import api, { locationProblemsAPI, maintenanceAPI } from '../services/api';
 import { LocationProblem, MaintenanceItem } from '../types';
 import { showError, showSuccess } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface VendorOption {
   id: string;
@@ -56,7 +57,7 @@ const LocationProblemDetailPage: React.FC = () => {
         const resp = await locationProblemsAPI.get(id);
         if (!cancelled) setProblem(resp.data);
       } catch (err: any) {
-        if (!cancelled) setError(err.response?.data?.detail || 'Failed to load');
+        if (!cancelled) setError(extractErrorMessage(err, 'Failed to load'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -101,7 +102,7 @@ const LocationProblemDetailPage: React.FC = () => {
       showSuccess('Standard work order opened.');
       await refreshProblem();
     } catch (err: any) {
-      showError(err.response?.data?.error || 'Failed to promote.');
+      showError(extractErrorMessage(err, 'Failed to promote.'));
     }
   };
 
@@ -119,7 +120,7 @@ const LocationProblemDetailPage: React.FC = () => {
       showSuccess('Third-party work order opened.');
       await refreshProblem();
     } catch (err: any) {
-      showError(err.response?.data?.error || 'Failed to promote.');
+      showError(extractErrorMessage(err, 'Failed to promote.'));
     }
   };
 
@@ -133,7 +134,7 @@ const LocationProblemDetailPage: React.FC = () => {
       showSuccess(`Problem marked ${status}.`);
       await refreshProblem();
     } catch (err: any) {
-      showError(err.response?.data?.error || 'Failed to resolve.');
+      showError(extractErrorMessage(err, 'Failed to resolve.'));
     }
   };
 

@@ -36,6 +36,7 @@ import { Link } from 'react-router-dom';
 import { maintenanceAPI, reorderAPI, workOrderAPI } from '../services/api';
 import { LowStockAlert, MaintenanceItem, WorkOrder, WorkOrderUploadResult } from '../types';
 import { parseYmd } from '../utils/dates';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const STATUS_COLORS: Record<string, string> = {
   open: 'blue',
@@ -398,7 +399,7 @@ const MaintenanceDashboard: React.FC = () => {
     } catch (err: any) {
       notifications.show({
         title: 'Upload Failed',
-        message: err?.response?.data?.detail || 'Could not upload PDF.',
+        message: extractErrorMessage(err, 'Could not upload PDF.'),
         color: 'red',
       });
     } finally {

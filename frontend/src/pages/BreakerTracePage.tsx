@@ -18,6 +18,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { electricalCircuitsAPI, OUTLET_TYPE_OPTIONS } from '../services/api';
 import { Breaker, LightSwitch, Outlet } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const outletTypeLabel = (value: string): string =>
   OUTLET_TYPE_OPTIONS.find((option) => option.value === value)?.label || value;
@@ -52,7 +53,7 @@ const BreakerTracePage: React.FC = () => {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err.response?.data?.detail || 'Failed to load breaker trace');
+        setError(extractErrorMessage(err, 'Failed to load breaker trace'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

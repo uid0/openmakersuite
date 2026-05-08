@@ -12,6 +12,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
+from config.api_errors import ErrorCode, error_response
+
 from .audit_feed import collect_events
 from .models import DashboardConfig, DashboardMessage, DashboardWidget
 from .serializers import DashboardWidgetSerializer
@@ -105,7 +107,11 @@ def get_dashboard_config(request):
         )
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return error_response(
+            ErrorCode.SERVER_ERROR,
+            str(e),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(["POST"])
@@ -152,7 +158,7 @@ def update_dashboard_config(request):
         )
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(ErrorCode.VALIDATION_FAILED, str(e))
 
 
 @api_view(["POST"])
@@ -188,7 +194,7 @@ def add_dashboard_message(request):
         )
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(ErrorCode.VALIDATION_FAILED, str(e))
 
 
 @api_view(["GET"])
@@ -262,7 +268,11 @@ def get_inventory_summary(request):
         )
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return error_response(
+            ErrorCode.SERVER_ERROR,
+            str(e),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 # Simple health check endpoint
@@ -309,7 +319,11 @@ def get_user_widgets(request):
         return Response(serializer.data)
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return error_response(
+            ErrorCode.SERVER_ERROR,
+            str(e),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(["POST"])
@@ -325,7 +339,7 @@ def save_user_widgets(request):
         widgets_data = request.data.get("widgets", [])
 
         if not isinstance(widgets_data, list):
-            return Response({"error": "widgets must be a list"}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(ErrorCode.VALIDATION_FAILED, "widgets must be a list")
 
         updated_widgets = []
         for widget_data in widgets_data:
@@ -356,7 +370,7 @@ def save_user_widgets(request):
         return Response({"widgets": updated_widgets})
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(ErrorCode.VALIDATION_FAILED, str(e))
 
 
 @api_view(["GET"])
@@ -409,7 +423,11 @@ def get_low_stock_data(request):
         )
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return error_response(
+            ErrorCode.SERVER_ERROR,
+            str(e),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(["GET"])
@@ -467,7 +485,11 @@ def get_pending_reorders_data(request):
         )
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return error_response(
+            ErrorCode.SERVER_ERROR,
+            str(e),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(["GET"])
@@ -525,7 +547,11 @@ def get_asset_problems_data(request):
         )
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return error_response(
+            ErrorCode.SERVER_ERROR,
+            str(e),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(["GET"])
@@ -604,7 +630,11 @@ def get_qr_scans_data(request):
         )
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return error_response(
+            ErrorCode.SERVER_ERROR,
+            str(e),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(["GET"])
@@ -661,7 +691,11 @@ def get_deliveries_data(request):
         )
 
     except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return error_response(
+            ErrorCode.SERVER_ERROR,
+            str(e),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 def _parse_audit_feed_dt(value):

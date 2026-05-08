@@ -24,6 +24,7 @@ import { FormTextarea } from '../components/forms/FormTextarea';
 import { webhooksAPI } from '../services/api';
 import '../styles/WebhookFormPage.css';
 import { WebhookFormData, webhookSchema } from '../utils/formSchemas';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const EVENT_TYPE_OPTIONS = [
   { value: 'reorder_request_created', label: 'Reorder Request Created' },
@@ -94,7 +95,7 @@ const WebhookFormPage: React.FC = () => {
       });
     } catch (err: any) {
       console.error('Error loading webhook:', err);
-      setError(err.response?.data?.detail || 'Failed to load webhook. Please try again.');
+      setError(extractErrorMessage(err, 'Failed to load webhook. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -128,7 +129,7 @@ const WebhookFormPage: React.FC = () => {
     } catch (err: any) {
       console.error('Error saving webhook:', err);
       setError(
-        err.response?.data?.detail ||
+        extractErrorMessage(err, '') ||
           err.response?.data?.message ||
           'Failed to save webhook. Please try again.'
       );

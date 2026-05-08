@@ -39,6 +39,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { workOrderAPI } from '../services/api';
 import { WorkOrder, WorkOrderStatus } from '../types';
 import { formatDateOnly } from '../utils/dates';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const STATUS_OPTIONS = [
   { value: 'open', label: 'Open' },
@@ -133,7 +134,7 @@ const WorkOrderPage: React.FC = () => {
       } else {
         notifications.show({
           title: 'Error',
-          message: e.response?.data?.detail || 'Failed to update status.',
+          message: extractErrorMessage(e, 'Failed to update status.'),
           color: 'red',
         });
       }
@@ -175,7 +176,7 @@ const WorkOrderPage: React.FC = () => {
       const e = err as { response?: { data?: { detail?: string } } };
       notifications.show({
         title: 'Validation failed',
-        message: e.response?.data?.detail || 'Could not record validation.',
+        message: extractErrorMessage(e, 'Could not record validation.'),
         color: 'red',
       });
     } finally {

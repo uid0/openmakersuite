@@ -16,6 +16,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from config.api_errors import ErrorCode, error_response
 from inventory.models import Location
 
 from .models import LocationCheckIn, LocationFeedback, LocationTask, SecurityReport
@@ -65,14 +66,16 @@ class LocationCheckInViewSet(viewsets.ModelViewSet):
         """
         location_id = request.data.get("location_id")
         if not location_id:
-            return Response(
-                {"error": "location_id is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(ErrorCode.VALIDATION_FAILED, "location_id is required")
 
         try:
             location = Location.objects.get(id=location_id, is_active=True)
         except Location.DoesNotExist:
-            return Response({"error": "Location not found"}, status=status.HTTP_404_NOT_FOUND)
+            return error_response(
+                ErrorCode.NOT_FOUND,
+                "Location not found",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
 
         checkin_type = request.data.get("checkin_type", "anonymous")
         if checkin_type not in ["volunteer", "contractor", "anonymous"]:
@@ -125,9 +128,7 @@ class LocationFeedbackViewSet(viewsets.ModelViewSet):
         """
         location_id = request.data.get("location_id")
         if not location_id:
-            return Response(
-                {"error": "location_id is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(ErrorCode.VALIDATION_FAILED, "location_id is required")
 
         feedback_type = request.data.get("feedback_type")
         if feedback_type not in ["positive", "neutral", "negative"]:
@@ -138,12 +139,16 @@ class LocationFeedbackViewSet(viewsets.ModelViewSet):
 
         message = request.data.get("message", "")
         if not message:
-            return Response({"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(ErrorCode.VALIDATION_FAILED, "message is required")
 
         try:
             location = Location.objects.get(id=location_id, is_active=True)
         except Location.DoesNotExist:
-            return Response({"error": "Location not found"}, status=status.HTTP_404_NOT_FOUND)
+            return error_response(
+                ErrorCode.NOT_FOUND,
+                "Location not found",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
 
         feedback = LocationFeedback.objects.create(
             location=location,
@@ -197,9 +202,7 @@ class SecurityReportViewSet(viewsets.ModelViewSet):
         """
         location_id = request.data.get("location_id")
         if not location_id:
-            return Response(
-                {"error": "location_id is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(ErrorCode.VALIDATION_FAILED, "location_id is required")
 
         report_type = request.data.get("report_type")
         if report_type not in ["cleaning", "safety"]:
@@ -214,7 +217,11 @@ class SecurityReportViewSet(viewsets.ModelViewSet):
         try:
             location = Location.objects.get(id=location_id, is_active=True)
         except Location.DoesNotExist:
-            return Response({"error": "Location not found"}, status=status.HTTP_404_NOT_FOUND)
+            return error_response(
+                ErrorCode.NOT_FOUND,
+                "Location not found",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
 
         security_report = SecurityReport.objects.create(
             location=location,
@@ -379,7 +386,11 @@ def location_ping_webhook(request):
 
     provided = request.headers.get("X-Location-Ping-Token") or request.GET.get("token") or ""
     if provided != expected:
-        return Response({"detail": "Unauthorized."}, status=status.HTTP_401_UNAUTHORIZED)
+        return error_response(
+            ErrorCode.NOT_AUTHENTICATED,
+            "Unauthorized.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
 
     payload = request.data if isinstance(request.data, dict) else {}
     location = _resolve_location(payload)

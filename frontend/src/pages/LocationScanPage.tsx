@@ -13,6 +13,7 @@ import { checklistsAPI, inventoryAPI, locationCheckinAPI } from '../services/api
 import '../styles/ScanPage.css';
 import { Checklist } from '../types';
 import { promptInput, showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface Location {
   id: string;
@@ -59,7 +60,7 @@ const LocationScanPage: React.FC = () => {
       setLocation(response.data);
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to load location');
+      setError(extractErrorMessage(err, 'Failed to load location'));
       console.error('Error loading location:', err);
     } finally {
       setLoading(false);
@@ -96,7 +97,7 @@ const LocationScanPage: React.FC = () => {
       const completion = await checklistsAPI.startChecklist(checklistId, userName);
       navigate(`/checklist/${checklistId}/complete/${completion.data.id}`);
     } catch (err: any) {
-      notifications.showError('Failed to start checklist', err.response?.data?.detail);
+      notifications.showError('Failed to start checklist', extractErrorMessage(err, ''));
     }
   };
 
@@ -168,7 +169,7 @@ const LocationScanPage: React.FC = () => {
         setReportDescription('');
       }, 3000);
     } catch (err: any) {
-      showError(err.response?.data?.error || 'Failed to submit report');
+      showError(extractErrorMessage(err, 'Failed to submit report'));
       console.error('Error submitting report:', err);
     } finally {
       setSubmitting(false);

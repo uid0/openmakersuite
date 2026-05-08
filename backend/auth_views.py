@@ -19,6 +19,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from config.api_errors import ErrorCode, error_response
 from config.tokens import CustomRefreshToken
 
 
@@ -59,26 +60,27 @@ def register_user(request):
 
     # Basic validation
     if not username:
-        return Response({"detail": "Username is required"}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(ErrorCode.VALIDATION_FAILED, "Username is required")
 
     if len(username) < 3:
-        return Response(
-            {"detail": "Username must be at least 3 characters long"},
-            status=status.HTTP_400_BAD_REQUEST,
+        return error_response(
+            ErrorCode.VALIDATION_FAILED,
+            "Username must be at least 3 characters long",
         )
 
     # Check if username already exists
     if User.objects.filter(username=username).exists():
-        return Response(
-            {"detail": "Username already exists. Please choose another."},
-            status=status.HTTP_400_BAD_REQUEST,
+        return error_response(
+            ErrorCode.CONFLICT,
+            "Username already exists. Please choose another.",
+            status_code=status.HTTP_400_BAD_REQUEST,
         )
 
     # Validate email if provided
     if email and not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
-        return Response(
-            {"detail": "Please enter a valid email address"},
-            status=status.HTTP_400_BAD_REQUEST,
+        return error_response(
+            ErrorCode.VALIDATION_FAILED,
+            "Please enter a valid email address",
         )
 
     try:
@@ -90,9 +92,10 @@ def register_user(request):
         return Response(payload, status=status.HTTP_201_CREATED)
 
     except Exception as e:
-        return Response(
-            {"detail": f"Registration failed: {str(e)}"},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        return error_response(
+            ErrorCode.SERVER_ERROR,
+            f"Registration failed: {str(e)}",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
@@ -108,23 +111,32 @@ def login_user(request):
     password = request.data.get("password", "")
 
     if not username or not password:
-        return Response(
-            {"detail": "Username and password are required"},
-            status=status.HTTP_400_BAD_REQUEST,
+        return error_response(
+            ErrorCode.VALIDATION_FAILED,
+            "Username and password are required",
         )
 
     user = authenticate(request, username=username, password=password)
 
     if user is None:
-        return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+        return error_response(
+            ErrorCode.AUTHENTICATION_FAILED,
+            "Invalid credentials",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
 
     if not user.is_active:
-        return Response({"detail": "User account is disabled"}, status=status.HTTP_401_UNAUTHORIZED)
+        return error_response(
+            ErrorCode.AUTHENTICATION_FAILED,
+            "User account is disabled",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
 
     if not user.can_login():
-        return Response(
-            {"detail": "User does not have an active membership or required role"},
-            status=status.HTTP_403_FORBIDDEN,
+        return error_response(
+            ErrorCode.PERMISSION_DENIED,
+            "User does not have an active membership or required role",
+            status_code=status.HTTP_403_FORBIDDEN,
         )
 
     return Response(_issue_session_and_tokens(request, user))
@@ -151,7 +163,7 @@ def refresh_token(request):
     refresh_token = request.data.get("refresh")
 
     if not refresh_token:
-        return Response({"detail": "Refresh token is required"}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(ErrorCode.VALIDATION_FAILED, "Refresh token is required")
 
     try:
         refresh = CustomRefreshToken(refresh_token)
@@ -164,7 +176,11 @@ def refresh_token(request):
         )
 
     except Exception:
-        return Response({"detail": "Invalid refresh token"}, status=status.HTTP_401_UNAUTHORIZED)
+        return error_response(
+            ErrorCode.AUTHENTICATION_FAILED,
+            "Invalid refresh token",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
 
 
 @api_view(["POST"])
@@ -179,20 +195,23 @@ def create_test_membership(request):
     from membership.models import Membership
 
     if not settings.DEBUG:
-        return Response(
-            {"detail": "This endpoint is only available in DEBUG mode"},
-            status=status.HTTP_403_FORBIDDEN,
+        return error_response(
+            ErrorCode.PERMISSION_DENIED,
+            "This endpoint is only available in DEBUG mode",
+            status_code=status.HTTP_403_FORBIDDEN,
         )
 
     username = request.data.get("username", "").strip()
     if not username:
-        return Response({"detail": "Username is required"}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(ErrorCode.VALIDATION_FAILED, "Username is required")
 
     try:
         user = User.objects.get(username=username)
     except User.DoesNotExist:
-        return Response(
-            {"detail": f"User '{username}' not found"}, status=status.HTTP_404_NOT_FOUND
+        return error_response(
+            ErrorCode.NOT_FOUND,
+            f"User '{username}' not found",
+            status_code=status.HTTP_404_NOT_FOUND,
         )
 
     # Create an active membership for the user

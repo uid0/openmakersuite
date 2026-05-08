@@ -24,6 +24,7 @@ import { webhooksAPI } from '../services/api';
 import '../styles/WebhookDetailPage.css';
 import { Webhook, WebhookTestResult } from '../types';
 import { confirmDelete, showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const WebhookDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -86,7 +87,7 @@ const WebhookDetailPage: React.FC = () => {
         webhook_id: Number(id),
         webhook_name: webhook?.name || '',
         success: false,
-        error_message: err.response?.data?.detail || 'Failed to test webhook',
+        error_message: extractErrorMessage(err, 'Failed to test webhook'),
         tested_at: new Date().toISOString(),
       });
       setTestModalOpen(true);
@@ -145,7 +146,7 @@ const WebhookDetailPage: React.FC = () => {
         navigate('/settings/webhooks');
       } catch (err: any) {
         console.error('Error deleting webhook:', err);
-        showError(err.response?.data?.detail || 'Failed to delete webhook');
+        showError(extractErrorMessage(err, 'Failed to delete webhook'));
       }
     });
   };

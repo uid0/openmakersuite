@@ -18,6 +18,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { activeMaintenanceAPI, maintenanceAPI, MaintenanceDashboardData } from '../services/api';
 import { ActiveMaintenanceRow } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const PERIOD_LABELS: Array<{ key: keyof MaintenanceDashboardData['costs']['per_period']; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -86,7 +87,7 @@ const MaintenanceDashboardPage: React.FC = () => {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err?.response?.data?.detail || 'Failed to load maintenance dashboard.');
+        setError(extractErrorMessage(err, 'Failed to load maintenance dashboard.'));
       })
       .finally(() => {
         if (cancelled) return;

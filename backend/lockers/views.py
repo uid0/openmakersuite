@@ -19,9 +19,15 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from config.observability_redaction import redact
 from forgekey.models import ESP32Device
 
-from .models import Locker
+from .models import (
+    Locker,
+    LockerAccessEvent,
+    LockerAccessEventKind,
+    LockerHighTrustReturn,
+)
 from .serializers import (
     IrBreakEventSerializer,
     LockoutEventSerializer,
@@ -90,18 +96,111 @@ class _WebhookBase(APIView):
 
 
 class LockoutEventView(_WebhookBase):
+    """Persist a TAMPER row when entering lockout, LOCKOUT_CLEARED on exit."""
+
     serializer_class = LockoutEventSerializer
     event_kind = "lockout"
 
+    def handle(self, *, locker: Locker, payload: dict) -> None:
+        super().handle(locker=locker, payload=payload)
+        kind = (
+            LockerAccessEventKind.TAMPER
+            if payload["state"] == "entered"
+            else LockerAccessEventKind.LOCKOUT_CLEARED
+        )
+        LockerAccessEvent.objects.create(
+            locker=locker,
+            kind=kind,
+            asset=locker.current_asset,
+            metadata=redact(payload),
+        )
+
 
 class IrBreakEventView(_WebhookBase):
+    """An IR-break event in isolation is just telemetry. It only becomes an
+    ITEM_REMOVED row when the door is *open* at the same time — see Phase 4
+    correlation logic below.
+    """
+
     serializer_class = IrBreakEventSerializer
     event_kind = "ir_break"
 
+    def handle(self, *, locker: Locker, payload: dict) -> None:
+        super().handle(locker=locker, payload=payload)
+        if not payload.get("broken"):
+            return
+        # Correlate with most recent door-state event. If the last one was
+        # OPEN (and there's no SECURED since), this break means the user
+        # took the asset out.
+        last_state = (
+            LockerAccessEvent.objects.filter(
+                locker=locker,
+                kind__in=(
+                    LockerAccessEventKind.OPEN,
+                    LockerAccessEventKind.SECURED,
+                ),
+            )
+            .order_by("-occurred_at")
+            .first()
+        )
+        if last_state is None or last_state.kind != LockerAccessEventKind.OPEN:
+            # No matching open state — just log the break itself.
+            return
+        LockerAccessEvent.objects.create(
+            locker=locker,
+            kind=LockerAccessEventKind.ITEM_REMOVED,
+            asset=locker.current_asset,
+            metadata=redact(payload),
+        )
+        # Asset is leaving the locker; clear the pointer.
+        if locker.current_asset_id is not None:
+            Locker.objects.filter(pk=locker.pk).update(current_asset=None)
+
 
 class ReedStatusEventView(_WebhookBase):
+    """Persist OPEN on door-opens; SECURED on closes. On a high-trust locker,
+    a SECURED transition with a non-null current_asset spawns a pending
+    LockerHighTrustReturn that blocks new OTPs until accepted/rejected.
+    """
+
     serializer_class = ReedStatusEventSerializer
     event_kind = "reed_status"
+
+    def handle(self, *, locker: Locker, payload: dict) -> None:
+        super().handle(locker=locker, payload=payload)
+        kind = LockerAccessEventKind.SECURED if payload["closed"] else LockerAccessEventKind.OPEN
+        event = LockerAccessEvent.objects.create(
+            locker=locker,
+            kind=kind,
+            asset=locker.current_asset,
+            metadata=redact(payload),
+        )
+        if (
+            kind == LockerAccessEventKind.SECURED
+            and locker.is_high_trust
+            and locker.current_asset_id is not None
+        ):
+            # Find the user from the most recent UNLOCKED event so the
+            # return is pinned to the right person.
+            last_unlock = (
+                LockerAccessEvent.objects.filter(
+                    locker=locker,
+                    kind=LockerAccessEventKind.UNLOCKED,
+                )
+                .order_by("-occurred_at")
+                .first()
+            )
+            returning_user = last_unlock.actor if last_unlock else None
+            if returning_user is not None:
+                LockerHighTrustReturn.objects.get_or_create(
+                    locker=locker,
+                    status=LockerHighTrustReturn.STATUS_PENDING,
+                    defaults={
+                        "returning_user": returning_user,
+                        "asset": locker.current_asset,
+                        "triggering_event": event,
+                    },
+                )
 
 
 # ---------------------------------------------------------------------------

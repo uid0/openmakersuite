@@ -330,3 +330,220 @@ class LockerOtp(models.Model):
         self.revoked_at = timezone.now()
         self.revoked_by = by
         self.save(update_fields=["revoked_at", "revoked_by"])
+
+
+class LockerAccessEventKind(models.TextChoices):
+    """What happened on the locker (Phase 4 audit state machine).
+
+    Phase 3's webhook receivers (`views.LockoutEventView`, etc.) persist
+    one of these per inbound EMQX forward. Phase 5's janitors flip
+    ``OPEN`` rows to ``INCOMPLETE`` when they overstay the propped-door
+    threshold.
+    """
+
+    REQUESTED = "requested", "Access requested (OTP minted)"
+    UNLOCKED = "unlocked", "Latch released"
+    OPEN = "open", "Door opened"
+    SECURED = "secured", "Door closed + latch confirmed"
+    INCOMPLETE = "incomplete", "Door left open past threshold"
+    TAMPER = "tamper", "Tamper / lockout entered"
+    LOCKOUT_CLEARED = "lockout_cleared", "Lockout cleared"
+    ITEM_REMOVED = "item_removed", "Inventory IR break while door open"
+    ADMIN_PHYSICAL_ENTRY = "admin_physical_entry", "Mortise key (manual override)"
+
+
+class LockerAccessEvent(models.Model):
+    """Append-only audit row for every meaningful locker event.
+
+    This is the join surface that operators look at to ask "what happened
+    on locker X today?" — both the high-trust return flow and the
+    propped-door alert task lean on this table. Rows are written by:
+
+    - ``services.access.generate_otp`` (kind=REQUESTED)
+    - ``services.commands.publish_unlock`` (kind=UNLOCKED)
+    - ``views.ReedStatusEventView`` (kind=OPEN | SECURED)
+    - ``views.IrBreakEventView`` (kind=ITEM_REMOVED) when correlated with
+      an OPEN reed-state on the same locker
+    - ``views.LockoutEventView`` (kind=TAMPER | LOCKOUT_CLEARED)
+    - ``mqtt_consumer`` mortise-key handler (kind=ADMIN_PHYSICAL_ENTRY)
+    - ``tasks.flag_propped_doors`` (kind=INCOMPLETE)
+
+    The model is intentionally append-only — historical rows never get
+    rewritten when the operator-facing state changes. Phase 5 closes a
+    cycle by writing a new SECURED row, not by mutating the original
+    OPEN row.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    locker = models.ForeignKey(
+        Locker,
+        on_delete=models.CASCADE,
+        related_name="access_events",
+        help_text="Locker this event is about.",
+    )
+    kind = models.CharField(
+        max_length=24,
+        choices=LockerAccessEventKind.choices,
+        help_text="What happened.",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="locker_access_events",
+        help_text=(
+            "User responsible (the OTP requester for unlocks; the admin "
+            "for clear_lockout; null for firmware-originated rows where "
+            "no user is associated, e.g. propped-door janitor)."
+        ),
+    )
+    otp = models.ForeignKey(
+        LockerOtp,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="access_events",
+        help_text=(
+            "OTP that authorised this event. Null for direct staff "
+            "unlocks, mortise-key entries, or tamper events."
+        ),
+    )
+    asset = models.ForeignKey(
+        "inventory.Asset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="locker_events",
+        help_text=(
+            "Asset implicated by the event (the locker's current_asset "
+            "snapshot at event time; null when the locker is empty)."
+        ),
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Event-specific payload (raw EMQX forward, propped-door "
+            "duration, lockout reason, etc.). Already passes through "
+            "``observability_redaction.redact`` before storage."
+        ),
+    )
+    occurred_at = models.DateTimeField(
+        default=timezone.now,
+        help_text="When the event occurred (broker-supplied if available).",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-occurred_at"]
+        indexes = [
+            models.Index(fields=["locker", "-occurred_at"]),
+            models.Index(fields=["kind", "-occurred_at"]),
+            models.Index(fields=["actor", "-occurred_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.locker.slug} {self.kind} @ {self.occurred_at:%Y-%m-%d %H:%M}"
+
+
+class LockerHighTrustReturn(models.Model):
+    """Pending sign-off for a high-trust locker return (Phase 4).
+
+    When a user closes a high-trust locker after replacing the asset, a
+    SIG admin must confirm the asset is in acceptable condition before
+    another user can take it. This model gates that flow:
+
+    - Created by the SECURED handler when the locker is high-trust.
+    - Resolved by ``accept`` (the asset is good; locker is available
+      again) or ``reject`` (the asset is damaged / missing; the locker
+      is locked out until staff intervenes).
+    """
+
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_REJECTED = "rejected"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending acceptance"),
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    locker = models.ForeignKey(
+        Locker,
+        on_delete=models.CASCADE,
+        related_name="high_trust_returns",
+    )
+    returning_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="high_trust_returns_made",
+        help_text="User who returned the asset.",
+    )
+    asset = models.ForeignKey(
+        "inventory.Asset",
+        on_delete=models.PROTECT,
+        related_name="high_trust_returns",
+    )
+    triggering_event = models.ForeignKey(
+        LockerAccessEvent,
+        on_delete=models.PROTECT,
+        related_name="high_trust_returns",
+        help_text="The SECURED event that opened this return.",
+    )
+    status = models.CharField(
+        max_length=12,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    resolution_notes = models.TextField(blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="high_trust_returns_resolved",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["locker", "status"]),
+            models.Index(fields=["status", "-created_at"]),
+        ]
+        constraints = [
+            # At most one *pending* return per locker — the locker is
+            # frozen until it's resolved.
+            models.UniqueConstraint(
+                fields=["locker"],
+                condition=models.Q(status="pending"),
+                name="unique_pending_high_trust_return_per_locker",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.locker.slug} return {self.status} ({self.asset.name})"
+
+    def accept(self, *, by, notes: str = "") -> None:
+        if self.status != self.STATUS_PENDING:
+            return
+        self.status = self.STATUS_ACCEPTED
+        self.resolved_by = by
+        self.resolved_at = timezone.now()
+        if notes:
+            self.resolution_notes = notes
+        self.save(update_fields=["status", "resolved_by", "resolved_at", "resolution_notes"])
+
+    def reject(self, *, by, notes: str = "") -> None:
+        if self.status != self.STATUS_PENDING:
+            return
+        self.status = self.STATUS_REJECTED
+        self.resolved_by = by
+        self.resolved_at = timezone.now()
+        if notes:
+            self.resolution_notes = notes
+        self.save(update_fields=["status", "resolved_by", "resolved_at", "resolution_notes"])

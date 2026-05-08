@@ -157,12 +157,26 @@ def generate_otp(
     last_exc: Optional[Exception] = None
     for _ in range(8):
         try:
-            return LockerOtp.objects.create(
+            otp = LockerOtp.objects.create(
                 locker=locker,
                 requesting_user=user,
                 code=_generate_otp_code(digits),
                 expires_at=expires_at,
             )
+            # Phase 4: audit a REQUESTED row so dashboards can answer
+            # "who tried to access this locker?" even when the user
+            # never made it to the keypad.
+            from ..models import LockerAccessEvent, LockerAccessEventKind
+
+            LockerAccessEvent.objects.create(
+                locker=locker,
+                kind=LockerAccessEventKind.REQUESTED,
+                actor=user,
+                otp=otp,
+                asset=locker.current_asset,
+                metadata={"reason": decision.reason},
+            )
+            return otp
         except Exception as exc:  # noqa: BLE001 — IntegrityError is the target
             last_exc = exc
             continue

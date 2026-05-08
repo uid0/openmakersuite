@@ -213,6 +213,8 @@ def user_active_certifications(user):
         user_grants__user=user,
         user_grants__revoked_at__isnull=True,
     ).distinct()
+
+
 def is_staff_or_sig_admin(user) -> bool:
     """Return True if the user is staff/superuser/Logistics or a SIG admin
     of any SIG.

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import dj_database_url
 import highlight_io
+from celery.schedules import crontab
 from decouple import config
 from highlight_io.integrations.django import DjangoIntegration
 
@@ -405,6 +406,13 @@ CELERY_BEAT_SCHEDULE = {
         "kwargs": {
             "retention_days": config("FORGEKEY_PHOTO_RETENTION_DAYS", default=30, cast=int),
         },
+    },
+    # Monthly board / staff pulse email — covers the prior calendar month.
+    # Uses crontab so we land at 09:00 on the 1st regardless of how the
+    # worker scheduler restarted during the month.
+    "analytics-send-monthly-pulse": {
+        "task": "analytics.send_monthly_pulse_email",
+        "schedule": crontab(minute=0, hour=9, day_of_month=1),
     },
 }
 

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Monthly pulse — {{ period_label }}</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color: #222; line-height: 1.5; max-width: 720px; margin: 0 auto; padding: 1em;">
+
+  <h1 style="margin-bottom: 0.25em; color: #1864ab;">Makerspace pulse</h1>
+  <p style="margin-top: 0; color: #555;">{{ period_label }}</p>
+
+  <h2 style="border-bottom: 1px solid #eee; padding-bottom: 0.25em;">Headline</h2>
+  <table cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin-bottom: 1.5em;">
+    <tr>
+      <td style="background:#f1f8ff; border-radius:4px;">
+        <div style="font-size:12px; color:#555; text-transform: uppercase; letter-spacing: 0.05em;">Net value created</div>
+        <div style="font-size:1.6em; font-weight:700; color:#2f9e44;">{{ summary.internal_net_value_fmt }}</div>
+        <div style="font-size:11px; color:#888;">External estimate − internal cost</div>
+      </td>
+      <td style="background:#fff4e6; border-radius:4px;">
+        <div style="font-size:12px; color:#555; text-transform: uppercase; letter-spacing: 0.05em;">External spend (closed)</div>
+        <div style="font-size:1.6em; font-weight:700; color:#e8590c;">{{ summary.external_actual_cost_fmt }}</div>
+        <div style="font-size:11px; color:#888;">{{ summary.external_closed_count }} third-party WO{{ summary.external_closed_count|pluralize }}</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="background:#e7f5ff; border-radius:4px;">
+        <div style="font-size:12px; color:#555; text-transform: uppercase; letter-spacing: 0.05em;">Internal WOs completed</div>
+        <div style="font-size:1.6em; font-weight:700; color:#1864ab;">{{ summary.internal_completed_count }}</div>
+      </td>
+      <td style="background:#f8f9fa; border-radius:4px;">
+        <div style="font-size:12px; color:#555; text-transform: uppercase; letter-spacing: 0.05em;">Total to makerspace</div>
+        <div style="font-size:1.6em; font-weight:700; color:#222;">{{ summary.total_value_to_makerspace_fmt }}</div>
+        <div style="font-size:11px; color:#888;">Net internal − external spent</div>
+      </td>
+    </tr>
+  </table>
+
+  <h2 style="border-bottom: 1px solid #eee; padding-bottom: 0.25em;">Work order volume</h2>
+  <p style="text-align:center; margin: 0;">
+    <img src="cid:volume_trend.png" alt="Work order volume — last 12 months" style="max-width: 100%; border-radius: 4px;">
+  </p>
+
+  <h2 style="border-bottom: 1px solid #eee; padding-bottom: 0.25em;">Spend by category</h2>
+  <p style="text-align:center; margin: 0;">
+    <img src="cid:category_spend.png" alt="Spend by category" style="max-width: 100%; border-radius: 4px;">
+  </p>
+
+  {% if top_users %}
+  <h2 style="border-bottom: 1px solid #eee; padding-bottom: 0.25em;">Top contributors</h2>
+  <table cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%; margin-bottom: 1.5em;">
+    <tr style="background:#f8f9fa;">
+      <th align="left" style="padding:8px; color:#555; font-size:12px; text-transform:uppercase;">Member</th>
+      <th align="right" style="padding:8px; color:#555; font-size:12px; text-transform:uppercase;">Completed WOs</th>
+    </tr>
+    {% for user in top_users %}
+    <tr style="{% if not forloop.last %}border-bottom:1px solid #eee;{% endif %}">
+      <td style="padding:8px;">{{ user.display_name }}</td>
+      <td style="padding:8px;" align="right"><strong>{{ user.completed_wo_count }}</strong></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if forecast %}
+  <h2 style="border-bottom: 1px solid #eee; padding-bottom: 0.25em;">Maintenance forecast</h2>
+  <p style="margin-top: 0; color: #555;">{{ forecast|length }} asset{{ forecast|length|pluralize }} due for service.</p>
+  <table cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%; margin-bottom: 1.5em;">
+    <tr style="background:#f8f9fa;">
+      <th align="left" style="padding:8px; color:#555; font-size:12px; text-transform:uppercase;">Asset</th>
+      <th align="left" style="padding:8px; color:#555; font-size:12px; text-transform:uppercase;">Trigger</th>
+    </tr>
+    {% for entry in forecast %}
+    <tr style="{% if not forloop.last %}border-bottom:1px solid #eee;{% endif %}">
+      <td style="padding:8px;">{{ entry.asset_name }}</td>
+      <td style="padding:8px; color:#e8590c;">{{ entry.due_reason_label }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <hr style="border: none; border-top: 1px solid #eee; margin-top: 2em;">
+  {% if dashboard_url %}
+  <p style="margin: 1em 0;">
+    <a href="{{ dashboard_url }}" style="background:#1971c2; color:#fff; padding:10px 16px; text-decoration:none; border-radius:4px; display:inline-block;">
+      Open the live dashboard
+    </a>
+  </p>
+  {% endif %}
+  <p style="color:#888; font-size: 12px;">Sent automatically by OpenMakerSuite on the 1st of each month.</p>
+</body>
+</html>

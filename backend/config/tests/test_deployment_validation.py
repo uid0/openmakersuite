@@ -359,6 +359,28 @@ class TestDeploymentArtifactsAC36:
         ]:
             assert (REPO_ROOT / rel).is_file(), f"missing required deploy doc: {rel}"
 
+    def test_prod_compose_bundles_celery_beat(self):
+        """AC-29/AC-32: docker-compose.prod.yml must define a celery_beat
+        service so CELERY_BEAT_SCHEDULE entries actually fire in production.
+
+        Without this, the worker is up but no scheduled task ever ticks —
+        the failure mode that motivated github #335 (oms-iuw).
+        """
+        text = (REPO_ROOT / "docker-compose.prod.yml").read_text()
+        assert re.search(r"^\s{2}celery_beat:", text, re.MULTILINE), (
+            "docker-compose.prod.yml must define a `celery_beat` service. "
+            "If you renamed it, update this test and deploy/COMPOSE_RUNBOOK.md "
+            "and deploy/SMOKE_TESTS.md to match."
+        )
+        assert (
+            "celery -A config beat" in text
+        ), "celery_beat service command must invoke `celery -A config beat`."
+        assert "celery_beat_state:" in text, (
+            "celery_beat must mount a persistent `celery_beat_state` volume "
+            "so last_run_at survives container restarts; otherwise the "
+            "90-day donor task can drift indefinitely on weekly redeploys."
+        )
+
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
 def test_validator_handles_quoted_values(tmp_path):

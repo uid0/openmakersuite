@@ -26,6 +26,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "forgekey.tasks.mark_stale_devices_offline",
         1800.0,  # 30 min
     ),
+    "forgekey-prune-device-photos": (
+        "forgekey.tasks.prune_device_photos",
+        86400.0,  # 1 day
+    ),
 }
 
 
@@ -66,6 +70,26 @@ class TestCeleryBeatSchedule:
         assert not extra, (
             f"Beat schedule has undocumented entries: {sorted(extra)}. "
             "Add them to docs/CELERY_TASKS.md and EXPECTED_BEAT_SCHEDULE."
+        )
+
+    def test_prune_device_photos_passes_retention_kwarg(self):
+        """The pruner is wired to FORGEKEY_PHOTO_RETENTION_DAYS via kwargs.
+
+        If the kwargs entry is dropped, beat will fire the task with no
+        ``retention_days`` argument and the task default (30) silently
+        replaces the operator-configured retention. Pin the wiring.
+        """
+        entry = settings.CELERY_BEAT_SCHEDULE["forgekey-prune-device-photos"]
+        kwargs = entry.get("kwargs") or {}
+        assert "retention_days" in kwargs, (
+            "forgekey-prune-device-photos must pass retention_days via "
+            "kwargs so FORGEKEY_PHOTO_RETENTION_DAYS reaches the task."
+        )
+        assert kwargs["retention_days"] == settings.FORGEKEY_PHOTO_RETENTION_DAYS, (
+            "forgekey-prune-device-photos kwargs.retention_days "
+            f"({kwargs['retention_days']!r}) drifted from "
+            f"settings.FORGEKEY_PHOTO_RETENTION_DAYS "
+            f"({settings.FORGEKEY_PHOTO_RETENTION_DAYS!r})."
         )
 
 

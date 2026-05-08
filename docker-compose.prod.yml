@@ -202,6 +202,54 @@ services:
     networks:
       - app-network
 
+  # Long-running MQTT consumer: subscribes to forgekey/+/status,
+  # forgekey/+/+/occupancy, forgekey/+/ota/status, etc. and updates the
+  # backing ESP32Device rows (last_seen, is_online, occupancy, firmware
+  # ack). Without this service the broker happily delivers messages but
+  # nothing in OMS records them — last_seen stalls at the last register/
+  # photo-upload time and command ACKs never resolve. (gh forge-2)
+  #
+  # Run exactly ONE replica per environment. The consumer uses a single
+  # paho.Client with the server JWT mint (oms-y5p) to authenticate; two
+  # replicas would race on connection state and double-process every
+  # message.
+  mqtt_consumer:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    logging: *default-logging
+    command: python manage.py mqtt_consumer
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    volumes:
+      - media_volume:/app/media
+    env_file:
+      - .env
+    environment:
+      - DEBUG=0
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - SKIP_DB_MIGRATIONS=1
+      - HIGHLIGHT_PROJECT_ID=${HIGHLIGHT_PROJECT_ID:-}
+      - HIGHLIGHT_OTLP_ENDPOINT=${HIGHLIGHT_OTLP_ENDPOINT:-}
+      - HIGHLIGHT_ENVIRONMENT=${HIGHLIGHT_ENVIRONMENT:-production}
+      - HIGHLIGHT_SERVICE_VERSION=${GIT_HASH:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - app-network
+
   frontend:
     build:
       context: ./frontend

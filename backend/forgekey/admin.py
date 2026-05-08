@@ -525,4 +525,11 @@ class DeviceCommandAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request, obj=None):
-        return False
+        # DeviceCommand is read-only audit history at the row level — staff
+        # admins should not scrub individual command rows. But the cascade
+        # path that fires when a superuser deletes an ESP32Device asks
+        # ``has_delete_permission`` here for each related command before it
+        # will let the parent delete proceed; returning False unconditionally
+        # blocks ESP32Device deletion entirely (gh forge-1). Allow superusers
+        # so the cascade can run; everyone else still gets the audit view.
+        return request.user.is_superuser

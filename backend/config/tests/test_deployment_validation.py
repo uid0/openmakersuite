@@ -300,6 +300,23 @@ class TestDeploymentArtifactsAC36:
         )
         assert result.returncode == 0, result.stderr
 
+    def test_prod_compose_bundles_mqtt_consumer(self):
+        """The mqtt_consumer service must be present in
+        docker-compose.prod.yml so device telemetry actually reaches the
+        Django process. Without it, ``ESP32Device.last_seen`` stalls at
+        the last register/photo-upload time and command ACKs never
+        resolve. The failure mode that motivated this check.
+        """
+        text = (REPO_ROOT / "docker-compose.prod.yml").read_text()
+        assert re.search(r"^\s{2}mqtt_consumer:", text, re.MULTILINE), (
+            "docker-compose.prod.yml must define an `mqtt_consumer` service. "
+            "If you renamed it, update this test and "
+            "deploy/COMPOSE_RUNBOOK.md to match."
+        )
+        assert (
+            "python manage.py mqtt_consumer" in text
+        ), "mqtt_consumer service command must invoke `python manage.py mqtt_consumer`."
+
     def test_env_example_covers_validator_required_keys(self):
         """Every key the validator marks fatal-if-missing must exist in
         .env.prod.example so operators have a slot to fill in."""

@@ -96,6 +96,7 @@ INSTALLED_APPS = [
     "devices",
     "loto",
     "lockers",
+    "analytics",
 ]
 
 MIDDLEWARE = [

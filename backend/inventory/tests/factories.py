@@ -228,6 +228,7 @@ class AssetFactory(DjangoModelFactory):
     name = factory.Sequence(lambda n: f"Asset {n}")
     description = Faker("text", max_nb_chars=200)
     serial_number = factory.Sequence(lambda n: f"SER-{n:05d}")
+    asset_tag = factory.Sequence(lambda n: f"AST-{n:05d}")
     category = SubFactory(CategoryFactory)
     location = SubFactory(LocationFactory)
     manufacturer = SubFactory(SupplierFactory)

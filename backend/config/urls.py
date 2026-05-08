@@ -52,6 +52,7 @@ urlpatterns = [
     path("api/maintenance-orders/", include("maintenance_orders.urls")),
     path("api/electrical-circuits/", include("electrical_circuits.urls")),
     path("api/loto/", include("loto.urls")),
+    path("api/analytics/", include("analytics.urls")),
     # Flower proxy (superuser only)
     path("flower/", include("config.flower_urls")),
 ]

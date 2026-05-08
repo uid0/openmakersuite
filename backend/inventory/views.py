@@ -25,6 +25,7 @@ from rest_framework.permissions import (
 from rest_framework.response import Response
 
 from config.api_errors import ErrorCode, error_response
+from membership.permissions import IsAuthenticatedOrStaffSigAdminWrite
 
 from .audit import record_event as record_maintenance_audit_event
 from .models import (
@@ -3035,7 +3036,11 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         )
         .all()
     )
-    permission_classes = [IsAuthenticated]
+    # gh #374: read for any authenticated user (volunteers can see open +
+    # completed PM work orders), but write requires staff / Logistics / SIG
+    # admin. Third-party work orders use a stricter gate (IsStaffOrSigAdmin)
+    # because the operator-set rule hides them from volunteers entirely.
+    permission_classes = [IsAuthenticatedOrStaffSigAdminWrite]
 
     def get_serializer_class(self):
         if self.action == "list":

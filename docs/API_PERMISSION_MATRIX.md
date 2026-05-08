@@ -89,7 +89,8 @@ below are public.
 | POST | `inventory/work-orders/<id>/upload/` | public | Upload a completed paper work-order PDF for ingest. | Required: PDF is signed by AcroForm field; rate-limit per-IP. |
 | GET  | `inventory/health/` | public | Inventory app health summary. | Not required. |
 | any  | `inventory/items/...` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly` — list/retrieve open to anonymous callers, write requires login. Staff-level gating is enforced inside `perform_create/_update/_destroy` via `_check_staff()`. |
-| any  | `inventory/work-orders/...` (CRUD) | member | `IsAuthenticated` on `WorkOrderViewSet`; staff-only operations are gated inline. |
+| GET  | `inventory/work-orders/...` | member | `IsAuthenticatedOrStaffSigAdminWrite` on `WorkOrderViewSet` — any authenticated user can read open + completed standard PM work orders (gh #374). |
+| POST/PATCH/PUT/DELETE | `inventory/work-orders/...` | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` denies writes to volunteers; staff and SIG leaders may add or modify (gh #374). |
 | any  | `inventory/maintenance-*` (CRUD) | member-rw | `IsAuthenticated` for log/task/dashboard; `IsAuthenticatedOrReadOnly` for material catalog. |
 
 ## Membership (`/api/membership/`)
@@ -223,27 +224,25 @@ below are public.
 
 | Method | Path | Class | Notes |
 | --- | --- | --- | --- |
-| any | `vendors/...` | member-rw | `IsAuthenticatedOrReadOnly` on `VendorViewSet`. The queryset filters cost/contact data for non-staff readers; staff-only writes are enforced inline. |
-
-> **Known intent gap (gh #328 follow-up):** the original matrix declared
-> vendors staff-only. Today the read surface is open to any authenticated
-> user. Tighten to `IsAdminUser` if vendor compliance must be staff-only.
+| GET | `vendors/...` | member | `IsAuthenticated` on `VendorViewSet`. The queryset still filters cost/contact data for non-staff readers; staff-only writes are enforced via `IsAdminUser` on non-safe methods. |
+| POST/PATCH/PUT/DELETE | `vendors/...` | admin | `IsAdminUser` only — staff manage vendor records. SIG leaders cannot create or modify vendors (operator-set rule, gh #374). |
 
 ## Maintenance orders (`/api/maintenance-orders/`)
 
 | Method | Path | Class | Notes |
 | --- | --- | --- | --- |
-| any | `maintenance-orders/third-party-work-orders/...` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly` on `ThirdPartyWorkOrderViewSet` and the related `…Asset/Attachment/AuditLog/Quote` ViewSets. |
-| any | `maintenance-orders/asset-warranties/...` | member-rw | `IsAuthenticatedOrReadOnly` on `AssetWarrantyViewSet`. |
-| any | `maintenance-orders/emergency-authorizations/...` | member-rw | `IsAuthenticatedOrReadOnly` on `EmergencyAuthorizationViewSet`. |
-| any | `maintenance-orders/recovery-tasks/...` | member-rw | `IsAuthenticatedOrReadOnly` on `RecoveryTaskViewSet`. |
-| GET | `maintenance-orders/assets/<id>/work-order-status/` | member | `IsAuthenticated` on `asset_wo_status`. |
+| any | `maintenance-orders/third-party-work-orders/...` (CRUD) | staff-or-sig-admin | `IsStaffOrSigAdmin` on `ThirdPartyWorkOrderViewSet` and the related `…Asset/Attachment/AuditLog/Quote` ViewSets. Reads gated alongside writes (gh #374). |
+| any | `maintenance-orders/asset-warranties/...` | staff-or-sig-admin | `IsStaffOrSigAdmin`. Volunteer surface is the standard PM work-order list (gh #374). |
+| any | `maintenance-orders/emergency-authorizations/...` | staff-or-sig-admin | `IsStaffOrSigAdmin`. |
+| any | `maintenance-orders/recovery-tasks/...` | staff-or-sig-admin | `IsStaffOrSigAdmin`. |
+| GET | `maintenance-orders/assets/<id>/work-order-status/` | member | `IsAuthenticated` on `asset_wo_status` — surfaces compact status data, not vendor relationships. |
 
-> **Known intent gap (gh #328 follow-up):** maintenance state was
-> previously documented as staff-only. The current code allows any
-> authenticated user to read; staff gating is enforced via the workflow
-> transitions in `maintenance_orders.transitions`. Tighten the ViewSet
-> permissions if read-side staff-only is required.
+> **gh #374 (operator-set rule, 2026-05):** third-party work orders are
+> intentionally hidden from volunteers — they would expose vendor
+> relationships, NTE amounts, and quote data. Standard PM work orders
+> (see `inventory/work-orders/`) remain readable by all authenticated
+> users. Staff and SIG leaders may add or modify both kinds; vendors
+> themselves are staff-only writes.
 
 ## Lockout / tagout (`/api/loto/`)
 

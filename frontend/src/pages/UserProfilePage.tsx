@@ -4,13 +4,14 @@
  * Allows users to view and edit their profile, change password, upload signature, and manage notification preferences
  */
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Alert, Button, Group, Image, Paper, PasswordInput, Slider, Stack, Switch, Tabs, Text, Title } from '@mantine/core';
+import { Alert, Button, Group, Image, Paper, PasswordInput, Slider, Stack, Switch, Tabs, Text } from '@mantine/core';
 import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { FormImageUpload } from '../components/forms/FormImageUpload';
 import { FormInput } from '../components/forms/FormInput';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { notificationsAPI, userAPI } from '../services/api';
 import { ChangePasswordRequest, NotificationPreferences, UserProfile } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -220,17 +221,26 @@ const UserProfilePage: React.FC = () => {
 
   if (loading) {
     return (
-      <Stack gap="md">
-        <Title order={2}>User Profile</Title>
-        <Text>Loading...</Text>
-      </Stack>
+      <WorkspacePage
+        testId="user-profile-page"
+        hero={{ eyebrow: 'Settings', title: 'Profile', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading profile…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <Stack gap="md">
-      <Title order={2}>User Profile</Title>
-
+    <WorkspacePage
+      testId="user-profile-page"
+      hero={{
+        eyebrow: 'Settings',
+        title: 'Profile',
+        description: 'Personal info, password, signature, and notification preferences.',
+      }}
+    >
       {error && (
         <Alert icon={<IconAlertCircle size={16} />} title="Error" color="red" onClose={() => setError(null)} withCloseButton>
           {error}
@@ -486,7 +496,7 @@ const UserProfilePage: React.FC = () => {
           </Paper>
         </Tabs.Panel>
       </Tabs>
-    </Stack>
+    </WorkspacePage>
   );
 };
 

@@ -2,7 +2,7 @@
  * Tests for PowerPanelDirectoryPage (oms-b25 [6/7]).
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import PowerPanelDirectoryPage from '../../pages/PowerPanelDirectoryPage';
@@ -73,7 +73,7 @@ describe('PowerPanelDirectoryPage', () => {
 
     renderPage();
 
-    await waitFor(() => expect(screen.getByText('Placeholder')).toBeInTheDocument());
+    expect(await screen.findByText('Placeholder')).toBeInTheDocument();
     expect(screen.getByText(/1 panel flagged for review/i)).toBeInTheDocument();
   });
 

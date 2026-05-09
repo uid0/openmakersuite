@@ -8,6 +8,7 @@
  *   3. Non-staff users cannot reach the page.
  *   4. Frontend test covers the edit flow.
  */
+import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ForgeKeyDevicesPage from '../../pages/ForgeKeyDevicesPage';
@@ -65,12 +66,14 @@ const buildLocation = (overrides: Partial<any> = {}) => ({
 
 const renderPage = (initialEntry = '/facilities/forgekey-devices') =>
   render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/facilities/forgekey-devices" element={<ForgeKeyDevicesPage />} />
-        <Route path="/" element={<div>HOME</div>} />
-      </Routes>
-    </MemoryRouter>,
+    <MantineProvider>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/facilities/forgekey-devices" element={<ForgeKeyDevicesPage />} />
+          <Route path="/" element={<div>HOME</div>} />
+        </Routes>
+      </MemoryRouter>
+    </MantineProvider>,
   );
 
 describe('ForgeKeyDevicesPage', () => {

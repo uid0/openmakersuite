@@ -266,10 +266,10 @@ describe('InventoryListPage', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText('Add New Item')).toBeInTheDocument();
+      expect(screen.getByText('Add new item')).toBeInTheDocument();
     });
 
-    const addButton = screen.getByText('Add New Item');
+    const addButton = screen.getByText('Add new item');
     fireEvent.click(addButton);
 
     expect(mockNavigate).toHaveBeenCalledWith('/inventory/items/new');

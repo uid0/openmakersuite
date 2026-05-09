@@ -3,8 +3,8 @@ import {
   Anchor,
   Badge,
   Box,
+  Button,
   Card,
-  Container,
   Group,
   Loader,
   SimpleGrid,
@@ -16,6 +16,7 @@ import {
 import { IconAlertTriangle, IconCalendar, IconCash, IconClipboardList } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { activeMaintenanceAPI, maintenanceAPI, MaintenanceDashboardData } from '../services/api';
 import { ActiveMaintenanceRow } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -103,14 +104,19 @@ const MaintenanceDashboardPage: React.FC = () => {
   );
 
   return (
-    <Container size="xl" py="md" data-testid="maintenance-dashboard-page">
-      <Group justify="space-between" mb="md">
-        <Title order={2}>Maintenance</Title>
-        <Anchor component={Link} to="/maintenance/dashboard" size="sm">
-          Open PM Dashboard →
-        </Anchor>
-      </Group>
-
+    <WorkspacePage
+      testId="maintenance-dashboard-page"
+      hero={{
+        eyebrow: 'Maintenance',
+        title: 'Maintenance',
+        description: 'Active work orders, asset problems, and PM cost rollups in one place.',
+        action: (
+          <Button component={Link} to="/maintenance/dashboard" variant="default">
+            Open PM dashboard
+          </Button>
+        ),
+      }}
+    >
       {loading && (
         <Group justify="center" py="xl">
           <Loader />
@@ -119,7 +125,7 @@ const MaintenanceDashboardPage: React.FC = () => {
       )}
 
       {!loading && error && (
-        <Alert color="red" icon={<IconAlertTriangle size={16} />} mb="md">
+        <Alert color="red" icon={<IconAlertTriangle size={16} />}>
           {error}
         </Alert>
       )}
@@ -373,7 +379,7 @@ const MaintenanceDashboardPage: React.FC = () => {
           </Box>
         </Stack>
       )}
-    </Container>
+    </WorkspacePage>
   );
 };
 

@@ -201,10 +201,10 @@ describe('SupplierListPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Add New Supplier')).toBeInTheDocument();
+      expect(screen.getByText('Add new supplier')).toBeInTheDocument();
     });
 
-    const addButton = screen.getByText('Add New Supplier');
+    const addButton = screen.getByText('Add new supplier');
     fireEvent.click(addButton);
 
     expect(mockNavigate).toHaveBeenCalledWith('/inventory/suppliers/new');

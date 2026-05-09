@@ -207,7 +207,7 @@ describe('LocationListPage', () => {
       expect(screen.getByText('Main Workshop')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText('Search locations...');
+    const searchInput = screen.getByPlaceholderText('Search locations…');
     fireEvent.change(searchInput, { target: { value: 'Electronics' } });
 
     await waitFor(() => {
@@ -223,7 +223,7 @@ describe('LocationListPage', () => {
       expect(screen.getByText('Main Workshop')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText('Search locations...');
+    const searchInput = screen.getByPlaceholderText('Search locations…');
     fireEvent.change(searchInput, { target: { value: 'workspace' } });
 
     await waitFor(() => {
@@ -256,7 +256,7 @@ describe('LocationListPage', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText('Create Location')).toBeInTheDocument();
+      expect(screen.getByText('Create location')).toBeInTheDocument();
     });
   });
 
@@ -268,7 +268,7 @@ describe('LocationListPage', () => {
       expect(screen.getByText('Main Workshop')).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('Create Location')).not.toBeInTheDocument();
+    expect(screen.queryByText('Create location')).not.toBeInTheDocument();
   });
 
   it('displays location status badges correctly', async () => {

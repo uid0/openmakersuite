@@ -20,6 +20,7 @@ import {
 import { IconDownload, IconQrcode, IconSearch, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { indexCardsAPI, inventoryAPI } from '../services/api';
 import { Category, InventoryItem, Location } from '../types';
 import { exportInventoryItemsToCSV } from '../utils/csvExport';
@@ -247,26 +248,29 @@ const InventoryListPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Paper p="md">
-        <Text>Loading inventory...</Text>
-      </Paper>
+      <WorkspacePage
+        hero={{ eyebrow: 'Inventory', title: 'Items', description: 'Loading…' }}
+        testId="inventory-list-page"
+      >
+        <Paper p="md" withBorder>
+          <Text c="dimmed">Loading inventory…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <Stack gap="md">
-      <Group justify="space-between">
-        <div>
-          <Text size="xl" fw={500}>
-            Inventory Items
-          </Text>
-          <Text size="sm" c="dimmed">
-            {sortedAndFilteredItems.length} of {items.length} items
-          </Text>
-        </div>
-        <Button onClick={() => navigate('/inventory/items/new')}>Add New Item</Button>
-      </Group>
-
+    <WorkspacePage
+      testId="inventory-list-page"
+      hero={{
+        eyebrow: 'Inventory',
+        title: 'Items',
+        description: `${sortedAndFilteredItems.length} of ${items.length} items in stock.`,
+        action: (
+          <Button onClick={() => navigate('/inventory/items/new')}>Add new item</Button>
+        ),
+      }}
+    >
       {/* Filters and Search */}
       <Paper p="md" withBorder>
         <Stack gap="md">
@@ -490,7 +494,7 @@ const InventoryListPage: React.FC = () => {
           </Paper>
         )}
       </Paper>
-    </Stack>
+    </WorkspacePage>
   );
 };
 

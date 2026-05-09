@@ -83,5 +83,23 @@ describe('Breadcrumbs Component', () => {
     const purchasingLink = screen.getByRole('link', { name: /^purchasing$/i });
     expect(purchasingLink).toHaveAttribute('href', '/purchasing');
   });
+
+  it('hides bare UUID segments between a parent listing and an action', () => {
+    // /facilities/electrical/breakers/<uuid>/edit used to render the raw
+    // UUID as its own breadcrumb chip. Hide it so the trail reads
+    // "Electrical → Breakers → Edit".
+    renderWithRouter([
+      '/facilities/electrical/breakers/550e8400-e29b-41d4-a716-446655440000/edit',
+    ]);
+    expect(screen.queryByText(/550e8400/)).not.toBeInTheDocument();
+    expect(screen.getByText(/breakers/i)).toBeInTheDocument();
+    expect(screen.getByText(/edit/i)).toBeInTheDocument();
+  });
+
+  it('hides numeric ID segments too', () => {
+    renderWithRouter(['/facilities/electrical/panels/42']);
+    expect(screen.queryByText('42')).not.toBeInTheDocument();
+    expect(screen.getByText(/panels/i)).toBeInTheDocument();
+  });
 });
 

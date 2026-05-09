@@ -21,8 +21,14 @@ import ChecklistCompletionPage from './pages/ChecklistCompletionPage';
 import CodeEntryPage from './pages/CodeEntryPage';
 import DashboardPage from './pages/DashboardPage';
 import DonationItemScanPage from './pages/DonationItemScanPage';
+import AssetPowerChainPage from './pages/AssetPowerChainPage';
+import BreakerTripImpactPage from './pages/BreakerTripImpactPage';
+import CircuitLoadPage from './pages/CircuitLoadPage';
 import ElectricalCircuitsPage from './pages/ElectricalCircuitsPage';
+import ElectricalOverviewPage from './pages/ElectricalOverviewPage';
 import FacilitiesOverviewPage from './pages/FacilitiesOverviewPage';
+import PowerPanelDetailPage from './pages/PowerPanelDetailPage';
+import PowerPanelDirectoryPage from './pages/PowerPanelDirectoryPage';
 import FixtureScanPage from './pages/FixtureScanPage';
 import ForgeKeyDeviceDetailPage from './pages/ForgeKeyDeviceDetailPage';
 import ForgeKeyDevicesPage from './pages/ForgeKeyDevicesPage';
@@ -199,8 +205,18 @@ function AppContent() {
           <Route path="/facilities/maker-boxes/scan" element={<WorkspaceLayout><MakerBoxScanPage /></WorkspaceLayout>} />
           <Route path="/facilities/maker-boxes" element={<WorkspaceLayout><MakerBoxAdminPage /></WorkspaceLayout>} />
 
-          {/* Electrical circuits & network drops (oms-a5f) */}
-          <Route path="/facilities/electrical" element={<WorkspaceLayout><ElectricalCircuitsPage /></WorkspaceLayout>} />
+          {/* Electrical workspace — overview + power-topology visualization (oms-b25 [6/7]) */}
+          <Route path="/facilities/electrical" element={<WorkspaceLayout><ElectricalOverviewPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/panels" element={<WorkspaceLayout><PowerPanelDirectoryPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/panels/:id" element={<WorkspaceLayout><PowerPanelDetailPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/breakers/:id/trip-impact" element={<WorkspaceLayout><BreakerTripImpactPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/circuits/:id/load" element={<WorkspaceLayout><CircuitLoadPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/power-chain" element={<WorkspaceLayout><AssetPowerChainPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/power-chain/:assetId" element={<WorkspaceLayout><AssetPowerChainPage /></WorkspaceLayout>} />
+
+          {/* Legacy fixture inventory (oms-a5f). Kept under /electrical/fixtures so
+              existing bookmarks redirect cleanly via the routes below. */}
+          <Route path="/facilities/electrical/fixtures" element={<WorkspaceLayout><ElectricalCircuitsPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/breakers/new" element={<WorkspaceLayout><BreakerFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/breakers/:id/edit" element={<WorkspaceLayout><BreakerFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/breakers/:id/trace" element={<WorkspaceLayout><BreakerTracePage /></WorkspaceLayout>} />

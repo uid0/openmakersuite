@@ -1930,6 +1930,115 @@ export const OUTLET_TYPE_OPTIONS = [
   { value: 'other', label: 'Other' },
 ];
 
+// ---------------------------------------------------------------------
+// Power topology safety API (oms-b25 [4/7]). Read-only views over the
+// PowerPanel → PowerBreaker → PowerCircuit → PowerOutlet ↔ PowerPort
+// hierarchy. Used by the [6/7] visualization pages.
+// ---------------------------------------------------------------------
+
+export type PowerPanelPhase = 'single' | 'split' | 'three';
+
+export interface PowerPanelSummary {
+  id: number;
+  name: string;
+  location_id: number;
+  location_name: string;
+  phase_configuration: PowerPanelPhase;
+  voltage: number;
+  main_breaker_amperage: number | null;
+  breaker_count: number;
+  needs_review: boolean;
+}
+
+export interface PowerOutletNode {
+  id: number;
+  label: string;
+  outlet_type: string;
+  status: string;
+  location_id: number | null;
+  location_name: string | null;
+}
+
+export interface PowerCircuitNode {
+  id: number;
+  label: string;
+  breaker_id: number;
+  max_load_amps: number | null;
+  conductor_size: string;
+  outlets: PowerOutletNode[];
+}
+
+export interface PowerBreakerNode {
+  id: number;
+  panel_id: number;
+  panel_name: string;
+  position: string;
+  amperage: number;
+  phase: string;
+  pole_count: number;
+  status: string;
+  label: string;
+  circuits: PowerCircuitNode[];
+}
+
+export interface PowerPanelTopology {
+  id: number;
+  name: string;
+  location_id: number;
+  location_name: string;
+  phase_configuration: PowerPanelPhase;
+  voltage: number;
+  main_breaker_amperage: number | null;
+  breakers: PowerBreakerNode[];
+}
+
+export interface PowerSafetyAsset {
+  id: string;
+  name: string;
+  asset_tag: string;
+  is_critical: boolean;
+}
+
+export interface BreakerTripImpact {
+  breaker: Omit<PowerBreakerNode, 'circuits'>;
+  assets: PowerSafetyAsset[];
+  critical_loads: PowerSafetyAsset[];
+}
+
+export interface CircuitLoad {
+  circuit: Omit<PowerCircuitNode, 'outlets'>;
+  connected_device_count: number;
+  connected_devices: PowerSafetyAsset[];
+  estimated_max_draw_amps: number;
+  capacity_amps: number | null;
+  capacity_utilization_percent: number | null;
+}
+
+export interface PowerChainHop {
+  kind: 'panel' | 'breaker' | 'circuit' | 'outlet' | 'cable' | 'port';
+  id: number;
+  type: string;
+  label: string | number;
+}
+
+export interface AssetPowerChain {
+  asset: PowerSafetyAsset;
+  chain: PowerChainHop[];
+}
+
+export const electricalSafetyAPI = {
+  listPanels: () =>
+    api.get<{ results: PowerPanelSummary[] }>('/electrical/panels/'),
+  getPanelTopology: (panelId: number | string) =>
+    api.get<PowerPanelTopology>(`/electrical/panels/${panelId}/topology/`),
+  getBreakerTripImpact: (breakerId: number | string) =>
+    api.get<BreakerTripImpact>(`/electrical/breakers/${breakerId}/trip-impact/`),
+  getCircuitLoad: (circuitId: number | string) =>
+    api.get<CircuitLoad>(`/electrical/circuits/${circuitId}/load/`),
+  getAssetPowerChain: (assetId: string) =>
+    api.get<AssetPowerChain>(`/assets/${assetId}/power-chain/`),
+};
+
 // LOTO (lockout / tagout) — oms-78j
 export type LOTODeviceType =
   | 'padlock'

@@ -11,13 +11,18 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import '../styles/Breadcrumbs.css';
 
-import { isClickable, labelFor } from '../navigation/routeMap';
+import { getRouteEntry, isClickable, labelFor } from '../navigation/routeMap';
 
 interface BreadcrumbSegment {
   path: string;
   label: string;
   clickable: boolean;
 }
+
+// Bare resource identifiers (UUIDs or all-digit ids). Rendering one between
+// the parent listing and an action label like "Edit" is noise — the user
+// already navigated through the parent to get here.
+const ID_LIKE = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 const Breadcrumbs: React.FC = () => {
   const location = useLocation();
@@ -30,6 +35,11 @@ const Breadcrumbs: React.FC = () => {
     pathSegments.forEach((segment, index) => {
       currentPath += `/${segment}`;
       const pathKey = pathSegments.slice(0, index + 1).join('/');
+      // Hide ID-like segments unless the route map explicitly registers
+      // them (e.g. a code that's worth surfacing to the user).
+      if (ID_LIKE.test(segment) && !getRouteEntry(pathKey)) {
+        return;
+      }
       out.push({
         path: currentPath,
         label: labelFor(pathKey, segment),

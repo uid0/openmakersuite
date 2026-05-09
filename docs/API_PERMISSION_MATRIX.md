@@ -264,6 +264,21 @@ below are public.
 | GET | `electrical-circuits/reports/panel-directory.pdf` | member | Printable panel directory PDF. |
 | GET | `electrical-circuits/reports/network-drop-list.pdf` | member | Printable network drop list PDF. |
 
+## Power-topology safety queries (`/api/electrical/`, `/api/assets/<id>/power-chain/`)
+
+Read-only endpoints that surface the resolvers in
+`electrical_circuits.services.power_chain` so a maintainer can answer
+"what loses power if I trip this?" / "what feeds this asset?" before
+opening a panel. All staff-gated (oms-b25 AC-5).
+
+| Method | Path | Class | Notes |
+| --- | --- | --- | --- |
+| GET | `electrical/panels/` | staff | `PowerPanelListView` — directory of every panel with breaker counts and the migration `needs_review` flag. |
+| GET | `electrical/breakers/<id>/trip-impact/` | staff | `PowerBreakerTripImpactView` — assets fed by the breaker, split critical vs. not. |
+| GET | `electrical/circuits/<id>/load/` | staff | `PowerCircuitLoadView` — connected devices, estimated nameplate draw, NEC-derated capacity utilization. |
+| GET | `electrical/panels/<id>/topology/` | staff | `PowerPanelTopologyView` — full panel → breaker → circuit → outlet tree. |
+| GET | `assets/<id>/power-chain/` | staff | `AssetPowerChainView` — every hop from an asset back to its panel. |
+
 ## Analytics (`/api/analytics/`)
 
 Read-only aggregate metrics for the executive dashboard and the monthly

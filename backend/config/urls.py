@@ -11,6 +11,10 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from auth_views import create_test_membership, login_user, logout_user, refresh_token, register_user
 from config.health import livez, readyz
+from electrical_circuits.urls import (
+    asset_power_chain_urlpatterns as electrical_asset_power_chain_urls,
+)
+from electrical_circuits.urls import safety_urlpatterns as electrical_safety_urls
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -51,6 +55,11 @@ urlpatterns = [
     path("api/vendors/", include("vendors.urls")),
     path("api/maintenance-orders/", include("maintenance_orders.urls")),
     path("api/electrical-circuits/", include("electrical_circuits.urls")),
+    # Safety query endpoints (oms-b25 AC-1..AC-4). Mounted at the bare
+    # /api/electrical/ and /api/assets/ prefixes so the URLs match the
+    # AC paths exactly.
+    path("api/electrical/", include(electrical_safety_urls)),
+    path("api/assets/", include(electrical_asset_power_chain_urls)),
     path("api/loto/", include("loto.urls")),
     path("api/analytics/", include("analytics.urls")),
     # Flower proxy (superuser only)

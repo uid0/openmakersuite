@@ -1,0 +1,43 @@
+{% extends "admin/electrical_circuits/_report_base.html" %}
+
+{% block report_body %}
+<p>Load = (estimated max draw amps) / (circuit max load amps). Color
+bands: <span class="ec-load-green">&lt;60%</span>,
+<span class="ec-load-yellow">60–79%</span>,
+<span class="ec-load-red">≥80%</span>.</p>
+
+<table class="ec-report-table" id="circuit-load-report">
+  <thead>
+    <tr>
+      <th>Panel</th>
+      <th>Breaker</th>
+      <th>Circuit</th>
+      <th>Devices</th>
+      <th>Est. max draw (A)</th>
+      <th>Capacity (A)</th>
+      <th>Load %</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr class="ec-load-{{ row.color_band }}">
+      <td>{{ row.panel.name }}</td>
+      <td>{{ row.breaker.position }} ({{ row.breaker.amperage }}A)</td>
+      <td>{{ row.circuit.label|default:row.circuit.pk }}</td>
+      <td>{{ row.device_count }}</td>
+      <td>{{ row.estimated_draw_amps }}</td>
+      <td>{{ row.capacity_amps|default:"—" }}</td>
+      <td>
+        {% if row.load_percent is not None %}
+          {{ row.load_percent }}%
+        {% else %}
+          n/a
+        {% endif %}
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="7"><em>No circuits configured.</em></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

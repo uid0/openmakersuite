@@ -228,6 +228,26 @@ views:
   donations.views.upload_signature:
     permission_classes:
     - IsAuthenticated
+  electrical_circuits.safety_views.AssetPowerChainView:
+    permission_classes:
+    - IsAuthenticated
+    - IsStaffUser
+  electrical_circuits.safety_views.PowerBreakerTripImpactView:
+    permission_classes:
+    - IsAuthenticated
+    - IsStaffUser
+  electrical_circuits.safety_views.PowerCircuitLoadView:
+    permission_classes:
+    - IsAuthenticated
+    - IsStaffUser
+  electrical_circuits.safety_views.PowerPanelListView:
+    permission_classes:
+    - IsAuthenticated
+    - IsStaffUser
+  electrical_circuits.safety_views.PowerPanelTopologyView:
+    permission_classes:
+    - IsAuthenticated
+    - IsStaffUser
   electrical_circuits.views.BreakerViewSet:
     actions:
       create:

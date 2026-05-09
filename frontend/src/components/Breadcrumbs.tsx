@@ -1,70 +1,45 @@
 /**
  * Breadcrumbs Component
- * Displays full navigation path from current route
+ *
+ * Renders the navigation path from current route. Labels and click-target
+ * routability come from `frontend/src/navigation/routeMap.ts` so a single
+ * place defines both. Segments that are not navigable (no route handler)
+ * render as plain text instead of links — see `clickable: false` entries
+ * in the route map.
  */
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import '../styles/Breadcrumbs.css';
 
+import { isClickable, labelFor } from '../navigation/routeMap';
+
 interface BreadcrumbSegment {
   path: string;
   label: string;
+  clickable: boolean;
 }
 
 const Breadcrumbs: React.FC = () => {
   const location = useLocation();
 
-  const getBreadcrumbs = (): BreadcrumbSegment[] => {
+  const breadcrumbs = React.useMemo<BreadcrumbSegment[]>(() => {
     const pathSegments = location.pathname.split('/').filter(Boolean);
-    const breadcrumbs: BreadcrumbSegment[] = [{ path: '/', label: 'Home' }];
-
-    // Route to label mapping
-    const routeLabels: Record<string, string> = {
-      inventory: 'Inventory',
-      'inventory/assets': 'Assets',
-      'inventory/admin': 'Admin Dashboard',
-      'inventory/code-entry': 'Code Entry',
-      'inventory/transparency': 'Transparency',
-      'inventory/scan': 'Scan Items',
-      maintenance: 'Maintenance',
-      'maintenance/location-problems': 'Location Problems',
-      'maintenance/work-orders': 'Work Orders',
-      'maintenance/third-party': 'Third-Party Work Orders',
-      'maintenance/dashboard': 'PM Dashboard',
-      purchasing: 'Purchasing',
-      'purchasing/orders': 'Purchase Orders',
-      assets: 'Assets',
-      facilities: 'Facilities',
-      'facilities/tv-dashboard': 'TV Dashboard',
-      'facilities/logistics': 'Logistics',
-      'facilities/checklist': 'Checklist',
-      sigs: 'SIGs',
-      'sigs/dashboard': 'SIG Dashboard',
-      settings: 'Settings',
-      'settings/tax-receipt': 'Tax Receipt',
-      'settings/tax-receipt/lookup': 'Tax Receipt Lookup',
-    };
+    const out: BreadcrumbSegment[] = [{ path: '/', label: 'Home', clickable: true }];
 
     let currentPath = '';
     pathSegments.forEach((segment, index) => {
       currentPath += `/${segment}`;
       const pathKey = pathSegments.slice(0, index + 1).join('/');
-      
-      // Use mapped label or format segment
-      const label = routeLabels[pathKey] || 
-                   segment.split('-').map(word => 
-                     word.charAt(0).toUpperCase() + word.slice(1)
-                   ).join(' ');
-      
-      breadcrumbs.push({ path: currentPath, label });
+      out.push({
+        path: currentPath,
+        label: labelFor(pathKey, segment),
+        clickable: isClickable(pathKey),
+      });
     });
 
-    return breadcrumbs;
-  };
+    return out;
+  }, [location.pathname]);
 
-  const breadcrumbs = getBreadcrumbs();
-
-  // Don't show breadcrumbs on home page
   if (location.pathname === '/') {
     return null;
   }
@@ -74,17 +49,21 @@ const Breadcrumbs: React.FC = () => {
       <ol className="breadcrumb-list">
         {breadcrumbs.map((crumb, index) => {
           const isLast = index === breadcrumbs.length - 1;
-          
+          const renderAsLink = !isLast && crumb.clickable;
+
           return (
             <li key={crumb.path} className="breadcrumb-item">
-              {isLast ? (
-                <span className="breadcrumb-current" aria-current="page">
-                  {crumb.label}
-                </span>
-              ) : (
+              {renderAsLink ? (
                 <Link to={crumb.path} className="breadcrumb-link">
                   {crumb.label}
                 </Link>
+              ) : (
+                <span
+                  className={isLast ? 'breadcrumb-current' : 'breadcrumb-static'}
+                  aria-current={isLast ? 'page' : undefined}
+                >
+                  {crumb.label}
+                </span>
               )}
               {!isLast && <span className="breadcrumb-separator">›</span>}
             </li>
@@ -96,4 +75,3 @@ const Breadcrumbs: React.FC = () => {
 };
 
 export default Breadcrumbs;
-

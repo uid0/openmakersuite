@@ -42,6 +42,13 @@
   padding: 2px 4px;
 }
 
+/* Non-clickable ancestor segments (structural-only paths with no route). */
+.breadcrumb-static {
+  color: #777;
+  padding: 2px 4px;
+  cursor: default;
+}
+
 .breadcrumb-separator {
   margin: 0 8px;
   color: #999;

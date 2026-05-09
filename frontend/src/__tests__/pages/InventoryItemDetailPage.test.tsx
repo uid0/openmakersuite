@@ -112,7 +112,7 @@ describe('InventoryItemDetailPage', () => {
     (api.inventoryAPI.getItem as jest.Mock).mockReturnValue(new Promise(() => {}));
     renderPage();
 
-    expect(screen.getByText(/Loading/)).toBeInTheDocument();
+    expect(screen.getByText(/Loading item/)).toBeInTheDocument();
   });
 
   it('displays item details in overview tab', async () => {
@@ -122,8 +122,10 @@ describe('InventoryItemDetailPage', () => {
       expect(screen.getByText('Test Item')).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/SKU: TEST-001/)).toBeInTheDocument();
-    expect(screen.getByText('Test description')).toBeInTheDocument();
+    expect(screen.getByText(/SKU TEST-001/)).toBeInTheDocument();
+    // "Test description" now appears in both the hero description and the
+    // overview body once the page uses <PageHero>; assert at least one.
+    expect(screen.getAllByText('Test description').length).toBeGreaterThan(0);
     expect(screen.getByText(/Current Stock:/)).toBeInTheDocument();
     // Stock value is displayed - check that the stock information section exists
     expect(screen.getByText(/Stock Information/i)).toBeInTheDocument();
@@ -299,7 +301,7 @@ describe('InventoryItemDetailPage', () => {
       expect(screen.getByText('Test Item')).toBeInTheDocument();
     });
 
-    const generateButton = screen.getByText(/Generate QR Code/i);
+    const generateButton = screen.getByText(/Generate QR/i);
     generateButton.click();
 
     await waitFor(() => {

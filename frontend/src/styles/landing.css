@@ -1,0 +1,130 @@
+/**
+ * Design tokens for the homepage + workspace overview pages.
+ *
+ * Aesthetic direction: refined editorial × industrial control panel.
+ * - Display: DM Serif Display gives section titles weight without
+ *   shouting; pairs with the system sans body to keep workspace pages
+ *   continuous with everything else in the app.
+ * - Mono accents (IBM Plex Mono) for eyebrow labels — channels the
+ *   "instrument label" feel without dressing every page in monospace.
+ *
+ * Tokens are scoped to .landing-surface so workspace pages that opt out
+ * (e.g. data-grid pages) don't pick them up by accident.
+ */
+
+:root {
+  --landing-display-font: 'DM Serif Display', 'Iowan Old Style', 'Cambria',
+    'Georgia', serif;
+  --landing-mono-font: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo,
+    Consolas, monospace;
+
+  --landing-surface-bg: #faf8f4;
+  --landing-card-bg: #ffffff;
+  --landing-card-border: rgba(15, 23, 42, 0.08);
+  --landing-card-border-hover: rgba(25, 113, 194, 0.45);
+  --landing-card-shadow-hover: 0 18px 40px -28px rgba(15, 23, 42, 0.4);
+
+  --landing-eyebrow: #6b7280;
+  --landing-text: #111827;
+  --landing-muted: #4b5563;
+  --landing-rule: rgba(15, 23, 42, 0.08);
+
+  --landing-accent: #1971c2;
+  --landing-accent-soft: #e7f1fb;
+  --landing-chip-bg: #1a1a1a;
+  --landing-chip-fg: #f5f1e8;
+
+  --landing-radius: 14px;
+}
+
+/*
+ * Apply the warm-paper background only when a page opts in by wrapping
+ * its content in `.landing-surface`. Workspace pages already on white
+ * Mantine cards stay unchanged.
+ */
+.landing-surface {
+  background: var(--landing-surface-bg);
+  min-height: 100%;
+}
+
+/* Display headings inside landing surfaces. */
+.landing-display {
+  font-family: var(--landing-display-font);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  color: var(--landing-text);
+}
+
+.landing-eyebrow {
+  font-family: var(--landing-mono-font);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--landing-eyebrow);
+}
+
+/* Capability card hover — subtle lift, no parallax tricks. */
+.landing-capability-card {
+  background: var(--landing-card-bg);
+  border: 1px solid var(--landing-card-border);
+  border-radius: var(--landing-radius);
+  transition: border-color 160ms ease, transform 160ms ease,
+    box-shadow 160ms ease;
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.landing-capability-card:hover {
+  border-color: var(--landing-card-border-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--landing-card-shadow-hover);
+}
+
+.landing-capability-card:focus-visible {
+  outline: 2px solid var(--landing-accent);
+  outline-offset: 3px;
+}
+
+.landing-icon-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--landing-chip-bg);
+  color: var(--landing-chip-fg);
+}
+
+.landing-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--landing-accent);
+  font-weight: 500;
+  font-size: 0.9rem;
+  transition: gap 160ms ease;
+}
+
+.landing-capability-card:hover .landing-arrow {
+  gap: 10px;
+}
+
+.landing-rule {
+  border: 0;
+  border-top: 1px solid var(--landing-rule);
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-capability-card,
+  .landing-arrow {
+    transition: none;
+  }
+  .landing-capability-card:hover {
+    transform: none;
+  }
+}

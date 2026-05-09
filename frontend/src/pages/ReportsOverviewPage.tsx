@@ -1,9 +1,8 @@
 /**
- * Landing page for the Reports workspace. Same shape as the other
- * overview pages added in this PR. Includes the new Analytics Pulse
- * dashboard so it is reachable through breadcrumb + sidebar navigation.
+ * Landing page for the Reports workspace, mounted at `/reports/`.
+ * Refactored in nav-cohesion PR2 to use the shared <WorkspaceLanding>
+ * + <CapabilityCard> primitives.
  */
-import { Card, Container, SimpleGrid, Stack, Text, Title } from '@mantine/core';
 import {
   IconChartBar,
   IconReportAnalytics,
@@ -11,73 +10,54 @@ import {
   IconStack,
 } from '@tabler/icons-react';
 import React from 'react';
-import { Link } from 'react-router-dom';
 
-interface OverviewItem {
-  to: string;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-}
-
-const ITEMS: OverviewItem[] = [
-  {
-    to: '/analytics',
-    title: 'Analytics pulse',
-    description:
-      'Executive dashboard: ROI, utilization, category spend, and the maintenance forecast. Source for the monthly board email.',
-    icon: <IconChartBar size={28} />,
-  },
-  {
-    to: '/reports/inventory',
-    title: 'Inventory report',
-    description: 'Stock levels, low-stock alerts, and item-level activity.',
-    icon: <IconStack size={28} />,
-  },
-  {
-    to: '/reports/purchasing',
-    title: 'Purchasing report',
-    description: 'Spend by supplier, vendor performance, and reorder cycle metrics.',
-    icon: <IconShoppingCart size={28} />,
-  },
-  {
-    to: '/reports/assets',
-    title: 'Asset report',
-    description: 'Asset roster, lifecycle status, and maintenance history.',
-    icon: <IconReportAnalytics size={28} />,
-  },
-];
+import CapabilityCard from '../components/landing/CapabilityCard';
+import WorkspaceLanding from '../components/landing/WorkspaceLanding';
 
 const ReportsOverviewPage: React.FC = () => (
-  <Container size="xl" py="lg">
-    <Stack gap="xl">
-      <Stack gap={4}>
-        <Title order={1}>Reports</Title>
-        <Text c="dimmed">Operational and executive reports across inventory, purchasing, assets, and the analytics pulse.</Text>
-      </Stack>
-
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-        {ITEMS.map((item) => (
-          <Card
-            key={item.to}
-            withBorder
-            radius="md"
-            p="lg"
-            component={Link}
-            to={item.to}
-            data-testid={`reports-overview-card-${item.to}`}
-            style={{ textDecoration: 'none', color: 'inherit' }}
-          >
-            <Stack gap="sm">
-              <Text c="blue.7">{item.icon}</Text>
-              <Title order={4}>{item.title}</Title>
-              <Text size="sm" c="dimmed">{item.description}</Text>
-            </Stack>
-          </Card>
-        ))}
-      </SimpleGrid>
-    </Stack>
-  </Container>
+  <WorkspaceLanding
+    testId="reports-overview"
+    hero={{
+      eyebrow: 'Reports',
+      title: 'Reports',
+      description:
+        'Operational and executive reports across inventory, purchasing, assets, and the analytics pulse.',
+    }}
+  >
+    <CapabilityCard
+      to="/analytics"
+      title="Analytics pulse"
+      description="Executive dashboard: ROI, utilization, category spend, and the maintenance forecast. Source for the monthly board email."
+      icon={<IconChartBar size={22} stroke={1.8} />}
+      eyebrow="Executive"
+      badge="Staff"
+      testId="reports-overview-card-/analytics"
+    />
+    <CapabilityCard
+      to="/reports/inventory"
+      title="Inventory report"
+      description="Stock levels, low-stock alerts, and item-level activity."
+      icon={<IconStack size={22} stroke={1.8} />}
+      eyebrow="Operational"
+      testId="reports-overview-card-/reports/inventory"
+    />
+    <CapabilityCard
+      to="/reports/purchasing"
+      title="Purchasing report"
+      description="Spend by supplier, vendor performance, and reorder cycle metrics."
+      icon={<IconShoppingCart size={22} stroke={1.8} />}
+      eyebrow="Operational"
+      testId="reports-overview-card-/reports/purchasing"
+    />
+    <CapabilityCard
+      to="/reports/assets"
+      title="Asset report"
+      description="Asset roster, lifecycle status, and maintenance history."
+      icon={<IconReportAnalytics size={22} stroke={1.8} />}
+      eyebrow="Operational"
+      testId="reports-overview-card-/reports/assets"
+    />
+  </WorkspaceLanding>
 );
 
 export default ReportsOverviewPage;

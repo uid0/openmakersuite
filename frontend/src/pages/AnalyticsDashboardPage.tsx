@@ -8,7 +8,6 @@ import {
   SimpleGrid,
   Stack,
   Text,
-  Title,
 } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
@@ -21,6 +20,7 @@ import { MaintenanceForecastList } from '../components/analytics/MaintenanceFore
 import { ShareLinkButton } from '../components/analytics/ShareLinkButton';
 import { TopUsersTable } from '../components/analytics/TopUsersTable';
 import { VolumeTrendChart } from '../components/analytics/VolumeTrendChart';
+import PageHero from '../components/landing/PageHero';
 import { pulseAPI, AnalyticsPulseResponse } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
@@ -104,16 +104,12 @@ export const AnalyticsDashboardPage: React.FC<AnalyticsDashboardPageProps> = ({ 
 
   return (
     <Container size="xl" py="lg">
-      <Group justify="space-between" mb="lg">
-        <Stack gap={2}>
-          <Title order={1}>Makerspace pulse</Title>
-          <Text size="sm" c="dimmed">
-            {summary.period_start} → {summary.period_end}
-            {shared && ' · shared link (read-only)'}
-          </Text>
-        </Stack>
-        {!shared && <ShareLinkButton baseUrl={window.location.origin} />}
-      </Group>
+      <PageHero
+        eyebrow="Analytics pulse"
+        title="Makerspace pulse"
+        description={`${summary.period_start} → ${summary.period_end}${shared ? ' · shared link (read-only)' : ''}`}
+        action={!shared ? <ShareLinkButton baseUrl={window.location.origin} /> : undefined}
+      />
 
       <Stack gap="lg">
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">

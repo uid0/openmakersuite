@@ -34,7 +34,7 @@ describe('Workspace overview pages (AC-3, AC-7)', () => {
       expect(screen.getByRole('heading', { level: 1, name: /purchasing/i })).toBeInTheDocument();
       const links = screen.getAllByRole('link');
       expect(links.length).toBeGreaterThanOrEqual(2);
-      expect(screen.getByRole('heading', { level: 4, name: /purchase orders/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /purchase orders/i })).toBeInTheDocument();
     });
   });
 
@@ -42,9 +42,9 @@ describe('Workspace overview pages (AC-3, AC-7)', () => {
     it('renders title + the major child entry points', () => {
       renderWithProviders(<FacilitiesOverviewPage />);
       expect(screen.getByRole('heading', { level: 1, name: /facilities/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /tv dashboard/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /logistics/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /^electrical$/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /tv dashboard/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /logistics/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /^electrical$/i })).toBeInTheDocument();
       const links = screen.getAllByRole('link');
       expect(links.length).toBeGreaterThanOrEqual(5);
     });
@@ -56,10 +56,10 @@ describe('Workspace overview pages (AC-3, AC-7)', () => {
       expect(screen.getByRole('heading', { level: 1, name: /reports/i })).toBeInTheDocument();
       // Use heading role (the card titles) so we don't collide with the
       // accessible-name text inside Link-wrapped cards.
-      expect(screen.getByRole('heading', { level: 4, name: /analytics pulse/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /inventory report/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /purchasing report/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /asset report/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /analytics pulse/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /inventory report/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /purchasing report/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /asset report/i })).toBeInTheDocument();
     });
   });
 
@@ -67,10 +67,10 @@ describe('Workspace overview pages (AC-3, AC-7)', () => {
     it('renders profile + site + webhooks + tax-receipt links', () => {
       renderWithProviders(<SettingsOverviewPage />);
       expect(screen.getByRole('heading', { level: 1, name: /settings/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /^profile$/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /site settings/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /^webhooks$/i })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 4, name: /tax receipt lookup/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /^profile$/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /site settings/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /^webhooks$/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /tax receipt lookup/i })).toBeInTheDocument();
     });
   });
 });

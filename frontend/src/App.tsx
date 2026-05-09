@@ -22,10 +22,14 @@ import CodeEntryPage from './pages/CodeEntryPage';
 import DashboardPage from './pages/DashboardPage';
 import DonationItemScanPage from './pages/DonationItemScanPage';
 import ElectricalCircuitsPage from './pages/ElectricalCircuitsPage';
+import FacilitiesOverviewPage from './pages/FacilitiesOverviewPage';
 import FixtureScanPage from './pages/FixtureScanPage';
 import ForgeKeyDeviceDetailPage from './pages/ForgeKeyDeviceDetailPage';
 import ForgeKeyDevicesPage from './pages/ForgeKeyDevicesPage';
 import HomePage from './pages/HomePage';
+import PurchasingOverviewPage from './pages/PurchasingOverviewPage';
+import ReportsOverviewPage from './pages/ReportsOverviewPage';
+import SettingsOverviewPage from './pages/SettingsOverviewPage';
 import LightSwitchFormPage from './pages/LightSwitchFormPage';
 import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
 import InventoryItemFormPage from './pages/InventoryItemFormPage';
@@ -171,6 +175,7 @@ function AppContent() {
           <Route path="/inventory/categories/:id/edit" element={<WorkspaceLayout><CategoryFormPage /></WorkspaceLayout>} />
 
           {/* Purchasing Workspace */}
+          <Route path="/purchasing" element={<WorkspaceLayout><PurchasingOverviewPage /></WorkspaceLayout>} />
           <Route path="/purchasing/orders" element={<WorkspaceLayout><PurchaseOrderListPage /></WorkspaceLayout>} />
           <Route path="/purchasing/orders/new" element={<WorkspaceLayout><PurchaseOrderFormPage /></WorkspaceLayout>} />
           <Route path="/purchasing/orders/:orderId" element={<WorkspaceLayout><PurchaseOrderPage /></WorkspaceLayout>} />
@@ -184,6 +189,7 @@ function AppContent() {
           <Route path="/assets/:assetId/maintenance/:id/edit" element={<WorkspaceLayout><MaintenanceItemFormPage /></WorkspaceLayout>} />
 
           {/* Facilities Workspace */}
+          <Route path="/facilities" element={<WorkspaceLayout><FacilitiesOverviewPage /></WorkspaceLayout>} />
           <Route path="/facilities/tv-dashboard" element={<TVDashboard />} />
           <Route path="/facilities/tv-dashboard/:location" element={<TVDashboard />} />
           <Route path="/facilities/screens" element={<WorkspaceLayout><ScreensListPage /></WorkspaceLayout>} />
@@ -224,11 +230,13 @@ function AppContent() {
           <Route path="/sigs/dashboard/:sigId" element={<WorkspaceLayout><SIGDashboard /></WorkspaceLayout>} />
 
           {/* Reports Workspace */}
+          <Route path="/reports" element={<WorkspaceLayout><ReportsOverviewPage /></WorkspaceLayout>} />
           <Route path="/reports/inventory" element={<WorkspaceLayout><InventoryReportPage /></WorkspaceLayout>} />
           <Route path="/reports/purchasing" element={<WorkspaceLayout><PurchasingReportPage /></WorkspaceLayout>} />
           <Route path="/reports/assets" element={<WorkspaceLayout><AssetReportPage /></WorkspaceLayout>} />
 
           {/* Settings Workspace */}
+          <Route path="/settings" element={<WorkspaceLayout><SettingsOverviewPage /></WorkspaceLayout>} />
           <Route path="/settings/profile" element={<WorkspaceLayout><UserProfilePage /></WorkspaceLayout>} />
           <Route path="/settings/site" element={<WorkspaceLayout><SiteSettingsPage /></WorkspaceLayout>} />
           <Route path="/settings/tax-receipt/lookup" element={<WorkspaceLayout><TaxReceiptLookupPage /></WorkspaceLayout>} />

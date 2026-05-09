@@ -58,5 +58,30 @@ describe('Breadcrumbs Component', () => {
     const assetsBreadcrumb = screen.getByText(/assets/i);
     expect(assetsBreadcrumb).toHaveAttribute('aria-current', 'page');
   });
+
+  it('renders non-routable ancestor segments as non-clickable spans (AC-4)', () => {
+    // /maintenance/work-orders has no list-page route — only :id child
+    // routes. The "Work Orders" segment must therefore not be a Link.
+    renderWithRouter(['/maintenance/work-orders/abc123']);
+    expect(screen.queryByRole('link', { name: /work orders/i })).not.toBeInTheDocument();
+    // It still shows up as text:
+    expect(screen.getByText(/work orders/i)).toBeInTheDocument();
+    // And ancestors that ARE routable remain clickable:
+    expect(screen.getByRole('link', { name: /maintenance/i })).toBeInTheDocument();
+  });
+
+  it('uses canonical labels for major workspaces (AC-5)', () => {
+    renderWithRouter(['/facilities/tv-dashboard']);
+    // Canonical "TV Dashboard", not raw-slug "Tv-dashboard".
+    expect(screen.getByText('TV Dashboard')).toBeInTheDocument();
+  });
+
+  it('linkifies the new overview-page parent paths (AC-3)', () => {
+    // /purchasing was previously an orphan path that would 404 on click.
+    // It now has a route handler, so the breadcrumb segment is a link.
+    renderWithRouter(['/purchasing/orders']);
+    const purchasingLink = screen.getByRole('link', { name: /^purchasing$/i });
+    expect(purchasingLink).toHaveAttribute('href', '/purchasing');
+  });
 });
 

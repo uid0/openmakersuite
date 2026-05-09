@@ -273,6 +273,7 @@ opening a panel. All staff-gated (oms-b25 AC-5).
 
 | Method | Path | Class | Notes |
 | --- | --- | --- | --- |
+| GET | `electrical/panels/` | staff | `PowerPanelListView` — directory of every panel with breaker counts and the migration `needs_review` flag. |
 | GET | `electrical/breakers/<id>/trip-impact/` | staff | `PowerBreakerTripImpactView` — assets fed by the breaker, split critical vs. not. |
 | GET | `electrical/circuits/<id>/load/` | staff | `PowerCircuitLoadView` — connected devices, estimated nameplate draw, NEC-derated capacity utilization. |
 | GET | `electrical/panels/<id>/topology/` | staff | `PowerPanelTopologyView` — full panel → breaker → circuit → outlet tree. |

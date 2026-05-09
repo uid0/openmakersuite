@@ -240,6 +240,10 @@ views:
     permission_classes:
     - IsAuthenticated
     - IsStaffUser
+  electrical_circuits.safety_views.PowerPanelListView:
+    permission_classes:
+    - IsAuthenticated
+    - IsStaffUser
   electrical_circuits.safety_views.PowerPanelTopologyView:
     permission_classes:
     - IsAuthenticated

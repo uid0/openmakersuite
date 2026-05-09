@@ -139,6 +139,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
       label: 'Reports',
       icon: '📊',
       items: [
+        { path: '/analytics', label: 'Analytics Pulse', icon: '📈', requiresAuth: true, requiresStaff: true },
         { path: '/reports/inventory', label: 'Inventory Report', icon: '📦', requiresAuth: true },
         { path: '/reports/purchasing', label: 'Purchasing Report', icon: '🛒', requiresAuth: true },
         { path: '/reports/assets', label: 'Asset Report', icon: '🏢', requiresAuth: true },

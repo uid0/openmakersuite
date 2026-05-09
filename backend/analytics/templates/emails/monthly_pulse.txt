@@ -1,0 +1,21 @@
+Makerspace pulse — {{ period_label }}
+======================================
+
+Headline
+--------
+Net value created:        {{ summary.internal_net_value_fmt }}
+External spend (closed):  {{ summary.external_actual_cost_fmt }} ({{ summary.external_closed_count }} third-party WO{{ summary.external_closed_count|pluralize }})
+Internal WOs completed:   {{ summary.internal_completed_count }}
+Total to makerspace:      {{ summary.total_value_to_makerspace_fmt }}
+
+{% if top_users %}Top contributors
+----------------
+{% for user in top_users %}- {{ user.display_name }}: {{ user.completed_wo_count }} completed WO{{ user.completed_wo_count|pluralize }}
+{% endfor %}
+{% endif %}{% if forecast %}Maintenance forecast ({{ forecast|length }} asset{{ forecast|length|pluralize }} due)
+{% for entry in forecast %}- {{ entry.asset_name }}: {{ entry.due_reason_label }}
+{% endfor %}
+{% endif %}{% if dashboard_url %}
+Live dashboard: {{ dashboard_url }}
+{% endif %}
+Sent automatically by OpenMakerSuite on the 1st of each month.

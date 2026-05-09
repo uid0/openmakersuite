@@ -1,17 +1,149 @@
 /**
- * Home Page
- * Landing page with links to scan items, admin dashboard, and authentication
+ * Home Page (`/`).
+ *
+ * Capability-showcase landing for OpenMakerSuite (AC-1). Lists every
+ * top-level workspace as a CapabilityCard with a 1-line value prop and
+ * a deep link, plus a "Common workflows" quick-action row at the top
+ * for the highest-traffic flows (scan, dashboard, work orders).
+ *
+ * Uses the same PageHero + CapabilityCard primitives the workspace
+ * overview pages use, so visuals stay continuous across the app (AC-2).
  */
+import { Box, Container, SimpleGrid, Stack, Text, Title } from '@mantine/core';
+import {
+  IconAdjustments,
+  IconBoxSeam,
+  IconBuildingFactory2,
+  IconChartBar,
+  IconChartLine,
+  IconClipboardList,
+  IconLayoutDashboard,
+  IconQrcode,
+  IconReceipt,
+  IconShoppingCart,
+  IconStack2,
+  IconUsersGroup,
+  IconTool,
+} from '@tabler/icons-react';
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+
 import AuthSection from '../components/AuthSection';
 import Footer from '../components/Footer';
-import '../styles/HomePage.css';
+import CapabilityCard from '../components/landing/CapabilityCard';
+import PageHero from '../components/landing/PageHero';
+import '../styles/landing.css';
+
+interface Capability {
+  to: string;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  eyebrow: string;
+  badge?: string;
+}
+
+/**
+ * Most-used workflows surfaced above the workspace grid. Kept short so
+ * a member arriving at /, with a phone in hand, can act in one tap.
+ */
+const QUICK_WORKFLOWS: Capability[] = [
+  {
+    to: '/inventory/scan',
+    title: 'Scan a QR code',
+    description: 'Look up a shelf, asset, or fixture from a printed label.',
+    icon: <IconQrcode size={22} stroke={1.8} />,
+    eyebrow: '01 / Quick',
+  },
+  {
+    to: '/dashboard',
+    title: 'Operations dashboard',
+    description: 'Live status across reorders, deliveries, and asset problems.',
+    icon: <IconLayoutDashboard size={22} stroke={1.8} />,
+    eyebrow: '02 / Quick',
+  },
+  {
+    to: '/maintenance',
+    title: 'Maintenance + work orders',
+    description: 'Open the PM dashboard, queue up scheduled work, log completions.',
+    icon: <IconClipboardList size={22} stroke={1.8} />,
+    eyebrow: '03 / Quick',
+  },
+];
+
+/**
+ * Every top-level workspace. Order matches the sidebar so navigation
+ * patterns are reinforced rather than competing.
+ */
+const WORKSPACES: Capability[] = [
+  {
+    to: '/inventory',
+    title: 'Inventory',
+    description: 'Items, suppliers, locations, and the QR-coded scan workflows the shop runs on.',
+    icon: <IconBoxSeam size={22} stroke={1.8} />,
+    eyebrow: 'Inventory',
+  },
+  {
+    to: '/purchasing',
+    title: 'Purchasing',
+    description: 'Purchase orders, suggested reorders, and the public transparency ledger.',
+    icon: <IconShoppingCart size={22} stroke={1.8} />,
+    eyebrow: 'Purchasing',
+  },
+  {
+    to: '/assets',
+    title: 'Assets',
+    description: 'Equipment register: lifecycle, ownership, maintenance plans, and parts.',
+    icon: <IconStack2 size={22} stroke={1.8} />,
+    eyebrow: 'Assets',
+  },
+  {
+    to: '/facilities',
+    title: 'Facilities',
+    description: 'Operations dashboards, kiosks, electrical, ForgeKey devices, and checklists.',
+    icon: <IconBuildingFactory2 size={22} stroke={1.8} />,
+    eyebrow: 'Facilities',
+  },
+  {
+    to: '/maintenance',
+    title: 'Maintenance',
+    description: 'Preventive maintenance, work orders, and third-party vendor coordination.',
+    icon: <IconTool size={22} stroke={1.8} />,
+    eyebrow: 'Maintenance',
+  },
+  {
+    to: '/sigs/dashboard',
+    title: 'SIGs',
+    description: 'Special Interest Group operations: members, assets, and SIG-owned inventory.',
+    icon: <IconUsersGroup size={22} stroke={1.8} />,
+    eyebrow: 'Community',
+  },
+  {
+    to: '/reports',
+    title: 'Reports',
+    description: 'Operational reports across inventory, purchasing, and assets.',
+    icon: <IconChartBar size={22} stroke={1.8} />,
+    eyebrow: 'Reports',
+  },
+  {
+    to: '/analytics',
+    title: 'Analytics pulse',
+    description: 'Executive dashboard: ROI, utilization, category spend, and the maintenance forecast.',
+    icon: <IconChartLine size={22} stroke={1.8} />,
+    eyebrow: 'Reports',
+    badge: 'Staff',
+  },
+  {
+    to: '/settings',
+    title: 'Settings + integrations',
+    description: 'Profile, organization configuration, webhooks, and tax-receipt tooling.',
+    icon: <IconAdjustments size={22} stroke={1.8} />,
+    eyebrow: 'Admin',
+  },
+];
 
 const HomePage: React.FC = () => {
-  const navigate = useNavigate();
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [username, setUsername] = useState('');
+  const [, setIsLoggedIn] = useState(false);
+  const [, setUsername] = useState('');
 
   const handleAuthChange = (loggedIn: boolean, user?: string) => {
     setIsLoggedIn(loggedIn);
@@ -19,106 +151,70 @@ const HomePage: React.FC = () => {
   };
 
   return (
-    <div className="home-page">
-      <div className="hero">
-        <h1> Dallas Makerspace Inventory Management</h1>
-        <p className="tagline">Scan. Track. Reorder. Simple.</p>
-      </div>
+    <Box className="landing-surface" data-testid="home-page">
+      <Container size="xl" py="xl">
+        <Stack gap="xl">
+          <PageHero
+            eyebrow="OpenMakerSuite"
+            title="Run the shop."
+            description="One operations layer for the makerspace — inventory, equipment, maintenance, purchasing, and the analytics that show your members what they get back from the room."
+          />
 
-      <AuthSection onAuthChange={handleAuthChange} />
+          <Box>
+            <AuthSection onAuthChange={handleAuthChange} />
+          </Box>
 
-      <div className="card-grid">
-        <div className="feature-card">
-          <div className="icon">📱</div>
-          <h2>Scan QR Code</h2>
-          <p>
-            Scan the QR code on any item shelf label to view details and submit
-            reorder requests.
-          </p>
-          <p className="instruction">
-            Use your phone camera to scan the QR codes on inventory labels.
-          </p>
-        </div>
+          <Stack gap="md" data-testid="home-quick-workflows">
+            <Stack gap={2}>
+              <Text component="span" className="landing-eyebrow">Common workflows</Text>
+              <Title order={2} className="landing-display" style={{ fontSize: '1.4rem', margin: 0 }}>
+                Start here
+              </Title>
+            </Stack>
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+              {QUICK_WORKFLOWS.map((c) => (
+                <CapabilityCard
+                  key={c.to}
+                  to={c.to}
+                  title={c.title}
+                  description={c.description}
+                  icon={c.icon}
+                  eyebrow={c.eyebrow}
+                  testId={`home-quick-${c.to}`}
+                  ctaLabel="Go"
+                />
+              ))}
+            </SimpleGrid>
+          </Stack>
 
-        <div className="feature-card" onClick={() => navigate('/inventory/admin')}>
-          <div className="icon">⚙️</div>
-          <h2>{isLoggedIn ? 'Admin Dashboard' : 'Admin Dashboard'}</h2>
-          <p>
-            {isLoggedIn
-              ? 'Manage reorder queue, approve requests, and process bulk orders by supplier.'
-              : 'View pending reorder requests and manage inventory workflow (login for enhanced features).'
-            }
-          </p>
-          <button className="card-button">
-            {isLoggedIn ? `Go to Dashboard (${username})` : 'Go to Dashboard'}
-          </button>
-        </div>
+          <hr className="landing-rule" />
 
-        <div className="feature-card">
-          <div className="icon">📊</div>
-          <h2>Features</h2>
-          <ul className="feature-list">
-            <li>Automatic QR code generation</li>
-            <li>3x5" printable index cards</li>
-            <li>Lead time tracking</li>
-            <li>Multi-supplier support</li>
-            <li>Stock level monitoring</li>
-          </ul>
-        </div>
-
-        <div className="feature-card" onClick={() => navigate('/facilities/tv-dashboard')}>
-          <div className="icon">📺</div>
-          <h2>TV Dashboard</h2>
-          <p>
-            Large-screen display optimized for Chromecast and TV viewing.
-            Shows items that have been reordered and are in progress with delivery tracking.
-          </p>
-          <button className="card-button">
-            Open TV Dashboard
-          </button>
-        </div>
-
-        <div className="feature-card" onClick={() => navigate('/facilities/logistics')}>
-          <div className="icon">🚛</div>
-          <h2>Logistics Display</h2>
-          <p>
-            FireTV-friendly board for the logistics bay. Highlights refill requests, open purchase orders,
-            and progress toward delivery.
-          </p>
-          <button className="card-button">
-            Launch Logistics Dashboard
-          </button>
-        </div>
-      </div>
-
-      <div className="info-section">
-        <h2>How It Works</h2>
-        <div className="steps">
-          <div className="step">
-            <div className="step-number">1</div>
-            <h3>Create Item</h3>
-            <p>Add inventory items via Django admin with photos, descriptions, and reorder quantities.</p>
-          </div>
-          <div className="step">
-            <div className="step-number">2</div>
-            <h3>Generate Labels</h3>
-            <p>Print 3x5" index cards with QR codes to laminate and hang from shelves.</p>
-          </div>
-          <div className="step">
-            <div className="step-number">3</div>
-            <h3>Scan & Request</h3>
-            <p>Users scan QR codes when items run low and submit reorder requests.</p>
-          </div>
-          <div className="step">
-            <div className="step-number">4</div>
-            <h3>Admin Review</h3>
-            <p>Admins review requests, generate supplier cart links, and track deliveries.</p>
-          </div>
-        </div>
-      </div>
-
+          <Stack gap="md" data-testid="home-workspaces">
+            <Stack gap={2}>
+              <Text component="span" className="landing-eyebrow">Workspaces</Text>
+              <Title order={2} className="landing-display" style={{ fontSize: '1.4rem', margin: 0 }}>
+                Everything OpenMakerSuite covers
+              </Title>
+            </Stack>
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+              {WORKSPACES.map((w) => (
+                <CapabilityCard
+                  key={w.to}
+                  to={w.to}
+                  title={w.title}
+                  description={w.description}
+                  icon={w.icon}
+                  eyebrow={w.eyebrow}
+                  badge={w.badge}
+                  testId={`home-workspace-${w.to}`}
+                />
+              ))}
+            </SimpleGrid>
+          </Stack>
+        </Stack>
+      </Container>
       <Footer />
-    </div>
+    </Box>
   );
 };
 

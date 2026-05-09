@@ -2140,4 +2140,86 @@ export const thirdPartyMaintenanceAPI = {
   }) => api.post<ThirdPartyQuoteDto>('/maintenance-orders/quotes/', payload),
 };
 
+// Analytics API
+export interface AnalyticsValueSummary {
+  period_start: string;
+  period_end: string;
+  internal_completed_count: number;
+  internal_estimated_external_cost: string;
+  internal_estimated_internal_cost: string;
+  internal_net_value: string;
+  external_closed_count: number;
+  external_actual_cost: string;
+  external_estimated_cost: string;
+  total_value_to_makerspace: string;
+}
+
+export interface AnalyticsTrendPoint {
+  period: string;
+  count: number;
+}
+
+export interface AnalyticsTopUser {
+  user_id: number;
+  username: string;
+  display_name: string;
+  completed_wo_count: number;
+}
+
+export interface AnalyticsUtilizationRow {
+  asset_id: string;
+  asset_name: string;
+  category: string | null;
+  hours_used: number;
+  completed_wo_count: number;
+  status: string;
+}
+
+export interface AnalyticsCategorySpendRow {
+  category_id: number | null;
+  category_name: string | null;
+  internal_estimated: string;
+  external_estimated: string;
+  external_actual: string;
+  internal_wo_count: number;
+  external_wo_count: number;
+}
+
+export interface AnalyticsForecastEntry {
+  asset_id: string;
+  asset_name: string;
+  category: string | null;
+  status: string;
+  hours_used: number;
+  last_completed_wo_at: string | null;
+  interval_hours: number | null;
+  interval_days: number | null;
+  days_since_last_wo: number | null;
+  due_reason: 'hours' | 'days' | 'both';
+}
+
+export interface AnalyticsPulseResponse {
+  summary: AnalyticsValueSummary;
+  wo_volume_trend: AnalyticsTrendPoint[];
+  top_users: AnalyticsTopUser[];
+  utilization: AnalyticsUtilizationRow[];
+  category_spend: AnalyticsCategorySpendRow[];
+  maintenance_forecast: AnalyticsForecastEntry[];
+  monthly_budget: string | null;
+}
+
+export interface AnalyticsShareResponse {
+  token: string;
+  ttl_days: number;
+  expires_in_days: number;
+}
+
+export const pulseAPI = {
+  getPulse: (params?: { start?: string; end?: string; bucket?: 'month' | 'quarter'; token?: string }) =>
+    api.get<AnalyticsPulseResponse>('/analytics/pulse/', { params }),
+
+  createShare: (ttlDays?: number) =>
+    api.post<AnalyticsShareResponse>('/analytics/share/', ttlDays ? { ttl_days: ttlDays } : {}),
+};
+
 export default api;

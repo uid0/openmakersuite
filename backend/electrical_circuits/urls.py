@@ -8,6 +8,7 @@ from .safety_views import (
     AssetPowerChainView,
     PowerBreakerTripImpactView,
     PowerCircuitLoadView,
+    PowerPanelListView,
     PowerPanelTopologyView,
 )
 from .views import (
@@ -43,6 +44,11 @@ urlpatterns = [
 # Safety query endpoints (oms-b25 [4/7]). Mounted by config.urls under
 # /api/electrical/ so the URLs match the AC-1..AC-4 paths exactly.
 safety_urlpatterns = [
+    path(
+        "panels/",
+        PowerPanelListView.as_view(),
+        name="electrical-panel-list",
+    ),
     path(
         "breakers/<int:pk>/trip-impact/",
         PowerBreakerTripImpactView.as_view(),

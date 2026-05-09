@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.db import models
 from django.shortcuts import get_object_or_404
 
 from rest_framework.permissions import BasePermission, IsAuthenticated
@@ -232,5 +233,41 @@ class AssetPowerChainView(APIView):
             {
                 "asset": _serialize_asset(asset),
                 "chain": chain_payload,
+            }
+        )
+
+
+class PowerPanelListView(APIView):
+    """``GET /api/electrical/panels/`` — directory of every panel.
+
+    Backs the frontend visualization ([6/7]). Annotates each panel with
+    its location, breaker count, and the ``needs_review`` flag set on
+    migration-created placeholders so admins can prioritize cleanup.
+    """
+
+    permission_classes = [IsAuthenticated, IsStaffUser]
+
+    def get(self, request):
+        panels = (
+            PowerPanel.objects.select_related("location")
+            .annotate(breaker_count=models.Count("breakers"))
+            .order_by("location__name", "name")
+        )
+        return Response(
+            {
+                "results": [
+                    {
+                        "id": panel.pk,
+                        "name": panel.name,
+                        "location_id": panel.location_id,
+                        "location_name": panel.location.name,
+                        "phase_configuration": panel.phase_configuration,
+                        "voltage": panel.voltage,
+                        "main_breaker_amperage": panel.main_breaker_amperage,
+                        "breaker_count": panel.breaker_count,
+                        "needs_review": panel.needs_review,
+                    }
+                    for panel in panels
+                ]
             }
         )

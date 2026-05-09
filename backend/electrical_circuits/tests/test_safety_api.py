@@ -143,6 +143,33 @@ def test_asset_power_chain_requires_staff(non_staff_client, topology):
     assert non_staff_client.get(url).status_code == 403
 
 
+def test_panel_list_requires_staff(non_staff_client, topology):
+    url = reverse("electrical-panel-list")
+    assert non_staff_client.get(url).status_code == 403
+
+
+# ---------------------------------------------------------------------
+# Panel list — backs the frontend panel directory ([6/7])
+# ---------------------------------------------------------------------
+
+
+def test_panel_list_returns_breaker_count_and_review_flag(staff_client, topology, db):
+    # A second panel with no breakers + needs_review flag exercises the
+    # annotation and the placeholder pathway from the migration.
+    placeholder = PowerPanel.objects.create(
+        location=topology["loc"], name="Placeholder", needs_review=True
+    )
+
+    resp = staff_client.get(reverse("electrical-panel-list"))
+    assert resp.status_code == 200
+    by_name = {p["name"]: p for p in resp.json()["results"]}
+    assert by_name["Sewing A"]["breaker_count"] == 1
+    assert by_name["Sewing A"]["needs_review"] is False
+    assert by_name["Placeholder"]["breaker_count"] == 0
+    assert by_name["Placeholder"]["needs_review"] is True
+    assert by_name["Placeholder"]["id"] == placeholder.pk
+
+
 # ---------------------------------------------------------------------
 # AC-1 — trip impact
 # ---------------------------------------------------------------------

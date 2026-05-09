@@ -55,6 +55,20 @@ const ENTRIES: RouteEntry[] = [
   { path: 'facilities/screens', label: 'Screens' },
   { path: 'facilities/maker-boxes', label: 'Maker Boxes' },
   { path: 'facilities/electrical', label: 'Electrical' },
+  // Power-topology visualization ([6/7]). Resource leaves are not their
+  // own listing pages — they're surfaced via the panel detail view — so
+  // their breadcrumb segments are non-clickable.
+  { path: 'facilities/electrical/panels', label: 'Panels' },
+  { path: 'facilities/electrical/breakers', label: 'Breakers', clickable: false },
+  { path: 'facilities/electrical/circuits', label: 'Circuits', clickable: false },
+  { path: 'facilities/electrical/power-chain', label: 'Power Chain' },
+  // Legacy fixture inventory (oms-a5f). Kept under the same /electrical
+  // root so existing bookmarks don't break; sub-resources point back to
+  // the tabbed listing rather than dead-ending.
+  { path: 'facilities/electrical/fixtures', label: 'Fixtures' },
+  { path: 'facilities/electrical/outlets', label: 'Outlets', clickable: false },
+  { path: 'facilities/electrical/light-switches', label: 'Light Switches', clickable: false },
+  { path: 'facilities/electrical/network-drops', label: 'Network Drops', clickable: false },
   { path: 'facilities/forgekey-devices', label: 'ForgeKey Devices' },
 
   { path: 'maintenance', label: 'Maintenance' },

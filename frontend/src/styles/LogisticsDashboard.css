@@ -1,7 +1,15 @@
 /**
  * Logistics Dashboard Styles
- * Optimized for 32" Fire TV / Silk Browser display at 1920x1080.
- * Six metric cards must fit on a single screen with no scrolling.
+ *
+ * Tuned for the 32" 1080p Fire TV in the logistics office. At that
+ * physical size + viewing distance the previous 4x2 grid pushed
+ * metric values down to ~80px tall — too small to read from across the
+ * room. Layout is now 3x3 with the "Top Locations" list claiming the
+ * full bottom row, which keeps every card to a 3:2 aspect that reads
+ * cleanly at 8-10 ft.
+ *
+ * Smaller monitors (<= 1366px) collapse to a 2x3 grid; tablets fall
+ * back to a single column with scrolling permitted.
  */
 
 .logistics-dashboard {
@@ -10,10 +18,10 @@
   overflow: hidden;
   background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #1e3a8a 100%);
   color: #ffffff;
-  padding: 1.25rem 1.5rem;
+  padding: 1.5rem 1.75rem;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1.5rem;
   font-family: 'Segoe UI', 'Roboto', 'Arial', sans-serif;
   box-sizing: border-box;
   position: relative;
@@ -98,9 +106,12 @@
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(2, 1fr);
-  gap: 1.25rem;
+  /* 32" Fire TV: 3 columns × 3 rows. Six headline metrics on the top
+   * two rows, "Top locations" claims the full bottom row so the list
+   * gets the horizontal real estate it needs without crowding. */
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: 1fr 1fr 1fr;
+  gap: 1.5rem;
   flex: 1;
   min-height: 0;
   position: relative;
@@ -108,8 +119,11 @@
 }
 
 .metric-card--list {
+  /* Span the entire bottom row. */
+  grid-column: 1 / -1;
   align-items: stretch;
   justify-content: flex-start;
+  padding: 1.5rem 2rem;
 }
 
 .top-locations-list {
@@ -117,10 +131,12 @@
   margin: 0;
   padding: 0;
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  font-size: 1.5rem;
+  display: grid;
+  /* Five locations in a horizontal row reads better than a vertical
+   * list when the card is the full width of the screen. */
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.5rem 2.25rem;
+  font-size: 1.85rem;
   color: rgba(255, 255, 255, 0.95);
   overflow: hidden;
 }
@@ -128,7 +144,10 @@
 .top-locations-list li {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 0.75rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .top-location-name {
@@ -140,6 +159,7 @@
 .top-location-count {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+  font-size: 2rem;
 }
 
 .metric-card {
@@ -147,13 +167,13 @@
   backdrop-filter: blur(10px);
   border: 2px solid rgba(255, 255, 255, 0.2);
   border-radius: 1.25rem;
-  padding: 1.5rem 1.25rem;
+  padding: 1.75rem 1.5rem;
   min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1rem;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
   /* Burn-in prevention: subtle animation to prevent static images */
@@ -171,20 +191,34 @@
 }
 
 .metric-label {
-  font-size: 1.5rem;
+  font-size: 1.75rem;
   font-weight: 600;
   text-align: center;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.92);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
+  /* Two-line labels (e.g. "Locations with Problems") used to wrap mid-
+   * column on the new 3x3 grid; this caps the width so they break in a
+   * predictable place. */
+  max-width: 22ch;
+  line-height: 1.15;
 }
 
 .metric-value {
-  font-size: 5.5rem;
+  font-size: 6.5rem;
   font-weight: 700;
   color: #ffffff;
   line-height: 1;
   text-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The list card on the bottom row reads horizontally, so its label is
+ * left-aligned (not centred) to anchor the row visually. */
+.metric-card--list .metric-label {
+  text-align: left;
+  align-self: flex-start;
+  margin-bottom: 0.5rem;
 }
 
 .sparkline-container {
@@ -309,7 +343,8 @@
   }
 }
 
-/* Smaller TVs / monitors: collapse to 2 cols x 3 rows so cards stay legible. */
+/* Smaller TVs / monitors: collapse to 2 cols x 4 rows (Top Locations
+ * still spans the bottom row) so cards stay legible. */
 @media (max-width: 1366px) {
   .logistics-dashboard {
     padding: 1rem;
@@ -318,7 +353,7 @@
 
   .dashboard-grid {
     grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: repeat(3, 1fr);
+    grid-template-rows: repeat(4, 1fr);
     gap: 1rem;
   }
 
@@ -331,7 +366,15 @@
   }
 
   .metric-value {
-    font-size: 4rem;
+    font-size: 4.5rem;
+  }
+
+  .top-locations-list {
+    font-size: 1.4rem;
+  }
+
+  .top-location-count {
+    font-size: 1.6rem;
   }
 
   .footer-time {
@@ -349,8 +392,17 @@
 
   .dashboard-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: repeat(6, minmax(140px, 1fr));
+    grid-template-rows: repeat(7, minmax(140px, 1fr));
     gap: 0.75rem;
+  }
+
+  .metric-card--list {
+    grid-column: 1 / -1;
+  }
+
+  .top-locations-list {
+    grid-template-columns: 1fr;
+    font-size: 1.25rem;
   }
 
   .metric-value {

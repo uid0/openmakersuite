@@ -28,13 +28,7 @@ from django.shortcuts import render
 
 from inventory.models import Asset
 
-from .models import (
-    Cable,
-    PowerBreaker,
-    PowerCircuit,
-    PowerOutlet,
-    PowerPort,
-)
+from .models import Cable, PowerBreaker, PowerCircuit, PowerOutlet, PowerPort
 
 
 def _classify_load(percent: float | None) -> str:
@@ -126,9 +120,7 @@ def _circuit_rows(circuits) -> List[dict]:
     ``breaker__panel`` so the iteration stays N+0.
     """
 
-    outlet_qs = PowerOutlet.objects.filter(circuit__in=circuits).values_list(
-        "pk", "circuit_id"
-    )
+    outlet_qs = PowerOutlet.objects.filter(circuit__in=circuits).values_list("pk", "circuit_id")
     outlets_by_circuit: Dict[int, List[int]] = defaultdict(list)
     for outlet_pk, circuit_id in outlet_qs:
         outlets_by_circuit[circuit_id].append(outlet_pk)
@@ -223,7 +215,12 @@ def shared_circuit_audit_view(model_admin, request):
             1 for a in r["connected_devices"] if getattr(a, "is_critical", False)
         )
     shared.sort(
-        key=lambda r: (-r["critical_count"], -r["device_count"], r["panel"].name, r["breaker"].position)
+        key=lambda r: (
+            -r["critical_count"],
+            -r["device_count"],
+            r["panel"].name,
+            r["breaker"].position,
+        )
     )
     context = {
         **model_admin.admin_site.each_context(request),
@@ -242,9 +239,7 @@ def breaker_trip_impact_view(model_admin, request):
     """Render the Breaker Trip Impact report (AC-3)."""
 
     breakers = list(
-        PowerBreaker.objects.select_related("panel").order_by(
-            "panel__name", "position", "pk"
-        )
+        PowerBreaker.objects.select_related("panel").order_by("panel__name", "position", "pk")
     )
     breaker_pks = [b.pk for b in breakers]
 

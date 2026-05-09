@@ -147,9 +147,7 @@ class PowerBreakerAdmin(admin.ModelAdmin):
         custom = [
             path(
                 "trip-impact/",
-                self.admin_site.admin_view(
-                    lambda request: breaker_trip_impact_view(self, request)
-                ),
+                self.admin_site.admin_view(lambda request: breaker_trip_impact_view(self, request)),
                 name="electrical_circuits_powerbreaker_trip_impact",
             ),
         ]
@@ -176,9 +174,7 @@ class PowerCircuitAdmin(admin.ModelAdmin):
         custom = [
             path(
                 "load-report/",
-                self.admin_site.admin_view(
-                    lambda request: circuit_load_report_view(self, request)
-                ),
+                self.admin_site.admin_view(lambda request: circuit_load_report_view(self, request)),
                 name="electrical_circuits_powercircuit_load_report",
             ),
             path(

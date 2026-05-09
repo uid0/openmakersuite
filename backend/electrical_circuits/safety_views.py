@@ -24,12 +24,7 @@ from rest_framework.views import APIView
 from inventory.models import Asset
 
 from .models import PowerBreaker, PowerCircuit, PowerPanel
-from .services.power_chain import (
-    get_devices_on_breaker,
-    get_devices_on_circuit,
-    get_power_chain,
-    get_trip_impact,
-)
+from .services.power_chain import get_devices_on_circuit, get_power_chain, get_trip_impact
 
 
 class IsStaffUser(BasePermission):

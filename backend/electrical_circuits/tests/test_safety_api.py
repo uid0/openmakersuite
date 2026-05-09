@@ -89,17 +89,13 @@ def topology(db):
     port_a = PowerPort.objects.create(
         asset=asset_critical, label="Main", max_draw_amps=Decimal("4.0")
     )
-    Cable.objects.create(
-        cable_type=Cable.CABLE_TYPE_POWER, endpoint_a=outlet1, endpoint_b=port_a
-    )
+    Cable.objects.create(cable_type=Cable.CABLE_TYPE_POWER, endpoint_a=outlet1, endpoint_b=port_a)
 
     asset_normal = _make_asset(name="Lamp", location=loc)
     port_b = PowerPort.objects.create(
         asset=asset_normal, label="Main", max_draw_amps=Decimal("0.5")
     )
-    Cable.objects.create(
-        cable_type=Cable.CABLE_TYPE_POWER, endpoint_a=outlet2, endpoint_b=port_b
-    )
+    Cable.objects.create(cable_type=Cable.CABLE_TYPE_POWER, endpoint_a=outlet2, endpoint_b=port_b)
 
     return {
         "loc": loc,
@@ -235,7 +231,7 @@ def test_asset_power_chain_returns_full_chain(staff_client, topology):
     data = resp.json()
     kinds = [hop["kind"] for hop in data["chain"]]
     assert kinds == ["panel", "breaker", "circuit", "outlet", "cable", "port"]
-    assert data["asset"]["id"] == topology["asset_critical"].pk
+    assert data["asset"]["id"] == str(topology["asset_critical"].pk)
 
 
 def test_asset_power_chain_empty_for_unconnected(staff_client, db):
@@ -269,9 +265,7 @@ def test_panel_topology_under_two_seconds_at_scale(staff_client):
             target_panel = panel
         # 20 circuits per panel × 10 panels = 200 circuits
         for c_idx in range(20):
-            breaker = PowerBreaker.objects.create(
-                panel=panel, position=str(c_idx + 1), amperage=20
-            )
+            breaker = PowerBreaker.objects.create(panel=panel, position=str(c_idx + 1), amperage=20)
             circuit = PowerCircuit.objects.create(breaker=breaker)
             outlet = PowerOutlet.objects.create(
                 circuit=circuit, location=loc, label=f"p{p_idx}-c{c_idx}"

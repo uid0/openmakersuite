@@ -107,7 +107,7 @@ describe('SupplierDetailPage', () => {
       </MantineProvider>
     );
 
-    expect(screen.getByText(/Loading/i)).toBeInTheDocument();
+    expect(screen.getByText(/Loading supplier/i)).toBeInTheDocument();
   });
 
   it('displays supplier information', async () => {
@@ -122,7 +122,7 @@ describe('SupplierDetailPage', () => {
     await waitFor(() => {
       const supplierNames = screen.getAllByText('Test Supplier');
       expect(supplierNames.length).toBeGreaterThan(0);
-      expect(screen.getByText('Local Supplier')).toBeInTheDocument();
+      expect(screen.getByText(/Local supplier/i)).toBeInTheDocument();
     });
   });
 
@@ -280,7 +280,7 @@ describe('SupplierDetailPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Supplier not found')).toBeInTheDocument();
+      expect(screen.getByText(/Supplier not found/i)).toBeInTheDocument();
     });
   });
 });

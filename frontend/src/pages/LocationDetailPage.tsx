@@ -2,8 +2,10 @@
  * Location Detail Page
  * Display location details, QR code, and fixtures
  */
+import { Button, Group, Paper, Text } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import LocationFixturesList from '../components/LocationFixturesList';
 import LocationProblemsPanel from '../components/LocationProblemsPanel';
 import LocationTrafficPanel from '../components/LocationTrafficPanel';
@@ -78,62 +80,77 @@ const LocationDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="location-detail-page">
-        <div className="loading">Loading location...</div>
-      </div>
+      <WorkspacePage
+        testId="location-detail-page"
+        hero={{ eyebrow: 'Inventory · Location', title: 'Location', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading location…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   if (error || !location) {
     return (
-      <div className="location-detail-page">
-        <div className="error">{error || 'Location not found'}</div>
-        <Link to="/inventory/locations" className="btn-secondary">
-          Back to Locations
-        </Link>
-      </div>
+      <WorkspacePage
+        testId="location-detail-page"
+        hero={{
+          eyebrow: 'Inventory · Location',
+          title: 'Location',
+          description: error || 'Not found.',
+          action: (
+            <Button component={Link} to="/inventory/locations" variant="default">
+              Back to locations
+            </Button>
+          ),
+        }}
+      >
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error || 'Location not found.'}</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="location-detail-page">
-      <header className="page-header">
-        <div>
-          <h1>{location.name}</h1>
-          {location.description && (
-            <p className="location-description">{location.description}</p>
-          )}
-        </div>
-        <div className="header-actions">
-          <button
-            type="button"
-            onClick={() => setShowReportModal(true)}
-            className="btn-secondary"
-          >
-            Report Problem
-          </button>
-          {isStaff && (
-            <>
-              <Link
-                to={`/inventory/locations/${location.id}/reconcile`}
-                className="btn-secondary"
-              >
-                Reconcile inventory
-              </Link>
-              <Link
-                to={`/inventory/locations/${location.id}/edit`}
-                className="btn-edit"
-              >
-                Edit
-              </Link>
-              <button onClick={handleDelete} className="btn-delete">
-                Delete
-              </button>
-            </>
-          )}
-        </div>
-      </header>
-
+    <WorkspacePage
+      testId="location-detail-page"
+      hero={{
+        eyebrow: location.parent_name
+          ? `Inventory · in ${location.parent_name}`
+          : 'Inventory · Location',
+        title: location.name,
+        description: location.description || undefined,
+        action: (
+          <Group gap="sm">
+            <Button onClick={() => setShowReportModal(true)} variant="default">
+              Report problem
+            </Button>
+            {isStaff && (
+              <>
+                <Button
+                  component={Link}
+                  to={`/inventory/locations/${location.id}/reconcile`}
+                  variant="default"
+                >
+                  Reconcile
+                </Button>
+                <Button
+                  component={Link}
+                  to={`/inventory/locations/${location.id}/edit`}
+                >
+                  Edit
+                </Button>
+                <Button color="red" variant="light" onClick={handleDelete}>
+                  Delete
+                </Button>
+              </>
+            )}
+          </Group>
+        ),
+      }}
+    >
       <div className="location-details">
         <div className="detail-section">
           <h2>Location Information</h2>
@@ -238,7 +255,7 @@ const LocationDetailPage: React.FC = () => {
           }}
         />
       )}
-    </div>
+    </WorkspacePage>
   );
 };
 

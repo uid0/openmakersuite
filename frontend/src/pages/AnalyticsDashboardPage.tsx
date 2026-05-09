@@ -1,5 +1,6 @@
 import {
   Alert,
+  Box,
   Card,
   Container,
   Grid,
@@ -21,6 +22,7 @@ import { ShareLinkButton } from '../components/analytics/ShareLinkButton';
 import { TopUsersTable } from '../components/analytics/TopUsersTable';
 import { VolumeTrendChart } from '../components/analytics/VolumeTrendChart';
 import PageHero from '../components/landing/PageHero';
+import '../styles/landing.css';
 import { pulseAPI, AnalyticsPulseResponse } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
@@ -84,34 +86,39 @@ export const AnalyticsDashboardPage: React.FC<AnalyticsDashboardPageProps> = ({ 
 
   if (loading) {
     return (
-      <Container size="xl" py="xl">
-        <Group justify="center"><Loader /></Group>
-      </Container>
+      <Box className="landing-surface">
+        <Container size="xl" py="xl">
+          <Group justify="center"><Loader /></Group>
+        </Container>
+      </Box>
     );
   }
 
   if (error || !data) {
     return (
-      <Container size="xl" py="xl">
-        <Alert color="red" icon={<IconAlertTriangle size={16} />} title="Could not load analytics">
-          {error ?? 'Unknown error'}
-        </Alert>
-      </Container>
+      <Box className="landing-surface">
+        <Container size="xl" py="xl">
+          <Alert color="red" icon={<IconAlertTriangle size={16} />} title="Could not load analytics">
+            {error ?? 'Unknown error'}
+          </Alert>
+        </Container>
+      </Box>
     );
   }
 
   const { summary } = data;
 
   return (
-    <Container size="xl" py="lg">
-      <PageHero
-        eyebrow="Analytics pulse"
-        title="Makerspace pulse"
-        description={`${summary.period_start} → ${summary.period_end}${shared ? ' · shared link (read-only)' : ''}`}
-        action={!shared ? <ShareLinkButton baseUrl={window.location.origin} /> : undefined}
-      />
+    <Box className="landing-surface" data-testid="analytics-dashboard-page">
+      <Container size="xl" py="lg">
+        <PageHero
+          eyebrow="Analytics pulse"
+          title="Makerspace pulse"
+          description={`${summary.period_start} → ${summary.period_end}${shared ? ' · shared link (read-only)' : ''}`}
+          action={!shared ? <ShareLinkButton baseUrl={window.location.origin} /> : undefined}
+        />
 
-      <Stack gap="lg">
+        <Stack gap="lg">
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
           <SummaryStat
             label="Net value created"
@@ -156,8 +163,9 @@ export const AnalyticsDashboardPage: React.FC<AnalyticsDashboardPageProps> = ({ 
         </Grid>
 
         <EquipmentStatusGrid rows={data.utilization} />
-      </Stack>
-    </Container>
+        </Stack>
+      </Container>
+    </Box>
   );
 };
 

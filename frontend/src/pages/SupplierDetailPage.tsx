@@ -19,6 +19,7 @@ import { IconEdit, IconExternalLink } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import LeadTimeChart from '../components/LeadTimeChart';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import PriceTrendChart from '../components/PriceTrendChart';
 import { inventoryAPI } from '../services/api';
 import { ItemSupplier, SupplierDetail } from '../types';
@@ -79,40 +80,47 @@ const SupplierDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Paper p="md">
-        <Text>Loading...</Text>
-      </Paper>
+      <WorkspacePage
+        testId="supplier-detail-page"
+        hero={{ eyebrow: 'Inventory · Supplier', title: 'Supplier', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading supplier…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   if (!supplier) {
     return (
-      <Paper p="md">
-        <Text>Supplier not found</Text>
-      </Paper>
+      <WorkspacePage
+        testId="supplier-detail-page"
+        hero={{ eyebrow: 'Inventory · Supplier', title: 'Supplier', description: 'Not found.' }}
+      >
+        <Paper withBorder p="md">
+          <Text>Supplier not found.</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <Stack gap="md">
-      {/* Header */}
-      <Group justify="space-between">
-        <div>
-          <Title order={2}>{supplier.name}</Title>
-          <Text size="sm" c="dimmed">
-            {getTypeLabel(supplier.supplier_type)} Supplier
-          </Text>
-        </div>
-        <Group>
+    <WorkspacePage
+      testId="supplier-detail-page"
+      hero={{
+        eyebrow: `Inventory · ${getTypeLabel(supplier.supplier_type)} supplier`,
+        title: supplier.name,
+        description: supplier.notes ? supplier.notes.split('\n')[0] : undefined,
+        action: (
           <Button
             leftSection={<IconEdit size={16} />}
             onClick={() => navigate(`/inventory/suppliers/${id}/edit`)}
           >
             Edit
           </Button>
-        </Group>
-      </Group>
-
+        ),
+      }}
+    >
       {/* Status Badges */}
       <Group>
         <Badge color={getTypeBadgeColor(supplier.supplier_type)}>
@@ -398,7 +406,7 @@ const SupplierDetailPage: React.FC = () => {
           )}
         </Tabs.Panel>
       </Tabs>
-    </Stack>
+    </WorkspacePage>
   );
 };
 

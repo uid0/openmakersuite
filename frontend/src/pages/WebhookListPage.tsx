@@ -17,6 +17,7 @@ import {
 import { IconEdit, IconExternalLink, IconEye, IconSearch, IconTestPipe, IconTrash } from '@tabler/icons-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { webhooksAPI } from '../services/api';
 import '../styles/WebhookListPage.css';
 import { Webhook } from '../types';
@@ -114,29 +115,30 @@ const WebhookListPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Stack gap="md">
-        <Text>Loading webhooks...</Text>
-      </Stack>
+      <WorkspacePage
+        testId="webhook-list-page"
+        hero={{ eyebrow: 'Settings', title: 'Webhooks', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading webhooks…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="webhook-list-page">
-      <Stack gap="md">
-        <Group justify="space-between">
-          <div>
-            <Text size="xl" fw={500}>
-              Webhooks
-            </Text>
-            <Text size="sm" c="dimmed">
-              {filteredWebhooks.length} of {webhooks.length} webhooks
-            </Text>
-          </div>
-          <Button onClick={() => navigate('/settings/webhooks/new')}>
-            Create Webhook
-          </Button>
-        </Group>
-
+    <WorkspacePage
+      testId="webhook-list-page"
+      hero={{
+        eyebrow: 'Settings',
+        title: 'Webhooks',
+        description: `${filteredWebhooks.length} of ${webhooks.length} webhooks configured.`,
+        action: (
+          <Button onClick={() => navigate('/settings/webhooks/new')}>Create webhook</Button>
+        ),
+      }}
+    >
+      <div className="webhook-list-page">
         {/* Filters and Search */}
         <Paper p="md" withBorder>
           <Stack gap="md">
@@ -287,8 +289,8 @@ const WebhookListPage: React.FC = () => {
             </Table.Tbody>
           </Table>
         </Paper>
-      </Stack>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

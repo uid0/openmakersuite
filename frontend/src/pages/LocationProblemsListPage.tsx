@@ -2,18 +2,17 @@ import {
   Alert,
   Anchor,
   Badge,
-  Container,
+  Button,
   Group,
   Loader,
   SegmentedControl,
-  Stack,
   Table,
   Text,
-  Title,
 } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { locationProblemsAPI } from '../services/api';
 import { LocationProblem } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -65,14 +64,19 @@ const LocationProblemsListPage: React.FC = () => {
   }, [problems, statusFilter]);
 
   return (
-    <Container size="xl" py="md" data-testid="location-problems-list-page">
-      <Group justify="space-between" mb="md">
-        <Title order={2}>Location Problems</Title>
-        <Anchor component={Link} to="/maintenance" size="sm">
-          ← Maintenance
-        </Anchor>
-      </Group>
-
+    <WorkspacePage
+      testId="location-problems-list-page"
+      hero={{
+        eyebrow: 'Maintenance',
+        title: 'Location problems',
+        description: 'Reported issues for shop locations — open, resolved, and the full history.',
+        action: (
+          <Button component={Link} to="/maintenance" variant="default">
+            Back to maintenance
+          </Button>
+        ),
+      }}
+    >
       <SegmentedControl
         mb="md"
         value={statusFilter}
@@ -146,7 +150,7 @@ const LocationProblemsListPage: React.FC = () => {
           </Table.Tbody>
         </Table>
       )}
-    </Container>
+    </WorkspacePage>
   );
 };
 

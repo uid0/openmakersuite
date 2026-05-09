@@ -52,7 +52,7 @@ describe('LocationProblemsListPage', () => {
 
     renderPage();
 
-    expect(screen.getByText('Location Problems')).toBeInTheDocument();
+    expect(screen.getByText('Location problems')).toBeInTheDocument();
     expect(await screen.findByTestId('location-problems-table')).toBeInTheDocument();
     expect(screen.getByText('Light is out')).toBeInTheDocument();
     expect(screen.getByText('Shelf A')).toBeInTheDocument();

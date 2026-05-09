@@ -2,8 +2,10 @@
  * Location List Page
  * Display locations in hierarchical tree structure
  */
+import { Button, Paper, Stack, Text, TextInput } from '@mantine/core';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import TreeView, { TreeNode } from '../components/TreeView';
 import { inventoryAPI } from '../services/api';
 import '../styles/LocationListPage.css';
@@ -222,62 +224,61 @@ const LocationListPage: React.FC = () => {
     );
   };
 
-  if (loading) {
-    return (
-      <div className="location-list-page">
-        <div className="loading">Loading locations...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="location-list-page">
-        <div className="error">{error}</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="location-list-page">
-      <header className="page-header">
-        <h1>Locations</h1>
-        {isStaff && (
-          <Link to="/inventory/locations/new" className="btn-primary">
-            Create Location
-          </Link>
-        )}
-      </header>
+    <WorkspacePage
+      testId="location-list-page"
+      hero={{
+        eyebrow: 'Inventory',
+        title: 'Locations',
+        description: loading
+          ? 'Loading…'
+          : `${treeNodes.length} top-level location${treeNodes.length === 1 ? '' : 's'} in the tree.`,
+        action: isStaff ? (
+          <Button component={Link} to="/inventory/locations/new">
+            Create location
+          </Button>
+        ) : undefined,
+      }}
+    >
+      {error && (
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error}</Text>
+        </Paper>
+      )}
 
-      <div className="page-controls">
-        <input
-          type="text"
-          placeholder="Search locations..."
+      <Paper withBorder p="md">
+        <TextInput
+          placeholder="Search locations…"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="search-input"
         />
-      </div>
+      </Paper>
 
-      {!treeNodes || treeNodes.length === 0 ? (
-        <div className="empty-state">
-          <p>No locations found.</p>
-          {isStaff && (
-            <Link to="/inventory/locations/new" className="btn-primary">
-              Create First Location
-            </Link>
-          )}
-        </div>
+      {loading ? (
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading locations…</Text>
+        </Paper>
+      ) : !treeNodes || treeNodes.length === 0 ? (
+        <Paper withBorder p="xl" radius="md">
+          <Stack gap="sm" align="center">
+            <Text fw={500}>No locations found.</Text>
+            {isStaff && (
+              <Button component={Link} to="/inventory/locations/new">
+                Create first location
+              </Button>
+            )}
+          </Stack>
+        </Paper>
       ) : (
-        <div className="location-tree">
+        <Paper withBorder p="md" radius="md" className="location-tree">
           <TreeView
             nodes={treeNodes}
             renderNode={renderLocationNode}
             defaultExpanded={true}
           />
-        </div>
+        </Paper>
       )}
-    </div>
+    </WorkspacePage>
   );
 };
 

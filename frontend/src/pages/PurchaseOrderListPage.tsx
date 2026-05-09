@@ -2,8 +2,10 @@
  * Public Purchase Order List Page
  * Shows all active and settled purchase orders for transparency
  */
+import { Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderListPage.css';
 import { formatDateOnly } from '../utils/dates';
@@ -84,43 +86,36 @@ const PurchaseOrderListPage: React.FC = () => {
     return statusMap[status] || 'status-default';
   };
 
-  if (loading) {
-    return (
-      <div className="purchase-order-list-page">
-        <div className="loading">Loading purchase orders...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="purchase-order-list-page">
-        <div className="error">
-          <h2>Error</h2>
-          <p>{error}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="purchase-order-list-page">
-      <header className="po-list-header">
-        <div>
-          <h1>Purchase Orders</h1>
-          <p className="po-list-subtitle">
-            Active and settled purchase orders for makerspace transparency
-          </p>
-        </div>
-        <div className="po-list-actions">
-          <Link to="/purchasing/orders/new" className="create-po-link">
-            + Create Purchase Order
-          </Link>
-          <Link to="/inventory/transparency" className="transparency-link">
-            View Financial Transparency →
-          </Link>
-        </div>
-      </header>
+    <WorkspacePage
+      testId="purchase-order-list-page"
+      hero={{
+        eyebrow: 'Purchasing',
+        title: 'Purchase orders',
+        description: 'Active and settled purchase orders for makerspace transparency.',
+        action: (
+          <Group gap="sm">
+            <Button component={Link} to="/inventory/transparency" variant="default">
+              Financial transparency
+            </Button>
+            <Button component={Link} to="/purchasing/orders/new">
+              Create purchase order
+            </Button>
+          </Group>
+        ),
+      }}
+    >
+      {error && (
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error}</Text>
+        </Paper>
+      )}
+
+      {loading && (
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading purchase orders…</Text>
+        </Paper>
+      )}
 
       <div className="po-list-filters">
         <label htmlFor="status-filter">Filter by Status:</label>
@@ -226,7 +221,7 @@ const PurchaseOrderListPage: React.FC = () => {
           </table>
         )}
       </section>
-    </div>
+    </WorkspacePage>
   );
 };
 

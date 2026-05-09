@@ -2,7 +2,7 @@
  * Dashboard Page
  * Customizable dashboard with drag-and-drop widgets
  */
-import { Button, Container, Loader, Text } from '@mantine/core';
+import { Button, Loader, Paper, Stack, Text } from '@mantine/core';
 import { useDebouncedCallback } from '@mantine/hooks';
 import React, { useCallback, useEffect, useState } from 'react';
 import GridLayout, { Layout } from 'react-grid-layout';
@@ -13,6 +13,7 @@ import DeliveriesWidget from '../components/dashboard/DeliveriesWidget';
 import LowStockWidget from '../components/dashboard/LowStockWidget';
 import PendingReordersWidget from '../components/dashboard/PendingReordersWidget';
 import QRScansWidget from '../components/dashboard/QRScansWidget';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { dashboardAPI } from '../services/api';
 import '../styles/DashboardPage.css';
 import { DashboardWidget as DashboardWidgetType } from '../types';
@@ -138,72 +139,62 @@ const DashboardPage: React.FC = () => {
       }));
   };
 
-  if (loading) {
-    return (
-      <Container size="xl" py="xl">
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
-          <Loader size="lg" />
-        </div>
-      </Container>
-    );
-  }
-
-  if (error) {
-    return (
-      <Container size="xl" py="xl">
-        <div style={{ textAlign: 'center', padding: '40px' }}>
-          <Text c="red" size="lg" fw={500} mb="md">
-            {error}
-          </Text>
-          <Button onClick={loadWidgets}>Retry</Button>
-        </div>
-      </Container>
-    );
-  }
-
   const visibleWidgets = widgets.filter((w) => w.is_visible);
 
-  if (visibleWidgets.length === 0) {
-    return (
-      <Container size="xl" py="xl">
-        <div style={{ textAlign: 'center', padding: '40px' }}>
-          <Text size="lg" c="dimmed" mb="md">
-            No widgets configured. Default widgets will be created on first access.
-          </Text>
-          <Button onClick={loadWidgets}>Load Widgets</Button>
-        </div>
-      </Container>
-    );
-  }
+  const heroDescription = saving
+    ? 'Saving layout…'
+    : 'Live operational signals — drag widgets to recompose the layout, resize to focus.';
 
   return (
-    <Container size="xl" py="xl">
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text size="xl" fw={700}>
-          Dashboard
-        </Text>
-        {saving && (
-          <Text size="sm" c="dimmed">
-            Saving...
-          </Text>
-        )}
-      </div>
-      <GridLayout
-        className="layout"
-        layout={getLayout()}
-        cols={6}
-        rowHeight={100}
-        width={containerWidth}
-        onLayoutChange={handleLayoutChange}
-        isDraggable={true}
-        isResizable={true}
-        draggableHandle=".dashboard-widget-drag-handle"
-      >
-        {visibleWidgets.map((widget) => (
-          <div key={widget.id}>{renderWidget(widget)}</div>
-        ))}
-      </GridLayout>
-    </Container>
+    <WorkspacePage
+      testId="dashboard-page"
+      hero={{
+        eyebrow: 'Operations',
+        title: 'Dashboard',
+        description: heroDescription,
+      }}
+    >
+      {loading ? (
+        <Paper withBorder p="xl" radius="md">
+          <Stack align="center" gap="md">
+            <Loader size="lg" />
+            <Text c="dimmed">Loading widgets…</Text>
+          </Stack>
+        </Paper>
+      ) : error ? (
+        <Paper withBorder p="xl" radius="md" bg="red.0">
+          <Stack align="center" gap="md">
+            <Text c="red.9" fw={500}>{error}</Text>
+            <Button onClick={loadWidgets}>Retry</Button>
+          </Stack>
+        </Paper>
+      ) : visibleWidgets.length === 0 ? (
+        <Paper withBorder p="xl" radius="md">
+          <Stack align="center" gap="md">
+            <Text c="dimmed">
+              No widgets configured. Default widgets will be created on first access.
+            </Text>
+            <Button onClick={loadWidgets}>Load widgets</Button>
+          </Stack>
+        </Paper>
+      ) : (
+        <GridLayout
+          className="layout"
+          layout={getLayout()}
+          cols={6}
+          rowHeight={100}
+          width={containerWidth}
+          onLayoutChange={handleLayoutChange}
+          isDraggable={true}
+          isResizable={true}
+          draggableHandle=".dashboard-widget-drag-handle"
+        >
+          {visibleWidgets.map((widget) => (
+            <div key={widget.id}>{renderWidget(widget)}</div>
+          ))}
+        </GridLayout>
+      )}
+    </WorkspacePage>
   );
 };
 

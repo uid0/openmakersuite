@@ -4,8 +4,10 @@
  * Staff-only screen for assigning ESP32 devices (e.g. ForgeKey traffic
  * counters) to a default Location.
  */
+import { Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { ForgeKeyDevice, forgekeyAPI, inventoryAPI } from '../services/api';
 import { Location } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -81,37 +83,48 @@ const ForgeKeyDevicesPage: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: '1.5rem' }}>
-      <h1>ForgeKey Devices</h1>
-      <p style={{ color: '#555' }}>
-        Assign each ForgeKey device to a default location (area). Required so that
-        traffic counts and sensor readings roll up to the right space.
-      </p>
+    <WorkspacePage
+      testId="forgekey-devices-page"
+      hero={{
+        eyebrow: 'Facilities',
+        title: 'ForgeKey devices',
+        description:
+          'Assign each ForgeKey device to a default location so traffic counts and sensor readings roll up to the right space.',
+      }}
+    >
+      <Paper withBorder p="md" radius="md">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <label htmlFor="capability-filter" style={{ color: '#555' }}>
+            Filter by capability:
+          </label>
+          <input
+            id="capability-filter"
+            type="text"
+            placeholder="e.g. mmwave_presence"
+            value={capabilityFilter}
+            onChange={(e) => setCapabilityFilter(e.target.value.trim())}
+            style={{ minWidth: '14rem' }}
+          />
+          {capabilityFilter && (
+            <button type="button" onClick={() => setCapabilityFilter('')}>
+              Clear
+            </button>
+          )}
+        </div>
+      </Paper>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
-        <label htmlFor="capability-filter" style={{ color: '#555' }}>
-          Filter by capability:
-        </label>
-        <input
-          id="capability-filter"
-          type="text"
-          placeholder="e.g. mmwave_presence"
-          value={capabilityFilter}
-          onChange={(e) => setCapabilityFilter(e.target.value.trim())}
-          style={{ minWidth: '14rem' }}
-        />
-        {capabilityFilter && (
-          <button type="button" onClick={() => setCapabilityFilter('')}>
-            Clear
-          </button>
-        )}
-      </div>
-
-      {error && <p style={{ color: '#c0392b' }}>{error}</p>}
+      {error && (
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error}</Text>
+        </Paper>
+      )}
 
       {loading ? (
-        <p>Loading…</p>
+        <Paper withBorder p="md" radius="md">
+          <Text c="dimmed">Loading…</Text>
+        </Paper>
       ) : (
+        <Paper withBorder p="md" radius="md">
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
@@ -215,8 +228,9 @@ const ForgeKeyDevicesPage: React.FC = () => {
             )}
           </tbody>
         </table>
+        </Paper>
       )}
-    </div>
+    </WorkspacePage>
   );
 };
 

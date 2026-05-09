@@ -20,6 +20,7 @@ import { IconEdit, IconQrcode } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
@@ -85,47 +86,56 @@ const InventoryItemDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Paper p="md">
-        <Text>Loading...</Text>
-      </Paper>
+      <WorkspacePage
+        testId="inventory-item-detail-page"
+        hero={{ eyebrow: 'Inventory · Item', title: 'Item', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading item…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   if (!item) {
     return (
-      <Paper p="md">
-        <Text>Item not found</Text>
-      </Paper>
+      <WorkspacePage
+        testId="inventory-item-detail-page"
+        hero={{ eyebrow: 'Inventory · Item', title: 'Item', description: 'Not found.' }}
+      >
+        <Paper withBorder p="md">
+          <Text>Item not found.</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <Stack gap="md">
-      {/* Header */}
-      <Group justify="space-between">
-        <div>
-          <Title order={2}>{item.name}</Title>
-          <Text size="sm" c="dimmed">
-            SKU: {item.sku}
-          </Text>
-        </div>
-        <Group>
-          <Button
-            leftSection={<IconEdit size={16} />}
-            onClick={() => navigate(`/inventory/items/${id}/edit`)}
-          >
-            Edit
-          </Button>
-          <Button
-            variant="outline"
-            leftSection={<IconQrcode size={16} />}
-            onClick={handleGenerateQR}
-          >
-            Generate QR Code
-          </Button>
-        </Group>
-      </Group>
-
+    <WorkspacePage
+      testId="inventory-item-detail-page"
+      hero={{
+        eyebrow: `Inventory · SKU ${item.sku}`,
+        title: item.name,
+        description: item.description ? item.description.split('\n')[0] : undefined,
+        action: (
+          <Group gap="sm">
+            <Button
+              variant="default"
+              leftSection={<IconQrcode size={16} />}
+              onClick={handleGenerateQR}
+            >
+              Generate QR
+            </Button>
+            <Button
+              leftSection={<IconEdit size={16} />}
+              onClick={() => navigate(`/inventory/items/${id}/edit`)}
+            >
+              Edit
+            </Button>
+          </Group>
+        ),
+      }}
+    >
       {/* Status Badges */}
       <Group>
         {item.needs_reorder && <Badge color="red">Low Stock</Badge>}
@@ -422,7 +432,7 @@ const InventoryItemDetailPage: React.FC = () => {
           </Card>
         </Tabs.Panel>
       </Tabs>
-    </Stack>
+    </WorkspacePage>
   );
 };
 

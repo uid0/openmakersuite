@@ -64,7 +64,7 @@ describe('UserProfilePage', () => {
       </MantineProvider>
     );
 
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByText(/Loading profile/)).toBeInTheDocument();
   });
 
   it('loads and displays notification preferences successfully', async () => {
@@ -80,7 +80,7 @@ describe('UserProfilePage', () => {
 
     // Wait for profile to load and tabs to be available
     await waitFor(() => {
-      expect(screen.getByText('User Profile')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /notifications/i })).toBeInTheDocument();
     });
 
@@ -116,7 +116,7 @@ describe('UserProfilePage', () => {
 
     // Wait for profile to load and tabs to be available
     await waitFor(() => {
-      expect(screen.getByText('User Profile')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /notifications/i })).toBeInTheDocument();
     });
 
@@ -156,7 +156,7 @@ describe('UserProfilePage', () => {
 
     // Wait for profile to load and tabs to be available
     await waitFor(() => {
-      expect(screen.getByText('User Profile')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /notifications/i })).toBeInTheDocument();
     });
 
@@ -197,7 +197,7 @@ describe('UserProfilePage', () => {
 
     // Wait for profile to load
     await waitFor(() => {
-      expect(screen.getByText('User Profile')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toBeInTheDocument();
     });
 
     // Wait for and click on notifications tab
@@ -230,7 +230,7 @@ describe('UserProfilePage', () => {
 
     // Wait for profile to load and tabs to be available
     await waitFor(() => {
-      expect(screen.getByText('User Profile')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /notifications/i })).toBeInTheDocument();
     });
 

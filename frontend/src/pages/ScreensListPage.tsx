@@ -14,10 +14,10 @@ import {
   Stack,
   Table,
   Text,
-  Title,
 } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { screensAPI } from '../services/api';
 import { Screen, ScreenStatusEntry } from '../types';
 
@@ -72,32 +72,46 @@ const ScreensListPage: React.FC = () => {
   };
 
   return (
-    <Paper p="md" shadow="xs">
-      <Group justify="space-between" mb="md">
-        <Title order={2}>Interactive Screens</Title>
-        <Group>
-          <Button variant="default" onClick={load}>Refresh</Button>
-          <Button onClick={handleCreate}>New Screen</Button>
-        </Group>
-      </Group>
-
+    <WorkspacePage
+      testId="screens-list-page"
+      hero={{
+        eyebrow: 'Facilities',
+        title: 'Interactive screens',
+        description: 'Kiosk and shop displays with live online/offline status.',
+        action: (
+          <Group gap="sm">
+            <Button variant="default" onClick={load}>Refresh</Button>
+            <Button onClick={handleCreate}>New screen</Button>
+          </Group>
+        ),
+      }}
+    >
       {loading && (
-        <Group>
-          <Loader size="sm" />
-          <Text>Loading screens…</Text>
-        </Group>
+        <Paper withBorder p="md" radius="md">
+          <Group>
+            <Loader size="sm" />
+            <Text c="dimmed">Loading screens…</Text>
+          </Group>
+        </Paper>
       )}
 
-      {error && <Text c="red">{error}</Text>}
+      {error && (
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error}</Text>
+        </Paper>
+      )}
 
       {!loading && !error && statuses.length === 0 && (
-        <Text c="dimmed">
-          No screens configured yet. Click <b>New Screen</b> to create one.
-        </Text>
+        <Paper withBorder p="xl" radius="md">
+          <Text c="dimmed" ta="center">
+            No screens configured yet. Click <b>New screen</b> to create one.
+          </Text>
+        </Paper>
       )}
 
       {!loading && statuses.length > 0 && (
-        <Table striped highlightOnHover withTableBorder>
+        <Paper withBorder radius="md" p={0}>
+          <Table striped highlightOnHover withTableBorder>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Name</Table.Th>
@@ -146,8 +160,9 @@ const ScreensListPage: React.FC = () => {
             ))}
           </Table.Tbody>
         </Table>
+        </Paper>
       )}
-    </Paper>
+    </WorkspacePage>
   );
 };
 

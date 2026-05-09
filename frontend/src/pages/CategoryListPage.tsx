@@ -2,8 +2,10 @@
  * Category List Page
  * Display categories in tree view with color picker and item counts
  */
+import { Button, Paper, Stack, Text, TextInput } from '@mantine/core';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import TreeView, { TreeNode } from '../components/TreeView';
 import { inventoryAPI } from '../services/api';
 import '../styles/CategoryListPage.css';
@@ -133,58 +135,61 @@ const CategoryListPage: React.FC = () => {
     );
   };
 
-  if (loading) {
-    return (
-      <div className="category-list-page">
-        <div className="loading">Loading categories...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="category-list-page">
-        <div className="error">{error}</div>
-      </div>
-    );
-  }
+  const heroDescription = loading
+    ? 'Loading…'
+    : `${treeNodes.length} top-level categor${treeNodes.length === 1 ? 'y' : 'ies'} in the tree.`;
 
   return (
-    <div className="category-list-page">
-      <header className="page-header">
-        <h1>Categories</h1>
-        <Link to="/inventory/categories/new" className="btn-primary">
-          Create Category
-        </Link>
-      </header>
+    <WorkspacePage
+      testId="category-list-page"
+      hero={{
+        eyebrow: 'Inventory',
+        title: 'Categories',
+        description: heroDescription,
+        action: (
+          <Button component={Link} to="/inventory/categories/new">
+            Create category
+          </Button>
+        ),
+      }}
+    >
+      {error && (
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error}</Text>
+        </Paper>
+      )}
 
-      <div className="page-controls">
-        <input
-          type="text"
-          placeholder="Search categories..."
+      <Paper withBorder p="md">
+        <TextInput
+          placeholder="Search categories…"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="search-input"
         />
-      </div>
+      </Paper>
 
-      {treeNodes.length === 0 ? (
-        <div className="empty-state">
-          <p>No categories found.</p>
-          <Link to="/inventory/categories/new" className="btn-primary">
-            Create First Category
-          </Link>
-        </div>
+      {loading ? (
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading categories…</Text>
+        </Paper>
+      ) : treeNodes.length === 0 ? (
+        <Paper withBorder p="xl" radius="md">
+          <Stack gap="sm" align="center">
+            <Text fw={500}>No categories found.</Text>
+            <Button component={Link} to="/inventory/categories/new">
+              Create first category
+            </Button>
+          </Stack>
+        </Paper>
       ) : (
-        <div className="category-tree">
+        <Paper withBorder p="md" radius="md" className="category-tree">
           <TreeView
             nodes={treeNodes}
             renderNode={renderCategoryNode}
             defaultExpanded={true}
           />
-        </div>
+        </Paper>
       )}
-    </div>
+    </WorkspacePage>
   );
 };
 

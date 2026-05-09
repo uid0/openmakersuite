@@ -17,6 +17,7 @@ import {
 import { IconEdit, IconExternalLink, IconEye, IconSearch } from '@tabler/icons-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { inventoryAPI } from '../services/api';
 import { Supplier } from '../types';
 
@@ -102,28 +103,29 @@ const SupplierListPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Stack gap="md">
-        <Text>Loading suppliers...</Text>
-      </Stack>
+      <WorkspacePage
+        testId="supplier-list-page"
+        hero={{ eyebrow: 'Inventory', title: 'Suppliers', description: 'Loading…' }}
+      >
+        <Paper p="md" withBorder>
+          <Text c="dimmed">Loading suppliers…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <Stack gap="md">
-      <Group justify="space-between">
-        <div>
-          <Text size="xl" fw={500}>
-            Suppliers
-          </Text>
-          <Text size="sm" c="dimmed">
-            {filteredSuppliers.length} of {suppliers.length} suppliers
-          </Text>
-        </div>
-        <Button onClick={() => navigate('/inventory/suppliers/new')}>
-          Add New Supplier
-        </Button>
-      </Group>
-
+    <WorkspacePage
+      testId="supplier-list-page"
+      hero={{
+        eyebrow: 'Inventory',
+        title: 'Suppliers',
+        description: `${filteredSuppliers.length} of ${suppliers.length} suppliers.`,
+        action: (
+          <Button onClick={() => navigate('/inventory/suppliers/new')}>Add new supplier</Button>
+        ),
+      }}
+    >
       {/* Filters and Search */}
       <Paper p="md" withBorder>
         <Stack gap="md">
@@ -241,7 +243,7 @@ const SupplierListPage: React.FC = () => {
           </Table.Tbody>
         </Table>
       </Paper>
-    </Stack>
+    </WorkspacePage>
   );
 };
 

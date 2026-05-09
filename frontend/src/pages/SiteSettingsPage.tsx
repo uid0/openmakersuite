@@ -12,6 +12,7 @@ import { z } from 'zod';
 import ColorPicker from '../components/ColorPicker';
 import { FormImageUpload } from '../components/forms/FormImageUpload';
 import { FormInput } from '../components/forms/FormInput';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { customizationAPI } from '../services/api';
 import '../styles/SiteSettingsPage.css';
 import { SiteSettings } from '../types';
@@ -158,21 +159,27 @@ const SiteSettingsPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Stack gap="md">
-        <Title order={2}>Site Settings</Title>
-        <Text>Loading...</Text>
-      </Stack>
+      <WorkspacePage
+        testId="site-settings-page"
+        hero={{ eyebrow: 'Settings', title: 'Site', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading site settings…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="site-settings-page">
-      <Stack gap="md">
-        <Title order={2}>Site Settings</Title>
-        <Text c="dimmed" size="sm">
-          Manage site-wide customization settings. Only superusers can access this page.
-        </Text>
-
+    <WorkspacePage
+      testId="site-settings-page"
+      hero={{
+        eyebrow: 'Settings',
+        title: 'Site',
+        description: 'Site-wide customization. Superuser only.',
+      }}
+    >
+      <div className="site-settings-page">
         {error && (
           <Alert
             icon={<IconAlertCircle size={16} />}
@@ -341,13 +348,13 @@ const SiteSettingsPage: React.FC = () => {
 
             <Group justify="flex-end">
               <Button type="submit" loading={saving} size="md">
-                Save Settings
+                Save settings
               </Button>
             </Group>
           </Stack>
         </form>
-      </Stack>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

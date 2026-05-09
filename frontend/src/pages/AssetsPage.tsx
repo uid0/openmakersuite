@@ -4,19 +4,20 @@
  */
 import React from 'react';
 import AssetList from '../components/AssetList';
-import '../styles/AssetsPage.css';
+import WorkspacePage from '../components/landing/WorkspacePage';
 
-const AssetsPage: React.FC = () => {
-  return (
-    <div className="assets-page">
-      <div className="assets-header">
-        <h1>Asset Inventory</h1>
-        <p className="subtitle">Browse all hard assets in the makerspace</p>
-      </div>
-      <AssetList />
-    </div>
-  );
-};
+const AssetsPage: React.FC = () => (
+  <WorkspacePage
+    testId="assets-page"
+    hero={{
+      eyebrow: 'Assets',
+      title: 'Asset inventory',
+      description: 'Every piece of equipment in the makerspace — lifecycle, ownership, and maintenance status.',
+    }}
+  >
+    <AssetList />
+  </WorkspacePage>
+);
 
 export default AssetsPage;
 

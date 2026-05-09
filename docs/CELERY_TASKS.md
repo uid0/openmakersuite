@@ -105,6 +105,12 @@ operator surface for inspecting status, args, and tracebacks
 | `forgekey.tasks.prune_device_photos` | Beat: every 86,400 s (daily) — see `CELERY_BEAT_SCHEDULE["forgekey-prune-device-photos"]`. The `retention_days` kwarg is sourced from `FORGEKEY_PHOTO_RETENTION_DAYS` (default 30). | Deletes `ESP32DevicePhoto` rows older than `retention_days` | None | 30 min global | **Yes** — re-running with the same cutoff is a no-op | Re-run manually: `celery -A config call forgekey.tasks.prune_device_photos`. |
 | `forgekey.tasks.mark_stale_devices_offline` | Beat: every 1,800 s (30 min) — see `CELERY_BEAT_SCHEDULE["forgekey-mark-stale-devices-offline"]`. The `threshold_hours` kwarg is sourced from `FORGEKEY_DEVICE_OFFLINE_THRESHOLD_HOURS` (default 5). | Updates `ESP32Device.is_online=False` for rows whose `last_seen` is older than the threshold (gh #349) | None | 30 min global | **Yes** — re-running with the same cutoff is a no-op (already-offline rows are filtered at the WHERE clause) | Run manually: `celery -A config call forgekey.tasks.mark_stale_devices_offline`. |
 
+### analytics
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `analytics.send_monthly_pulse_email` | Beat: `crontab(minute=0, hour=9, day_of_month=1)` — see `CELERY_BEAT_SCHEDULE["analytics-send-monthly-pulse"]`. Covers the prior calendar month. | Resolves recipients (env `BOARD_REPORT_EMAILS` ∪ `analytics-recipients` Django group), renders the HTML+text monthly-pulse email with two inline matplotlib PNG charts, sends via the configured email backend (Postmark via `django-anymail` in prod). Short-circuits with a logged warning when no recipients are configured. | None (`@shared_task` defaults) | 30 min global | **No** — running twice in the same window double-emails recipients. | Manual replay: `python manage.py send_monthly_pulse --month=YYYY-MM` (with `--dry-run` to preview without sending). The management command shares the same body so it stays in lockstep with the Beat task. |
+
 ### config (debug)
 
 | Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |

@@ -39,7 +39,7 @@ export const ShareLinkButton: React.FC<ShareLinkButtonProps> = ({ baseUrl }) => 
       notifications.show({
         color: 'red',
         title: 'Could not create share link',
-        message: extractErrorMessage(err) ?? 'Unknown error',
+        message: extractErrorMessage(err, 'Unknown error'),
       });
     } finally {
       setSubmitting(false);

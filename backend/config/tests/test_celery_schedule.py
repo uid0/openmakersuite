@@ -11,9 +11,12 @@ from django.conf import settings
 
 import pytest
 from celery import current_app
+from celery.schedules import crontab
 
 EXPECTED_BEAT_SCHEDULE = {
-    # name in CELERY_BEAT_SCHEDULE -> (task path, schedule seconds)
+    # name in CELERY_BEAT_SCHEDULE -> (task path, schedule)
+    # Schedule is float seconds for periodic interval tasks, or a celery
+    # crontab() instance for calendar-aligned tasks.
     "send-quarterly-donor-updates": (
         "donations.tasks.send_quarterly_donor_updates",
         7776000.0,  # 90 days
@@ -30,6 +33,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "forgekey.tasks.prune_device_photos",
         86400.0,  # 1 day
     ),
+    "analytics-send-monthly-pulse": (
+        "analytics.send_monthly_pulse_email",
+        crontab(minute=0, hour=9, day_of_month=1),  # 09:00 on the 1st
+    ),
 }
 
 
@@ -45,17 +52,17 @@ class TestCeleryBeatSchedule:
             )
 
     @pytest.mark.parametrize(
-        "name, task_path, schedule_seconds",
+        "name, task_path, schedule",
         [(name, *cfg) for name, cfg in EXPECTED_BEAT_SCHEDULE.items()],
     )
-    def test_entry_targets_expected_task_and_cadence(self, name, task_path, schedule_seconds):
+    def test_entry_targets_expected_task_and_cadence(self, name, task_path, schedule):
         entry = settings.CELERY_BEAT_SCHEDULE[name]
         assert (
             entry["task"] == task_path
         ), f"Beat entry {name!r} points at {entry['task']!r}, expected {task_path!r}."
-        assert entry["schedule"] == schedule_seconds, (
+        assert entry["schedule"] == schedule, (
             f"Beat entry {name!r} schedule changed to {entry['schedule']!r} "
-            f"(expected {schedule_seconds!r})."
+            f"(expected {schedule!r})."
         )
 
     def test_no_undocumented_entries(self):

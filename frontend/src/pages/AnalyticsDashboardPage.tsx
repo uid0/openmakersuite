@@ -73,7 +73,7 @@ export const AnalyticsDashboardPage: React.FC<AnalyticsDashboardPageProps> = ({ 
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(extractErrorMessage(err) ?? 'Could not load analytics.');
+          setError(extractErrorMessage(err, 'Could not load analytics.'));
           setLoading(false);
         }
       });

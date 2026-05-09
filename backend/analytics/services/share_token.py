@@ -18,10 +18,13 @@ from datetime import timedelta
 from django.conf import settings
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 
-SHARE_TOKEN_SALT_SETTING = "ANALYTICS_SHARE_SALT"
+# Both constants below are *names* (a Django settings key + a payload
+# version marker), not secrets. ``# nosec B105`` quiets bandit's
+# hardcoded-password heuristic.
+SHARE_TOKEN_SALT_SETTING = "ANALYTICS_SHARE_SALT"  # nosec B105
 DEFAULT_TTL_DAYS = 30
 MAX_TTL_DAYS = 365
-TOKEN_PAYLOAD_V1 = "v1"
+TOKEN_PAYLOAD_V1 = "v1"  # nosec B105
 
 
 class InvalidShareToken(Exception):

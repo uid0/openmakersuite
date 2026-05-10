@@ -39,6 +39,24 @@ class TestMQTTTasks:
         assert result["command"] == "enable"
         mock_client.publish.assert_called_once()
 
+    @patch("forgekey.tasks.get_mqtt_client")
+    def test_send_mqtt_command_uses_firmware_payload_contract(self, mock_get_client):
+        """Published payload must key the verb under ``cmd`` — firmware
+        ignores the older ``command`` key."""
+        import json
+
+        mock_client = MagicMock()
+        mock_client.publish.return_value.rc = 0
+        mock_get_client.return_value = mock_client
+
+        send_mqtt_command("AA:BB:CC:DD:EE:FF", "enable")
+
+        topic, body, *_ = mock_client.publish.call_args[0]
+        assert topic.endswith("/aabbccddeeff/command")
+        body_obj = json.loads(body)
+        assert body_obj["cmd"] == "enable"
+        assert "command" not in body_obj
+
     @patch("forgekey.tasks.send_mqtt_command")
     def test_enable_device(self, mock_send_command):
         """Test enabling a device."""
@@ -280,6 +298,41 @@ class TestMQTTTasks:
 
         with pytest.raises(Exception, match="Connection refused"):
             get_mqtt_client()
+
+    @patch("paho.mqtt.client.Client")
+    @patch("forgekey.tasks.settings")
+    def test_get_mqtt_client_drops_disconnected_singleton(self, mock_settings, mock_client_class):
+        """Stale-singleton bug: a backend that lost its broker session was
+        getting handed back the dead client and silently dropping publishes.
+        After the link is dead, the next call must recreate."""
+        from forgekey.tasks import _reset_mqtt_client_state_for_tests, get_mqtt_client
+
+        _reset_mqtt_client_state_for_tests()
+        mock_settings.MQTT_CLIENT_ID = "test-client"
+        mock_settings.MQTT_BROKER_HOST = "localhost"
+        mock_settings.MQTT_BROKER_PORT = 1883
+        mock_settings.MQTT_KEEPALIVE = 60
+        mock_settings.MQTT_BROKER_USERNAME = ""  # nosec B105
+        mock_settings.MQTT_BROKER_PASSWORD = ""  # nosec B105
+        mock_settings.MQTT_CONNECT_RETRY_COOLDOWN_SECONDS = 0
+
+        first_client = MagicMock()
+        second_client = MagicMock()
+        mock_client_class.side_effect = [first_client, second_client]
+
+        # First call connects + caches.
+        first_client.is_connected.return_value = True
+        client = get_mqtt_client()
+        assert client is first_client
+
+        # Simulate a dropped broker connection on the cached client.
+        first_client.is_connected.return_value = False
+        second_client.is_connected.return_value = True
+
+        client = get_mqtt_client()
+        assert client is second_client, "expected a fresh client when cached one is disconnected"
+        first_client.loop_stop.assert_called_once()
+        first_client.disconnect.assert_called_once()
 
 
 @pytest.mark.django_db

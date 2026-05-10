@@ -189,19 +189,57 @@ def handle_status_message(topic: str, payload: bytes) -> bool:
         logger.info("Dropping status message: unknown MAC %s on topic %s", mac, topic)
         return False
 
-    # Firmware ack channel: a status payload may include
-    # ``cmd_ack: {"command_id": ..., "status": ..., "error": ...}`` to mark a
-    # specific :class:`DeviceCommand` row as acked. Lives in status (not a
-    # separate topic) so the firmware needs no new MQTT subscription.
-    ack = body.get("cmd_ack") if isinstance(body, dict) else None
-    if isinstance(ack, dict):
-        from forgekey.services.device_commands import apply_command_ack
+    # Firmware ack channel: a status payload may include ``cmd_ack`` to
+    # mark a :class:`DeviceCommand` row as acked. Two shapes are accepted
+    # so we work with both the current firmware (flat) and any future
+    # firmware that grows the richer object form:
+    #
+    #   * Object form (preferred):
+    #       ``cmd_ack: {"command_id": "<uuid>", "status": "ok|error", ...}``
+    #     Acks a specific row by id — robust under burst commands.
+    #
+    #   * Flat form (current firmware):
+    #       ``cmd_ack: "<verb>"`` with sibling ``command_id`` / ``status``
+    #     fields, OR just the verb. Falls back to the most-recent
+    #     ``ACK_PENDING`` row of that verb for this device — best-effort
+    #     when the firmware doesn't echo the id.
+    #
+    # Lives in status (not a separate topic) so the firmware needs no
+    # new MQTT subscription.
+    if isinstance(body, dict) and "cmd_ack" in body:
+        from forgekey.services.device_commands import apply_command_ack, apply_command_ack_by_verb
 
-        apply_command_ack(
-            command_id=str(ack.get("command_id") or ""),
-            status=str(ack.get("status") or ""),
-            ack_payload=ack,
-        )
+        ack = body.get("cmd_ack")
+        sibling_command_id = body.get("command_id")
+        sibling_status = body.get("status") or body.get("ack_status") or "ok"
+
+        if isinstance(ack, dict):
+            apply_command_ack(
+                command_id=str(ack.get("command_id") or sibling_command_id or ""),
+                status=str(ack.get("status") or sibling_status or ""),
+                ack_payload=ack,
+            )
+        elif isinstance(ack, str):
+            verb = ack.strip()
+            if sibling_command_id:
+                apply_command_ack(
+                    command_id=str(sibling_command_id),
+                    status=str(sibling_status),
+                    ack_payload={
+                        "cmd_ack": verb,
+                        **{k: v for k, v in body.items() if k != "cmd_ack"},
+                    },
+                )
+            elif verb:
+                apply_command_ack_by_verb(
+                    device=ESP32Device.objects.filter(mac_address=mac).first(),
+                    verb=verb,
+                    status=str(sibling_status),
+                    ack_payload={
+                        "cmd_ack": verb,
+                        **{k: v for k, v in body.items() if k != "cmd_ack"},
+                    },
+                )
     return True
 
 

@@ -197,9 +197,11 @@ class TestPublishCommandService:
                 client=client,
             )
 
-        # Command topic uses the colon→hyphen form per get_mqtt_command_topic
+        # Command topic uses the firmware contract MAC encoding
+        # (lowercase hex, no separators) — see get_mqtt_command_topic.
         assert topic.endswith("/command")
-        assert device.mac_address.replace(":", "-") in topic
+        contract_mac = device.mac_address.replace(":", "").lower()
+        assert contract_mac in topic
         # Payload has the command and a server-applied timestamp
         published_topic, body, *_rest = client.publish.call_args[0]
         body_obj = json.loads(body)

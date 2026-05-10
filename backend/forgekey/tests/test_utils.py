@@ -54,16 +54,28 @@ class TestMQTTTopics:
     """Tests for MQTT topic generation."""
 
     def test_command_topic(self):
+        # Lowercase, no separators — matches the firmware subscription
+        # contract (firmware listens on forgekey/<mac>/command). The old
+        # UPPER-WITH-HYPHENS encoding silently broke command delivery
+        # because the device was never subscribed to that topic.
         topic = get_mqtt_command_topic("AA:BB:CC:DD:EE:FF")
-        assert topic == f"{settings.MQTT_TOPIC_PREFIX}/AA-BB-CC-DD-EE-FF/command"
+        assert topic == f"{settings.MQTT_TOPIC_PREFIX}/aabbccddeeff/command"
 
     def test_status_topic(self):
         topic = get_mqtt_status_topic("AA:BB:CC:DD:EE:FF")
-        assert topic == f"{settings.MQTT_TOPIC_PREFIX}/AA-BB-CC-DD-EE-FF/status"
+        assert topic == f"{settings.MQTT_TOPIC_PREFIX}/aabbccddeeff/status"
 
     def test_data_topic(self):
         topic = get_mqtt_data_topic("AA:BB:CC:DD:EE:FF")
-        assert topic == f"{settings.MQTT_TOPIC_PREFIX}/AA-BB-CC-DD-EE-FF/data"
+        assert topic == f"{settings.MQTT_TOPIC_PREFIX}/aabbccddeeff/data"
+
+    def test_command_topic_normalizes_arbitrary_input_format(self):
+        """Any reasonable input shape resolves to the contract topic."""
+        expected = f"{settings.MQTT_TOPIC_PREFIX}/aabbccddeeff/command"
+        assert get_mqtt_command_topic("aa:bb:cc:dd:ee:ff") == expected
+        assert get_mqtt_command_topic("AA-BB-CC-DD-EE-FF") == expected
+        assert get_mqtt_command_topic("aabbccddeeff") == expected
+        assert get_mqtt_command_topic("AABBCCDDEEFF") == expected
 
 
 @pytest.mark.unit

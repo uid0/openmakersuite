@@ -253,3 +253,80 @@ class TestPublishCommandStillReturnsTopic:
         topic = publish_command(device, {"cmd": "restart"}, client=client)
         assert isinstance(topic, str)
         assert topic.endswith("/command")
+
+
+class TestPublishCommandWaitsForBrokerAck:
+    """publish_command must wait for the broker PUBACK so callers don't get a
+    success return for a publish the broker actually dropped."""
+
+    def test_pubacked_publish_returns_topic(self):
+        from forgekey.services.device_commands import publish_command
+
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:00:60")
+        result = MagicMock(rc=0)
+        result.wait_for_publish.return_value = True
+        client = MagicMock()
+        client.publish.return_value = result
+
+        topic = publish_command(device, {"cmd": "restart"}, client=client)
+        assert topic.endswith("/command")
+        result.wait_for_publish.assert_called_once()
+
+    def test_puback_timeout_raises_device_command_error(self):
+        from forgekey.services.device_commands import DeviceCommandError, publish_command
+
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:00:61")
+        result = MagicMock(rc=0)
+        result.wait_for_publish.return_value = False
+        client = MagicMock()
+        client.publish.return_value = result
+
+        with pytest.raises(DeviceCommandError, match="PUBACK"):
+            publish_command(device, {"cmd": "restart"}, client=client)
+
+
+class TestStatusHandlerAcceptsFlatCmdAck:
+    """Current firmware emits ``cmd_ack: "<verb>"`` (a flat string) rather
+    than the richer object form. The consumer must accept both."""
+
+    def test_flat_cmd_ack_with_sibling_command_id(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:00:70")
+        rec = DeviceCommand.objects.create(device=device, command="status", payload={})
+        topic = f"forgekey/{device.mac_address.replace(':', '').lower()}/status"
+        body = json.dumps(
+            {
+                "online": True,
+                "cmd_ack": "status",
+                "command_id": str(rec.id),
+                "status": "ok",
+            }
+        ).encode("utf-8")
+
+        assert handle_status_message(topic, body) is True
+        rec.refresh_from_db()
+        assert rec.ack_status == DeviceCommand.ACK_OK
+
+    def test_flat_cmd_ack_falls_back_to_most_recent_pending_of_verb(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:00:71")
+        # Older pending row of the same verb — should be skipped in favour
+        # of the newer one.
+        DeviceCommand.objects.create(
+            device=device,
+            command="status",
+            payload={},
+            sent_at=timezone.now() - timedelta(seconds=30),
+        )
+        newer = DeviceCommand.objects.create(device=device, command="status", payload={})
+        topic = f"forgekey/{device.mac_address.replace(':', '').lower()}/status"
+        body = json.dumps({"online": True, "cmd_ack": "status"}).encode("utf-8")
+
+        assert handle_status_message(topic, body) is True
+        newer.refresh_from_db()
+        assert newer.ack_status == DeviceCommand.ACK_OK
+
+    def test_flat_cmd_ack_for_unknown_device_is_silent(self):
+        topic = "forgekey/aabbcc000099/status"
+        body = json.dumps({"online": True, "cmd_ack": "status"}).encode("utf-8")
+        # Unknown MAC: handle_status_message returns False (nothing to do)
+        # rather than raising.
+        assert handle_status_message(topic, body) is False

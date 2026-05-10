@@ -31,6 +31,9 @@ class DeviceCommandError(RuntimeError):
     """Raised when the broker rejects a publish."""
 
 
+PUBACK_WAIT_SECONDS = 2.0
+
+
 def publish_command(
     device: ESP32Device,
     command_payload: Dict[str, Any],
@@ -41,9 +44,17 @@ def publish_command(
 ) -> str:
     """Publish a JSON command payload to a device's MQTT command topic.
 
-    Returns the topic the message was published on. Raises
-    :class:`DeviceCommandError` on broker rejection so callers can map it to
-    an HTTP 502 / retryable failure.
+    Waits up to ``PUBACK_WAIT_SECONDS`` for the broker PUBACK before
+    returning so callers get "broker has the message" rather than just
+    "queued in the local paho buffer". Returns the topic the message
+    was published on. Raises :class:`DeviceCommandError` on broker
+    rejection or PUBACK timeout so callers can map it to a retryable
+    failure.
+
+    Note: a successful return still does not guarantee the device
+    received the command — that's confirmed asynchronously via
+    ``cmd_ack`` on the device's status topic and tracked on the
+    :class:`DeviceCommand` row.
     """
 
     topic = get_mqtt_command_topic(device.mac_address)
@@ -63,6 +74,26 @@ def publish_command(
             payload,
         )
         raise DeviceCommandError(f"MQTT publish failed (rc={rc})")
+
+    # Block briefly for the broker PUBACK. paho's wait_for_publish blocks
+    # the calling thread until the broker confirms (QoS 1) or the timeout
+    # fires; a False return signals the broker dropped or never confirmed.
+    wait_for_publish = getattr(result, "wait_for_publish", None)
+    if callable(wait_for_publish):
+        try:
+            acknowledged = wait_for_publish(timeout=PUBACK_WAIT_SECONDS)
+        except (RuntimeError, ValueError):
+            # Older paho releases raise instead of returning False — treat
+            # as "broker never PUBACK'd" rather than letting it bubble up.
+            acknowledged = False
+        # paho < 2.0 returns None (no signal); only fail on explicit False.
+        if acknowledged is False:
+            logger.error(
+                "Command publish broker PUBACK timeout: device=%s topic=%s",
+                device.mac_address,
+                topic,
+            )
+            raise DeviceCommandError(f"MQTT broker did not PUBACK within {PUBACK_WAIT_SECONDS}s")
 
     actor_id = None
     actor_username = None
@@ -138,6 +169,17 @@ def dispatch_command(
     return topic, record
 
 
+def _resolve_ack_status(status: str) -> str:
+    normalized = (status or "").lower()
+    if normalized in ("ok", "success", "acked", "complete", "completed", "done"):
+        return DeviceCommand.ACK_OK
+    if normalized in ("error", "failed", "failure", "rejected", "unknown_command"):
+        return DeviceCommand.ACK_ERROR
+    # Treat anything else as an error so the UI surfaces the firmware
+    # message rather than silently leaving the command pending.
+    return DeviceCommand.ACK_ERROR
+
+
 def apply_command_ack(
     *,
     command_id: str,
@@ -152,22 +194,57 @@ def apply_command_ack(
     """
     if not command_id:
         return False
-    normalized = (status or "").lower()
-    if normalized in ("ok", "success", "acked", "complete", "completed", "done"):
-        ack_status = DeviceCommand.ACK_OK
-    elif normalized in ("error", "failed", "failure", "rejected", "unknown_command"):
-        ack_status = DeviceCommand.ACK_ERROR
-    else:
-        # Treat anything else as an error so the UI surfaces the firmware
-        # message rather than silently leaving the command pending.
-        ack_status = DeviceCommand.ACK_ERROR
-
     rows = DeviceCommand.objects.filter(id=command_id, ack_status=DeviceCommand.ACK_PENDING).update(
-        ack_status=ack_status,
+        ack_status=_resolve_ack_status(status),
         ack_at=timezone.now(),
         ack_payload=ack_payload or None,
     )
     return rows > 0
 
 
-__all__ = ["DeviceCommandError", "publish_command", "dispatch_command", "apply_command_ack"]
+def apply_command_ack_by_verb(
+    *,
+    device: Optional[ESP32Device],
+    verb: str,
+    status: str,
+    ack_payload: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Best-effort ack when the firmware doesn't echo a ``command_id``.
+
+    Matches the most-recent pending :class:`DeviceCommand` row for the
+    given device whose ``command`` matches ``verb``. Used for the flat
+    ``cmd_ack: "<verb>"`` snapshot form the current firmware emits.
+    Returns ``True`` if a row was updated.
+
+    Caveat: under a burst of two identical commands this collapses both
+    into the older row. The object-form ack (``cmd_ack: {command_id, ...}``)
+    is preferred and should be adopted by future firmware.
+    """
+    if device is None or not verb:
+        return False
+    pending = (
+        DeviceCommand.objects.filter(
+            device=device,
+            command=verb,
+            ack_status=DeviceCommand.ACK_PENDING,
+        )
+        .order_by("-sent_at")
+        .first()
+    )
+    if pending is None:
+        return False
+    DeviceCommand.objects.filter(pk=pending.pk).update(
+        ack_status=_resolve_ack_status(status),
+        ack_at=timezone.now(),
+        ack_payload=ack_payload or None,
+    )
+    return True
+
+
+__all__ = [
+    "DeviceCommandError",
+    "publish_command",
+    "dispatch_command",
+    "apply_command_ack",
+    "apply_command_ack_by_verb",
+]

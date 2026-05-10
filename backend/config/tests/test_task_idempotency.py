@@ -166,8 +166,9 @@ class TestMQTTCommandIsLevelTriggered:
         second_topic, second_body = client.publish.call_args_list[1][0][:2]
         assert first_topic == second_topic
         # Command name is identical; only the timestamp differs (stamped per call).
-        assert '"command": "disable"' in first_body
-        assert '"command": "disable"' in second_body
+        # Firmware contract: verb is keyed under "cmd", not "command".
+        assert '"cmd": "disable"' in first_body
+        assert '"cmd": "disable"' in second_body
 
 
 @pytest.mark.django_db

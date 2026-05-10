@@ -65,7 +65,25 @@ def get_mqtt_client() -> mqtt.Client:
     global _mqtt_client, _mqtt_connect_failed_at
 
     if _mqtt_client is not None:
-        return _mqtt_client
+        # Trust paho's `is_connected()` over our singleton cache: a backend
+        # that lost its broker session and never reconnected was returning
+        # the stale client and silently swallowing publishes. Drop and
+        # re-create when the link is dead so the next caller gets a live
+        # client (the cooldown still protects against thrashing — a
+        # failing reconnect updates _mqtt_connect_failed_at below).
+        is_connected_fn = getattr(_mqtt_client, "is_connected", None)
+        if is_connected_fn is None or is_connected_fn():
+            return _mqtt_client
+        logger.warning("MQTT client cached but not connected; recreating")
+        try:
+            _mqtt_client.loop_stop()
+        except Exception as cleanup_exc:
+            logger.warning("MQTT cleanup: loop_stop() on stale client: %s", cleanup_exc)
+        try:
+            _mqtt_client.disconnect()
+        except Exception as cleanup_exc:
+            logger.warning("MQTT cleanup: disconnect() on stale client: %s", cleanup_exc)
+        _mqtt_client = None
 
     cooldown = getattr(settings, "MQTT_CONNECT_RETRY_COOLDOWN_SECONDS", 30)
     if _mqtt_connect_failed_at:
@@ -167,8 +185,12 @@ def send_mqtt_command(
         client = get_mqtt_client()
         topic = get_mqtt_command_topic(mac_address)
 
+        # Firmware contract: the command verb is keyed under ``cmd``, not
+        # ``command``. The older ``"command"`` key was silently dropped by
+        # firmware so /enable, /disable, and /status were no-ops on the
+        # device side even after the topic was correct.
         message = {
-            "command": command,
+            "cmd": command,
             "timestamp": timezone.now().isoformat(),
         }
 

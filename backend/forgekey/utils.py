@@ -207,15 +207,20 @@ def get_mqtt_topic(mac_address: str, topic_type: str) -> str:
     """
     Generate MQTT topic for a device.
 
+    Uses the firmware provisioning contract MAC encoding (lowercase hex,
+    no separators) — the same form the firmware subscribes / publishes
+    on and the same form the JWT ACL grants. The previous
+    ``UPPER-WITH-HYPHENS`` encoding silently broke command delivery
+    because the device was never subscribed to that topic.
+
     Args:
-        mac_address: MAC address of the device
+        mac_address: MAC address of the device (any input format)
         topic_type: Type of topic (e.g., 'command', 'status', 'data')
 
     Returns:
-        MQTT topic string
+        MQTT topic string, e.g. ``forgekey/aabbccddeeff/command``.
     """
-    normalized_mac = normalize_mac_address(mac_address).replace(":", "-")
-    return f"{settings.MQTT_TOPIC_PREFIX}/{normalized_mac}/{topic_type}"
+    return f"{settings.MQTT_TOPIC_PREFIX}/{_firmware_contract_mac(mac_address)}/{topic_type}"
 
 
 def get_mqtt_command_topic(mac_address: str) -> str:

@@ -340,10 +340,11 @@ class TestRotateProvisioningTokenCommand:
             )
 
         topics = [call.args[0] for call in client.publish.call_args_list]
+        # Firmware contract MAC encoding: lowercase hex, no separators.
         assert sorted(topics) == sorted(
             [
-                f"forgekey/{a.mac_address.replace(':', '-')}/config",
-                f"forgekey/{b.mac_address.replace(':', '-')}/config",
+                f"forgekey/{a.mac_address.replace(':', '').lower()}/config",
+                f"forgekey/{b.mac_address.replace(':', '').lower()}/config",
             ]
         )
 

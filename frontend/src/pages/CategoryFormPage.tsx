@@ -2,9 +2,11 @@
  * Category Form Page
  * Create/Edit form for categories
  */
+import { Paper, Text } from '@mantine/core';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ColorPicker from '../components/ColorPicker';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { inventoryAPI } from '../services/api';
 import '../styles/CategoryFormPage.css';
 import { Category } from '../types';
@@ -140,23 +142,32 @@ const CategoryFormPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="category-form-page">
-        <div className="loading">Loading category...</div>
-      </div>
+      <WorkspacePage
+        testId="category-form-page"
+        hero={{ eyebrow: 'Inventory · Category', title: 'Category', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading category…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="category-form-page">
-      <header className="page-header">
-        <h1>{isEditMode ? 'Edit Category' : 'Create Category'}</h1>
-      </header>
-
-      {error && (
-        <div className="error-message">
-          {error}
-        </div>
-      )}
+    <WorkspacePage
+      testId="category-form-page"
+      hero={{
+        eyebrow: 'Inventory · Category',
+        title: isEditMode ? 'Edit category' : 'New category',
+        description: 'Categories group SKUs for reporting and reorder approvals.',
+      }}
+    >
+      <div className="category-form-page">
+        {error && (
+          <div className="error-message">
+            {error}
+          </div>
+        )}
 
       <form onSubmit={handleSubmit} className="category-form">
         <div className="form-group">
@@ -226,7 +237,8 @@ const CategoryFormPage: React.FC = () => {
           </button>
         </div>
       </form>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

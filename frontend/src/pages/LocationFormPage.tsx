@@ -2,8 +2,10 @@
  * Location Form Page
  * Create/Edit form for locations
  */
+import { Paper, Text } from '@mantine/core';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { inventoryAPI } from '../services/api';
 import '../styles/LocationFormPage.css';
 import { Location } from '../types';
@@ -135,23 +137,32 @@ const LocationFormPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="location-form-page">
-        <div className="loading">Loading location...</div>
-      </div>
+      <WorkspacePage
+        testId="location-form-page"
+        hero={{ eyebrow: 'Inventory · Location', title: 'Location', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading location…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="location-form-page">
-      <header className="page-header">
-        <h1>{isEditMode ? 'Edit Location' : 'Create Location'}</h1>
-      </header>
-
-      {error && (
-        <div className="error-message">
-          {error}
-        </div>
-      )}
+    <WorkspacePage
+      testId="location-form-page"
+      hero={{
+        eyebrow: 'Inventory · Location',
+        title: isEditMode ? 'Edit location' : 'New location',
+        description: 'Locations describe where in the shop something lives — used by every QR scan path.',
+      }}
+    >
+      <div className="location-form-page">
+        {error && (
+          <div className="error-message">
+            {error}
+          </div>
+        )}
 
       <form onSubmit={handleSubmit} className="location-form">
         <div className="form-group">
@@ -225,7 +236,8 @@ const LocationFormPage: React.FC = () => {
           </button>
         </div>
       </form>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

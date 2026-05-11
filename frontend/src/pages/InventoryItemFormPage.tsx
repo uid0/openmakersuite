@@ -17,6 +17,7 @@ import { FormLayout } from '../components/forms/FormLayout';
 import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormSelect } from '../components/forms/FormSelect';
 import { FormTextarea } from '../components/forms/FormTextarea';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { inventoryAPI } from '../services/api';
 import { Category, InventoryItem, ItemSupplier, Location, Supplier } from '../types';
 import { promptInput, showError } from '../utils/dialogs';
@@ -241,9 +242,14 @@ const InventoryItemFormPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Paper p="md">
-        <Text>Loading...</Text>
-      </Paper>
+      <WorkspacePage
+        testId="inventory-item-form-page"
+        hero={{ eyebrow: 'Inventory · Item', title: 'Item', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading item…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
@@ -258,14 +264,21 @@ const InventoryItemFormPage: React.FC = () => {
   ];
 
   return (
-    <Stack gap="md">
-      <Group justify="space-between">
-        <Title order={2}>{isEditMode ? 'Edit Inventory Item' : 'Create Inventory Item'}</Title>
-        <Button variant="subtle" onClick={() => navigate(-1)}>
-          Cancel
-        </Button>
-      </Group>
-
+    <WorkspacePage
+      testId="inventory-item-form-page"
+      hero={{
+        eyebrow: 'Inventory · Item',
+        title: isEditMode ? 'Edit item' : 'New item',
+        description: isEditMode
+          ? 'Update stock thresholds, suppliers, hazard data, and pricing.'
+          : 'Register a new inventory SKU with reorder thresholds and a primary supplier.',
+        action: (
+          <Button variant="default" onClick={() => navigate(-1)}>
+            Cancel
+          </Button>
+        ),
+      }}
+    >
       {error && (
         <Alert icon={<IconAlertCircle size={16} />} title="Error" color="red">
           {error}
@@ -577,7 +590,7 @@ const InventoryItemFormPage: React.FC = () => {
           </Group>
         </Stack>
       </Modal>
-    </Stack>
+    </WorkspacePage>
   );
 };
 

@@ -3,7 +3,7 @@
  * Create/Edit form for assets with all fields
  */
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Alert, Button, Group, Modal, Paper, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
+import { Alert, Button, Group, Modal, Paper, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
@@ -15,6 +15,7 @@ import { FormLayout } from '../components/forms/FormLayout';
 import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormSelect } from '../components/forms/FormSelect';
 import { FormTextarea } from '../components/forms/FormTextarea';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { assetsAPI, inventoryAPI, sigAPI } from '../services/api';
 import { Asset, Category, InventoryItem, Location, SIG } from '../types';
 import { AssetFormData, assetFormSchema } from '../utils/formSchemas';
@@ -237,9 +238,14 @@ const AssetFormPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Paper p="md">
-        <Text>Loading...</Text>
-      </Paper>
+      <WorkspacePage
+        testId="asset-form-page"
+        hero={{ eyebrow: 'Assets', title: 'Asset', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading asset…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
@@ -274,14 +280,21 @@ const AssetFormPage: React.FC = () => {
   const sigOptions = sigs.map((sig) => ({ value: String(sig.id), label: sig.name }));
 
   return (
-    <Stack gap="md">
-      <Group justify="space-between">
-        <Title order={2}>{isEditMode ? 'Edit Asset' : 'Create Asset'}</Title>
-        <Button variant="subtle" onClick={() => navigate(-1)}>
-          Cancel
-        </Button>
-      </Group>
-
+    <WorkspacePage
+      testId="asset-form-page"
+      hero={{
+        eyebrow: 'Assets',
+        title: isEditMode ? 'Edit asset' : 'New asset',
+        description: isEditMode
+          ? 'Update lifecycle, ownership, maintenance plan, and parts.'
+          : 'Register a new piece of equipment in the asset roster.',
+        action: (
+          <Button variant="default" onClick={() => navigate(-1)}>
+            Cancel
+          </Button>
+        ),
+      }}
+    >
       {error && (
         <Alert icon={<IconAlertCircle size={16} />} title="Error" color="red">
           {error}
@@ -647,7 +660,7 @@ const AssetFormPage: React.FC = () => {
           </Group>
         </Stack>
       </Modal>
-    </Stack>
+    </WorkspacePage>
   );
 };
 

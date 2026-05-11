@@ -21,6 +21,7 @@ import { FormInput } from '../components/forms/FormInput';
 import { FormLayout } from '../components/forms/FormLayout';
 import { FormSelect } from '../components/forms/FormSelect';
 import { FormTextarea } from '../components/forms/FormTextarea';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { webhooksAPI } from '../services/api';
 import '../styles/WebhookFormPage.css';
 import { WebhookFormData, webhookSchema } from '../utils/formSchemas';
@@ -150,17 +151,29 @@ const WebhookFormPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Stack gap="md">
-        <Text>Loading webhook...</Text>
-      </Stack>
+      <WorkspacePage
+        testId="webhook-form-page"
+        hero={{ eyebrow: 'Settings · Webhook', title: 'Webhook', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading webhook…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="webhook-form-page">
-      <Stack gap="md">
-        <Title order={2}>{isEditMode ? 'Edit Webhook' : 'Create New Webhook'}</Title>
-
+    <WorkspacePage
+      testId="webhook-form-page"
+      hero={{
+        eyebrow: 'Settings · Webhook',
+        title: isEditMode ? 'Edit webhook' : 'New webhook',
+        description: isEditMode
+          ? 'Update target URL, secret, and event subscriptions.'
+          : 'Subscribe an external system to OMS events with a signed payload.',
+      }}
+    >
+      <div className="webhook-form-page">
         {error && (
           <Alert icon={<IconAlertCircle size={16} />} title="Error" color="red">
             {error}
@@ -275,8 +288,8 @@ const WebhookFormPage: React.FC = () => {
             </Group>
           </Paper>
         </form>
-      </Stack>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

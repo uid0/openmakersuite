@@ -114,7 +114,7 @@ describe('AssetFormPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Create Asset' })).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toBeInTheDocument();
     });
 
     expect(screen.getByLabelText(/Name/i)).toBeInTheDocument();
@@ -318,7 +318,7 @@ describe('AssetFormPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Edit Asset')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toHaveTextContent(/edit asset/i);
     });
 
     await waitFor(() => {
@@ -342,7 +342,7 @@ describe('AssetFormPage', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByText(/Loading asset/)).toBeInTheDocument();
   });
 
   it('handles API responses with missing results property gracefully', async () => {
@@ -390,7 +390,7 @@ describe('AssetFormPage', () => {
 
     // Should render the form (not crash) - arrays should be empty, not undefined
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Create Asset' })).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toBeInTheDocument();
     });
 
     // Form fields should be accessible (arrays should be empty, not undefined)
@@ -424,7 +424,7 @@ describe('AssetFormPage', () => {
 
     // Should still render the form (not crash)
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Create Asset' })).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toBeInTheDocument();
     });
 
     // Form fields should be accessible (arrays should be empty, not undefined)
@@ -538,7 +538,7 @@ describe('AssetFormPage', () => {
 
     // Should render the edit form (not crash) - arrays should be empty, not undefined
     await waitFor(() => {
-      expect(screen.getByText('Edit Asset')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toHaveTextContent(/edit asset/i);
     });
 
     // Asset data should still be loaded

@@ -68,11 +68,20 @@ class ReorderRequestSerializer(serializers.ModelSerializer):
 
 
 class ReorderRequestCreateSerializer(serializers.ModelSerializer):
-    """Simplified serializer for creating reorder requests (public-facing)."""
+    """Simplified serializer for creating reorder requests (public-facing).
+
+    Used as both the input serializer for the public ``create`` endpoint
+    and the output shape for anonymous callers so no admin metadata
+    (admin_notes, invoice_url, supplier_url, actual_cost, …) ever leaks
+    back to an anonymous caller. ``id`` and ``status`` are exposed
+    read-only so the QR-scan flow can confirm the row landed and which
+    state it's in (typically ``pending``).
+    """
 
     class Meta:
         model = ReorderRequest
-        fields = ["item", "quantity", "requested_by", "request_notes", "priority"]
+        fields = ["id", "item", "quantity", "requested_by", "request_notes", "priority", "status"]
+        read_only_fields = ["id", "status"]
         extra_kwargs = {
             "requested_by": {"required": False},
             "request_notes": {"required": False},

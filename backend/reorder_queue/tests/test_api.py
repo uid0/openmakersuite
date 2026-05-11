@@ -68,15 +68,53 @@ class TestReorderRequestAPI:
 
         assert response.status_code == status.HTTP_201_CREATED
 
-    def test_create_reorder_request_anonymous_denied(self, api_client):
-        """Anonymous users cannot create reorder requests (gh #327)."""
+    def test_create_reorder_request_anonymous_allowed(self, api_client):
+        """The QR-scan reorder flow must work without a login. Anonymous
+        callers may submit a reorder; the limited create serializer
+        guarantees they can only set safe fields and the response leaks
+        no admin metadata."""
         item = InventoryItemFactory()
 
         url = reverse("reorderrequest-list")
-        data = {"item": str(item.id), "quantity": 10}
+        data = {
+            "item": str(item.id),
+            "quantity": 10,
+            "requested_by": "Anonymous",
+            "request_notes": "Auto-submitted via QR scan",
+        }
         response = api_client.post(url, data, format="json")
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert response.status_code == status.HTTP_201_CREATED
+        # Limited response shape — no admin / invoice / supplier-URL leakage.
+        assert "admin_notes" not in response.data
+        assert "invoice_url" not in response.data
+        assert "supplier_url" not in response.data
+        assert "actual_cost" not in response.data
+        assert response.data["quantity"] == 10
+        assert response.data["requested_by"] == "Anonymous"
+
+    def test_create_reorder_request_anonymous_cannot_set_admin_fields(self, api_client):
+        """Even if an anonymous caller posts admin fields, the limited
+        create serializer drops them on the floor — defense in depth."""
+        item = InventoryItemFactory()
+
+        url = reverse("reorderrequest-list")
+        data = {
+            "item": str(item.id),
+            "quantity": 5,
+            "admin_notes": "should be ignored",
+            "actual_cost": "999.99",
+            "supplier_url": "https://evil.example.com/poison",
+        }
+        response = api_client.post(url, data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+        from reorder_queue.models import ReorderRequest
+
+        row = ReorderRequest.objects.get(id=response.data["id"])
+        assert row.admin_notes == ""
+        assert row.actual_cost is None
+        assert row.supplier_url == ""
 
     def test_list_reorder_requests_anonymous_denied(self, api_client):
         """Anonymous users cannot list reorder requests (gh #327)."""

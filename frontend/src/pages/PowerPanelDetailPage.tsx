@@ -11,6 +11,7 @@
 import {
   Badge,
   Box,
+  Button,
   Container,
   Group,
   Paper,
@@ -18,7 +19,7 @@ import {
   Table,
   Text,
 } from '@mantine/core';
-import { IconBolt, IconRouteAltLeft } from '@tabler/icons-react';
+import { IconBolt, IconEdit, IconPlus, IconRouteAltLeft } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
@@ -70,6 +71,27 @@ const PowerPanelDetailPage: React.FC = () => {
                   }`
                 : 'Loading panel topology…'
             }
+            action={
+              topology ? (
+                <Group gap="sm">
+                  <Button
+                    component={Link}
+                    to={`/facilities/electrical/panels/${topology.id}/edit`}
+                    variant="default"
+                    leftSection={<IconEdit size={16} />}
+                  >
+                    Edit panel
+                  </Button>
+                  <Button
+                    component={Link}
+                    to={`/facilities/electrical/panels/${topology.id}/breakers/new`}
+                    leftSection={<IconPlus size={16} />}
+                  >
+                    Add breaker
+                  </Button>
+                </Group>
+              ) : undefined
+            }
           />
 
           {error && (
@@ -88,12 +110,20 @@ const PowerPanelDetailPage: React.FC = () => {
 
           {topology && topology.breakers.length === 0 && (
             <Paper withBorder p="xl" radius="md">
-              <Stack gap="xs" align="center">
+              <Stack gap="sm" align="center">
                 <IconBolt size={28} stroke={1.6} />
                 <Text fw={500}>No breakers configured for this panel</Text>
-                <Text size="sm" c="dimmed">
-                  Add breakers via Django admin to populate this view.
+                <Text size="sm" c="dimmed" ta="center" maw={380}>
+                  Add the first breaker to start populating the panel. Circuits hang off
+                  breakers, outlets hang off circuits.
                 </Text>
+                <Button
+                  component={Link}
+                  to={`/facilities/electrical/panels/${topology.id}/breakers/new`}
+                  leftSection={<IconPlus size={16} />}
+                >
+                  Add first breaker
+                </Button>
               </Stack>
             </Paper>
           )}
@@ -120,7 +150,7 @@ const PowerPanelDetailPage: React.FC = () => {
                         {breaker.amperage}A · {breaker.pole_count}-pole · phase {breaker.phase}
                       </Text>
                     </Stack>
-                    <Group gap="xs">
+                    <Group gap="xs" wrap="wrap">
                       <Badge
                         color={breaker.status === 'on' ? 'green' : 'gray'}
                         variant="light"
@@ -138,13 +168,41 @@ const PowerPanelDetailPage: React.FC = () => {
                         <IconRouteAltLeft size={16} stroke={2.4} />
                         Trip impact
                       </Link>
+                      <Button
+                        component={Link}
+                        to={`/facilities/electrical/breakers/${breaker.id}/edit`}
+                        size="xs"
+                        variant="default"
+                        leftSection={<IconEdit size={14} />}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        component={Link}
+                        to={`/facilities/electrical/breakers/${breaker.id}/circuits/new`}
+                        size="xs"
+                        leftSection={<IconPlus size={14} />}
+                      >
+                        Add circuit
+                      </Button>
                     </Group>
                   </Group>
 
                   {breaker.circuits.length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      No circuits wired to this breaker yet.
-                    </Text>
+                    <Group gap="sm" align="center">
+                      <Text size="sm" c="dimmed">
+                        No circuits wired to this breaker yet.
+                      </Text>
+                      <Button
+                        component={Link}
+                        to={`/facilities/electrical/breakers/${breaker.id}/circuits/new`}
+                        size="xs"
+                        variant="light"
+                        leftSection={<IconPlus size={14} />}
+                      >
+                        Add circuit
+                      </Button>
+                    </Group>
                   ) : (
                     <Table withTableBorder withColumnBorders striped>
                       <Table.Thead>
@@ -153,7 +211,7 @@ const PowerPanelDetailPage: React.FC = () => {
                           <Table.Th>Conductor</Table.Th>
                           <Table.Th>Capacity</Table.Th>
                           <Table.Th>Outlets</Table.Th>
-                          <Table.Th>Load report</Table.Th>
+                          <Table.Th>Actions</Table.Th>
                         </Table.Tr>
                       </Table.Thead>
                       <Table.Tbody>
@@ -174,21 +232,43 @@ const PowerPanelDetailPage: React.FC = () => {
                               ) : (
                                 <Stack gap={2}>
                                   {circuit.outlets.map((outlet) => (
-                                    <Text key={outlet.id} size="sm">
-                                      {outlet.label || `Outlet ${outlet.id}`}
-                                      {outlet.location_name ? ` — ${outlet.location_name}` : ''}
-                                    </Text>
+                                    <Group key={outlet.id} gap="xs" wrap="nowrap">
+                                      <Text size="sm" style={{ flex: 1 }}>
+                                        {outlet.label || `Outlet ${outlet.id}`}
+                                        {outlet.location_name ? ` — ${outlet.location_name}` : ''}
+                                      </Text>
+                                      <Link
+                                        to={`/facilities/electrical/outlets/${outlet.id}/edit`}
+                                        aria-label={`Edit outlet ${outlet.label || outlet.id}`}
+                                      >
+                                        <IconEdit size={14} />
+                                      </Link>
+                                    </Group>
                                   ))}
                                 </Stack>
                               )}
                             </Table.Td>
                             <Table.Td>
-                              <Link
-                                to={`/facilities/electrical/circuits/${circuit.id}/load`}
-                                data-testid={`circuit-load-${circuit.id}`}
-                              >
-                                Load
-                              </Link>
+                              <Group gap="xs" wrap="wrap">
+                                <Link
+                                  to={`/facilities/electrical/circuits/${circuit.id}/load`}
+                                  data-testid={`circuit-load-${circuit.id}`}
+                                >
+                                  Load
+                                </Link>
+                                <Link
+                                  to={`/facilities/electrical/circuits/${circuit.id}/edit`}
+                                  aria-label={`Edit circuit ${circuit.label || circuit.id}`}
+                                >
+                                  Edit
+                                </Link>
+                                <Link
+                                  to={`/facilities/electrical/circuits/${circuit.id}/outlets/new`}
+                                  aria-label={`Add outlet to circuit ${circuit.label || circuit.id}`}
+                                >
+                                  + Outlet
+                                </Link>
+                              </Group>
                             </Table.Td>
                           </Table.Tr>
                         ))}

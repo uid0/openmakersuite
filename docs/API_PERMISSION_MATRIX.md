@@ -279,6 +279,10 @@ opening a panel. All staff-gated (oms-b25 AC-5).
 | GET | `electrical/circuits/<id>/load/` | staff | `PowerCircuitLoadView` — connected devices, estimated nameplate draw, NEC-derated capacity utilization. |
 | GET | `electrical/panels/<id>/topology/` | staff | `PowerPanelTopologyView` — full panel → breaker → circuit → outlet tree. |
 | GET | `assets/<id>/power-chain/` | staff | `AssetPowerChainView` — every hop from an asset back to its panel. |
+| any  | `electrical/panels-crud/...` | staff | `PowerPanelViewSet` — full CRUD on PowerPanel rows so the frontend can create and edit panels without Django admin. |
+| any  | `electrical/breakers-crud/...` | staff | `PowerBreakerViewSet` — full CRUD on PowerBreaker rows. Supports `?panel=<id>` filter on list. |
+| any  | `electrical/circuits-crud/...` | staff | `PowerCircuitViewSet` — full CRUD on PowerCircuit rows. Supports `?breaker=<id>` filter on list. `max_load_amps` defaults to 80% of the breaker amperage per NEC continuous-load rule when omitted. |
+| any  | `electrical/outlets-crud/...` | staff | `PowerOutletViewSet` — full CRUD on PowerOutlet rows. Supports `?circuit=<id>` filter on list. |
 
 ## Analytics (`/api/analytics/`)
 

@@ -1,5 +1,6 @@
 """DRF viewsets for electrical circuits and network drops."""
 
+from django.db.models import Count
 from django.http import HttpResponse
 
 from rest_framework import viewsets
@@ -7,12 +8,26 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Breaker, LightSwitch, NetworkDrop, Outlet
+from .models import (
+    Breaker,
+    LightSwitch,
+    NetworkDrop,
+    Outlet,
+    PowerBreaker,
+    PowerCircuit,
+    PowerOutlet,
+    PowerPanel,
+)
+from .safety_views import IsStaffUser
 from .serializers import (
     BreakerSerializer,
     LightSwitchSerializer,
     NetworkDropSerializer,
     OutletSerializer,
+    PowerBreakerSerializer,
+    PowerCircuitSerializer,
+    PowerOutletSerializer,
+    PowerPanelSerializer,
 )
 from .utils.panel_directory_pdf import generate_network_drop_list_pdf, generate_panel_directory_pdf
 
@@ -131,3 +146,77 @@ class NetworkDropListReportView(APIView):
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'inline; filename="network-drop-list-{slug}.pdf"'
         return response
+
+
+# ---------------------------------------------------------------------
+# Power topology CRUD ViewSets (oms-b25 + oms-wwx).
+#
+# Staff-only write surface on top of the read-only safety API. These
+# back the new frontend form pages (PR oms-b25 [7/7]) so an admin can
+# create + edit PowerPanels / PowerBreakers / PowerCircuits /
+# PowerOutlets without dropping into Django admin. The existing
+# read-only safety views (panel directory + per-panel topology) stay
+# the canonical retrieval path; these viewsets exist purely for the
+# write contract.
+# ---------------------------------------------------------------------
+
+
+class PowerPanelViewSet(viewsets.ModelViewSet):
+    """``/api/electrical/panels-crud/`` — full CRUD for power panels."""
+
+    permission_classes = [IsAuthenticated, IsStaffUser]
+    serializer_class = PowerPanelSerializer
+    queryset = (
+        PowerPanel.objects.select_related("location")
+        .annotate(annotated_breaker_count=Count("breakers"))
+        .order_by("location__name", "name")
+    )
+
+
+class PowerBreakerViewSet(viewsets.ModelViewSet):
+    """``/api/electrical/breakers-crud/`` — full CRUD for power breakers."""
+
+    permission_classes = [IsAuthenticated, IsStaffUser]
+    serializer_class = PowerBreakerSerializer
+    queryset = PowerBreaker.objects.select_related("panel").order_by("panel__name", "position")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        panel_id = self.request.query_params.get("panel")
+        if panel_id:
+            qs = qs.filter(panel_id=panel_id)
+        return qs
+
+
+class PowerCircuitViewSet(viewsets.ModelViewSet):
+    """``/api/electrical/circuits-crud/`` — full CRUD for power circuits."""
+
+    permission_classes = [IsAuthenticated, IsStaffUser]
+    serializer_class = PowerCircuitSerializer
+    queryset = PowerCircuit.objects.select_related("breaker", "breaker__panel").order_by(
+        "breaker__panel__name", "breaker__position"
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        breaker_id = self.request.query_params.get("breaker")
+        if breaker_id:
+            qs = qs.filter(breaker_id=breaker_id)
+        return qs
+
+
+class PowerOutletViewSet(viewsets.ModelViewSet):
+    """``/api/electrical/outlets-crud/`` — full CRUD for power outlets."""
+
+    permission_classes = [IsAuthenticated, IsStaffUser]
+    serializer_class = PowerOutletSerializer
+    queryset = PowerOutlet.objects.select_related(
+        "circuit", "circuit__breaker", "location"
+    ).order_by("location__name", "label")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        circuit_id = self.request.query_params.get("circuit")
+        if circuit_id:
+            qs = qs.filter(circuit_id=circuit_id)
+        return qs

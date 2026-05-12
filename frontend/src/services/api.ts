@@ -823,6 +823,30 @@ export const assetPartsAPI = {
   listAssetParts: (params?: { asset?: string }) =>
     api.get<{ results: AssetPart[] }>('/inventory/asset-parts/', { params }),
 
+  createAssetPart: (data: {
+    asset: string;
+    part: string;
+    quantity_needed: number;
+    is_required: boolean;
+    maintenance_interval_days: number | null;
+    notes: string;
+  }) =>
+    api.post<AssetPart>('/inventory/asset-parts/', data),
+
+  updateAssetPart: (
+    id: string,
+    data: Partial<{
+      quantity_needed: number;
+      is_required: boolean;
+      maintenance_interval_days: number | null;
+      notes: string;
+    }>,
+  ) =>
+    api.patch<AssetPart>(`/inventory/asset-parts/${id}/`, data),
+
+  deleteAssetPart: (id: string) =>
+    api.delete(`/inventory/asset-parts/${id}/`),
+
   markReplaced: (id: string) =>
     api.post<AssetPart>(`/inventory/asset-parts/${id}/mark_replaced/`),
 };

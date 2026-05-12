@@ -1,13 +1,57 @@
 /**
- * Asset Form Page
- * Create/Edit form for assets with all fields
+ * Asset Form Page — create / edit a hard-asset record.
+ *
+ * Re-tuned from the older version that grew sprawling over time. The
+ * new shape is:
+ *
+ *  1. Basics — name, description, serial, asset tag (edit-only),
+ *     inventory item type, category, location.
+ *  2. Acquisition — date received, amount paid, donor info if
+ *     donation.
+ *  3. Status & ownership — lifecycle status, who owns it.
+ *  4. Supplies — opt-in toggle that asks "does this asset use
+ *     consumable supplies?" then a structured list editor.
+ *  5. Maintenance — opt-in toggle that asks "schedule preventive
+ *     maintenance?" then a modal-driven PM task list.
+ *  6. Documentation — image, manual PDF, wiki / product links.
+ *  7. Advanced — needs-compressed-air / ventilation / chargeable /
+ *     report-only / condition / general notes, collapsed under a
+ *     "More options" affordance for the staff member who needs them.
+ *
+ * Dropped (stale): freeform ``circuit`` text (now power-topology
+ * PowerOutlet/Cable), ``mac_address`` (now ForgeKey device-pairing
+ * flow), ``image_url`` (redundant with upload), freeform
+ * ``maintenance_plan`` Textarea (replaced by structured
+ * MaintenanceItem rows), ``groups_can_enable`` (was hidden anyway).
  */
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Alert, Button, Group, Modal, Paper, Stack, Switch, Text, TextInput } from '@mantine/core';
-import { IconAlertCircle } from '@tabler/icons-react';
+import {
+  Alert,
+  Box,
+  Button,
+  Collapse,
+  Group,
+  Modal,
+  Paper,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+} from '@mantine/core';
+import {
+  IconAlertCircle,
+  IconChevronDown,
+  IconChevronUp,
+} from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
+
+import AssetMaintenanceSection from '../components/assets/AssetMaintenanceSection';
+import { PendingMaintenanceItem } from '../components/assets/AssetMaintenanceModal';
+import AssetSuppliesSection, {
+  PendingAssetPart,
+} from '../components/assets/AssetSuppliesSection';
 import { FormFileUpload } from '../components/forms/FormFileUpload';
 import { FormImageUpload } from '../components/forms/FormImageUpload';
 import { FormInput } from '../components/forms/FormInput';
@@ -16,10 +60,32 @@ import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormSelect } from '../components/forms/FormSelect';
 import { FormTextarea } from '../components/forms/FormTextarea';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { assetsAPI, inventoryAPI, sigAPI } from '../services/api';
+import {
+  assetPartsAPI,
+  assetsAPI,
+  inventoryAPI,
+  maintenanceAPI,
+  sigAPI,
+} from '../services/api';
 import { Asset, Category, InventoryItem, Location, SIG } from '../types';
 import { AssetFormData, assetFormSchema } from '../utils/formSchemas';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+
+const STATUS_OPTIONS = [
+  { value: 'implementing', label: 'Implementing' },
+  { value: 'testing', label: 'Testing' },
+  { value: 'active', label: 'Active' },
+  { value: 'maintenance', label: 'Maintenance' },
+  { value: 'retired', label: 'Retired' },
+  { value: 'lost', label: 'Lost' },
+  { value: 'donated_out', label: 'Donated out' },
+];
+
+const OWNERSHIP_OPTIONS = [
+  { value: 'space', label: 'Space (Makerspace)' },
+  { value: 'group', label: 'Group (SIG)' },
+  { value: 'user', label: 'User' },
+];
 
 const AssetFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -33,8 +99,19 @@ const AssetFormPage: React.FC = () => {
   const [locations, setLocations] = useState<Location[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [sigs, setSigs] = useState<SIG[]>([]);
+
   const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // Supplies + maintenance live in form state until the asset is saved
+  // (both server resources need the asset.id, which doesn't exist on
+  // create). After save, the parent form chains the creates.
+  const [usesSupplies, setUsesSupplies] = useState(false);
+  const [supplies, setSupplies] = useState<PendingAssetPart[]>([]);
+  const [pmEnabled, setPmEnabled] = useState(false);
+  const [maintenanceItems, setMaintenanceItems] = useState<PendingMaintenanceItem[]>([]);
 
   const {
     control,
@@ -56,24 +133,17 @@ const AssetFormPage: React.FC = () => {
       donor_name: '',
       location: null,
       category: null,
-      manufacturer: null,
-      manufacturer_name: '',
-      circuit: '',
-      mac_address: '',
       needs_compressed_air: false,
       needs_ventilation: false,
       is_chargeable: false,
       image: null,
-      image_url: '',
       manual_pdf: null,
       wiki_page_url: '',
       product_url: '',
-      maintenance_plan: '',
       status: 'active',
       ownership_type: 'space',
       owning_user: null,
       owning_group: null,
-      groups_can_enable: [],
       is_active: true,
       report_only: false,
       notes: '',
@@ -85,88 +155,124 @@ const AssetFormPage: React.FC = () => {
   const ownershipType = watch('ownership_type');
 
   useEffect(() => {
-    loadInitialData();
-    if (isEditMode) {
-      loadAsset();
-    }
-  }, [id, isEditMode]);
-
-  const loadInitialData = async () => {
-    try {
-      const [categoriesRes, locationsRes, itemsRes, sigsRes] = await Promise.all([
-        inventoryAPI.listCategories(),
-        inventoryAPI.listLocations(),
-        inventoryAPI.listItems(),
-        sigAPI.listMySIGs(),
-      ]);
-      setCategories(categoriesRes.data.results || []);
-      setLocations(locationsRes.data.results || []);
-      setInventoryItems(itemsRes.data.results || []);
-      setSigs(sigsRes.data.results || []);
-    } catch (err) {
-      console.error('Error loading initial data:', err);
-      setError('Failed to load form data. Please refresh the page.');
-      // Ensure arrays remain empty arrays even on error
-      setCategories([]);
-      setLocations([]);
-      setInventoryItems([]);
-      setSigs([]);
-    }
-  };
-
-  const loadAsset = async () => {
-    if (!id) return;
-
-    try {
-      setLoading(true);
-      const response = await assetsAPI.getAsset(id);
-      const asset = response.data;
-
-      // Map asset data to form
-      reset({
-        name: asset.name,
-        description: asset.description || '',
-        serial_number: asset.serial_number || '',
-        asset_tag: asset.asset_tag || '',
-        inventory_item: asset.inventory_item ? Number(asset.inventory_item) : null,
-        date_received: asset.date_received || null,
-        amount_paid: parseFloat(asset.amount_paid) || 0,
-        is_donation: asset.is_donation,
-        donor_name: asset.donor_name || '',
-        location: asset.location ? (typeof asset.location === 'string' ? asset.location : Number(asset.location)) : null,
-        category: asset.category ? Number(asset.category) : null,
-        manufacturer: asset.manufacturer ? Number(asset.manufacturer) : null,
-        manufacturer_name: asset.manufacturer_name || '',
-        circuit: asset.circuit || '',
-        mac_address: asset.mac_address || '',
-        needs_compressed_air: asset.needs_compressed_air,
-        needs_ventilation: asset.needs_ventilation,
-        is_chargeable: asset.is_chargeable,
-        image_url: asset.image_url || '',
-        wiki_page_url: asset.wiki_page_url || '',
-        product_url: asset.product_url || '',
-        maintenance_plan: asset.maintenance_plan || '',
-        status: asset.status as any,
-        ownership_type: asset.ownership_type,
-        owning_user: asset.owning_user ? Number(asset.owning_user) : null,
-        owning_group: asset.owning_group ? Number(asset.owning_group) : null,
-        groups_can_enable: asset.groups_can_enable || [],
-        is_active: asset.is_active,
-        report_only: asset.report_only,
-        notes: asset.notes || '',
-        condition_notes: asset.condition_notes || '',
+    let cancelled = false;
+    Promise.all([
+      inventoryAPI.listCategories(),
+      inventoryAPI.listLocations(),
+      inventoryAPI.listItems(),
+      sigAPI.listMySIGs(),
+    ])
+      .then(([cats, locs, items, sigsRes]) => {
+        if (cancelled) return;
+        setCategories(cats.data.results || []);
+        setLocations(locs.data.results || []);
+        setInventoryItems(items.data.results || []);
+        setSigs(sigsRes.data.results || []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Error loading initial data:', err);
+        setError('Failed to load form data. Please refresh the page.');
       });
-    } catch (err) {
-      console.error('Error loading asset:', err);
-      setError('Failed to load asset. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isEditMode || !id) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const response = await assetsAPI.getAsset(id);
+        if (cancelled) return;
+        const asset = response.data;
+        reset({
+          name: asset.name,
+          description: asset.description || '',
+          serial_number: asset.serial_number || '',
+          asset_tag: asset.asset_tag || '',
+          inventory_item: asset.inventory_item ? Number(asset.inventory_item) : null,
+          date_received: asset.date_received || null,
+          amount_paid: parseFloat(asset.amount_paid) || 0,
+          is_donation: asset.is_donation,
+          donor_name: asset.donor_name || '',
+          location:
+            asset.location != null
+              ? typeof asset.location === 'string'
+                ? asset.location
+                : Number(asset.location)
+              : null,
+          category: asset.category ? Number(asset.category) : null,
+          needs_compressed_air: asset.needs_compressed_air,
+          needs_ventilation: asset.needs_ventilation,
+          is_chargeable: asset.is_chargeable,
+          wiki_page_url: asset.wiki_page_url || '',
+          product_url: asset.product_url || '',
+          status: asset.status as AssetFormData['status'],
+          ownership_type: asset.ownership_type,
+          owning_user: asset.owning_user ? Number(asset.owning_user) : null,
+          owning_group: asset.owning_group ? Number(asset.owning_group) : null,
+          is_active: asset.is_active,
+          report_only: asset.report_only,
+          notes: asset.notes || '',
+          condition_notes: asset.condition_notes || '',
+        });
+
+        // Hydrate the supplies + maintenance sections from existing rows
+        // so an edit-mode visit shows what's already there.
+        try {
+          const partsResponse = await assetPartsAPI.listAssetParts({ asset: asset.id });
+          if (!cancelled && partsResponse.data.results.length > 0) {
+            setUsesSupplies(true);
+            setSupplies(
+              partsResponse.data.results.map((row) => ({
+                key: row.id,
+                part: row.part,
+                quantity_needed: row.quantity_needed,
+                is_required: row.is_required,
+                maintenance_interval_days: row.maintenance_interval_days,
+                notes: row.notes,
+              })),
+            );
+          }
+        } catch (err) {
+          console.warn('Failed to load asset parts; supplies section will start empty', err);
+        }
+        try {
+          const miResponse = await maintenanceAPI.listItems({ asset: asset.id });
+          if (!cancelled && miResponse.data.results.length > 0) {
+            setPmEnabled(true);
+            setMaintenanceItems(
+              miResponse.data.results.map((item) => ({
+                key: item.id,
+                title: item.title,
+                description: item.description,
+                instructions: item.instructions,
+                estimated_time_minutes: item.estimated_time_minutes,
+                interval_days: item.interval_days,
+              })),
+            );
+          }
+        } catch (err) {
+          console.warn('Failed to load maintenance items; PM section will start empty', err);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Error loading asset:', err);
+        setError('Failed to load asset. Please try again.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isEditMode, reset]);
 
   const handleCreateCategory = async () => {
     if (!newCategoryName.trim()) return;
-
     try {
       const response = await inventoryAPI.createCategory({ name: newCategoryName.trim() });
       setCategories([...categories, response.data]);
@@ -175,7 +281,7 @@ const AssetFormPage: React.FC = () => {
       setNewCategoryName('');
     } catch (err) {
       console.error('Error creating category:', err);
-      alert('Failed to create category. Please try again.');
+      setError('Failed to create category.');
     }
   };
 
@@ -184,23 +290,13 @@ const AssetFormPage: React.FC = () => {
       setSaving(true);
       setError(null);
 
-      // Prepare form data
       const formData = new FormData();
-
-      // Add all fields
       Object.entries(data).forEach(([key, value]) => {
-        if (value === null || value === undefined || value === '') {
-          return;
-        }
-
+        if (value === null || value === undefined || value === '') return;
         if (key === 'image' && value instanceof File) {
           formData.append('image', value);
         } else if (key === 'manual_pdf' && value instanceof File) {
           formData.append('manual_pdf', value);
-        } else if (key === 'image_url' && typeof value === 'string') {
-          formData.append('image_url', value);
-        } else if (key === 'groups_can_enable' && Array.isArray(value)) {
-          value.forEach((groupId) => formData.append('groups_can_enable', String(groupId)));
         } else if (typeof value === 'boolean') {
           formData.append(key, String(value));
         } else if (typeof value === 'number') {
@@ -209,26 +305,76 @@ const AssetFormPage: React.FC = () => {
           formData.append(key, value);
         }
       });
-
-      // Handle location - can be string or number
       if (data.location) {
-        if (typeof data.location === 'string') {
-          formData.append('location', data.location);
-        } else {
-          formData.append('location', String(data.location));
+        formData.append(
+          'location',
+          typeof data.location === 'string' ? data.location : String(data.location),
+        );
+      }
+
+      const savedAsset: Asset = isEditMode && id
+        ? (await assetsAPI.updateAsset(id, formData)).data
+        : (await assetsAPI.createAsset(formData)).data;
+
+      // Chain the supplies + maintenance creates after the asset exists.
+      // We don't bail on the asset save if a child create fails — the
+      // user gets a non-fatal warning instead so they can fix the
+      // problem from the asset detail page.
+      const childErrors: string[] = [];
+
+      if (usesSupplies) {
+        for (const supply of supplies) {
+          if (!supply.part) continue;
+          try {
+            // If this row already exists (came from the server with a UUID
+            // key), skip — we don't update parts in this form pass yet.
+            if (!supply.key.startsWith('pending-')) continue;
+            await assetPartsAPI.createAssetPart({
+              asset: savedAsset.id,
+              part: String(supply.part),
+              quantity_needed: supply.quantity_needed,
+              is_required: supply.is_required,
+              maintenance_interval_days: supply.maintenance_interval_days,
+              notes: supply.notes,
+            });
+          } catch (err) {
+            childErrors.push(`supply "${supply.part}"`);
+          }
         }
       }
 
-      // Save asset
-      let savedAsset: Asset;
-      if (isEditMode && id) {
-        savedAsset = (await assetsAPI.updateAsset(id, formData)).data;
-      } else {
-        savedAsset = (await assetsAPI.createAsset(formData)).data;
+      if (pmEnabled) {
+        for (const item of maintenanceItems) {
+          if (!item.title.trim()) continue;
+          try {
+            if (!item.key.startsWith('pending-mi-')) continue;
+            await maintenanceAPI.createItem({
+              asset: savedAsset.id,
+              title: item.title,
+              description: item.description,
+              instructions: item.instructions,
+              estimated_time_minutes: item.estimated_time_minutes,
+              interval_days: item.interval_days,
+            });
+          } catch (err) {
+            childErrors.push(`maintenance task "${item.title}"`);
+          }
+        }
       }
 
-      navigate(`/assets/${savedAsset.id}`);
-    } catch (err: any) {
+      if (childErrors.length > 0) {
+        // Asset saved, but at least one supply / PM failed to attach.
+        // Surface a soft warning via query string so the detail page
+        // can show it.
+        navigate(
+          `/assets/${savedAsset.id}?warning=${encodeURIComponent(
+            `Saved, but couldn't attach: ${childErrors.join(', ')}`,
+          )}`,
+        );
+      } else {
+        navigate(`/assets/${savedAsset.id}`);
+      }
+    } catch (err) {
       console.error('Error saving asset:', err);
       setError(extractErrorMessage(err, 'Failed to save asset. Please try again.'));
     } finally {
@@ -251,32 +397,13 @@ const AssetFormPage: React.FC = () => {
 
   const categoryOptions = [
     ...categories.map((c) => ({ value: String(c.id), label: c.name })),
-    { value: '__create_new__', label: '+ Create New Category' },
+    { value: '__create_new__', label: '+ Create new category' },
   ];
-
   const locationOptions = locations.map((l) => ({ value: String(l.id), label: l.name }));
-
   const inventoryItemOptions = inventoryItems.map((item) => ({
     value: String(item.id),
     label: item.name,
   }));
-
-  const statusOptions = [
-    { value: 'implementing', label: 'Implementing' },
-    { value: 'testing', label: 'Testing' },
-    { value: 'active', label: 'Active' },
-    { value: 'maintenance', label: 'Maintenance' },
-    { value: 'retired', label: 'Retired' },
-    { value: 'lost', label: 'Lost' },
-    { value: 'donated_out', label: 'Donated Out' },
-  ];
-
-  const ownershipTypeOptions = [
-    { value: 'space', label: 'Space (Makerspace)' },
-    { value: 'group', label: 'Group (SIG)' },
-    { value: 'user', label: 'User' },
-  ];
-
   const sigOptions = sigs.map((sig) => ({ value: String(sig.id), label: sig.name }));
 
   return (
@@ -286,8 +413,8 @@ const AssetFormPage: React.FC = () => {
         eyebrow: 'Assets',
         title: isEditMode ? 'Edit asset' : 'New asset',
         description: isEditMode
-          ? 'Update lifecycle, ownership, maintenance plan, and parts.'
-          : 'Register a new piece of equipment in the asset roster.',
+          ? 'Update lifecycle, ownership, supplies, and PM schedule.'
+          : 'Register a piece of equipment. Add supplies + a maintenance schedule inline.',
         action: (
           <Button variant="default" onClick={() => navigate(-1)}>
             Cancel
@@ -306,7 +433,7 @@ const AssetFormPage: React.FC = () => {
           <FormLayout
             sections={[
               {
-                title: 'Basic Information',
+                title: 'Basics',
                 children: (
                   <>
                     <FormInput
@@ -325,14 +452,14 @@ const AssetFormPage: React.FC = () => {
                     <FormInput
                       name="serial_number"
                       control={control}
-                      label="Serial Number"
+                      label="Serial number"
                       placeholder="Serial number or unique identifier"
                     />
                     {isEditMode && (
                       <FormInput
                         name="asset_tag"
                         control={control}
-                        label="Asset Tag"
+                        label="Asset tag"
                         placeholder="Auto-generated"
                         disabled
                       />
@@ -340,74 +467,23 @@ const AssetFormPage: React.FC = () => {
                     <Controller
                       name="inventory_item"
                       control={control}
-                      render={({ field, fieldState: { error } }) => (
+                      render={({ field, fieldState: { error: fieldError } }) => (
                         <FormSelect
                           name="inventory_item"
                           control={control}
-                          label="Inventory Item Type"
+                          label="Inventory item type"
                           data={[{ value: '', label: 'None' }, ...inventoryItemOptions]}
                           searchable
                           value={field.value ? String(field.value) : ''}
                           onChange={(value) => field.onChange(value ? Number(value) : null)}
-                          error={error?.message}
+                          error={fieldError?.message}
                         />
                       )}
                     />
-                  </>
-                ),
-              },
-              {
-                title: 'Acquisition Information',
-                children: (
-                  <>
-                    <Controller
-                      name="date_received"
-                      control={control}
-                      render={({ field, fieldState: { error } }) => (
-                        <FormInput
-                          name="date_received"
-                          control={control}
-                          label="Date Received"
-                          type="date"
-                          value={field.value || ''}
-                          onChange={(e) => field.onChange(e.target.value || null)}
-                          error={error?.message}
-                        />
-                      )}
-                    />
-                    <FormNumberInput
-                      name="amount_paid"
-                      control={control}
-                      label="Amount Paid"
-                      min={0}
-                      step={0.01}
-                    />
-                    <div>
-                      <Switch
-                        label="Is Donation"
-                        checked={isDonation}
-                        onChange={(e) => setValue('is_donation', e.currentTarget.checked)}
-                      />
-                    </div>
-                    {isDonation && (
-                      <FormInput
-                        name="donor_name"
-                        control={control}
-                        label="Donor Name"
-                        placeholder="Name of donor"
-                      />
-                    )}
-                  </>
-                ),
-              },
-              {
-                title: 'Location & Category',
-                children: (
-                  <>
                     <Controller
                       name="category"
                       control={control}
-                      render={({ field, fieldState: { error } }) => (
+                      render={({ field, fieldState: { error: fieldError } }) => (
                         <FormSelect
                           name="category"
                           control={control}
@@ -422,14 +498,14 @@ const AssetFormPage: React.FC = () => {
                               field.onChange(value ? Number(value) : null);
                             }
                           }}
-                          error={error?.message}
+                          error={fieldError?.message}
                         />
                       )}
                     />
                     <Controller
                       name="location"
                       control={control}
-                      render={({ field, fieldState: { error } }) => (
+                      render={({ field, fieldState: { error: fieldError } }) => (
                         <FormSelect
                           name="location"
                           control={control}
@@ -438,9 +514,11 @@ const AssetFormPage: React.FC = () => {
                           searchable
                           value={field.value ? String(field.value) : ''}
                           onChange={(value) =>
-                            field.onChange(value ? (isNaN(Number(value)) ? value : Number(value)) : null)
+                            field.onChange(
+                              value ? (isNaN(Number(value)) ? value : Number(value)) : null,
+                            )
                           }
-                          error={error?.message}
+                          error={fieldError?.message}
                         />
                       )}
                     />
@@ -448,129 +526,74 @@ const AssetFormPage: React.FC = () => {
                 ),
               },
               {
-                title: 'Operational Requirements',
+                title: 'Acquisition',
                 children: (
                   <>
-                    <FormInput
-                      name="circuit"
+                    <Controller
+                      name="date_received"
                       control={control}
-                      label="Circuit"
-                      placeholder="Circuit identification"
+                      render={({ field, fieldState: { error: fieldError } }) => (
+                        <FormInput
+                          name="date_received"
+                          control={control}
+                          label="Date received"
+                          type="date"
+                          value={field.value || ''}
+                          onChange={(e) => field.onChange(e.target.value || null)}
+                          error={fieldError?.message}
+                        />
+                      )}
                     />
-                    <FormInput
-                      name="mac_address"
+                    <FormNumberInput
+                      name="amount_paid"
                       control={control}
-                      label="MAC Address"
-                      placeholder="AA:BB:CC:11:22:33"
+                      label="Amount paid"
+                      min={0}
+                      step={0.01}
                     />
-                    <div>
-                      <Switch
-                        label="Needs Compressed Air"
-                        checked={watch('needs_compressed_air')}
-                        onChange={(e) => setValue('needs_compressed_air', e.currentTarget.checked)}
+                    <Switch
+                      label="Donation"
+                      checked={isDonation}
+                      onChange={(e) => setValue('is_donation', e.currentTarget.checked)}
+                    />
+                    {isDonation && (
+                      <FormInput
+                        name="donor_name"
+                        control={control}
+                        label="Donor name"
+                        placeholder="Name of donor"
                       />
-                    </div>
-                    <div>
-                      <Switch
-                        label="Needs Ventilation"
-                        checked={watch('needs_ventilation')}
-                        onChange={(e) => setValue('needs_ventilation', e.currentTarget.checked)}
-                      />
-                    </div>
-                    <div>
-                      <Switch
-                        label="Is Chargeable"
-                        checked={watch('is_chargeable')}
-                        onChange={(e) => setValue('is_chargeable', e.currentTarget.checked)}
-                      />
-                    </div>
+                    )}
                   </>
                 ),
               },
               {
-                title: 'Media & Documentation',
-                children: (
-                  <>
-                    <FormInput
-                      name="image_url"
-                      control={control}
-                      label="Image URL"
-                      placeholder="URL to download image from"
-                    />
-                    <FormImageUpload
-                      name="image"
-                      control={control}
-                      label="Image Upload"
-                      description="Upload an image file (alternative to URL)"
-                    />
-                    <FormFileUpload
-                      name="manual_pdf"
-                      control={control}
-                      label="Manual PDF Upload"
-                      accept={['application/pdf']}
-                    />
-                    <FormInput
-                      name="wiki_page_url"
-                      control={control}
-                      label="Wiki Page URL"
-                      placeholder="Link to wiki page for this asset"
-                    />
-                    <FormInput
-                      name="product_url"
-                      control={control}
-                      label="Product URL"
-                      placeholder="Link to product page or documentation"
-                    />
-                  </>
-                ),
-              },
-              {
-                title: 'Maintenance',
-                children: (
-                  <>
-                    <FormTextarea
-                      name="maintenance_plan"
-                      control={control}
-                      label="Maintenance Plan"
-                      placeholder="Maintenance schedule and procedures"
-                    />
-                    <FormTextarea
-                      name="condition_notes"
-                      control={control}
-                      label="Condition Notes"
-                      placeholder="Notes about the asset's condition, maintenance history, etc."
-                    />
-                  </>
-                ),
-              },
-              {
-                title: 'Status & Ownership',
+                title: 'Status & ownership',
                 children: (
                   <>
                     <FormSelect
                       name="status"
                       control={control}
                       label="Status"
-                      data={statusOptions}
+                      data={STATUS_OPTIONS}
                       required
                     />
                     <Controller
                       name="ownership_type"
                       control={control}
-                      render={({ field, fieldState: { error } }) => (
+                      render={({ field, fieldState: { error: fieldError } }) => (
                         <FormSelect
                           name="ownership_type"
                           control={control}
-                          label="Ownership Type"
-                          data={ownershipTypeOptions}
+                          label="Ownership"
+                          data={OWNERSHIP_OPTIONS}
                           value={field.value}
                           onChange={(value) => {
-                            field.onChange(value as any);
-                            // Clear owning_user/owning_group when changing ownership type
+                            field.onChange(value as AssetFormData['ownership_type']);
                             if (value !== 'user') setValue('owning_user', null);
                             if (value !== 'group') setValue('owning_group', null);
                           }}
-                          error={error?.message}
+                          error={fieldError?.message}
                         />
                       )}
                     />
@@ -578,53 +601,141 @@ const AssetFormPage: React.FC = () => {
                       <Controller
                         name="owning_group"
                         control={control}
-                        render={({ field, fieldState: { error } }) => (
+                        render={({ field, fieldState: { error: fieldError } }) => (
                           <FormSelect
                             name="owning_group"
                             control={control}
-                            label="Owning Group (SIG)"
+                            label="Owning SIG"
                             data={sigOptions}
                             searchable
                             value={field.value ? String(field.value) : ''}
                             onChange={(value) => field.onChange(value ? Number(value) : null)}
-                            error={error?.message}
+                            error={fieldError?.message}
                           />
                         )}
                       />
                     )}
-                    <div>
+                    {isEditMode && (
                       <Switch
                         label="Active"
                         checked={watch('is_active')}
                         onChange={(e) => setValue('is_active', e.currentTarget.checked)}
                       />
-                    </div>
-                    <div>
-                      <Switch
-                        label="Report Only"
-                        checked={watch('report_only')}
-                        onChange={(e) => setValue('report_only', e.currentTarget.checked)}
-                        description="If enabled, this asset only supports problem reporting (no enable/disable functionality)"
-                      />
-                    </div>
+                    )}
                   </>
                 ),
               },
               {
-                title: 'Additional Notes',
+                title: 'Supplies',
+                children: (
+                  <AssetSuppliesSection
+                    enabled={usesSupplies}
+                    onEnabledChange={setUsesSupplies}
+                    supplies={supplies}
+                    onChange={setSupplies}
+                    inventoryItems={inventoryItems}
+                  />
+                ),
+              },
+              {
+                title: 'Maintenance',
+                children: (
+                  <AssetMaintenanceSection
+                    enabled={pmEnabled}
+                    onEnabledChange={setPmEnabled}
+                    items={maintenanceItems}
+                    onChange={setMaintenanceItems}
+                  />
+                ),
+              },
+              {
+                title: 'Documentation',
                 children: (
                   <>
-                    <FormTextarea
-                      name="notes"
+                    <FormImageUpload
+                      name="image"
                       control={control}
-                      label="Notes"
-                      placeholder="General notes about the asset"
+                      label="Image"
+                      description="A photo of the equipment."
+                    />
+                    <FormFileUpload
+                      name="manual_pdf"
+                      control={control}
+                      label="Manual (PDF)"
+                      accept={['application/pdf']}
+                    />
+                    <FormInput
+                      name="wiki_page_url"
+                      control={control}
+                      label="Wiki page"
+                      placeholder="https://wiki.example.com/asset"
+                    />
+                    <FormInput
+                      name="product_url"
+                      control={control}
+                      label="Product page"
+                      placeholder="https://manufacturer.example.com/product"
                     />
                   </>
                 ),
               },
             ]}
           />
+
+          <Box mt="lg">
+            <Button
+              variant="subtle"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              rightSection={
+                advancedOpen ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />
+              }
+            >
+              {advancedOpen ? 'Hide advanced options' : 'Show advanced options'}
+            </Button>
+            <Collapse in={advancedOpen}>
+              <Paper p="md" withBorder mt="sm" radius="md">
+                <Stack gap="md">
+                  <Text size="sm" c="dimmed">
+                    Niche operating-requirement flags + free-text notes. Most assets don't need
+                    these.
+                  </Text>
+                  <Switch
+                    label="Needs compressed air"
+                    checked={watch('needs_compressed_air')}
+                    onChange={(e) => setValue('needs_compressed_air', e.currentTarget.checked)}
+                  />
+                  <Switch
+                    label="Needs ventilation"
+                    checked={watch('needs_ventilation')}
+                    onChange={(e) => setValue('needs_ventilation', e.currentTarget.checked)}
+                  />
+                  <Switch
+                    label="Chargeable use"
+                    checked={watch('is_chargeable')}
+                    onChange={(e) => setValue('is_chargeable', e.currentTarget.checked)}
+                  />
+                  <Switch
+                    label="Report-only"
+                    description="Problem reporting only — no enable/disable flows."
+                    checked={watch('report_only')}
+                    onChange={(e) => setValue('report_only', e.currentTarget.checked)}
+                  />
+                  <FormTextarea
+                    name="condition_notes"
+                    control={control}
+                    label="Condition notes"
+                    placeholder="Notes about the asset's condition, maintenance history, etc."
+                  />
+                  <FormTextarea
+                    name="notes"
+                    control={control}
+                    label="Notes"
+                    placeholder="General notes about the asset"
+                  />
+                </Stack>
+              </Paper>
+            </Collapse>
+          </Box>
 
           <Group justify="flex-end" mt="xl">
             <Button variant="subtle" onClick={() => navigate(-1)}>
@@ -641,11 +752,11 @@ const AssetFormPage: React.FC = () => {
       <Modal
         opened={showCreateCategory}
         onClose={() => setShowCreateCategory(false)}
-        title="Create New Category"
+        title="Create new category"
       >
         <Stack gap="md">
           <TextInput
-            label="Category Name"
+            label="Category name"
             value={newCategoryName}
             onChange={(e) => setNewCategoryName(e.target.value)}
             placeholder="Enter category name"

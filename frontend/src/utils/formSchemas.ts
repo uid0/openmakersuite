@@ -173,60 +173,46 @@ export type SupplierFormData = z.infer<typeof supplierSchema>;
 // Asset Form Schema
 export const assetFormSchema = z
   .object({
-    // Basic Info
+    // Basics — the minimum needed to describe what this asset is.
     name: z.string().min(1, 'Name is required').max(200, 'Name must be 200 characters or less'),
     description: z.string().optional(),
     serial_number: z.string().max(100, 'Serial number must be 100 characters or less').optional(),
     asset_tag: z.string().max(50, 'Asset tag must be 50 characters or less').optional(),
     inventory_item: z.number().int().positive().optional().nullable(),
+    category: z.number().int().positive().optional().nullable(),
+    location: z.union([z.string(), z.number().int().positive()]).optional().nullable(),
 
-    // Acquisition Info
+    // Acquisition — where it came from + how much it cost.
     date_received: z.string().optional().nullable(),
     amount_paid: z.number().min(0, 'Amount cannot be negative').default(0),
     is_donation: z.boolean().default(false),
     donor_name: z.string().max(200, 'Donor name must be 200 characters or less').optional(),
 
-    // Location & Category
-    location: z.union([z.string(), z.number().int().positive()]).optional().nullable(),
-    category: z.number().int().positive().optional().nullable(),
-
-    // Manufacturer
-    manufacturer: z.number().int().positive().optional().nullable(),
-    manufacturer_name: z.string().max(200, 'Manufacturer name must be 200 characters or less').optional(),
-
-    // Operational Requirements
-    circuit: z.string().max(100, 'Circuit must be 100 characters or less').optional(),
-    needs_compressed_air: z.boolean().default(false),
-    needs_ventilation: z.boolean().default(false),
-    is_chargeable: z.boolean().default(false),
-    mac_address: z
-      .string()
-      .regex(
-        /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/,
-        'Enter a valid MAC address (e.g., AA:BB:CC:11:22:33)'
-      )
-      .optional()
-      .or(z.literal('')),
-
-    // Media
+    // Media — single image + optional manual / wiki / product links.
     image: z.union([z.instanceof(File), z.string().url(), z.null()]).optional(),
-    image_url: z.string().url('Invalid URL').optional().or(z.literal('')),
     manual_pdf: z.union([z.instanceof(File), z.null()]).optional(),
     wiki_page_url: z.string().url('Invalid URL').optional().or(z.literal('')),
     product_url: z.string().url('Invalid URL').optional().or(z.literal('')),
 
-    // Maintenance
-    maintenance_plan: z.string().optional(),
-
-    // Status & Ownership
-    status: z.enum(['implementing', 'testing', 'active', 'maintenance', 'retired', 'lost', 'donated_out']).default('active'),
+    // Status & ownership — who owns it, what lifecycle state it's in.
+    status: z
+      .enum(['implementing', 'testing', 'active', 'maintenance', 'retired', 'lost', 'donated_out'])
+      .default('active'),
     ownership_type: z.enum(['user', 'group', 'space']).default('space'),
     owning_user: z.number().int().positive().optional().nullable(),
     owning_group: z.number().int().positive().optional().nullable(),
-    groups_can_enable: z.array(z.number().int().positive()).default([]),
-
-    // Other
     is_active: z.boolean().default(true),
+
+    // Operating requirements — collapsed under an "Advanced" section.
+    // ``circuit`` and ``mac_address`` used to live here as free-text;
+    // they're now superseded by the power-topology PowerOutlet / Cable
+    // link and the ForgeKey device-pairing flow respectively. Dropped.
+    // Note: ``maintenance_plan`` (freeform Textarea) is replaced by
+    // structured MaintenanceItem rows created via a modal in the
+    // Maintenance section.
+    needs_compressed_air: z.boolean().default(false),
+    needs_ventilation: z.boolean().default(false),
+    is_chargeable: z.boolean().default(false),
     report_only: z.boolean().default(false),
     notes: z.string().optional(),
     condition_notes: z.string().optional(),

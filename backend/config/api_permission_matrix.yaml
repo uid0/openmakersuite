@@ -334,6 +334,110 @@ views:
   electrical_circuits.views.PanelDirectoryReportView:
     permission_classes:
     - IsAuthenticated
+  electrical_circuits.views.PowerBreakerViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      list:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      update:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+  electrical_circuits.views.PowerCircuitViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      list:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      update:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+  electrical_circuits.views.PowerOutletViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      list:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      update:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+  electrical_circuits.views.PowerPanelViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      list:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
+      update:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
   forgekey.views.AssetAuthorizationViewSet:
     actions:
       add_via_classroom_mode:

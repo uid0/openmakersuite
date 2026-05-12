@@ -8,6 +8,7 @@
 import {
   Badge,
   Box,
+  Button,
   Container,
   Group,
   Paper,
@@ -15,7 +16,7 @@ import {
   Stack,
   Text,
 } from '@mantine/core';
-import { IconAlertTriangle, IconBolt, IconSitemap } from '@tabler/icons-react';
+import { IconAlertTriangle, IconBolt, IconPlus, IconSitemap } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -71,6 +72,15 @@ const PowerPanelDirectoryPage: React.FC = () => {
             eyebrow="Electrical · Topology"
             title="Power panel directory"
             description="Every load center in the building. Open one to see its breakers, circuits, and the assets they feed."
+            action={
+              <Button
+                component={Link}
+                to="/facilities/electrical/panels/new"
+                leftSection={<IconPlus size={16} />}
+              >
+                New panel
+              </Button>
+            }
           />
 
           {error && (
@@ -99,13 +109,22 @@ const PowerPanelDirectoryPage: React.FC = () => {
             </Paper>
           ) : panels.length === 0 ? (
             <Paper withBorder p="xl" radius="md">
-              <Stack gap="xs" align="center">
+              <Stack gap="sm" align="center">
                 <IconSitemap size={28} stroke={1.6} />
                 <Text fw={500}>No power panels yet</Text>
-                <Text size="sm" c="dimmed" ta="center" maw={400}>
-                  Add a PowerPanel from Django admin to see it here. The legacy breaker/outlet
-                  inventory lives under the "Fixture inventory" card on the Electrical overview.
+                <Text size="sm" c="dimmed" ta="center" maw={420}>
+                  Add the first load center to start building the topology. Once a panel is in
+                  place, breakers / circuits / outlets land on top of it. The legacy
+                  breaker/outlet inventory lives under the "Fixture inventory" card on the
+                  Electrical overview.
                 </Text>
+                <Button
+                  component={Link}
+                  to="/facilities/electrical/panels/new"
+                  leftSection={<IconPlus size={16} />}
+                >
+                  Create first panel
+                </Button>
               </Stack>
             </Paper>
           ) : (

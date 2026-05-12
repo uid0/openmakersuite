@@ -2039,6 +2039,181 @@ export const electricalSafetyAPI = {
     api.get<AssetPowerChain>(`/assets/${assetId}/power-chain/`),
 };
 
+// ---------------------------------------------------------------------
+// Power-topology write API (oms-b25 [7/7]).
+// CRUD endpoints behind the new frontend form pages. Staff-only on the
+// server; the frontend doesn't try to gate UI for non-staff because the
+// form pages aren't reachable from the sidebar for non-staff users.
+// ---------------------------------------------------------------------
+
+export interface PowerPanelDetail {
+  id: number;
+  location: number;
+  location_name: string;
+  name: string;
+  phase_configuration: PowerPanelPhase;
+  voltage: number;
+  main_breaker_amperage: number | null;
+  manufacturer: string;
+  model: string;
+  install_date: string | null;
+  notes: string;
+  needs_review: boolean;
+  breaker_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PowerPanelWritable = Pick<
+  PowerPanelDetail,
+  | 'location'
+  | 'name'
+  | 'phase_configuration'
+  | 'voltage'
+  | 'main_breaker_amperage'
+  | 'manufacturer'
+  | 'model'
+  | 'install_date'
+  | 'notes'
+  | 'needs_review'
+>;
+
+export interface PowerBreakerDetail {
+  id: number;
+  panel: number;
+  panel_name: string;
+  position: string;
+  pole_count: 1 | 2 | 3;
+  amperage: number;
+  phase: 'A' | 'B' | 'C' | 'AB' | 'BC' | 'AC' | 'ABC';
+  status: 'active' | 'spare' | 'locked_out';
+  label: string;
+  notes: string;
+  needs_review: boolean;
+  circuit_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PowerBreakerWritable = Pick<
+  PowerBreakerDetail,
+  | 'panel'
+  | 'position'
+  | 'pole_count'
+  | 'amperage'
+  | 'phase'
+  | 'status'
+  | 'label'
+  | 'notes'
+  | 'needs_review'
+>;
+
+export interface PowerCircuitDetail {
+  id: number;
+  breaker: number;
+  breaker_label: string;
+  panel_id: number;
+  panel_name: string;
+  label: string;
+  conductor_size: string;
+  conductor_length_ft: number | null;
+  max_load_amps: number | null;
+  notes: string;
+  needs_review: boolean;
+  outlet_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PowerCircuitWritable = Pick<
+  PowerCircuitDetail,
+  | 'breaker'
+  | 'label'
+  | 'conductor_size'
+  | 'conductor_length_ft'
+  | 'max_load_amps'
+  | 'notes'
+  | 'needs_review'
+>;
+
+export interface PowerOutletDetail {
+  id: number;
+  circuit: number;
+  circuit_label: string;
+  location: number;
+  location_name: string;
+  outlet_type: string;
+  label: string;
+  location_description: string;
+  status: 'active' | 'inactive' | 'capped';
+  notes: string;
+  needs_review: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PowerOutletWritable = Pick<
+  PowerOutletDetail,
+  | 'circuit'
+  | 'location'
+  | 'outlet_type'
+  | 'label'
+  | 'location_description'
+  | 'status'
+  | 'notes'
+  | 'needs_review'
+>;
+
+export const electricalTopologyAPI = {
+  // Panels
+  listPanels: () =>
+    api.get<{ results: PowerPanelDetail[] }>('/electrical/panels-crud/'),
+  getPanel: (id: number | string) =>
+    api.get<PowerPanelDetail>(`/electrical/panels-crud/${id}/`),
+  createPanel: (data: Partial<PowerPanelWritable>) =>
+    api.post<PowerPanelDetail>('/electrical/panels-crud/', data),
+  updatePanel: (id: number | string, data: Partial<PowerPanelWritable>) =>
+    api.patch<PowerPanelDetail>(`/electrical/panels-crud/${id}/`, data),
+  deletePanel: (id: number | string) =>
+    api.delete(`/electrical/panels-crud/${id}/`),
+
+  // Breakers
+  listBreakers: (params?: { panel?: number | string }) =>
+    api.get<{ results: PowerBreakerDetail[] }>('/electrical/breakers-crud/', { params }),
+  getBreaker: (id: number | string) =>
+    api.get<PowerBreakerDetail>(`/electrical/breakers-crud/${id}/`),
+  createBreaker: (data: Partial<PowerBreakerWritable>) =>
+    api.post<PowerBreakerDetail>('/electrical/breakers-crud/', data),
+  updateBreaker: (id: number | string, data: Partial<PowerBreakerWritable>) =>
+    api.patch<PowerBreakerDetail>(`/electrical/breakers-crud/${id}/`, data),
+  deleteBreaker: (id: number | string) =>
+    api.delete(`/electrical/breakers-crud/${id}/`),
+
+  // Circuits
+  listCircuits: (params?: { breaker?: number | string }) =>
+    api.get<{ results: PowerCircuitDetail[] }>('/electrical/circuits-crud/', { params }),
+  getCircuit: (id: number | string) =>
+    api.get<PowerCircuitDetail>(`/electrical/circuits-crud/${id}/`),
+  createCircuit: (data: Partial<PowerCircuitWritable>) =>
+    api.post<PowerCircuitDetail>('/electrical/circuits-crud/', data),
+  updateCircuit: (id: number | string, data: Partial<PowerCircuitWritable>) =>
+    api.patch<PowerCircuitDetail>(`/electrical/circuits-crud/${id}/`, data),
+  deleteCircuit: (id: number | string) =>
+    api.delete(`/electrical/circuits-crud/${id}/`),
+
+  // Outlets
+  listOutlets: (params?: { circuit?: number | string }) =>
+    api.get<{ results: PowerOutletDetail[] }>('/electrical/outlets-crud/', { params }),
+  getOutlet: (id: number | string) =>
+    api.get<PowerOutletDetail>(`/electrical/outlets-crud/${id}/`),
+  createOutlet: (data: Partial<PowerOutletWritable>) =>
+    api.post<PowerOutletDetail>('/electrical/outlets-crud/', data),
+  updateOutlet: (id: number | string, data: Partial<PowerOutletWritable>) =>
+    api.patch<PowerOutletDetail>(`/electrical/outlets-crud/${id}/`, data),
+  deleteOutlet: (id: number | string) =>
+    api.delete(`/electrical/outlets-crud/${id}/`),
+};
+
 // LOTO (lockout / tagout) — oms-78j
 export type LOTODeviceType =
   | 'padlock'

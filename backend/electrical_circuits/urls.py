@@ -18,6 +18,10 @@ from .views import (
     NetworkDropViewSet,
     OutletViewSet,
     PanelDirectoryReportView,
+    PowerBreakerViewSet,
+    PowerCircuitViewSet,
+    PowerOutletViewSet,
+    PowerPanelViewSet,
 )
 
 router = DefaultRouter()
@@ -25,6 +29,16 @@ router.register(r"breakers", BreakerViewSet, basename="breaker")
 router.register(r"outlets", OutletViewSet, basename="outlet")
 router.register(r"light-switches", LightSwitchViewSet, basename="light-switch")
 router.register(r"network-drops", NetworkDropViewSet, basename="network-drop")
+
+# Power-topology CRUD router — separate prefix from the legacy router so
+# the legacy /breakers and /outlets keep their existing shape. Mounted
+# by config.urls under /api/electrical/ to sit alongside the safety
+# read-only views.
+power_router = DefaultRouter()
+power_router.register(r"panels-crud", PowerPanelViewSet, basename="powerpanel")
+power_router.register(r"breakers-crud", PowerBreakerViewSet, basename="powerbreaker")
+power_router.register(r"circuits-crud", PowerCircuitViewSet, basename="powercircuit")
+power_router.register(r"outlets-crud", PowerOutletViewSet, basename="poweroutlet")
 
 urlpatterns = [
     path("", include(router.urls)),
@@ -43,7 +57,10 @@ urlpatterns = [
 
 # Safety query endpoints (oms-b25 [4/7]). Mounted by config.urls under
 # /api/electrical/ so the URLs match the AC-1..AC-4 paths exactly.
+# The power-topology CRUD router is included here too so all power-*
+# write surfaces land under /api/electrical/<resource>-crud/.
 safety_urlpatterns = [
+    path("", include(power_router.urls)),
     path(
         "panels/",
         PowerPanelListView.as_view(),

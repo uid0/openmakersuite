@@ -27,8 +27,12 @@ import CircuitLoadPage from './pages/CircuitLoadPage';
 import ElectricalCircuitsPage from './pages/ElectricalCircuitsPage';
 import ElectricalOverviewPage from './pages/ElectricalOverviewPage';
 import FacilitiesOverviewPage from './pages/FacilitiesOverviewPage';
+import PowerBreakerFormPage from './pages/PowerBreakerFormPage';
+import PowerCircuitFormPage from './pages/PowerCircuitFormPage';
+import PowerOutletFormPage from './pages/PowerOutletFormPage';
 import PowerPanelDetailPage from './pages/PowerPanelDetailPage';
 import PowerPanelDirectoryPage from './pages/PowerPanelDirectoryPage';
+import PowerPanelFormPage from './pages/PowerPanelFormPage';
 import FixtureScanPage from './pages/FixtureScanPage';
 import ForgeKeyDeviceDetailPage from './pages/ForgeKeyDeviceDetailPage';
 import ForgeKeyDevicesPage from './pages/ForgeKeyDevicesPage';
@@ -208,9 +212,17 @@ function AppContent() {
           {/* Electrical workspace — overview + power-topology visualization (oms-b25 [6/7]) */}
           <Route path="/facilities/electrical" element={<WorkspaceLayout><ElectricalOverviewPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/panels" element={<WorkspaceLayout><PowerPanelDirectoryPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/panels/new" element={<WorkspaceLayout><PowerPanelFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/panels/:id" element={<WorkspaceLayout><PowerPanelDetailPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/panels/:id/edit" element={<WorkspaceLayout><PowerPanelFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/panels/:panelId/breakers/new" element={<WorkspaceLayout><PowerBreakerFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/breakers/:id/edit" element={<WorkspaceLayout><PowerBreakerFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/breakers/:id/trip-impact" element={<WorkspaceLayout><BreakerTripImpactPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/breakers/:breakerId/circuits/new" element={<WorkspaceLayout><PowerCircuitFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/circuits/:id/edit" element={<WorkspaceLayout><PowerCircuitFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/circuits/:id/load" element={<WorkspaceLayout><CircuitLoadPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/circuits/:circuitId/outlets/new" element={<WorkspaceLayout><PowerOutletFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/electrical/outlets/:id/edit" element={<WorkspaceLayout><PowerOutletFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/power-chain" element={<WorkspaceLayout><AssetPowerChainPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/power-chain/:assetId" element={<WorkspaceLayout><AssetPowerChainPage /></WorkspaceLayout>} />
 

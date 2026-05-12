@@ -7,6 +7,7 @@
  *   - non-staff users get redirected
  *   - OTA disabled state
  */
+import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ForgeKeyDeviceDetailPage from '../../pages/ForgeKeyDeviceDetailPage';
@@ -71,12 +72,14 @@ const buildDevice = (overrides: Partial<any> = {}) => ({
 
 const renderAt = (path: string) =>
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/facilities/forgekey-devices/:id" element={<ForgeKeyDeviceDetailPage />} />
-        <Route path="/" element={<div>home</div>} />
-      </Routes>
-    </MemoryRouter>,
+    <MantineProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/facilities/forgekey-devices/:id" element={<ForgeKeyDeviceDetailPage />} />
+          <Route path="/" element={<div>home</div>} />
+        </Routes>
+      </MemoryRouter>
+    </MantineProvider>,
   );
 
 const seedHappyPath = () => {

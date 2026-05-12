@@ -4,8 +4,10 @@
  * Shows a single LocationProblem with reporter info, photo, paper-form
  * attachment, and promote-to-WO / resolve actions for staff.
  */
+import { Button, Paper, Text } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import api, { locationProblemsAPI, maintenanceAPI } from '../services/api';
 import { LocationProblem, MaintenanceItem } from '../types';
 import { showError, showSuccess } from '../utils/dialogs';
@@ -138,15 +140,41 @@ const LocationProblemDetailPage: React.FC = () => {
     }
   };
 
-  if (loading) return <div className="page">Loading…</div>;
+  if (loading) {
+    return (
+      <WorkspacePage
+        testId="location-problem-detail-page"
+        hero={{
+          eyebrow: 'Maintenance · Location problem',
+          title: 'Location problem',
+          description: 'Loading…',
+        }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading problem…</Text>
+        </Paper>
+      </WorkspacePage>
+    );
+  }
   if (error || !problem) {
     return (
-      <div className="page">
-        <p className="error">{error || 'Problem not found.'}</p>
-        <Link to="/inventory/locations" className="btn-secondary">
-          Back to Locations
-        </Link>
-      </div>
+      <WorkspacePage
+        testId="location-problem-detail-page"
+        hero={{
+          eyebrow: 'Maintenance · Location problem',
+          title: 'Location problem',
+          description: error || 'Not found.',
+          action: (
+            <Button component={Link} to="/inventory/locations" variant="default">
+              Back to locations
+            </Button>
+          ),
+        }}
+      >
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error || 'Problem not found.'}</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
@@ -155,17 +183,16 @@ const LocationProblemDetailPage: React.FC = () => {
   const isResolved = problem.status === 'resolved' || problem.status === 'closed';
 
   return (
-    <div className="page location-problem-detail-page">
-      <header className="page-header">
-        <div>
-          <h1>Location Problem</h1>
-          <p>
-            <Link to={`/inventory/locations/${problem.location}`}>
-              {problem.location_name}
-            </Link>
-          </p>
-        </div>
-        <div className="header-actions">
+    <WorkspacePage
+      testId="location-problem-detail-page"
+      hero={{
+        eyebrow: `Maintenance · ${problem.location_name}`,
+        title: 'Location problem',
+        description: problem.severity_display,
+      }}
+    >
+      <div className="page location-problem-detail-page">
+        <div className="header-actions" style={{ marginBottom: '1rem' }}>
           <span
             className="lp-severity-badge"
             style={{
@@ -181,7 +208,6 @@ const LocationProblemDetailPage: React.FC = () => {
             {problem.status_display}
           </span>
         </div>
-      </header>
 
       <section className="detail-section">
         <h2>Description</h2>
@@ -334,7 +360,8 @@ const LocationProblemDetailPage: React.FC = () => {
           </div>
         </section>
       )}
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

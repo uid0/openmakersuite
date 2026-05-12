@@ -36,6 +36,7 @@ import {
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { workOrderAPI } from '../services/api';
 import { WorkOrder, WorkOrderStatus } from '../types';
 import { formatDateOnly } from '../utils/dates';
@@ -327,23 +328,37 @@ const WorkOrderPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Container py="xl">
+      <WorkspacePage
+        testId="work-order-page"
+        hero={{ eyebrow: 'Maintenance · Work order', title: 'Work order', description: 'Loading…' }}
+        containerSize="sm"
+      >
         <Group justify="center">
           <Loader />
           <Text c="dimmed">Loading work order…</Text>
         </Group>
-      </Container>
+      </WorkspacePage>
     );
   }
 
   if (!workOrder) {
     return (
-      <Container py="xl">
+      <WorkspacePage
+        testId="work-order-page"
+        hero={{
+          eyebrow: 'Maintenance · Work order',
+          title: 'Work order',
+          description: 'Not found.',
+          action: (
+            <Button variant="default" onClick={() => navigate('/maintenance/dashboard')}>
+              Back to dashboard
+            </Button>
+          ),
+        }}
+        containerSize="sm"
+      >
         <Text c="red">Work order not found.</Text>
-        <Button mt="sm" variant="default" onClick={() => navigate('/maintenance/dashboard')}>
-          Back to Dashboard
-        </Button>
-      </Container>
+      </WorkspacePage>
     );
   }
 
@@ -352,9 +367,17 @@ const WorkOrderPage: React.FC = () => {
   const allTasksDone = totalTasks > 0 && completedTasks === totalTasks;
 
   return (
-    <Container size="sm" py="md">
+    <WorkspacePage
+      testId="work-order-page"
+      hero={{
+        eyebrow: `Maintenance · ${workOrder.short_id}`,
+        title: workOrder.maintenance_item_title,
+        description: workOrder.asset_name ? `Asset: ${workOrder.asset_name}` : undefined,
+      }}
+      containerSize="sm"
+    >
       {/* Header */}
-      <Card withBorder p="md" radius="md" mb="md">
+      <Card withBorder p="md" radius="md">
         <Group justify="space-between" mb="xs" wrap="nowrap">
           <Box style={{ flex: 1, minWidth: 0 }}>
             <Group gap="xs" mb={4}>
@@ -921,7 +944,7 @@ const WorkOrderPage: React.FC = () => {
           </Group>
         </Stack>
       </Modal>
-    </Container>
+    </WorkspacePage>
   );
 };
 

@@ -5,10 +5,12 @@
  * device. Polls the occupancy endpoint on a fixed interval; SSE/WebSocket
  * push is a follow-up. Staff/superuser only.
  */
+import { Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import DeviceControlsCard from '../components/DeviceControlsCard';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   ForgeKeyCommandResponse,
   ForgeKeyDevice,
@@ -113,29 +115,43 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
   }
 
   if (!id) {
-    return <p style={{ padding: '1.5rem' }}>Missing device id.</p>;
+    return (
+      <WorkspacePage
+        testId="forgekey-device-detail-page"
+        hero={{
+          eyebrow: 'Facilities · ForgeKey device',
+          title: 'ForgeKey device',
+          description: 'Missing device id.',
+        }}
+      >
+        <Paper withBorder p="md">
+          <Text c="red">Missing device id.</Text>
+        </Paper>
+      </WorkspacePage>
+    );
   }
 
   return (
-    <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <h1>ForgeKey Device</h1>
+    <WorkspacePage
+      testId="forgekey-device-detail-page"
+      hero={{
+        eyebrow: device
+          ? `Facilities · ForgeKey · ${device.device_type_name ?? 'device'}`
+          : 'Facilities · ForgeKey device',
+        title: device ? device.name || device.mac_address : 'ForgeKey device',
+        description: device
+          ? `${device.mac_address} · ${device.is_online ? 'Online' : 'Offline'} · last seen ${
+              device.last_seen ? new Date(device.last_seen).toLocaleString() : '—'
+            }`
+          : 'Loading device…',
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {loadError && <p style={{ color: '#c0392b' }}>{loadError}</p>}
       {loading && !device ? (
         <p>Loading…</p>
       ) : device ? (
         <>
-          <section>
-            <h2 style={{ marginBottom: '0.25rem' }}>{device.name || device.mac_address}</h2>
-            <p style={{ color: '#555', margin: 0, fontFamily: 'monospace' }}>
-              {device.mac_address} · {device.device_type_name ?? '—'}
-            </p>
-            <p style={{ color: '#555', margin: 0 }}>
-              Last seen: {device.last_seen ? new Date(device.last_seen).toLocaleString() : '—'} ·{' '}
-              <span style={{ color: device.is_online ? '#1f8a3a' : '#777' }}>
-                {device.is_online ? 'Online' : 'Offline'}
-              </span>
-            </p>
-          </section>
 
           <section aria-label="Occupancy chart">
             <h3>Occupancy (last 24h)</h3>
@@ -222,7 +238,8 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
       ) : (
         <p>Device not found.</p>
       )}
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

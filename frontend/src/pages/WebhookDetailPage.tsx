@@ -20,6 +20,7 @@ import {
 import { IconEdit, IconExternalLink, IconTestPipe, IconTrash } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { webhooksAPI } from '../services/api';
 import '../styles/WebhookDetailPage.css';
 import { Webhook, WebhookTestResult } from '../types';
@@ -166,43 +167,51 @@ const WebhookDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Paper p="md">
-        <Text>Loading...</Text>
-      </Paper>
+      <WorkspacePage
+        testId="webhook-detail-page"
+        hero={{ eyebrow: 'Settings · Webhook', title: 'Webhook', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading webhook…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   if (!webhook) {
     return (
-      <Paper p="md">
-        <Text>Webhook not found</Text>
-      </Paper>
+      <WorkspacePage
+        testId="webhook-detail-page"
+        hero={{ eyebrow: 'Settings · Webhook', title: 'Webhook', description: 'Not found.' }}
+      >
+        <Paper withBorder p="md">
+          <Text>Webhook not found.</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="webhook-detail-page">
-      <Stack gap="md">
-        {/* Header */}
-        <Group justify="space-between">
-          <div>
-            <Title order={2}>{webhook.name}</Title>
-            <Text size="sm" c="dimmed">
-              {webhook.event_type_display}
-            </Text>
-          </div>
-          <Group>
+    <WorkspacePage
+      testId="webhook-detail-page"
+      hero={{
+        eyebrow: `Settings · Webhook · ${webhook.event_type_display}`,
+        title: webhook.name,
+        description: webhook.url,
+        action: (
+          <Group gap="sm">
             <Button
               leftSection={<IconTestPipe size={16} />}
               onClick={handleTest}
               loading={testing}
               variant="light"
             >
-              Test Webhook
+              Test
             </Button>
             <Button
               leftSection={<IconEdit size={16} />}
               onClick={() => navigate(`/settings/webhooks/${id}/edit`)}
+              variant="default"
             >
               Edit
             </Button>
@@ -215,10 +224,13 @@ const WebhookDetailPage: React.FC = () => {
               Delete
             </Button>
           </Group>
-        </Group>
-
-        {/* Status Badges */}
-        <Group>
+        ),
+      }}
+    >
+      <div className="webhook-detail-page">
+        <Stack gap="md">
+          {/* Status Badges */}
+          <Group>
           {webhook.is_active ? (
             <Badge color="green" size="lg">Active</Badge>
           ) : (
@@ -560,7 +572,8 @@ const WebhookDetailPage: React.FC = () => {
           </Stack>
         )}
       </Modal>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

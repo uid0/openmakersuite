@@ -1,6 +1,7 @@
 /**
  * Tests for AssetDetailPage component
  */
+import { MantineProvider } from '@mantine/core';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -179,9 +180,9 @@ describe('AssetDetailPage', () => {
 
   it('renders asset details', async () => {
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {
@@ -195,9 +196,9 @@ describe('AssetDetailPage', () => {
 
   it('displays part replacement tracking', async () => {
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {
@@ -213,9 +214,9 @@ describe('AssetDetailPage', () => {
 
   it('displays problem history', async () => {
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {
@@ -228,9 +229,9 @@ describe('AssetDetailPage', () => {
 
   it('filters problems by status', async () => {
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {
@@ -270,9 +271,9 @@ describe('AssetDetailPage', () => {
     });
 
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {
@@ -289,9 +290,9 @@ describe('AssetDetailPage', () => {
 
   it('displays QR code when available', async () => {
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {
@@ -320,9 +321,9 @@ describe('AssetDetailPage', () => {
     });
 
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {
@@ -339,9 +340,9 @@ describe('AssetDetailPage', () => {
 
   it('hides asset tag section when not logged in', async () => {
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {
@@ -362,9 +363,9 @@ describe('AssetDetailPage', () => {
 
     it('renders preview, size selector, and download link', async () => {
       render(
-        <MemoryRouter>
+        <MantineProvider><MemoryRouter>
           <AssetDetailPage />
-        </MemoryRouter>
+        </MemoryRouter></MantineProvider>
       );
 
       await waitFor(() => {
@@ -403,25 +404,27 @@ describe('AssetDetailPage', () => {
     );
 
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
-    expect(screen.getByText('Loading asset details...')).toBeInTheDocument();
+    expect(screen.getByText(/Loading asset details/)).toBeInTheDocument();
   });
 
   it('shows error state', async () => {
     mockAssetsAPI.getAsset.mockRejectedValueOnce(new Error('Failed to load'));
 
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <AssetDetailPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/Error:/)).toBeInTheDocument();
+      // Error string surfaces in the WorkspacePage hero description and
+      // the red panel underneath.
+      expect(screen.getAllByText(/Failed to load/i).length).toBeGreaterThan(0);
     });
   });
 
@@ -488,9 +491,9 @@ describe('AssetDetailPage', () => {
       } as any);
 
       render(
-        <MemoryRouter>
+        <MantineProvider><MemoryRouter>
           <AssetDetailPage />
-        </MemoryRouter>
+        </MemoryRouter></MantineProvider>
       );
 
       await waitFor(() => {
@@ -513,9 +516,9 @@ describe('AssetDetailPage', () => {
 
     it('does not render legacy maintenance_plan or condition_notes on the detail page', async () => {
       render(
-        <MemoryRouter>
+        <MantineProvider><MemoryRouter>
           <AssetDetailPage />
-        </MemoryRouter>
+        </MemoryRouter></MantineProvider>
       );
 
       await waitFor(() => {
@@ -591,9 +594,9 @@ describe('AssetDetailPage', () => {
 
     it('opens clone modal when Clone button is clicked', async () => {
       render(
-        <MemoryRouter>
+        <MantineProvider><MemoryRouter>
           <AssetDetailPage />
-        </MemoryRouter>
+        </MemoryRouter></MantineProvider>
       );
 
       const cloneButton = await screen.findByText('Clone to asset...');
@@ -620,9 +623,9 @@ describe('AssetDetailPage', () => {
       });
 
       render(
-        <MemoryRouter>
+        <MantineProvider><MemoryRouter>
           <AssetDetailPage />
-        </MemoryRouter>
+        </MemoryRouter></MantineProvider>
       );
 
       const cloneButton = await screen.findByText('Clone to asset...');
@@ -649,9 +652,9 @@ describe('AssetDetailPage', () => {
   describe('LOTO section (oms-78j AC-4)', () => {
     it('shows "No LOTO required" when no lockout configured', async () => {
       render(
-        <MemoryRouter>
+        <MantineProvider><MemoryRouter>
           <AssetDetailPage />
-        </MemoryRouter>
+        </MemoryRouter></MantineProvider>
       );
       await waitFor(() => {
         expect(screen.getByText(/Lockout \/ Tagout/)).toBeInTheDocument();
@@ -702,9 +705,9 @@ describe('AssetDetailPage', () => {
       });
 
       render(
-        <MemoryRouter>
+        <MantineProvider><MemoryRouter>
           <AssetDetailPage />
-        </MemoryRouter>
+        </MemoryRouter></MantineProvider>
       );
 
       await waitFor(() => {

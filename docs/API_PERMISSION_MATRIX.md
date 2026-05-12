@@ -108,7 +108,8 @@ below are public.
 
 | Method | Path | Class | Notes |
 | --- | --- | --- | --- |
-| any | `reorders/requests/...` (CRUD + workflow `@action`s) | member | `IsAuthenticated` on `ReorderRequestViewSet` since gh #327 / PR #341 — every action, including `list`, `retrieve`, `create`, and `pending`, rejects anonymous callers because the serializer carries purchasing-sensitive fields (`actual_cost`, `invoice_number`, `supplier_url`). |
+| POST | `reorders/requests/` (create only) | public | `AllowAny` on `ReorderRequestViewSet.create` — required for the QR-scan reorder flow on printed shelf labels. The create input + response use `ReorderRequestCreateSerializer`, which only exposes `id`, `item`, `quantity`, `requested_by`, `request_notes`, `priority`, `status` — admin / cost / invoice / supplier-URL fields cannot be set or read by an anonymous caller. |
+| any | `reorders/requests/...` (everything else: list, retrieve, update, workflow `@action`s) | member | `IsAuthenticated` on `ReorderRequestViewSet` since gh #327 / PR #341 — every read or admin action rejects anonymous callers because `ReorderRequestSerializer` carries purchasing-sensitive fields (`actual_cost`, `invoice_number`, `supplier_url`). |
 | any | `reorders/purchase-orders/...` | member-rw | `IsAuthenticatedOrReadOnly` — anonymous reads exist for the queue dashboard; writes need login. Cost data is filtered in the serializer. |
 | any | `reorders/order-receipts/...` | member | `IsAuthenticated` on `OrderReceiptViewSet`. |
 | any | `reorders/analytics/...` | member-rw | `IsAuthenticated` for the API; the `kanban-print` and `kanban-multi-print` `@action`s are explicitly `AllowAny` so kiosks can render PDFs without a session. |

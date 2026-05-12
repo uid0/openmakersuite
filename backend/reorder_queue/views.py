@@ -84,9 +84,16 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     """
     API endpoint for reorder requests.
 
-    All actions require JWT authentication. Reorder request payloads include
-    purchasing-sensitive fields (cost, invoice, supplier URLs), so anonymous
-    access is not permitted on any action — see GH #327.
+    Read/admin actions require JWT authentication. The ``create`` action is
+    intentionally public so a member scanning a printed shelf QR code can
+    submit a reorder without logging in — this is the primary flow the
+    physical QR labels were built for.
+
+    The ``create`` path accepts only the safe subset of fields exposed by
+    :class:`ReorderRequestCreateSerializer` (item, quantity, requested_by,
+    request_notes, priority) and the create response is also serialized
+    with that limited shape so no admin metadata (cost, invoice,
+    supplier URLs) ever leaks to an anonymous caller.
     """
 
     # Only JWT, no session auth needed
@@ -100,14 +107,29 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         .all()
     )
 
+    def get_permissions(self):
+        """``create`` is public (QR-scan reorder); everything else stays
+        gated to authenticated users so admin actions, list/retrieve, and
+        sensitive analytics keep their lockdown."""
+        if self.action == "create":
+            return [AllowAny()]
+        return super().get_permissions()
+
     def get_serializer_class(self):
         if self.action == "create":
             return ReorderRequestCreateSerializer
         return ReorderRequestSerializer
 
     def create(self, request, *args, **kwargs):
-        """Create a new reorder request."""
-        # Check permissions if user is authenticated
+        """Create a new reorder request.
+
+        Public endpoint (see :meth:`get_permissions`). For authenticated
+        users, applies the membership-level permission gate so a SIG
+        member can't reorder for another SIG's inventory. Anonymous
+        callers go straight to the serializer — the serializer only
+        exposes safe fields, so they cannot smuggle cost / supplier-URL
+        data into the row.
+        """
         user = request.user
         if user.is_authenticated:
             item_id = request.data.get("item")
@@ -132,9 +154,15 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
 
-        # Return full details
+        # Anonymous callers get the limited create-serializer shape back
+        # so no admin metadata (admin_notes, invoice_url, supplier_url,
+        # actual_cost, …) leaks even by accident. Authenticated callers
+        # keep the existing richer response.
         instance = ReorderRequest.objects.get(id=serializer.instance.id)
-        output_serializer = ReorderRequestSerializer(instance)
+        if user.is_authenticated:
+            output_serializer = ReorderRequestSerializer(instance)
+        else:
+            output_serializer = ReorderRequestCreateSerializer(instance)
 
         # Create notifications for admins about new reorder request
         try:

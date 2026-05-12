@@ -66,8 +66,9 @@ class SimpleReorderViewTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-    def test_create_reorder_request_anonymous_denied(self):
-        """Anonymous users cannot create reorder requests (gh #327)."""
+    def test_create_reorder_request_anonymous_allowed(self):
+        """Anonymous users CAN create reorder requests — required for the
+        QR-scan reorder flow on printed shelf labels."""
         from inventory.tests.factories import InventoryItemFactory
 
         item = InventoryItemFactory()
@@ -82,4 +83,4 @@ class SimpleReorderViewTests(TestCase):
         client = APIClient()
         response = client.post("/api/reorders/requests/", data, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)

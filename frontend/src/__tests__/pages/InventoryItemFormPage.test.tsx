@@ -160,7 +160,7 @@ describe('InventoryItemFormPage', () => {
     renderCreatePage();
 
     await waitFor(() => {
-      expect(screen.getByText('Create Inventory Item')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toHaveTextContent(/new item/i);
     });
 
     // Use getAllByLabelText and get the first one if multiple
@@ -173,7 +173,7 @@ describe('InventoryItemFormPage', () => {
     renderEditPage();
 
     await waitFor(() => {
-      expect(screen.getByText('Edit Inventory Item')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toHaveTextContent(/edit item/i);
     });
 
     expect(screen.getByDisplayValue('Test Item')).toBeInTheDocument();
@@ -293,7 +293,7 @@ describe('InventoryItemFormPage', () => {
     renderCreatePage();
 
     await waitFor(() => {
-      expect(screen.getByText('Create Inventory Item')).toBeInTheDocument();
+      expect(screen.getByTestId('page-hero-title')).toHaveTextContent(/new item/i);
     });
 
     // Open create-category modal flow if "Create New Category" button is exposed.

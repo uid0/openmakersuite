@@ -8,10 +8,8 @@ import {
     Button,
     Group,
     Paper,
-    Stack,
     Switch,
     Text,
-    Title,
 } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
@@ -21,6 +19,7 @@ import { FormInput } from '../components/forms/FormInput';
 import { FormLayout } from '../components/forms/FormLayout';
 import { FormSelect } from '../components/forms/FormSelect';
 import { FormTextarea } from '../components/forms/FormTextarea';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { inventoryAPI } from '../services/api';
 import { SupplierFormData, supplierSchema } from '../utils/formSchemas';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -107,16 +106,28 @@ const SupplierFormPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Stack gap="md">
-        <Text>Loading supplier...</Text>
-      </Stack>
+      <WorkspacePage
+        testId="supplier-form-page"
+        hero={{ eyebrow: 'Inventory · Supplier', title: 'Supplier', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading supplier…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <Stack gap="md">
-      <Title order={2}>{isEditMode ? 'Edit Supplier' : 'Create New Supplier'}</Title>
-
+    <WorkspacePage
+      testId="supplier-form-page"
+      hero={{
+        eyebrow: 'Inventory · Supplier',
+        title: isEditMode ? 'Edit supplier' : 'New supplier',
+        description: isEditMode
+          ? 'Update contact info, tax-free paperwork status, and notes.'
+          : 'Add a new supplier so items can be sourced from it.',
+      }}
+    >
       {error && (
         <Alert icon={<IconAlertCircle size={16} />} title="Error" color="red">
           {error}
@@ -212,7 +223,7 @@ const SupplierFormPage: React.FC = () => {
           </Group>
         </Paper>
       </form>
-    </Stack>
+    </WorkspacePage>
   );
 };
 

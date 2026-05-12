@@ -32,7 +32,7 @@ describe('SupplierFormPage - Create Mode', () => {
       </MantineProvider>
     );
 
-    expect(screen.getByText('Create New Supplier')).toBeInTheDocument();
+    expect(screen.getByTestId('page-hero-title')).toHaveTextContent(/new supplier/i);
     // Check for name input by placeholder
     expect(screen.getByPlaceholderText('Supplier name')).toBeInTheDocument();
   });

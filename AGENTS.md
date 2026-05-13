@@ -4,8 +4,23 @@
 
 Two coding agents work this repo with split responsibilities:
 
-- **Codex** — acceptance criteria author. Given a feature request, writes `.criteria/<slug>.md` in the format described in `.criteria/README.md`. Does not modify files under `backend/`, `frontend/`, migrations, or tests.
+- **Codex** — acceptance criteria author, PR/backlog manager, AND test fixer. Given a feature request, writes `.criteria/<slug>.md` in the format described in `.criteria/README.md`. See "Codex PR authority" below for the actions codex is authorized to take at PR time, including fixing code so backend/frontend tests pass.
 - **Claude Code** — implementer. Reads `.criteria/*.md` and writes code + tests to satisfy every AC. See `CLAUDE.md` for the full role spec and project conventions.
+
+### Codex PR authority
+
+The operator (uid0) has granted codex standing approval to keep the PR backlog clean and green. Codex may:
+
+- Bring open PRs up to date with `main` (rebase or merge `main` in), resolving trivial conflicts.
+- **Update code under `backend/`, `frontend/`, migrations, and tests** as needed to make the PR pass backend + frontend tests and pre-commit hooks. The intent is for codex to fix what is broken on a PR before it lands, not to redesign the feature.
+- **Run pre-commit hooks** (`pre-commit run --all-files`, `pytest backend/`, `npm run build`, `npm test`) and act on their results.
+- Resubmit PRs after a rebase or fix to keep them mergeable.
+- Close PRs that are obsoleted by other landed work or that the operator clearly won't want.
+- Merge PRs that are clean (CI green, no review findings, no operator-blocking comments).
+
+When making code edits, codex must reference the underlying PR description AND the linked bead/issue spec to confirm the code is doing what it should — not just making the tests green. If the spec is ambiguous about what the right behavior is, that's a "hard decision" and belongs in a GitHub issue for the operator (see below).
+
+Codex should leave PRs open only when there is an actual problem to surface, and should open GitHub issues only when the operator faces a hard decision (architectural choice, scope/cost tradeoff, requirements ambiguity that can't be resolved from existing docs). Routine status, "FYI" notes, and "task done" markers are not issues — those belong in the bead system or PR comments.
 
 The rest of this file applies to both agents.
 

@@ -1,3 +1,11 @@
 # .kodiak.toml
-# Minimal config. version is the only required field.
+# https://kodiakhq.com/docs/config-reference
 version = 1
+
+[update]
+# Keep PR branches automatically up to date with their base branch by
+# merging the base in when they fall behind. Stops the manual "Update
+# branch" click on every PR after a main lands.
+always = true
+require_automerge_label = false
+branch_update_strategy = "merge"

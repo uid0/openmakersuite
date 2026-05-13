@@ -23,6 +23,7 @@ from rest_framework.test import APIClient
 from forgekey.management.commands.mqtt_consumer import handle_status_message
 from forgekey.models import DeviceCommand
 from forgekey.services.device_commands import apply_command_ack, publish_command
+from forgekey.tasks import process_mqtt_status_message
 from forgekey.tests.factories import ESP32DeviceFactory
 
 pytestmark = pytest.mark.django_db
@@ -330,3 +331,137 @@ class TestStatusHandlerAcceptsFlatCmdAck:
         # Unknown MAC: handle_status_message returns False (nothing to do)
         # rather than raising.
         assert handle_status_message(topic, body) is False
+
+
+class TestWebhookTaskProcessesCmdAck:
+    """The EMQX webhook path (``process_mqtt_status_message`` Celery task)
+    must absorb cmd_ack identically to ``mqtt_consumer.handle_status_message``.
+    See oms-v433rt: PR #400 fixed the consumer path but missed this one, so
+    commands appeared to fail ("no ack") whenever the long-running consumer
+    container was down even though the broker was still relaying acks via
+    the webhook."""
+
+    def test_object_form_marks_row_acked(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:01:00")
+        rec = DeviceCommand.objects.create(device=device, command="restart", payload={})
+
+        process_mqtt_status_message(
+            device.mac_address,
+            {
+                "online": True,
+                "cmd_ack": {"command_id": str(rec.id), "status": "ok"},
+            },
+        )
+
+        rec.refresh_from_db()
+        assert rec.ack_status == DeviceCommand.ACK_OK
+        assert rec.ack_payload == {"command_id": str(rec.id), "status": "ok"}
+
+    def test_object_form_error_status_marks_row_error(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:01:0A")
+        rec = DeviceCommand.objects.create(device=device, command="unlock", payload={})
+
+        process_mqtt_status_message(
+            device.mac_address,
+            {
+                "online": True,
+                "cmd_ack": {
+                    "command_id": str(rec.id),
+                    "status": "error",
+                    "reason": "invalid_token",
+                },
+            },
+        )
+
+        rec.refresh_from_db()
+        assert rec.ack_status == DeviceCommand.ACK_ERROR
+
+    def test_flat_form_with_sibling_command_id_marks_row(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:01:01")
+        rec = DeviceCommand.objects.create(device=device, command="status", payload={})
+
+        process_mqtt_status_message(
+            device.mac_address,
+            {
+                "online": True,
+                "cmd_ack": "status",
+                "command_id": str(rec.id),
+                "status": "ok",
+            },
+        )
+
+        rec.refresh_from_db()
+        assert rec.ack_status == DeviceCommand.ACK_OK
+
+    def test_flat_form_without_sibling_falls_back_to_most_recent_pending_of_verb(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:01:02")
+        # Older pending row of the same verb — newer one should be picked.
+        DeviceCommand.objects.create(
+            device=device,
+            command="status",
+            payload={},
+            sent_at=timezone.now() - timedelta(seconds=30),
+        )
+        newer = DeviceCommand.objects.create(device=device, command="status", payload={})
+
+        process_mqtt_status_message(
+            device.mac_address,
+            {"online": True, "cmd_ack": "status"},
+        )
+
+        newer.refresh_from_db()
+        assert newer.ack_status == DeviceCommand.ACK_OK
+
+    def test_no_cmd_ack_does_not_touch_device_command_rows(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:01:03")
+        rec = DeviceCommand.objects.create(device=device, command="restart", payload={})
+
+        process_mqtt_status_message(device.mac_address, {"online": True})
+
+        rec.refresh_from_db()
+        assert rec.ack_status == DeviceCommand.ACK_PENDING
+
+    def test_malformed_cmd_ack_does_not_break_online_update(self):
+        device = ESP32DeviceFactory(
+            mac_address="AA:BB:CC:00:01:04",
+            is_online=False,
+            firmware_version="1.0.0",
+        )
+
+        # ``cmd_ack: 42`` is neither dict nor str — the cmd_ack block must
+        # silently ignore it AND the prior online/last_seen/firmware update
+        # must still land.
+        process_mqtt_status_message(
+            device.mac_address,
+            {"online": True, "cmd_ack": 42, "firmware_version": "9.9.9"},
+        )
+
+        device.refresh_from_db()
+        assert device.is_online is True
+        assert device.firmware_version == "9.9.9"
+
+    def test_idempotent_with_consumer_path_for_same_payload(self):
+        """Both paths fire on the same broker message in prod. The second
+        ``apply_command_ack`` call must be a no-op (the row is no longer
+        ACK_PENDING) so the state matches whichever path ran first."""
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:01:05")
+        rec = DeviceCommand.objects.create(device=device, command="restart", payload={})
+
+        payload = {
+            "online": True,
+            "cmd_ack": {"command_id": str(rec.id), "status": "ok"},
+        }
+        topic = f"forgekey/{device.mac_address.replace(':', '').lower()}/status"
+
+        # Consumer fires first.
+        handle_status_message(topic, json.dumps(payload).encode("utf-8"))
+        rec.refresh_from_db()
+        first_ack_at = rec.ack_at
+        assert rec.ack_status == DeviceCommand.ACK_OK
+        assert first_ack_at is not None
+
+        # Webhook fires second on the same payload — must be a no-op.
+        process_mqtt_status_message(device.mac_address, payload)
+        rec.refresh_from_db()
+        assert rec.ack_status == DeviceCommand.ACK_OK
+        assert rec.ack_at == first_ack_at

@@ -285,6 +285,51 @@ def process_mqtt_status_message(mac_address: str, message_data: Dict[str, Any]) 
 
         logger.info(f"Updated status for device {mac_address}")
 
+        # Mirror mqtt_consumer.handle_status_message: the EMQX webhook delivers
+        # the same status payloads as the long-running consumer, so it must
+        # absorb cmd_ack identically. Without this, commands appear to fail
+        # ("no ack") whenever the consumer container is down even though the
+        # broker is still relaying ack messages via the webhook (oms-v433rt).
+        # Own try/except so a malformed ack can never undo the online write.
+        if isinstance(message_data, dict) and "cmd_ack" in message_data:
+            try:
+                from .services.device_commands import apply_command_ack, apply_command_ack_by_verb
+
+                ack = message_data.get("cmd_ack")
+                sibling_command_id = message_data.get("command_id")
+                sibling_status = (
+                    message_data.get("status") or message_data.get("ack_status") or "ok"
+                )
+
+                if isinstance(ack, dict):
+                    apply_command_ack(
+                        command_id=str(ack.get("command_id") or sibling_command_id or ""),
+                        status=str(ack.get("status") or sibling_status or ""),
+                        ack_payload=ack,
+                    )
+                elif isinstance(ack, str):
+                    verb = ack.strip()
+                    rest = {k: v for k, v in message_data.items() if k != "cmd_ack"}
+                    if sibling_command_id:
+                        apply_command_ack(
+                            command_id=str(sibling_command_id),
+                            status=str(sibling_status),
+                            ack_payload={"cmd_ack": verb, **rest},
+                        )
+                    elif verb:
+                        apply_command_ack_by_verb(
+                            device=device,
+                            verb=verb,
+                            status=str(sibling_status),
+                            ack_payload={"cmd_ack": verb, **rest},
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "process_mqtt_status_message: failed to apply cmd_ack for %s: %s",
+                    mac_address,
+                    exc,
+                )
+
     except ESP32Device.DoesNotExist:
         logger.warning(f"Received status message from unknown device: {mac_address}")
     except Exception as e:

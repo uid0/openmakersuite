@@ -5,6 +5,7 @@
 import { Badge, Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import MaintenanceHistorySection from '../components/assets/MaintenanceHistorySection';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   AssetLOTORequirements,
@@ -993,6 +994,13 @@ const AssetDetailPage: React.FC = () => {
             </ul>
           )}
         </section>
+
+        {id && (
+          <MaintenanceHistorySection
+            assetId={id}
+            canManage={isLoggedIn && localStorage.getItem('is_staff') === 'true'}
+          />
+        )}
 
         {/* QR Code */}
         <section className="asset-detail-section">

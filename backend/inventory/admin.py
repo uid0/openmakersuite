@@ -24,6 +24,7 @@ from .models import (
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
+    MaintenanceRecord,
     MaintenanceTask,
     PriceHistory,
     StockReconciliation,
@@ -1629,3 +1630,29 @@ class StockReconciliationAdmin(admin.ModelAdmin):
         "triggered_reorder",
     ]
     date_hierarchy = "reconciled_at"
+
+
+@admin.register(MaintenanceRecord)
+class MaintenanceRecordAdmin(admin.ModelAdmin):
+    list_display = [
+        "completed_on",
+        "asset",
+        "title",
+        "vendor",
+        "performed_by_internal",
+        "cost",
+        "recorded_by",
+        "recorded_at",
+    ]
+    list_filter = ["completed_on", "vendor", "recorded_at"]
+    search_fields = [
+        "title",
+        "description",
+        "invoice_number",
+        "asset__name",
+        "asset__asset_tag",
+        "vendor__name",
+        "notes",
+    ]
+    date_hierarchy = "completed_on"
+    autocomplete_fields = ["asset", "vendor", "performed_by_internal", "recorded_by"]

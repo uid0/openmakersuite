@@ -279,3 +279,34 @@ def get_mqtt_ota_status_topic(mac_address: str) -> str:
     Firmware contract: ``forgekey/<lowercase-no-sep-mac>/ota/status``.
     """
     return f"{settings.MQTT_TOPIC_PREFIX}/{_firmware_contract_mac(mac_address)}/ota/status"
+
+
+# ---------------------------------------------------------------------------
+# device-id-keyed topic helpers (oms-d2axqu / forgekey-trust-refactor)
+# ---------------------------------------------------------------------------
+#
+# These return topics keyed on the per-chip ``device_id`` rather than the
+# MAC. The /enroll/ endpoint populates its policy response with these so
+# new-format devices receive the device-id namespace. The MAC-keyed helpers
+# above continue to drive the legacy command pipeline until that pipeline
+# migrates separately (see [[forgekey-trust-refactor]] step 7).
+
+
+def device_command_topic_for(device_id: str) -> str:
+    """MQTT topic an enrolled device receives commands on (device-id namespace)."""
+    return f"{settings.MQTT_TOPIC_PREFIX}/devices/{device_id}/command"
+
+
+def device_status_topic_for(device_id: str) -> str:
+    """MQTT topic an enrolled device publishes status to (device-id namespace)."""
+    return f"{settings.MQTT_TOPIC_PREFIX}/devices/{device_id}/status"
+
+
+def device_firmware_topic_for(device_id: str) -> str:
+    """MQTT topic an enrolled device subscribes to for OTA (device-id namespace)."""
+    return f"{settings.MQTT_TOPIC_PREFIX}/devices/{device_id}/firmware"
+
+
+def device_ping_topic_for(device_id: str) -> str:
+    """MQTT topic an enrolled device publishes pings to (device-id namespace)."""
+    return f"{settings.MQTT_TOPIC_PREFIX}/devices/{device_id}/ping"

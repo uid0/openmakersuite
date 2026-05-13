@@ -176,6 +176,17 @@ class ESP32Device(models.Model):
         blank=True,
         help_text="When the device last published its capability set.",
     )
+    identity = models.OneToOneField(
+        "DeviceIdentity",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="esp32_device",
+        help_text=(
+            "Per-chip device identity (set by /enroll/). MAC drops to inventory metadata "
+            "once an identity is bound."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1160,3 +1171,218 @@ class ForgeKeyAuditEvent(models.Model):
     def __str__(self) -> str:
         target = self.asset_id or self.device_id or self.authorization_id or self.lockout_id
         return f"{self.action} ({target}) @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+# ---------------------------------------------------------------------------
+# Device-identity trust foundation (oms-d2axqu / forgekey-trust-refactor)
+# ---------------------------------------------------------------------------
+#
+# DeviceIdentity is the per-chip security boundary. The legacy MAC-keyed
+# ESP32Device row drops to inventory metadata; pre-existing callers keep
+# resolving by MAC. New enrollments bind DeviceIdentity -> ESP32Device via
+# ESP32Device.identity and persist an OMS-issued client certificate.
+
+
+class DeviceIdentity(models.Model):
+    """Per-device security anchor keyed by the ESP32 unique chip id.
+
+    A DeviceIdentity is created/updated by the /enroll/ flow and references
+    every certificate ever issued to that chip. Decommissioned identities
+    cannot be re-enrolled.
+    """
+
+    STATUS_ACTIVE = "active"
+    STATUS_SUSPENDED = "suspended"
+    STATUS_DECOMMISSIONED = "decommissioned"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_SUSPENDED, "Suspended"),
+        (STATUS_DECOMMISSIONED, "Decommissioned"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device_id = models.CharField(
+        max_length=64,
+        unique=True,
+        help_text="ESP32 unique chip identifier — the device-identity security boundary.",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACTIVE,
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["device_id"]
+        indexes = [
+            models.Index(fields=["device_id"]),
+            models.Index(fields=["status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.device_id} [{self.status}]"
+
+
+class DeviceCertificate(models.Model):
+    """An mTLS client certificate issued by the OMS root CA to a DeviceIdentity."""
+
+    STATUS_VALID = "valid"
+    STATUS_REVOKED = "revoked"
+    STATUS_EXPIRED = "expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        DeviceIdentity,
+        on_delete=models.PROTECT,
+        related_name="certificates",
+    )
+    serial = models.CharField(max_length=128, unique=True)
+    subject = models.CharField(max_length=512, help_text="RFC4514 subject DN.")
+    fingerprint_sha256 = models.CharField(max_length=64, unique=True)
+    not_before = models.DateTimeField()
+    not_after = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    issued_by = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Issuer CA name at the time of issuance (audit breadcrumb).",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["fingerprint_sha256"]),
+            models.Index(fields=["device", "-created_at"]),
+            models.Index(fields=["revoked_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.device.device_id} cert {self.serial[:12]} [{self.status}]"
+
+    @property
+    def status(self) -> str:
+        if self.revoked_at is not None:
+            return self.STATUS_REVOKED
+        if self.not_after <= timezone.now():
+            return self.STATUS_EXPIRED
+        return self.STATUS_VALID
+
+
+class DeviceEnrollment(models.Model):
+    """Bootstrap session: CSR submission, validation, signing, and issuance."""
+
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_ISSUED = "issued"
+    STATUS_EXPIRED = "expired"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+        (STATUS_ISSUED, "Issued"),
+        (STATUS_EXPIRED, "Expired"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        DeviceIdentity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="enrollments",
+    )
+    csr_pem = models.TextField()
+    nonce = models.CharField(max_length=64, blank=True, db_index=True)
+    unique_chip_id = models.CharField(max_length=64, blank=True)
+    mac_address = models.CharField(max_length=32, blank=True)
+    sensor_kind = models.CharField(max_length=50, blank=True)
+    firmware_version = models.CharField(max_length=50, blank=True)
+    chip_info = models.JSONField(default=dict, blank=True)
+    boot_count = models.PositiveIntegerField(null=True, blank=True)
+    free_heap = models.PositiveIntegerField(null=True, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    flash_memory_id = models.CharField(max_length=64, blank=True)
+    token_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA-256 hex of the provisioning token used (full digest).",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    requested_at = models.DateTimeField(auto_now_add=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="forgekey_enrollments_approved",
+    )
+    certificate = models.ForeignKey(
+        DeviceCertificate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="enrollments",
+    )
+    expires_at = models.DateTimeField(null=True, blank=True)
+    enrollment_photo = models.ImageField(
+        upload_to="forgekey/enrollment_photos/",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["-requested_at"]
+        indexes = [
+            models.Index(fields=["status", "-requested_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"enrollment {self.unique_chip_id or self.id} [{self.status}]"
+
+
+class CertificateAuthority(models.Model):
+    """OMS-internal root CA backing :mod:`forgekey.services.csr_signing`.
+
+    Only one row may be ``is_active=True`` at a time. The encrypted private
+    key blob carries its own ``key_kid`` so KEK rotation is non-destructive
+    (older blobs still decrypt with their original kid).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=64, default="forgekey-root", db_index=True)
+    cert_pem = models.TextField()
+    encrypted_private_key = models.BinaryField()
+    key_kid = models.CharField(max_length=64, blank=True)
+    not_before = models.DateTimeField()
+    not_after = models.DateTimeField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_active"],
+                condition=models.Q(is_active=True),
+                name="forgekey_ca_single_active",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        flag = "active" if self.is_active else "retired"
+        return f"{self.name} [{flag}]"
+
+    @classmethod
+    def get_active(cls) -> Optional["CertificateAuthority"]:
+        return cls.objects.filter(is_active=True).order_by("-created_at").first()

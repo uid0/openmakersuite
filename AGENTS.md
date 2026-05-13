@@ -4,8 +4,19 @@
 
 Two coding agents work this repo with split responsibilities:
 
-- **Codex** — acceptance criteria author. Given a feature request, writes `.criteria/<slug>.md` in the format described in `.criteria/README.md`. Does not modify files under `backend/`, `frontend/`, migrations, or tests.
+- **Codex** — acceptance criteria author AND PR/backlog manager. Given a feature request, writes `.criteria/<slug>.md` in the format described in `.criteria/README.md`. Does not modify files under `backend/`, `frontend/`, migrations, or tests itself; however, see "Codex PR authority" below for what it IS authorized to do at PR time.
 - **Claude Code** — implementer. Reads `.criteria/*.md` and writes code + tests to satisfy every AC. See `CLAUDE.md` for the full role spec and project conventions.
+
+### Codex PR authority
+
+The operator (uid0) has granted codex standing approval to keep the PR backlog clean. Codex may:
+
+- Bring open PRs up to date with `main` (rebase or merge `main` in), resolving trivial conflicts.
+- Resubmit PRs after a rebase or fix to keep them mergeable.
+- Close PRs that are obsoleted by other landed work or that the operator clearly won't want.
+- Merge PRs that are clean (CI green, no review findings, no operator-blocking comments).
+
+Codex should leave PRs open only when there is an actual problem to surface, and should open GitHub issues only when the operator faces a hard decision (architectural choice, scope/cost tradeoff, requirements ambiguity that can't be resolved from existing docs). Routine status, "FYI" notes, and "task done" markers are not issues — those belong in the bead system or PR comments.
 
 The rest of this file applies to both agents.
 

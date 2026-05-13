@@ -33,6 +33,7 @@ import {
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { maintenanceAPI, reorderAPI, workOrderAPI } from '../services/api';
 import { LowStockAlert, MaintenanceItem, WorkOrder, WorkOrderUploadResult } from '../types';
 import { parseYmd } from '../utils/dates';
@@ -433,60 +434,72 @@ const MaintenanceDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <Container py="xl">
+      <WorkspacePage
+        testId="maintenance-dashboard"
+        hero={{
+          eyebrow: 'Maintenance',
+          title: 'Preventive maintenance',
+          description: 'Loading…',
+        }}
+      >
         <Group justify="center">
           <Loader />
           <Text c="dimmed">Loading maintenance data…</Text>
         </Group>
-      </Container>
+      </WorkspacePage>
     );
   }
 
   return (
-    <Container size="xl" py="md">
-      <Group justify="space-between" mb="md">
-        <Title order={2}>Preventive Maintenance</Title>
-        <Group>
-          <Button
-            leftSection={<IconRefresh size={16} />}
-            variant="default"
-            size="sm"
-            onClick={loadData}
-            loading={loading}
-          >
-            Refresh
-          </Button>
-          <Button
-            leftSection={<IconPlus size={16} />}
-            size="sm"
-            onClick={openBulkConfirm}
-            loading={generatingBulk}
-          >
-            Generate Due Work Orders
-          </Button>
-          {isStaff && (
-            <FileButton
-              resetRef={resetPdfRef}
-              accept="application/pdf"
-              onChange={handlePdfUpload}
+    <WorkspacePage
+      testId="maintenance-dashboard"
+      hero={{
+        eyebrow: 'Maintenance',
+        title: 'Preventive maintenance',
+        description: 'Due PM tasks, open work orders, and bulk work-order generation.',
+        action: (
+          <Group gap="sm">
+            <Button
+              leftSection={<IconRefresh size={16} />}
+              variant="default"
+              size="sm"
+              onClick={loadData}
+              loading={loading}
             >
-              {(props) => (
-                <Button
-                  {...props}
-                  leftSection={<IconUpload size={16} />}
-                  variant="default"
-                  size="sm"
-                  loading={uploadingPdf}
-                  aria-label="Upload completed work order PDF"
-                >
-                  Upload PDF
-                </Button>
-              )}
-            </FileButton>
-          )}
-        </Group>
-      </Group>
-
+              Refresh
+            </Button>
+            <Button
+              leftSection={<IconPlus size={16} />}
+              size="sm"
+              onClick={openBulkConfirm}
+              loading={generatingBulk}
+            >
+              Generate due WOs
+            </Button>
+            {isStaff && (
+              <FileButton
+                resetRef={resetPdfRef}
+                accept="application/pdf"
+                onChange={handlePdfUpload}
+              >
+                {(props) => (
+                  <Button
+                    {...props}
+                    leftSection={<IconUpload size={16} />}
+                    variant="default"
+                    size="sm"
+                    loading={uploadingPdf}
+                    aria-label="Upload completed work order PDF"
+                  >
+                    Upload PDF
+                  </Button>
+                )}
+              </FileButton>
+            )}
+          </Group>
+        ),
+      }}
+    >
       {/* Stats row */}
       <SimpleGrid cols={{ base: 2, sm: 4 }} mb="lg">
         <StatCard
@@ -740,7 +753,7 @@ const MaintenanceDashboard: React.FC = () => {
           </Stack>
         )}
       </Modal>
-    </Container>
+    </WorkspacePage>
   );
 };
 

@@ -22,6 +22,7 @@ import { FormInput } from '../components/forms/FormInput';
 import { FormLayout } from '../components/forms/FormLayout';
 import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormTextarea } from '../components/forms/FormTextarea';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { maintenanceAPI } from '../services/api';
 import { MaintenanceMaterial } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -170,21 +171,31 @@ const MaintenanceItemFormPage: React.FC = () => {
 
   if (loading) {
     return (
-      <Paper p="md">
-        <Text>Loading...</Text>
-      </Paper>
+      <WorkspacePage
+        testId="maintenance-item-form-page"
+        hero={{ eyebrow: 'Maintenance · PM task', title: 'PM task', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading task…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <Stack gap="md">
-      <Group justify="space-between">
-        <Title order={2}>{isEditMode ? 'Edit PM Task' : 'New PM Task'}</Title>
-        <Button variant="subtle" onClick={() => navigate(`/assets/${assetId}`)}>
-          Cancel
-        </Button>
-      </Group>
-
+    <WorkspacePage
+      testId="maintenance-item-form-page"
+      hero={{
+        eyebrow: 'Maintenance · PM task',
+        title: isEditMode ? 'Edit PM task' : 'New PM task',
+        description: 'A recurring preventive-maintenance task tied to a specific asset.',
+        action: (
+          <Button variant="default" onClick={() => navigate(`/assets/${assetId}`)}>
+            Cancel
+          </Button>
+        ),
+      }}
+    >
       {error && (
         <Alert icon={<IconAlertCircle size={16} />} title="Error" color="red">
           {error}
@@ -353,7 +364,7 @@ const MaintenanceItemFormPage: React.FC = () => {
           </Group>
         </Paper>
       </form>
-    </Stack>
+    </WorkspacePage>
   );
 };
 

@@ -2,8 +2,10 @@
  * Purchase Order Management Page
  * View and manage purchase orders, including setting expected shipment dates for line items
  */
+import { Button, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { purchaseOrderAPI } from '../services/api';
 import '../styles/PurchaseOrderPage.css';
 import { formatDateOnly, formatYmd } from '../utils/dates';
@@ -381,41 +383,48 @@ const PurchaseOrderPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="purchase-order-page">
-        <div className="loading">Loading purchase order...</div>
-      </div>
+      <WorkspacePage
+        testId="purchase-order-page"
+        hero={{ eyebrow: 'Purchasing · Order', title: 'Purchase order', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading purchase order…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   if (error || !order) {
     return (
-      <div className="purchase-order-page">
-        <div className="error">
-          <h2>Error</h2>
-          <p>{error || 'Purchase order not found'}</p>
-        </div>
-      </div>
+      <WorkspacePage
+        testId="purchase-order-page"
+        hero={{
+          eyebrow: 'Purchasing · Order',
+          title: 'Purchase order',
+          description: error || 'Not found.',
+        }}
+      >
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error || 'Purchase order not found'}</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="purchase-order-page">
-      <header className="po-header">
-        <div>
-          <h1>Purchase Order: {order.po_number}</h1>
-          <p className="po-supplier">Supplier: {order.supplier_details}</p>
-        </div>
+    <WorkspacePage
+      testId="purchase-order-page"
+      hero={{
+        eyebrow: `Purchasing · ${order.supplier_details}`,
+        title: `PO ${order.po_number}`,
+        description: order.status_label,
+        action: canMarkDelivered(order) && !markingDelivered ? (
+          <Button onClick={handleOpenMarkDelivered}>Mark as delivered</Button>
+        ) : undefined,
+      }}
+    >
+      <div className="purchase-order-page">
         <div className="po-status">
-          <span className={`status-badge status-${order.status}`}>{order.status_label}</span>
-          {canMarkDelivered(order) && !markingDelivered && (
-            <button
-              type="button"
-              className="btn-primary mark-delivered-button"
-              onClick={handleOpenMarkDelivered}
-            >
-              Mark as Delivered
-            </button>
-          )}
           {canVoidOrder(order) && (
             <button
               type="button"
@@ -427,7 +436,6 @@ const PurchaseOrderPage: React.FC = () => {
             </button>
           )}
         </div>
-      </header>
 
       {order.status === 'voided' && (
         <section className="po-voided-banner" aria-label="Voided purchase order">
@@ -915,7 +923,8 @@ const PurchaseOrderPage: React.FC = () => {
           </tbody>
         </table>
       </section>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

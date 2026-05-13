@@ -3,6 +3,7 @@
  *  - oms-aq2: editable metadata + file attachments behaviors.
  *  - oms-74q: freeform PO line items render their description, not 'Unknown Item'.
  */
+import { MantineProvider } from '@mantine/core';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PurchaseOrderPage from '../../pages/PurchaseOrderPage';
@@ -21,11 +22,13 @@ jest.mock('../../utils/dialogs', () => ({
 
 const renderPage = () =>
   render(
-    <MemoryRouter initialEntries={['/purchase-orders/po-1']}>
-      <Routes>
-        <Route path="/purchase-orders/:orderId" element={<PurchaseOrderPage />} />
-      </Routes>
-    </MemoryRouter>
+    <MantineProvider>
+      <MemoryRouter initialEntries={['/purchase-orders/po-1']}>
+        <Routes>
+          <Route path="/purchase-orders/:orderId" element={<PurchaseOrderPage />} />
+        </Routes>
+      </MemoryRouter>
+    </MantineProvider>
   );
 
 const baseOrder = {

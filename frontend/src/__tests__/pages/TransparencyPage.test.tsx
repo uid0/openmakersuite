@@ -1,3 +1,4 @@
+import { MantineProvider } from '@mantine/core';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import TransparencyPage from '../../pages/TransparencyPage';
@@ -70,9 +71,9 @@ describe('TransparencyPage', () => {
     getTransparencyLedgerMock.mockResolvedValue({ data: mockTransparencyData });
 
     render(
-      <MemoryRouter>
+      <MantineProvider><MemoryRouter>
         <TransparencyPage />
-      </MemoryRouter>
+      </MemoryRouter></MantineProvider>
     );
 
     await waitFor(() => {

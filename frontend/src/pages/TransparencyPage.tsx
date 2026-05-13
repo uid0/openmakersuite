@@ -2,8 +2,10 @@
  * Financial Transparency Page - Shows public spending information
  * Dedicated to makerspace transparency and community trust
  */
+import { Button, Paper, Text } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { analyticsAPI } from '../services/api';
 import '../styles/TransparencyPage.css';
 
@@ -105,40 +107,51 @@ const TransparencyPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="transparency-page">
-        <div className="loading">
-          <div className="loading-spinner">🔄</div>
-          <p>Loading transparency data...</p>
-        </div>
-      </div>
+      <WorkspacePage
+        testId="transparency-page"
+        hero={{
+          eyebrow: 'Inventory',
+          title: 'Financial transparency',
+          description: 'Loading…',
+        }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading transparency data…</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="transparency-page">
-        <div className="error">
-          <h2>⚠️ Unable to Load Transparency Data</h2>
-          <p>{error}</p>
-          <button onClick={() => window.location.reload()}>
-            Try Again
-          </button>
-        </div>
-      </div>
+      <WorkspacePage
+        testId="transparency-page"
+        hero={{
+          eyebrow: 'Inventory',
+          title: 'Financial transparency',
+          description: error || 'Unable to load transparency data.',
+          action: (
+            <Button onClick={() => window.location.reload()}>Try again</Button>
+          ),
+        }}
+      >
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error || 'Unable to load transparency data.'}</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="transparency-page">
-      <header className="transparency-header">
-        <h1>
-          <span className="icon">🔍</span>
-          Financial Transparency
-        </h1>
-        <p className="transparency-mission">
-          {data.summary.transparency_note}
-        </p>
-      </header>
+    <WorkspacePage
+      testId="transparency-page"
+      hero={{
+        eyebrow: 'Inventory · Public ledger',
+        title: 'Financial transparency',
+        description: data.summary.transparency_note,
+      }}
+    >
+      <div className="transparency-page">
 
       <div className="summary-section">
         <div className="summary-card">
@@ -391,7 +404,8 @@ const TransparencyPage: React.FC = () => {
           <a href="/tv-dashboard">← Back to Dashboard</a>
         </p>
       </footer>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

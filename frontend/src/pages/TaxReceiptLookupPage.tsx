@@ -3,6 +3,7 @@
  * Public-facing page for looking up tax receipts by serial number
  */
 import React, { useState } from 'react';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { donationsAPI } from '../services/api';
 import { TaxReceipt } from '../types';
 import '../styles/ScanPage.css';
@@ -59,14 +60,18 @@ const TaxReceiptLookupPage: React.FC = () => {
     formatDateOnly(dateString, { year: 'numeric', month: 'long', day: 'numeric' });
 
   return (
-    <div className="scan-page">
-      <div className="scan-container">
-        <h1>Tax Receipt Lookup</h1>
-        <p className="scan-subtitle">
-          Enter your tax receipt serial number to view and download your receipt
-        </p>
-
-        <form onSubmit={handleLookup} className="scan-form">
+    <WorkspacePage
+      testId="tax-receipt-lookup-page"
+      hero={{
+        eyebrow: 'Settings · Tax receipt',
+        title: 'Tax receipt lookup',
+        description: 'Enter your serial number to view and download your receipt.',
+      }}
+      containerSize="sm"
+    >
+      <div className="scan-page">
+        <div className="scan-container">
+          <form onSubmit={handleLookup} className="scan-form">
           <div className="form-group">
             <label htmlFor="serialNumber">Serial Number</label>
             <input
@@ -129,7 +134,8 @@ const TaxReceiptLookupPage: React.FC = () => {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

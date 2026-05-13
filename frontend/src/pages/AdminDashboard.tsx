@@ -8,6 +8,7 @@ import { useForm } from '@mantine/form';
 import { modals } from '@mantine/modals';
 import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useState } from 'react';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
 import '../styles/AdminDashboard.css';
 import { Asset, InventoryItem, ReorderRequest } from '../types';
@@ -337,15 +338,20 @@ const AdminDashboard: React.FC = () => {
   };
 
   return (
-    <div className="admin-dashboard">
-      <header className="dashboard-header">
-        <h1>Admin Dashboard</h1>
-        <div className="header-actions">
-          <button onClick={loadSupplierGroups} className="btn-secondary">
-            View by Supplier
-          </button>
-        </div>
-      </header>
+    <WorkspacePage
+      testId="admin-dashboard"
+      hero={{
+        eyebrow: 'Inventory · Admin',
+        title: 'Admin dashboard',
+        description: 'Reorder queue, supplier groups, and pending requests.',
+        action: (
+          <Button onClick={loadSupplierGroups} variant="default">
+            View by supplier
+          </Button>
+        ),
+      }}
+    >
+      <div className="admin-dashboard">
 
       <div className="filter-bar">
         <button
@@ -663,7 +669,8 @@ const AdminDashboard: React.FC = () => {
           </>
         )}
       </div>
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

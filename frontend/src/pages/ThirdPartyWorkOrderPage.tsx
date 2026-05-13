@@ -40,6 +40,7 @@ import {
   ThirdPartyWorkOrderDto,
   ThirdPartyWorkOrderStatus,
 } from '../services/api';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const STATUS_TO_STEP: Record<ThirdPartyWorkOrderStatus, number> = {
@@ -111,50 +112,55 @@ const ThirdPartyWorkOrderPage: React.FC = () => {
 
   if (loading && !wo) {
     return (
-      <Container size="md" py="md">
+      <WorkspacePage
+        testId="third-party-work-order-page"
+        hero={{
+          eyebrow: 'Maintenance · Third-party WO',
+          title: 'Work order',
+          description: 'Loading…',
+        }}
+        containerSize="md"
+      >
         <Loader />
-      </Container>
+      </WorkspacePage>
     );
   }
 
   if (error || !wo) {
     return (
-      <Container size="md" py="md">
+      <WorkspacePage
+        testId="third-party-work-order-page"
+        hero={{
+          eyebrow: 'Maintenance · Third-party WO',
+          title: 'Work order',
+          description: error ?? 'Not found.',
+        }}
+        containerSize="md"
+      >
         <Alert color="red" icon={<IconAlertTriangle size={16} />}>
           {error ?? 'Work order not found'}
         </Alert>
-      </Container>
+      </WorkspacePage>
     );
   }
 
   const wf = wo.workflow;
 
   const renderHeader = (
-    <Group justify="space-between" align="flex-start" mb="md">
-      <Stack gap={4}>
-        <Title order={2}>
-          {wo.short_id} — {wo.title}
-        </Title>
-        <Text c="dimmed">
-          {wo.vendor_name} · {wo.work_type_display}
-          {wo.is_emergency && ' · Emergency'}
-        </Text>
-      </Stack>
-      <Group gap="xs">
-        <Badge color="blue" size="lg">
-          {wo.status_display}
+    <Group justify="flex-start" gap="xs" wrap="wrap" mb="md">
+      <Badge color="blue" size="lg">
+        {wo.status_display}
+      </Badge>
+      {wo.warranty_recovery && (
+        <Badge color="orange" variant="filled">
+          Warranty Recovery
         </Badge>
-        {wo.warranty_recovery && (
-          <Badge color="orange" variant="filled">
-            Warranty Recovery
-          </Badge>
-        )}
-        {wf.has_active_emergency_authorization && (
-          <Badge color="red" variant="filled">
-            Emergency Auth
-          </Badge>
-        )}
-      </Group>
+      )}
+      {wf.has_active_emergency_authorization && (
+        <Badge color="red" variant="filled">
+          Emergency Auth
+        </Badge>
+      )}
     </Group>
   );
 
@@ -513,7 +519,15 @@ const ThirdPartyWorkOrderPage: React.FC = () => {
   );
 
   return (
-    <Container size="md" py="md">
+    <WorkspacePage
+      testId="third-party-work-order-page"
+      hero={{
+        eyebrow: `Maintenance · Third-party WO · ${wo.short_id}`,
+        title: wo.title,
+        description: `${wo.vendor_name} · ${wo.work_type_display}${wo.is_emergency ? ' · Emergency' : ''}`,
+      }}
+      containerSize="md"
+    >
       {renderHeader}
       {actionError && (
         <Alert color="red" icon={<IconAlertTriangle size={16} />} mb="md">
@@ -543,7 +557,7 @@ const ThirdPartyWorkOrderPage: React.FC = () => {
           {stepClosed}
         </Stepper.Step>
       </Stepper>
-    </Container>
+    </WorkspacePage>
   );
 };
 

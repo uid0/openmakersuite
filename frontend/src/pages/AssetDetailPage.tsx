@@ -2,8 +2,10 @@
  * Asset Detail Page
  * Full page view for asset details with part tracking, problem history, maintenance, QR code, and lock/unlock controls
  */
+import { Badge, Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   AssetLOTORequirements,
   assetPartsAPI,
@@ -328,58 +330,81 @@ const AssetDetailPage: React.FC = () => {
   });
 
   if (loading) {
-    return <div className="asset-detail-loading">Loading asset details...</div>;
+    return (
+      <WorkspacePage
+        testId="asset-detail-page"
+        hero={{ eyebrow: 'Assets', title: 'Asset', description: 'Loading…' }}
+      >
+        <Paper withBorder p="md">
+          <Text c="dimmed">Loading asset details…</Text>
+        </Paper>
+      </WorkspacePage>
+    );
   }
 
   if (error || !asset) {
     return (
-      <div className="asset-detail-error">
-        <p>Error: {error || 'Asset not found'}</p>
-        <button onClick={() => navigate(-1)}>Go Back</button>
-      </div>
+      <WorkspacePage
+        testId="asset-detail-page"
+        hero={{
+          eyebrow: 'Assets',
+          title: 'Asset',
+          description: error || 'Not found.',
+          action: (
+            <Button variant="default" onClick={() => navigate(-1)}>
+              Go back
+            </Button>
+          ),
+        }}
+      >
+        <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
+          <Text>{error || 'Asset not found'}</Text>
+        </Paper>
+      </WorkspacePage>
     );
   }
 
   return (
-    <div className="asset-detail-page">
-      {/* Header */}
-      <div className="asset-detail-header">
-        <div className="asset-detail-header-left">
-          <button className="back-button" onClick={() => navigate(-1)}>
-            ← Back
-          </button>
-          <h1>{asset.name}</h1>
-          <span className={`status-badge ${getStatusBadgeClass(asset.status)}`}>
-            {getStatusLabel(asset.status)}
-          </span>
-        </div>
-        <div className="asset-detail-header-right">
-          {asset.can_unlock && (
-            <>
-              {asset.is_locked ? (
-                <button
-                  className="action-button unlock-button"
+    <WorkspacePage
+      testId="asset-detail-page"
+      hero={{
+        eyebrow: asset.asset_tag ? `Assets · ${asset.asset_tag}` : 'Assets',
+        title: asset.name,
+        description: getStatusLabel(asset.status),
+        action: (
+          <Group gap="sm">
+            {asset.can_unlock && (
+              asset.is_locked ? (
+                <Button
+                  variant="filled"
                   onClick={handleUnlock}
                   disabled={actionLoading === 'unlock'}
+                  loading={actionLoading === 'unlock'}
                 >
-                  {actionLoading === 'unlock' ? 'Unlocking...' : 'Unlock Asset'}
-                </button>
+                  Unlock asset
+                </Button>
               ) : (
-                <button
-                  className="action-button lock-button"
+                <Button
+                  variant="default"
                   onClick={handleLock}
                   disabled={actionLoading === 'lock'}
+                  loading={actionLoading === 'lock'}
                 >
-                  {actionLoading === 'lock' ? 'Locking...' : 'Lock Asset'}
-                </button>
-              )}
-            </>
-          )}
-          <button className="action-button edit-button" onClick={handleEdit}>
-            Edit Asset
-          </button>
-        </div>
-      </div>
+                  Lock asset
+                </Button>
+              )
+            )}
+            <Button onClick={handleEdit}>Edit asset</Button>
+          </Group>
+        ),
+      }}
+    >
+      <div className="asset-detail-page">
+        <Group gap="sm">
+          <Badge size="lg" radius="sm" variant="light">
+            {getStatusLabel(asset.status)}
+          </Badge>
+        </Group>
 
       {/* Asset Image */}
       {asset.image_url && (
@@ -1138,7 +1163,8 @@ const AssetDetailPage: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </WorkspacePage>
   );
 };
 

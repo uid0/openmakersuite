@@ -24,6 +24,7 @@ from .views import (
     MaintenanceItemViewSet,
     MaintenanceLogViewSet,
     MaintenanceMaterialViewSet,
+    MaintenanceRecordViewSet,
     MaintenanceTaskViewSet,
     PriceHistoryViewSet,
     SupplierViewSet,
@@ -51,6 +52,7 @@ router.register(r"maintenance", MaintenanceDashboardViewSet, basename="maintenan
 router.register(r"maintenance-items", MaintenanceItemViewSet)
 router.register(r"maintenance-materials", MaintenanceMaterialViewSet)
 router.register(r"maintenance-logs", MaintenanceLogViewSet)
+router.register(r"maintenance-records", MaintenanceRecordViewSet, basename="maintenance-record")
 router.register(r"maintenance-tasks", MaintenanceTaskViewSet)
 router.register(r"work-orders", WorkOrderViewSet)
 router.register(r"reports/inventory", InventoryReportViewSet, basename="inventory-reports")

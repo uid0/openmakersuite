@@ -10,8 +10,10 @@ from typing import Any, Optional
 
 from django.conf import settings
 from django.contrib.auth.models import Group
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 
 from imagekit.models import ImageSpecField
@@ -2786,3 +2788,96 @@ class MaintenanceAuditEvent(models.Model):
     def __str__(self) -> str:
         target = self.work_order_id or self.location_problem_id
         return f"{self.action} ({target}) @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class MaintenanceRecord(models.Model):
+    """Backdated or recent maintenance event recorded against an asset.
+
+    Captures historical PM/maintenance work that pre-dates OMS tracking
+    (years of vendor service on HVAC, compressors, etc.) or recent jobs
+    we want logged without running the full ThirdPartyWorkOrder workflow.
+    Kept separate from ThirdPartyWorkOrder so the TPWO state machine,
+    par-cost buffers, warranty gates, and audit log stay clean.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.PROTECT,
+        related_name="maintenance_records",
+        help_text="Asset the maintenance was performed on",
+    )
+    title = models.CharField(
+        max_length=200,
+        help_text="Short label, e.g. 'Annual HVAC service'",
+    )
+    description = models.TextField(help_text="Description of the work performed")
+    completed_on = models.DateField(
+        db_index=True,
+        help_text="Calendar date the work was completed",
+    )
+    vendor = models.ForeignKey(
+        "vendors.Vendor",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="maintenance_records",
+        help_text="Vendor that performed the work (outsourced)",
+    )
+    performed_by_internal = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="internal_maintenance_records",
+        help_text="Internal staff member who performed the work",
+    )
+    cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Total cost of the work; null when unknown or N/A",
+    )
+    invoice_number = models.CharField(max_length=64, blank=True)
+    attachment = models.FileField(
+        upload_to="inventory/maintenance_records/",
+        null=True,
+        blank=True,
+        help_text="Invoice PDF, receipt photo, etc.",
+    )
+    notes = models.TextField(blank=True)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recorded_maintenance_records",
+        help_text="User who entered this record",
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-completed_on", "-recorded_at"]
+        indexes = [
+            models.Index(fields=["asset", "-completed_on"], name="maint_rec_asset_done_idx"),
+            models.Index(fields=["vendor", "-completed_on"], name="maint_rec_vendor_done_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.title} ({self.completed_on}) on {self.asset_id}"
+
+    def clean(self) -> None:
+        super().clean()
+        if self.vendor_id is None and self.performed_by_internal_id is None:
+            raise ValidationError(
+                {
+                    "performed_by_internal": (
+                        "Either a vendor or an internal staff member must be set."
+                    )
+                }
+            )
+        if self.completed_on is not None and self.completed_on > timezone.localdate():
+            raise ValidationError({"completed_on": "completed_on cannot be in the future."})

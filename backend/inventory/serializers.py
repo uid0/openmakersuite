@@ -19,6 +19,7 @@ from .models import (
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
+    MaintenanceRecord,
     MaintenanceTask,
     PriceHistory,
     StockReconciliation,
@@ -1721,3 +1722,79 @@ class LocationReconcileItemSerializer(serializers.ModelSerializer):
             "owning_group_name",
         ]
         read_only_fields = fields
+
+
+class MaintenanceRecordSerializer(serializers.ModelSerializer):
+    """Serializer for backdated/recent maintenance records on an asset."""
+
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    vendor_name = serializers.CharField(source="vendor.name", read_only=True, default=None)
+    performed_by_internal_username = serializers.CharField(
+        source="performed_by_internal.username", read_only=True, default=None
+    )
+    recorded_by_username = serializers.CharField(
+        source="recorded_by.username", read_only=True, default=None
+    )
+    attachment_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MaintenanceRecord
+        fields = [
+            "id",
+            "asset",
+            "asset_name",
+            "title",
+            "description",
+            "completed_on",
+            "vendor",
+            "vendor_name",
+            "performed_by_internal",
+            "performed_by_internal_username",
+            "cost",
+            "invoice_number",
+            "attachment",
+            "attachment_url",
+            "notes",
+            "recorded_by",
+            "recorded_by_username",
+            "recorded_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "recorded_by",
+            "recorded_at",
+            "updated_at",
+        ]
+
+    def get_attachment_url(self, obj):
+        if not obj.attachment:
+            return None
+        request = self.context.get("request")
+        url = obj.attachment.url
+        if request is not None:
+            return request.build_absolute_uri(url)
+        return url
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        vendor = attrs.get("vendor", getattr(self.instance, "vendor", None))
+        internal = attrs.get(
+            "performed_by_internal", getattr(self.instance, "performed_by_internal", None)
+        )
+        if vendor is None and internal is None:
+            raise serializers.ValidationError(
+                {
+                    "performed_by_internal": (
+                        "Either a vendor or an internal staff member must be set."
+                    )
+                }
+            )
+        completed_on = attrs.get("completed_on", getattr(self.instance, "completed_on", None))
+        from django.utils import timezone as _tz
+
+        if completed_on is not None and completed_on > _tz.localdate():
+            raise serializers.ValidationError(
+                {"completed_on": "completed_on cannot be in the future."}
+            )
+        return attrs

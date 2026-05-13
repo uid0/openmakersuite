@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import (
     AllowAny,
     IsAdminUser,
@@ -42,6 +42,7 @@ from .models import (
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
+    MaintenanceRecord,
     MaintenanceTask,
     PriceHistory,
     StockReconciliation,
@@ -71,6 +72,7 @@ from .serializers import (
     MaintenanceItemSerializer,
     MaintenanceLogSerializer,
     MaintenanceMaterialSerializer,
+    MaintenanceRecordSerializer,
     MaintenanceTaskSerializer,
     PriceHistorySerializer,
     StockReconciliationBatchSerializer,
@@ -2096,6 +2098,162 @@ class AssetViewSet(viewsets.ModelViewSet):
             {"asset_id": str(asset.id), "hours_used": asset.hours_used},
             status=status.HTTP_200_OK,
         )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="maintenance-history",
+        permission_classes=[IsAuthenticated],
+    )
+    def maintenance_history(self, request, pk=None):
+        """Unified maintenance history for an asset.
+
+        Returns a date-sorted list of both backdated MaintenanceRecord rows
+        and closed ThirdPartyWorkOrder rows that touched this asset (direct
+        ``asset`` FK or via the multi-asset ``assets`` M2M).
+
+        Query params:
+        - ``since`` (YYYY-MM-DD, inclusive) — lower-bound completion date
+        - ``until`` (YYYY-MM-DD, inclusive) — upper-bound completion date
+        - ``source`` — ``all`` (default), ``historical``, or ``workorder``
+        """
+        asset = self.get_object()
+
+        def _parse(name):
+            raw = request.query_params.get(name)
+            if not raw:
+                return None
+            try:
+                return date.fromisoformat(raw)
+            except ValueError:
+                raise DjangoValidationError(f"{name} must be a YYYY-MM-DD date")
+
+        try:
+            since = _parse("since")
+            until = _parse("until")
+        except DjangoValidationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        source = request.query_params.get("source", "all")
+        if source not in {"all", "historical", "workorder"}:
+            return Response(
+                {"detail": "source must be one of 'all', 'historical', 'workorder'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rows = []
+
+        if source in {"all", "historical"}:
+            historical_qs = MaintenanceRecord.objects.select_related(
+                "vendor", "performed_by_internal"
+            ).filter(asset=asset)
+            if since:
+                historical_qs = historical_qs.filter(completed_on__gte=since)
+            if until:
+                historical_qs = historical_qs.filter(completed_on__lte=until)
+            for rec in historical_qs:
+                rows.append(_maintenance_history_row_for_record(rec, request))
+
+        if source in {"all", "workorder"}:
+            from maintenance_orders.models import ThirdPartyWorkOrder
+
+            tpwo_qs = (
+                ThirdPartyWorkOrder.objects.select_related("vendor")
+                .filter(status=ThirdPartyWorkOrder.STATUS_CLOSED)
+                .filter(Q(asset=asset) | Q(assets=asset))
+                .distinct()
+            )
+            for wo in tpwo_qs:
+                row = _maintenance_history_row_for_tpwo(wo)
+                if row is None:
+                    continue
+                if since and row["completed_on"] < since:
+                    continue
+                if until and row["completed_on"] > until:
+                    continue
+                rows.append(row)
+
+        rows.sort(
+            key=lambda r: (r["completed_on"], r.get("_recorded_at") or ""),
+            reverse=True,
+        )
+        for row in rows:
+            row.pop("_recorded_at", None)
+            row["completed_on"] = row["completed_on"].isoformat()
+
+        total_cost = sum(
+            (Decimal(r["cost"]) for r in rows if r.get("cost") is not None),
+            Decimal("0"),
+        )
+        return Response(
+            {
+                "count": len(rows),
+                "total_cost": str(total_cost),
+                "results": rows,
+            }
+        )
+
+
+def _maintenance_history_row_for_record(rec, request):
+    """Serialize a MaintenanceRecord into the unified history envelope."""
+    attachment_url = None
+    if rec.attachment:
+        attachment_url = rec.attachment.url
+        if request is not None:
+            attachment_url = request.build_absolute_uri(attachment_url)
+    return {
+        "id": str(rec.id),
+        "source": "historical",
+        "title": rec.title,
+        "description": rec.description,
+        "completed_on": rec.completed_on,
+        "_recorded_at": rec.recorded_at.isoformat() if rec.recorded_at else "",
+        "performed_by": {
+            "vendor": (
+                {"id": str(rec.vendor.id), "name": rec.vendor.name} if rec.vendor_id else None
+            ),
+            "internal_user": (
+                {
+                    "id": rec.performed_by_internal.id,
+                    "username": rec.performed_by_internal.username,
+                }
+                if rec.performed_by_internal_id
+                else None
+            ),
+        },
+        "cost": str(rec.cost) if rec.cost is not None else None,
+        "invoice_number": rec.invoice_number,
+        "notes": rec.notes,
+        "attachment_url": attachment_url,
+        "detail_url": None,
+    }
+
+
+def _maintenance_history_row_for_tpwo(wo):
+    """Serialize a closed ThirdPartyWorkOrder into the unified history envelope."""
+    if wo.closed_at:
+        completed = wo.closed_at.date()
+    elif wo.downtime_end:
+        completed = wo.downtime_end.date()
+    else:
+        return None
+    return {
+        "id": str(wo.id),
+        "source": "workorder",
+        "title": wo.title,
+        "description": wo.notes or "",
+        "completed_on": completed,
+        "_recorded_at": wo.closed_at.isoformat() if wo.closed_at else "",
+        "performed_by": {
+            "vendor": ({"id": str(wo.vendor.id), "name": wo.vendor.name} if wo.vendor_id else None),
+            "internal_user": None,
+        },
+        "cost": (str(wo.actual_invoice_total) if wo.actual_invoice_total is not None else None),
+        "invoice_number": "",
+        "notes": wo.notes or "",
+        "attachment_url": None,
+        "detail_url": f"/work-orders/{wo.id}",
+    }
 
 
 class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):
@@ -4906,3 +5064,55 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
         filename = f"reconcile_location_{location.pk}.csv"
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
+
+
+class MaintenanceRecordViewSet(viewsets.ModelViewSet):
+    """API for backdated/recent maintenance records on assets.
+
+    Permissions:
+    - Read: any authenticated user.
+    - Create/update: staff, Logistics, or SIG admin (`IsAuthenticatedOrStaffSigAdminWrite`).
+    - Delete: staff/superuser only (deletions are auditable but not undoable).
+    """
+
+    queryset = MaintenanceRecord.objects.select_related(
+        "asset", "vendor", "performed_by_internal", "recorded_by"
+    )
+    serializer_class = MaintenanceRecordSerializer
+    permission_classes = [IsAuthenticatedOrStaffSigAdminWrite]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        vendor_id = self.request.query_params.get("vendor")
+        if vendor_id:
+            qs = qs.filter(vendor_id=vendor_id)
+        since = self.request.query_params.get("since")
+        if since:
+            try:
+                qs = qs.filter(completed_on__gte=date.fromisoformat(since))
+            except ValueError:
+                pass
+        until = self.request.query_params.get("until")
+        if until:
+            try:
+                qs = qs.filter(completed_on__lte=date.fromisoformat(until))
+            except ValueError:
+                pass
+        return qs
+
+    def perform_create(self, serializer):
+        user = self.request.user if self.request.user.is_authenticated else None
+        serializer.save(recorded_by=user)
+
+    def destroy(self, request, *args, **kwargs):
+        user = request.user
+        if not (user.is_authenticated and (user.is_staff or user.is_superuser)):
+            return Response(
+                {"detail": "Only staff may delete maintenance records."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().destroy(request, *args, **kwargs)

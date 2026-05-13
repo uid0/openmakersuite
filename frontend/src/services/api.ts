@@ -554,6 +554,114 @@ export const assetsAPI = {
 
   getMaintenanceItems: (assetId: string) =>
     api.get<MaintenanceItem[]>(`/inventory/assets/${assetId}/maintenance_items/`),
+
+  getMaintenanceHistory: (assetId: string, params?: {
+    since?: string;
+    until?: string;
+    source?: 'all' | 'historical' | 'workorder';
+  }) =>
+    api.get<MaintenanceHistoryResponse>(
+      `/inventory/assets/${assetId}/maintenance-history/`,
+      { params },
+    ),
+};
+
+// Asset Maintenance History (oms-0xxlp2)
+export interface MaintenanceHistoryRow {
+  id: string;
+  source: 'historical' | 'workorder';
+  title: string;
+  description: string;
+  completed_on: string;
+  performed_by: {
+    vendor: { id: string; name: string } | null;
+    internal_user: { id: number; username: string } | null;
+  };
+  cost: string | null;
+  invoice_number: string;
+  notes: string;
+  attachment_url: string | null;
+  detail_url: string | null;
+}
+
+export interface MaintenanceHistoryResponse {
+  count: number;
+  total_cost: string;
+  results: MaintenanceHistoryRow[];
+}
+
+export interface MaintenanceRecord {
+  id: string;
+  asset: string;
+  asset_name: string;
+  title: string;
+  description: string;
+  completed_on: string;
+  vendor: string | null;
+  vendor_name: string | null;
+  performed_by_internal: number | null;
+  performed_by_internal_username: string | null;
+  cost: string | null;
+  invoice_number: string;
+  attachment: string | null;
+  attachment_url: string | null;
+  notes: string;
+  recorded_by: number | null;
+  recorded_by_username: string | null;
+  recorded_at: string;
+  updated_at: string;
+}
+
+export interface MaintenanceRecordCreatePayload {
+  asset: string;
+  title: string;
+  description: string;
+  completed_on: string;
+  vendor?: string | null;
+  performed_by_internal?: number | null;
+  cost?: string | null;
+  invoice_number?: string;
+  notes?: string;
+  attachment?: File | null;
+}
+
+export const maintenanceRecordsAPI = {
+  list: (params?: { asset?: string; vendor?: string; since?: string; until?: string }) =>
+    api.get<{ count: number; results: MaintenanceRecord[] } | MaintenanceRecord[]>(
+      '/inventory/maintenance-records/',
+      { params },
+    ),
+
+  get: (id: string) =>
+    api.get<MaintenanceRecord>(`/inventory/maintenance-records/${id}/`),
+
+  create: (payload: MaintenanceRecordCreatePayload) => {
+    if (payload.attachment) {
+      const form = new FormData();
+      form.append('asset', payload.asset);
+      form.append('title', payload.title);
+      form.append('description', payload.description);
+      form.append('completed_on', payload.completed_on);
+      if (payload.vendor) form.append('vendor', payload.vendor);
+      if (payload.performed_by_internal != null) {
+        form.append('performed_by_internal', String(payload.performed_by_internal));
+      }
+      if (payload.cost != null && payload.cost !== '') form.append('cost', payload.cost);
+      if (payload.invoice_number) form.append('invoice_number', payload.invoice_number);
+      if (payload.notes) form.append('notes', payload.notes);
+      form.append('attachment', payload.attachment);
+      return api.post<MaintenanceRecord>('/inventory/maintenance-records/', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.post<MaintenanceRecord>('/inventory/maintenance-records/', payload);
+  },
+
+  update: (id: string, payload: Partial<MaintenanceRecordCreatePayload>) =>
+    api.patch<MaintenanceRecord>(`/inventory/maintenance-records/${id}/`, payload),
+
+  delete: (id: string) =>
+    api.delete(`/inventory/maintenance-records/${id}/`),
 };
 
 // Location Problem API (oms-sd1)

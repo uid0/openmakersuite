@@ -516,6 +516,29 @@ FORGEKEY_WEBHOOK_ALLOWED_IPS = [
     if entry.strip()
 ]
 
+# Device-identity trust foundation (oms-d2axqu / forgekey-trust-refactor).
+#
+# FORGEKEY_CA_KEY_ENCRYPTION_KEY: base64-encoded 32-byte KEK used to wrap the
+# internal CA's private key with Fernet at rest. Required to bootstrap or
+# decrypt the CA. Generate with:
+#     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Empty in dev/test by default; the management command and signing service
+# fail loud on missing/invalid keys rather than silently falling back to
+# plaintext.
+FORGEKEY_CA_KEY_ENCRYPTION_KEY = config("FORGEKEY_CA_KEY_ENCRYPTION_KEY", default="")
+
+# How long an unfinished DeviceEnrollment session is valid before the
+# enrollment endpoint considers it expired. 10 minutes by default.
+FORGEKEY_ENROLLMENT_SESSION_TTL_SECONDS = config(
+    "FORGEKEY_ENROLLMENT_SESSION_TTL_SECONDS", default=600, cast=int
+)
+
+# Client-certificate validity for /enroll/-issued certs (in days). 365 by
+# default. Re-enrollment issues a fresh cert and revokes the prior one.
+FORGEKEY_CLIENT_CERT_VALIDITY_DAYS = config(
+    "FORGEKEY_CLIENT_CERT_VALIDITY_DAYS", default=365, cast=int
+)
+
 # Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {
     "TITLE": "Makerspace Inventory Management API",

@@ -643,10 +643,13 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
-  forgekey.views.ForgeKeyDevicePhotoUploadView:
+  forgekey.views.ForgeKeyCertificateRevocationListView:
     permission_classes:
     - AllowAny
-  forgekey.views.ForgeKeyDeviceRegisterView:
+  forgekey.views.ForgeKeyDeviceEnrollView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.ForgeKeyDevicePhotoUploadView:
     permission_classes:
     - AllowAny
   forgekey.views.ForgeKeyFirmwareDownloadView:
@@ -656,6 +659,9 @@ views:
     permission_classes:
     - AllowAny
   forgekey.views.ForgeKeyJWKSView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.ForgeKeyOmsCommandPublicKeyView:
     permission_classes:
     - AllowAny
   forgekey.views.MqttWebhookView:

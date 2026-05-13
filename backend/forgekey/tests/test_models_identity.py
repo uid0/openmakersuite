@@ -23,7 +23,6 @@ from forgekey.models import (
     DeviceIdentity,
 )
 
-
 pytestmark = pytest.mark.django_db
 
 

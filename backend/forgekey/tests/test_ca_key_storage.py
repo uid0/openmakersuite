@@ -17,7 +17,6 @@ from cryptography.fernet import Fernet
 
 from forgekey.services import ca_key_storage
 
-
 VALID_KEK = Fernet.generate_key().decode("ascii")
 ALT_KEK = Fernet.generate_key().decode("ascii")
 
@@ -55,9 +54,7 @@ def test_non_base64_kek_fails_loud(settings):
 
 def test_wrong_length_kek_fails_loud(settings):
     # 16 bytes (not 32) — Fernet requires exactly 32-byte material.
-    settings.FORGEKEY_CA_KEY_ENCRYPTION_KEY = base64.urlsafe_b64encode(b"\x00" * 16).decode(
-        "ascii"
-    )
+    settings.FORGEKEY_CA_KEY_ENCRYPTION_KEY = base64.urlsafe_b64encode(b"\x00" * 16).decode("ascii")
     with pytest.raises(ca_key_storage.CaKeyStorageError):
         ca_key_storage.encrypt_ca_key(b"data")
 

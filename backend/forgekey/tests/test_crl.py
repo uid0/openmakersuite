@@ -9,21 +9,20 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from cryptography import x509
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import serialization
 from django.core.management import call_command
 from django.urls import reverse
 from django.utils import timezone
+
 import pytest
+from cryptography import x509
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from forgekey.models import (
     CertificateAuthority,
     DeviceCertificate,
     DeviceIdentity,
 )
-
 
 pytestmark = pytest.mark.django_db
 

@@ -42,9 +42,7 @@ def _kek_material() -> bytes:
             "FORGEKEY_CA_KEY_ENCRYPTION_KEY is not valid urlsafe base64."
         ) from exc
     if len(decoded) != 32:
-        raise CaKeyStorageError(
-            "FORGEKEY_CA_KEY_ENCRYPTION_KEY must be 32 bytes (urlsafe base64)."
-        )
+        raise CaKeyStorageError("FORGEKEY_CA_KEY_ENCRYPTION_KEY must be 32 bytes (urlsafe base64).")
     return raw.encode("ascii")
 
 

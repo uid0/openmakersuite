@@ -11,16 +11,17 @@ from __future__ import annotations
 import json
 from io import BytesIO
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from django.urls import reverse
+
+import pytest
 from cryptography import x509
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.core.management import call_command
-from django.urls import reverse
 from PIL import Image
-import pytest
 
 from forgekey.models import (
     CertificateAuthority,
@@ -31,7 +32,6 @@ from forgekey.models import (
     ESP32Device,
 )
 from forgekey.tests.factories import DeviceTypeFactory
-
 
 pytestmark = pytest.mark.django_db
 
@@ -130,9 +130,7 @@ def _post_enroll(
 # ---------------------------------------------------------------------------
 
 
-def test_enroll_returns_documented_fields(
-    api_client, enroll_url, active_ca, people_counter_type
-):
+def test_enroll_returns_documented_fields(api_client, enroll_url, active_ca, people_counter_type):
     resp = _post_enroll(api_client, enroll_url, photo=_jpeg())
     assert resp.status_code == 201, resp.content
     body = resp.json()
@@ -222,9 +220,7 @@ def test_decommissioned_identity_returns_403(
 # ---------------------------------------------------------------------------
 
 
-def test_enroll_missing_token_returns_401(
-    api_client, enroll_url, active_ca, people_counter_type
-):
+def test_enroll_missing_token_returns_401(api_client, enroll_url, active_ca, people_counter_type):
     resp = _post_enroll(api_client, enroll_url, token=None)
     assert resp.status_code == 401
     assert resp.json()["code"] == "token_missing"
@@ -242,9 +238,7 @@ def test_enroll_wrong_token_returns_401_with_diagnostics(
     assert PROVISIONING_TOKEN not in resp.content.decode("utf-8")
 
 
-def test_enroll_malformed_csr_returns_400(
-    api_client, enroll_url, active_ca, people_counter_type
-):
+def test_enroll_malformed_csr_returns_400(api_client, enroll_url, active_ca, people_counter_type):
     resp = _post_enroll(
         api_client,
         enroll_url,
@@ -275,9 +269,7 @@ def test_enroll_missing_unique_chip_id_returns_400(
     assert resp.json()["code"] == "unique_chip_id_missing"
 
 
-def test_enroll_missing_csr_returns_400(
-    api_client, enroll_url, active_ca, people_counter_type
-):
+def test_enroll_missing_csr_returns_400(api_client, enroll_url, active_ca, people_counter_type):
     meta = {
         "mac_address": "AA:BB:CC:DD:EE:02",
         "unique_chip_id": "chip-2",
@@ -306,9 +298,7 @@ def test_enroll_invalid_metadata_json_returns_400(
     assert resp.json()["code"] == "metadata_invalid_json"
 
 
-def test_enroll_returns_503_when_no_ca_configured(
-    api_client, enroll_url, people_counter_type
-):
+def test_enroll_returns_503_when_no_ca_configured(api_client, enroll_url, people_counter_type):
     # No active_ca fixture — service is not bootstrapped.
     resp = _post_enroll(api_client, enroll_url)
     assert resp.status_code == 503

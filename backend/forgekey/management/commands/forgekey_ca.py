@@ -75,9 +75,7 @@ class Command(BaseCommand):
             )
 
         try:
-            private_pem, ca_cert = generate_ca_keypair(
-                cn=cn, validity_days=validity_years * 365
-            )
+            private_pem, ca_cert = generate_ca_keypair(cn=cn, validity_days=validity_years * 365)
         except Exception as exc:
             raise CommandError(f"Failed to generate CA keypair: {exc}") from exc
 
@@ -110,9 +108,7 @@ class Command(BaseCommand):
             f"to {ca_cert.not_valid_after_utc.isoformat()}"
         )
         if active is not None:
-            self.stdout.write(
-                self.style.WARNING(f"  Replaced prior active CA {active.name!r}.")
-            )
+            self.stdout.write(self.style.WARNING(f"  Replaced prior active CA {active.name!r}."))
 
     # ----- status ---------------------------------------------------------
 

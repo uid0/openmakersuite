@@ -90,6 +90,7 @@ class TestSeedDeviceTypesMigration:
             assert row.is_active is True
             assert row.name  # non-empty human-readable label
 
+
 # ---------------------------------------------------------------------------
 # AC: periodic photo upload
 # ---------------------------------------------------------------------------

@@ -11,14 +11,14 @@ from __future__ import annotations
 
 from io import StringIO
 
-from cryptography import x509
-from cryptography.fernet import Fernet
 from django.core.management import call_command
 from django.core.management.base import CommandError
+
 import pytest
+from cryptography import x509
+from cryptography.fernet import Fernet
 
 from forgekey.models import CertificateAuthority
-
 
 pytestmark = pytest.mark.django_db
 

@@ -11,12 +11,12 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
 from cryptography import x509
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import ExtensionOID, NameOID
-import pytest
 
 from forgekey.models import CertificateAuthority
 from forgekey.services.ca_key_storage import encrypt_ca_key
@@ -27,7 +27,6 @@ from forgekey.services.csr_signing import (
     sign_csr,
     validate_csr,
 )
-
 
 pytestmark = pytest.mark.django_db
 
@@ -62,13 +61,17 @@ def _build_csr(
     *,
     cn: str = "forgekey-aabbccddeeff",
     private_key=None,
-    sig_hash=hashes.SHA256(),
+    sig_hash=None,
 ):
     if private_key is None:
         private_key = ec.generate_private_key(ec.SECP256R1())
+    if sig_hash is None:
+        sig_hash = hashes.SHA256()
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
-    csr = x509.CertificateSigningRequestBuilder().subject_name(subject).sign(
-        private_key=private_key, algorithm=sig_hash
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(subject)
+        .sign(private_key=private_key, algorithm=sig_hash)
     )
     return private_key, csr.public_bytes(serialization.Encoding.PEM).decode("ascii")
 

@@ -17,7 +17,6 @@ from django.utils import timezone
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -99,9 +98,6 @@ from .utils import (
     device_firmware_topic_for,
     device_ping_topic_for,
     device_status_topic_for,
-    generate_device_jwt,
-    get_mqtt_firmware_topic,
-    get_mqtt_ping_topic,
     normalize_mac_address,
     normalize_sensor_kind,
     verify_device_jwt,
@@ -351,9 +347,7 @@ class ForgeKeyDeviceEnrollView(APIView):
             )
 
         now = timezone.now()
-        ttl_seconds = int(
-            getattr(settings, "FORGEKEY_ENROLLMENT_SESSION_TTL_SECONDS", 600) or 600
-        )
+        ttl_seconds = int(getattr(settings, "FORGEKEY_ENROLLMENT_SESSION_TTL_SECONDS", 600) or 600)
         active_ca = CertificateAuthority.get_active()
         ca_name = active_ca.name if active_ca else ""
 
@@ -376,9 +370,9 @@ class ForgeKeyDeviceEnrollView(APIView):
             )
 
             # Re-enrollment supersedes the previous cert.
-            DeviceCertificate.objects.filter(
-                device=identity, revoked_at__isnull=True
-            ).update(revoked_at=now)
+            DeviceCertificate.objects.filter(device=identity, revoked_at__isnull=True).update(
+                revoked_at=now
+            )
 
             certificate = DeviceCertificate.objects.create(
                 device=identity,
@@ -1738,9 +1732,7 @@ class ForgeKeyCertificateRevocationListView(APIView):
             try:
                 serial_int = int(cert_row.serial, 16)
             except (TypeError, ValueError):
-                logger.warning(
-                    "CRL: skipping revoked cert with non-hex serial %r", cert_row.serial
-                )
+                logger.warning("CRL: skipping revoked cert with non-hex serial %r", cert_row.serial)
                 continue
             revoked = (
                 x509.RevokedCertificateBuilder()

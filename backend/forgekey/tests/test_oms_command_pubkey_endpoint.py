@@ -9,10 +9,10 @@ build can bake it into ``oms_command_pubkey.h``.
 from __future__ import annotations
 
 from django.urls import reverse
+
 import pytest
 
 from forgekey.services.jwt_signing import get_jwt_public_key_pem
-
 
 pytestmark = pytest.mark.django_db
 

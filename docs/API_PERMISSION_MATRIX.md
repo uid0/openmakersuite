@@ -144,10 +144,12 @@ below are public.
 | --- | --- | --- | --- |
 | any | `forgekey/devices/...` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly` on `ESP32DeviceViewSet`/`AssetDeviceViewSet`/`DeviceTypeViewSet`/`DeviceLockoutViewSet`/`DeviceUsageViewSet`. Custom write `@action`s elevate to `IsAdminUser`. |
 | any | `forgekey/firmware/...` | member | `IsAuthenticated` on `FirmwareVersionViewSet` and `DeviceFirmwareUpdateViewSet`. |
-| POST | `forgekey/devices/register/` | device-token | `AllowAny` at DRF; the view validates a provisioning token (`FORGEKEY_PROVISIONING_TOKEN`) before any state change. |
+| POST | `forgekey/devices/enroll/` | device-token | `AllowAny` at DRF; the view validates the provisioning token (`X-ForgeKey-Provisioning-Token` → `FORGEKEY_PROVISIONING_TOKEN`), validates the CSR, signs it, and links the resulting cert to a `DeviceIdentity`. Replaces the prior `/devices/register/` endpoint. |
 | POST | `forgekey/devices/<id>/photo/` | device-token | `AllowAny` at DRF; signed device payload is validated in the view body. |
 | GET | `forgekey/firmware/<id>/download/` | device-token | `AllowAny` + signed download URL. |
 | GET | `forgekey/firmware/public-key/` | public | Returns the firmware-signing public key (required for OTA). |
+| GET | `forgekey/oms-command-public-key.pem` | public | Returns the OMS command-verification public key (PEM). Used by firmware to verify signed commands. |
+| GET | `forgekey/ca/crl.pem` | public | OMS-internal CA's Certificate Revocation List for the device client-certificate PKI. |
 | GET | `forgekey/.well-known/jwks.json` | public | JWKS endpoint for issued device JWTs. |
 | POST | `forgekey/mqtt-webhook/` | webhook-secret | `AllowAny` + HMAC validation in the view body. |
 | any | `forgekey/asset-authorizations/...`, `forgekey/operational-modes/...`, `forgekey/power-meter-readings/...` | member-rw | `IsAuthenticatedOrReadOnly` ViewSets feeding the device control panel. |

@@ -7,11 +7,16 @@ import hmac
 import json
 import logging
 import re
+from datetime import timedelta
 
 from django.conf import settings
+from django.db import transaction
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -28,8 +33,12 @@ from .audit import record_event as record_audit_event
 from .models import (
     AssetAuthorization,
     AssetDevice,
+    CertificateAuthority,
+    DeviceCertificate,
     DeviceCommand,
+    DeviceEnrollment,
     DeviceFirmwareUpdate,
+    DeviceIdentity,
     DeviceLockout,
     DeviceType,
     DeviceUsage,
@@ -55,6 +64,12 @@ from .serializers import (
     OperationalModeSerializer,
     PowerMeterReadingSerializer,
 )
+from .services.ca_key_storage import CaKeyStorageError, decrypt_ca_key
+from .services.csr_signing import (
+    CsrSigningError,
+    CsrValidationError,
+    sign_csr,
+)
 from .services.device_commands import DeviceCommandError, publish_command
 from .services.firmware_download_token import verify_download_token
 from .services.firmware_signing import (
@@ -62,7 +77,12 @@ from .services.firmware_signing import (
     get_public_key_pem,
     is_signing_configured,
 )
-from .services.jwt_signing import JwtSigningError, get_jwt_jwks, is_jwt_signing_configured
+from .services.jwt_signing import (
+    JwtSigningError,
+    get_jwt_jwks,
+    get_jwt_public_key_pem,
+    is_jwt_signing_configured,
+)
 from .tasks import (
     disable_device,
     enable_device,
@@ -74,9 +94,10 @@ from .tasks import (
     request_device_status,
 )
 from .utils import (
-    generate_device_jwt,
-    get_mqtt_firmware_topic,
-    get_mqtt_ping_topic,
+    device_command_topic_for,
+    device_firmware_topic_for,
+    device_ping_topic_for,
+    device_status_topic_for,
     normalize_mac_address,
     normalize_sensor_kind,
     verify_device_jwt,
@@ -177,16 +198,29 @@ def _provisioning_token_valid(request) -> bool:
     return ok
 
 
-class ForgeKeyDeviceRegisterView(APIView):
+class ForgeKeyDeviceEnrollView(APIView):
     """
-    POST /api/forgekey/devices/register/
+    POST /api/forgekey/devices/enroll/
 
-    Accepts a multipart/form-data request from a freshly-booted ESP32 device
-    containing an enrollment photo plus identifying metadata. Idempotent on
-    ``mac_address`` — re-posting updates the existing row.
+    Bootstrap endpoint for ESP32 devices. The firmware posts a multipart
+    request containing:
 
-    Auth: shared FORGEKEY_PROVISIONING_TOKEN, supplied via the
-    ``X-ForgeKey-Provisioning-Token`` request header.
+      * ``metadata`` (JSON): ``mac_address``, ``firmware_version``,
+        ``sensor_kind``, ``csr_pem``, ``unique_chip_id``, ``chip_info``,
+        plus optional ``boot_count``, ``free_heap``, ``ip``,
+        ``flash_memory_id``.
+      * ``photo`` (image/jpeg, optional — non-imaging sensors send
+        metadata-only).
+
+    On success the server creates / refreshes the per-chip ``DeviceIdentity``,
+    issues a fresh mTLS client certificate signed by the active CA, revokes
+    the prior certificate if one existed, binds the legacy ``ESP32Device`` row
+    to the identity, and returns the certificate, the OMS command-verification
+    public key, and a broker policy tailored to this device.
+
+    Auth: shared ``FORGEKEY_PROVISIONING_TOKEN`` supplied in the
+    ``X-ForgeKey-Provisioning-Token`` header (same bootstrap secret used by
+    the legacy ``/register/`` endpoint).
     """
 
     authentication_classes: list = []
@@ -197,7 +231,7 @@ class ForgeKeyDeviceRegisterView(APIView):
         ok, error_code, diagnostics = _classify_provisioning_token(request)
         if not ok:
             logger.warning(
-                "ForgeKey register: provisioning auth failed code=%s "
+                "ForgeKey enroll: provisioning auth failed code=%s "
                 "expected_fp=%s expected_len=%d supplied_fp=%s supplied_len=%d "
                 "remote=%s",
                 error_code,
@@ -209,127 +243,233 @@ class ForgeKeyDeviceRegisterView(APIView):
             )
             return _provisioning_auth_error_response(error_code, diagnostics)
 
-        # Metadata may arrive either as top-level multipart fields or as a
-        # JSON blob under the "metadata" field — accept both shapes.
         meta_blob = request.data.get("metadata")
         if isinstance(meta_blob, str):
             try:
                 meta = json.loads(meta_blob)
             except json.JSONDecodeError:
                 return Response(
-                    {"detail": "metadata field must be valid JSON."},
+                    {
+                        "detail": "metadata field must be valid JSON.",
+                        "code": "metadata_invalid_json",
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+        elif isinstance(meta_blob, dict):
+            meta = meta_blob
         else:
             meta = {k: v for k, v in request.data.items() if k not in ("photo", "metadata")}
 
-        mac_raw = meta.get("mac_address")
-        if not mac_raw:
-            return Response(
-                {"detail": "mac_address is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            mac = normalize_mac_address(mac_raw)
-        except Exception:
-            return Response(
-                {"detail": "mac_address is malformed."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        raw_device_type = meta.get("device_type") or meta.get("sensor_kind")
-        device_type_code = normalize_sensor_kind(raw_device_type) if raw_device_type else None
-        device_type_obj = None
-        if device_type_code:
-            device_type_obj = DeviceType.objects.filter(code=device_type_code).first()
-            if device_type_obj is None:
-                valid_codes = sorted(
-                    DeviceType.objects.filter(is_active=True).values_list("code", flat=True)
-                )
-                logger.warning(
-                    "ForgeKey register: unknown device_type %r (normalized=%r) from mac=%s",
-                    raw_device_type,
-                    device_type_code,
-                    mac,
-                )
-                return Response(
-                    {
-                        "detail": (
-                            f"Unknown device_type '{raw_device_type}'. "
-                            f"Valid: {', '.join(valid_codes)}"
-                        ),
-                        "valid_device_types": valid_codes,
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        defaults = {
-            "firmware_version": meta.get("firmware_version", ""),
-            "boot_count": meta.get("boot_count"),
-            "free_heap": meta.get("free_heap"),
-            "ip": meta.get("ip"),
-            "last_seen": timezone.now(),
-        }
-        if device_type_obj is not None:
-            defaults["device_type"] = device_type_obj
-
-        device = ESP32Device.objects.filter(mac_address=mac).first()
-        created = device is None
-        if created:
-            if device_type_obj is None:
-                valid_codes = sorted(
-                    DeviceType.objects.filter(is_active=True).values_list("code", flat=True)
-                )
-                return Response(
-                    {
-                        "detail": (
-                            "device_type is required for first registration. "
-                            f"Valid: {', '.join(valid_codes)}"
-                        ),
-                        "valid_device_types": valid_codes,
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            device = ESP32Device(mac_address=mac, **defaults)
-        else:
-            for field, value in defaults.items():
-                if value is not None and value != "":
-                    setattr(device, field, value)
-
-        photo = request.FILES.get("photo")
-        if photo is not None:
-            device.enrollment_photo = photo
-
-        device.save()
-
-        sensor_kind_for_topic = device_type_code or (
-            device.device_type.code if device.device_type_id else ""
-        )
-        try:
-            token = generate_device_jwt(mac)
-        except JwtSigningError as exc:
-            logger.error("ForgeKey register: JWT signing key misconfigured: %s", exc)
+        unique_chip_id = (meta.get("unique_chip_id") or "").strip()
+        if not unique_chip_id:
             return Response(
                 {
-                    "detail": "Device JWT signing is not configured on the server.",
-                    "error_code": "jwt_signing_unconfigured",
+                    "detail": "unique_chip_id is required.",
+                    "code": "unique_chip_id_missing",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        csr_pem = meta.get("csr_pem") or ""
+        if not csr_pem:
+            return Response(
+                {"detail": "csr_pem is required.", "code": "csr_pem_missing"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        mac_raw = meta.get("mac_address") or ""
+        mac_normalized = ""
+        if mac_raw:
+            try:
+                mac_normalized = normalize_mac_address(mac_raw)
+            except Exception:
+                return Response(
+                    {
+                        "detail": "mac_address is malformed.",
+                        "code": "mac_address_invalid",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        raw_sensor_kind = meta.get("sensor_kind") or meta.get("device_type") or ""
+        sensor_kind_code = normalize_sensor_kind(raw_sensor_kind) if raw_sensor_kind else ""
+
+        token_fp_full = (
+            hashlib.sha256(
+                (request.headers.get("x-forgekey-provisioning-token", "") or "").encode("utf-8")
+            ).hexdigest()
+            if request.headers.get("x-forgekey-provisioning-token")
+            else ""
+        )
+
+        identity, _ = DeviceIdentity.objects.get_or_create(device_id=unique_chip_id)
+        if identity.status == DeviceIdentity.STATUS_DECOMMISSIONED:
+            logger.warning(
+                "ForgeKey enroll: refusing re-issue for decommissioned chip %s",
+                unique_chip_id,
+            )
+            return Response(
+                {
+                    "detail": "Device identity is decommissioned.",
+                    "code": "identity_decommissioned",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            signed = sign_csr(
+                csr_pem,
+                device_id=unique_chip_id,
+            )
+        except CsrValidationError as exc:
+            logger.info("ForgeKey enroll: rejecting CSR — %s", exc)
+            return Response(
+                {"detail": str(exc), "code": "csr_invalid"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except CsrSigningError as exc:
+            logger.error("ForgeKey enroll: CA unavailable — %s", exc)
+            return Response(
+                {"detail": str(exc), "code": "ca_unavailable"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            command_public_pem = get_jwt_public_key_pem()
+        except JwtSigningError as exc:
+            logger.error("ForgeKey enroll: command-key not configured — %s", exc)
+            return Response(
+                {
+                    "detail": "Command-signing key is not configured.",
+                    "code": "command_key_unconfigured",
                 },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return Response(
-            {
-                "device_id": str(device.id),
-                "assigned_location_id": (str(device.location_id) if device.location_id else None),
-                "mqtt_topic_for_firmware": get_mqtt_firmware_topic(mac),
-                "mqtt_topic_for_pings": get_mqtt_ping_topic(mac, sensor_kind_for_topic),
-                "mqtt_broker_host": (settings.PUBLIC_MQTT_BROKER_HOST or settings.MQTT_BROKER_HOST),
-                "mqtt_broker_port": settings.PUBLIC_MQTT_BROKER_PORT,
-                "mqtt_broker_use_tls": settings.PUBLIC_MQTT_BROKER_USE_TLS,
-                "jwt_token": token,
-                "created": created,
-            },
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-        )
+
+        now = timezone.now()
+        ttl_seconds = int(getattr(settings, "FORGEKEY_ENROLLMENT_SESSION_TTL_SECONDS", 600) or 600)
+        active_ca = CertificateAuthority.get_active()
+        ca_name = active_ca.name if active_ca else ""
+
+        with transaction.atomic():
+            enrollment = DeviceEnrollment.objects.create(
+                device=identity,
+                csr_pem=csr_pem,
+                unique_chip_id=unique_chip_id,
+                mac_address=mac_normalized,
+                sensor_kind=sensor_kind_code,
+                firmware_version=meta.get("firmware_version", "") or "",
+                chip_info=meta.get("chip_info") or {},
+                boot_count=meta.get("boot_count"),
+                free_heap=meta.get("free_heap"),
+                ip_address=meta.get("ip") or meta.get("ip_address") or None,
+                flash_memory_id=meta.get("flash_memory_id", "") or "",
+                token_fingerprint=token_fp_full,
+                status=DeviceEnrollment.STATUS_PENDING,
+                expires_at=now + timedelta(seconds=ttl_seconds),
+            )
+
+            # Re-enrollment supersedes the previous cert.
+            DeviceCertificate.objects.filter(device=identity, revoked_at__isnull=True).update(
+                revoked_at=now
+            )
+
+            certificate = DeviceCertificate.objects.create(
+                device=identity,
+                serial=signed.serial,
+                subject=signed.subject,
+                fingerprint_sha256=signed.fingerprint_sha256,
+                not_before=signed.not_before,
+                not_after=signed.not_after,
+                issued_by=ca_name,
+            )
+
+            enrollment.certificate = certificate
+            enrollment.status = DeviceEnrollment.STATUS_ISSUED
+            enrollment.approved_at = now
+            photo = request.FILES.get("photo")
+            if photo is not None:
+                enrollment.enrollment_photo = photo
+            enrollment.save()
+
+            esp_device = None
+            if mac_normalized:
+                esp_device = ESP32Device.objects.filter(mac_address=mac_normalized).first()
+                if esp_device is None:
+                    device_type_obj = None
+                    if sensor_kind_code:
+                        device_type_obj = DeviceType.objects.filter(code=sensor_kind_code).first()
+                    if device_type_obj is not None:
+                        esp_device = ESP32Device.objects.create(
+                            mac_address=mac_normalized,
+                            device_type=device_type_obj,
+                            firmware_version=meta.get("firmware_version", "") or "",
+                            boot_count=meta.get("boot_count"),
+                            free_heap=meta.get("free_heap"),
+                            ip=meta.get("ip") or meta.get("ip_address"),
+                            last_seen=now,
+                            identity=identity,
+                        )
+                else:
+                    update_fields = []
+                    if esp_device.identity_id != identity.id:
+                        esp_device.identity = identity
+                        update_fields.append("identity")
+                    if meta.get("firmware_version"):
+                        esp_device.firmware_version = meta["firmware_version"]
+                        update_fields.append("firmware_version")
+                    if meta.get("boot_count") is not None:
+                        esp_device.boot_count = meta["boot_count"]
+                        update_fields.append("boot_count")
+                    if meta.get("free_heap") is not None:
+                        esp_device.free_heap = meta["free_heap"]
+                        update_fields.append("free_heap")
+                    raw_ip = meta.get("ip") or meta.get("ip_address")
+                    if raw_ip:
+                        esp_device.ip = raw_ip
+                        update_fields.append("ip")
+                    esp_device.last_seen = now
+                    update_fields.append("last_seen")
+                    if photo is not None:
+                        esp_device.enrollment_photo = photo
+                        update_fields.append("enrollment_photo")
+                    if update_fields:
+                        update_fields.append("updated_at")
+                        esp_device.save(update_fields=update_fields)
+
+        broker_host = settings.PUBLIC_MQTT_BROKER_HOST or settings.MQTT_BROKER_HOST
+        broker_port = settings.PUBLIC_MQTT_BROKER_PORT
+        broker_tls = settings.PUBLIC_MQTT_BROKER_USE_TLS
+        firmware_topic = device_firmware_topic_for(unique_chip_id)
+        ping_topic = device_ping_topic_for(unique_chip_id)
+        command_topic = device_command_topic_for(unique_chip_id)
+        status_topic = device_status_topic_for(unique_chip_id)
+
+        policy = {
+            "mqtt_broker_host": broker_host,
+            "mqtt_broker_port": broker_port,
+            "mqtt_broker_use_tls": broker_tls,
+            "mqtt_topic_for_firmware": firmware_topic,
+            "mqtt_topic_for_pings": ping_topic,
+            "mqtt_topic_for_commands": command_topic,
+            "mqtt_topic_for_status": status_topic,
+        }
+
+        body = {
+            "device_id": unique_chip_id,
+            "client_certificate_pem": signed.cert_pem,
+            "command_public_key_pem": command_public_pem,
+            "policy": policy,
+            # Top-level mirror for the firmware's firstString(policy[k], resp[k])
+            # fallback. Drop in a follow-up cleanup PR once firmware has settled
+            # on the nested form everywhere.
+            "mqtt_broker_host": broker_host,
+            "mqtt_broker_port": broker_port,
+            "mqtt_broker_use_tls": broker_tls,
+            "mqtt_topic_for_firmware": firmware_topic,
+            "mqtt_topic_for_pings": ping_topic,
+        }
+        return Response(body, status=status.HTTP_201_CREATED)
 
 
 class ForgeKeyDevicePhotoUploadView(APIView):
@@ -1499,4 +1639,111 @@ class ForgeKeyJWKSView(APIView):
             content_type="application/jwk-set+json",
         )
         response["Cache-Control"] = "public, max-age=3600"
+        return response
+
+
+class ForgeKeyOmsCommandPublicKeyView(APIView):
+    """
+    GET /api/forgekey/oms-command-public-key.pem
+
+    Serves the OMS command-signing public key (the ES256 keypair backing
+    :func:`forgekey.services.jwt_signing.make_command_jwt`). Firmware build
+    scripts bake this into ``oms_command_pubkey.h`` so the device can verify
+    command signatures offline. Public by definition — no auth.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        if not is_jwt_signing_configured():
+            return Response(
+                {"detail": "OMS command-signing key is not configured."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            pem = get_jwt_public_key_pem()
+        except JwtSigningError as exc:
+            logger.warning("Cannot return command public key: %s", exc)
+            return Response(
+                {"detail": "Command-signing key is misconfigured."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return HttpResponse(pem, content_type="application/x-pem-file")
+
+
+class ForgeKeyCertificateRevocationListView(APIView):
+    """
+    GET /api/forgekey/ca/crl.pem
+
+    Returns a CRL of every revoked :class:`DeviceCertificate`, signed by the
+    active CA. ``thisUpdate`` is now, ``nextUpdate`` is now + 24h. Public —
+    EMQX (and any other relying party) fetches this on a schedule.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        active = CertificateAuthority.get_active()
+        if active is None:
+            return Response(
+                {"detail": "No active CertificateAuthority is configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            private_pem = decrypt_ca_key(
+                bytes(active.encrypted_private_key), active.key_kid or None
+            )
+            ca_private_key = serialization.load_pem_private_key(private_pem, password=None)
+            ca_cert = x509.load_pem_x509_certificate(active.cert_pem.encode("utf-8"))
+        except CaKeyStorageError as exc:
+            logger.error("CRL: cannot unwrap active CA key: %s", exc)
+            return Response(
+                {"detail": "Active CA private key is not accessible."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.error("CRL: cannot parse active CA material: %s", exc)
+            return Response(
+                {"detail": "Active CA material is unreadable."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if not isinstance(ca_private_key, ec.EllipticCurvePrivateKey):
+            return Response(
+                {"detail": "Active CA key is not an EC private key."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        now = timezone.now()
+        builder = (
+            x509.CertificateRevocationListBuilder()
+            .issuer_name(ca_cert.subject)
+            .last_update(now)
+            .next_update(now + timedelta(hours=24))
+        )
+
+        revoked_qs = DeviceCertificate.objects.filter(revoked_at__isnull=False).only(
+            "serial", "revoked_at"
+        )
+        for cert_row in revoked_qs:
+            try:
+                serial_int = int(cert_row.serial, 16)
+            except (TypeError, ValueError):
+                logger.warning("CRL: skipping revoked cert with non-hex serial %r", cert_row.serial)
+                continue
+            revoked = (
+                x509.RevokedCertificateBuilder()
+                .serial_number(serial_int)
+                .revocation_date(cert_row.revoked_at)
+                .build()
+            )
+            builder = builder.add_revoked_certificate(revoked)
+
+        crl = builder.sign(private_key=ca_private_key, algorithm=hashes.SHA256())
+        pem = crl.public_bytes(serialization.Encoding.PEM)
+        response = HttpResponse(pem, content_type="application/x-pem-file")
+        response["Cache-Control"] = "public, max-age=300"
         return response

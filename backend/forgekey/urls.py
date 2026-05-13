@@ -15,11 +15,13 @@ from .views import (
     DeviceUsageViewSet,
     ESP32DeviceViewSet,
     FirmwareVersionViewSet,
+    ForgeKeyCertificateRevocationListView,
+    ForgeKeyDeviceEnrollView,
     ForgeKeyDevicePhotoUploadView,
-    ForgeKeyDeviceRegisterView,
     ForgeKeyFirmwareDownloadView,
     ForgeKeyFirmwarePublicKeyView,
     ForgeKeyJWKSView,
+    ForgeKeyOmsCommandPublicKeyView,
     MqttWebhookView,
     OperationalModeViewSet,
     PowerMeterReadingViewSet,
@@ -41,9 +43,9 @@ app_name = "forgekey"
 
 urlpatterns = [
     path(
-        "devices/register/",
-        ForgeKeyDeviceRegisterView.as_view(),
-        name="device-register",
+        "devices/enroll/",
+        ForgeKeyDeviceEnrollView.as_view(),
+        name="device-enroll",
     ),
     path(
         "devices/<str:mac>/photo/",
@@ -54,6 +56,16 @@ urlpatterns = [
         "firmware/public-key",
         ForgeKeyFirmwarePublicKeyView.as_view(),
         name="firmware-public-key",
+    ),
+    path(
+        "oms-command-public-key.pem",
+        ForgeKeyOmsCommandPublicKeyView.as_view(),
+        name="oms-command-public-key",
+    ),
+    path(
+        "ca/crl.pem",
+        ForgeKeyCertificateRevocationListView.as_view(),
+        name="ca-crl",
     ),
     path(
         "jwks/",

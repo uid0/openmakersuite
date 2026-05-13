@@ -13,8 +13,12 @@ from django.utils.html import format_html
 from .models import (
     AssetAuthorization,
     AssetDevice,
+    CertificateAuthority,
+    DeviceCertificate,
     DeviceCommand,
+    DeviceEnrollment,
     DeviceFirmwareUpdate,
+    DeviceIdentity,
     DeviceLockout,
     DeviceType,
     DeviceUsage,
@@ -533,3 +537,122 @@ class DeviceCommandAdmin(admin.ModelAdmin):
         # blocks ESP32Device deletion entirely (gh forge-1). Allow superusers
         # so the cascade can run; everyone else still gets the audit view.
         return request.user.is_superuser
+
+
+# ---------------------------------------------------------------------------
+# Device-identity trust foundation (oms-d2axqu / forgekey-trust-refactor)
+# ---------------------------------------------------------------------------
+
+
+@admin.register(DeviceIdentity)
+class DeviceIdentityAdmin(admin.ModelAdmin):
+    """Per-chip security anchor populated by /enroll/."""
+
+    list_display = ["device_id", "status", "created_at", "updated_at"]
+    list_filter = ["status"]
+    search_fields = ["device_id", "notes"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    fields = ["id", "device_id", "status", "notes", "created_at", "updated_at"]
+
+
+@admin.register(DeviceCertificate)
+class DeviceCertificateAdmin(admin.ModelAdmin):
+    """mTLS client certificates issued by the internal CA."""
+
+    list_display = [
+        "serial",
+        "device",
+        "fingerprint_sha256_short",
+        "not_after",
+        "revoked_at",
+        "status_label",
+    ]
+    list_filter = ["revoked_at", "issued_by"]
+    search_fields = ["serial", "fingerprint_sha256", "device__device_id", "subject"]
+    readonly_fields = [
+        "id",
+        "device",
+        "serial",
+        "subject",
+        "fingerprint_sha256",
+        "not_before",
+        "not_after",
+        "issued_by",
+        "created_at",
+    ]
+    fields = readonly_fields + ["revoked_at"]
+
+    @admin.display(description="fingerprint")
+    def fingerprint_sha256_short(self, obj):
+        return (obj.fingerprint_sha256 or "")[:16]
+
+    @admin.display(description="status")
+    def status_label(self, obj):
+        return obj.status
+
+
+@admin.register(DeviceEnrollment)
+class DeviceEnrollmentAdmin(admin.ModelAdmin):
+    """CSR / bootstrap sessions submitted to /enroll/."""
+
+    list_display = [
+        "unique_chip_id",
+        "mac_address",
+        "sensor_kind",
+        "status",
+        "requested_at",
+        "approved_at",
+    ]
+    list_filter = ["status", "sensor_kind"]
+    search_fields = ["unique_chip_id", "mac_address", "device__device_id"]
+    readonly_fields = [
+        "id",
+        "device",
+        "csr_pem",
+        "nonce",
+        "unique_chip_id",
+        "mac_address",
+        "sensor_kind",
+        "firmware_version",
+        "chip_info",
+        "boot_count",
+        "free_heap",
+        "ip_address",
+        "flash_memory_id",
+        "token_fingerprint",
+        "requested_at",
+        "approved_at",
+        "approved_by",
+        "certificate",
+        "expires_at",
+        "enrollment_photo",
+    ]
+    fields = readonly_fields + ["status"]
+
+
+@admin.register(CertificateAuthority)
+class CertificateAuthorityAdmin(admin.ModelAdmin):
+    """Read-only view of the internal CA. Bootstrap via ``manage.py forgekey_ca``."""
+
+    list_display = ["name", "is_active", "not_before", "not_after", "created_at"]
+    list_filter = ["is_active"]
+    search_fields = ["name", "key_kid"]
+    readonly_fields = [
+        "id",
+        "name",
+        "cert_pem",
+        "key_kid",
+        "not_before",
+        "not_after",
+        "is_active",
+        "created_at",
+        "updated_at",
+    ]
+    fields = readonly_fields
+    # The encrypted private-key blob never appears in the admin.
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

@@ -92,6 +92,8 @@ below are public.
 | GET  | `inventory/work-orders/...` | member | `IsAuthenticatedOrStaffSigAdminWrite` on `WorkOrderViewSet` — any authenticated user can read open + completed standard PM work orders (gh #374). |
 | POST/PATCH/PUT/DELETE | `inventory/work-orders/...` | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` denies writes to volunteers; staff and SIG leaders may add or modify (gh #374). |
 | any  | `inventory/maintenance-*` (CRUD) | member-rw | `IsAuthenticated` for log/task/dashboard; `IsAuthenticatedOrReadOnly` for material catalog. |
+| GET  | `inventory/assets/<id>/maintenance-history/` | member | `IsAuthenticated` — unified per-asset history (backdated `MaintenanceRecord` rows + closed third-party work orders) with `since`/`until`/`source` filters. |
+| any  | `inventory/maintenance-records/...` (CRUD) | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` — anyone authenticated can read; staff and SIG leaders can create/update; staff-only delete. |
 | POST | `inventory/assets/<id>/log-hours/` | staff-or-sig-admin | `IsStaffOrSigAdmin` — atomically increments `Asset.hours_used` for utilization metrics + maintenance forecast. |
 
 ## Membership (`/api/membership/`)

@@ -799,6 +799,9 @@ views:
       log_hours:
         permission_classes:
         - IsStaffOrSigAdmin
+      maintenance_history:
+        permission_classes:
+        - IsAuthenticated
       maintenance_items:
         permission_classes:
         - AllowAny
@@ -1146,6 +1149,26 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  inventory.views.MaintenanceRecordViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      list:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      update:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
   inventory.views.MaintenanceTaskViewSet:
     actions:
       create:

@@ -2344,7 +2344,72 @@ export const electricalTopologyAPI = {
     api.patch<PowerOutletDetail>(`/electrical/outlets-crud/${id}/`, data),
   deleteOutlet: (id: number | string) =>
     api.delete(`/electrical/outlets-crud/${id}/`),
+
+  // Power ports (per-asset)
+  listPorts: (params?: { asset?: string }) =>
+    api.get<{ results: PowerPortDetail[] } | PowerPortDetail[]>('/electrical/ports-crud/', { params }),
+  createPort: (data: Partial<PowerPortWritable>) =>
+    api.post<PowerPortDetail>('/electrical/ports-crud/', data),
+  updatePort: (id: number, data: Partial<PowerPortWritable>) =>
+    api.patch<PowerPortDetail>(`/electrical/ports-crud/${id}/`, data),
+  deletePort: (id: number) =>
+    api.delete(`/electrical/ports-crud/${id}/`),
+
+  // Power cables (PowerOutlet ↔ PowerPort)
+  listPowerCables: (params?: { asset?: string; port?: number }) =>
+    api.get<{ results: PowerCableDetail[] } | PowerCableDetail[]>('/electrical/power-cables-crud/', { params }),
+  createPowerCable: (data: PowerCableWritable) =>
+    api.post<PowerCableDetail>('/electrical/power-cables-crud/', data),
+  deletePowerCable: (id: number) =>
+    api.delete(`/electrical/power-cables-crud/${id}/`),
 };
+
+export interface PowerPortDetail {
+  id: number;
+  asset: string;
+  asset_name: string;
+  label: string;
+  port_type: string;
+  max_draw_amps: string | null;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PowerPortWritable {
+  asset: string;
+  label: string;
+  port_type: string;
+  max_draw_amps?: string | number | null;
+  notes?: string;
+}
+
+export interface PowerCableDetail {
+  id: number;
+  outlet_id: number;
+  outlet_label: string | null;
+  port_id: number;
+  port_label: string | null;
+  asset_id: string | null;
+  asset_name: string | null;
+  color: string;
+  length_ft: number | null;
+  label: string;
+  status: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PowerCableWritable {
+  outlet: number;
+  port: number;
+  color?: string;
+  length_ft?: number | null;
+  label?: string;
+  status?: string;
+  notes?: string;
+}
 
 // LOTO (lockout / tagout) — oms-78j
 export type LOTODeviceType =

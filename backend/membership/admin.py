@@ -6,6 +6,8 @@ from io import BytesIO
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import Group
 from django.http import HttpResponse
 from django.shortcuts import redirect
@@ -14,20 +16,45 @@ from django.utils.html import format_html
 
 from inventory.services.qr_code_service import QRCodeService
 
-from .models import (
-    Certification,
-    Membership,
-    SIGAdmin,
-    UserCertification,
-    UserRegistrationToken,
-)
+from .models import Certification, Membership, SIGAdmin, UserCertification, UserRegistrationToken
 
 User = get_user_model()
 
 
+class CustomUserCreationForm(UserCreationForm):
+    """Add-user form pointed at the custom User model.
+
+    Django's stock UserCreationForm renders password1 + password2 + username,
+    which are the minimum fields the add flow needs. Once the user has a
+    primary key we drop into the change form which exposes the full fieldset
+    (groups, permissions, makerspace fields, etc.).
+    """
+
+    class Meta(UserCreationForm.Meta):
+        model = User
+        fields = ("username", "email", "first_name", "last_name")
+
+
+class CustomUserChangeForm(UserChangeForm):
+    """Change-user form pointed at the custom User model."""
+
+    class Meta(UserChangeForm.Meta):
+        model = User
+
+
 @admin.register(User)
-class UserAdmin(admin.ModelAdmin):
-    """Admin interface for custom user model."""
+class UserAdmin(BaseUserAdmin):
+    """Admin interface for the makerspace custom user model.
+
+    Inherits from django.contrib.auth.admin.UserAdmin so password hashing,
+    the username/password1/password2 add form, and the M2M-safe add_fieldsets
+    all work correctly. Without this inheritance the /add/ page 500s because
+    the change-form fieldset is used for creation and Django tries to render
+    M2M widgets against a not-yet-saved User.
+    """
+
+    add_form = CustomUserCreationForm
+    form = CustomUserChangeForm
 
     list_display = [
         "username",
@@ -68,22 +95,14 @@ class UserAdmin(admin.ModelAdmin):
         "discord_username",
         "discourse_username",
     ]
+
+    # Change-form fieldsets: extend Django's default with a Makerspace section
+    # so all the custom fields on the User model remain editable.
     fieldsets = (
+        (None, {"fields": ("username", "password")}),
+        ("Personal info", {"fields": ("first_name", "last_name", "email", "handle")}),
         (
-            "Basic Information",
-            {
-                "fields": (
-                    "username",
-                    "handle",
-                    "password",
-                    "email",
-                    "first_name",
-                    "last_name",
-                )
-            },
-        ),
-        (
-            "Makerspace Information",
+            "Makerspace",
             {
                 "fields": (
                     "active_directory_username",
@@ -93,6 +112,9 @@ class UserAdmin(admin.ModelAdmin):
                     "is_board_member",
                     "is_officer",
                     "is_director",
+                    "signature_image",
+                    "signature_uploaded_at",
+                    "signature_line_offset",
                 )
             },
         ),
@@ -108,32 +130,41 @@ class UserAdmin(admin.ModelAdmin):
                 )
             },
         ),
+        ("Important dates", {"fields": ("last_login", "date_joined")}),
+    )
+
+    # Add-form fieldset: tight to the minimum needed to create a User, so
+    # M2M fields (groups, user_permissions) are never rendered before the
+    # row has a primary key.
+    add_fieldsets = (
         (
-            "Important dates",
+            None,
             {
+                "classes": ("wide",),
                 "fields": (
-                    "last_login",
-                    "date_joined",
-                )
+                    "username",
+                    "password1",
+                    "password2",
+                    "email",
+                    "first_name",
+                    "last_name",
+                ),
             },
         ),
     )
+
     readonly_fields = ["last_login", "date_joined"]
     actions = ["create_registration_token", "generate_registration_qr"]
+    ordering = ("username",)
 
     def save_model(self, request, obj, form, change):
-        """Override save to automatically create registration token for new users."""
-        # Save the user first
+        """Save user and auto-create a registration token for new users."""
         super().save_model(request, obj, form, change)
-
-        # If this is a new user (not a change), create a registration token
-        if not change:
-            # Check if user already has a token (shouldn't happen for new users, but be safe)
-            if not hasattr(obj, "registration_token"):
-                UserRegistrationToken.create_for_user(
-                    user=obj,
-                    created_by=request.user,
-                )
+        if not change and not hasattr(obj, "registration_token"):
+            UserRegistrationToken.create_for_user(
+                user=obj,
+                created_by=request.user,
+            )
 
     @admin.display(description="Registration Token")
     def registration_token_status(self, obj):
@@ -158,11 +189,8 @@ class UserAdmin(admin.ModelAdmin):
         """Create registration tokens for selected users."""
         created_count = 0
         for user in queryset:
-            # Check if user already has an active token
             if hasattr(user, "registration_token") and user.registration_token.is_valid():
                 continue
-
-            # Create new token
             UserRegistrationToken.create_for_user(
                 user=user,
                 created_by=request.user,
@@ -189,7 +217,6 @@ class UserAdmin(admin.ModelAdmin):
             try:
                 token = user.registration_token
                 if token.is_valid():
-                    # QR code will be generated on-demand via the view
                     generated_count += 1
             except UserRegistrationToken.DoesNotExist:
                 continue
@@ -226,20 +253,16 @@ class UserAdmin(admin.ModelAdmin):
         except User.DoesNotExist:
             return HttpResponse("User not found", status=404)
 
-        # Check if user already has an active token
         if hasattr(user, "registration_token") and user.registration_token.is_valid():
             return HttpResponse(
                 "User already has an active registration token.",
                 status=400,
             )
 
-        # Create new token
         token = UserRegistrationToken.create_for_user(
             user=user,
             created_by=request.user,
         )
-
-        # Redirect to token admin page
         return redirect(reverse("admin:membership_userregistrationtoken_change", args=[token.id]))
 
 
@@ -452,17 +475,14 @@ class UserRegistrationTokenAdmin(admin.ModelAdmin):
         except UserRegistrationToken.DoesNotExist:
             return HttpResponse("Token not found", status=404)
 
-        # Generate QR code
         registration_url = token.get_registration_url()
         service = QRCodeService(include_logo=True)
         qr_img = service.generate_qr_code_image(registration_url)
 
-        # Convert to BytesIO
         buffer = BytesIO()
         qr_img.save(buffer, format="PNG")
         buffer.seek(0)
 
-        # Return as HTTP response
         response = HttpResponse(buffer.read(), content_type="image/png")
         response["Content-Disposition"] = f'inline; filename="registration_qr_{token.id}.png"'
         return response

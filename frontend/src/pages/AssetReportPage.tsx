@@ -144,7 +144,9 @@ const AssetReportPage: React.FC = () => {
   const sortedUtilization = useMemo(() => sortData(utilization), [utilization, sortField, sortDirection]);
   const sortedTco = useMemo(() => {
     if (!sortField) {
-      return [...tcoRows].sort((a, b) => Number(b.tco) - Number(a.tco));
+      return [...tcoRows].sort(
+        (a, b) => Number(b.total_maintenance_cost_90d) - Number(a.total_maintenance_cost_90d),
+      );
     }
     const sorted = [...tcoRows];
     sorted.sort((a, b) => {
@@ -156,6 +158,9 @@ const AssetReportPage: React.FC = () => {
         'unscheduled_maintenance_cost',
         'repair_cost',
         'tco',
+        'preventive_maintenance_cost',
+        'vendor_maintenance_cost',
+        'total_maintenance_cost_90d',
       ];
       if (numericFields.includes(sortField)) {
         aVal = Number(aVal);
@@ -173,8 +178,10 @@ const AssetReportPage: React.FC = () => {
 
   const tcoHighlightThreshold = useMemo(() => {
     if (tcoRows.length === 0) return Infinity;
-    const sorted = [...tcoRows].sort((a, b) => Number(b.tco) - Number(a.tco));
-    return Number(sorted[Math.min(sorted.length - 1, 2)].tco);
+    const sorted = [...tcoRows].sort(
+      (a, b) => Number(b.total_maintenance_cost_90d) - Number(a.total_maintenance_cost_90d),
+    );
+    return Number(sorted[Math.min(sorted.length - 1, 2)].total_maintenance_cost_90d);
   }, [tcoRows]);
 
   const handleExport = () => {
@@ -194,10 +201,11 @@ const AssetReportPage: React.FC = () => {
     return Number.isFinite(num) ? num.toFixed(2) : '0.00';
   };
 
-  const tcoRowColor = (tcoValue: string) => {
-    const num = Number(tcoValue);
+  const tcoRowColor = (totalValue: string) => {
+    const num = Number(totalValue);
     if (!Number.isFinite(num) || num <= 0) return undefined;
-    if (num >= tcoHighlightThreshold && num >= Number(sortedTco[0]?.tco ?? 0) * 0.8) {
+    const topTotal = Number(sortedTco[0]?.total_maintenance_cost_90d ?? 0);
+    if (num >= tcoHighlightThreshold && num >= topTotal * 0.8) {
       return 'red.0';
     }
     if (num >= tcoHighlightThreshold) return 'orange.0';
@@ -406,11 +414,13 @@ const AssetReportPage: React.FC = () => {
         <Tabs.Panel value="tco" pt="md">
           <Stack gap="xs">
             <Text size="sm" c="dimmed">
-              Per-asset cost over the last 90 days. Top spenders are highlighted so
-              you can decide where to invest, retire, or replace. Sort by any column.
+              Per-asset cost over the last 90 days. Preventive is in-house maintenance
+              (Scheduled + Unscheduled); Vendor is third-party WO spend allocated per
+              asset. Total = Preventive + Vendor. Top spenders are highlighted so you
+              can decide where to invest, retire, or replace. Sort by any column.
             </Text>
             <Paper withBorder>
-              <Table.ScrollContainer minWidth={1100}>
+              <Table.ScrollContainer minWidth={1300}>
                 <Table highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
@@ -429,38 +439,45 @@ const AssetReportPage: React.FC = () => {
                       <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('unscheduled_maintenance_cost')}>
                         Unscheduled $
                       </Table.Th>
-                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('repair_cost')}>
-                        Repair $
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('preventive_maintenance_cost')}>
+                        Preventive $
                       </Table.Th>
-                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('tco')}>
-                        TCO
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('vendor_maintenance_cost')}>
+                        Vendor $
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('total_maintenance_cost_90d')}>
+                        Total (90d)
                       </Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
                     {loading ? (
                       <Table.Tr>
-                        <Table.Td colSpan={7} style={{ textAlign: 'center' }}>
+                        <Table.Td colSpan={8} style={{ textAlign: 'center' }}>
                           <Text>Loading...</Text>
                         </Table.Td>
                       </Table.Tr>
                     ) : sortedTco.length === 0 ? (
                       <Table.Tr>
-                        <Table.Td colSpan={7} style={{ textAlign: 'center' }}>
+                        <Table.Td colSpan={8} style={{ textAlign: 'center' }}>
                           <Text>No TCO data available</Text>
                         </Table.Td>
                       </Table.Tr>
                     ) : (
                       sortedTco.map((item) => (
-                        <Table.Tr key={item.asset_id} bg={tcoRowColor(item.tco)}>
+                        <Table.Tr
+                          key={item.asset_id}
+                          bg={tcoRowColor(item.total_maintenance_cost_90d)}
+                        >
                           <Table.Td>{item.asset_name}</Table.Td>
                           <Table.Td>{item.asset_tag || '-'}</Table.Td>
                           <Table.Td>{item.maintenance_days_last_90}</Table.Td>
                           <Table.Td>${formatMoney(item.scheduled_maintenance_cost)}</Table.Td>
                           <Table.Td>${formatMoney(item.unscheduled_maintenance_cost)}</Table.Td>
-                          <Table.Td>${formatMoney(item.repair_cost)}</Table.Td>
+                          <Table.Td>${formatMoney(item.preventive_maintenance_cost)}</Table.Td>
+                          <Table.Td>${formatMoney(item.vendor_maintenance_cost)}</Table.Td>
                           <Table.Td>
-                            <Text fw={600}>${formatMoney(item.tco)}</Text>
+                            <Text fw={600}>${formatMoney(item.total_maintenance_cost_90d)}</Text>
                           </Table.Td>
                         </Table.Tr>
                       ))

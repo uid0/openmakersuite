@@ -1699,6 +1699,9 @@ class AssetTcoReportSerializer(serializers.Serializer):
     unscheduled_maintenance_cost = serializers.DecimalField(max_digits=12, decimal_places=2)
     repair_cost = serializers.DecimalField(max_digits=12, decimal_places=2)
     tco = serializers.DecimalField(max_digits=12, decimal_places=2)
+    preventive_maintenance_cost = serializers.DecimalField(max_digits=12, decimal_places=2)
+    vendor_maintenance_cost = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_maintenance_cost_90d = serializers.DecimalField(max_digits=12, decimal_places=2)
 
 
 class LocationReconcileItemSerializer(serializers.ModelSerializer):

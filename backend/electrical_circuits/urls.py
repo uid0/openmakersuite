@@ -19,9 +19,11 @@ from .views import (
     OutletViewSet,
     PanelDirectoryReportView,
     PowerBreakerViewSet,
+    PowerCableViewSet,
     PowerCircuitViewSet,
     PowerOutletViewSet,
     PowerPanelViewSet,
+    PowerPortViewSet,
 )
 
 router = DefaultRouter()
@@ -38,6 +40,8 @@ power_router = DefaultRouter()
 power_router.register(r"panels-crud", PowerPanelViewSet, basename="powerpanel")
 power_router.register(r"breakers-crud", PowerBreakerViewSet, basename="powerbreaker")
 power_router.register(r"circuits-crud", PowerCircuitViewSet, basename="powercircuit")
+power_router.register(r"ports-crud", PowerPortViewSet, basename="powerport")
+power_router.register(r"power-cables-crud", PowerCableViewSet, basename="powercable")
 power_router.register(r"outlets-crud", PowerOutletViewSet, basename="poweroutlet")
 
 urlpatterns = [

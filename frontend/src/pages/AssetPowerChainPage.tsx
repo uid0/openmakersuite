@@ -29,10 +29,11 @@ import {
   IconRouteAltLeft,
   IconSitemap,
 } from '@tabler/icons-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import PageHero from '../components/landing/PageHero';
+import AssetPowerChainEditor from './AssetPowerChainEditor';
 import { AssetPowerChain, assetsAPI, electricalSafetyAPI } from '../services/api';
 import { Asset } from '../types';
 import '../styles/landing.css';
@@ -82,31 +83,38 @@ const AssetPowerChainPage: React.FC = () => {
     };
   }, []);
 
+  const loadChain = useCallback(
+    (id: string) => {
+      let cancelled = false;
+      setLoading(true);
+      setError(null);
+      electricalSafetyAPI
+        .getAssetPowerChain(id)
+        .then((response) => {
+          if (cancelled) return;
+          setChain(response.data);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err?.response?.data?.detail || 'Failed to load power chain.');
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!assetId) {
       setChain(null);
       setError(null);
       return;
     }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    electricalSafetyAPI
-      .getAssetPowerChain(assetId)
-      .then((response) => {
-        if (cancelled) return;
-        setChain(response.data);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err?.response?.data?.detail || 'Failed to load power chain.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    return loadChain(assetId);
   }, [assetId]);
 
   const assetOptions = useMemo(
@@ -207,8 +215,7 @@ const AssetPowerChainPage: React.FC = () => {
                     <IconAlertCircle size={24} />
                     <Text fw={500}>This asset is not wired into a power topology.</Text>
                     <Text size="sm" c="dimmed" ta="center" maw={420}>
-                      Add a PowerPort and a Cable from the port to an outlet via Django admin to
-                      see the chain.
+                      Add a port below and wire it to an outlet to see the chain.
                     </Text>
                   </Stack>
                 </Paper>
@@ -267,6 +274,12 @@ const AssetPowerChainPage: React.FC = () => {
                   </Timeline>
                 </Paper>
               )}
+
+              <AssetPowerChainEditor
+                assetId={chain.asset.id}
+                isStaff={localStorage.getItem('is_staff') === 'true' || localStorage.getItem('is_superuser') === 'true'}
+                onChange={() => loadChain(chain.asset.id)}
+              />
             </Stack>
           )}
         </Stack>

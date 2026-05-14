@@ -1,5 +1,6 @@
 """DRF viewsets for electrical circuits and network drops."""
 
+from django.db import models
 from django.db.models import Count
 from django.http import HttpResponse
 
@@ -10,6 +11,7 @@ from rest_framework.views import APIView
 
 from .models import (
     Breaker,
+    Cable,
     LightSwitch,
     NetworkDrop,
     Outlet,
@@ -17,6 +19,7 @@ from .models import (
     PowerCircuit,
     PowerOutlet,
     PowerPanel,
+    PowerPort,
 )
 from .safety_views import IsStaffUser
 from .serializers import (
@@ -25,9 +28,11 @@ from .serializers import (
     NetworkDropSerializer,
     OutletSerializer,
     PowerBreakerSerializer,
+    PowerCableSerializer,
     PowerCircuitSerializer,
     PowerOutletSerializer,
     PowerPanelSerializer,
+    PowerPortSerializer,
 )
 from .utils.panel_directory_pdf import generate_network_drop_list_pdf, generate_panel_directory_pdf
 
@@ -219,4 +224,70 @@ class PowerOutletViewSet(viewsets.ModelViewSet):
         circuit_id = self.request.query_params.get("circuit")
         if circuit_id:
             qs = qs.filter(circuit_id=circuit_id)
+        return qs
+
+
+class PowerPortViewSet(viewsets.ModelViewSet):
+    """``/api/electrical/ports-crud/`` — full CRUD for asset PowerPorts.
+
+    Supports ``?asset=<uuid>`` to scope the list to a single asset, which
+    is the only query the frontend needs today (the AssetPowerChainPage
+    edit affordance asks "what ports does this asset already have?" before
+    offering to create more).
+    """
+
+    permission_classes = [IsAuthenticated, IsStaffUser]
+    serializer_class = PowerPortSerializer
+    queryset = PowerPort.objects.select_related("asset").order_by("asset__name", "label")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        return qs
+
+
+class PowerCableViewSet(viewsets.ModelViewSet):
+    """``/api/electrical/power-cables-crud/`` — full CRUD for power cables.
+
+    Restricted to power cables (filters Cable by cable_type=power). The
+    serializer hides the generic-foreign-key plumbing — callers POST a
+    flat ``{"outlet": <id>, "port": <id>, ...}`` shape.
+
+    Supports ``?asset=<uuid>`` and ``?port=<id>`` filters so the frontend
+    can render the chain rows for one asset without loading the whole
+    cable table.
+    """
+
+    permission_classes = [IsAuthenticated, IsStaffUser]
+    serializer_class = PowerCableSerializer
+    queryset = Cable.objects.filter(cable_type=Cable.CABLE_TYPE_POWER).order_by("-created_at")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        port_id = self.request.query_params.get("port")
+        if port_id:
+            from django.contrib.contenttypes.models import ContentType
+
+            port_ct = ContentType.objects.get_for_model(PowerPort)
+            qs = qs.filter(
+                models.Q(endpoint_a_content_type=port_ct, endpoint_a_object_id=str(port_id))
+                | models.Q(endpoint_b_content_type=port_ct, endpoint_b_object_id=str(port_id))
+            )
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            from django.contrib.contenttypes.models import ContentType
+
+            port_ct = ContentType.objects.get_for_model(PowerPort)
+            port_ids = list(
+                PowerPort.objects.filter(asset_id=asset_id).values_list("pk", flat=True)
+            )
+            if not port_ids:
+                return qs.none()
+            string_ids = [str(p) for p in port_ids]
+            qs = qs.filter(
+                models.Q(endpoint_a_content_type=port_ct, endpoint_a_object_id__in=string_ids)
+                | models.Q(endpoint_b_content_type=port_ct, endpoint_b_object_id__in=string_ids)
+            )
         return qs

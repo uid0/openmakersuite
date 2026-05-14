@@ -247,3 +247,146 @@ def test_list_power_outlets_filtered_by_circuit(staff_client, loc):
     rows = resp.json()["results"]
     assert len(rows) == 1
     assert rows[0]["circuit"] == c1.pk
+
+
+# ---------------------------------------------------------------------------
+# PowerPort + PowerCable CRUD — backs the asset-side power-chain edit UI.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def asset(db):
+    from inventory.tests.factories import AssetFactory
+
+    return AssetFactory(name="Lathe", asset_tag="A-PC1")
+
+
+@pytest.fixture
+def power_outlet(db, loc):
+    panel = PowerPanel.objects.create(name="P1", location=loc)
+    breaker = PowerBreaker.objects.create(panel=panel, position="A-01", amperage=20)
+    circuit = PowerCircuit.objects.create(breaker=breaker, label="C1")
+    return PowerOutlet.objects.create(circuit=circuit, location=loc, label="O1")
+
+
+@pytest.mark.django_db
+class TestPowerPortCRUD:
+    def test_staff_can_create_port(self, staff_client, asset):
+        url = reverse("powerport-list")
+        resp = staff_client.post(
+            url,
+            {"asset": str(asset.id), "label": "Main", "port_type": "5-15R"},
+            format="json",
+        )
+        assert resp.status_code == 201, resp.data
+        assert str(resp.data["asset"]) == str(asset.id)
+        assert resp.data["label"] == "Main"
+        assert resp.data["asset_name"] == asset.name
+
+    def test_filter_by_asset(self, staff_client, asset):
+        from electrical_circuits.models import PowerPort
+        from inventory.tests.factories import AssetFactory
+
+        PowerPort.objects.create(asset=asset, label="Main", port_type="5-15R")
+        other = AssetFactory(name="Other")
+        PowerPort.objects.create(asset=other, label="Main", port_type="5-15R")
+
+        resp = staff_client.get(reverse("powerport-list"), {"asset": str(asset.id)})
+        assert resp.status_code == 200
+        rows = resp.data["results"] if isinstance(resp.data, dict) else resp.data
+        assert len(rows) == 1
+        assert str(rows[0]["asset"]) == str(asset.id)
+
+    def test_non_staff_cannot_create(self, non_staff_client, asset):
+        resp = non_staff_client.post(
+            reverse("powerport-list"),
+            {"asset": str(asset.id), "label": "Main", "port_type": "5-15R"},
+            format="json",
+        )
+        assert resp.status_code == 403
+
+    def test_unique_label_per_asset(self, staff_client, asset):
+        from electrical_circuits.models import PowerPort
+
+        PowerPort.objects.create(asset=asset, label="Main", port_type="5-15R")
+        resp = staff_client.post(
+            reverse("powerport-list"),
+            {"asset": str(asset.id), "label": "Main", "port_type": "5-15R"},
+            format="json",
+        )
+        assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+class TestPowerCableCRUD:
+    def _make_port(self, asset, label="Main"):
+        from electrical_circuits.models import PowerPort
+
+        return PowerPort.objects.create(asset=asset, label=label, port_type="5-15R")
+
+    def test_create_power_cable_via_flat_fields(self, staff_client, asset, power_outlet):
+        port = self._make_port(asset)
+        resp = staff_client.post(
+            reverse("powercable-list"),
+            {
+                "outlet": power_outlet.pk,
+                "port": port.pk,
+                "status": "connected",
+                "length_ft": 6,
+            },
+            format="json",
+        )
+        assert resp.status_code == 201, resp.data
+        assert resp.data["outlet_id"] == power_outlet.pk
+        assert resp.data["port_id"] == port.pk
+        assert str(resp.data["asset_id"]) == str(asset.id)
+        assert resp.data["asset_name"] == asset.name
+
+    def test_filter_by_asset_returns_only_that_assets_cables(
+        self, staff_client, asset, power_outlet
+    ):
+        from inventory.tests.factories import AssetFactory
+
+        port_a = self._make_port(asset, "Main")
+        staff_client.post(
+            reverse("powercable-list"),
+            {"outlet": power_outlet.pk, "port": port_a.pk},
+            format="json",
+        )
+
+        other = AssetFactory(name="Other")
+        port_b = self._make_port(other, "Main")
+        staff_client.post(
+            reverse("powercable-list"),
+            {"outlet": power_outlet.pk, "port": port_b.pk},
+            format="json",
+        )
+
+        resp = staff_client.get(reverse("powercable-list"), {"asset": str(asset.id)})
+        assert resp.status_code == 200
+        rows = resp.data["results"] if isinstance(resp.data, dict) else resp.data
+        assert len(rows) == 1
+        assert str(rows[0]["asset_id"]) == str(asset.id)
+
+    def test_non_staff_cannot_create(self, non_staff_client, asset, power_outlet):
+        port = self._make_port(asset)
+        resp = non_staff_client.post(
+            reverse("powercable-list"),
+            {"outlet": power_outlet.pk, "port": port.pk},
+            format="json",
+        )
+        assert resp.status_code == 403
+
+    def test_delete_unwires_chain(self, staff_client, asset, power_outlet):
+        port = self._make_port(asset)
+        created = staff_client.post(
+            reverse("powercable-list"),
+            {"outlet": power_outlet.pk, "port": port.pk},
+            format="json",
+        )
+        cable_id = created.data["id"]
+        resp = staff_client.delete(reverse("powercable-detail", args=[cable_id]))
+        assert resp.status_code == 204
+        list_resp = staff_client.get(reverse("powercable-list"), {"asset": str(asset.id)})
+        rows = list_resp.data["results"] if isinstance(list_resp.data, dict) else list_resp.data
+        assert rows == []

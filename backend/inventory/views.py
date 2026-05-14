@@ -4349,21 +4349,45 @@ class AssetReportViewSet(viewsets.ViewSet):
         Returns one row per asset with maintenance_days_last_90 (distinct calendar
         days where any work order overlapped the window, plus today if the asset
         is currently in MAINTENANCE status), bucketed cost components, and the
-        tco total. Sorted by tco DESC. Repair cost is reserved for future use
-        (AssetProblem does not yet carry cost fields).
+        tco total. Sorted by total_maintenance_cost_90d DESC.
+
+        Cost components:
+        - scheduled_maintenance_cost / unscheduled_maintenance_cost: preventive
+          maintenance via internal WorkOrder + WorkOrderMaterialUsage.
+        - vendor_maintenance_cost: third-party WO spend allocated to this asset
+          via ThirdPartyWorkOrderAsset.allocated_cost (only closed records, since
+          earlier statuses don't have allocated_cost materialized yet).
+        - preventive_maintenance_cost: scheduled + unscheduled (alias).
+        - total_maintenance_cost_90d: preventive + vendor (the headline figure).
+        - tco: scheduled + unscheduled + repair (legacy; preserved for callers
+          that haven't migrated to the blended figure).
+        - repair_cost: reserved for future use (AssetProblem doesn't carry cost).
         """
         from django.db.models import Prefetch
+
+        from maintenance_orders.models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAsset
 
         from .serializers import AssetTcoReportSerializer
 
         today = timezone.now().date()
         window_start = today - timedelta(days=90)
 
+        vendor_link_qs = ThirdPartyWorkOrderAsset.objects.select_related("work_order").filter(
+            work_order__status=ThirdPartyWorkOrder.STATUS_CLOSED,
+            work_order__closed_at__date__gte=window_start,
+            work_order__closed_at__date__lte=today,
+        )
+
         assets = Asset.objects.all().prefetch_related(
             Prefetch(
                 "maintenance_items__work_orders",
                 queryset=WorkOrder.objects.prefetch_related("material_usage__material"),
-            )
+            ),
+            Prefetch(
+                "third_party_work_order_links",
+                queryset=vendor_link_qs,
+                to_attr="_tco_vendor_links",
+            ),
         )
 
         rows = []
@@ -4399,11 +4423,21 @@ class AssetReportViewSet(viewsets.ViewSet):
                                         * usage.material.estimated_cost_per_unit
                                     )
 
+            vendor = Decimal("0.00")
+            for link in getattr(asset, "_tco_vendor_links", []):
+                if link.allocated_cost is not None:
+                    vendor += link.allocated_cost
+                    wo_closed = link.work_order.closed_at
+                    if wo_closed is not None:
+                        days_set.add(wo_closed.date())
+
             if asset.status == Asset.MAINTENANCE:
                 days_set.add(today)
 
             repair = Decimal("0.00")
             tco_total = scheduled + unscheduled + repair
+            preventive_total = scheduled + unscheduled
+            total_90d = preventive_total + vendor
 
             rows.append(
                 {
@@ -4415,10 +4449,13 @@ class AssetReportViewSet(viewsets.ViewSet):
                     "unscheduled_maintenance_cost": unscheduled,
                     "repair_cost": repair,
                     "tco": tco_total,
+                    "preventive_maintenance_cost": preventive_total,
+                    "vendor_maintenance_cost": vendor,
+                    "total_maintenance_cost_90d": total_90d,
                 }
             )
 
-        rows.sort(key=lambda r: r["tco"], reverse=True)
+        rows.sort(key=lambda r: r["total_maintenance_cost_90d"], reverse=True)
         serializer = AssetTcoReportSerializer(rows, many=True)
         return Response(serializer.data)
 

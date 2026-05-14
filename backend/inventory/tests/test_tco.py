@@ -184,3 +184,166 @@ class TestAssetTcoReport:
 
         ids = [row["asset_id"] for row in response.data]
         assert ids.index(str(pricey.id)) < ids.index(str(cheap.id))
+
+
+def _closed_vendor_wo(
+    asset,
+    *,
+    allocated_cost,
+    closed_days_ago=10,
+    status_value=None,
+    share_pct=Decimal("100"),
+):
+    """Create a ThirdPartyWorkOrder bypassing the state machine and link it to
+    ``asset`` with the given ``allocated_cost``. Used for TCO rollup tests."""
+    from maintenance_orders.models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAsset
+    from vendors.models import Vendor
+
+    vendor, _ = Vendor.objects.get_or_create(
+        name="TCO Test Vendor",
+        defaults={"vendor_kind": Vendor.KIND_HVAC},
+    )
+    wo = ThirdPartyWorkOrder.objects.create(
+        title="Vendor work",
+        vendor=vendor,
+        asset=asset,
+    )
+    wo.status = status_value or ThirdPartyWorkOrder.STATUS_CLOSED
+    if closed_days_ago is not None:
+        wo.closed_at = timezone.now() - timedelta(days=closed_days_ago)
+    wo.save(update_fields=["status", "closed_at"])
+    return ThirdPartyWorkOrderAsset.objects.create(
+        work_order=wo,
+        asset=asset,
+        share_pct=share_pct,
+        allocated_cost=allocated_cost,
+    )
+
+
+@pytest.mark.integration
+class TestAssetTcoVendorRollup:
+    """ThirdPartyWorkOrderAsset.allocated_cost rolls into vendor_maintenance_cost
+    and total_maintenance_cost_90d when the parent WO is closed in the window."""
+
+    def test_vendor_only_asset_reports_vendor_cost(self, authenticated_client):
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Vendor Only", asset_tag="A-V01")
+        _closed_vendor_wo(asset, allocated_cost=Decimal("250.00"), closed_days_ago=5)
+
+        response = client.get(URL)
+        assert response.status_code == status.HTTP_200_OK
+
+        row = {r["asset_id"]: r for r in response.data}[str(asset.id)]
+        assert Decimal(row["preventive_maintenance_cost"]) == Decimal("0.00")
+        assert Decimal(row["vendor_maintenance_cost"]) == Decimal("250.00")
+        assert Decimal(row["total_maintenance_cost_90d"]) == Decimal("250.00")
+
+    def test_blended_preventive_and_vendor_cost(self, authenticated_client):
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Mixed", asset_tag="A-MIX")
+
+        mi = MaintenanceItem.objects.create(
+            asset=asset,
+            title="Quarterly PM",
+            interval_days=90,
+            estimated_cost=Decimal("100.00"),
+        )
+        _create_completed_wo(mi, completed_at=timezone.now() - timedelta(days=7))
+        _closed_vendor_wo(asset, allocated_cost=Decimal("300.00"), closed_days_ago=3)
+
+        response = client.get(URL)
+        assert response.status_code == status.HTTP_200_OK
+
+        row = {r["asset_id"]: r for r in response.data}[str(asset.id)]
+        assert Decimal(row["preventive_maintenance_cost"]) == Decimal("100.00")
+        assert Decimal(row["vendor_maintenance_cost"]) == Decimal("300.00")
+        assert Decimal(row["total_maintenance_cost_90d"]) == Decimal("400.00")
+
+    def test_multi_asset_po_allocates_per_asset(self, authenticated_client):
+        """One vendor WO covering two assets — each row gets its own allocated_cost,
+        not the parent WO's full invoice."""
+        from maintenance_orders.models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAsset
+        from vendors.models import Vendor
+
+        client, _ = authenticated_client
+        asset_a = AssetFactory(name="Split A", asset_tag="A-SPA")
+        asset_b = AssetFactory(name="Split B", asset_tag="A-SPB")
+
+        vendor, _ = Vendor.objects.get_or_create(
+            name="Split Vendor", defaults={"vendor_kind": Vendor.KIND_HVAC}
+        )
+        wo = ThirdPartyWorkOrder.objects.create(
+            title="Two-asset truck roll", vendor=vendor, asset=asset_a
+        )
+        wo.status = ThirdPartyWorkOrder.STATUS_CLOSED
+        wo.closed_at = timezone.now() - timedelta(days=2)
+        wo.save(update_fields=["status", "closed_at"])
+
+        ThirdPartyWorkOrderAsset.objects.create(
+            work_order=wo,
+            asset=asset_a,
+            share_pct=Decimal("60"),
+            allocated_cost=Decimal("180.00"),
+        )
+        ThirdPartyWorkOrderAsset.objects.create(
+            work_order=wo,
+            asset=asset_b,
+            share_pct=Decimal("40"),
+            allocated_cost=Decimal("120.00"),
+        )
+
+        response = client.get(URL)
+        assert response.status_code == status.HTTP_200_OK
+        rows = {r["asset_id"]: r for r in response.data}
+        assert Decimal(rows[str(asset_a.id)]["vendor_maintenance_cost"]) == Decimal("180.00")
+        assert Decimal(rows[str(asset_b.id)]["vendor_maintenance_cost"]) == Decimal("120.00")
+
+    def test_cancelled_vendor_wo_excluded(self, authenticated_client):
+        from maintenance_orders.models import ThirdPartyWorkOrder
+
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Cancelled Vendor", asset_tag="A-CXL")
+        _closed_vendor_wo(
+            asset,
+            allocated_cost=Decimal("999.00"),
+            closed_days_ago=5,
+            status_value=ThirdPartyWorkOrder.STATUS_CANCELLED,
+        )
+
+        response = client.get(URL)
+        assert response.status_code == status.HTTP_200_OK
+
+        row = {r["asset_id"]: r for r in response.data}[str(asset.id)]
+        assert Decimal(row["vendor_maintenance_cost"]) == Decimal("0.00")
+        assert Decimal(row["total_maintenance_cost_90d"]) == Decimal("0.00")
+
+    def test_vendor_wo_outside_window_excluded(self, authenticated_client):
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Old Vendor", asset_tag="A-OLD")
+        _closed_vendor_wo(asset, allocated_cost=Decimal("500.00"), closed_days_ago=120)
+
+        response = client.get(URL)
+        assert response.status_code == status.HTTP_200_OK
+
+        row = {r["asset_id"]: r for r in response.data}[str(asset.id)]
+        assert Decimal(row["vendor_maintenance_cost"]) == Decimal("0.00")
+
+    def test_open_vendor_wo_excluded(self, authenticated_client):
+        """A WO still in financial_review (not yet closed) is excluded — its
+        closed_at is null even if allocated_cost has been materialized."""
+        from maintenance_orders.models import ThirdPartyWorkOrder
+
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Pending Vendor", asset_tag="A-PND")
+        _closed_vendor_wo(
+            asset,
+            allocated_cost=Decimal("420.00"),
+            closed_days_ago=None,
+            status_value=ThirdPartyWorkOrder.STATUS_FINANCIAL_REVIEW,
+        )
+
+        response = client.get(URL)
+        assert response.status_code == status.HTTP_200_OK
+
+        row = {r["asset_id"]: r for r in response.data}[str(asset.id)]
+        assert Decimal(row["vendor_maintenance_cost"]) == Decimal("0.00")

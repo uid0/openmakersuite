@@ -985,6 +985,9 @@ export interface AssetTco {
   unscheduled_maintenance_cost: string;
   repair_cost: string;
   tco: string;
+  preventive_maintenance_cost: string;
+  vendor_maintenance_cost: string;
+  total_maintenance_cost_90d: string;
 }
 
 // Dashboard Widget Types

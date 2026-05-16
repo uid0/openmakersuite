@@ -82,6 +82,58 @@ const MaintenanceHistorySection: React.FC<MaintenanceHistorySectionProps> = ({
   const [formNotes, setFormNotes] = useState('');
   const [formAttachment, setFormAttachment] = useState<File | null>(null);
 
+  // Inline-edit state for historical rows. Only one row is editable at a
+  // time; the edit panel renders below the table once a row is selected.
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [editNotes, setEditNotes] = useState('');
+  const [editAttachment, setEditAttachment] = useState<File | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const openEdit = useCallback((row: MaintenanceHistoryRow) => {
+    setEditingRowId(row.id);
+    setEditNotes(row.notes ?? '');
+    setEditAttachment(null);
+    setEditError(null);
+  }, []);
+
+  const closeEdit = useCallback(() => {
+    setEditingRowId(null);
+    setEditNotes('');
+    setEditAttachment(null);
+    setEditError(null);
+  }, []);
+
+  const handleEditSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!editingRowId) return;
+      setEditError(null);
+      setEditSubmitting(true);
+      try {
+        const payload: Partial<MaintenanceRecordCreatePayload> = {
+          notes: editNotes,
+        };
+        if (editAttachment) {
+          payload.attachment = editAttachment;
+        }
+        await maintenanceRecordsAPI.update(editingRowId, payload);
+        closeEdit();
+        await loadHistory();
+      } catch (err: any) {
+        const detail =
+          err?.response?.data?.error?.message ||
+          err?.response?.data?.detail ||
+          err?.message ||
+          'Failed to update maintenance record';
+        setEditError(detail);
+      } finally {
+        setEditSubmitting(false);
+      }
+    },
+    [editingRowId, editNotes, editAttachment, closeEdit],
+  );
+
   const loadHistory = useCallback(async () => {
     try {
       setLoading(true);
@@ -501,20 +553,108 @@ const MaintenanceHistorySection: React.FC<MaintenanceHistorySectionProps> = ({
                   <td>{row.cost != null ? `$${row.cost}` : '—'}</td>
                   <td>{sourceLabel(row.source)}</td>
                   <td>
-                    {row.detail_url ? (
-                      <a href={row.detail_url}>Open WO</a>
-                    ) : row.attachment_url ? (
-                      <a href={row.attachment_url} target="_blank" rel="noopener noreferrer">
-                        Attachment
-                      </a>
-                    ) : (
-                      '—'
-                    )}
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      {row.detail_url && (
+                        <a href={row.detail_url}>Open WO</a>
+                      )}
+                      {row.attachment_url && (
+                        <a
+                          href={row.attachment_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Attachment
+                        </a>
+                      )}
+                      {canManage && row.source === 'historical' && (
+                        <button
+                          type="button"
+                          onClick={() => openEdit(row)}
+                          data-testid={`history-row-edit-${row.id}`}
+                          style={{
+                            background: 'transparent',
+                            border: '1px solid #ccc',
+                            borderRadius: 4,
+                            padding: '2px 8px',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem',
+                          }}
+                        >
+                          Edit notes / attachment
+                        </button>
+                      )}
+                      {!row.detail_url &&
+                        !row.attachment_url &&
+                        !(canManage && row.source === 'historical') &&
+                        '—'}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {editingRowId && (
+        <div
+          style={{
+            marginTop: '1rem',
+            padding: '1rem',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            background: '#fafafa',
+          }}
+          data-testid="history-edit-panel"
+        >
+          <h3 style={{ marginTop: 0 }}>Edit maintenance record</h3>
+          <form onSubmit={handleEditSubmit}>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem' }}>
+                Notes
+              </label>
+              <textarea
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                rows={4}
+                style={{ width: '100%', resize: 'vertical' }}
+                data-testid="history-edit-notes"
+              />
+            </div>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem' }}>
+                Attachment (PDF, photo, etc.) — uploading replaces any existing file
+              </label>
+              <input
+                type="file"
+                accept=".pdf,application/pdf,image/*"
+                onChange={(e) => setEditAttachment(e.target.files?.[0] ?? null)}
+                data-testid="history-edit-attachment"
+              />
+            </div>
+            {editError && (
+              <div style={{ color: '#c00', marginBottom: '0.5rem' }} role="alert">
+                {editError}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                type="submit"
+                disabled={editSubmitting}
+                data-testid="history-edit-submit"
+              >
+                {editSubmitting ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={closeEdit}
+                disabled={editSubmitting}
+                data-testid="history-edit-cancel"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </section>

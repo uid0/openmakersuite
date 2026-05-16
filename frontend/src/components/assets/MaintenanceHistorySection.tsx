@@ -546,50 +546,75 @@ const MaintenanceHistorySection: React.FC<MaintenanceHistorySectionProps> = ({
             </thead>
             <tbody>
               {data.results.map((row) => (
-                <tr key={`${row.source}-${row.id}`} data-testid={`history-row-${row.id}`}>
-                  <td>{row.completed_on}</td>
-                  <td>{row.title}</td>
-                  <td>{performerLabel(row)}</td>
-                  <td>{row.cost != null ? `$${row.cost}` : '—'}</td>
-                  <td>{sourceLabel(row.source)}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {row.detail_url && (
-                        <a href={row.detail_url}>Open WO</a>
-                      )}
-                      {row.attachment_url && (
-                        <a
-                          href={row.attachment_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          Attachment
-                        </a>
-                      )}
-                      {canManage && row.source === 'historical' && (
-                        <button
-                          type="button"
-                          onClick={() => openEdit(row)}
-                          data-testid={`history-row-edit-${row.id}`}
+                <React.Fragment key={`${row.source}-${row.id}`}>
+                  <tr data-testid={`history-row-${row.id}`}>
+                    <td>{row.completed_on}</td>
+                    <td>{row.title}</td>
+                    <td>{performerLabel(row)}</td>
+                    <td>{row.cost != null ? `$${row.cost}` : '—'}</td>
+                    <td>{sourceLabel(row.source)}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        {row.detail_url && (
+                          <a href={row.detail_url}>Open WO</a>
+                        )}
+                        {row.attachment_url && (
+                          <a
+                            href={row.attachment_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Attachment
+                          </a>
+                        )}
+                        {canManage && row.source === 'historical' && (
+                          <button
+                            type="button"
+                            onClick={() => openEdit(row)}
+                            data-testid={`history-row-edit-${row.id}`}
+                            style={{
+                              background: 'transparent',
+                              border: '1px solid #ccc',
+                              borderRadius: 4,
+                              padding: '2px 8px',
+                              cursor: 'pointer',
+                              fontSize: '0.85rem',
+                            }}
+                          >
+                            Edit notes / attachment
+                          </button>
+                        )}
+                        {!row.detail_url &&
+                          !row.attachment_url &&
+                          !(canManage && row.source === 'historical') &&
+                          '—'}
+                      </div>
+                    </td>
+                  </tr>
+                  {row.notes && row.notes.trim() && (
+                    <tr
+                      data-testid={`history-row-notes-${row.id}`}
+                      className="history-notes-row"
+                    >
+                      <td></td>
+                      <td colSpan={5}>
+                        <div
                           style={{
-                            background: 'transparent',
-                            border: '1px solid #ccc',
-                            borderRadius: 4,
-                            padding: '2px 8px',
-                            cursor: 'pointer',
-                            fontSize: '0.85rem',
+                            color: '#555',
+                            fontSize: '0.9em',
+                            whiteSpace: 'pre-wrap',
+                            padding: '0.25rem 0 0.5rem 0',
                           }}
                         >
-                          Edit notes / attachment
-                        </button>
-                      )}
-                      {!row.detail_url &&
-                        !row.attachment_url &&
-                        !(canManage && row.source === 'historical') &&
-                        '—'}
-                    </div>
-                  </td>
-                </tr>
+                          <span style={{ fontWeight: 600, marginRight: '0.5em' }}>
+                            Notes:
+                          </span>
+                          {row.notes}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

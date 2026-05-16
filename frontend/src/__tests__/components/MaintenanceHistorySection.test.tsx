@@ -189,6 +189,73 @@ describe('MaintenanceHistorySection', () => {
     expect(mockedApi.maintenanceRecordsAPI.create).not.toHaveBeenCalled();
   });
 
+  describe('notes display', () => {
+    it('renders a notes sub-row when notes are present', async () => {
+      const withNotes = {
+        data: {
+          ...oneHistoricalRow.data,
+          results: [
+            {
+              ...oneHistoricalRow.data.results[0],
+              notes: 'replaced belt; next service due Q2 2025',
+            },
+          ],
+        },
+      };
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(withNotes);
+      renderSection(false);
+      await waitFor(() => {
+        expect(screen.getByText('Annual HVAC service')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('history-row-notes-rec-1')).toBeInTheDocument();
+      expect(
+        screen.getByText('replaced belt; next service due Q2 2025'),
+      ).toBeInTheDocument();
+    });
+
+    it('omits the notes sub-row when notes are empty', async () => {
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(oneHistoricalRow);
+      renderSection(false);
+      await waitFor(() => {
+        expect(screen.getByText('Annual HVAC service')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('history-row-notes-rec-1')).not.toBeInTheDocument();
+    });
+
+    it('omits the notes sub-row when notes are whitespace only', async () => {
+      const blankNotes = {
+        data: {
+          ...oneHistoricalRow.data,
+          results: [{ ...oneHistoricalRow.data.results[0], notes: '   \n  ' }],
+        },
+      };
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(blankNotes);
+      renderSection(false);
+      await waitFor(() => {
+        expect(screen.getByText('Annual HVAC service')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('history-row-notes-rec-1')).not.toBeInTheDocument();
+    });
+
+    it('shows notes on workorder-source rows too', async () => {
+      const woWithNotes = {
+        data: {
+          ...oneWorkOrderRow.data,
+          results: [
+            { ...oneWorkOrderRow.data.results[0], notes: 'vendor invoice attached' },
+          ],
+        },
+      };
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(woWithNotes);
+      renderSection(true);
+      await waitFor(() => {
+        expect(screen.getByText('Compressor swap')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('history-row-notes-wo-1')).toBeInTheDocument();
+      expect(screen.getByText('vendor invoice attached')).toBeInTheDocument();
+    });
+  });
+
   describe('historical row edit', () => {
     it('hides the Edit button from non-staff', async () => {
       mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(oneHistoricalRow);

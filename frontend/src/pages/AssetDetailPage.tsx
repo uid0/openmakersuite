@@ -6,6 +6,7 @@ import { Badge, Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import MaintenanceHistorySection from '../components/assets/MaintenanceHistorySection';
+import AssetPowerChainEditor from './AssetPowerChainEditor';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   AssetLOTORequirements,
@@ -1001,6 +1002,33 @@ const AssetDetailPage: React.FC = () => {
             canManage={isLoggedIn && localStorage.getItem('is_staff') === 'true'}
           />
         )}
+
+        {id &&
+          (localStorage.getItem('is_staff') === 'true' ||
+            localStorage.getItem('is_superuser') === 'true') && (
+            <section className="asset-detail-section">
+              <h2>Power chain</h2>
+              <p style={{ marginTop: 0, color: '#666' }}>
+                Wire this asset into the electrical topology by adding power ports and
+                connecting them to outlets. The outlet&apos;s circuit and breaker chain
+                are then traceable end-to-end. Full timeline view at{' '}
+                <a href={`/facilities/electrical/power-chain/${id}`}>
+                  /facilities/electrical/power-chain
+                </a>
+                .
+              </p>
+              <AssetPowerChainEditor
+                assetId={id}
+                isStaff={
+                  localStorage.getItem('is_staff') === 'true' ||
+                  localStorage.getItem('is_superuser') === 'true'
+                }
+                onChange={() => {
+                  /* editor manages its own refresh */
+                }}
+              />
+            </section>
+          )}
 
         {/* QR Code */}
         <section className="asset-detail-section">

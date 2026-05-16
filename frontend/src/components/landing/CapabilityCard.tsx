@@ -49,14 +49,20 @@ const CapabilityCard: React.FC<CapabilityCardProps> = ({
   badge,
   ctaLabel = 'Open',
   testId,
-}) => (
-  <Link
-    to={to}
-    className="landing-capability-card"
-    data-testid={testId ?? `capability-card-${to}`}
-    aria-label={title}
-    style={{ padding: '1.4rem' }}
-  >
+}) => {
+  // Backend endpoints (api/*, /media/*, /static/*) and *.pdf / *.csv
+  // downloads must use a real <a href>, not a SPA <Link>, otherwise React
+  // Router intercepts the click and the browser never makes the HTTP
+  // request. Detect those and emit an anchor; SPA routes stay on <Link>.
+  const isExternal =
+    to.startsWith('/api/') ||
+    to.startsWith('/media/') ||
+    to.startsWith('/static/') ||
+    to.startsWith('http://') ||
+    to.startsWith('https://') ||
+    /\.(pdf|csv|xlsx?|json)(\?|$)/i.test(to);
+
+  const innerContent = (
     <Stack gap="md" style={{ height: '100%' }}>
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <Box className="landing-icon-chip" aria-hidden>
@@ -90,7 +96,35 @@ const CapabilityCard: React.FC<CapabilityCardProps> = ({
         </span>
       </Box>
     </Stack>
-  </Link>
-);
+  );
+
+  if (isExternal) {
+    return (
+      <a
+        href={to}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="landing-capability-card"
+        data-testid={testId ?? `capability-card-${to}`}
+        aria-label={title}
+        style={{ padding: '1.4rem' }}
+      >
+        {innerContent}
+      </a>
+    );
+  }
+
+  return (
+    <Link
+      to={to}
+      className="landing-capability-card"
+      data-testid={testId ?? `capability-card-${to}`}
+      aria-label={title}
+      style={{ padding: '1.4rem' }}
+    >
+      {innerContent}
+    </Link>
+  );
+};
 
 export default CapabilityCard;

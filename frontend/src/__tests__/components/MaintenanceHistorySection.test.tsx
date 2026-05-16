@@ -188,4 +188,106 @@ describe('MaintenanceHistorySection', () => {
     // HTML5 required validation prevents submit; no API call should fire.
     expect(mockedApi.maintenanceRecordsAPI.create).not.toHaveBeenCalled();
   });
+
+  describe('historical row edit', () => {
+    it('hides the Edit button from non-staff', async () => {
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(oneHistoricalRow);
+      renderSection(false);
+      await waitFor(() => {
+        expect(screen.getByText('Annual HVAC service')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('history-row-edit-rec-1')).not.toBeInTheDocument();
+    });
+
+    it('shows the Edit button on historical rows for staff', async () => {
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(oneHistoricalRow);
+      renderSection(true);
+      await waitFor(() => {
+        expect(screen.getByTestId('history-row-edit-rec-1')).toBeInTheDocument();
+      });
+    });
+
+    it('does not show Edit on workorder rows even for staff', async () => {
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(oneWorkOrderRow);
+      renderSection(true);
+      await waitFor(() => {
+        expect(screen.getByText('Compressor swap')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('history-row-edit-wo-1')).not.toBeInTheDocument();
+    });
+
+    it('opens the edit panel pre-filled with the row notes', async () => {
+      const withNotes = {
+        data: {
+          ...oneHistoricalRow.data,
+          results: [{ ...oneHistoricalRow.data.results[0], notes: 'replaced belt' }],
+        },
+      };
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(withNotes);
+      renderSection(true);
+      await waitFor(() => {
+        expect(screen.getByTestId('history-row-edit-rec-1')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('history-row-edit-rec-1'));
+      expect(screen.getByTestId('history-edit-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('history-edit-notes')).toHaveValue('replaced belt');
+    });
+
+    it('submits notes-only updates via JSON', async () => {
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(oneHistoricalRow);
+      mockedApi.maintenanceRecordsAPI.update.mockResolvedValue({
+        data: oneHistoricalRow.data.results[0],
+      });
+      renderSection(true);
+      await waitFor(() => {
+        expect(screen.getByTestId('history-row-edit-rec-1')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('history-row-edit-rec-1'));
+      fireEvent.change(screen.getByTestId('history-edit-notes'), {
+        target: { value: 'follow-up next quarter' },
+      });
+      fireEvent.click(screen.getByTestId('history-edit-submit'));
+      await waitFor(() => {
+        expect(mockedApi.maintenanceRecordsAPI.update).toHaveBeenCalledWith(
+          'rec-1',
+          { notes: 'follow-up next quarter' },
+        );
+      });
+    });
+
+    it('submits attachment uploads alongside notes', async () => {
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(oneHistoricalRow);
+      mockedApi.maintenanceRecordsAPI.update.mockResolvedValue({
+        data: oneHistoricalRow.data.results[0],
+      });
+      renderSection(true);
+      await waitFor(() => {
+        expect(screen.getByTestId('history-row-edit-rec-1')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('history-row-edit-rec-1'));
+      const file = new File(['%PDF-1.4'], 'invoice.pdf', { type: 'application/pdf' });
+      const input = screen.getByTestId('history-edit-attachment') as HTMLInputElement;
+      Object.defineProperty(input, 'files', { value: [file] });
+      fireEvent.change(input);
+      fireEvent.click(screen.getByTestId('history-edit-submit'));
+      await waitFor(() => {
+        const call = mockedApi.maintenanceRecordsAPI.update.mock.calls[0];
+        expect(call[0]).toBe('rec-1');
+        expect(call[1].attachment).toBe(file);
+      });
+    });
+
+    it('cancel closes the panel without calling the API', async () => {
+      mockedApi.assetsAPI.getMaintenanceHistory.mockResolvedValue(oneHistoricalRow);
+      renderSection(true);
+      await waitFor(() => {
+        expect(screen.getByTestId('history-row-edit-rec-1')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('history-row-edit-rec-1'));
+      expect(screen.getByTestId('history-edit-panel')).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('history-edit-cancel'));
+      expect(screen.queryByTestId('history-edit-panel')).not.toBeInTheDocument();
+      expect(mockedApi.maintenanceRecordsAPI.update).not.toHaveBeenCalled();
+    });
+  });
 });

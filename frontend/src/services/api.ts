@@ -657,8 +657,32 @@ export const maintenanceRecordsAPI = {
     return api.post<MaintenanceRecord>('/inventory/maintenance-records/', payload);
   },
 
-  update: (id: string, payload: Partial<MaintenanceRecordCreatePayload>) =>
-    api.patch<MaintenanceRecord>(`/inventory/maintenance-records/${id}/`, payload),
+  update: (id: string, payload: Partial<MaintenanceRecordCreatePayload>) => {
+    // FileField needs multipart/form-data; everything else can stay JSON.
+    if (payload.attachment instanceof File) {
+      const form = new FormData();
+      if (payload.asset !== undefined) form.append('asset', payload.asset);
+      if (payload.title !== undefined) form.append('title', payload.title);
+      if (payload.description !== undefined) form.append('description', payload.description);
+      if (payload.completed_on !== undefined) form.append('completed_on', payload.completed_on);
+      if (payload.vendor !== undefined && payload.vendor !== null) {
+        form.append('vendor', payload.vendor);
+      }
+      if (payload.performed_by_internal !== undefined && payload.performed_by_internal !== null) {
+        form.append('performed_by_internal', String(payload.performed_by_internal));
+      }
+      if (payload.cost !== undefined && payload.cost !== null && payload.cost !== '') {
+        form.append('cost', payload.cost);
+      }
+      if (payload.invoice_number !== undefined) form.append('invoice_number', payload.invoice_number);
+      if (payload.notes !== undefined) form.append('notes', payload.notes);
+      form.append('attachment', payload.attachment);
+      return api.patch<MaintenanceRecord>(`/inventory/maintenance-records/${id}/`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.patch<MaintenanceRecord>(`/inventory/maintenance-records/${id}/`, payload);
+  },
 
   delete: (id: string) =>
     api.delete(`/inventory/maintenance-records/${id}/`),

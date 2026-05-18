@@ -4,9 +4,14 @@ from django.contrib.contenttypes.models import ContentType
 
 from rest_framework import serializers
 
+from loto.models import LOTODevice
+from loto.serializers import LOTODeviceSerializer
+
 from .models import (
     Breaker,
     Cable,
+    Disconnect,
+    HardwiredConnection,
     LightSwitch,
     NetworkDrop,
     Outlet,
@@ -276,6 +281,9 @@ class PowerOutletSerializer(serializers.ModelSerializer):
 
     location_name = serializers.CharField(source="location.name", read_only=True)
     circuit_label = serializers.SerializerMethodField()
+    disconnect_label = serializers.CharField(
+        source="disconnect.label", read_only=True, allow_null=True
+    )
 
     class Meta:
         model = PowerOutlet
@@ -285,6 +293,8 @@ class PowerOutletSerializer(serializers.ModelSerializer):
             "circuit_label",
             "location",
             "location_name",
+            "disconnect",
+            "disconnect_label",
             "outlet_type",
             "label",
             "location_description",
@@ -298,6 +308,89 @@ class PowerOutletSerializer(serializers.ModelSerializer):
 
     def get_circuit_label(self, obj) -> str:
         return obj.circuit.label or f"Circuit #{obj.circuit_id}"
+
+
+class DisconnectSerializer(serializers.ModelSerializer):
+    """Read/write serializer for Disconnect rows.
+
+    Reads expose denormalized panel / breaker / circuit context so the
+    frontend can render a disconnect row without a follow-up tree walk.
+    Writes accept a list of LOTODevice ids via the dedicated
+    ``required_loto_device_ids`` field; the read shape carries the full
+    LOTODevice payloads under ``required_loto_devices``.
+    """
+
+    location_name = serializers.CharField(source="location.name", read_only=True, allow_null=True)
+    circuit_label = serializers.CharField(source="circuit.label", read_only=True)
+    breaker_position = serializers.CharField(source="circuit.breaker.position", read_only=True)
+    panel_name = serializers.CharField(source="circuit.breaker.panel.name", read_only=True)
+    required_loto_devices = LOTODeviceSerializer(many=True, read_only=True)
+    required_loto_device_ids = serializers.PrimaryKeyRelatedField(
+        many=True,
+        write_only=True,
+        queryset=LOTODevice.objects.all(),
+        source="required_loto_devices",
+        required=False,
+    )
+
+    class Meta:
+        model = Disconnect
+        fields = [
+            "id",
+            "circuit",
+            "circuit_label",
+            "panel_name",
+            "breaker_position",
+            "location",
+            "location_name",
+            "label",
+            "disconnect_type",
+            "amperage",
+            "fuse_size",
+            "is_lockable",
+            "photo",
+            "notes",
+            "required_loto_devices",
+            "required_loto_device_ids",
+            "needs_review",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class HardwiredConnectionSerializer(serializers.ModelSerializer):
+    """Read/write serializer for HardwiredConnection rows.
+
+    The upstream circuit is reachable via ``disconnect.circuit`` on the
+    model, but callers expect it at the top level — we surface it as a
+    read-only convenience so the frontend doesn't have to double-hop
+    through the disconnect payload.
+    """
+
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    disconnect_label = serializers.CharField(source="disconnect.label", read_only=True)
+    circuit = serializers.PrimaryKeyRelatedField(source="disconnect.circuit", read_only=True)
+    circuit_label = serializers.CharField(source="disconnect.circuit.label", read_only=True)
+
+    class Meta:
+        model = HardwiredConnection
+        fields = [
+            "id",
+            "asset",
+            "asset_name",
+            "disconnect",
+            "disconnect_label",
+            "circuit",
+            "circuit_label",
+            "conductor_size",
+            "conductor_length_ft",
+            "notes",
+            "needs_review",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
 
 
 class NetworkDropSerializer(serializers.ModelSerializer):

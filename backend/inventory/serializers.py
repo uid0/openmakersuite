@@ -702,6 +702,13 @@ class AssetSerializer(serializers.ModelSerializer):
     # Power / electrical computed flag
     is_forgekey_managed = serializers.ReadOnlyField()
 
+    # Hardwired power feeds (PR oms-0v4b41) — surfaces the new
+    # HardwiredConnection rows on the asset detail payload alongside
+    # the existing cordset/PowerCable rendering. Writes still go through
+    # the dedicated /hardwired-connections/ endpoint; this field is
+    # read-only.
+    hardwired_connections = serializers.SerializerMethodField()
+
     class Meta:
         model = Asset
         fields = [
@@ -747,6 +754,7 @@ class AssetSerializer(serializers.ModelSerializer):
             "is_chargeable",
             "mac_address",
             # Power / electrical
+            "hardwired_connections",
             "power_draw_watts",
             "wiring_type",
             "suite",
@@ -984,6 +992,18 @@ class AssetSerializer(serializers.ModelSerializer):
             return obj.manual_pdf.url if obj.manual_pdf else None
         except Exception:
             return None
+
+    def get_hardwired_connections(self, obj):
+        # Lazy import — inventory must not import electrical_circuits at
+        # module load (circular: electrical_circuits.models depends on
+        # inventory.models).
+        from electrical_circuits.serializers import HardwiredConnectionSerializer
+
+        connections = obj.hardwired_connections.select_related(
+            "asset",
+            "disconnect__circuit__breaker__panel",
+        ).order_by("disconnect__label")
+        return HardwiredConnectionSerializer(connections, many=True).data
 
 
 class AssetProblemPhotoSerializer(serializers.ModelSerializer):

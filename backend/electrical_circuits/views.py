@@ -12,6 +12,8 @@ from rest_framework.views import APIView
 from .models import (
     Breaker,
     Cable,
+    Disconnect,
+    HardwiredConnection,
     LightSwitch,
     NetworkDrop,
     Outlet,
@@ -24,6 +26,8 @@ from .models import (
 from .safety_views import IsStaffUser
 from .serializers import (
     BreakerSerializer,
+    DisconnectSerializer,
+    HardwiredConnectionSerializer,
     LightSwitchSerializer,
     NetworkDropSerializer,
     OutletSerializer,
@@ -245,6 +249,72 @@ class PowerPortViewSet(viewsets.ModelViewSet):
         asset_id = self.request.query_params.get("asset")
         if asset_id:
             qs = qs.filter(asset_id=asset_id)
+        return qs
+
+
+class DisconnectViewSet(viewsets.ModelViewSet):
+    """``/api/electrical-circuits/disconnects/`` — full CRUD for disconnects.
+
+    Staff-only (consistent with the rest of the power-chain edit surface).
+    Supports ``?circuit=``, ``?location=``, ``?disconnect_type=``, and
+    ``?needs_review=`` query params on the list endpoint so the
+    Disconnect management UI can scope the table.
+    """
+
+    permission_classes = [IsAuthenticated, IsStaffUser]
+    serializer_class = DisconnectSerializer
+    queryset = (
+        Disconnect.objects.select_related(
+            "circuit__breaker__panel",
+            "location",
+        )
+        .prefetch_related("required_loto_devices")
+        .order_by("location__name", "label")
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        circuit_id = params.get("circuit")
+        if circuit_id:
+            qs = qs.filter(circuit_id=circuit_id)
+        location_id = params.get("location")
+        if location_id:
+            qs = qs.filter(location_id=location_id)
+        disconnect_type = params.get("disconnect_type")
+        if disconnect_type:
+            qs = qs.filter(disconnect_type=disconnect_type)
+        needs_review = params.get("needs_review")
+        if needs_review is not None:
+            truthy = needs_review.lower() in ("1", "true", "yes")
+            qs = qs.filter(needs_review=truthy)
+        return qs
+
+
+class HardwiredConnectionViewSet(viewsets.ModelViewSet):
+    """``/api/electrical-circuits/hardwired-connections/`` — full CRUD.
+
+    Staff-only. Supports ``?asset=`` and ``?disconnect=`` filters so the
+    asset detail page (and the Disconnect detail page) can fetch the
+    relevant connection rows without scanning the whole table.
+    """
+
+    permission_classes = [IsAuthenticated, IsStaffUser]
+    serializer_class = HardwiredConnectionSerializer
+    queryset = HardwiredConnection.objects.select_related(
+        "asset",
+        "disconnect__circuit__breaker__panel",
+    ).order_by("asset__name")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        asset_id = params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        disconnect_id = params.get("disconnect")
+        if disconnect_id:
+            qs = qs.filter(disconnect_id=disconnect_id)
         return qs
 
 

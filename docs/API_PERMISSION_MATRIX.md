@@ -267,6 +267,8 @@ below are public.
 | any | `electrical-circuits/outlets/...` | member | Inventory of outlets. |
 | any | `electrical-circuits/light-switches/...` | member | Inventory of light switches. |
 | any | `electrical-circuits/network-drops/...` | member | Inventory of network drops. |
+| any | `electrical-circuits/disconnects/...` | staff | `DisconnectViewSet` — full CRUD on Disconnect rows for hardwired loads. Supports `?circuit=`, `?location=`, `?disconnect_type=`, and `?needs_review=` filters on list. |
+| any | `electrical-circuits/hardwired-connections/...` | staff | `HardwiredConnectionViewSet` — full CRUD on the Asset ↔ Disconnect feed rows. Supports `?asset=` and `?disconnect=` filters on list. |
 | GET | `electrical-circuits/reports/panel-directory.pdf` | member | Printable panel directory PDF. |
 | GET | `electrical-circuits/reports/network-drop-list.pdf` | member | Printable network drop list PDF. |
 

@@ -2067,6 +2067,9 @@ views:
   screens.views.kiosk_payload:
     permission_classes:
     - AllowAny
+  screens.weather_views.current_weather:
+    permission_classes:
+    - AllowAny
   search.views.get_recent_searches:
     permission_classes:
     - IsAuthenticated

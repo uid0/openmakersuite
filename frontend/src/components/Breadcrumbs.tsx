@@ -11,6 +11,7 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import '../styles/Breadcrumbs.css';
 
+import { useBreadcrumbState } from '../contexts/BreadcrumbContext';
 import { getRouteEntry, isClickable, labelFor } from '../navigation/routeMap';
 
 interface BreadcrumbSegment {
@@ -26,6 +27,7 @@ const ID_LIKE = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 const Breadcrumbs: React.FC = () => {
   const location = useLocation();
+  const { currentLabel } = useBreadcrumbState();
 
   const breadcrumbs = React.useMemo<BreadcrumbSegment[]>(() => {
     const pathSegments = location.pathname.split('/').filter(Boolean);
@@ -50,6 +52,17 @@ const Breadcrumbs: React.FC = () => {
     return out;
   }, [location.pathname]);
 
+  // When a page has registered a dynamic label via useSetBreadcrumb, swap
+  // it in for the final segment so e.g. /assets/<uuid>/edit reads as
+  // "Home › Assets › <Asset name>" instead of "… › Edit".
+  const visibleBreadcrumbs = React.useMemo<BreadcrumbSegment[]>(() => {
+    if (!currentLabel || breadcrumbs.length === 0) return breadcrumbs;
+    const lastIndex = breadcrumbs.length - 1;
+    return breadcrumbs.map((crumb, index) =>
+      index === lastIndex ? { ...crumb, label: currentLabel } : crumb,
+    );
+  }, [breadcrumbs, currentLabel]);
+
   if (location.pathname === '/') {
     return null;
   }
@@ -57,8 +70,8 @@ const Breadcrumbs: React.FC = () => {
   return (
     <nav className="breadcrumbs" aria-label="Breadcrumb">
       <ol className="breadcrumb-list">
-        {breadcrumbs.map((crumb, index) => {
-          const isLast = index === breadcrumbs.length - 1;
+        {visibleBreadcrumbs.map((crumb, index) => {
+          const isLast = index === visibleBreadcrumbs.length - 1;
           const renderAsLink = !isLast && crumb.clickable;
 
           return (

@@ -2113,6 +2113,7 @@ export interface PowerOutletNode {
   status: string;
   location_id: number | null;
   location_name: string | null;
+  connected_assets: PowerSafetyAsset[];
 }
 
 export interface PowerCircuitNode {

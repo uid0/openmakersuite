@@ -262,10 +262,23 @@ FRONTEND_URL = config("FRONTEND_URL", default="http://192.168.1.36:3000")
 
 # Shared weather widget URL surfaced to all kiosk screens. All SIGs share the
 # same physical location, so a single global URL avoids per-screen duplication.
+# Legacy: kept while the iframe-based SharedWeatherBlock is still on screens
+# that haven't switched to the OpenWeather-backed block.
 WEATHER_URL = config(
     "WEATHER_URL",
     default="https://www.wunderground.com/weather/us/tx/carrollton/",
 )
+
+# OpenWeather server-side proxy (screens.weather_views.current_weather).
+# Replaces the iframe-embedded widget that CSP blocks on most TVs. Set
+# OPENWEATHER_API_KEY + either OPENWEATHER_LAT/LON or OPENWEATHER_ZIP for
+# the kiosk weather block to light up.
+OPENWEATHER_API_KEY = config("OPENWEATHER_API_KEY", default="")
+OPENWEATHER_LAT = config("OPENWEATHER_LAT", default=None)
+OPENWEATHER_LON = config("OPENWEATHER_LON", default=None)
+OPENWEATHER_ZIP = config("OPENWEATHER_ZIP", default="")  # e.g. "75001,us"
+OPENWEATHER_UNITS = config("OPENWEATHER_UNITS", default="imperial")
+OPENWEATHER_CACHE_SECONDS = config("OPENWEATHER_CACHE_SECONDS", default=600, cast=int)
 
 # Passkey / WebAuthn configuration
 # django-passkey-auth derives the Relying Party ID from request.get_host(). When

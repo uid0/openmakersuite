@@ -126,7 +126,7 @@ def make_command_jwt(*, mac: str, cmd: str, exp_seconds: int = 60) -> str:
     """Sign a short-TTL command JWT for a ForgeKey device.
 
     The JWT is the credential the firmware verifies before acting on a
-    `forgekey/<mac>/cmd` MQTT message — used by the locker / door /
+    `forgekey/<mac>/command` MQTT message — used by the locker / door /
     electronic-device pipeline (gh ForgeKey expansion, Phase 1).
 
     Payload shape: ``{"mac": ..., "cmd": ..., "exp": <unix-seconds>}``.

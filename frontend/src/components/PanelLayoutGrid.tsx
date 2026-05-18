@@ -270,7 +270,15 @@ export interface PanelLayoutGridProps {
 }
 
 const PanelLayoutGrid: React.FC<PanelLayoutGridProps> = ({ topology, density = 'interactive' }) => {
-  const pairs = buildSlotPairs(topology);
+  const pairsTopDown = buildSlotPairs(topology);
+  // Render order matches the physical cabinet: top-down (default) or
+  // bottom-up for the manufacturers that put slot 1 at the bottom. We
+  // reverse the rendered pair list rather than swapping odd/even within
+  // each row so the left-column / right-column convention stays intact.
+  const pairs =
+    topology.numbering_direction === 'bottom_up'
+      ? [...pairsTopDown].reverse()
+      : pairsTopDown;
 
   if (topology.breakers.length === 0) {
     return (

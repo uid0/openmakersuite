@@ -352,6 +352,34 @@ class PowerPanel(models.Model):
         (PHASE_THREE, "Three phase"),
     ]
 
+    # Breaker family — informs sourcing replacements + LOTO procedure choice.
+    # Listed by prevalence in North American makerspaces; "DIN_RAIL" covers
+    # the IEC C60/C120 modular breakers common on imported industrial gear.
+    BREAKER_TYPE_CHOICES = [
+        ("SQUARE_D_QO", "Square D QO (plug-on, 10kA)"),
+        ("SQUARE_D_HOMELINE", "Square D Homeline (plug-on, 10kA)"),
+        ("EATON_CH", "Eaton CH / Cutler-Hammer Classic"),
+        ("EATON_BR", "Eaton BR (residential)"),
+        ("SIEMENS_QP", "Siemens QP / Murray MP"),
+        ("GE_Q_LINE", "GE Q-Line / ABB Q-Line"),
+        ("FEDERAL_PACIFIC", "Federal Pacific Stab-Lok (legacy — replace)"),
+        ("PUSHMATIC", "Pushmatic / ITE-Bulldog (legacy)"),
+        ("DIN_RAIL", "IEC DIN-rail (C60 / industrial)"),
+        ("OTHER", "Other / unknown"),
+    ]
+
+    # Some manufacturers number slots top-to-bottom (most common), others
+    # bottom-to-top (notably some industrial / European panels and a few
+    # older US load centers). Drives the rendering order in
+    # PanelLayoutGrid so the on-screen layout matches what the operator
+    # actually sees on the cabinet door.
+    NUMBERING_TOP_DOWN = "top_down"
+    NUMBERING_BOTTOM_UP = "bottom_up"
+    NUMBERING_DIRECTION_CHOICES = [
+        (NUMBERING_TOP_DOWN, "Top-down (slot 1 at top)"),
+        (NUMBERING_BOTTOM_UP, "Bottom-up (slot 1 at bottom)"),
+    ]
+
     location = models.ForeignKey(
         Location,
         on_delete=models.PROTECT,
@@ -390,6 +418,26 @@ class PowerPanel(models.Model):
         blank=True,
         validators=[MinValueValidator(1)],
         help_text="Main breaker amperage (null if no main / sub-fed)",
+    )
+    breaker_type = models.CharField(
+        max_length=30,
+        choices=BREAKER_TYPE_CHOICES,
+        blank=True,
+        default="",
+        help_text=(
+            "Breaker family this panel accepts. Used to filter replacement "
+            "sourcing and warn when a mismatched breaker is added."
+        ),
+    )
+    numbering_direction = models.CharField(
+        max_length=10,
+        choices=NUMBERING_DIRECTION_CHOICES,
+        default=NUMBERING_TOP_DOWN,
+        help_text=(
+            "Slot 1 location on the physical cabinet — top-down for most "
+            "North American load centers, bottom-up for some industrial / "
+            "European panels."
+        ),
     )
     manufacturer = models.CharField(max_length=100, blank=True)
     model = models.CharField(max_length=100, blank=True)

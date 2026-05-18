@@ -130,6 +130,8 @@ class PowerPanelSerializer(serializers.ModelSerializer):
             "phase_configuration",
             "voltage",
             "main_breaker_amperage",
+            "breaker_type",
+            "numbering_direction",
             "manufacturer",
             "model",
             "install_date",

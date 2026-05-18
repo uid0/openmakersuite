@@ -234,6 +234,8 @@ class PowerPanelTopologyView(APIView):
                 "phase_configuration": panel.phase_configuration,
                 "voltage": panel.voltage,
                 "main_breaker_amperage": panel.main_breaker_amperage,
+                "breaker_type": panel.breaker_type,
+                "numbering_direction": panel.numbering_direction,
                 "fed_by_summary": fed_by_summary,
                 "downstream_panels": downstream,
                 "breakers": breakers_payload,

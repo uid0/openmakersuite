@@ -2141,6 +2141,21 @@ export interface PowerBreakerNode {
   circuits: PowerCircuitNode[];
 }
 
+export type PanelBreakerType =
+  | ''
+  | 'SQUARE_D_QO'
+  | 'SQUARE_D_HOMELINE'
+  | 'EATON_CH'
+  | 'EATON_BR'
+  | 'SIEMENS_QP'
+  | 'GE_Q_LINE'
+  | 'FEDERAL_PACIFIC'
+  | 'PUSHMATIC'
+  | 'DIN_RAIL'
+  | 'OTHER';
+
+export type PanelNumberingDirection = 'top_down' | 'bottom_up';
+
 export interface PowerPanelTopology {
   id: number;
   name: string;
@@ -2149,6 +2164,8 @@ export interface PowerPanelTopology {
   phase_configuration: PowerPanelPhase;
   voltage: number;
   main_breaker_amperage: number | null;
+  breaker_type: PanelBreakerType;
+  numbering_direction: PanelNumberingDirection;
   fed_by_summary: PanelFedBySummary | null;
   downstream_panels: Array<{ id: number; name: string }>;
   breakers: PowerBreakerNode[];
@@ -2227,6 +2244,8 @@ export interface PowerPanelDetail {
   phase_configuration: PowerPanelPhase;
   voltage: number;
   main_breaker_amperage: number | null;
+  breaker_type: PanelBreakerType;
+  numbering_direction: PanelNumberingDirection;
   manufacturer: string;
   model: string;
   install_date: string | null;
@@ -2247,6 +2266,8 @@ export type PowerPanelWritable = Pick<
   | 'phase_configuration'
   | 'voltage'
   | 'main_breaker_amperage'
+  | 'breaker_type'
+  | 'numbering_direction'
   | 'manufacturer'
   | 'model'
   | 'install_date'

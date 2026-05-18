@@ -37,6 +37,25 @@ const PHASE_OPTIONS: Array<{ value: PowerPanelPhase; label: string }> = [
   { value: 'three', label: 'Three phase' },
 ];
 
+const BREAKER_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Not specified' },
+  { value: 'SQUARE_D_QO', label: 'Square D QO (plug-on, 10kA)' },
+  { value: 'SQUARE_D_HOMELINE', label: 'Square D Homeline (plug-on, 10kA)' },
+  { value: 'EATON_CH', label: 'Eaton CH / Cutler-Hammer Classic' },
+  { value: 'EATON_BR', label: 'Eaton BR (residential)' },
+  { value: 'SIEMENS_QP', label: 'Siemens QP / Murray MP' },
+  { value: 'GE_Q_LINE', label: 'GE Q-Line / ABB Q-Line' },
+  { value: 'FEDERAL_PACIFIC', label: 'Federal Pacific Stab-Lok (legacy — replace)' },
+  { value: 'PUSHMATIC', label: 'Pushmatic / ITE-Bulldog (legacy)' },
+  { value: 'DIN_RAIL', label: 'IEC DIN-rail (C60 / industrial)' },
+  { value: 'OTHER', label: 'Other / unknown' },
+];
+
+const NUMBERING_OPTIONS: Array<{ value: 'top_down' | 'bottom_up'; label: string }> = [
+  { value: 'top_down', label: 'Top-down (slot 1 at top)' },
+  { value: 'bottom_up', label: 'Bottom-up (slot 1 at bottom)' },
+];
+
 const PowerPanelFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -49,6 +68,8 @@ const PowerPanelFormPage: React.FC = () => {
     phase_configuration: 'split',
     voltage: 240,
     main_breaker_amperage: null,
+    breaker_type: '',
+    numbering_direction: 'top_down',
     manufacturer: '',
     model: '',
     install_date: null,
@@ -86,6 +107,8 @@ const PowerPanelFormPage: React.FC = () => {
         phase_configuration: panel.phase_configuration,
         voltage: panel.voltage,
         main_breaker_amperage: panel.main_breaker_amperage,
+        breaker_type: panel.breaker_type,
+        numbering_direction: panel.numbering_direction,
         manufacturer: panel.manufacturer,
         model: panel.model,
         install_date: panel.install_date,
@@ -204,6 +227,29 @@ const PowerPanelFormPage: React.FC = () => {
                   }
                   min={1}
                   suffix=" A"
+                />
+              </Group>
+              <Group grow>
+                <Select
+                  label="Breaker family"
+                  description="Used to filter replacement sourcing and flag mismatched breakers."
+                  data={BREAKER_TYPE_OPTIONS}
+                  value={form.breaker_type ?? ''}
+                  onChange={(value) =>
+                    setForm({ ...form, breaker_type: (value as any) ?? '' })
+                  }
+                />
+                <Select
+                  label="Numbering direction"
+                  description="Which physical slot is breaker 1? Most North American panels are top-down."
+                  data={NUMBERING_OPTIONS}
+                  value={form.numbering_direction ?? 'top_down'}
+                  onChange={(value) =>
+                    setForm({
+                      ...form,
+                      numbering_direction: (value as 'top_down' | 'bottom_up') ?? 'top_down',
+                    })
+                  }
                 />
               </Group>
               <Group grow>

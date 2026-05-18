@@ -28,6 +28,7 @@ import {
   PowerBreakerWritable,
   PowerPanelDetail,
 } from '../services/api';
+import { computePhase } from '../utils/computePhase';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const POLE_OPTIONS = [
@@ -72,6 +73,45 @@ const PowerBreakerFormPage: React.FC = () => {
   const [loading, setLoading] = useState(isEditMode);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Track whether the operator has hand-picked the phase. Once they
+  // override, we stop overwriting from the position/pole_count auto-calc
+  // so we don't second-guess a deliberate choice.
+  const [phaseManuallySet, setPhaseManuallySet] = useState(isEditMode);
+  const [autoPhaseHint, setAutoPhaseHint] = useState<string | null>(null);
+
+  const selectedPanel = panels.find((p) => p.id === form.panel) ?? null;
+
+  // Auto-populate phase from panel config + position + pole count.
+  // Bails out cleanly when the position is tandem or unparseable
+  // (computePhase returns null) so manual entries aren't clobbered.
+  useEffect(() => {
+    if (phaseManuallySet || !selectedPanel) {
+      setAutoPhaseHint(null);
+      return;
+    }
+    const computed = computePhase({
+      position: form.position ?? '',
+      poleCount: form.pole_count ?? 1,
+      panelPhase: selectedPanel.phase_configuration,
+    });
+    if (computed === null) {
+      setAutoPhaseHint(
+        /[/-]/.test(form.position ?? '')
+          ? 'Auto-calc skipped for tandem positions — set phase manually.'
+          : null,
+      );
+      return;
+    }
+    setAutoPhaseHint(
+      `Auto-set from ${selectedPanel.phase_configuration} panel · slot ${form.position} · ${form.pole_count}-pole`,
+    );
+    setForm((prev) => (prev.phase === computed ? prev : { ...prev, phase: computed }));
+  }, [
+    selectedPanel,
+    form.position,
+    form.pole_count,
+    phaseManuallySet,
+  ]);
 
   useEffect(() => {
     electricalTopologyAPI
@@ -200,11 +240,29 @@ const PowerBreakerFormPage: React.FC = () => {
                   label="Phase"
                   data={PHASE_OPTIONS}
                   value={form.phase ?? 'A'}
-                  onChange={(value) =>
-                    setForm({ ...form, phase: (value as PowerBreakerWritable['phase']) ?? 'A' })
+                  description={
+                    phaseManuallySet
+                      ? 'Manually set — reset below to re-enable auto-calc'
+                      : autoPhaseHint ?? undefined
                   }
+                  onChange={(value) => {
+                    setPhaseManuallySet(true);
+                    setForm({ ...form, phase: (value as PowerBreakerWritable['phase']) ?? 'A' });
+                  }}
                 />
               </Group>
+              {phaseManuallySet && !isEditMode && (
+                <Group justify="flex-end" gap="xs">
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    size="xs"
+                    onClick={() => setPhaseManuallySet(false)}
+                  >
+                    Re-enable phase auto-calc
+                  </Button>
+                </Group>
+              )}
               <Select
                 label="Status"
                 data={STATUS_OPTIONS}

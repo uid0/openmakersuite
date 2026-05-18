@@ -15,20 +15,38 @@ import {
   Container,
   Group,
   Paper,
+  SegmentedControl,
   Stack,
   Table,
   Text,
 } from '@mantine/core';
-import { IconBolt, IconEdit, IconPlus, IconRouteAltLeft } from '@tabler/icons-react';
+import { IconBolt, IconEdit, IconPlus, IconPrinter, IconRouteAltLeft } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import PageHero from '../components/landing/PageHero';
+import PanelLayoutGrid from '../components/PanelLayoutGrid';
 import { electricalSafetyAPI, PowerPanelTopology } from '../services/api';
 import '../styles/landing.css';
 
+type PanelView = 'panel' | 'list';
+
+const isPanelView = (v: string | null): v is PanelView => v === 'panel' || v === 'list';
+
 const PowerPanelDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewParam = searchParams.get('view');
+  const view: PanelView = isPanelView(viewParam) ? viewParam : 'panel';
+  const setView = (next: PanelView) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'panel') {
+      params.delete('view');
+    } else {
+      params.set('view', next);
+    }
+    setSearchParams(params, { replace: true });
+  };
   const [topology, setTopology] = useState<PowerPanelTopology | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +99,16 @@ const PowerPanelDetailPage: React.FC = () => {
               topology ? (
                 <Group gap="sm">
                   <Button
+                    component="a"
+                    href={`/facilities/electrical/panels/${topology.id}/print`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    variant="default"
+                    leftSection={<IconPrinter size={16} />}
+                  >
+                    Print directory
+                  </Button>
+                  <Button
                     component={Link}
                     to={`/facilities/electrical/panels/${topology.id}/edit`}
                     variant="default"
@@ -99,6 +127,25 @@ const PowerPanelDetailPage: React.FC = () => {
               ) : undefined
             }
           />
+
+          {topology && topology.breakers.length > 0 && (
+            <Group justify="space-between" align="center" wrap="wrap">
+              <SegmentedControl
+                data={[
+                  { label: 'Panel layout', value: 'panel' },
+                  { label: 'List', value: 'list' },
+                ]}
+                value={view}
+                onChange={(v) => setView(v as PanelView)}
+                data-testid="panel-view-toggle"
+              />
+              <Text size="sm" c="dimmed">
+                {view === 'panel'
+                  ? 'Odds left, evens right — mirrors the physical panel'
+                  : 'One card per breaker with full circuit detail'}
+              </Text>
+            </Group>
+          )}
 
           {error && (
             <Paper withBorder p="md" radius="md" bg="red.0" c="red.9">
@@ -178,7 +225,12 @@ const PowerPanelDetailPage: React.FC = () => {
             </Paper>
           )}
 
+          {topology && topology.breakers.length > 0 && view === 'panel' && (
+            <PanelLayoutGrid topology={topology} density="interactive" />
+          )}
+
           {topology &&
+            view === 'list' &&
             topology.breakers.map((breaker) => (
               <Paper
                 key={breaker.id}

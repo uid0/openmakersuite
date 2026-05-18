@@ -60,6 +60,7 @@ import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormSelect } from '../components/forms/FormSelect';
 import { FormTextarea } from '../components/forms/FormTextarea';
 import WorkspacePage from '../components/landing/WorkspacePage';
+import { useSetBreadcrumb } from '../contexts/BreadcrumbContext';
 import {
   assetPartsAPI,
   assetsAPI,
@@ -99,6 +100,11 @@ const AssetFormPage: React.FC = () => {
   const [locations, setLocations] = useState<Location[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [sigs, setSigs] = useState<SIG[]>([]);
+  const [assetName, setAssetName] = useState<string | undefined>(undefined);
+
+  // Show the asset name as the trailing breadcrumb in edit mode, so the
+  // header reads "Home › Assets › <Asset name>" instead of "… › Edit".
+  useSetBreadcrumb(isEditMode ? assetName : undefined);
 
   const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -188,6 +194,7 @@ const AssetFormPage: React.FC = () => {
         const response = await assetsAPI.getAsset(id);
         if (cancelled) return;
         const asset = response.data;
+        setAssetName(asset.name);
         reset({
           name: asset.name,
           description: asset.description || '',

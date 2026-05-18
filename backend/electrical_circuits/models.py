@@ -23,18 +23,34 @@ from django.db import models
 from inventory.models import Asset, Location
 
 NEMA_PORT_TYPE_CHOICES = [
+    # NEMA straight blade
     ("5-15R", "NEMA 5-15R (120V 15A)"),
     ("5-20R", "NEMA 5-20R (120V 20A)"),
     ("6-15R", "NEMA 6-15R (240V 15A)"),
     ("6-20R", "NEMA 6-20R (240V 20A)"),
+    # NEMA locking (twist-lock)
     ("L5-15R", "NEMA L5-15R (120V 15A locking)"),
     ("L5-20R", "NEMA L5-20R (120V 20A locking)"),
+    ("L5-30R", "NEMA L5-30R (120V 30A locking)"),
     ("L6-20R", "NEMA L6-20R (240V 20A locking)"),
     ("L6-30R", "NEMA L6-30R (240V 30A locking)"),
+    # NEMA range/dryer
     ("14-30R", "NEMA 14-30R (240V 30A)"),
     ("14-50R", "NEMA 14-50R (240V 50A)"),
+    # IEC 60320 — rack PDU + server / appliance cordsets. Added 2026-05-18
+    # after the frontend AssetPowerChainEditor was already offering C13/C19
+    # and the backend rejected them.
+    ("C13", "IEC C13 (PDU appliance, ≤10A)"),
+    ("C14", "IEC C14 (PDU inlet, ≤10A)"),
+    ("C19", "IEC C19 (PDU high-current, ≤16A)"),
+    ("C20", "IEC C20 (PDU high-current inlet, ≤16A)"),
+    # Misc
     ("USB", "USB charging"),
     ("OTHER", "Other"),
+    # Lowercase legacy alias — the frontend send "other" in lowercase
+    # for a stretch (PR #416). Accept both to avoid breaking existing
+    # rows + UI without a migration.
+    ("other", "Other (legacy lowercase)"),
 ]
 
 

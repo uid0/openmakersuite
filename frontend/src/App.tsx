@@ -31,6 +31,7 @@ import PowerBreakerFormPage from './pages/PowerBreakerFormPage';
 import PowerCircuitFormPage from './pages/PowerCircuitFormPage';
 import PowerOutletFormPage from './pages/PowerOutletFormPage';
 import PowerPanelDetailPage from './pages/PowerPanelDetailPage';
+import PowerPanelPrintPage from './pages/PowerPanelPrintPage';
 import PowerPanelDirectoryPage from './pages/PowerPanelDirectoryPage';
 import PowerPanelFormPage from './pages/PowerPanelFormPage';
 import FixtureScanPage from './pages/FixtureScanPage';
@@ -214,6 +215,9 @@ function AppContent() {
           <Route path="/facilities/electrical/panels" element={<WorkspaceLayout><PowerPanelDirectoryPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/panels/new" element={<WorkspaceLayout><PowerPanelFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/panels/:id" element={<WorkspaceLayout><PowerPanelDetailPage /></WorkspaceLayout>} />
+          {/* Print directory route renders bare — no workspace chrome — so the
+              browser print dialog emits a clean letter-size cabinet directory. */}
+          <Route path="/facilities/electrical/panels/:id/print" element={<PowerPanelPrintPage />} />
           <Route path="/facilities/electrical/panels/:id/edit" element={<WorkspaceLayout><PowerPanelFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/panels/:panelId/breakers/new" element={<WorkspaceLayout><PowerBreakerFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/breakers/:id/edit" element={<WorkspaceLayout><PowerBreakerFormPage /></WorkspaceLayout>} />

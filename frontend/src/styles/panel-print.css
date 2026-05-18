@@ -1,0 +1,59 @@
+/* Print stylesheet for the panel directory page.
+ * Goal: a single letter-size page that fits inside a typical residential
+ * load-center door. Strips chrome, tightens spacing, forces black text. */
+
+.panel-print-page {
+  max-width: 8in;
+  margin: 0 auto;
+}
+
+@media print {
+  /* Hide the workspace shell + the in-page toolbar so only the directory
+   * itself reaches the paper. WorkspaceLayout isn't applied to this route
+   * but we still strip any global app chrome that leaks through. */
+  body * {
+    visibility: hidden;
+  }
+
+  .panel-print-page,
+  .panel-print-page * {
+    visibility: visible;
+  }
+
+  .panel-print-page {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 0.4in !important;
+  }
+
+  .panel-print-no-print {
+    display: none !important;
+  }
+
+  /* Tighten the grid for print. */
+  .panel-layout-grid--print {
+    gap: 4px !important;
+    color: #000 !important;
+  }
+
+  .panel-layout-grid--print .mantine-Paper-root {
+    border-color: #000 !important;
+    background: #fff !important;
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+
+  /* Force readable fonts on paper. */
+  .panel-print-page,
+  .panel-print-page * {
+    color: #000 !important;
+    background: transparent !important;
+  }
+
+  @page {
+    size: letter;
+    margin: 0.4in;
+  }
+}

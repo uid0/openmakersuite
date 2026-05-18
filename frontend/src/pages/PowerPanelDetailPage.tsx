@@ -17,6 +17,7 @@ import {
   Paper,
   SegmentedControl,
   Stack,
+  Switch,
   Table,
   Text,
 } from '@mantine/core';
@@ -50,6 +51,24 @@ const PowerPanelDetailPage: React.FC = () => {
   const [topology, setTopology] = useState<PowerPanelTopology | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showFlaggedOnly, setShowFlaggedOnly] = useState(false);
+
+  // Count + filter computed against the loaded topology. Filtering happens
+  // before passing into PanelLayoutGrid so unflagged slots fall back to
+  // the "spare" cell rendering — keeps the spatial layout intact instead
+  // of collapsing flagged breakers into a dense list.
+  const flaggedCount =
+    topology?.breakers.filter((b) => b.review_status && b.review_status !== 'ok').length ?? 0;
+  const visibleTopology: PowerPanelTopology | null = !topology
+    ? null
+    : showFlaggedOnly
+      ? {
+          ...topology,
+          breakers: topology.breakers.filter(
+            (b) => b.review_status && b.review_status !== 'ok',
+          ),
+        }
+      : topology;
 
   useEffect(() => {
     if (!id) return;
@@ -130,15 +149,25 @@ const PowerPanelDetailPage: React.FC = () => {
 
           {topology && topology.breakers.length > 0 && (
             <Group justify="space-between" align="center" wrap="wrap">
-              <SegmentedControl
-                data={[
-                  { label: 'Panel layout', value: 'panel' },
-                  { label: 'List', value: 'list' },
-                ]}
-                value={view}
-                onChange={(v) => setView(v as PanelView)}
-                data-testid="panel-view-toggle"
-              />
+              <Group gap="md" wrap="wrap">
+                <SegmentedControl
+                  data={[
+                    { label: 'Panel layout', value: 'panel' },
+                    { label: 'List', value: 'list' },
+                  ]}
+                  value={view}
+                  onChange={(v) => setView(v as PanelView)}
+                  data-testid="panel-view-toggle"
+                />
+                {flaggedCount > 0 && (
+                  <Switch
+                    label={`Show flagged only (${flaggedCount})`}
+                    checked={showFlaggedOnly}
+                    onChange={(e) => setShowFlaggedOnly(e.currentTarget.checked)}
+                    data-testid="filter-flagged-only"
+                  />
+                )}
+              </Group>
               <Text size="sm" c="dimmed">
                 {view === 'panel'
                   ? 'Odds left, evens right — mirrors the physical panel'
@@ -225,13 +254,21 @@ const PowerPanelDetailPage: React.FC = () => {
             </Paper>
           )}
 
-          {topology && topology.breakers.length > 0 && view === 'panel' && (
-            <PanelLayoutGrid topology={topology} density="interactive" />
+          {visibleTopology && visibleTopology.breakers.length > 0 && view === 'panel' && (
+            <PanelLayoutGrid topology={visibleTopology} density="interactive" />
           )}
 
-          {topology &&
+          {visibleTopology && visibleTopology.breakers.length === 0 && showFlaggedOnly && (
+            <Paper withBorder p="xl" radius="md">
+              <Text c="dimmed" ta="center">
+                No flagged breakers on this panel.
+              </Text>
+            </Paper>
+          )}
+
+          {visibleTopology &&
             view === 'list' &&
-            topology.breakers.map((breaker) => (
+            visibleTopology.breakers.map((breaker) => (
               <Paper
                 key={breaker.id}
                 withBorder

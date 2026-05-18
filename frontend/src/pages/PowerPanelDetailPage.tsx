@@ -78,7 +78,13 @@ const PowerPanelDetailPage: React.FC = () => {
       <Container size="xl" py="xl">
         <Stack gap="xl">
           <PageHero
-            eyebrow={topology ? `Electrical · ${topology.location_name}` : 'Electrical'}
+            eyebrow={
+              topology
+                ? topology.fed_by_summary
+                  ? `Electrical · ${topology.location_name} · Sub-panel of ${topology.fed_by_summary.panel_name}`
+                  : `Electrical · ${topology.location_name}`
+                : 'Electrical'
+            }
             title={topology ? topology.name : 'Power panel'}
             description={
               topology
@@ -152,6 +158,50 @@ const PowerPanelDetailPage: React.FC = () => {
               <Text c="dimmed" ta="center">
                 Loading…
               </Text>
+            </Paper>
+          )}
+
+          {topology && (topology.fed_by_summary || topology.downstream_panels.length > 0) && (
+            <Paper withBorder p="md" radius="md" data-testid="panel-lineage">
+              <Stack gap="xs">
+                {topology.fed_by_summary && (
+                  <Group gap="xs" wrap="wrap">
+                    <Text size="sm" c="dimmed">
+                      Sub-panel of
+                    </Text>
+                    <Link
+                      to={`/facilities/electrical/panels/${topology.fed_by_summary.panel_id}`}
+                      style={{ fontWeight: 600 }}
+                    >
+                      {topology.fed_by_summary.panel_name}
+                    </Link>
+                    <Text size="sm" c="dimmed">
+                      · fed by breaker {topology.fed_by_summary.breaker_position} (
+                      {topology.fed_by_summary.breaker_amperage}A{' '}
+                      {topology.fed_by_summary.breaker_pole_count}P)
+                      {topology.fed_by_summary.circuit_label
+                        ? ` · circuit "${topology.fed_by_summary.circuit_label}"`
+                        : ''}
+                    </Text>
+                  </Group>
+                )}
+                {topology.downstream_panels.length > 0 && (
+                  <Group gap="xs" wrap="wrap">
+                    <Text size="sm" c="dimmed">
+                      Sub-panels:
+                    </Text>
+                    {topology.downstream_panels.map((sp) => (
+                      <Link
+                        key={sp.id}
+                        to={`/facilities/electrical/panels/${sp.id}`}
+                        data-testid={`downstream-panel-${sp.id}`}
+                      >
+                        {sp.name}
+                      </Link>
+                    ))}
+                  </Group>
+                )}
+              </Stack>
             </Paper>
           )}
 

@@ -346,6 +346,19 @@ class PowerPanel(models.Model):
         max_length=100,
         help_text="Panel name (e.g., 'Sewing Panel A', 'Main Distribution')",
     )
+    # Feeder circuit that supplies this panel from upstream. NULL for the
+    # service-entrance / main panel. Pointing at a PowerCircuit (not a
+    # breaker directly) keeps the chain consistent with how loads are
+    # already wired in the model: breaker → circuit → load. Following
+    # `fed_by → breaker → panel` gives the parent panel for free.
+    fed_by = models.ForeignKey(
+        "PowerCircuit",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="downstream_panels",
+        help_text="Upstream feeder circuit. Leave blank for the main / service-entrance panel.",
+    )
     phase_configuration = models.CharField(
         max_length=10,
         choices=PHASE_CHOICES,
@@ -387,6 +400,21 @@ class PowerPanel(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} @ {self.location.name}"
+
+    def clean(self) -> None:
+        super().clean()
+        # Block self-feeding: a panel can't be its own upstream feeder.
+        # Direct loops only — deeper cycles (A→B→A) are detected at the
+        # service layer where graph traversal makes sense; the common
+        # operator slip is picking your own circuit by mistake.
+        if self.fed_by_id and self.pk:
+            feeder_panel_id = self.fed_by.breaker.panel_id
+            if feeder_panel_id == self.pk:
+                from django.core.exceptions import ValidationError
+
+                raise ValidationError(
+                    {"fed_by": "A panel cannot be fed by one of its own circuits."}
+                )
 
 
 class PowerBreaker(models.Model):

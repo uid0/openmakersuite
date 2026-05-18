@@ -32,6 +32,9 @@ describe('PowerPanelFormPage', () => {
     (api.inventoryAPI.listLocations as jest.Mock).mockResolvedValue({
       data: { results: mockLocations },
     });
+    (api.electricalTopologyAPI.listCircuits as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
   });
 
   it('renders the create form with the canonical hero', async () => {
@@ -65,6 +68,9 @@ describe('PowerPanelFormPage', () => {
         install_date: null,
         notes: '',
         needs_review: false,
+        fed_by: null,
+        fed_by_summary: null,
+        downstream_panel_count: 0,
         breaker_count: 0,
         created_at: '',
         updated_at: '',

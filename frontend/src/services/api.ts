@@ -2145,6 +2145,8 @@ export interface PowerPanelTopology {
   phase_configuration: PowerPanelPhase;
   voltage: number;
   main_breaker_amperage: number | null;
+  fed_by_summary: PanelFedBySummary | null;
+  downstream_panels: Array<{ id: number; name: string }>;
   breakers: PowerBreakerNode[];
 }
 
@@ -2202,6 +2204,17 @@ export const electricalSafetyAPI = {
 // form pages aren't reachable from the sidebar for non-staff users.
 // ---------------------------------------------------------------------
 
+export interface PanelFedBySummary {
+  circuit_id: number;
+  circuit_label: string;
+  breaker_id: number;
+  breaker_position: string;
+  breaker_amperage: number;
+  breaker_pole_count: number;
+  panel_id: number;
+  panel_name: string;
+}
+
 export interface PowerPanelDetail {
   id: number;
   location: number;
@@ -2215,6 +2228,9 @@ export interface PowerPanelDetail {
   install_date: string | null;
   notes: string;
   needs_review: boolean;
+  fed_by: number | null;
+  fed_by_summary: PanelFedBySummary | null;
+  downstream_panel_count: number;
   breaker_count: number;
   created_at: string;
   updated_at: string;
@@ -2232,6 +2248,7 @@ export type PowerPanelWritable = Pick<
   | 'install_date'
   | 'notes'
   | 'needs_review'
+  | 'fed_by'
 >;
 
 export interface PowerBreakerDetail {

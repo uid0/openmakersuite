@@ -216,6 +216,7 @@ below are public.
 | --- | --- | --- | --- |
 | GET | `screens/kiosk/<slug>/payload/` | public | Read-only kiosk content; never includes cost or member PII. |
 | POST | `screens/kiosk/<slug>/heartbeat/` | public | Kiosk liveness heartbeat. **Abuse control:** required (per-slug throttle). |
+| GET | `screens/weather/current/` | public | OpenWeather-backed current conditions for kiosks. Server-side cache (`OPENWEATHER_CACHE_SECONDS`, default 600s) bounds upstream quota. |
 | any | `screens/screens/...` (CRUD) | member | `IsAuthenticated` on `ScreenViewSet`. |
 | any | `screens/blocks/...` | member | `IsAuthenticated` on `ScreenContentBlockViewSet`. |
 | any | `screens/messages/...` | member | `IsAuthenticated` on `SystemMessageViewSet`. |

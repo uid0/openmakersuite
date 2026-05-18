@@ -2124,6 +2124,8 @@ export interface PowerCircuitNode {
   outlets: PowerOutletNode[];
 }
 
+export type BreakerReviewStatus = 'ok' | 'needs_attention' | 'circuit_moved';
+
 export interface PowerBreakerNode {
   id: number;
   panel_id: number;
@@ -2133,6 +2135,8 @@ export interface PowerBreakerNode {
   phase: string;
   pole_count: number;
   status: string;
+  review_status: BreakerReviewStatus;
+  review_note: string;
   label: string;
   circuits: PowerCircuitNode[];
 }
@@ -2260,6 +2264,8 @@ export interface PowerBreakerDetail {
   amperage: number;
   phase: 'A' | 'B' | 'C' | 'AB' | 'BC' | 'AC' | 'ABC';
   status: 'active' | 'spare' | 'locked_out';
+  review_status: BreakerReviewStatus;
+  review_note: string;
   label: string;
   notes: string;
   needs_review: boolean;
@@ -2276,6 +2282,8 @@ export type PowerBreakerWritable = Pick<
   | 'amperage'
   | 'phase'
   | 'status'
+  | 'review_status'
+  | 'review_note'
   | 'label'
   | 'notes'
   | 'needs_review'

@@ -454,6 +454,25 @@ class PowerBreaker(models.Model):
         (STATUS_LOCKED_OUT, "Locked out"),
     ]
 
+    # Orthogonal to `status` — a breaker can be `status=active` AND need
+    # review/cleanup of its downstream wiring. Surfaced visually on the
+    # panel layout grid so operators can spot stale entries from across
+    # the room before they touch anything.
+    REVIEW_OK = "ok"
+    REVIEW_NEEDS_ATTENTION = "needs_attention"
+    REVIEW_CIRCUIT_MOVED = "circuit_moved"
+    REVIEW_STATUS_CHOICES = [
+        (REVIEW_OK, "OK"),
+        (
+            REVIEW_NEEDS_ATTENTION,
+            "Needs attention — active but circuit confirmed gone/wrong",
+        ),
+        (
+            REVIEW_CIRCUIT_MOVED,
+            "Circuit moved — awaiting cleanup",
+        ),
+    ]
+
     panel = models.ForeignKey(
         PowerPanel,
         on_delete=models.CASCADE,
@@ -480,6 +499,20 @@ class PowerBreaker(models.Model):
         max_length=12,
         choices=STATUS_CHOICES,
         default=STATUS_ACTIVE,
+    )
+    review_status = models.CharField(
+        max_length=20,
+        choices=REVIEW_STATUS_CHOICES,
+        default=REVIEW_OK,
+        help_text=(
+            "Operator review flag for stale wiring. 'needs_attention' = red "
+            "(active but downstream wiring is wrong/missing), 'circuit_moved' "
+            "= grey (known to be reassigned, cleanup pending)."
+        ),
+    )
+    review_note = models.TextField(
+        blank=True,
+        help_text="Free-text context for the review flag (what changed, by whom, when).",
     )
     label = models.CharField(
         max_length=200,

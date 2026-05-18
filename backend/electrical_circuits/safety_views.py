@@ -55,6 +55,8 @@ def _serialize_breaker(breaker: PowerBreaker) -> dict:
         "phase": breaker.phase,
         "pole_count": breaker.pole_count,
         "status": breaker.status,
+        "review_status": breaker.review_status,
+        "review_note": breaker.review_note,
         "label": breaker.label,
     }
 

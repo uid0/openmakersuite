@@ -117,6 +117,8 @@ class PowerPanelSerializer(serializers.ModelSerializer):
 
     location_name = serializers.CharField(source="location.name", read_only=True)
     breaker_count = serializers.SerializerMethodField()
+    fed_by_summary = serializers.SerializerMethodField()
+    downstream_panel_count = serializers.SerializerMethodField()
 
     class Meta:
         model = PowerPanel
@@ -133,11 +135,21 @@ class PowerPanelSerializer(serializers.ModelSerializer):
             "install_date",
             "notes",
             "needs_review",
+            "fed_by",
+            "fed_by_summary",
+            "downstream_panel_count",
             "breaker_count",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "breaker_count", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "breaker_count",
+            "fed_by_summary",
+            "downstream_panel_count",
+            "created_at",
+            "updated_at",
+        ]
 
     def get_breaker_count(self, obj) -> int:
         # Use a cached annotation when the view supplied one (avoids N+1
@@ -146,6 +158,44 @@ class PowerPanelSerializer(serializers.ModelSerializer):
         if cached is not None:
             return cached
         return obj.breakers.count()
+
+    def get_fed_by_summary(self, obj):
+        """Denormalized lineage for the UI hero: parent panel + feeding
+        breaker so the frontend can render 'Sub-panel of: LV2A · 60A
+        3-pole at slots 14/16/18' without a second round-trip.
+        """
+        circuit = obj.fed_by
+        if circuit is None:
+            return None
+        breaker = circuit.breaker
+        panel = breaker.panel
+        return {
+            "circuit_id": circuit.id,
+            "circuit_label": circuit.label or "",
+            "breaker_id": breaker.id,
+            "breaker_position": breaker.position,
+            "breaker_amperage": breaker.amperage,
+            "breaker_pole_count": breaker.pole_count,
+            "panel_id": panel.id,
+            "panel_name": panel.name,
+        }
+
+    def get_downstream_panel_count(self, obj) -> int:
+        # No SerializerMethod for the reverse: simple count over the
+        # related_name. Negligible cost on the detail endpoint; the list
+        # endpoint can annotate if it ever needs this hot.
+        return PowerPanel.objects.filter(fed_by__breaker__panel=obj).count()
+
+    def validate(self, attrs):
+        """Block self-feeding at the API boundary in addition to model.clean(),
+        since DRF skips model.clean() by default."""
+        fed_by = attrs.get("fed_by") or getattr(self.instance, "fed_by", None)
+        if fed_by is not None and self.instance is not None:
+            if fed_by.breaker.panel_id == self.instance.pk:
+                raise serializers.ValidationError(
+                    {"fed_by": "A panel cannot be fed by one of its own circuits."}
+                )
+        return attrs
 
 
 class PowerBreakerSerializer(serializers.ModelSerializer):

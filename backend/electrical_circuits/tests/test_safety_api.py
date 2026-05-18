@@ -246,6 +246,34 @@ def test_panel_topology_returns_full_tree(staff_client, topology):
     assert outlet_labels == ["bench-1", "bench-2"]
 
 
+def test_panel_topology_exposes_subpanel_hierarchy(staff_client, topology):
+    """A sub-panel fed by an upstream circuit reports its parent in
+    `fed_by_summary`; the parent reports the child in `downstream_panels`.
+    """
+
+    loc = LocationFactory(name="Machine Shop")
+    subpanel = PowerPanel.objects.create(
+        location=loc,
+        name="LV4",
+        fed_by=topology["circuit"],
+    )
+
+    # Sub-panel's topology should carry parent lineage.
+    sub_url = reverse("electrical-panel-topology", args=[subpanel.pk])
+    sub_data = staff_client.get(sub_url).json()
+    assert sub_data["fed_by_summary"] is not None
+    assert sub_data["fed_by_summary"]["panel_id"] == topology["panel"].pk
+    assert sub_data["fed_by_summary"]["breaker_id"] == topology["breaker"].pk
+    assert sub_data["fed_by_summary"]["circuit_id"] == topology["circuit"].pk
+    assert sub_data["downstream_panels"] == []
+
+    # Parent topology should list the sub-panel under downstream_panels.
+    parent_url = reverse("electrical-panel-topology", args=[topology["panel"].pk])
+    parent_data = staff_client.get(parent_url).json()
+    assert parent_data["fed_by_summary"] is None
+    assert {"id": subpanel.pk, "name": "LV4"} in parent_data["downstream_panels"]
+
+
 # ---------------------------------------------------------------------
 # AC-4 — asset power chain
 # ---------------------------------------------------------------------

@@ -24,6 +24,7 @@ import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   electricalTopologyAPI,
   inventoryAPI,
+  PowerCircuitDetail,
   PowerPanelPhase,
   PowerPanelWritable,
 } from '../services/api';
@@ -42,6 +43,7 @@ const PowerPanelFormPage: React.FC = () => {
   const isEditMode = !!id;
 
   const [locations, setLocations] = useState<Location[]>([]);
+  const [circuits, setCircuits] = useState<PowerCircuitDetail[]>([]);
   const [form, setForm] = useState<Partial<PowerPanelWritable>>({
     name: '',
     phase_configuration: 'split',
@@ -52,6 +54,7 @@ const PowerPanelFormPage: React.FC = () => {
     install_date: null,
     notes: '',
     needs_review: false,
+    fed_by: null,
   });
   const [loading, setLoading] = useState(isEditMode);
   const [saving, setSaving] = useState(false);
@@ -62,6 +65,13 @@ const PowerPanelFormPage: React.FC = () => {
       .listLocations()
       .then((response) => setLocations(response.data.results))
       .catch((err) => console.warn('Failed to load locations', err));
+    // All circuits are candidate feeders for any sub-panel. We filter out
+    // the current panel's own circuits below so the operator can't
+    // self-feed via the dropdown.
+    electricalTopologyAPI
+      .listCircuits()
+      .then((response) => setCircuits(response.data.results))
+      .catch((err) => console.warn('Failed to load circuits', err));
   }, []);
 
   const loadPanel = useCallback(async () => {
@@ -81,6 +91,7 @@ const PowerPanelFormPage: React.FC = () => {
         install_date: panel.install_date,
         notes: panel.notes,
         needs_review: panel.needs_review,
+        fed_by: panel.fed_by,
       });
       setError(null);
     } catch (err: any) {
@@ -212,6 +223,23 @@ const PowerPanelFormPage: React.FC = () => {
                 type="date"
                 value={form.install_date ?? ''}
                 onChange={(e) => setForm({ ...form, install_date: e.target.value || null })}
+              />
+              <Select
+                label="Fed by (upstream feeder circuit)"
+                description="Leave blank for the main / service-entrance panel. Pick the parent panel's feeder circuit for a sub-panel."
+                placeholder="No upstream feeder (main panel)"
+                clearable
+                searchable
+                data={circuits
+                  .filter((c) => !id || c.panel_id !== Number(id))
+                  .map((c) => ({
+                    value: String(c.id),
+                    label: `${c.panel_name} · breaker ${c.breaker_label || c.breaker} · ${c.label || `Circuit ${c.id}`}`,
+                  }))}
+                value={form.fed_by != null ? String(form.fed_by) : null}
+                onChange={(value) =>
+                  setForm({ ...form, fed_by: value ? Number(value) : null })
+                }
               />
               <Textarea
                 label="Notes"

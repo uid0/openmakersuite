@@ -163,7 +163,12 @@ class PowerPanelTopologyView(APIView):
 
     def get(self, request, pk: int):
         panel = get_object_or_404(
-            PowerPanel.objects.select_related("location"),
+            PowerPanel.objects.select_related(
+                "location",
+                "fed_by",
+                "fed_by__breaker",
+                "fed_by__breaker__panel",
+            ),
             pk=pk,
         )
         breakers = list(
@@ -194,6 +199,30 @@ class PowerPanelTopologyView(APIView):
                 }
             )
 
+        fed_by_summary = None
+        if panel.fed_by_id is not None:
+            feeder = panel.fed_by
+            fb_breaker = feeder.breaker
+            fb_panel = fb_breaker.panel
+            fed_by_summary = {
+                "circuit_id": feeder.id,
+                "circuit_label": feeder.label or "",
+                "breaker_id": fb_breaker.id,
+                "breaker_position": fb_breaker.position,
+                "breaker_amperage": fb_breaker.amperage,
+                "breaker_pole_count": fb_breaker.pole_count,
+                "panel_id": fb_panel.id,
+                "panel_name": fb_panel.name,
+            }
+
+        # Reverse: list panels fed by THIS panel's circuits, so the UI
+        # can offer "Sub-panels: LV4, LV5" navigation in one round-trip.
+        downstream = list(
+            PowerPanel.objects.filter(fed_by__breaker__panel=panel)
+            .order_by("name")
+            .values("id", "name")
+        )
+
         return Response(
             {
                 "id": panel.pk,
@@ -203,6 +232,8 @@ class PowerPanelTopologyView(APIView):
                 "phase_configuration": panel.phase_configuration,
                 "voltage": panel.voltage,
                 "main_breaker_amperage": panel.main_breaker_amperage,
+                "fed_by_summary": fed_by_summary,
+                "downstream_panels": downstream,
                 "breakers": breakers_payload,
             }
         )

@@ -5,6 +5,7 @@ import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { BrowserRouter, MemoryRouter } from 'react-router-dom';
 import Breadcrumbs from '../../components/Breadcrumbs';
+import { BreadcrumbProvider, useSetBreadcrumb } from '../../contexts/BreadcrumbContext';
 
 const renderWithRouter = (initialEntries = ['/']) => {
   return render(
@@ -12,6 +13,11 @@ const renderWithRouter = (initialEntries = ['/']) => {
       <Breadcrumbs />
     </MemoryRouter>
   );
+};
+
+const LabelSetter: React.FC<{ label: string | undefined }> = ({ label }) => {
+  useSetBreadcrumb(label);
+  return null;
 };
 
 describe('Breadcrumbs Component', () => {
@@ -100,6 +106,45 @@ describe('Breadcrumbs Component', () => {
     renderWithRouter(['/facilities/electrical/panels/42']);
     expect(screen.queryByText('42')).not.toBeInTheDocument();
     expect(screen.getByText(/panels/i)).toBeInTheDocument();
+  });
+
+  describe('dynamic label via BreadcrumbContext', () => {
+    it('replaces the trailing segment when a page registers a label', () => {
+      render(
+        <MemoryRouter initialEntries={['/inventory/assets/abc123/edit']}>
+          <BreadcrumbProvider>
+            <LabelSetter label="Bridgeport Mill" />
+            <Breadcrumbs />
+          </BreadcrumbProvider>
+        </MemoryRouter>,
+      );
+      // Trailing static "Edit" is swapped for the asset name.
+      expect(screen.queryByText(/^edit$/i)).not.toBeInTheDocument();
+      expect(screen.getByText('Bridgeport Mill')).toBeInTheDocument();
+      expect(screen.getByText('Bridgeport Mill')).toHaveAttribute('aria-current', 'page');
+      // Earlier segments are untouched.
+      expect(screen.getByText(/home/i)).toBeInTheDocument();
+      expect(screen.getByText(/assets/i)).toBeInTheDocument();
+    });
+
+    it('falls back to the static label when no dynamic label is set', () => {
+      render(
+        <MemoryRouter initialEntries={['/inventory/assets/abc123/edit']}>
+          <BreadcrumbProvider>
+            <LabelSetter label={undefined} />
+            <Breadcrumbs />
+          </BreadcrumbProvider>
+        </MemoryRouter>,
+      );
+      expect(screen.getByText(/^edit$/i)).toBeInTheDocument();
+    });
+
+    it('renders normally without a provider (safe no-op outside WorkspaceLayout)', () => {
+      // Breadcrumbs is also rendered in places where the provider isn't
+      // mounted (storybook, isolated tests). Verify it doesn't throw.
+      renderWithRouter(['/inventory/assets']);
+      expect(screen.getByText(/assets/i)).toBeInTheDocument();
+    });
   });
 });
 

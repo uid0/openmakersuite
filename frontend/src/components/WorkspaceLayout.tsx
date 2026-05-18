@@ -6,6 +6,7 @@ import { ActionIcon } from '@mantine/core';
 import { IconBell } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { BreadcrumbProvider } from '../contexts/BreadcrumbContext';
 import { useCommandPalette } from '../hooks/useCommandPalette';
 import { useNotifications } from '../hooks/useNotifications';
 import '../styles/WorkspaceLayout.css';
@@ -128,71 +129,73 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
   }
 
   return (
-    <div className="workspace-layout">
-      {/* Mobile backdrop */}
-      {isMobile && isMobileOpen && (
-        <div
-          className="sidebar-backdrop"
-          onClick={closeMobileSidebar}
-          aria-hidden="true"
-        />
-      )}
-      <Sidebar
-        isCollapsed={isCollapsed}
-        isMobileOpen={isMobileOpen}
-        onClose={closeMobileSidebar}
-      />
-      <div className="workspace-content">
-        <div className="workspace-header">
-          <button
-            className={`menu-toggle ${!hasInteracted ? 'shimmer' : ''}`}
-            onClick={toggleSidebar}
-            aria-label={isMobile ? (isMobileOpen ? 'Close sidebar' : 'Open sidebar') : (isCollapsed ? 'Expand sidebar' : 'Collapse sidebar')}
-          >
-            ☰
-          </button>
-          <Link to="/" className="header-logo">
-            <span className="logo-icon">📦</span>
-            <span className="logo-text">DallasMakerspace</span>
-          </Link>
-          <Breadcrumbs />
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <ActionIcon
-              variant="subtle"
-              size="lg"
-              onClick={() => setIsNotificationCenterOpen(true)}
-              aria-label="Open notifications"
-              style={{ position: 'relative' }}
-            >
-              <IconBell size={20} />
-              <NotificationBadge count={notifications.unreadCount} />
-            </ActionIcon>
-          </div>
-        </div>
-        {/* Banners */}
-        {notifications.banners.length > 0 && (
-          <div style={{ padding: '16px 20px 0' }}>
-            {notifications.banners.map((banner) => (
-              <NotificationBanner
-                key={banner.id}
-                banner={banner}
-                onDismiss={notifications.dismissBanner}
-              />
-            ))}
-          </div>
+    <BreadcrumbProvider>
+      <div className="workspace-layout">
+        {/* Mobile backdrop */}
+        {isMobile && isMobileOpen && (
+          <div
+            className="sidebar-backdrop"
+            onClick={closeMobileSidebar}
+            aria-hidden="true"
+          />
         )}
-        <main className="workspace-main">{children}</main>
+        <Sidebar
+          isCollapsed={isCollapsed}
+          isMobileOpen={isMobileOpen}
+          onClose={closeMobileSidebar}
+        />
+        <div className="workspace-content">
+          <div className="workspace-header">
+            <button
+              className={`menu-toggle ${!hasInteracted ? 'shimmer' : ''}`}
+              onClick={toggleSidebar}
+              aria-label={isMobile ? (isMobileOpen ? 'Close sidebar' : 'Open sidebar') : (isCollapsed ? 'Expand sidebar' : 'Collapse sidebar')}
+            >
+              ☰
+            </button>
+            <Link to="/" className="header-logo">
+              <span className="logo-icon">📦</span>
+              <span className="logo-text">DallasMakerspace</span>
+            </Link>
+            <Breadcrumbs />
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <ActionIcon
+                variant="subtle"
+                size="lg"
+                onClick={() => setIsNotificationCenterOpen(true)}
+                aria-label="Open notifications"
+                style={{ position: 'relative' }}
+              >
+                <IconBell size={20} />
+                <NotificationBadge count={notifications.unreadCount} />
+              </ActionIcon>
+            </div>
+          </div>
+          {/* Banners */}
+          {notifications.banners.length > 0 && (
+            <div style={{ padding: '16px 20px 0' }}>
+              {notifications.banners.map((banner) => (
+                <NotificationBanner
+                  key={banner.id}
+                  banner={banner}
+                  onDismiss={notifications.dismissBanner}
+                />
+              ))}
+            </div>
+          )}
+          <main className="workspace-main">{children}</main>
+        </div>
+        <CommandPalette isOpen={commandPalette.isOpen} onClose={commandPalette.close} />
+        <NotificationCenter
+          isOpen={isNotificationCenterOpen}
+          onClose={() => setIsNotificationCenterOpen(false)}
+        />
+        <SessionExpiredBanner />
+        <div style={{ position: 'fixed', bottom: 16, left: 16, zIndex: 1050, maxWidth: 360 }}>
+          <OfflineIndicator />
+        </div>
       </div>
-      <CommandPalette isOpen={commandPalette.isOpen} onClose={commandPalette.close} />
-      <NotificationCenter
-        isOpen={isNotificationCenterOpen}
-        onClose={() => setIsNotificationCenterOpen(false)}
-      />
-      <SessionExpiredBanner />
-      <div style={{ position: 'fixed', bottom: 16, left: 16, zIndex: 1050, maxWidth: 360 }}>
-        <OfflineIndicator />
-      </div>
-    </div>
+    </BreadcrumbProvider>
   );
 };
 

@@ -35,6 +35,23 @@ type PanelView = 'panel' | 'list';
 
 const isPanelView = (v: string | null): v is PanelView => v === 'panel' || v === 'list';
 
+// Pretty-print the panel breaker family in the hero. Keeps the canonical
+// uppercase enum value out of the user-facing description.
+const BREAKER_TYPE_LABELS: Record<string, string> = {
+  SQUARE_D_QO: 'Square D QO',
+  SQUARE_D_HOMELINE: 'Square D Homeline',
+  EATON_CH: 'Eaton CH',
+  EATON_BR: 'Eaton BR',
+  SIEMENS_QP: 'Siemens QP',
+  GE_Q_LINE: 'GE Q-Line',
+  FEDERAL_PACIFIC: 'Federal Pacific (replace)',
+  PUSHMATIC: 'Pushmatic',
+  DIN_RAIL: 'DIN-rail',
+  OTHER: 'Other breaker family',
+};
+
+const breakerTypeLabel = (code: string): string => BREAKER_TYPE_LABELS[code] ?? code;
+
 const PowerPanelDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -108,11 +125,19 @@ const PowerPanelDetailPage: React.FC = () => {
             title={topology ? topology.name : 'Power panel'}
             description={
               topology
-                ? `${topology.voltage}V · ${topology.phase_configuration} phase${
+                ? [
+                    `${topology.voltage}V`,
+                    `${topology.phase_configuration} phase`,
                     topology.main_breaker_amperage
-                      ? ` · ${topology.main_breaker_amperage}A main`
-                      : ''
-                  }`
+                      ? `${topology.main_breaker_amperage}A main`
+                      : null,
+                    topology.breaker_type ? breakerTypeLabel(topology.breaker_type) : null,
+                    topology.numbering_direction === 'bottom_up'
+                      ? 'slot 1 at bottom'
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')
                 : 'Loading panel topology…'
             }
             action={

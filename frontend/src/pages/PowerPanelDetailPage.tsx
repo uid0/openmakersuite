@@ -328,11 +328,11 @@ const PowerPanelDetailPage: React.FC = () => {
                       <Link
                         to={`/facilities/electrical/breakers/${breaker.id}/trip-impact`}
                         className="landing-arrow"
-                        data-testid={`breaker-trip-impact-${breaker.id}`}
+                        data-testid={`breaker-loads-${breaker.id}`}
                         style={{ textDecoration: 'none' }}
                       >
                         <IconRouteAltLeft size={16} stroke={2.4} />
-                        Trip impact
+                        Loads
                       </Link>
                       <Button
                         component={Link}
@@ -396,20 +396,49 @@ const PowerPanelDetailPage: React.FC = () => {
                                   no outlets
                                 </Text>
                               ) : (
-                                <Stack gap={2}>
+                                <Stack gap={6}>
                                   {circuit.outlets.map((outlet) => (
-                                    <Group key={outlet.id} gap="xs" wrap="nowrap">
-                                      <Text size="sm" style={{ flex: 1 }}>
-                                        {outlet.label || `Outlet ${outlet.id}`}
-                                        {outlet.location_name ? ` — ${outlet.location_name}` : ''}
-                                      </Text>
-                                      <Link
-                                        to={`/facilities/electrical/outlets/${outlet.id}/edit`}
-                                        aria-label={`Edit outlet ${outlet.label || outlet.id}`}
-                                      >
-                                        <IconEdit size={14} />
-                                      </Link>
-                                    </Group>
+                                    <Stack key={outlet.id} gap={2}>
+                                      <Group gap="xs" wrap="nowrap">
+                                        <Text size="sm" style={{ flex: 1 }}>
+                                          {outlet.label || `Outlet ${outlet.id}`}
+                                          {outlet.location_name
+                                            ? ` — ${outlet.location_name}`
+                                            : ''}
+                                        </Text>
+                                        <Link
+                                          to={`/facilities/electrical/outlets/${outlet.id}/edit`}
+                                          aria-label={`Edit outlet ${outlet.label || outlet.id}`}
+                                        >
+                                          <IconEdit size={14} />
+                                        </Link>
+                                      </Group>
+                                      {outlet.connected_assets &&
+                                        outlet.connected_assets.length > 0 && (
+                                          <Stack
+                                            gap={0}
+                                            pl="md"
+                                            data-testid={`outlet-${outlet.id}-assets`}
+                                          >
+                                            {outlet.connected_assets.map((asset) => (
+                                              <Text
+                                                key={asset.id}
+                                                size="xs"
+                                                c="dimmed"
+                                                component="div"
+                                              >
+                                                <span aria-hidden="true">•&nbsp;</span>
+                                                <Link
+                                                  to={`/assets/${asset.id}`}
+                                                  data-testid={`outlet-asset-${asset.id}`}
+                                                >
+                                                  {asset.name}
+                                                </Link>
+                                              </Text>
+                                            ))}
+                                          </Stack>
+                                        )}
+                                    </Stack>
                                   ))}
                                 </Stack>
                               )}

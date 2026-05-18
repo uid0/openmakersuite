@@ -99,6 +99,25 @@ def test_power_port_uniqueness_and_per_asset():
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    "port_type",
+    ["C13", "C14", "C19", "C20", "L5-30R", "other"],
+)
+def test_power_port_accepts_iec_and_legacy_lowercase_types(port_type):
+    """Regression: the AssetPowerChainEditor frontend offers IEC 60320
+    (C13/C19) and 'other' lowercase. Before the fix the backend
+    NEMA_PORT_TYPE_CHOICES list rejected these and surfaced a
+    validation_failed error in the console. Lock in that these
+    specific values are accepted.
+    """
+    asset = AssetFactory()
+    port = PowerPort(asset=asset, label=f"port-{port_type}", port_type=port_type)
+    port.full_clean()  # must not raise
+    port.save()
+    assert PowerPort.objects.filter(pk=port.pk, port_type=port_type).exists()
+
+
+@pytest.mark.django_db
 def test_power_outlet_label_uniqueness_only_when_set():
     """Empty labels should not collide; labelled outlets per location must be unique."""
     loc = LocationFactory()

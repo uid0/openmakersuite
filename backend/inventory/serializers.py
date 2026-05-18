@@ -999,10 +999,13 @@ class AssetSerializer(serializers.ModelSerializer):
         # inventory.models).
         from electrical_circuits.serializers import HardwiredConnectionSerializer
 
-        connections = obj.hardwired_connections.select_related(
-            "asset",
-            "disconnect__circuit__breaker__panel",
-        ).order_by("disconnect__label")
+        # Use the prefetched cache (AssetViewSet prefetches
+        # `hardwired_connections__disconnect__circuit__breaker__panel`).
+        # Sorting in Python avoids re-issuing the query.
+        connections = sorted(
+            obj.hardwired_connections.all(),
+            key=lambda c: (c.disconnect.label or "", c.pk),
+        )
         return HardwiredConnectionSerializer(connections, many=True).data
 
 

@@ -672,6 +672,134 @@ class PowerCircuit(models.Model):
         return self.label or f"Circuit on {self.breaker}"
 
 
+class Disconnect(models.Model):
+    """
+    A disconnect switch isolating a hardwired (or hard-wired-style) load from
+    its upstream circuit.
+
+    Hardwired equipment (RTUs, dust collectors, water heaters, exhaust fans)
+    is fed directly from a breaker without a receptacle in between. The
+    disconnect switch on the wall next to the equipment is the operator-
+    accessible isolation point and the natural LOTO attach point. Promoting it
+    to a first-class model lets a HardwiredConnection point at the disconnect
+    rather than fabricating a fake PowerOutlet/Cable pair just to record the
+    feed.
+
+    Some loads have no separate disconnect (the breaker itself serves) — in
+    that case operators create a ``Disconnect(disconnect_type='none')`` so
+    every hardwired load still resolves through a Disconnect record and the
+    LOTO/inspection paths have a single object to walk.
+    """
+
+    DISCONNECT_TYPE_FUSED = "fused"
+    DISCONNECT_TYPE_UNFUSED = "unfused"
+    DISCONNECT_TYPE_TOGGLE = "toggle"
+    DISCONNECT_TYPE_INTEGRAL = "integral"
+    DISCONNECT_TYPE_NONE = "none"
+    DISCONNECT_TYPE_CHOICES = [
+        (DISCONNECT_TYPE_FUSED, "Fused safety switch"),
+        (DISCONNECT_TYPE_UNFUSED, "Unfused safety switch"),
+        (DISCONNECT_TYPE_TOGGLE, "Toggle / snap switch"),
+        (DISCONNECT_TYPE_INTEGRAL, "Integral to the equipment"),
+        (DISCONNECT_TYPE_NONE, "No separate disconnect (breaker serves)"),
+    ]
+
+    circuit = models.ForeignKey(
+        PowerCircuit,
+        on_delete=models.PROTECT,
+        related_name="disconnects",
+        help_text="Upstream circuit this disconnect isolates.",
+    )
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="disconnects",
+        help_text=(
+            "Where the disconnect is mounted. Nullable because 'integral' and "
+            "'none' types don't have a physical switch separate from the load."
+        ),
+    )
+    label = models.CharField(
+        max_length=120,
+        help_text="Human label (e.g., 'Dust collector disconnect — east wall').",
+    )
+    disconnect_type = models.CharField(
+        max_length=10,
+        choices=DISCONNECT_TYPE_CHOICES,
+    )
+    amperage = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+        help_text="Switch rating in amps (informational; not enforced against load).",
+    )
+    fuse_size = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Fuse size string (e.g., '30A class J'). Only meaningful for fused type.",
+    )
+    is_lockable = models.BooleanField(
+        default=True,
+        help_text="True if the switch accepts a lockout device for LOTO.",
+    )
+    photo = models.ImageField(
+        upload_to="electrical_circuits/disconnects/",
+        null=True,
+        blank=True,
+    )
+    notes = models.TextField(blank=True)
+    required_loto_devices = models.ManyToManyField(
+        "loto.LOTODevice",
+        blank=True,
+        related_name="disconnects",
+        help_text=(
+            "LOTO devices required to safely isolate this disconnect. When set, "
+            "LOTO resolution should prefer these over the upstream breaker's list."
+        ),
+    )
+    needs_review = models.BooleanField(
+        default=False,
+        help_text=(
+            "Flagged automatically when clean() detects an inconsistent "
+            "combination (fused with no fuse_size, lockable integral/none, etc.)."
+        ),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["label"]
+        indexes = [
+            models.Index(fields=["circuit"]),
+            models.Index(fields=["location"]),
+            models.Index(fields=["disconnect_type"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.label} ({self.get_disconnect_type_display()})"
+
+    def clean(self) -> None:
+        super().clean()
+        # Field crews often don't read the fuse size off the cartridge — record
+        # the disconnect anyway and flag it for an inspector to chase down,
+        # rather than refusing to save and losing the data.
+        flag = False
+        if self.disconnect_type == self.DISCONNECT_TYPE_FUSED and not self.fuse_size:
+            flag = True
+        # Integral / none types are part of the equipment (or there is no
+        # separate switch); they typically can't accept a lockout device, so a
+        # lockable=True is almost always a data-entry slip worth reviewing.
+        if (
+            self.disconnect_type in (self.DISCONNECT_TYPE_INTEGRAL, self.DISCONNECT_TYPE_NONE)
+            and self.is_lockable
+        ):
+            flag = True
+        if flag:
+            self.needs_review = True
+
+
 class PowerOutlet(models.Model):
     """
     A power receptacle on a PowerCircuit at a physical Location.
@@ -699,6 +827,17 @@ class PowerOutlet(models.Model):
         Location,
         on_delete=models.PROTECT,
         related_name="power_outlets",
+    )
+    disconnect = models.ForeignKey(
+        Disconnect,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="powered_outlets",
+        help_text=(
+            "Optional upstream disconnect — set for receptacle circuits with a "
+            "dedicated isolation switch (welder outlets, 240V loads)."
+        ),
     )
     outlet_type = models.CharField(
         max_length=20,
@@ -950,3 +1089,66 @@ class Cable(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+class HardwiredConnection(models.Model):
+    """
+    A hardwired feed between an Asset and a Disconnect.
+
+    Hardwired equipment is fed directly from a breaker through a disconnect
+    switch — there is no receptacle and no cordset to model. This row captures
+    that wiring so the asset's energy source / LOTO chain resolves through
+    ``connection.disconnect.circuit.breaker`` without needing fake
+    PowerPort/PowerOutlet/Cable rows.
+
+    The disconnect FK is required — even when no physical switch exists,
+    operators create a ``Disconnect(disconnect_type='none')`` so every
+    hardwired load resolves through a single Disconnect record.
+    """
+
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="hardwired_connections",
+    )
+    disconnect = models.ForeignKey(
+        Disconnect,
+        on_delete=models.PROTECT,
+        related_name="hardwired_loads",
+        help_text="Required: every hardwired load resolves through a Disconnect.",
+    )
+    conductor_size = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Conductor gauge (e.g., '10 AWG').",
+    )
+    conductor_length_ft = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Approximate conductor run length in feet.",
+    )
+    notes = models.TextField(blank=True)
+    needs_review = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["asset__name", "disconnect__label"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["asset", "disconnect"],
+                name="electrical_circuits_hardwiredconnection_unique_pair",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["asset"]),
+            models.Index(fields=["disconnect"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.asset} ↔ {self.disconnect.label}"
+
+    @property
+    def circuit(self) -> "PowerCircuit":
+        """Resolve through the disconnect — no duplicate FK on this row."""
+        return self.disconnect.circuit

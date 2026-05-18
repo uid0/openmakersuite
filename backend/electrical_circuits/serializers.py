@@ -215,6 +215,8 @@ class PowerBreakerSerializer(serializers.ModelSerializer):
             "amperage",
             "phase",
             "status",
+            "review_status",
+            "review_note",
             "label",
             "notes",
             "needs_review",

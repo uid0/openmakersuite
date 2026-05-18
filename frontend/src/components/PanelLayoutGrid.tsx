@@ -201,6 +201,16 @@ const SlotBlock: React.FC<CellProps> = ({ cell, density, side }) => {
 
   const statusColor = breaker.status === 'active' ? 'green' : breaker.status === 'locked_out' ? 'red' : 'gray';
 
+  // Review-status driven background tint, orthogonal to status. Red =
+  // active-but-circuit-gone (DANGER state), grey = known-stale awaiting
+  // cleanup. Skipped in print density so the printed copy stays clean.
+  const reviewTint =
+    density === 'interactive' && breaker.review_status === 'needs_attention'
+      ? { background: 'rgba(220, 53, 69, 0.08)', borderColor: '#dc3545' }
+      : density === 'interactive' && breaker.review_status === 'circuit_moved'
+        ? { background: 'rgba(108, 117, 125, 0.10)', borderColor: '#6c757d' }
+        : {};
+
   return (
     <Paper
       withBorder
@@ -208,7 +218,8 @@ const SlotBlock: React.FC<CellProps> = ({ cell, density, side }) => {
       radius="sm"
       data-testid={`slot-${slot}`}
       data-breaker-id={breaker.id}
-      style={{ minHeight: density === 'print' ? 36 : 56 }}
+      data-review-status={breaker.review_status}
+      style={{ minHeight: density === 'print' ? 36 : 56, ...reviewTint }}
     >
       <Stack gap={density === 'print' ? 2 : 4}>
         <Group gap="xs" wrap="nowrap" justify="space-between" align="flex-start">
@@ -223,6 +234,16 @@ const SlotBlock: React.FC<CellProps> = ({ cell, density, side }) => {
               <Badge size="xs" color={statusColor} variant="light" radius="sm">
                 {breaker.status}
               </Badge>
+              {breaker.review_status === 'needs_attention' && (
+                <Badge size="xs" color="red" variant="filled" radius="sm" title={breaker.review_note}>
+                  needs attention
+                </Badge>
+              )}
+              {breaker.review_status === 'circuit_moved' && (
+                <Badge size="xs" color="gray" variant="filled" radius="sm" title={breaker.review_note}>
+                  circuit moved
+                </Badge>
+              )}
               <Link
                 to={`/facilities/electrical/breakers/${breaker.id}/edit`}
                 aria-label={`Edit breaker ${breaker.label || slot}`}

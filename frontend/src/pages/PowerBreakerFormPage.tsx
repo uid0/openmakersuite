@@ -53,6 +53,12 @@ const STATUS_OPTIONS: Array<{ value: PowerBreakerWritable['status']; label: stri
   { value: 'locked_out', label: 'Locked out' },
 ];
 
+const REVIEW_STATUS_OPTIONS: Array<{ value: PowerBreakerWritable['review_status']; label: string }> = [
+  { value: 'ok', label: 'OK — no review flag' },
+  { value: 'needs_attention', label: 'Needs attention (red) — active but circuit gone/wrong' },
+  { value: 'circuit_moved', label: 'Circuit moved (grey) — awaiting cleanup' },
+];
+
 const PowerBreakerFormPage: React.FC = () => {
   const { id, panelId } = useParams<{ id?: string; panelId?: string }>();
   const navigate = useNavigate();
@@ -66,6 +72,8 @@ const PowerBreakerFormPage: React.FC = () => {
     amperage: 20,
     phase: 'A',
     status: 'active',
+    review_status: 'ok',
+    review_note: '',
     label: '',
     notes: '',
     needs_review: false,
@@ -133,6 +141,8 @@ const PowerBreakerFormPage: React.FC = () => {
         amperage: b.amperage,
         phase: b.phase,
         status: b.status,
+        review_status: b.review_status,
+        review_note: b.review_note,
         label: b.label,
         notes: b.notes,
         needs_review: b.needs_review,
@@ -271,6 +281,28 @@ const PowerBreakerFormPage: React.FC = () => {
                   setForm({ ...form, status: (value as PowerBreakerWritable['status']) ?? 'active' })
                 }
               />
+              <Select
+                label="Review flag"
+                description="Surface a visual flag on the panel layout grid for stale wiring."
+                data={REVIEW_STATUS_OPTIONS}
+                value={form.review_status ?? 'ok'}
+                onChange={(value) =>
+                  setForm({
+                    ...form,
+                    review_status: (value as PowerBreakerWritable['review_status']) ?? 'ok',
+                  })
+                }
+              />
+              {form.review_status && form.review_status !== 'ok' && (
+                <Textarea
+                  label="Review note"
+                  description="What changed, by whom, when — context for whoever picks this up."
+                  value={form.review_note ?? ''}
+                  onChange={(e) => setForm({ ...form, review_note: e.target.value })}
+                  autosize
+                  minRows={2}
+                />
+              )}
               <TextInput
                 label="Label"
                 value={form.label ?? ''}

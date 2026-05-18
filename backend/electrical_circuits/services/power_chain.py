@@ -176,6 +176,87 @@ def _assets_for_outlets(outlet_pks: Iterable[int]) -> QuerySet[Asset]:
     return Asset.objects.filter(pk__in=asset_ids).distinct()
 
 
+def assets_by_outlet(outlet_pks: Iterable[int]) -> dict[int, list[Asset]]:
+    """Return ``{outlet_pk: [Asset, ...]}`` for the given outlets.
+
+    Used by the panel topology view to surface "what is plugged in here?"
+    per outlet without N+1 query fanout. Outlets with no cabled asset are
+    present in the result with an empty list, so callers can rely on
+    ``.get(pk, [])`` semantics being unnecessary.
+
+    Only connected power cables are walked (``status='connected'``,
+    ``cable_type='power'``). Decommissioned or planned cables don't count
+    as a live load.
+    """
+
+    outlet_pks = list(outlet_pks)
+    result: dict[int, list[Asset]] = {pk: [] for pk in outlet_pks}
+    if not outlet_pks:
+        return result
+
+    outlet_ct = _power_outlet_ct()
+    port_ct = _power_port_ct()
+
+    cables = (
+        Cable.objects.filter(
+            cable_type=Cable.CABLE_TYPE_POWER,
+            status=Cable.STATUS_CONNECTED,
+        )
+        .filter(_cable_endpoint_q(outlet_ct, [str(pk) for pk in outlet_pks]))
+        .only(
+            "endpoint_a_content_type_id",
+            "endpoint_a_object_id",
+            "endpoint_b_content_type_id",
+            "endpoint_b_object_id",
+        )
+    )
+
+    # outlet_pk -> {port_pk, ...}
+    outlet_to_ports: dict[int, set[int]] = {}
+    all_port_ids: set[int] = set()
+    for cable in cables:
+        if (
+            cable.endpoint_a_content_type_id == outlet_ct.id
+            and cable.endpoint_b_content_type_id == port_ct.id
+        ):
+            outlet_pk = int(cable.endpoint_a_object_id)
+            port_pk = int(cable.endpoint_b_object_id)
+        elif (
+            cable.endpoint_b_content_type_id == outlet_ct.id
+            and cable.endpoint_a_content_type_id == port_ct.id
+        ):
+            outlet_pk = int(cable.endpoint_b_object_id)
+            port_pk = int(cable.endpoint_a_object_id)
+        else:
+            continue
+        outlet_to_ports.setdefault(outlet_pk, set()).add(port_pk)
+        all_port_ids.add(port_pk)
+
+    if not all_port_ids:
+        return result
+
+    # Bulk-load ports + assets in two queries.
+    port_to_asset_id = dict(
+        PowerPort.objects.filter(pk__in=all_port_ids).values_list("pk", "asset_id")
+    )
+    asset_ids = {aid for aid in port_to_asset_id.values() if aid is not None}
+    assets_by_id = {a.pk: a for a in Asset.objects.filter(pk__in=asset_ids)}
+
+    for outlet_pk, port_pks in outlet_to_ports.items():
+        seen: set = set()
+        for port_pk in port_pks:
+            asset_id = port_to_asset_id.get(port_pk)
+            if asset_id is None or asset_id in seen:
+                continue
+            asset = assets_by_id.get(asset_id)
+            if asset is None:
+                continue
+            seen.add(asset_id)
+            result.setdefault(outlet_pk, []).append(asset)
+
+    return result
+
+
 def get_devices_on_circuit(circuit: PowerCircuit) -> QuerySet[Asset]:
     """Return Assets whose PowerPort is cabled to any outlet on this circuit."""
 
@@ -225,6 +306,7 @@ __all__ = [
     "get_devices_on_circuit",
     "get_devices_on_breaker",
     "get_trip_impact",
+    "assets_by_outlet",
     "PowerPanel",
     "PowerBreaker",
     "PowerCircuit",

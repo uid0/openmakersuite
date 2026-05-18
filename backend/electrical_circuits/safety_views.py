@@ -24,8 +24,13 @@ from rest_framework.views import APIView
 
 from inventory.models import Asset
 
-from .models import PowerBreaker, PowerCircuit, PowerPanel
-from .services.power_chain import get_devices_on_circuit, get_power_chain, get_trip_impact
+from .models import PowerBreaker, PowerCircuit, PowerOutlet, PowerPanel
+from .services.power_chain import (
+    assets_by_outlet,
+    get_devices_on_circuit,
+    get_power_chain,
+    get_trip_impact,
+)
 
 
 class IsStaffUser(BasePermission):
@@ -71,7 +76,7 @@ def _serialize_circuit(circuit: PowerCircuit) -> dict:
     }
 
 
-def _serialize_outlet(outlet) -> dict:
+def _serialize_outlet(outlet, connected_assets=None) -> dict:
     return {
         "id": outlet.pk,
         "label": outlet.label,
@@ -79,6 +84,7 @@ def _serialize_outlet(outlet) -> dict:
         "status": outlet.status,
         "location_id": outlet.location_id,
         "location_name": outlet.location.name if outlet.location_id else None,
+        "connected_assets": [_serialize_asset(a) for a in (connected_assets or [])],
     }
 
 
@@ -183,11 +189,23 @@ class PowerPanelTopologyView(APIView):
             )
         )
 
+        # Resolve {outlet_pk: [Asset]} once for every outlet on the panel
+        # so per-outlet serialization stays O(1). Cable lookups use a
+        # GenericForeignKey, so a naive prefetch_related path doesn't work
+        # — the dedicated resolver is the cheap route.
+        outlet_pks = list(
+            PowerOutlet.objects.filter(circuit__breaker__panel=panel).values_list("pk", flat=True)
+        )
+        outlet_assets = assets_by_outlet(outlet_pks)
+
         breakers_payload = []
         for breaker in breakers:
             circuits_payload = []
             for circuit in breaker.circuits.all():
-                outlets_payload = [_serialize_outlet(o) for o in circuit.outlets.all()]
+                outlets_payload = [
+                    _serialize_outlet(o, connected_assets=outlet_assets.get(o.pk, []))
+                    for o in circuit.outlets.all()
+                ]
                 circuits_payload.append(
                     {
                         **_serialize_circuit(circuit),

@@ -246,6 +246,38 @@ def test_panel_topology_returns_full_tree(staff_client, topology):
     assert outlet_labels == ["bench-1", "bench-2"]
 
 
+def test_panel_topology_surfaces_connected_assets_per_outlet(staff_client, topology, db):
+    """Each outlet that has a cable→port→asset path reports the asset
+    inline under `connected_assets`; outlets with no cable report `[]`.
+    """
+
+    # Add a third outlet on the same circuit with no cable attached.
+    bare_outlet = PowerOutlet.objects.create(
+        circuit=topology["circuit"], location=topology["loc"], label="bench-bare"
+    )
+
+    url = reverse("electrical-panel-topology", args=[topology["panel"].pk])
+    resp = staff_client.get(url)
+    assert resp.status_code == 200
+    outlets = {o["label"]: o for o in resp.json()["breakers"][0]["circuits"][0]["outlets"]}
+
+    # bench-1 has the critical Server cabled in
+    bench_1 = outlets["bench-1"]
+    assert len(bench_1["connected_assets"]) == 1
+    asset = bench_1["connected_assets"][0]
+    assert asset["name"] == "Server"
+    assert asset["is_critical"] is True
+    assert asset["id"] == str(topology["asset_critical"].pk)
+
+    # bench-2 has the non-critical Lamp
+    bench_2 = outlets["bench-2"]
+    assert [a["name"] for a in bench_2["connected_assets"]] == ["Lamp"]
+
+    # bench-bare has no cable, so connected_assets is an empty list
+    assert outlets["bench-bare"]["connected_assets"] == []
+    assert bare_outlet.pk == outlets["bench-bare"]["id"]
+
+
 def test_panel_topology_exposes_subpanel_hierarchy(staff_client, topology):
     """A sub-panel fed by an upstream circuit reports its parent in
     `fed_by_summary`; the parent reports the child in `downstream_panels`.

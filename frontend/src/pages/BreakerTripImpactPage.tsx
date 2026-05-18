@@ -50,7 +50,7 @@ const BreakerTripImpactPage: React.FC = () => {
         <Stack gap="xl">
           <PageHero
             eyebrow={impact ? `Electrical · ${impact.breaker.panel_name}` : 'Electrical'}
-            title={impact ? `Trip impact · breaker ${impact.breaker.position}` : 'Trip impact'}
+            title={impact ? `Loads on breaker ${impact.breaker.position}` : 'Loads'}
             description="What loses power if this breaker is opened. Verify before maintenance."
           />
 

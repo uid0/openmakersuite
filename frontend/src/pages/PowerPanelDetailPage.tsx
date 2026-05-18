@@ -25,6 +25,7 @@ import { IconBolt, IconEdit, IconPlus, IconPrinter, IconRouteAltLeft } from '@ta
 import React, { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
+import OfflineSyncBadge from '../components/OfflineSyncBadge';
 import PageHero from '../components/landing/PageHero';
 import PanelLayoutGrid from '../components/PanelLayoutGrid';
 import { electricalSafetyAPI, PowerPanelTopology } from '../services/api';
@@ -117,6 +118,7 @@ const PowerPanelDetailPage: React.FC = () => {
             action={
               topology ? (
                 <Group gap="sm">
+                  <OfflineSyncBadge />
                   <Button
                     component="a"
                     href={`/facilities/electrical/panels/${topology.id}/print`}

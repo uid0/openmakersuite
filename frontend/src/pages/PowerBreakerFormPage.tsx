@@ -28,6 +28,7 @@ import {
   PowerBreakerWritable,
   PowerPanelDetail,
 } from '../services/api';
+import { queueablePatchBreaker } from '../services/electricalOfflineEdits';
 import { computePhase } from '../utils/computePhase';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
@@ -159,9 +160,26 @@ const PowerBreakerFormPage: React.FC = () => {
     setSaving(true);
     try {
       if (isEditMode && id) {
-        const response = await electricalTopologyAPI.updateBreaker(id, form);
-        navigate(`/facilities/electrical/panels/${response.data.panel}`);
+        // Updates go through the offline-aware wrapper: on network
+        // failure the payload is queued + replayed when connectivity
+        // returns. Successful path is unchanged.
+        const result = await queueablePatchBreaker(
+          id,
+          form,
+          `Breaker ${form.position || id}${form.label ? ` (${form.label})` : ''}`,
+        );
+        if (result.applied) {
+          navigate(`/facilities/electrical/panels/${(result.data as { panel?: number })?.panel ?? form.panel}`);
+        } else {
+          // Queued: navigate back to the panel anyway so the operator
+          // can keep moving. The OfflineSyncBadge in the page chrome
+          // surfaces the pending state.
+          navigate(`/facilities/electrical/panels/${form.panel}?queued=1`);
+        }
       } else {
+        // CREATE intentionally bypasses the queue — we need the server-
+        // assigned ID for follow-up chained operations (circuits,
+        // outlets). Treat network failure as a hard error here.
         const response = await electricalTopologyAPI.createBreaker(form);
         navigate(`/facilities/electrical/panels/${response.data.panel}`);
       }

@@ -1157,7 +1157,11 @@ class AssetViewSet(viewsets.ModelViewSet):
 
     queryset = (
         Asset.objects.select_related("inventory_item", "category", "location", "manufacturer")
-        .prefetch_related("asset_parts__part", "asset_parts__part__category")
+        .prefetch_related(
+            "asset_parts__part",
+            "asset_parts__part__category",
+            "hardwired_connections__disconnect__circuit__breaker__panel",
+        )
         .all()
     )
     serializer_class = AssetSerializer

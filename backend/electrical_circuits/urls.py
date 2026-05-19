@@ -13,6 +13,8 @@ from .safety_views import (
 )
 from .views import (
     BreakerViewSet,
+    DisconnectViewSet,
+    HardwiredConnectionViewSet,
     LightSwitchViewSet,
     NetworkDropListReportView,
     NetworkDropViewSet,
@@ -31,6 +33,12 @@ router.register(r"breakers", BreakerViewSet, basename="breaker")
 router.register(r"outlets", OutletViewSet, basename="outlet")
 router.register(r"light-switches", LightSwitchViewSet, basename="light-switch")
 router.register(r"network-drops", NetworkDropViewSet, basename="network-drop")
+router.register(r"disconnects", DisconnectViewSet, basename="disconnect")
+router.register(
+    r"hardwired-connections",
+    HardwiredConnectionViewSet,
+    basename="hardwired-connection",
+)
 
 # Power-topology CRUD router — separate prefix from the legacy router so
 # the legacy /breakers and /outlets keep their existing shape. Mounted

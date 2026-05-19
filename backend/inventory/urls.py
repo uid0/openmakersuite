@@ -6,6 +6,7 @@ from django.urls import include, path
 
 from rest_framework.routers import DefaultRouter
 
+from .safety_sheet import LocationSafetySheetView
 from .views import (
     AssetPartViewSet,
     AssetProblemViewSet,
@@ -64,6 +65,11 @@ router.register(
 )
 
 urlpatterns = [
+    path(
+        "locations/<int:location_id>/safety-sheet/",
+        LocationSafetySheetView.as_view(),
+        name="inventory-location-safety-sheet",
+    ),
     path(
         "locations/<int:location_id>/reconcile/",
         InventoryReconciliationViewSet.as_view({"get": "location_grid"}),

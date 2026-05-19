@@ -1,0 +1,102 @@
+/* Print stylesheet for the per-location Safety Sign (oms-gzycmj).
+ * Goal: one letter-size page that posts on the wall and answers the
+ * "what breakers de-energize this room?" question at a glance. */
+
+.safety-sign-page {
+  max-width: 8in;
+  margin: 0 auto;
+  color: #000;
+}
+
+.safety-sign-section {
+  border: 1px solid #000;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.6rem;
+}
+
+.safety-sign-section-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.safety-sign-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.15rem 0;
+  font-size: 0.95rem;
+}
+
+.safety-sign-row-label {
+  font-weight: 600;
+}
+
+.safety-sign-row-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+.safety-sign-emergency {
+  border: 2px solid #b03030;
+  padding: 0.6rem 0.8rem;
+  background-color: rgba(176, 48, 48, 0.05);
+}
+
+.safety-sign-emergency-title {
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  font-size: 1rem;
+  color: #b03030;
+}
+
+.safety-sign-kill-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.safety-sign-kill-pill {
+  border: 2px solid #b03030;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.25rem;
+  color: #b03030;
+  background: #fff;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .safety-sign-page,
+  .safety-sign-page * {
+    visibility: visible;
+  }
+
+  .safety-sign-page {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 0.4in !important;
+  }
+
+  .safety-sign-no-print {
+    display: none !important;
+  }
+
+  .safety-sign-section,
+  .safety-sign-emergency {
+    page-break-inside: avoid;
+  }
+
+  @page {
+    size: letter;
+    margin: 0.4in;
+  }
+}

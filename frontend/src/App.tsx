@@ -42,6 +42,9 @@ import PurchasingOverviewPage from './pages/PurchasingOverviewPage';
 import ReportsOverviewPage from './pages/ReportsOverviewPage';
 import SettingsOverviewPage from './pages/SettingsOverviewPage';
 import LightSwitchFormPage from './pages/LightSwitchFormPage';
+import LocationSafetySignPage from './pages/LocationSafetySignPage';
+import LocationSafetySignPrintPage from './pages/LocationSafetySignPrintPage';
+import ThermostatFormPage from './pages/ThermostatFormPage';
 import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
 import InventoryItemFormPage from './pages/InventoryItemFormPage';
 import InventoryListPage from './pages/InventoryListPage';
@@ -242,6 +245,16 @@ function AppContent() {
           <Route path="/facilities/electrical/light-switches/:id/edit" element={<WorkspaceLayout><LightSwitchFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/network-drops/new" element={<WorkspaceLayout><NetworkDropFormPage /></WorkspaceLayout>} />
           <Route path="/facilities/electrical/network-drops/:id/edit" element={<WorkspaceLayout><NetworkDropFormPage /></WorkspaceLayout>} />
+
+          {/* Climate — thermostat CRUD (oms-gzycmj) */}
+          <Route path="/facilities/climate/thermostats/new" element={<WorkspaceLayout><ThermostatFormPage /></WorkspaceLayout>} />
+          <Route path="/facilities/climate/thermostats/:id/edit" element={<WorkspaceLayout><ThermostatFormPage /></WorkspaceLayout>} />
+
+          {/* Per-location Safety Sign (oms-gzycmj). Print variant renders
+              without the workspace shell so the browser print dialog
+              produces a single clean sheet. */}
+          <Route path="/facilities/locations/:id/safety-sign" element={<WorkspaceLayout><LocationSafetySignPage /></WorkspaceLayout>} />
+          <Route path="/facilities/locations/:id/safety-sign/print" element={<LocationSafetySignPrintPage />} />
 
           {/* Analytics dashboard */}
           <Route path="/analytics" element={<WorkspaceLayout><AnalyticsDashboardPage /></WorkspaceLayout>} />

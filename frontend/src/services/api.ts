@@ -2327,6 +2327,120 @@ export const electricalSafetyAPI = {
 };
 
 // ---------------------------------------------------------------------
+// Per-location Safety Sign (oms-gzycmj).
+// ---------------------------------------------------------------------
+
+export interface SafetySheetLight {
+  switch_id: number;
+  switch_label: string;
+  panel: string | null;
+  position: string | null;
+  amperage: number | null;
+  breaker_id: number | null;
+}
+
+export interface SafetySheetOutletGroupItem {
+  id: number;
+  identifier: string;
+  outlet_type: string;
+}
+
+export interface SafetySheetOutletGroup {
+  panel: string | null;
+  position: string | null;
+  amperage: number | null;
+  breaker_id: number | null;
+  source: 'legacy' | 'power';
+  outlet_count: number;
+  outlets: SafetySheetOutletGroupItem[];
+}
+
+export interface SafetySheetKillBreaker {
+  breaker_id: number;
+  panel: string;
+  position: string;
+  amperage: number | null;
+  source: 'hardwired' | 'cordset';
+}
+
+export interface SafetySheetThermostat {
+  id: number;
+  label: string;
+  manufacturer: string;
+  model: string;
+  controlled_asset: { id: string; name: string } | null;
+  kill_breakers: SafetySheetKillBreaker[];
+  needs_review: boolean;
+}
+
+export interface SafetySheetBreakerSummary {
+  panel: string;
+  position: string;
+  amperage: number | null;
+}
+
+export interface SafetySheet {
+  location: { id: number; name: string };
+  lights: SafetySheetLight[];
+  outlets: SafetySheetOutletGroup[];
+  thermostats: SafetySheetThermostat[];
+  all_kill_breakers: SafetySheetBreakerSummary[];
+}
+
+export const safetySheetAPI = {
+  getLocationSafetySheet: (locationId: number | string) =>
+    api.get<SafetySheet>(`/inventory/locations/${locationId}/safety-sheet/`),
+};
+
+// ---------------------------------------------------------------------
+// Climate / thermostats (oms-gzycmj).
+// ---------------------------------------------------------------------
+
+export interface Thermostat {
+  id: number;
+  label: string;
+  location: number;
+  location_name: string;
+  controls_location: number | null;
+  controls_location_name: string | null;
+  controlled_asset: string | null;
+  controlled_asset_name: string | null;
+  manufacturer: string;
+  model: string;
+  notes: string;
+  needs_review: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ThermostatWritable {
+  label: string;
+  location: number;
+  controls_location: number | null;
+  controlled_asset: string | null;
+  manufacturer: string;
+  model: string;
+  notes: string;
+}
+
+export const climateAPI = {
+  listThermostats: (params?: { location?: number; controls_location?: number }) =>
+    api.get<{ results: Thermostat[] } | Thermostat[]>('/climate/thermostats/', { params })
+      .then((response) => ({
+        ...response,
+        data: normalizeResults<Thermostat>(response.data),
+      })),
+  getThermostat: (id: number | string) =>
+    api.get<Thermostat>(`/climate/thermostats/${id}/`),
+  createThermostat: (payload: ThermostatWritable) =>
+    api.post<Thermostat>('/climate/thermostats/', payload),
+  updateThermostat: (id: number | string, payload: Partial<ThermostatWritable>) =>
+    api.patch<Thermostat>(`/climate/thermostats/${id}/`, payload),
+  deleteThermostat: (id: number | string) =>
+    api.delete(`/climate/thermostats/${id}/`),
+};
+
+// ---------------------------------------------------------------------
 // Power-topology write API (oms-b25 [7/7]).
 // CRUD endpoints behind the new frontend form pages. Staff-only on the
 // server; the frontend doesn't try to gate UI for non-staff because the

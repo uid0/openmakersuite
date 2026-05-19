@@ -98,6 +98,7 @@ INSTALLED_APPS = [
     "loto",
     "lockers",
     "analytics",
+    "climate",
 ]
 
 MIDDLEWARE = [

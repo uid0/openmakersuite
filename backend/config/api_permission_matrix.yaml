@@ -70,6 +70,26 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  climate.views.ThermostatViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
   config.flower_proxy.flower_proxy:
     permission_classes:
     - <default>
@@ -814,6 +834,10 @@ views:
   index_cards.views.TestSheetGenerateView:
     permission_classes:
     - IsAuthenticatedOrReadOnly
+  inventory.safety_sheet.LocationSafetySheetView:
+    permission_classes:
+    - IsAuthenticated
+    - IsStaffUser
   inventory.views.AssetPartViewSet:
     actions:
       create:

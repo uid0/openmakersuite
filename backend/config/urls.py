@@ -62,6 +62,7 @@ urlpatterns = [
     path("api/assets/", include(electrical_asset_power_chain_urls)),
     path("api/loto/", include("loto.urls")),
     path("api/analytics/", include("analytics.urls")),
+    path("api/climate/", include("climate.urls")),
     # Flower proxy (superuser only)
     path("flower/", include("config.flower_urls")),
 ]

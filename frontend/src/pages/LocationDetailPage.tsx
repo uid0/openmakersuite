@@ -2,15 +2,16 @@
  * Location Detail Page
  * Display location details, QR code, and fixtures
  */
-import { Button, Group, Paper, Text } from '@mantine/core';
-import React, { useEffect, useState } from 'react';
+import { Button, Group, Paper, Stack, Text } from '@mantine/core';
+import { IconAlertTriangle, IconBolt, IconPlus, IconShieldHalfFilled } from '@tabler/icons-react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import LocationFixturesList from '../components/LocationFixturesList';
 import LocationProblemsPanel from '../components/LocationProblemsPanel';
 import LocationTrafficPanel from '../components/LocationTrafficPanel';
 import ReportLocationProblemModal from '../components/ReportLocationProblemModal';
-import { inventoryAPI } from '../services/api';
+import { climateAPI, inventoryAPI, Thermostat } from '../services/api';
 import '../styles/LocationDetailPage.css';
 import { Location } from '../types';
 import { confirmDelete, showError, showSuccess } from '../utils/dialogs';
@@ -26,14 +27,28 @@ const LocationDetailPage: React.FC = () => {
   const [generatingQR, setGeneratingQR] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [problemsRefreshKey, setProblemsRefreshKey] = useState(0);
+  const [thermostats, setThermostats] = useState<Thermostat[]>([]);
+
+  const loadThermostats = useCallback(async (locationId: string) => {
+    try {
+      const response = await climateAPI.listThermostats({
+        controls_location: Number(locationId),
+      });
+      setThermostats(response.data.results);
+    } catch (err) {
+      console.warn('Failed to load thermostats for location', err);
+      setThermostats([]);
+    }
+  }, []);
 
   useEffect(() => {
     const staffStatus = localStorage.getItem('is_staff');
     setIsStaff(staffStatus === 'true');
     if (id) {
       loadLocation();
+      loadThermostats(id);
     }
-  }, [id]);
+  }, [id, loadThermostats]);
 
   const loadLocation = async () => {
     if (!id) return;
@@ -129,6 +144,15 @@ const LocationDetailPage: React.FC = () => {
             </Button>
             {isStaff && (
               <>
+                <Button
+                  component={Link}
+                  to={`/facilities/locations/${location.id}/safety-sign`}
+                  variant="default"
+                  leftSection={<IconShieldHalfFilled size={16} />}
+                  data-testid="open-safety-sign-button"
+                >
+                  Safety sign
+                </Button>
                 <Button
                   component={Link}
                   to={`/inventory/locations/${location.id}/reconcile`}
@@ -232,6 +256,74 @@ const LocationDetailPage: React.FC = () => {
         <div className="detail-section">
           <h2>Traffic</h2>
           <LocationTrafficPanel locationId={location.id} />
+        </div>
+
+        <div className="detail-section" data-testid="location-thermostats-section">
+          <Group justify="space-between" align="flex-end" mb="xs">
+            <h2 style={{ margin: 0 }}>Thermostats controlling this room</h2>
+            {isStaff && (
+              <Button
+                component={Link}
+                to={`/facilities/climate/thermostats/new?location=${location.id}`}
+                size="xs"
+                variant="light"
+                leftSection={<IconPlus size={14} />}
+                data-testid="add-thermostat-button"
+              >
+                Add thermostat
+              </Button>
+            )}
+          </Group>
+          {thermostats.length === 0 ? (
+            <Paper withBorder p="md" radius="md">
+              <Group gap="xs">
+                <IconAlertTriangle size={16} color="orange" />
+                <Text size="sm" c="dimmed">
+                  No thermostats registered for this room. Without one, the safety sign cannot
+                  surface HVAC kill breakers.
+                </Text>
+              </Group>
+            </Paper>
+          ) : (
+            <Stack gap="xs">
+              {thermostats.map((t) => (
+                <Paper
+                  key={t.id}
+                  withBorder
+                  p="sm"
+                  radius="md"
+                  data-testid={`location-thermostat-${t.id}`}
+                >
+                  <Group justify="space-between" align="flex-start" wrap="wrap">
+                    <div>
+                      <Group gap="xs">
+                        <IconBolt size={14} />
+                        <Text fw={600}>{t.label}</Text>
+                      </Group>
+                      <Text size="xs" c="dimmed" mt={2}>
+                        {t.controlled_asset_name
+                          ? `Controls ${t.controlled_asset_name}`
+                          : 'No controlled asset linked'}
+                        {t.manufacturer || t.model
+                          ? ` · ${[t.manufacturer, t.model].filter(Boolean).join(' ')}`
+                          : ''}
+                      </Text>
+                    </div>
+                    {isStaff && (
+                      <Button
+                        component={Link}
+                        to={`/facilities/climate/thermostats/${t.id}/edit`}
+                        size="xs"
+                        variant="subtle"
+                      >
+                        Edit
+                      </Button>
+                    )}
+                  </Group>
+                </Paper>
+              ))}
+            </Stack>
+          )}
         </div>
 
         <div className="detail-section">

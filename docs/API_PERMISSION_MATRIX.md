@@ -95,6 +95,7 @@ below are public.
 | GET  | `inventory/assets/<id>/maintenance-history/` | member | `IsAuthenticated` — unified per-asset history (backdated `MaintenanceRecord` rows + closed third-party work orders) with `since`/`until`/`source` filters. |
 | any  | `inventory/maintenance-records/...` (CRUD) | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` — anyone authenticated can read; staff and SIG leaders can create/update; staff-only delete. |
 | POST | `inventory/assets/<id>/log-hours/` | staff-or-sig-admin | `IsStaffOrSigAdmin` — atomically increments `Asset.hours_used` for utilization metrics + maintenance forecast. |
+| GET  | `inventory/locations/<id>/safety-sheet/` | staff | `LocationSafetySheetView` — printable Safety Sign payload (lights / outlets / thermostats + deduped kill-breaker list for the room). |
 
 ## Membership (`/api/membership/`)
 
@@ -290,6 +291,12 @@ opening a panel. All staff-gated (oms-b25 AC-5).
 | any  | `electrical/breakers-crud/...` | staff | `PowerBreakerViewSet` — full CRUD on PowerBreaker rows. Supports `?panel=<id>` filter on list. |
 | any  | `electrical/circuits-crud/...` | staff | `PowerCircuitViewSet` — full CRUD on PowerCircuit rows. Supports `?breaker=<id>` filter on list. `max_load_amps` defaults to 80% of the breaker amperage per NEC continuous-load rule when omitted. |
 | any  | `electrical/outlets-crud/...` | staff | `PowerOutletViewSet` — full CRUD on PowerOutlet rows. Supports `?circuit=<id>` filter on list. |
+
+## Climate (`/api/climate/`)
+
+| Method | Path | Class | Notes |
+| --- | --- | --- | --- |
+| any | `climate/thermostats/...` | member | `IsAuthenticated` on `ThermostatViewSet` — CRUD on per-room Thermostat records. Supports `?location=` and `?controls_location=` filters on list. |
 
 ## Analytics (`/api/analytics/`)
 

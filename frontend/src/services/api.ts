@@ -2070,7 +2070,114 @@ export const electricalCircuitsAPI = {
   },
   deleteNetworkDrop: (id: number | string) =>
     api.delete(`${electricalBase}/network-drops/${id}/`),
+
+  // Disconnects (PR 2/5) — `/api/electrical-circuits/disconnects/`
+  listDisconnects: (params?: DisconnectListParams) =>
+    api.get<{ results: Disconnect[] } | Disconnect[]>(`${electricalBase}/disconnects/`, { params })
+      .then((response) => ({ ...response, data: normalizeResults<Disconnect>(response.data) })),
+  getDisconnect: (id: number | string) =>
+    api.get<Disconnect>(`${electricalBase}/disconnects/${id}/`),
+  createDisconnect: (data: DisconnectWritable) =>
+    api.post<Disconnect>(`${electricalBase}/disconnects/`, data),
+  updateDisconnect: (id: number | string, data: Partial<DisconnectWritable>) =>
+    api.patch<Disconnect>(`${electricalBase}/disconnects/${id}/`, data),
+  deleteDisconnect: (id: number | string) =>
+    api.delete(`${electricalBase}/disconnects/${id}/`),
+
+  // Hardwired connections (PR 2/5) — `/api/electrical-circuits/hardwired-connections/`
+  listHardwiredConnections: (params?: { asset?: string; disconnect?: number | string }) =>
+    api.get<{ results: HardwiredConnection[] } | HardwiredConnection[]>(
+      `${electricalBase}/hardwired-connections/`,
+      { params },
+    ).then((response) => ({
+      ...response,
+      data: normalizeResults<HardwiredConnection>(response.data),
+    })),
+  createHardwiredConnection: (data: HardwiredConnectionWritable) =>
+    api.post<HardwiredConnection>(`${electricalBase}/hardwired-connections/`, data),
+  updateHardwiredConnection: (
+    id: number | string,
+    data: Partial<HardwiredConnectionWritable>,
+  ) =>
+    api.patch<HardwiredConnection>(`${electricalBase}/hardwired-connections/${id}/`, data),
+  deleteHardwiredConnection: (id: number | string) =>
+    api.delete(`${electricalBase}/hardwired-connections/${id}/`),
 };
+
+export type DisconnectType = 'fused' | 'unfused' | 'toggle' | 'integral' | 'none';
+
+export interface DisconnectListParams {
+  circuit?: number | string;
+  location?: number | string;
+  disconnect_type?: DisconnectType;
+  needs_review?: boolean;
+}
+
+export interface Disconnect {
+  id: number;
+  circuit: number;
+  circuit_label: string;
+  panel_name: string;
+  breaker_position: string;
+  location: number | null;
+  location_name: string | null;
+  label: string;
+  disconnect_type: DisconnectType;
+  amperage: number | null;
+  fuse_size: string;
+  is_lockable: boolean;
+  photo: string | null;
+  notes: string;
+  required_loto_devices: LOTODevice[];
+  needs_review: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DisconnectWritable {
+  circuit: number;
+  location?: number | null;
+  label: string;
+  disconnect_type: DisconnectType;
+  amperage?: number | null;
+  fuse_size?: string;
+  is_lockable?: boolean;
+  notes?: string;
+  required_loto_device_ids?: number[];
+  needs_review?: boolean;
+}
+
+export interface HardwiredConnection {
+  id: number;
+  asset: string;
+  asset_name: string;
+  disconnect: number;
+  disconnect_label: string;
+  circuit: number;
+  circuit_label: string;
+  conductor_size: string;
+  conductor_length_ft: number | null;
+  notes: string;
+  needs_review: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HardwiredConnectionWritable {
+  asset: string;
+  disconnect: number;
+  conductor_size?: string;
+  conductor_length_ft?: number | null;
+  notes?: string;
+}
+
+export const DISCONNECT_TYPE_OPTIONS: { value: DisconnectType; label: string }[] = [
+  { value: 'fused', label: 'Fused safety switch' },
+  { value: 'unfused', label: 'Unfused safety switch' },
+  { value: 'toggle', label: 'Toggle / snap switch' },
+  { value: 'integral', label: 'Integral to the equipment' },
+  { value: 'none', label: 'No separate disconnect (breaker serves)' },
+];
 
 export const OUTLET_TYPE_OPTIONS = [
   { value: 'standard', label: 'Standard 120V' },

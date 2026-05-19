@@ -296,6 +296,26 @@ export interface Asset {
   operational_status: OperationalStatus;
   // Parts/consumables
   parts?: AssetPart[];
+  // Hardwired electrical connections (PR 2/5 + 3/5). Read-only summary
+  // from the asset detail serializer; the editor mutates these through
+  // the `electricalCircuitsAPI.*HardwiredConnection*` endpoints.
+  hardwired_connections?: AssetHardwiredConnection[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetHardwiredConnection {
+  id: number;
+  asset: string;
+  asset_name: string;
+  disconnect: number;
+  disconnect_label: string;
+  circuit: number;
+  circuit_label: string;
+  conductor_size: string;
+  conductor_length_ft: number | null;
+  notes: string;
+  needs_review: boolean;
   created_at: string;
   updated_at: string;
 }

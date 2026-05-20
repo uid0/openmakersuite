@@ -47,10 +47,16 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
-    command: 'npm start',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
-  },
+  // When PLAYWRIGHT_BASE_URL is set explicitly (CI e2e job, or a dev who
+  // pre-built and is serving via serve-spa.py), use that server directly
+  // instead of trying to spawn `npm start`. Only fall back to launching
+  // the dev server for the unconfigured local case.
+  webServer: process.env.PLAYWRIGHT_BASE_URL
+    ? undefined
+    : {
+        command: 'npm start',
+        url: 'http://localhost:3000',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120 * 1000,
+      },
 });

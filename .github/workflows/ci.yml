@@ -311,25 +311,6 @@ jobs:
           CI: false
           NODE_OPTIONS: "--dns-result-order=ipv4first"
 
-      - name: Install Playwright browsers
-        run: |
-          cd frontend
-          npx playwright install --with-deps
-
-      - name: Run Playwright E2E tests
-        continue-on-error: true
-        run: |
-          cd frontend
-          python3 ../scripts/serve-spa.py build 3000 &
-          server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-          sleep 2
-          env -u CI npm run test:e2e
-        env:
-          NODE_OPTIONS: "--dns-result-order=ipv4first"
-          PLAYWRIGHT_BASE_URL: http://localhost:3000
-          PLAYWRIGHT_API_URL: http://localhost:8000/api
-
       - name: Verify coverage files exist
         run: |
           cd frontend
@@ -352,6 +333,190 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+
+  e2e-tests:
+    # AC-21 / gh-456: Playwright runs against a live Django backend +
+    # built SPA in CI so the suite is a real product-confidence gate, not
+    # an advisory signal. This job intentionally has no continue-on-error
+    # — a Playwright failure here blocks the PR.
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: test_makerspace_inventory
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # DEBUG=1 enables /api/auth/test-membership/ which the e2e fixtures
+      # use to grant active memberships to seeded users. Without it, login
+      # fails for newly-registered users and every spec skips.
+      DEBUG: 1
+      SECRET_KEY: test-secret-key-for-ci-only
+      ALLOWED_HOSTS: localhost,127.0.0.1,0.0.0.0
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
+      REDIS_URL: redis://localhost:6379/0
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
+      PLAYWRIGHT_API_URL: http://localhost:8000/api
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run migrations
+        run: |
+          cd backend
+          python manage.py migrate --no-input
+
+      - name: Start Django backend
+        run: |
+          cd backend
+          # --noreload prevents the autoreloader from forking a second
+          # process that outlives this step. nohup + disown so the server
+          # survives the step boundary; logs go to a file we tail on failure.
+          nohup python manage.py runserver 0.0.0.0:8000 --noreload \
+            > /tmp/django.log 2>&1 &
+          echo $! > /tmp/django.pid
+          disown
+
+      - name: Wait for backend /api/health/livez/
+        run: |
+          deadline=$(( $(date +%s) + 60 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            if curl -fsS http://localhost:8000/api/health/livez/ >/dev/null 2>&1; then
+              echo "✅ backend live"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "❌ backend did not serve /api/health/livez/ within 60s"
+          echo "::group::django.log"
+          cat /tmp/django.log || true
+          echo "::endgroup::"
+          exit 1
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+        env:
+          CI: false
+
+      - name: Install Playwright browsers (chromium only)
+        run: |
+          cd frontend
+          # CI gate runs chromium only for cycle time; the playwright config
+          # still defines firefox + webkit projects so local devs can opt in.
+          npx playwright install --with-deps chromium
+
+      - name: Start SPA server
+        run: |
+          nohup python3 scripts/serve-spa.py frontend/build 3000 \
+            > /tmp/spa.log 2>&1 &
+          echo $! > /tmp/spa.pid
+          disown
+          deadline=$(( $(date +%s) + 30 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            if curl -fsS http://localhost:3000/ >/dev/null 2>&1; then
+              echo "✅ SPA server up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "❌ SPA server did not respond on :3000 within 30s"
+          cat /tmp/spa.log || true
+          exit 1
+
+      - name: Run Playwright (chromium)
+        run: |
+          cd frontend
+          # PLAYWRIGHT_BASE_URL is set at job level, which signals our
+          # playwright config to skip its dev-server block — Playwright
+          # talks to the SPA server started above instead. CI=true keeps
+          # retries=2 and workers=1 from the config active.
+          npx playwright test --project=chromium
+
+      - name: Tail backend log on failure
+        if: failure()
+        run: |
+          echo "::group::django.log"
+          cat /tmp/django.log || true
+          echo "::endgroup::"
+          echo "::group::spa.log"
+          cat /tmp/spa.log || true
+          echo "::endgroup::"
+
+      - name: Stop background servers
+        if: always()
+        run: |
+          kill "$(cat /tmp/django.pid 2>/dev/null)" 2>/dev/null || true
+          kill "$(cat /tmp/spa.pid 2>/dev/null)" 2>/dev/null || true
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload Playwright traces/screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   docker-build:
     name: Docker Build Test
@@ -954,7 +1119,7 @@ jobs:
   ci-complete:
     name: ✅ CI Complete
     runs-on: ubuntu-latest
-    needs: [changes, backend-lint, backend-tests, frontend-lint, frontend-tests, docker-build, security, deploy-validation, deploy-artifacts, prod-stack-smoke]
+    needs: [changes, backend-lint, backend-tests, frontend-lint, frontend-tests, e2e-tests, docker-build, security, deploy-validation, deploy-artifacts, prod-stack-smoke]
     if: always()
     steps:
       - name: Check all jobs succeeded or were skipped
@@ -968,6 +1133,7 @@ jobs:
           BACKEND="${{ needs.backend-tests.result }}"
           FRONTEND_LINT="${{ needs.frontend-lint.result }}"
           FRONTEND="${{ needs.frontend-tests.result }}"
+          E2E="${{ needs.e2e-tests.result }}"
           DOCKER="${{ needs.docker-build.result }}"
           SECURITY="${{ needs.security.result }}"
           DEPLOY="${{ needs.deploy-validation.result }}"
@@ -978,6 +1144,7 @@ jobs:
           echo "Backend tests:   $BACKEND"
           echo "Frontend lint:   $FRONTEND_LINT"
           echo "Frontend:        $FRONTEND"
+          echo "E2E:             $E2E"
           echo "Docker:          $DOCKER"
           echo "Security:        $SECURITY"
           echo "Deploy:          $DEPLOY"
@@ -985,7 +1152,7 @@ jobs:
           echo "Prod smoke:      $PROD_SMOKE"
 
           fail=0
-          for r in "$BACKEND_LINT" "$BACKEND" "$FRONTEND_LINT" "$FRONTEND" "$DOCKER" "$SECURITY" "$DEPLOY" "$DEPLOY_ART" "$PROD_SMOKE"; do
+          for r in "$BACKEND_LINT" "$BACKEND" "$FRONTEND_LINT" "$FRONTEND" "$E2E" "$DOCKER" "$SECURITY" "$DEPLOY" "$DEPLOY_ART" "$PROD_SMOKE"; do
             ok "$r" || fail=1
           done
 

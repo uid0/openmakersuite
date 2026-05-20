@@ -296,26 +296,24 @@ export interface Asset {
   operational_status: OperationalStatus;
   // Parts/consumables
   parts?: AssetPart[];
-  // Hardwired electrical connections (PR 2/5 + 3/5). Read-only summary
-  // from the asset detail serializer; the editor mutates these through
-  // the `electricalCircuitsAPI.*HardwiredConnection*` endpoints.
-  hardwired_connections?: AssetHardwiredConnection[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AssetHardwiredConnection {
-  id: number;
-  asset: string;
-  asset_name: string;
-  disconnect: number;
-  disconnect_label: string;
-  circuit: number;
-  circuit_label: string;
-  conductor_size: string;
-  conductor_length_ft: number | null;
-  notes: string;
-  needs_review: boolean;
+  // Power / electrical — direct FKs to PowerBreaker + Disconnect, plus
+  // server-rendered summaries for read-only display.
+  breaker: number | null;
+  breaker_summary: {
+    id: number;
+    panel_id: number | null;
+    panel_name: string;
+    position: string;
+    amperage: number;
+    label: string;
+  } | null;
+  disconnect: number | null;
+  disconnect_summary: {
+    id: number;
+    label: string;
+    disconnect_type: string;
+    is_lockable: boolean;
+  } | null;
   created_at: string;
   updated_at: string;
 }

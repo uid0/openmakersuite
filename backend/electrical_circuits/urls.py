@@ -14,18 +14,15 @@ from .safety_views import (
 from .views import (
     BreakerViewSet,
     DisconnectViewSet,
-    HardwiredConnectionViewSet,
     LightSwitchViewSet,
     NetworkDropListReportView,
     NetworkDropViewSet,
     OutletViewSet,
     PanelDirectoryReportView,
     PowerBreakerViewSet,
-    PowerCableViewSet,
     PowerCircuitViewSet,
     PowerOutletViewSet,
     PowerPanelViewSet,
-    PowerPortViewSet,
 )
 
 router = DefaultRouter()
@@ -34,11 +31,6 @@ router.register(r"outlets", OutletViewSet, basename="outlet")
 router.register(r"light-switches", LightSwitchViewSet, basename="light-switch")
 router.register(r"network-drops", NetworkDropViewSet, basename="network-drop")
 router.register(r"disconnects", DisconnectViewSet, basename="disconnect")
-router.register(
-    r"hardwired-connections",
-    HardwiredConnectionViewSet,
-    basename="hardwired-connection",
-)
 
 # Power-topology CRUD router — separate prefix from the legacy router so
 # the legacy /breakers and /outlets keep their existing shape. Mounted
@@ -48,8 +40,6 @@ power_router = DefaultRouter()
 power_router.register(r"panels-crud", PowerPanelViewSet, basename="powerpanel")
 power_router.register(r"breakers-crud", PowerBreakerViewSet, basename="powerbreaker")
 power_router.register(r"circuits-crud", PowerCircuitViewSet, basename="powercircuit")
-power_router.register(r"ports-crud", PowerPortViewSet, basename="powerport")
-power_router.register(r"power-cables-crud", PowerCableViewSet, basename="powercable")
 power_router.register(r"outlets-crud", PowerOutletViewSet, basename="poweroutlet")
 
 urlpatterns = [

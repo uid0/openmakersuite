@@ -4,8 +4,8 @@ Climate / HVAC models (oms-gzycmj).
 Owns the per-room Thermostat record so the per-Location Safety Sign can answer
 "which breakers kill the HVAC for this room?". The thermostat's
 ``controlled_asset`` is the upstream RTU / furnace / mini-split that actually
-moves the air — walking from that asset through its hardwired connection (or
-fall-back cordset feed) is what produces the kill-breaker list on the sign.
+moves the air — looking up that asset's ``breaker`` FK is what produces the
+kill-breaker list on the sign.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ class Thermostat(models.Model):
         help_text=(
             "Flag for safety-sign rendering. True when the kill-breaker chain "
             "could not be resolved (no controlled_asset, or the asset has no "
-            "hardwired/cordset feed)."
+            "breaker FK set)."
         ),
     )
     created_at = models.DateTimeField(auto_now_add=True)

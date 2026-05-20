@@ -18,11 +18,11 @@
  *     report-only / condition / general notes, collapsed under a
  *     "More options" affordance for the staff member who needs them.
  *
- * Dropped (stale): freeform ``circuit`` text (now power-topology
- * PowerOutlet/Cable), ``mac_address`` (now ForgeKey device-pairing
- * flow), ``image_url`` (redundant with upload), freeform
- * ``maintenance_plan`` Textarea (replaced by structured
- * MaintenanceItem rows), ``groups_can_enable`` (was hidden anyway).
+ * Dropped (stale): freeform ``circuit`` text (now ``Asset.breaker``
+ * FK), ``mac_address`` (now ForgeKey device-pairing flow),
+ * ``image_url`` (redundant with upload), freeform ``maintenance_plan``
+ * Textarea (replaced by structured MaintenanceItem rows),
+ * ``groups_can_enable`` (was hidden anyway).
  */
 import { zodResolver } from '@hookform/resolvers/zod';
 import {

@@ -19,7 +19,6 @@ from climate.models import Thermostat
 from electrical_circuits.models import (
     Breaker,
     Disconnect,
-    HardwiredConnection,
     LightSwitch,
     Outlet,
     PowerBreaker,
@@ -121,8 +120,8 @@ def test_safety_sheet_full_shape(staff_client):
     power_circuit = PowerCircuit.objects.create(breaker=power_breaker, label="Bench north")
     PowerOutlet.objects.create(circuit=power_circuit, location=wood_shop, label="NE-bench-power")
 
-    # Thermostat with a hardwired asset → kill breaker through Disconnect
-    hvac = AssetFactory(name="RTU-3", location=wood_shop)
+    # Thermostat with an asset assigned directly to a breaker → kill breaker
+    # resolves through Asset.breaker.
     hvac_breaker = PowerBreaker.objects.create(panel=power_panel, position="22", amperage=30)
     hvac_circuit = PowerCircuit.objects.create(breaker=hvac_breaker, label="RTU-3 feeder")
     hvac_disconnect = Disconnect.objects.create(
@@ -131,7 +130,12 @@ def test_safety_sheet_full_shape(staff_client):
         label="RTU-3 disconnect",
         disconnect_type=Disconnect.DISCONNECT_TYPE_UNFUSED,
     )
-    HardwiredConnection.objects.create(asset=hvac, disconnect=hvac_disconnect)
+    hvac = AssetFactory(
+        name="RTU-3",
+        location=wood_shop,
+        breaker=hvac_breaker,
+        disconnect=hvac_disconnect,
+    )
     Thermostat.objects.create(
         location=wood_shop,
         controls_location=wood_shop,
@@ -178,7 +182,7 @@ def test_safety_sheet_full_shape(staff_client):
     assert kb["panel"] == "Panel C"
     assert kb["position"] == "22"
     assert kb["amperage"] == 30
-    assert kb["source"] == "hardwired"
+    assert kb["source"] == "direct"
 
     # all_kill_breakers — deduped union, sorted
     all_kb = body["all_kill_breakers"]
@@ -199,8 +203,8 @@ def test_thermostat_without_asset_flags_needs_review(staff_client):
 
 
 @pytest.mark.django_db
-def test_thermostat_with_asset_but_no_feed_flags_needs_review(staff_client):
-    """Asset with no hardwired connection and no cordset → empty kill list."""
+def test_thermostat_with_asset_but_no_breaker_flags_needs_review(staff_client):
+    """Asset with no breaker FK → empty kill list, needs_review=True."""
 
     loc = LocationFactory()
     asset = AssetFactory(name="Orphan HVAC", location=loc)

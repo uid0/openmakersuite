@@ -70,7 +70,7 @@ const buildSheet = (overrides: Partial<SafetySheet> = {}): SafetySheet => ({
           panel: 'Panel C',
           position: '22',
           amperage: 30,
-          source: 'hardwired',
+          source: 'direct',
         },
       ],
       needs_review: false,

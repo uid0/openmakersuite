@@ -39,7 +39,7 @@ const ElectricalOverviewPage: React.FC = () => (
     <CapabilityCard
       to="/facilities/electrical/power-chain"
       title="Asset power chain"
-      description='"What feeds this?" — trace any asset back to its panel through cables, ports, and breakers.'
+      description='"What feeds this?" — trace any asset back to its panel through its assigned breaker.'
       icon={<IconRouteAltLeft size={22} stroke={1.8} />}
       eyebrow="Lookup"
       testId="electrical-overview-card-power-chain"

@@ -1,13 +1,12 @@
 """Signal handlers that keep AssetEnergySource in sync with the power topology.
 
-Listens to ``Cable`` and ``PowerBreaker.required_loto_devices`` changes:
+Listens for changes that affect the asset → breaker derivation:
 
-* connected power cable saved → re-derive the attached asset's electrical
-  energy source.
-* power cable decommissioned (or hard-deleted) → mark its derived row stale
-  (do not delete — audit trail).
-* breaker LOTO requirements changed → re-derive every asset cabled to that
-  breaker so the new device set propagates.
+* asset's breaker changes → re-derive its electrical energy source.
+* breaker LOTO requirements changed → re-derive every asset on that breaker
+  so the new device set propagates.
+* breaker is being deleted → mark its derived rows stale so the audit trail
+  survives the cascade.
 """
 
 from __future__ import annotations
@@ -17,32 +16,31 @@ import logging
 from django.db.models.signals import m2m_changed, post_save, pre_delete
 from django.dispatch import receiver
 
-from electrical_circuits.models import Cable, PowerBreaker
+from electrical_circuits.models import PowerBreaker
 from electrical_circuits.services.power_chain import get_devices_on_breaker
+from inventory.models import Asset
 
-from .services.power_derivation import derive_for_asset, derive_for_cable, mark_stale_for_cable
+from .services.power_derivation import derive_for_asset, derive_for_breaker, mark_stale_for_breaker
 
 logger = logging.getLogger("loto.power_derivation")
 
 
-@receiver(post_save, sender=Cable, dispatch_uid="loto_derive_on_cable_save")
-def _cable_post_save(sender, instance: Cable, **kwargs) -> None:
-    if instance.cable_type != Cable.CABLE_TYPE_POWER:
-        return
-    if instance.status == Cable.STATUS_CONNECTED:
-        derive_for_cable(instance)
-    else:
-        # Planned / decommissioned: keep audit trail, mark historical.
-        mark_stale_for_cable(instance)
+@receiver(post_save, sender=Asset, dispatch_uid="loto_derive_on_asset_save")
+def _asset_post_save(sender, instance: Asset, **kwargs) -> None:
+    """Re-derive whenever an asset is saved.
+
+    Cheap: it's one breaker lookup + one update_or_create when ``breaker_id``
+    is set, or a single ``UPDATE ... SET is_stale=true`` when it is null.
+    """
+
+    derive_for_asset(instance)
 
 
-@receiver(pre_delete, sender=Cable, dispatch_uid="loto_stale_on_cable_delete")
-def _cable_pre_delete(sender, instance: Cable, **kwargs) -> None:
+@receiver(pre_delete, sender=PowerBreaker, dispatch_uid="loto_stale_on_breaker_delete")
+def _breaker_pre_delete(sender, instance: PowerBreaker, **kwargs) -> None:
     """Mark stale BEFORE the SET_NULL cascade nulls the derived_from FK."""
 
-    if instance.cable_type != Cable.CABLE_TYPE_POWER:
-        return
-    mark_stale_for_cable(instance)
+    mark_stale_for_breaker(instance)
 
 
 @receiver(
@@ -58,5 +56,8 @@ def _breaker_devices_changed(sender, instance, action: str, **kwargs) -> None:
     if not isinstance(instance, PowerBreaker):
         # Reverse signal (LOTODevice.breakers.add(...)) — not modeled here.
         return
+    derive_for_breaker(instance)
+    # Defensive: ensure any asset still on the breaker (but missing a derived
+    # row) gets one.
     for asset in get_devices_on_breaker(instance):
         derive_for_asset(asset)

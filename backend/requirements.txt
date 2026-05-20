@@ -48,7 +48,7 @@ cryptography==46.0.7
 # Observability — self-hosted Highlight (replaces Sentry, oms-fjs).
 # `highlight-io` ships all OTel instrumentations (Django, Celery, Redis,
 # requests, …) as direct deps; no per-framework extras are required.
-highlight-io==0.10.1
+highlight-io==0.10.2
 
 # Email (Postmark via Anymail)
 django-anymail[postmark]==11.1

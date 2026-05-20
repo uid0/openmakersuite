@@ -2,6 +2,8 @@
  * Tests for PurchaseOrderPage:
  *  - oms-aq2: editable metadata + file attachments behaviors.
  *  - oms-74q: freeform PO line items render their description, not 'Unknown Item'.
+ *  - gh-453: mark-delivered patches the page from the response without
+ *    flipping back into the initial "Loading purchase order…" placeholder.
  */
 import { MantineProvider } from '@mantine/core';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -118,6 +120,104 @@ describe('PurchaseOrderPage attachments + metadata', () => {
         'Confirmation email',
       );
     });
+  });
+});
+
+describe('PurchaseOrderPage mark-delivered reactive contract (gh-453)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  test('patches the page from the mark-delivered response without a follow-up GET', async () => {
+    const sentOrder = {
+      ...baseOrder,
+      status: 'sent',
+      status_label: 'Sent',
+      items: [],
+      attachments: [],
+    };
+    const deliveredOrder = {
+      ...sentOrder,
+      status: 'received',
+      status_label: 'Received',
+    };
+
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: sentOrder });
+    (api.purchaseOrderAPI.markDelivered as jest.Mock).mockResolvedValue({
+      data: deliveredOrder,
+    });
+
+    renderPage();
+
+    // Initial render: the "Mark as delivered" affordance is shown for sent POs.
+    const openBtn = await screen.findByRole('button', { name: /^mark as delivered$/i });
+    fireEvent.click(openBtn);
+
+    fireEvent.change(screen.getByLabelText(/delivery date/i), {
+      target: { value: '2026-05-10' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm delivery/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.markDelivered).toHaveBeenCalledWith('po-1', {
+        delivery_date: '2026-05-10',
+        tracking_number: undefined,
+        carrier: undefined,
+      });
+    });
+
+    // Status flips to "Received" from the response — no follow-up GET.
+    await waitFor(() => {
+      expect(screen.getByText(/Received/)).toBeInTheDocument();
+    });
+    expect(api.purchaseOrderAPI.getOrder).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/loading purchase order/i)).not.toBeInTheDocument();
+  });
+
+  test('disables submit while pending and re-enables on failure with context preserved', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: { ...baseOrder, status: 'sent', items: [], attachments: [] },
+    });
+
+    let rejectMark: (err: any) => void = () => undefined;
+    (api.purchaseOrderAPI.markDelivered as jest.Mock).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectMark = reject;
+        }),
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^mark as delivered$/i }));
+
+    const dateInput = screen.getByLabelText(/delivery date/i) as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: '2026-05-10' } });
+    const trackingInput = screen.getByLabelText(/tracking number/i) as HTMLInputElement;
+    fireEvent.change(trackingInput, { target: { value: 'TRK-99' } });
+
+    const confirm = screen.getByRole('button', { name: /confirm delivery/i });
+    fireEvent.click(confirm);
+
+    // Submit button reflects pending state.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /saving/i })).toBeDisabled();
+    });
+    expect(screen.queryByText(/loading purchase order/i)).not.toBeInTheDocument();
+
+    // Reject — the panel stays mounted with the user's typed values intact
+    // so they can retry without re-entering anything.
+    rejectMark(new Error('boom'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /confirm delivery/i })).not.toBeDisabled();
+    });
+    expect((screen.getByLabelText(/delivery date/i) as HTMLInputElement).value).toBe('2026-05-10');
+    expect((screen.getByLabelText(/tracking number/i) as HTMLInputElement).value).toBe('TRK-99');
   });
 });
 

@@ -2,7 +2,10 @@
  * Location Problem Detail Page (oms-sd1).
  *
  * Shows a single LocationProblem with reporter info, photo, paper-form
- * attachment, and promote-to-WO / resolve actions for staff.
+ * attachment, and promote-to-WO / resolve actions for staff. Resolve and
+ * promote mutations patch the visible problem from the response — see
+ * docs/REACTIVE_MUTATIONS.md. The "Loading problem…" placeholder is
+ * reserved for the initial fetch.
  */
 import { Button, Paper, Text } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
@@ -31,6 +34,8 @@ const LocationProblemDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isStaff, setIsStaff] = useState(false);
+  const [pendingAction, setPendingAction] =
+    useState<'promote-standard' | 'promote-tp' | 'resolve' | null>(null);
 
   // Promote-standard inputs
   const [maintenanceItems, setMaintenanceItems] = useState<MaintenanceItem[]>([]);
@@ -88,10 +93,14 @@ const LocationProblemDetailPage: React.FC = () => {
     load();
   }, [isStaff]);
 
-  const refreshProblem = async () => {
-    if (!id) return;
-    const resp = await locationProblemsAPI.get(id);
-    setProblem(resp.data);
+  // Patch the visible problem from a mutation response. Falls back to a
+  // partial merge so unit tests with a {} mock body don't blank out the
+  // panel; in production these endpoints return the full LocationProblem.
+  const applyProblemUpdate = (data: unknown) => {
+    if (!data || typeof data !== 'object') return;
+    setProblem((prev) =>
+      prev ? ({ ...prev, ...(data as Partial<LocationProblem>) }) : (data as LocationProblem),
+    );
   };
 
   const handlePromoteStandard = async () => {
@@ -99,12 +108,16 @@ const LocationProblemDetailPage: React.FC = () => {
       showError('Choose a maintenance item to anchor the work order under.');
       return;
     }
+    if (pendingAction) return;
     try {
-      await locationProblemsAPI.promoteStandard(id, chosenItem);
+      setPendingAction('promote-standard');
+      const resp = await locationProblemsAPI.promoteStandard(id, chosenItem);
+      applyProblemUpdate(resp.data);
       showSuccess('Standard work order opened.');
-      await refreshProblem();
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to promote.'));
+    } finally {
+      setPendingAction(null);
     }
   };
 
@@ -113,30 +126,38 @@ const LocationProblemDetailPage: React.FC = () => {
       showError('Vendor and title are required.');
       return;
     }
+    if (pendingAction) return;
     try {
-      await locationProblemsAPI.promoteThirdParty(id, {
+      setPendingAction('promote-tp');
+      const resp = await locationProblemsAPI.promoteThirdParty(id, {
         vendor: tpVendor,
         title: tpTitle.trim(),
         work_type: tpWorkType,
       });
+      applyProblemUpdate(resp.data);
       showSuccess('Third-party work order opened.');
-      await refreshProblem();
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to promote.'));
+    } finally {
+      setPendingAction(null);
     }
   };
 
   const handleResolve = async (status: 'resolved' | 'closed') => {
     if (!id) return;
+    if (pendingAction) return;
     try {
-      await locationProblemsAPI.resolve(id, {
+      setPendingAction('resolve');
+      const resp = await locationProblemsAPI.resolve(id, {
         status,
         resolution_notes: resolutionNotes.trim() || undefined,
       });
+      applyProblemUpdate(resp.data);
       showSuccess(`Problem marked ${status}.`);
-      await refreshProblem();
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to resolve.'));
+    } finally {
+      setPendingAction(null);
     }
   };
 
@@ -280,9 +301,9 @@ const LocationProblemDetailPage: React.FC = () => {
               type="button"
               className="btn-primary"
               onClick={handlePromoteStandard}
-              disabled={!chosenItem}
+              disabled={!chosenItem || pendingAction !== null}
             >
-              Open Work Order
+              {pendingAction === 'promote-standard' ? 'Opening…' : 'Open Work Order'}
             </button>
           </section>
 
@@ -324,9 +345,9 @@ const LocationProblemDetailPage: React.FC = () => {
               type="button"
               className="btn-primary"
               onClick={handlePromoteThirdParty}
-              disabled={!tpVendor || !tpTitle.trim()}
+              disabled={!tpVendor || !tpTitle.trim() || pendingAction !== null}
             >
-              Open 3rd-Party Work Order
+              {pendingAction === 'promote-tp' ? 'Opening…' : 'Open 3rd-Party Work Order'}
             </button>
           </section>
         </>
@@ -347,6 +368,8 @@ const LocationProblemDetailPage: React.FC = () => {
               type="button"
               className="btn-secondary"
               onClick={() => handleResolve('resolved')}
+              disabled={pendingAction !== null}
+              aria-busy={pendingAction === 'resolve' ? 'true' : undefined}
             >
               Mark Resolved
             </button>
@@ -354,6 +377,8 @@ const LocationProblemDetailPage: React.FC = () => {
               type="button"
               className="btn-secondary"
               onClick={() => handleResolve('closed')}
+              disabled={pendingAction !== null}
+              aria-busy={pendingAction === 'resolve' ? 'true' : undefined}
             >
               Mark Closed
             </button>

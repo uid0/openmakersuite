@@ -238,6 +238,21 @@ Coverage gap: `CommandPalette`, `OfflineIndicator`, `InstallPrompt`, and
 
 ---
 
+## Reactive mutation contract
+
+After a successful operational mutation, the affected row / panel / detail
+section should update in place from the response — never via a re-fetch
+that flips the page back through its initial loading placeholder. The
+contract (patch from response, preserve operator context, scope pending
+state, scope failures, non-disruptive reconciliation) and the inventory
+of refresh-y workflows still to migrate live in
+[`REACTIVE_MUTATIONS.md`](REACTIVE_MUTATIONS.md). Reference implementations:
+purchase receiving (`AdminDashboard.tsx`, `PurchaseOrderPage.tsx`
+`mark-delivered`) and location problem resolution
+(`LocationProblemDetailPage.tsx`).
+
+---
+
 ## Resilience matrix
 
 Each journey above is expected to handle the following states. The shared

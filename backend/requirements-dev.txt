@@ -22,7 +22,7 @@ typer[all]>=0.9.0
 
 # Type Checking
 mypy==1.8.0
-django-stubs==5.2.8
+django-stubs==5.2.9
 djangorestframework-stubs==3.16.6
 
 # Enhanced Testing

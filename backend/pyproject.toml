@@ -26,20 +26,7 @@ known_django = "django"
 sections = ["FUTURE", "STDLIB", "DJANGO", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 skip = ["migrations", "venv", "env", ".venv"]
 
-[tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "config.settings"
-python_files = ["tests.py", "test_*.py", "*_tests.py"]
-addopts = [
-    "--cov=inventory",
-    "--cov=reorder_queue",
-    "--cov=config",
-    "--cov=membership",
-    "--cov-report=term-missing",
-    "--cov-report=xml",
-    "--cov-fail-under=80",
-]
-testpaths = ["inventory/tests", "reorder_queue/tests", "membership/tests"]
-markers = [
-    "unit: Unit tests",
-    "integration: Integration tests",
-]
+# Pytest configuration lives in backend/pytest.ini — the single source of truth
+# for testpaths, coverage apps, the fail-under threshold, and markers. Keeping
+# pytest config out of pyproject.toml avoids the "WARNING: ignoring pytest
+# config in pyproject.toml!" drift that bit gh-460 / oms-8q38.

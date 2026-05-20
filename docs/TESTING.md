@@ -50,7 +50,18 @@ Run tests with configured coverage:
 pytest
 ```
 
-`backend/pytest.ini` is the source of truth for pytest options, test paths, coverage app selection, reports, markers, and the current fail-under threshold. CI relies on the same config instead of repeating app-specific `--cov` flags.
+`backend/pytest.ini` is the **single** source of truth for pytest options, test
+paths, coverage app selection, reports, markers, and the current fail-under
+threshold. CI relies on the same config instead of repeating app-specific
+`--cov` flags. `backend/pyproject.toml` intentionally does not carry a
+`[tool.pytest.ini_options]` section — when both files define pytest config,
+pytest emits a "WARNING: ignoring pytest config in pyproject.toml" and silent
+drift can hide bugs (see oms-8q38 / gh-460 for the regression this prevents).
+
+The configured test directories cover the product-critical apps, including
+LOTO and electrical-circuits safety paths, analytics, climate, devices,
+maker_boxes, and notifications. The current backend fail-under threshold is
+**85%**; raise it incrementally as new tests land.
 
 Coverage reports:
 
@@ -84,6 +95,14 @@ Run coverage with the configured Jest thresholds:
 ```bash
 npm run test:ci:coverage
 ```
+
+The current global Jest thresholds live in `frontend/package.json` under
+`jest.coverageThreshold.global`. They were set from the measured baseline on
+2026-05-20 (oms-8q38) and the file-level `collectCoverageFrom` exclusions are
+limited to the React bootstrap (`index.tsx`), web-vitals reporting, type
+declaration packages, and `.d.ts` files. Application pages and components are
+not excluded; raise the thresholds incrementally rather than excluding files
+that are merely undertested.
 
 Build the production bundle:
 

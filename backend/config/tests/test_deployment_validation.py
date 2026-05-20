@@ -425,13 +425,98 @@ class TestDeploymentArtifactsAC36:
         ), "Helm backend readiness default must be /api/health/readyz/."
 
 
+class TestProductionSafetyCoverageDoc:
+    """gh-455 / R-01 + R-02: the production safety coverage table lives at
+    docs/PRODUCTION_SAFETY_COVERAGE.md. It is the first-PR artifact for the
+    iterative compliance plan on bead oms-zu26, and it indexes
+    docs/RISK_REGISTER.md rows R-01 and R-02 to per-class and per-endpoint
+    evidence in code. These tests guard against three failure modes:
+      1. The doc gets accidentally deleted (the index of safety classes
+         disappears).
+      2. The doc drifts from the risk register (R-01/R-02 stop pointing here).
+      3. The file paths the doc cites get renamed or removed without the
+         doc being updated (broken evidence trail).
+    """
+
+    DOC_REL = "docs/PRODUCTION_SAFETY_COVERAGE.md"
+
+    REQUIRED_SECTIONS = [
+        "## R-01 — Unsafe production defaults",
+        "## R-02 — Public unauthenticated write abuse controls",
+        "### Configuration class coverage",
+        "### Integration of the validator",
+        "### Public write endpoints",
+        "### Cross-cutting controls",
+        "### R-02 gaps and follow-up scope",
+        "## Maintenance contract",
+    ]
+
+    PATH_PATTERN = re.compile(
+        r"`("
+        r"(?:backend|scripts|docs|deploy|frontend|\.github)"
+        r"/[A-Za-z0-9_./\-]+"
+        r")"
+        r"(?::\d+(?:-\d+)?)?"
+        r"`"
+    )
+
+    def test_coverage_doc_exists(self):
+        assert (
+            REPO_ROOT / self.DOC_REL
+        ).is_file(), f"{self.DOC_REL} is the safety-coverage index for gh-455; do not delete it."
+
+    def test_coverage_doc_has_required_sections(self):
+        text = (REPO_ROOT / self.DOC_REL).read_text()
+        missing = [s for s in self.REQUIRED_SECTIONS if s not in text]
+        assert not missing, (
+            f"{self.DOC_REL} is missing required section headers: {missing}. "
+            "These sections are the contract between R-01/R-02 and per-endpoint "
+            "evidence; renaming one requires updating this test in the same PR."
+        )
+
+    def test_risk_register_links_to_coverage_doc(self):
+        """R-01 and R-02 rows must reference the coverage doc so future
+        maintainers can navigate from risk → evidence in one hop."""
+        text = (REPO_ROOT / "docs" / "RISK_REGISTER.md").read_text()
+        rel = "docs/PRODUCTION_SAFETY_COVERAGE.md"
+        # Both rows are on single Markdown table lines; the simple check is
+        # that the doc is referenced inside each row's Notes column.
+        for row_id in ("R-01", "R-02"):
+            row_match = re.search(rf"^\|\s*{re.escape(row_id)}\s*\|.*$", text, re.MULTILINE)
+            assert row_match, f"RISK_REGISTER.md is missing row {row_id}."
+            row = row_match.group(0)
+            assert rel in row, (
+                f"RISK_REGISTER.md row {row_id} must reference {rel} in its "
+                "Notes column so the evidence trail is one click away."
+            )
+
+    def test_coverage_doc_references_existing_paths(self):
+        """Every `path/to/file` (with optional :line or :line-line) inside a
+        code span must exist on disk. Trips on a rename or accidental delete."""
+        text = (REPO_ROOT / self.DOC_REL).read_text()
+        cited = set()
+        for match in self.PATH_PATTERN.finditer(text):
+            cited.add(match.group(1))
+        # n/a, …, and matrix tokens are filtered out by the regex shape.
+        assert cited, (
+            f"{self.DOC_REL} cites no concrete file paths; the doc has lost its " "evidence trail."
+        )
+        missing = sorted(p for p in cited if not (REPO_ROOT / p).exists())
+        assert not missing, (
+            f"{self.DOC_REL} references paths that no longer exist on disk: "
+            f"{missing}. Update the doc in the same PR that renames or removes "
+            "the underlying files."
+        )
+
+
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
 def test_validator_handles_quoted_values(tmp_path):
     """Values quoted with single or double quotes (common when copied from
     secret stores) must be parsed correctly without leaking the quotes into
     length/comparison checks."""
     env = tmp_path / ".env"
-    body = textwrap.dedent("""\
+    body = textwrap.dedent(
+        """\
         DOMAIN="oms.example.com"
         LETSENCRYPT_EMAIL='admin@oms.example.com'
         LETSENCRYPT_DOMAINS=oms.example.com
@@ -451,7 +536,8 @@ def test_validator_handles_quoted_values(tmp_path):
         DEFAULT_FROM_EMAIL=noreply@oms.example.com
         POSTMARK_INBOUND_TOKEN=tok
         LOCATION_PING_TOKEN=tok
-        """)
+        """
+    )
     env.write_text(body)
     result = _run_validator(env)
     assert result.returncode == 0, result.stdout

@@ -287,6 +287,11 @@ class TestDeploymentArtifactsAC36:
             "scripts/validate-prod-env.sh",
             "scripts/backup-db.sh",
             "scripts/restore-db.sh",
+            "scripts/backup-media.sh",
+            "scripts/restore-media.sh",
+            "scripts/backup-config.sh",
+            "scripts/smoke.sh",
+            "scripts/restore-drill.sh",
             "scripts/check-env.sh",
             "deploy.sh",
         ],
@@ -431,7 +436,8 @@ def test_validator_handles_quoted_values(tmp_path):
     secret stores) must be parsed correctly without leaking the quotes into
     length/comparison checks."""
     env = tmp_path / ".env"
-    body = textwrap.dedent("""\
+    body = textwrap.dedent(
+        """\
         DOMAIN="oms.example.com"
         LETSENCRYPT_EMAIL='admin@oms.example.com'
         LETSENCRYPT_DOMAINS=oms.example.com
@@ -451,7 +457,8 @@ def test_validator_handles_quoted_values(tmp_path):
         DEFAULT_FROM_EMAIL=noreply@oms.example.com
         POSTMARK_INBOUND_TOKEN=tok
         LOCATION_PING_TOKEN=tok
-        """)
+        """
+    )
     env.write_text(body)
     result = _run_validator(env)
     assert result.returncode == 0, result.stdout

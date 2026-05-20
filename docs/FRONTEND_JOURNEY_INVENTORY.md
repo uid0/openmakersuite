@@ -42,12 +42,15 @@ Tests: `e2e/asset-scan.spec.ts`, `e2e/code-entry-fallback.spec.ts`,
 `__tests__/pages/ScanPage.test.tsx`,
 `__tests__/pages/AssetScanPage.test.tsx`,
 `__tests__/pages/LocationScanPage.test.tsx`,
-`__tests__/pages/TransparencyPage.test.tsx`.
+`__tests__/pages/TransparencyPage.test.tsx`,
+`__tests__/pages/FixtureScanPage.test.tsx`,
+`__tests__/pages/DonationItemScanPage.test.tsx`,
+`__tests__/pages/MakerBoxScanPage.test.tsx`,
+`__tests__/pages/TaxReceiptLookupPage.test.tsx`,
+`__tests__/pages/ThanksPage.test.tsx`.
 
-Coverage gaps: `FixtureScanPage`, `DonationItemScanPage`, `MakerBoxScanPage`,
-`TaxReceiptLookupPage`, and `ThanksPage` have no dedicated unit test today —
-manual verification only. `CodeEntryPage` is covered by
-`e2e/code-entry-fallback.spec.ts`.
+Coverage gaps: `CodeEntryPage` is covered by
+`e2e/code-entry-fallback.spec.ts` rather than a unit test.
 
 ---
 

@@ -9,3 +9,12 @@ version = 1
 always = true
 require_automerge_label = false
 branch_update_strategy = "merge"
+
+[merge]
+# Apply the existing `automerge` GH label to opt a PR in to auto-merge.
+# All required checks must still be green; this just removes the manual
+# "Squash and merge" click once they are.
+automerge_label = "automerge"
+# Match the recent convention in `git log` — every PR title carries
+# `(#N)` and history reads as one commit per PR.
+method = "squash"

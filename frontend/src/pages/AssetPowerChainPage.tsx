@@ -2,10 +2,10 @@
  * Asset power chain at `/facilities/electrical/power-chain` and
  * `/facilities/electrical/power-chain/:assetId`.
  *
- * "What feeds this?" — given an asset, walks back through cables,
- * outlets, circuits, and breakers to the panel. Lets a maintainer pick
- * an asset by tag from the asset list, or jump straight to one via the
- * URL (useful when linked from an asset detail page).
+ * "What feeds this?" — given an asset, shows the panel + breaker that
+ * power it (and the upstream disconnect when present). Lets a
+ * maintainer pick an asset by tag, or jump straight to one via the URL
+ * (useful when linked from an asset detail page).
  */
 import {
   Anchor,
@@ -23,17 +23,14 @@ import {
   IconAlertCircle,
   IconBolt,
   IconCircuitGround,
-  IconCpu,
   IconLayoutGrid,
-  IconPlugConnected,
+  IconLockOpen,
   IconRouteAltLeft,
-  IconSitemap,
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import PageHero from '../components/landing/PageHero';
-import AssetPowerChainEditor from './AssetPowerChainEditor';
 import { AssetPowerChain, assetsAPI, electricalSafetyAPI } from '../services/api';
 import { Asset } from '../types';
 import '../styles/landing.css';
@@ -42,18 +39,14 @@ const HOP_ICON: Record<AssetPowerChain['chain'][number]['kind'], React.ReactNode
   panel: <IconLayoutGrid size={14} />,
   breaker: <IconBolt size={14} />,
   circuit: <IconCircuitGround size={14} />,
-  outlet: <IconPlugConnected size={14} />,
-  cable: <IconRouteAltLeft size={14} />,
-  port: <IconCpu size={14} />,
+  disconnect: <IconLockOpen size={14} />,
 };
 
 const HOP_TITLE: Record<AssetPowerChain['chain'][number]['kind'], string> = {
   panel: 'Panel',
   breaker: 'Breaker',
   circuit: 'Circuit',
-  outlet: 'Outlet',
-  cable: 'Cable',
-  port: 'Port',
+  disconnect: 'Disconnect',
 };
 
 const AssetPowerChainPage: React.FC = () => {
@@ -133,7 +126,7 @@ const AssetPowerChainPage: React.FC = () => {
           <PageHero
             eyebrow="Electrical · Lookup"
             title="Asset power chain"
-            description='Pick an asset to walk back through cables, outlets, circuits, and breakers to its panel.'
+            description='Pick an asset to see the panel and breaker that feed it, plus any upstream disconnect.'
           />
 
           <Paper withBorder p="md" radius="md">
@@ -179,8 +172,8 @@ const AssetPowerChainPage: React.FC = () => {
                 <IconRouteAltLeft size={28} stroke={1.6} />
                 <Text fw={500}>Pick an asset to start.</Text>
                 <Text size="sm" c="dimmed" ta="center" maw={420}>
-                  The chain shows every hop from the asset's power port back to the panel that
-                  feeds it. Useful when planning a shutdown.
+                  The chain shows the panel and breaker that feed the asset. Useful when planning a
+                  shutdown.
                 </Text>
               </Stack>
             </Paper>
@@ -213,9 +206,9 @@ const AssetPowerChainPage: React.FC = () => {
                 <Paper withBorder p="xl" radius="md" bg="yellow.0">
                   <Stack gap="xs" align="center">
                     <IconAlertCircle size={24} />
-                    <Text fw={500}>This asset is not wired into a power topology.</Text>
+                    <Text fw={500}>This asset is not wired into a panel yet.</Text>
                     <Text size="sm" c="dimmed" ta="center" maw={420}>
-                      Add a port below and wire it to an outlet to see the chain.
+                      Set the feeding breaker on the asset's edit form to populate the chain.
                     </Text>
                   </Stack>
                 </Paper>
@@ -274,12 +267,6 @@ const AssetPowerChainPage: React.FC = () => {
                   </Timeline>
                 </Paper>
               )}
-
-              <AssetPowerChainEditor
-                assetId={chain.asset.id}
-                isStaff={localStorage.getItem('is_staff') === 'true' || localStorage.getItem('is_superuser') === 'true'}
-                onChange={() => loadChain(chain.asset.id)}
-              />
             </Stack>
           )}
         </Stack>

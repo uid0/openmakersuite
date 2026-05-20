@@ -1156,11 +1156,17 @@ class AssetViewSet(viewsets.ModelViewSet):
     """API endpoint for hard assets."""
 
     queryset = (
-        Asset.objects.select_related("inventory_item", "category", "location", "manufacturer")
+        Asset.objects.select_related(
+            "inventory_item",
+            "category",
+            "location",
+            "manufacturer",
+            "breaker__panel",
+            "disconnect",
+        )
         .prefetch_related(
             "asset_parts__part",
             "asset_parts__part__category",
-            "hardwired_connections__disconnect__circuit__breaker__panel",
         )
         .all()
     )

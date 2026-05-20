@@ -88,21 +88,22 @@ def _serialize_outlet(outlet, connected_assets=None) -> dict:
     }
 
 
-def _estimate_max_draw_amps(devices) -> Decimal:
-    """Sum of nameplate ``max_draw_amps`` across each asset's primary port.
+def _estimate_max_draw_amps(devices, voltage: int | None) -> Decimal:
+    """Sum nameplate watts across ``devices``, converted to amps at ``voltage``.
 
-    Per :func:`electrical_circuits.services.power_chain._primary_power_port`,
-    the primary port is the lowest (label, pk) ordering — chosen so this
-    matches what gets walked by ``get_power_chain``. Assets with no
-    declared draw contribute 0 (we surface them in ``connected_devices``
-    rather than guessing a load).
+    Each asset's ``power_draw_watts`` is the nameplate rating. We divide by
+    the panel voltage (when known) to get amps; assets with no declared
+    draw or panels with no voltage contribute 0 — we surface those assets
+    in ``connected_devices`` rather than guessing a load.
     """
 
+    if not voltage:
+        return Decimal("0")
     total = Decimal("0")
+    voltage_dec = Decimal(voltage)
     for asset in devices:
-        port = asset.power_ports.order_by("label", "pk").first()
-        if port and port.max_draw_amps is not None:
-            total += port.max_draw_amps
+        if asset.power_draw_watts is not None:
+            total += Decimal(asset.power_draw_watts) / voltage_dec
     return total
 
 
@@ -137,7 +138,10 @@ class PowerCircuitLoadView(APIView):
             pk=pk,
         )
         devices = list(get_devices_on_circuit(circuit))
-        estimated_draw = _estimate_max_draw_amps(devices)
+        panel_voltage = (
+            circuit.breaker.panel.voltage if circuit.breaker and circuit.breaker.panel else None
+        )
+        estimated_draw = _estimate_max_draw_amps(devices, panel_voltage)
 
         capacity = circuit.max_load_amps
         if capacity:
@@ -190,9 +194,7 @@ class PowerPanelTopologyView(APIView):
         )
 
         # Resolve {outlet_pk: [Asset]} once for every outlet on the panel
-        # so per-outlet serialization stays O(1). Cable lookups use a
-        # GenericForeignKey, so a naive prefetch_related path doesn't work
-        # — the dedicated resolver is the cheap route.
+        # so per-outlet serialization stays O(1).
         outlet_pks = list(
             PowerOutlet.objects.filter(circuit__breaker__panel=panel).values_list("pk", flat=True)
         )

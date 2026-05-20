@@ -702,12 +702,10 @@ class AssetSerializer(serializers.ModelSerializer):
     # Power / electrical computed flag
     is_forgekey_managed = serializers.ReadOnlyField()
 
-    # Hardwired power feeds (PR oms-0v4b41) — surfaces the new
-    # HardwiredConnection rows on the asset detail payload alongside
-    # the existing cordset/PowerCable rendering. Writes still go through
-    # the dedicated /hardwired-connections/ endpoint; this field is
-    # read-only.
-    hardwired_connections = serializers.SerializerMethodField()
+    # Read-only summary of the asset's breaker + disconnect; writes still
+    # go through the dedicated FK fields.
+    breaker_summary = serializers.SerializerMethodField()
+    disconnect_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = Asset
@@ -754,7 +752,10 @@ class AssetSerializer(serializers.ModelSerializer):
             "is_chargeable",
             "mac_address",
             # Power / electrical
-            "hardwired_connections",
+            "breaker",
+            "breaker_summary",
+            "disconnect",
+            "disconnect_summary",
             "power_draw_watts",
             "wiring_type",
             "suite",
@@ -993,20 +994,30 @@ class AssetSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
-    def get_hardwired_connections(self, obj):
-        # Lazy import — inventory must not import electrical_circuits at
-        # module load (circular: electrical_circuits.models depends on
-        # inventory.models).
-        from electrical_circuits.serializers import HardwiredConnectionSerializer
+    def get_breaker_summary(self, obj):
+        if obj.breaker_id is None:
+            return None
+        b = obj.breaker
+        panel = b.panel
+        return {
+            "id": b.pk,
+            "panel_id": panel.pk if panel else None,
+            "panel_name": panel.name if panel else "",
+            "position": b.position,
+            "amperage": b.amperage,
+            "label": b.label,
+        }
 
-        # Use the prefetched cache (AssetViewSet prefetches
-        # `hardwired_connections__disconnect__circuit__breaker__panel`).
-        # Sorting in Python avoids re-issuing the query.
-        connections = sorted(
-            obj.hardwired_connections.all(),
-            key=lambda c: (c.disconnect.label or "", c.pk),
-        )
-        return HardwiredConnectionSerializer(connections, many=True).data
+    def get_disconnect_summary(self, obj):
+        if obj.disconnect_id is None:
+            return None
+        d = obj.disconnect
+        return {
+            "id": d.pk,
+            "label": d.label,
+            "disconnect_type": d.disconnect_type,
+            "is_lockable": d.is_lockable,
+        }
 
 
 class AssetProblemPhotoSerializer(serializers.ModelSerializer):

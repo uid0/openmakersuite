@@ -6,13 +6,11 @@ import { Badge, Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import MaintenanceHistorySection from '../components/assets/MaintenanceHistorySection';
-import AssetPowerChainEditor from './AssetPowerChainEditor';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   AssetLOTORequirements,
   assetPartsAPI,
   assetsAPI,
-  electricalTopologyAPI,
   lotoAPI,
   maintenanceAPI,
   workOrderAPI,
@@ -49,19 +47,6 @@ const AssetDetailPage: React.FC = () => {
   const [cloneToast, setCloneToast] = useState<string | null>(null);
   const [tagSize, setTagSize] = useState<'standard' | 'large'>('standard');
   const [loto, setLoto] = useState<AssetLOTORequirements | null>(null);
-  const [cordsetOutletCount, setCordsetOutletCount] = useState<number | null>(null);
-
-  const refreshCordsetCount = useCallback(async () => {
-    if (!id) return;
-    try {
-      const resp = await electricalTopologyAPI.listPowerCables({ asset: id });
-      const rows = Array.isArray(resp.data) ? resp.data : resp.data?.results ?? [];
-      setCordsetOutletCount(rows.length);
-    } catch (err) {
-      // Non-fatal — summary just hides the count.
-      setCordsetOutletCount(null);
-    }
-  }, [id]);
 
   const loadAssetDetails = useCallback(async () => {
     if (!id) return;
@@ -80,7 +65,6 @@ const AssetDetailPage: React.FC = () => {
       setProblems(problemsResponse.data);
       setMaintenanceItems(maintenanceResponse.data);
       setRecentWorkOrders(workOrdersResponse.data?.results ?? []);
-      refreshCordsetCount();
 
       try {
         const lotoResp = await lotoAPI.getAssetRequirements(id);
@@ -96,7 +80,7 @@ const AssetDetailPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [id, refreshCordsetCount]);
+  }, [id]);
 
   useEffect(() => {
     if (id) {
@@ -1022,47 +1006,27 @@ const AssetDetailPage: React.FC = () => {
           (localStorage.getItem('is_staff') === 'true' ||
             localStorage.getItem('is_superuser') === 'true') && (
             <section className="asset-detail-section">
-              <h2>Power chain</h2>
+              <h2>Power</h2>
               {(() => {
-                const hwCount = asset?.hardwired_connections?.length ?? 0;
-                const cordCount = cordsetOutletCount ?? 0;
-                const parts: string[] = [];
-                if (cordsetOutletCount !== null) {
-                  parts.push(
-                    `Cordset (${cordCount} ${cordCount === 1 ? 'outlet' : 'outlets'})`,
-                  );
-                }
-                parts.push(
-                  `Hardwired (${hwCount} ${hwCount === 1 ? 'disconnect' : 'disconnects'})`,
-                );
+                const b = asset?.breaker_summary;
+                const d = asset?.disconnect_summary;
                 return (
                   <Text size="sm" fw={500} mt={0} mb="xs" data-testid="power-summary">
-                    Power: {parts.join(' · ')}
+                    {b
+                      ? `Breaker: ${b.panel_name} · ${b.position}${b.label ? ` (${b.label})` : ''}`
+                      : 'No breaker recorded.'}
+                    {d && ` · Disconnect: ${d.label}`}
                   </Text>
                 );
               })()}
               <p style={{ marginTop: 0, color: '#666' }}>
-                Wire this asset into the electrical topology by adding power ports and
-                connecting them to outlets, or recording a hardwired feed against a
-                disconnect. Full timeline view at{' '}
+                Set the feeding breaker (and, for lock-out/tag-out, the upstream disconnect) on the
+                asset's edit form. Full chain view at{' '}
                 <a href={`/facilities/electrical/power-chain/${id}`}>
                   /facilities/electrical/power-chain
                 </a>
                 .
               </p>
-              <AssetPowerChainEditor
-                assetId={id}
-                isStaff={
-                  localStorage.getItem('is_staff') === 'true' ||
-                  localStorage.getItem('is_superuser') === 'true'
-                }
-                onChange={() => {
-                  // Editor manages its own refresh of the in-editor lists; this
-                  // callback reloads the page-level summary so cordset / hardwired
-                  // counts stay accurate after add/delete.
-                  loadAssetDetails();
-                }}
-              />
             </section>
           )}
 

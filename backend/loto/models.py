@@ -175,23 +175,23 @@ class AssetEnergySource(models.Model):
         help_text="LOTO devices required to isolate this source.",
     )
     derived_from = models.ForeignKey(
-        "electrical_circuits.Cable",
+        "electrical_circuits.PowerBreaker",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="derived_energy_sources",
         help_text=(
-            "Power cable this row was auto-derived from. NULL for manual entries "
-            "(hydraulic, pneumatic, etc.) and for derived rows whose source cable "
+            "Power breaker this row was auto-derived from. NULL for manual entries "
+            "(hydraulic, pneumatic, etc.) and for derived rows whose source breaker "
             "was hard-deleted."
         ),
     )
     is_stale = models.BooleanField(
         default=False,
         help_text=(
-            "True when the cable that derived this row was decommissioned or "
-            "removed. Kept (rather than deleted) so the LOTO audit trail "
-            "survives equipment moves."
+            "True when the breaker that derived this row was removed or the asset "
+            "is no longer assigned to it. Kept (rather than deleted) so the LOTO "
+            "audit trail survives equipment moves."
         ),
     )
     notes = models.TextField(blank=True)

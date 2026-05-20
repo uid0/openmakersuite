@@ -7,20 +7,24 @@ maintenance can trace power and connectivity from any fixture back to its
 source.
 
 Power topology models (Power*, oms-wwx) provide a NetBox-grade hierarchy
-PowerPanel → PowerBreaker → PowerCircuit → PowerOutlet ↔ PowerPort that
-supersedes the flat Breaker/Outlet pair. The legacy models are kept in place
-for backward compatibility while consumers migrate.
+PowerPanel → PowerBreaker → PowerCircuit → PowerOutlet that supersedes the
+flat Breaker/Outlet pair. The legacy models are kept in place for backward
+compatibility while consumers migrate.
+
+The Cable / PowerPort / HardwiredConnection abstractions used to model the
+cordset and hardwired feeds between a breaker and an asset, but were too
+painful to keep current — operators routinely failed to enter (or maintain)
+cable data. Assets now point directly at their feeding breaker (and, when
+present, an upstream Disconnect for lock-out / tag-out) via FKs on the
+``Asset`` model.
 """
 
 from __future__ import annotations
 
-from django.contrib.contenttypes.fields import GenericForeignKey
-from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
-from inventory.models import Asset, Location
+from inventory.models import Location
 
 NEMA_PORT_TYPE_CHOICES = [
     # NEMA straight blade
@@ -591,7 +595,7 @@ class PowerBreaker(models.Model):
         related_name="breakers",
         help_text=(
             "LOTO devices required to safely isolate this breaker. Propagates "
-            "to AssetEnergySource rows derived from cables fed by this breaker."
+            "to AssetEnergySource rows derived from assets fed by this breaker."
         ),
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -680,10 +684,9 @@ class Disconnect(models.Model):
     Hardwired equipment (RTUs, dust collectors, water heaters, exhaust fans)
     is fed directly from a breaker without a receptacle in between. The
     disconnect switch on the wall next to the equipment is the operator-
-    accessible isolation point and the natural LOTO attach point. Promoting it
-    to a first-class model lets a HardwiredConnection point at the disconnect
-    rather than fabricating a fake PowerOutlet/Cable pair just to record the
-    feed.
+    accessible isolation point and the natural LOTO attach point. Assets
+    point at a Disconnect directly via ``Asset.disconnect`` so the LOTO chain
+    is a single field lookup.
 
     Some loads have no separate disconnect (the breaker itself serves) — in
     that case operators create a ``Disconnect(disconnect_type='none')`` so
@@ -805,8 +808,7 @@ class PowerOutlet(models.Model):
     A power receptacle on a PowerCircuit at a physical Location.
 
     Supersedes the legacy `Outlet` model. `outlet_type` is a NEMA standard
-    code (5-15R, L6-30R, etc.) so the cable model in [3/7] can validate
-    PowerPort ↔ PowerOutlet compatibility.
+    code (5-15R, L6-30R, etc.) describing the receptacle shape.
     """
 
     STATUS_ACTIVE = "active"
@@ -890,265 +892,3 @@ class PowerOutlet(models.Model):
     def __str__(self) -> str:
         label = self.label or f"#{self.pk}"
         return f"PowerOutlet {label} @ {self.location.name}"
-
-
-class PowerPort(models.Model):
-    """
-    A power input port on an Asset.
-
-    Assets with redundant PSUs (servers, network switches) have multiple
-    PowerPort rows. `port_type` matches the NEMA codes on PowerOutlet so the
-    cable model in [3/7] can pair compatible plugs and receptacles.
-    """
-
-    asset = models.ForeignKey(
-        Asset,
-        on_delete=models.CASCADE,
-        related_name="power_ports",
-    )
-    label = models.CharField(
-        max_length=80,
-        help_text="Port label (e.g., 'Main', 'Auxiliary', 'PSU 1')",
-    )
-    port_type = models.CharField(
-        max_length=20,
-        choices=NEMA_PORT_TYPE_CHOICES,
-        default="5-15R",
-    )
-    max_draw_amps = models.DecimalField(
-        max_digits=6,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        help_text="Nameplate max current draw in amps",
-    )
-    notes = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["asset__name", "label"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["asset", "label"],
-                name="electrical_circuits_powerport_unique_label",
-            ),
-        ]
-        indexes = [
-            models.Index(fields=["asset"]),
-            models.Index(fields=["port_type"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.asset.name} / {self.label} ({self.port_type})"
-
-
-class Cable(models.Model):
-    """
-    A physical cable connecting two endpoints in the makerspace (oms-i6g).
-
-    Generic on both ends so the same model captures power runs (PowerOutlet
-    ↔ PowerPort) and the volunteer-controlled segments of the network plant
-    (devices.Interface ↔ devices.NetworkDrop). Endpoints upstream of the
-    devices.NetworkDrop (the IT-managed switch fabric, IDF patch panels) are
-    intentionally not modeled.
-
-    Validation in :meth:`clean` enforces that the two endpoints form a
-    compatible pair for ``cable_type``: power cables must connect a
-    PowerOutlet to a PowerPort, network cables must connect an Interface to
-    a NetworkDrop. Order does not matter — either side may be ``endpoint_a``.
-    """
-
-    CABLE_TYPE_POWER = "power"
-    CABLE_TYPE_NETWORK = "network"
-    CABLE_TYPE_CHOICES = [
-        (CABLE_TYPE_POWER, "Power"),
-        (CABLE_TYPE_NETWORK, "Network"),
-    ]
-
-    STATUS_CONNECTED = "connected"
-    STATUS_PLANNED = "planned"
-    STATUS_DECOMMISSIONED = "decommissioned"
-    STATUS_CHOICES = [
-        (STATUS_CONNECTED, "Connected"),
-        (STATUS_PLANNED, "Planned"),
-        (STATUS_DECOMMISSIONED, "Decommissioned"),
-    ]
-
-    # Power side endpoints: (electrical_circuits, poweroutlet),
-    #                      (electrical_circuits, powerport)
-    # Network side endpoints: (devices, interface), (devices, networkdrop)
-    _POWER_ENDPOINT_PAIR = frozenset(
-        {
-            ("electrical_circuits", "poweroutlet"),
-            ("electrical_circuits", "powerport"),
-        }
-    )
-    _NETWORK_ENDPOINT_PAIR = frozenset(
-        {
-            ("devices", "interface"),
-            ("devices", "networkdrop"),
-        }
-    )
-
-    cable_type = models.CharField(
-        max_length=10,
-        choices=CABLE_TYPE_CHOICES,
-        help_text="Determines which endpoint pairing is valid (power vs network).",
-    )
-
-    endpoint_a_content_type = models.ForeignKey(
-        ContentType,
-        on_delete=models.PROTECT,
-        related_name="+",
-    )
-    endpoint_a_object_id = models.CharField(max_length=64)
-    endpoint_a = GenericForeignKey("endpoint_a_content_type", "endpoint_a_object_id")
-
-    endpoint_b_content_type = models.ForeignKey(
-        ContentType,
-        on_delete=models.PROTECT,
-        related_name="+",
-    )
-    endpoint_b_object_id = models.CharField(max_length=64)
-    endpoint_b = GenericForeignKey("endpoint_b_content_type", "endpoint_b_object_id")
-
-    color = models.CharField(
-        max_length=30,
-        blank=True,
-        help_text="Optional cable color (useful in dense racks).",
-    )
-    length_ft = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Approximate cable length in feet.",
-    )
-    label = models.CharField(
-        max_length=80,
-        blank=True,
-        help_text="Optional cable label (e.g., printed sleeve text).",
-    )
-    status = models.CharField(
-        max_length=15,
-        choices=STATUS_CHOICES,
-        default=STATUS_CONNECTED,
-    )
-    notes = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["cable_type", "label"]
-        indexes = [
-            models.Index(
-                fields=["endpoint_a_content_type", "endpoint_a_object_id"],
-                name="ec_cable_endpoint_a_idx",
-            ),
-            models.Index(
-                fields=["endpoint_b_content_type", "endpoint_b_object_id"],
-                name="ec_cable_endpoint_b_idx",
-            ),
-            models.Index(fields=["cable_type"]),
-            models.Index(fields=["status"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.get_cable_type_display()} cable {self.label or f'#{self.pk}'}"
-
-    def _endpoint_key(self, content_type: ContentType | None) -> tuple[str, str] | None:
-        if content_type is None:
-            return None
-        return (content_type.app_label, content_type.model)
-
-    def clean(self) -> None:
-        super().clean()
-        a_key = self._endpoint_key(self.endpoint_a_content_type)
-        b_key = self._endpoint_key(self.endpoint_b_content_type)
-        if a_key is None or b_key is None:
-            raise ValidationError("Both endpoints are required.")
-
-        pair = frozenset({a_key, b_key})
-        if self.cable_type == self.CABLE_TYPE_POWER:
-            if pair != self._POWER_ENDPOINT_PAIR:
-                raise ValidationError("Power cables must connect a PowerOutlet to a PowerPort.")
-        elif self.cable_type == self.CABLE_TYPE_NETWORK:
-            if pair != self._NETWORK_ENDPOINT_PAIR:
-                raise ValidationError(
-                    "Network cables must connect a devices.Interface to a " "devices.NetworkDrop."
-                )
-        else:
-            raise ValidationError(
-                f"Unknown cable_type {self.cable_type!r}.",
-            )
-
-        if self.endpoint_a_content_type_id == self.endpoint_b_content_type_id and str(
-            self.endpoint_a_object_id
-        ) == str(self.endpoint_b_object_id):
-            raise ValidationError("A cable cannot connect an endpoint to itself.")
-
-    def save(self, *args, **kwargs):
-        self.full_clean()
-        super().save(*args, **kwargs)
-
-
-class HardwiredConnection(models.Model):
-    """
-    A hardwired feed between an Asset and a Disconnect.
-
-    Hardwired equipment is fed directly from a breaker through a disconnect
-    switch — there is no receptacle and no cordset to model. This row captures
-    that wiring so the asset's energy source / LOTO chain resolves through
-    ``connection.disconnect.circuit.breaker`` without needing fake
-    PowerPort/PowerOutlet/Cable rows.
-
-    The disconnect FK is required — even when no physical switch exists,
-    operators create a ``Disconnect(disconnect_type='none')`` so every
-    hardwired load resolves through a single Disconnect record.
-    """
-
-    asset = models.ForeignKey(
-        Asset,
-        on_delete=models.CASCADE,
-        related_name="hardwired_connections",
-    )
-    disconnect = models.ForeignKey(
-        Disconnect,
-        on_delete=models.PROTECT,
-        related_name="hardwired_loads",
-        help_text="Required: every hardwired load resolves through a Disconnect.",
-    )
-    conductor_size = models.CharField(
-        max_length=20,
-        blank=True,
-        help_text="Conductor gauge (e.g., '10 AWG').",
-    )
-    conductor_length_ft = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Approximate conductor run length in feet.",
-    )
-    notes = models.TextField(blank=True)
-    needs_review = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["asset__name", "disconnect__label"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["asset", "disconnect"],
-                name="electrical_circuits_hardwiredconnection_unique_pair",
-            ),
-        ]
-        indexes = [
-            models.Index(fields=["asset"]),
-            models.Index(fields=["disconnect"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.asset} ↔ {self.disconnect.label}"
-
-    @property
-    def circuit(self) -> "PowerCircuit":
-        """Resolve through the disconnect — no duplicate FK on this row."""
-        return self.disconnect.circuit

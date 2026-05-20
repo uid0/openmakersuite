@@ -10,9 +10,7 @@ from .admin_reports import (
 )
 from .models import (
     Breaker,
-    Cable,
     Disconnect,
-    HardwiredConnection,
     LightSwitch,
     NetworkDrop,
     Outlet,
@@ -20,7 +18,6 @@ from .models import (
     PowerCircuit,
     PowerOutlet,
     PowerPanel,
-    PowerPort,
 )
 
 
@@ -222,32 +219,3 @@ class DisconnectAdmin(admin.ModelAdmin):
     search_fields = ["label", "notes", "location__name"]
     autocomplete_fields = ["circuit", "location"]
     filter_horizontal = ["required_loto_devices"]
-
-
-@admin.register(HardwiredConnection)
-class HardwiredConnectionAdmin(admin.ModelAdmin):
-    list_display = [
-        "asset",
-        "disconnect",
-        "conductor_size",
-        "conductor_length_ft",
-        "needs_review",
-    ]
-    list_filter = ["needs_review", "disconnect__disconnect_type"]
-    search_fields = ["asset__name", "asset__asset_tag", "disconnect__label"]
-    raw_id_fields = ["asset", "disconnect"]
-
-
-@admin.register(PowerPort)
-class PowerPortAdmin(admin.ModelAdmin):
-    list_display = ["asset", "label", "port_type", "max_draw_amps"]
-    list_filter = ["port_type"]
-    search_fields = ["label", "asset__name", "asset__asset_tag"]
-    autocomplete_fields = ["asset"]
-
-
-@admin.register(Cable)
-class CableAdmin(admin.ModelAdmin):
-    list_display = ["__str__", "cable_type", "status", "label", "color", "length_ft"]
-    list_filter = ["cable_type", "status"]
-    search_fields = ["label", "notes"]

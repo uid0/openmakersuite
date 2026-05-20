@@ -209,7 +209,7 @@ describe('ThermostatFormPage', () => {
     expect(payload.controlled_asset).toBe('asset-88');
   });
 
-  it('shows a kill-breaker preview when the cordset chain resolves', async () => {
+  it('shows a kill-breaker preview when the power chain resolves', async () => {
     mockClimateAPI.getThermostat.mockResolvedValue(
       apiResponse({
         id: 7,

@@ -2084,24 +2084,6 @@ export const electricalCircuitsAPI = {
   deleteDisconnect: (id: number | string) =>
     api.delete(`${electricalBase}/disconnects/${id}/`),
 
-  // Hardwired connections (PR 2/5) — `/api/electrical-circuits/hardwired-connections/`
-  listHardwiredConnections: (params?: { asset?: string; disconnect?: number | string }) =>
-    api.get<{ results: HardwiredConnection[] } | HardwiredConnection[]>(
-      `${electricalBase}/hardwired-connections/`,
-      { params },
-    ).then((response) => ({
-      ...response,
-      data: normalizeResults<HardwiredConnection>(response.data),
-    })),
-  createHardwiredConnection: (data: HardwiredConnectionWritable) =>
-    api.post<HardwiredConnection>(`${electricalBase}/hardwired-connections/`, data),
-  updateHardwiredConnection: (
-    id: number | string,
-    data: Partial<HardwiredConnectionWritable>,
-  ) =>
-    api.patch<HardwiredConnection>(`${electricalBase}/hardwired-connections/${id}/`, data),
-  deleteHardwiredConnection: (id: number | string) =>
-    api.delete(`${electricalBase}/hardwired-connections/${id}/`),
 };
 
 export type DisconnectType = 'fused' | 'unfused' | 'toggle' | 'integral' | 'none';
@@ -2147,30 +2129,6 @@ export interface DisconnectWritable {
   needs_review?: boolean;
 }
 
-export interface HardwiredConnection {
-  id: number;
-  asset: string;
-  asset_name: string;
-  disconnect: number;
-  disconnect_label: string;
-  circuit: number;
-  circuit_label: string;
-  conductor_size: string;
-  conductor_length_ft: number | null;
-  notes: string;
-  needs_review: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface HardwiredConnectionWritable {
-  asset: string;
-  disconnect: number;
-  conductor_size?: string;
-  conductor_length_ft?: number | null;
-  notes?: string;
-}
-
 export const DISCONNECT_TYPE_OPTIONS: { value: DisconnectType; label: string }[] = [
   { value: 'fused', label: 'Fused safety switch' },
   { value: 'unfused', label: 'Unfused safety switch' },
@@ -2195,8 +2153,9 @@ export const OUTLET_TYPE_OPTIONS = [
 
 // ---------------------------------------------------------------------
 // Power topology safety API (oms-b25 [4/7]). Read-only views over the
-// PowerPanel → PowerBreaker → PowerCircuit → PowerOutlet ↔ PowerPort
-// hierarchy. Used by the [6/7] visualization pages.
+// PowerPanel → PowerBreaker → PowerCircuit → PowerOutlet hierarchy plus
+// the direct ``Asset.breaker`` association. Used by the [6/7]
+// visualization pages.
 // ---------------------------------------------------------------------
 
 export type PowerPanelPhase = 'single' | 'split' | 'three';
@@ -2302,7 +2261,7 @@ export interface CircuitLoad {
 }
 
 export interface PowerChainHop {
-  kind: 'panel' | 'breaker' | 'circuit' | 'outlet' | 'cable' | 'port';
+  kind: 'panel' | 'breaker' | 'circuit' | 'disconnect';
   id: number;
   type: string;
   label: string | number;
@@ -2360,7 +2319,7 @@ export interface SafetySheetKillBreaker {
   panel: string;
   position: string;
   amperage: number | null;
-  source: 'hardwired' | 'cordset';
+  source: 'direct';
 }
 
 export interface SafetySheetThermostat {
@@ -2637,71 +2596,7 @@ export const electricalTopologyAPI = {
   deleteOutlet: (id: number | string) =>
     api.delete(`/electrical/outlets-crud/${id}/`),
 
-  // Power ports (per-asset)
-  listPorts: (params?: { asset?: string }) =>
-    api.get<{ results: PowerPortDetail[] } | PowerPortDetail[]>('/electrical/ports-crud/', { params }),
-  createPort: (data: Partial<PowerPortWritable>) =>
-    api.post<PowerPortDetail>('/electrical/ports-crud/', data),
-  updatePort: (id: number, data: Partial<PowerPortWritable>) =>
-    api.patch<PowerPortDetail>(`/electrical/ports-crud/${id}/`, data),
-  deletePort: (id: number) =>
-    api.delete(`/electrical/ports-crud/${id}/`),
-
-  // Power cables (PowerOutlet ↔ PowerPort)
-  listPowerCables: (params?: { asset?: string; port?: number }) =>
-    api.get<{ results: PowerCableDetail[] } | PowerCableDetail[]>('/electrical/power-cables-crud/', { params }),
-  createPowerCable: (data: PowerCableWritable) =>
-    api.post<PowerCableDetail>('/electrical/power-cables-crud/', data),
-  deletePowerCable: (id: number) =>
-    api.delete(`/electrical/power-cables-crud/${id}/`),
 };
-
-export interface PowerPortDetail {
-  id: number;
-  asset: string;
-  asset_name: string;
-  label: string;
-  port_type: string;
-  max_draw_amps: string | null;
-  notes: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PowerPortWritable {
-  asset: string;
-  label: string;
-  port_type: string;
-  max_draw_amps?: string | number | null;
-  notes?: string;
-}
-
-export interface PowerCableDetail {
-  id: number;
-  outlet_id: number;
-  outlet_label: string | null;
-  port_id: number;
-  port_label: string | null;
-  asset_id: string | null;
-  asset_name: string | null;
-  color: string;
-  length_ft: number | null;
-  label: string;
-  status: string;
-  notes: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PowerCableWritable {
-  outlet: number;
-  port: number;
-  color?: string;
-  length_ft?: number | null;
-  label?: string;
-  status?: string;
-  notes?: string;
-}
 
 // LOTO (lockout / tagout) — oms-78j
 export type LOTODeviceType =

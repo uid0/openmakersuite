@@ -1175,6 +1175,26 @@ class Asset(models.Model):
         blank=True,
         help_text="Specific breaker label / number serving this asset (e.g., 'Panel A, Breaker 12').",
     )
+    breaker = models.ForeignKey(
+        "electrical_circuits.PowerBreaker",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assets",
+        help_text="Breaker that feeds this asset (replaces the previous cable-and-port chain).",
+    )
+    disconnect = models.ForeignKey(
+        "electrical_circuits.Disconnect",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assets",
+        help_text=(
+            "Disconnect switch used to isolate this asset for lock-out / tag-out. "
+            "Optional — only the disconnect-relevant LOTO data is kept on the asset; "
+            "the rest of the cable/cordset modelling has been removed."
+        ),
+    )
     is_critical = models.BooleanField(
         default=False,
         help_text=(

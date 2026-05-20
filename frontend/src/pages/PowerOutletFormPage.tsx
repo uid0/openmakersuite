@@ -4,8 +4,7 @@
  *   /facilities/electrical/outlets/:id/edit
  *
  * In create-mode the ``circuitId`` from the URL pre-fills the parent
- * circuit selector. ``outlet_type`` carries the NEMA receptacle code
- * so the cable model can validate plug ↔ receptacle compatibility.
+ * circuit selector. ``outlet_type`` carries the NEMA receptacle code.
  */
 import {
   Alert,
@@ -156,7 +155,7 @@ const PowerOutletFormPage: React.FC = () => {
         eyebrow: 'Electrical · Outlet',
         title: isEditMode ? 'Edit outlet' : 'New outlet',
         description:
-          'Outlets live on a circuit at a physical location. The NEMA code is what cables match against.',
+          'Outlets live on a circuit at a physical location. The NEMA code describes the receptacle shape.',
         action: (
           <Button variant="default" onClick={() => navigate(-1)}>
             Cancel

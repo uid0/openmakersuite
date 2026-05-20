@@ -205,8 +205,8 @@ export const assetFormSchema = z
 
     // Operating requirements — collapsed under an "Advanced" section.
     // ``circuit`` and ``mac_address`` used to live here as free-text;
-    // they're now superseded by the power-topology PowerOutlet / Cable
-    // link and the ForgeKey device-pairing flow respectively. Dropped.
+    // they're now superseded by the Asset.breaker FK and the ForgeKey
+    // device-pairing flow respectively. Dropped.
     // Note: ``maintenance_plan`` (freeform Textarea) is replaced by
     // structured MaintenanceItem rows created via a modal in the
     // Maintenance section.

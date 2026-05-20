@@ -1,14 +1,10 @@
 """
-Tests for the safety query API (oms-b25, AC-1..AC-6).
+Tests for the safety query API.
 
-Each test maps to one of the acceptance criteria in oms-b25:
-
-* AC-1 — ``GET /api/electrical/breakers/<id>/trip-impact/``
-* AC-2 — ``GET /api/electrical/circuits/<id>/load/``
-* AC-3 — ``GET /api/electrical/panels/<id>/topology/``
-* AC-4 — ``GET /api/assets/<id>/power-chain/``
-* AC-5 — auth-gated (staff only)
-* AC-6 — typical-makerspace-scale perf (10 panels / 200 circuits / 500 devices, <2s)
+The cable/cordset model was removed in favour of a direct ``Asset.breaker``
+FK. These tests cover the same endpoints but seed the new graph and adjust
+the expected shape (no more ``cable`` / ``port`` hops, draw estimated from
+``Asset.power_draw_watts`` over the panel voltage).
 """
 
 from __future__ import annotations
@@ -23,14 +19,7 @@ from django.urls import reverse
 import pytest
 from rest_framework.test import APIClient
 
-from electrical_circuits.models import (
-    Cable,
-    PowerBreaker,
-    PowerCircuit,
-    PowerOutlet,
-    PowerPanel,
-    PowerPort,
-)
+from electrical_circuits.models import PowerBreaker, PowerCircuit, PowerOutlet, PowerPanel
 from inventory.tests.factories import AssetFactory, LocationFactory
 
 _tag_counter = itertools.count(1)
@@ -38,13 +27,6 @@ User = get_user_model()
 
 
 def _make_asset(name: str | None = None, **kwargs):
-    """AssetFactory with an explicit unique asset_tag.
-
-    Mirrors the helper in test_power_chain — UUID7-derived tags collide
-    inside a 16-day window when many assets are created in the same
-    test run (see [3/7] notes), so we pin them.
-    """
-
     kwargs.setdefault("asset_tag", f"B25-{next(_tag_counter):06d}")
     if name is not None:
         kwargs["name"] = name
@@ -73,29 +55,31 @@ def non_staff_client(db):
 
 @pytest.fixture
 def topology(db):
-    """A small topology with two assets — one critical, one not — on
-    a single circuit fed by one breaker on one panel.
+    """A small topology with two assets — one critical, one not — both
+    assigned to the same breaker on one panel.
     """
 
     loc = LocationFactory(name="Sewing Room")
-    panel = PowerPanel.objects.create(location=loc, name="Sewing A")
+    panel = PowerPanel.objects.create(location=loc, name="Sewing A", voltage=120)
     breaker = PowerBreaker.objects.create(panel=panel, position="2", amperage=20)
     circuit = PowerCircuit.objects.create(breaker=breaker, label="Bench row 1")
 
     outlet1 = PowerOutlet.objects.create(circuit=circuit, location=loc, label="bench-1")
     outlet2 = PowerOutlet.objects.create(circuit=circuit, location=loc, label="bench-2")
 
-    asset_critical = _make_asset(name="Server", location=loc, is_critical=True)
-    port_a = PowerPort.objects.create(
-        asset=asset_critical, label="Main", max_draw_amps=Decimal("4.0")
+    asset_critical = _make_asset(
+        name="Server",
+        location=loc,
+        is_critical=True,
+        breaker=breaker,
+        power_draw_watts=Decimal("480.0"),
     )
-    Cable.objects.create(cable_type=Cable.CABLE_TYPE_POWER, endpoint_a=outlet1, endpoint_b=port_a)
-
-    asset_normal = _make_asset(name="Lamp", location=loc)
-    port_b = PowerPort.objects.create(
-        asset=asset_normal, label="Main", max_draw_amps=Decimal("0.5")
+    asset_normal = _make_asset(
+        name="Lamp",
+        location=loc,
+        breaker=breaker,
+        power_draw_watts=Decimal("60.0"),
     )
-    Cable.objects.create(cable_type=Cable.CABLE_TYPE_POWER, endpoint_a=outlet2, endpoint_b=port_b)
 
     return {
         "loc": loc,
@@ -106,13 +90,11 @@ def topology(db):
         "outlet2": outlet2,
         "asset_critical": asset_critical,
         "asset_normal": asset_normal,
-        "port_a": port_a,
-        "port_b": port_b,
     }
 
 
 # ---------------------------------------------------------------------
-# AC-5 — auth gate
+# Auth gate
 # ---------------------------------------------------------------------
 
 
@@ -149,13 +131,11 @@ def test_panel_list_requires_staff(non_staff_client, topology):
 
 
 # ---------------------------------------------------------------------
-# Panel list — backs the frontend panel directory ([6/7])
+# Panel list
 # ---------------------------------------------------------------------
 
 
 def test_panel_list_returns_breaker_count_and_review_flag(staff_client, topology, db):
-    # A second panel with no breakers + needs_review flag exercises the
-    # annotation and the placeholder pathway from the migration.
     placeholder = PowerPanel.objects.create(
         location=topology["loc"], name="Placeholder", needs_review=True
     )
@@ -171,7 +151,7 @@ def test_panel_list_returns_breaker_count_and_review_flag(staff_client, topology
 
 
 # ---------------------------------------------------------------------
-# AC-1 — trip impact
+# Trip impact
 # ---------------------------------------------------------------------
 
 
@@ -193,7 +173,7 @@ def test_trip_impact_unknown_breaker_returns_404(staff_client, db):
 
 
 # ---------------------------------------------------------------------
-# AC-2 — circuit load
+# Circuit load
 # ---------------------------------------------------------------------
 
 
@@ -203,7 +183,7 @@ def test_circuit_load_returns_total_draw_and_utilization(staff_client, topology)
     assert resp.status_code == 200
     data = resp.json()
     assert data["connected_device_count"] == 2
-    # 4.0 + 0.5 = 4.5 amps
+    # 480W + 60W = 540W. At 120V → 4.5A.
     assert data["estimated_max_draw_amps"] == pytest.approx(4.5)
     # capacity defaults to 0.8 * 20 = 16
     assert data["capacity_amps"] == 16
@@ -213,10 +193,9 @@ def test_circuit_load_returns_total_draw_and_utilization(staff_client, topology)
 
 def test_circuit_load_handles_no_capacity(staff_client, db):
     loc = LocationFactory()
-    panel = PowerPanel.objects.create(location=loc, name="P")
+    panel = PowerPanel.objects.create(location=loc, name="P", voltage=120)
     breaker = PowerBreaker.objects.create(panel=panel, position="1", amperage=20)
     circuit = PowerCircuit.objects.create(breaker=breaker)
-    # The default save() sets max_load_amps; clear it manually.
     PowerCircuit.objects.filter(pk=circuit.pk).update(max_load_amps=None)
 
     url = reverse("electrical-circuit-load", args=[circuit.pk])
@@ -226,7 +205,7 @@ def test_circuit_load_handles_no_capacity(staff_client, db):
 
 
 # ---------------------------------------------------------------------
-# AC-3 — panel topology
+# Panel topology
 # ---------------------------------------------------------------------
 
 
@@ -246,13 +225,12 @@ def test_panel_topology_returns_full_tree(staff_client, topology):
     assert outlet_labels == ["bench-1", "bench-2"]
 
 
-def test_panel_topology_surfaces_connected_assets_per_outlet(staff_client, topology, db):
-    """Each outlet that has a cable→port→asset path reports the asset
-    inline under `connected_assets`; outlets with no cable report `[]`.
+def test_panel_topology_surfaces_assets_on_breaker_per_outlet(staff_client, topology, db):
+    """Without cables there is no outlet ↔ asset edge; every outlet on the
+    breaker reports every asset assigned to the breaker.
     """
 
-    # Add a third outlet on the same circuit with no cable attached.
-    bare_outlet = PowerOutlet.objects.create(
+    PowerOutlet.objects.create(
         circuit=topology["circuit"], location=topology["loc"], label="bench-bare"
     )
 
@@ -261,28 +239,13 @@ def test_panel_topology_surfaces_connected_assets_per_outlet(staff_client, topol
     assert resp.status_code == 200
     outlets = {o["label"]: o for o in resp.json()["breakers"][0]["circuits"][0]["outlets"]}
 
-    # bench-1 has the critical Server cabled in
-    bench_1 = outlets["bench-1"]
-    assert len(bench_1["connected_assets"]) == 1
-    asset = bench_1["connected_assets"][0]
-    assert asset["name"] == "Server"
-    assert asset["is_critical"] is True
-    assert asset["id"] == str(topology["asset_critical"].pk)
-
-    # bench-2 has the non-critical Lamp
-    bench_2 = outlets["bench-2"]
-    assert [a["name"] for a in bench_2["connected_assets"]] == ["Lamp"]
-
-    # bench-bare has no cable, so connected_assets is an empty list
-    assert outlets["bench-bare"]["connected_assets"] == []
-    assert bare_outlet.pk == outlets["bench-bare"]["id"]
+    # Every outlet on the breaker surfaces both assets.
+    for label in ("bench-1", "bench-2", "bench-bare"):
+        names = sorted(a["name"] for a in outlets[label]["connected_assets"])
+        assert names == ["Lamp", "Server"]
 
 
 def test_panel_topology_exposes_subpanel_hierarchy(staff_client, topology):
-    """A sub-panel fed by an upstream circuit reports its parent in
-    `fed_by_summary`; the parent reports the child in `downstream_panels`.
-    """
-
     loc = LocationFactory(name="Machine Shop")
     subpanel = PowerPanel.objects.create(
         location=loc,
@@ -290,7 +253,6 @@ def test_panel_topology_exposes_subpanel_hierarchy(staff_client, topology):
         fed_by=topology["circuit"],
     )
 
-    # Sub-panel's topology should carry parent lineage.
     sub_url = reverse("electrical-panel-topology", args=[subpanel.pk])
     sub_data = staff_client.get(sub_url).json()
     assert sub_data["fed_by_summary"] is not None
@@ -299,7 +261,6 @@ def test_panel_topology_exposes_subpanel_hierarchy(staff_client, topology):
     assert sub_data["fed_by_summary"]["circuit_id"] == topology["circuit"].pk
     assert sub_data["downstream_panels"] == []
 
-    # Parent topology should list the sub-panel under downstream_panels.
     parent_url = reverse("electrical-panel-topology", args=[topology["panel"].pk])
     parent_data = staff_client.get(parent_url).json()
     assert parent_data["fed_by_summary"] is None
@@ -307,7 +268,7 @@ def test_panel_topology_exposes_subpanel_hierarchy(staff_client, topology):
 
 
 # ---------------------------------------------------------------------
-# AC-4 — asset power chain
+# Asset power chain
 # ---------------------------------------------------------------------
 
 
@@ -317,7 +278,7 @@ def test_asset_power_chain_returns_full_chain(staff_client, topology):
     assert resp.status_code == 200
     data = resp.json()
     kinds = [hop["kind"] for hop in data["chain"]]
-    assert kinds == ["panel", "breaker", "circuit", "outlet", "cable", "port"]
+    assert kinds == ["panel", "breaker", "circuit"]
     assert data["asset"]["id"] == str(topology["asset_critical"].pk)
 
 
@@ -329,56 +290,40 @@ def test_asset_power_chain_empty_for_unconnected(staff_client, db):
 
 
 # ---------------------------------------------------------------------
-# AC-6 — perf budget at typical makerspace scale
+# Perf budget
 # ---------------------------------------------------------------------
 
 
 @pytest.mark.django_db
 def test_panel_topology_under_two_seconds_at_scale(staff_client):
-    """1 site, 10 panels, 200 circuits, 500 devices — single-panel
-    topology read should land well under 2s per AC-6.
-
-    We render only one panel's topology (the endpoint is per-panel) but
-    seed the surrounding scale so the prefetch query has to filter.
-    """
+    """1 site, 10 panels, 200 circuits, 200 devices — well under 2s."""
 
     loc = LocationFactory(name="Site")
     target_panel = None
     devices_made = 0
     circuits_made = 0
     for p_idx in range(10):
-        panel = PowerPanel.objects.create(location=loc, name=f"Panel-{p_idx}")
+        panel = PowerPanel.objects.create(location=loc, name=f"Panel-{p_idx}", voltage=120)
         if p_idx == 0:
             target_panel = panel
-        # 20 circuits per panel × 10 panels = 200 circuits
         for c_idx in range(20):
             breaker = PowerBreaker.objects.create(panel=panel, position=str(c_idx + 1), amperage=20)
             circuit = PowerCircuit.objects.create(breaker=breaker)
-            outlet = PowerOutlet.objects.create(
-                circuit=circuit, location=loc, label=f"p{p_idx}-c{c_idx}"
-            )
+            PowerOutlet.objects.create(circuit=circuit, location=loc, label=f"p{p_idx}-c{c_idx}")
             circuits_made += 1
-            # 50 devices per panel × 10 panels = 500 devices
-            for _ in range(min(50 - (devices_made % 50) - 1, 0) + 0):
-                pass
             if devices_made < 500:
-                asset = _make_asset(name=f"Dev-{devices_made}")
-                port = PowerPort.objects.create(
-                    asset=asset, label="Main", max_draw_amps=Decimal("1.0")
-                )
-                Cable.objects.create(
-                    cable_type=Cable.CABLE_TYPE_POWER,
-                    endpoint_a=outlet,
-                    endpoint_b=port,
+                _make_asset(
+                    name=f"Dev-{devices_made}",
+                    breaker=breaker,
+                    power_draw_watts=Decimal("120.0"),
                 )
                 devices_made += 1
 
     assert circuits_made == 200
-    assert devices_made == 200  # 1 device per circuit, capped at 500
+    assert devices_made == 200
 
     url = reverse("electrical-panel-topology", args=[target_panel.pk])
-    # Warm caches.
-    staff_client.get(url)
+    staff_client.get(url)  # warm caches
     start = time.perf_counter()
     resp = staff_client.get(url)
     elapsed = time.perf_counter() - start

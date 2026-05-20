@@ -56,7 +56,6 @@ const initialState: FormState = {
 interface KillBreakerPreview {
   panel: string;
   position: string;
-  source: 'hardwired' | 'cordset';
 }
 
 const ThermostatFormPage: React.FC = () => {
@@ -143,8 +142,7 @@ const ThermostatFormPage: React.FC = () => {
     try {
       const response = await electricalSafetyAPI.getAssetPowerChain(assetId);
       const chain = response.data.chain || [];
-      // Power-chain returns [Panel, Breaker, Circuit, Outlet, Cable, Port].
-      // The breaker that kills a cordset asset is the second hop.
+      // Power-chain returns [Panel, Breaker, (Circuit), (Disconnect)].
       const panelHop = chain.find((h) => h.kind === 'panel');
       const breakerHop = chain.find((h) => h.kind === 'breaker');
       if (panelHop && breakerHop) {
@@ -152,13 +150,9 @@ const ThermostatFormPage: React.FC = () => {
           {
             panel: String(panelHop.label),
             position: String(breakerHop.label),
-            source: 'cordset',
           },
         ]);
       } else {
-        // Backend will resolve hardwired connections when the safety sheet
-        // is rendered. We can't preview those here without a dedicated
-        // endpoint, so just inform the operator.
         setKillPreview([]);
       }
     } catch (err) {
@@ -313,8 +307,8 @@ const ThermostatFormPage: React.FC = () => {
               )}
               {form.controlled_asset && killPreview && killPreview.length === 0 && (
                 <Text size="xs" c="orange" mt={6}>
-                  No cordset chain found from this asset. If it has a hardwired feed, the safety
-                  sheet will still resolve it once saved.
+                  No breaker is recorded for this asset yet. Set one on the asset to populate the
+                  safety sign.
                 </Text>
               )}
               {killPreview && killPreview.length > 0 && (

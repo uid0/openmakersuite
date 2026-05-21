@@ -7,5 +7,8 @@ exclude_dirs = /tests,/migrations,/__pycache__,/.pytest_cache,/venv,/env,create_
 
 # Skip specific tests
 # B101: assert_used - acceptable in test files
+# B105: hardcoded_password_string - too noisy on token-handling code
+#       (e.g. flags 'token_type' and user-facing error strings like
+#       "Invalid registration token." — none are credentials)
 # B106: hardcoded_password_funcarg - acceptable in test files
-skips = B101,B106
+skips = B101,B105,B106

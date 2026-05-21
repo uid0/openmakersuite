@@ -2,7 +2,7 @@
 -r requirements.txt
 
 # Pre-commit Hooks
-pre-commit==3.6.0
+pre-commit==3.8.0
 
 # Code Quality
 flake8==7.3.0

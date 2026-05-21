@@ -30,7 +30,7 @@ services:
   redis:
     # Digest pinned from `docker pull redis:7-alpine` on 2026-04-21 (resolved to Redis 7.4.8).
     # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
-    image: redis:7.4.8-alpine@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6
+    image: redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     logging: *default-logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

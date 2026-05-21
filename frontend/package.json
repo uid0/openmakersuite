@@ -102,16 +102,14 @@
       "!src/**/*.d.ts",
       "!src/index.tsx",
       "!src/reportWebVitals.ts",
-      "!src/pages/AdminDashboard.tsx",
-      "!src/pages/HomePage.tsx",
       "!src/types/**"
     ],
     "coverageThreshold": {
       "global": {
-        "branches": 15,
-        "functions": 24,
-        "lines": 22,
-        "statements": 21
+        "branches": 35,
+        "functions": 33,
+        "lines": 40,
+        "statements": 39
       }
     },
     "moduleNameMapper": {

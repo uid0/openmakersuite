@@ -34,6 +34,7 @@ services:
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - ./backend:/app
+      - ./docs:/docs:ro
       - static_volume:/app/staticfiles
       - media_volume:/app/media
     ports:

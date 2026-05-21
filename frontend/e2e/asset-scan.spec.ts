@@ -40,17 +40,18 @@ test.describe('Asset QR Code Scanning', () => {
     try {
       // Create test user first
       testUser = await createTestUser('testuser', 'testpass123', 'testuser@test.com');
-      
+
       // Create active membership for test user (uses test helper endpoint)
       const { createActiveMembershipForUser } = await import('./fixtures');
       await createActiveMembershipForUser('testuser');
-      
+
       // Now login to get a fresh token (registration token works, but login verifies membership)
       testUser.token = await loginUser(testUser.username, testUser.password);
 
-      // Create admin user for asset creation
+      // Create admin user for asset creation. is_staff lets us hit admin-only
+      // endpoints during seeding (e.g. patching last_scanned_at) if needed.
       const adminUser = await createTestUser('admin', 'adminpass123', 'admin@test.com', true);
-      await createActiveMembershipForUser('admin');
+      await createActiveMembershipForUser('admin', { isStaff: true });
       adminToken = await loginUser('admin', 'adminpass123');
 
       // Create a test asset (requires authentication)
@@ -135,8 +136,11 @@ test.describe('Asset QR Code Scanning', () => {
     await expect(page.getByText('Actions')).toBeVisible();
     await expect(page.getByText('Report a Problem')).toBeVisible();
 
-    // Verify asset status is displayed (use more specific selector)
-    await expect(page.locator('.info-item .label:has-text("Status")')).toBeVisible();
+    // Verify asset status is displayed. There can be more than one
+    // `.info-item .label` matching "Status" (e.g. asset status + safety
+    // status), so scope to the first match — we're proving the label
+    // renders, not asserting cardinality.
+    await expect(page.locator('.info-item .label:has-text("Status")').first()).toBeVisible();
 
     // Verify operational requirements if set (use more specific selectors)
     if (testAsset.needs_ventilation) {

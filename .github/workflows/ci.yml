@@ -378,6 +378,11 @@ jobs:
       SECRET_KEY: test-secret-key-for-ci-only
       ALLOWED_HOSTS: localhost,127.0.0.1,0.0.0.0
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
+      # Close DB connections after each request. The single --noreload
+      # runserver process otherwise piles up persistent connections
+      # against postgres `max_connections=100` and the suite eventually
+      # hits FATAL: sorry, too many clients already on later specs.
+      DJANGO_CONN_MAX_AGE: 0
       REDIS_URL: redis://localhost:6379/0
       PLAYWRIGHT_BASE_URL: http://localhost:3000
       PLAYWRIGHT_API_URL: http://localhost:8000/api

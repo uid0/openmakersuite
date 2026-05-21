@@ -32,10 +32,11 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
     try {
       // Create admin user
       const adminUser = await createTestUser('admin', 'adminpass123', 'admin@test.com', true);
-      
-      // Create active membership for admin user
+
+      // Create active membership AND promote to staff so the seed below
+      // can patch last_scanned_at via the admin-only update path.
       const { createActiveMembershipForUser } = await import('./fixtures');
-      await createActiveMembershipForUser('admin');
+      await createActiveMembershipForUser('admin', { isStaff: true });
       
       // Login to get admin token
       adminToken = await loginUser('admin', 'adminpass123');
@@ -96,9 +97,14 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
     // Navigate to admin dashboard
     await page.goto('/orderadmin');
 
-    // Wait for page to load
+    // Wait for page to load. Scope to the <h1> page heading because
+    // "Admin Dashboard" also appears in the sidebar nav, recent pages,
+    // and command palette — getByText would resolve to 4 elements and
+    // trigger a strict-mode violation.
     await page.waitForSelector('h1', { timeout: 10000 });
-    await expect(page.getByText('Admin Dashboard')).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: /admin dashboard/i })
+    ).toBeVisible();
 
     // Scroll to assets section
     const assetsSection = page.getByText('Assets Not Checked In (3+ Months)');
@@ -123,12 +129,14 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
     const tableVisible = await assetsTable.isVisible().catch(() => false);
 
     if (tableVisible) {
-      // Verify table headers
-      await expect(page.getByText('Asset Name')).toBeVisible();
-      await expect(page.getByText('Asset Tag')).toBeVisible();
-      await expect(page.getByText('Location')).toBeVisible();
-      await expect(page.getByText('Last Scanned')).toBeVisible();
-      await expect(page.getByText('Status')).toBeVisible();
+      // Verify table headers. Scope to the table so common words like
+      // "Location" / "Status" don't collide with sidebar / breadcrumb /
+      // filter copy elsewhere on the page (strict-mode violation).
+      await expect(assetsTable.getByText('Asset Name')).toBeVisible();
+      await expect(assetsTable.getByText('Asset Tag')).toBeVisible();
+      await expect(assetsTable.getByText('Location')).toBeVisible();
+      await expect(assetsTable.getByText('Last Scanned')).toBeVisible();
+      await expect(assetsTable.getByText('Status')).toBeVisible();
 
       // Verify at least one of our test assets is in the table
       const asset1Visible = await page.getByText('Old Unscanned Asset').isVisible().catch(() => false);

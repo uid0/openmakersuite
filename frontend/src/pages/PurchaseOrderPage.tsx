@@ -1,6 +1,12 @@
 /**
  * Purchase Order Management Page
- * View and manage purchase orders, including setting expected shipment dates for line items
+ * View and manage purchase orders, including setting expected shipment dates for line items.
+ *
+ * The `mark-delivered` flow patches the page from the API response — see
+ * docs/REACTIVE_MUTATIONS.md. The initial "Loading purchase order…"
+ * placeholder is reserved for the first fetch and route changes; a
+ * successful mark-delivered submit must never flip the page back into
+ * that state.
  */
 import { Button, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -270,16 +276,20 @@ const PurchaseOrderPage: React.FC = () => {
       showError('Please select a delivery date');
       return;
     }
+    if (saving) return;
 
     try {
       setSaving(true);
-      await purchaseOrderAPI.markDelivered(orderId!, {
+      const response = await purchaseOrderAPI.markDelivered(orderId!, {
         delivery_date: deliveryDate,
         tracking_number: deliveryTracking || undefined,
         carrier: deliveryCarrier || undefined,
       });
-      await loadOrder();
+      if (response.data && typeof response.data === 'object' && response.data.id) {
+        setOrder(response.data as PurchaseOrder);
+      }
       handleCancelMarkDelivered();
+      showSuccess('Purchase order marked as delivered');
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to mark purchase order as delivered'));
       console.error('Error marking delivered:', err);

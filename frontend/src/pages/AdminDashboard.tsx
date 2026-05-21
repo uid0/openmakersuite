@@ -1,6 +1,11 @@
 /**
  * Admin Dashboard
- * Manage reorder queue, view pending requests, and access supplier cart links
+ * Manage reorder queue, view pending requests, and access supplier cart links.
+ *
+ * Successful mutations patch the affected row from the API response — see
+ * docs/REACTIVE_MUTATIONS.md. The full "Loading requests…" placeholder is
+ * only shown during the initial fetch and filter switch, never after a
+ * successful row mutation.
  */
 import { Button, Group, Stack, TextInput } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
@@ -138,6 +143,7 @@ const AdminDashboard: React.FC = () => {
   const [assetStatusFilter, setAssetStatusFilter] = useState<string>('all');
   const [assetInventoryItemFilter, setAssetInventoryItemFilter] = useState<string | null>(null);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [pendingRowIds, setPendingRowIds] = useState<Set<number>>(new Set());
 
   const loadRequests = useCallback(async () => {
     try {
@@ -206,18 +212,65 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleApprove = async (id: number) => {
+  // Patch a single request row in place using the response from the mutation.
+  // Falls back to a partial merge if the response omits fields (e.g. when a
+  // test mock returns {}), so the existing row never disappears.
+  const applyRequestUpdate = (id: number, updated: Partial<ReorderRequest> | undefined) => {
+    if (!updated || typeof updated !== 'object') return;
+    setRequests((rs) =>
+      rs.map((r) =>
+        r.id === id
+          ? { ...r, ...(updated as Partial<ReorderRequest>), id: r.id }
+          : r,
+      ),
+    );
+  };
+
+  // Run a row-scoped mutation: marks the row pending, prevents duplicate
+  // submits for the same row, patches local state from the response on
+  // success, and shows a scoped error notification on failure (the row
+  // remains visible and unchanged so the user can retry).
+  const runRowMutation = async <T extends Partial<ReorderRequest>>(
+    id: number,
+    op: () => Promise<{ data: T }>,
+    successMessage: string,
+    errorMessage: string,
+  ): Promise<void> => {
+    if (pendingRowIds.has(id)) return;
+    setPendingRowIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
     try {
-      await reorderAPI.approveRequest(id);
-      loadRequests();
-      showSuccess('Request approved');
+      const response = await op();
+      applyRequestUpdate(id, response.data);
+      showSuccess(successMessage);
     } catch (err) {
-      console.error('Error approving request:', err);
-      showError('Failed to approve request');
+      console.error(`${errorMessage}:`, err);
+      showError(errorMessage);
+    } finally {
+      setPendingRowIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
+  const isRowPending = (id: number) => pendingRowIds.has(id);
+
+  const handleApprove = (id: number) => {
+    void runRowMutation(
+      id,
+      () => reorderAPI.approveRequest(id) as Promise<{ data: Partial<ReorderRequest> }>,
+      'Request approved',
+      'Failed to approve request',
+    );
+  };
+
   const handleMarkOrdered = (id: number) => {
+    if (isRowPending(id)) return;
     const modalId = `mark-ordered-${id}-${Date.now()}`;
     modals.open({
       modalId,
@@ -225,22 +278,23 @@ const AdminDashboard: React.FC = () => {
       children: (
         <MarkOrderedForm
           modalId={modalId}
-          onSubmit={async (values) => {
-            try {
-              const data: any = {};
-              if (values.orderNumber) data.order_number = values.orderNumber;
-              if (values.estimatedDelivery) {
-                data.estimated_delivery = dayjs(values.estimatedDelivery).format('YYYY-MM-DD');
-              }
-              if (values.actualCost) data.actual_cost = parseFloat(values.actualCost);
-
-              await reorderAPI.markOrdered(id, data);
-              loadRequests();
-              showSuccess('Marked as ordered with tracking information');
-            } catch (err) {
-              console.error('Error marking as ordered:', err);
-              showError('Failed to mark as ordered');
+          onSubmit={(values) => {
+            const data: any = {};
+            if (values.orderNumber) data.order_number = values.orderNumber;
+            if (values.estimatedDelivery) {
+              data.estimated_delivery = dayjs(values.estimatedDelivery).format('YYYY-MM-DD');
             }
+            if (values.actualCost) data.actual_cost = parseFloat(values.actualCost);
+
+            void runRowMutation(
+              id,
+              () =>
+                reorderAPI.markOrdered(id, data) as Promise<{
+                  data: Partial<ReorderRequest>;
+                }>,
+              'Marked as ordered with tracking information',
+              'Failed to mark as ordered',
+            );
           }}
         />
       ),
@@ -248,36 +302,41 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleMarkReceived = (id: number) => {
+    if (isRowPending(id)) return;
     promptInput(
       'Mark as Received',
       'Actual delivery date (YYYY-MM-DD, optional — defaults to today)',
-      async (actualDeliveryStr) => {
-        try {
-          await reorderAPI.markReceived(id, actualDeliveryStr || undefined);
-          loadRequests();
-          showSuccess('Marked as received and inventory updated');
-        } catch (err) {
-          console.error('Error marking as received:', err);
-          showError('Failed to mark as received');
-        }
+      (actualDeliveryStr) => {
+        void runRowMutation(
+          id,
+          () =>
+            reorderAPI.markReceived(id, actualDeliveryStr || undefined) as Promise<{
+              data: Partial<ReorderRequest>;
+            }>,
+          'Marked as received and inventory updated',
+          'Failed to mark as received',
+        );
       },
     );
   };
 
   const handleCancel = (id: number) => {
-    promptInput('Cancel Request', 'Reason for cancellation', async (notes) => {
-      try {
-        await reorderAPI.cancelRequest(id, notes);
-        loadRequests();
-        showSuccess('Request cancelled');
-      } catch (err) {
-        console.error('Error cancelling request:', err);
-        showError('Failed to cancel request');
-      }
+    if (isRowPending(id)) return;
+    promptInput('Cancel Request', 'Reason for cancellation', (notes) => {
+      void runRowMutation(
+        id,
+        () =>
+          reorderAPI.cancelRequest(id, notes) as Promise<{
+            data: Partial<ReorderRequest>;
+          }>,
+        'Request cancelled',
+        'Failed to cancel request',
+      );
     });
   };
 
   const handleUpdateTracking = (id: number) => {
+    if (isRowPending(id)) return;
     const modalId = `update-tracking-${id}-${Date.now()}`;
     modals.open({
       modalId,
@@ -285,7 +344,7 @@ const AdminDashboard: React.FC = () => {
       children: (
         <UpdateTrackingForm
           modalId={modalId}
-          onSubmit={async (values) => {
+          onSubmit={(values) => {
             if (
               !values.trackingNumber &&
               !values.carrier &&
@@ -295,21 +354,22 @@ const AdminDashboard: React.FC = () => {
               return;
             }
 
-            try {
-              const data: any = {};
-              if (values.trackingNumber) data.tracking_number = values.trackingNumber;
-              if (values.carrier) data.carrier = values.carrier;
-              if (values.expectedDeliveryDate)
-                data.expected_delivery_date = values.expectedDeliveryDate;
-              if (values.trackingUrl) data.delivery_tracking_url = values.trackingUrl;
+            const data: any = {};
+            if (values.trackingNumber) data.tracking_number = values.trackingNumber;
+            if (values.carrier) data.carrier = values.carrier;
+            if (values.expectedDeliveryDate)
+              data.expected_delivery_date = values.expectedDeliveryDate;
+            if (values.trackingUrl) data.delivery_tracking_url = values.trackingUrl;
 
-              await reorderAPI.updateTracking(id, data);
-              loadRequests();
-              showSuccess('Tracking information updated');
-            } catch (err) {
-              console.error('Error updating tracking:', err);
-              showError('Failed to update tracking information');
-            }
+            void runRowMutation(
+              id,
+              () =>
+                reorderAPI.updateTracking(id, data) as Promise<{
+                  data: Partial<ReorderRequest>;
+                }>,
+              'Tracking information updated',
+              'Failed to update tracking information',
+            );
           }}
         />
       ),
@@ -394,8 +454,15 @@ const AdminDashboard: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                requests.map((request) => (
-                  <tr key={request.id}>
+                requests.map((request) => {
+                  const rowPending = isRowPending(request.id);
+                  return (
+                  <tr
+                    key={request.id}
+                    data-testid={`reorder-row-${request.id}`}
+                    aria-busy={rowPending ? 'true' : undefined}
+                    className={rowPending ? 'row-pending' : undefined}
+                  >
                     <td>
                       <div className="item-cell">
                         {request.item_details.thumbnail && (
@@ -495,6 +562,7 @@ const AdminDashboard: React.FC = () => {
                               onClick={() => handleApprove(request.id)}
                               className="btn-approve"
                               title="Approve"
+                              disabled={rowPending}
                             >
                               ✓
                             </button>
@@ -502,6 +570,7 @@ const AdminDashboard: React.FC = () => {
                               onClick={() => handleCancel(request.id)}
                               className="btn-cancel"
                               title="Cancel"
+                              disabled={rowPending}
                             >
                               ✗
                             </button>
@@ -511,6 +580,7 @@ const AdminDashboard: React.FC = () => {
                           <button
                             onClick={() => handleMarkOrdered(request.id)}
                             className="btn-order"
+                            disabled={rowPending}
                           >
                             Mark Ordered
                           </button>
@@ -521,12 +591,14 @@ const AdminDashboard: React.FC = () => {
                               onClick={() => handleUpdateTracking(request.id)}
                               className="btn-tracking"
                               title="Update Tracking"
+                              disabled={rowPending}
                             >
                               📦
                             </button>
                             <button
                               onClick={() => handleMarkReceived(request.id)}
                               className="btn-receive"
+                              disabled={rowPending}
                             >
                               Mark Received
                             </button>
@@ -535,7 +607,8 @@ const AdminDashboard: React.FC = () => {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

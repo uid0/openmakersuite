@@ -37,6 +37,39 @@ or session, so they are intentionally excluded from the backup paths below.
 Back them up only if you have a specific reason (e.g. preserving long Celery
 ETA tasks across a maintenance window).
 
+## Scripts (Docker Compose path)
+
+For the bundled Compose stack, the runbook commands below are wrapped by
+shell scripts in `scripts/`. The scripts default to safe choices and are the
+supported way to run an unattended drill (`scripts/restore-drill.sh`) — the
+raw `docker compose exec` recipes in the sections that follow are kept for
+operators on Kubernetes, managed Postgres, or anyone who wants to inspect
+exactly what the wrapper is doing.
+
+| Script                          | Purpose                                                                                                              |
+|---------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `scripts/backup-db.sh`          | Dump PostgreSQL via `docker compose exec db pg_dump`. Plain SQL `.sql.gz` by default; `--format=custom` writes `-Fc`. |
+| `scripts/restore-db.sh`         | Restore from a `.sql.gz` or `.dump`. Auto-detects format. `--force` skips the interactive `YES` prompt.              |
+| `scripts/backup-media.sh`       | Stream the `media_volume` contents into a gzipped tar via the backend container.                                     |
+| `scripts/restore-media.sh`      | Wipe the in-container media tree and unpack an archive back into it. Stops workers around the restore.               |
+| `scripts/backup-config.sh`      | Archive the live `.env` (+ optional `docker-compose.override.yml`, EMQX bootstrap file) with 0600 permissions.       |
+| `scripts/smoke.sh`              | Scripted form of `deploy/SMOKE_TESTS.md` post-restore checks; `--json` for evidence capture.                         |
+| `scripts/restore-drill.sh`      | Orchestrator that captures fresh dumps, restores them, waits for the backend, and runs `smoke.sh --json`.            |
+
+Every script supports `--help` and obeys these overrides:
+
+| Variable          | Effect                                              | Default                  |
+|-------------------|-----------------------------------------------------|--------------------------|
+| `COMPOSE_FILE`    | Compose file the script execs against              | `docker-compose.prod.yml`|
+| `BACKUP_DIR`      | Where backups land (script-specific subdirectory)  | `./db-backups`, `./media-backups`, `./config-backups` |
+| `POSTGRES_USER`   | Postgres role                                       | `makerspace`             |
+| `POSTGRES_DB`     | Database name                                       | `makerspace_inventory`   |
+| `RETENTION_DAYS`  | Days of history to keep (0 disables pruning)        | `30`                     |
+
+`scripts/restore-drill.sh --dry-run` parses every dependency without touching
+the live stack — use it to confirm a worktree is ready for an upcoming drill
+window before the maintenance start.
+
 ## 1. PostgreSQL — Docker Compose
 
 The bundled `db` service stores its data in the named volume `postgres_data`

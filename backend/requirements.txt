@@ -54,7 +54,7 @@ highlight-io==0.10.2
 django-anymail[postmark]==11.1
 
 # Testing and Code Coverage
-coverage==7.6.4
+coverage==7.14.0
 pytest==9.0.3
 pytest-django==4.9.0
 pytest-cov==5.0.0

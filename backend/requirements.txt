@@ -14,7 +14,7 @@ flower==2.0.1
 
 # QR Code and PDF generation
 qrcode[pil]==7.4.2
-reportlab==4.2.0
+reportlab==4.5.1
 Pillow==12.2.0
 # Server-side PNG charts for the monthly analytics pulse email (analytics app).
 # Forced to the headless Agg backend in code so this does not pull GUI deps.
@@ -40,7 +40,7 @@ PyYAML==6.0.3
 
 # Utilities
 python-slugify==8.0.4
-requests==2.33.0
+requests==2.34.2
 paho-mqtt==2.1.0
 PyJWT==2.12.1
 cryptography==46.0.7
@@ -58,7 +58,7 @@ coverage==7.14.0
 pytest==9.0.3
 pytest-django==4.12.0
 pytest-cov==5.0.0
-pytest-mock==3.14.0
+pytest-mock==3.15.1
 factory-boy==3.3.3
 faker==28.4.1
 freezegun==1.5.5

@@ -44,7 +44,10 @@ test.describe('Public-to-staff proficiency loop', () => {
     try {
       const adminUsername = `oms_admin_${Date.now()}`;
       await createTestUser(adminUsername, 'adminpass123', `${adminUsername}@test.com`, true);
-      await createActiveMembershipForUser(adminUsername);
+      // is_staff is required so the seed step below can hit
+      // LocationViewSet.create (IsAdminUser); without it, every spec in
+      // this file fails at setup with HTTP 403.
+      await createActiveMembershipForUser(adminUsername, { isStaff: true });
       adminToken = await loginUser(adminUsername, 'adminpass123');
 
       const stamp = Date.now();

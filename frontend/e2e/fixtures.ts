@@ -60,7 +60,7 @@ export async function checkBackendAvailable(): Promise<boolean> {
  */
 export async function createActiveMembershipForUser(
   username: string,
-  adminToken?: string
+  options: { isStaff?: boolean } = {}
 ): Promise<void> {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/test-membership/`, {
@@ -68,7 +68,7 @@ export async function createActiveMembershipForUser(
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ username }),
+      body: JSON.stringify({ username, is_staff: options.isStaff === true }),
     });
 
     if (!response.ok) {

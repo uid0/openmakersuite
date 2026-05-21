@@ -176,10 +176,13 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # Database
+# CONN_MAX_AGE is configurable via env so the e2e CI job can force
+# 0 (close-after-request) to avoid exhausting postgres `max_connections`
+# when a single --noreload runserver fields a burst of fixture requests.
 DATABASES = {
     "default": dj_database_url.config(
         default=config("DATABASE_URL", default=f'sqlite:///{BASE_DIR / "db.sqlite3"}'),
-        conn_max_age=600,
+        conn_max_age=config("DJANGO_CONN_MAX_AGE", default=600, cast=int),
     )
 }
 

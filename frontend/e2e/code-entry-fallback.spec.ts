@@ -16,7 +16,11 @@
 import { devices, expect, test } from '@playwright/test';
 import { checkBackendAvailable, dismissWebpackOverlay } from './fixtures';
 
-test.use({ ...devices['iPhone 12'] });
+// Pixel 5 is a chromium-based device emulation, so this still proves the
+// phone-sized fallback path but stays on the one browser engine CI
+// installs. iPhone 12 (devices['iPhone 12']) forces webkit and breaks the
+// chromium-only CI job with `webkit Executable doesn't exist`.
+test.use({ ...devices['Pixel 5'] });
 
 test.describe('Mobile code-entry fallback', () => {
   let backendAvailable = false;

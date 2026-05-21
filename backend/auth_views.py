@@ -214,6 +214,13 @@ def create_test_membership(request):
             status_code=status.HTTP_404_NOT_FOUND,
         )
 
+    # E2E suite drives admin-only flows (e.g., LocationViewSet.create requires
+    # IsAdminUser) through this helper, so it also has to be able to promote
+    # the user to staff in DEBUG mode.
+    if request.data.get("is_staff"):
+        user.is_staff = True
+        user.save(update_fields=["is_staff"])
+
     # Create an active membership for the user
     membership = Membership.objects.create(
         membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY,
@@ -226,6 +233,7 @@ def create_test_membership(request):
             "detail": f"Active membership created for {username}",
             "membership_id": membership.id,
             "username": username,
+            "is_staff": user.is_staff,
         },
         status=status.HTTP_201_CREATED,
     )

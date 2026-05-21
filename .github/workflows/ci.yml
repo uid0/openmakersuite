@@ -216,7 +216,7 @@ jobs:
           ls -lh backend/coverage.xml
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v6
         with:
           file: ./backend/coverage.xml
           flags: backend
@@ -345,7 +345,7 @@ jobs:
           ls -lh coverage/clover.xml coverage/lcov.info
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v6
         with:
           files: ./frontend/coverage/clover.xml,./frontend/coverage/lcov.info
           flags: frontend

@@ -3,7 +3,7 @@ djangorestframework==3.16.1
 django-cors-headers==4.9.0
 psycopg2-binary==2.9.12
 python-decouple==3.8
-dj-database-url==2.1.0
+dj-database-url==2.3.0
 
 # Redis and Celery
 redis==5.1.1

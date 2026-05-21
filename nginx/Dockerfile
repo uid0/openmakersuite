@@ -1,4 +1,4 @@
-FROM nginx:1.25-alpine
+FROM nginx:1.31-alpine
 
 RUN apk add --no-cache certbot openssl && \
     mkdir -p /var/www/certbot /etc/nginx/templates /docker-entrypoint.d

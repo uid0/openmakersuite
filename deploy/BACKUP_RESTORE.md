@@ -471,8 +471,46 @@ timestamp.
 
 ## 8. Restore drill
 
-A backup that has never been restored is a hypothesis, not a backup. At
-least once per quarter:
+A backup that has never been restored is a hypothesis, not a backup.
+
+### 8.1 Automated DB drill (CI-enforced)
+
+The Docker Compose half of the drill runs on every deploy-touching PR via
+the `Prod Stack Smoke (livez within 60s)` job in `.github/workflows/ci.yml`.
+After the stack boots and `/api/health/livez/` answers 200, the job
+invokes [`scripts/restore-drill.sh --skip-media --skip-smoke`](../scripts/restore-drill.sh),
+which takes a fresh `pg_dump` of the live `db` service, restores it
+back into the same database, and then re-probes `/api/health/livez/`
+from inside the backend container so the drill proves the restored stack
+still serves requests — not just that `pg_restore` exited 0.
+
+The companion `Deploy Artifacts` job runs `scripts/restore-drill.sh --dry-run`
+under `bash -n`–level lint plus a parse-and-verify pass on every dependency
+script. That step catches regressions on the operator-facing drill in
+environments where Docker is not available.
+
+`--skip-media` is set because the CI compose stack ships an empty
+`oms_media_volume` by default; `--skip-smoke` because `smoke.sh` expects
+the frontend/nginx surfaces, which the prod-stack-smoke job does not
+boot. Media + config restore stay on the manual quarterly cadence below.
+
+Run the same drill locally against a disposable stack:
+
+```bash
+# Bring up just the slice the drill exercises
+docker compose -f docker-compose.prod.yml --env-file .env up -d --build \
+    db redis backend
+
+# Drive the drill (uses the running compose db; tears down its own evidence
+# on success). POSTGRES_USER / POSTGRES_DB must match your .env.
+POSTGRES_USER=oms POSTGRES_DB=oms bash scripts/restore-drill.sh --skip-media --skip-smoke
+```
+
+### 8.2 Manual quarterly drill (Kubernetes / full-stack)
+
+The DB-only CI drill does not exercise media restore, config restore, or
+the multi-namespace recovery shape. At least once per quarter, run the
+full drill on Kubernetes:
 
 1. Stand up a parallel namespace (`openmakersuite-dr` is the convention).
 2. Restore PostgreSQL into it from the most recent dump.

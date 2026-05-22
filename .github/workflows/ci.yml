@@ -780,10 +780,22 @@ jobs:
           # not just that pg_restore exited 0.
           bash scripts/restore-drill.sh --skip-media --skip-smoke
 
+          # restore-db.sh stops/starts worker services around pg_restore, so
+          # the backend can briefly disconnect from the DB. Re-probe livez
+          # with the same 60s budget as the original livez-wait step.
+          deadline=$(( $(date +%s) + 60 ))
           backend_id=$(docker compose -f docker-compose.prod.yml ps -q backend)
-          docker exec "$backend_id" python -c \
-              "import urllib.request; r=urllib.request.urlopen('http://localhost:8000/api/health/livez/', timeout=5); import sys; sys.exit(0 if r.status==200 else 1)"
-          echo "✅ /api/health/livez/ green after restore round-trip"
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            if docker exec "$backend_id" python -c \
+                "import urllib.request; r=urllib.request.urlopen('http://localhost:8000/api/health/livez/', timeout=5); import sys; sys.exit(0 if r.status==200 else 1)" \
+                2>/dev/null; then
+              echo "✅ /api/health/livez/ green after restore round-trip"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ backend did not re-serve /api/health/livez/ within 60s after restore"
+          exit 1
 
       - name: Show backend logs on failure
         if: failure()

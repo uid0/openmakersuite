@@ -511,6 +511,15 @@ jobs:
               \( -name '*.sh' -type f \) -print | sort)
           [ "$fail" = 0 ]
 
+      - name: restore-drill.sh dry-run (AC-25)
+        run: |
+          # AC-25 stage 1: the drill orchestrator must parse and verify its
+          # dependency scripts (backup-db.sh, restore-db.sh, smoke.sh) without
+          # touching the database. Catches accidental regressions on the
+          # operator-facing drill script in environments where Docker isn't
+          # available (this job runs on a plain ubuntu-latest).
+          bash scripts/restore-drill.sh --dry-run
+
       - name: Render docker-compose.prod.yml
         run: |
           # Confirm the compose file parses and resolves all variables. We
@@ -752,6 +761,40 @@ jobs:
             sleep 2
           done
           echo "❌ backend did not serve /api/health/livez/ within 60s"
+          exit 1
+
+      - name: AC-25 DB restore drill (backup → restore → livez)
+        env:
+          # Match the rendered .env used by this job so the drill talks to
+          # the same role + database.
+          POSTGRES_USER: oms
+          POSTGRES_DB: oms
+        run: |
+          # AC-25 stage 2/3: against the same stack we just proved live,
+          # drive scripts/restore-drill.sh end-to-end. --skip-media because
+          # the compose stack ships an empty media volume; --skip-smoke
+          # because smoke.sh expects the frontend/nginx surfaces, which
+          # this job does not boot. After the round-trip, re-prove
+          # /api/health/livez/ from inside the backend container so the
+          # drill demonstrates the restored stack still serves requests —
+          # not just that pg_restore exited 0.
+          bash scripts/restore-drill.sh --skip-media --skip-smoke
+
+          # restore-db.sh stops/starts worker services around pg_restore, so
+          # the backend can briefly disconnect from the DB. Re-probe livez
+          # with the same 60s budget as the original livez-wait step.
+          deadline=$(( $(date +%s) + 60 ))
+          backend_id=$(docker compose -f docker-compose.prod.yml ps -q backend)
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            if docker exec "$backend_id" python -c \
+                "import urllib.request; r=urllib.request.urlopen('http://localhost:8000/api/health/livez/', timeout=5); import sys; sys.exit(0 if r.status==200 else 1)" \
+                2>/dev/null; then
+              echo "✅ /api/health/livez/ green after restore round-trip"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ backend did not re-serve /api/health/livez/ within 60s after restore"
           exit 1
 
       - name: Show backend logs on failure

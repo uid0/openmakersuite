@@ -143,7 +143,7 @@
     "underscore": "^1.13.7",
     "node-forge": "1.4.0",
     "uuid": "^14.0.0",
-    "brace-expansion": "1.1.13 || ^2.0.3",
+    "brace-expansion": "1.1.13 || ^2.0.3 || ^5.0.0",
     "http-proxy-agent": "^7.0.2",
     "protobufjs": "^8.0.2"
   }

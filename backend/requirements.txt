@@ -51,7 +51,7 @@ cryptography==48.0.0
 highlight-io==0.10.2
 
 # Email (Postmark via Anymail)
-django-anymail[postmark]==11.1
+django-anymail[postmark]==15.0
 
 # Testing and Code Coverage
 coverage==7.14.0

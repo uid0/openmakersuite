@@ -1,4 +1,6 @@
 import {
+  DEFAULT_HIGHLIGHT_BACKEND_URL,
+  DEFAULT_HIGHLIGHT_OTLP_ENDPOINT,
   initHighlight,
   projectIdFingerprint,
   readHighlightEnv,
@@ -9,6 +11,7 @@ describe('utils/highlight', () => {
     it('reads REACT_APP_HIGHLIGHT_* and NODE_ENV from process.env', () => {
       const env = {
         REACT_APP_HIGHLIGHT_PROJECT_ID: 'abc12345',
+        REACT_APP_HIGHLIGHT_BACKEND_URL: 'https://hl.example.org/public',
         REACT_APP_HIGHLIGHT_OTLP_ENDPOINT: 'https://otel.example.org:4317',
         REACT_APP_HIGHLIGHT_ENVIRONMENT: 'production',
         REACT_APP_GIT_HASH: 'deadbeef',
@@ -17,6 +20,7 @@ describe('utils/highlight', () => {
 
       expect(readHighlightEnv(env)).toEqual({
         projectId: 'abc12345',
+        backendUrl: 'https://hl.example.org/public',
         otlpEndpoint: 'https://otel.example.org:4317',
         environment: 'production',
         release: 'deadbeef',
@@ -73,6 +77,7 @@ describe('utils/highlight', () => {
       const result = initHighlight(
         {
           projectId: 'abc12345xyz',
+          backendUrl: 'https://hl.example.org/public',
           otlpEndpoint: 'https://otel.example.org:4317',
           environment: 'production',
           release: 'deadbeef',
@@ -91,11 +96,12 @@ describe('utils/highlight', () => {
       expect(optsArg.version).toBe('deadbeef');
       expect(optsArg.serviceName).toBe('oms-frontend');
       expect(optsArg.tracingOrigins).toBe(true);
+      expect(optsArg.backendUrl).toBe('https://hl.example.org/public');
       expect(optsArg.otlpEndpoint).toBe('https://otel.example.org:4317');
 
       expect(logger.warn).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
-        '[Highlight] initialized (env=production, release=deadbeef, project=abc12345)',
+        '[Highlight] initialized (env=production, release=deadbeef, project=abc12345, backend=https://hl.example.org/public, otlp=https://otel.example.org:4317)',
       );
       expect(consumeError).toHaveBeenCalledTimes(1);
       expect(consumeError.mock.calls[0][0]).toBeInstanceOf(Error);
@@ -107,7 +113,7 @@ describe('utils/highlight', () => {
       });
     });
 
-    it('omits otlpEndpoint/backendUrl when env value is unset', () => {
+    it('falls back to the OMS self-host defaults when env values are unset', () => {
       const init = jest.fn();
       const consumeError = jest.fn();
       const logger = { info: jest.fn(), warn: jest.fn() };
@@ -120,7 +126,8 @@ describe('utils/highlight', () => {
       );
 
       const optsArg = init.mock.calls[0][1];
-      expect(optsArg.otlpEndpoint).toBeUndefined();
+      expect(optsArg.backendUrl).toBe(DEFAULT_HIGHLIGHT_BACKEND_URL);
+      expect(optsArg.otlpEndpoint).toBe(DEFAULT_HIGHLIGHT_OTLP_ENDPOINT);
     });
 
     it('falls back to NODE_ENV when REACT_APP_HIGHLIGHT_ENVIRONMENT is unset', () => {

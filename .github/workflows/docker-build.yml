@@ -269,6 +269,10 @@ jobs:
           # project HIGHLIGHT_PROJECT_ID used at runtime by the SDK.
           HIGHLIGHT_API_KEY: ${{ secrets.HIGHLIGHT_API_KEY }}
           HIGHLIGHT_PROJECT_ID: ${{ secrets.REACT_APP_HIGHLIGHT_PROJECT_ID }}
+          # Self-hosted upload endpoint. Defaults to the OMS Highlight host
+          # so maps land where the runtime SDK reads them. Override via repo
+          # secret HIGHLIGHT_BACKEND_URL when pointing at staging or cloud.
+          HIGHLIGHT_BACKEND_URL: ${{ secrets.HIGHLIGHT_BACKEND_URL || 'https://highlighter.openmakersuite.net/public' }}
           GIT_HASH: ${{ steps.git.outputs.hash }}
         run: |
           if [ -z "$HIGHLIGHT_API_KEY" ] || [ -z "$HIGHLIGHT_PROJECT_ID" ]; then
@@ -280,12 +284,15 @@ jobs:
           # dashboard can resolve minified frames during replay. --appVersion
           # must match REACT_APP_GIT_HASH baked into the bundle, otherwise
           # Highlight will not match the maps to the bundle at error time.
+          # --backendUrl points the uploader at the self-hosted instance so
+          # maps land where the runtime SDK reads them, not at the cloud.
           npx --yes @highlight-run/sourcemap-uploader upload \
             --apiKey "$HIGHLIGHT_API_KEY" \
+            --backendUrl "$HIGHLIGHT_BACKEND_URL" \
             --path ./frontend/build/static/js \
             --basePath '/static/js' \
             --appVersion "$GIT_HASH"
-          echo "✅ Source maps uploaded for release $GIT_HASH"
+          echo "✅ Source maps uploaded to $HIGHLIGHT_BACKEND_URL for release $GIT_HASH"
 
   publish-helm:
     name: 📜 Publish Helm Chart

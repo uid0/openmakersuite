@@ -1,8 +1,17 @@
 import { H, HighlightOptions } from 'highlight.run';
 import { redactString } from './redact';
 
+// Default endpoints for the OMS self-hosted Highlight instance. Both can be
+// overridden per-env via REACT_APP_HIGHLIGHT_BACKEND_URL /
+// REACT_APP_HIGHLIGHT_OTLP_ENDPOINT — point them at the Highlight cloud
+// (https://pub.highlight.io / https://otel.highlight.io:4318) for cloud, or
+// at a different self-hosted host for staging.
+export const DEFAULT_HIGHLIGHT_BACKEND_URL = 'https://highlighter.openmakersuite.net/public';
+export const DEFAULT_HIGHLIGHT_OTLP_ENDPOINT = 'https://highlighter.openmakersuite.net/otel';
+
 export interface HighlightEnvConfig {
   projectId?: string;
+  backendUrl?: string;
   otlpEndpoint?: string;
   environment?: string;
   release?: string;
@@ -17,6 +26,7 @@ export interface HighlightLogger {
 export function readHighlightEnv(env: NodeJS.ProcessEnv = process.env): HighlightEnvConfig {
   return {
     projectId: env.REACT_APP_HIGHLIGHT_PROJECT_ID,
+    backendUrl: env.REACT_APP_HIGHLIGHT_BACKEND_URL,
     otlpEndpoint: env.REACT_APP_HIGHLIGHT_OTLP_ENDPOINT,
     environment: env.REACT_APP_HIGHLIGHT_ENVIRONMENT,
     release: env.REACT_APP_GIT_HASH,
@@ -34,7 +44,7 @@ export function initHighlight(
   logger: HighlightLogger = console,
   consumeError: typeof H.consumeError = H.consumeError,
 ): boolean {
-  const { projectId, otlpEndpoint, environment, release, nodeEnv } = config;
+  const { projectId, backendUrl, otlpEndpoint, environment, release, nodeEnv } = config;
 
   if (!projectId) {
     logger.warn('[Highlight] PROJECT_ID missing — session replay & error reporting disabled');
@@ -42,11 +52,14 @@ export function initHighlight(
   }
 
   const env = environment || nodeEnv || 'development';
+  const resolvedBackendUrl = backendUrl || DEFAULT_HIGHLIGHT_BACKEND_URL;
+  const resolvedOtlpEndpoint = otlpEndpoint || DEFAULT_HIGHLIGHT_OTLP_ENDPOINT;
   const options: HighlightOptions = {
     environment: env,
     version: release || undefined,
     serviceName: 'oms-frontend',
-    backendUrl: "https://highlighter.openmakersuite.net/public",
+    backendUrl: resolvedBackendUrl,
+    otlpEndpoint: resolvedOtlpEndpoint,
     tracingOrigins: true,
     // gh #378: header + body redaction for the network recording surface.
     // Mirrors the backend's `_KEY_PATTERNS` in
@@ -106,15 +119,10 @@ export function initHighlight(
       },
     },
   };
-  if (otlpEndpoint) {
-    options.otlpEndpoint = otlpEndpoint;
-    options.backendUrl = otlpEndpoint;
-  }
-
   init(projectId, options);
 
   logger.info(
-    `[Highlight] initialized (env=${env}, release=${release || 'unknown'}, project=${projectIdFingerprint(projectId)})`,
+    `[Highlight] initialized (env=${env}, release=${release || 'unknown'}, project=${projectIdFingerprint(projectId)}, backend=${resolvedBackendUrl}, otlp=${resolvedOtlpEndpoint})`,
   );
 
   // Boot ping (oms-78t): emit a single non-fatal error on init so a deployed

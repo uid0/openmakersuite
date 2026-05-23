@@ -162,7 +162,7 @@ jobs:
             type=raw,value=${{ needs.determine-tags.outputs.backend_tags }},enable={{is_default_branch}}
 
       - name: Build and push backend
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/Dockerfile.prod
@@ -201,7 +201,7 @@ jobs:
           echo "🔍 Git hash: $GIT_HASH"
 
       - name: Build and push frontend
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./frontend
           file: ./frontend/Dockerfile.prod

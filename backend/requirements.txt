@@ -28,7 +28,7 @@ djangorestframework-simplejwt==5.5.1
 django-passkey-auth==0.2.0
 
 # Image handling
-django-imagekit==5.0.0
+django-imagekit==6.1.0
 
 # API Documentation
 drf-spectacular==0.29.0

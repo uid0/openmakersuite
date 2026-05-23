@@ -150,8 +150,17 @@ class TestQRCodeService:
             url = "https://example.com/test-url"
             qr_img = service.generate_qr_code_image(url)
 
+            # Round-trip through PNG bytes to get a real PIL.Image — the
+            # service returns a qrcode.image.pil.PilImage wrapper that
+            # pyzbar's isinstance() check misses under Pillow 12+. See
+            # qr_code_service._validate_qr_code for the same pattern.
+            buffer = BytesIO()
+            qr_img.save(buffer, format="PNG")
+            buffer.seek(0)
+            pil_image = Image.open(buffer)
+
             # Verify the QR code can be decoded
-            decoded_objects = decode(qr_img)
+            decoded_objects = decode(pil_image)
             assert len(decoded_objects) > 0
             decoded_url = decoded_objects[0].data.decode("utf-8")
             assert decoded_url == url

@@ -130,7 +130,12 @@ def _build_email(
         to=recipients,
     )
     message.attach_alternative(html_body, "text/html")
-    message.mixed_subtype = "related"  # so cid: refs work in HTML
+    # Django 6 removed EmailMessage.mixed_subtype. The CIDs below still resolve
+    # in every email client we've tested (Postmark renders Gmail / Outlook /
+    # Apple Mail correctly) because each attached part carries its own
+    # Content-ID + Content-Disposition: inline header — the outer multipart
+    # subtype is only the strict-correctness signal, not what most clients
+    # rely on.
 
     for cid, png_bytes in (
         ("volume_trend.png", render_volume_trend_png(payload["trend"])),

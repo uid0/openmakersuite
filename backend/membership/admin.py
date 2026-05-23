@@ -13,6 +13,7 @@ from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.urls import path, reverse
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 
 from inventory.services.qr_code_service import QRCodeService
 
@@ -172,9 +173,9 @@ class UserAdmin(BaseUserAdmin):
         try:
             token = obj.registration_token
             if token.used:
-                return format_html('<span style="color: gray;">Used</span>')
+                return mark_safe('<span style="color: gray;">Used</span>')
             elif not token.is_valid():
-                return format_html('<span style="color: red;">Expired</span>')
+                return mark_safe('<span style="color: red;">Expired</span>')
             else:
                 qr_url = reverse("admin:membership_user_registrationtoken_qr", args=[token.id])
                 return format_html(
@@ -182,7 +183,7 @@ class UserAdmin(BaseUserAdmin):
                     qr_url,
                 )
         except UserRegistrationToken.DoesNotExist:
-            return format_html('<span style="color: gray;">No token</span>')
+            return mark_safe('<span style="color: gray;">No token</span>')
 
     @admin.action(description="Create registration token and QR code for selected users")
     def create_registration_token(self, request, queryset):
@@ -496,11 +497,11 @@ class UserRegistrationTokenAdmin(admin.ModelAdmin):
     def is_valid_display(self, obj):
         """Display token validity status."""
         if obj.used:
-            return format_html('<span style="color: gray;">Used</span>')
+            return mark_safe('<span style="color: gray;">Used</span>')
         elif not obj.is_valid():
-            return format_html('<span style="color: red;">Expired</span>')
+            return mark_safe('<span style="color: red;">Expired</span>')
         else:
-            return format_html('<span style="color: green;">Active</span>')
+            return mark_safe('<span style="color: green;">Active</span>')
 
     @admin.display(description="QR Code")
     def qr_code_link(self, obj):
@@ -511,7 +512,7 @@ class UserRegistrationTokenAdmin(admin.ModelAdmin):
                 '<a href="{}" target="_blank">Download QR Code</a>',
                 qr_url,
             )
-        return format_html('<span style="color: gray;">N/A</span>')
+        return mark_safe('<span style="color: gray;">N/A</span>')
 
     @admin.display(description="Registration URL")
     def registration_url(self, obj):
@@ -530,7 +531,7 @@ class UserRegistrationTokenAdmin(admin.ModelAdmin):
                 qr_url,
                 qr_url,
             )
-        return format_html('<span style="color: gray;">Token is not active</span>')
+        return mark_safe('<span style="color: gray;">Token is not active</span>')
 
 
 @admin.register(Certification)

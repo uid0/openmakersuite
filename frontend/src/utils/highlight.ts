@@ -16,7 +16,7 @@ export interface HighlightLogger {
 
 export function readHighlightEnv(env: NodeJS.ProcessEnv = process.env): HighlightEnvConfig {
   return {
-    projectId: env.REACT_APP_HIGHLIGHT_PROJECT_ID,
+    projectId: '1jdkoe52',
     otlpEndpoint: env.REACT_APP_HIGHLIGHT_OTLP_ENDPOINT,
     environment: env.REACT_APP_HIGHLIGHT_ENVIRONMENT,
     release: env.REACT_APP_GIT_HASH,

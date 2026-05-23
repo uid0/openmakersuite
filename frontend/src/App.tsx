@@ -26,6 +26,7 @@ import BreakerTripImpactPage from './pages/BreakerTripImpactPage';
 import CircuitLoadPage from './pages/CircuitLoadPage';
 import ElectricalCircuitsPage from './pages/ElectricalCircuitsPage';
 import ElectricalOverviewPage from './pages/ElectricalOverviewPage';
+import FacilitiesChecklistsPage from './pages/FacilitiesChecklistsPage';
 import FacilitiesOverviewPage from './pages/FacilitiesOverviewPage';
 import PowerBreakerFormPage from './pages/PowerBreakerFormPage';
 import PowerCircuitFormPage from './pages/PowerCircuitFormPage';
@@ -267,6 +268,7 @@ function AppContent() {
           <Route path="/maintenance/third-party/:id" element={<WorkspaceLayout><ThirdPartyWorkOrderPage /></WorkspaceLayout>} />
           <Route path="/maintenance/location-problems" element={<WorkspaceLayout><LocationProblemsListPage /></WorkspaceLayout>} />
           <Route path="/maintenance/location-problems/:id" element={<WorkspaceLayout><LocationProblemDetailPage /></WorkspaceLayout>} />
+          <Route path="/facilities/checklist" element={<WorkspaceLayout><FacilitiesChecklistsPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist/:checklistId/complete/:completionId" element={<WorkspaceLayout><ChecklistCompletionPage /></WorkspaceLayout>} />
 
           {/* SIGs Workspace */}

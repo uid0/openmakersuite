@@ -39,7 +39,7 @@ server {
     root /app/frontend;
     index index.html;
 
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com https://highlighter.openmakersuite.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://highlighter.openmakersuite.net wss://highlighter.openmakersuite.net; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -117,14 +117,14 @@ server {
         alias /app/staticfiles/;
         expires 30d;
         add_header Cache-Control "public, immutable";
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com https://highlighter.openmakersuite.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://highlighter.openmakersuite.net wss://highlighter.openmakersuite.net; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
     }
 
     location /media/ {
         alias /app/media/;
         expires 7d;
         add_header Cache-Control "public";
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry-cdn.com https://js.sentry-cdn.com https://browser.sentry-cdn.com https://highlighter.openmakersuite.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://sentry.io https://highlighter.openmakersuite.net wss://highlighter.openmakersuite.net; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
     }
 
     location / {

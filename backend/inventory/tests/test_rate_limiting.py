@@ -30,7 +30,7 @@ class TestQRCodeRateLimiter:
             is_allowed, error_msg = QRCodeRateLimiter.check_rate_limit(
                 user=None, item_id=item_id, item_type=item_type, ip_address="127.0.0.1"
             )
-            assert is_allowed, f"Request {i+1} should be allowed"
+            assert is_allowed, f"Request {i + 1} should be allowed"
             assert error_msg is None
 
         # 6th request should be denied
@@ -52,7 +52,7 @@ class TestQRCodeRateLimiter:
             is_allowed, error_msg = QRCodeRateLimiter.check_rate_limit(
                 user=user, item_id=item_id, item_type=item_type, ip_address="127.0.0.1"
             )
-            assert is_allowed, f"Request {i+1} should be allowed"
+            assert is_allowed, f"Request {i + 1} should be allowed"
             assert error_msg is None
 
         # 6th request should be denied
@@ -76,7 +76,7 @@ class TestQRCodeRateLimiter:
                 item_type=item_type,
                 ip_address="127.0.0.1",
             )
-            assert is_allowed, f"Request {i+1} should be allowed for staff"
+            assert is_allowed, f"Request {i + 1} should be allowed for staff"
             assert error_msg is None
 
     def test_different_items_separate_limits(self):

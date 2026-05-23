@@ -69,7 +69,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="purchaseorderitem",
             constraint=models.CheckConstraint(
-                check=models.Q(
+                condition=models.Q(
                     models.Q(("asset__isnull", True), ("item_supplier__isnull", False)),
                     models.Q(("asset__isnull", False), ("item_supplier__isnull", True)),
                     _connector="OR",

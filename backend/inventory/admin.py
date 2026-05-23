@@ -11,6 +11,7 @@ from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 
 from .models import (
     Asset,
@@ -331,8 +332,8 @@ class AssetPartInline(admin.TabularInline):
     def needs_replacement_display(self, obj):
         """Display if part needs replacement."""
         if obj and obj.needs_replacement:
-            return format_html('<span style="color: #dc3545; font-weight: bold;">⚠️ Yes</span>')
-        return format_html('<span style="color: #28a745;">✓ No</span>')
+            return mark_safe('<span style="color: #dc3545; font-weight: bold;">⚠️ Yes</span>')
+        return mark_safe('<span style="color: #28a745;">✓ No</span>')
 
     @admin.display(description="Days Since Replacement")
     def days_since_replacement_display(self, obj):
@@ -580,7 +581,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
                     '<span style="color: #dc3545; font-weight: bold;" title="{}">❌ INCOMPLETE</span>',
                     obj.hazmat_compliance_status,
                 )
-        return format_html('<span style="color: #28a745;" title="Not Hazardous">✅</span>')
+        return mark_safe('<span style="color: #28a745;" title="Not Hazardous">✅</span>')
 
     @admin.display(description="NFPA Fire Diamond")
     def nfpa_fire_diamond_display(self, obj):
@@ -988,7 +989,7 @@ class AssetAdmin(admin.ModelAdmin):
                 mode_display += " (Classroom)"
             return format_html("<span>{}</span>", mode_display)
         except OperationalMode.DoesNotExist:
-            return format_html('<span style="color: #6c757d;">Available</span>')
+            return mark_safe('<span style="color: #6c757d;">Available</span>')
 
     @admin.display(description="Lock Status")
     def lock_status_display(self, obj):
@@ -1007,9 +1008,9 @@ class AssetAdmin(admin.ModelAdmin):
                 if active_lockouts.count() > 1:
                     lock_info += f" (+{active_lockouts.count() - 1} more)"
                 return format_html('<span style="color: #dc3545;">{}</span>', lock_info)
-            return format_html('<span style="color: #28a745;">✓ Unlocked</span>')
+            return mark_safe('<span style="color: #28a745;">✓ Unlocked</span>')
         except Exception:
-            return format_html('<span style="color: #28a745;">✓ Unlocked</span>')
+            return mark_safe('<span style="color: #28a745;">✓ Unlocked</span>')
 
     actions = ["duplicate_asset", "regenerate_qr_codes"]
 
@@ -1252,8 +1253,8 @@ class AssetPartAdmin(admin.ModelAdmin):
     def needs_replacement_display(self, obj):
         """Display if part needs replacement."""
         if obj and obj.needs_replacement:
-            return format_html('<span style="color: #dc3545; font-weight: bold;">⚠️ Yes</span>')
-        return format_html('<span style="color: #28a745;">✓ No</span>')
+            return mark_safe('<span style="color: #dc3545; font-weight: bold;">⚠️ Yes</span>')
+        return mark_safe('<span style="color: #28a745;">✓ No</span>')
 
     @admin.display(description="Days Since Replacement")
     def days_since_replacement_display(self, obj):

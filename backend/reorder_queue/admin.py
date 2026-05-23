@@ -24,6 +24,7 @@
 
 from django.contrib import admin
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 
 from .models import (
     DeliveryItem,
@@ -363,7 +364,7 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
         """Display quantity pending with color coding."""
         pending = obj.quantity_pending
         if pending == 0:
-            return format_html('<span style="color: green;">✓ Complete</span>')
+            return mark_safe('<span style="color: green;">✓ Complete</span>')
         else:
             return format_html('<span style="color: orange;">{} pending</span>', pending)
 
@@ -476,13 +477,13 @@ class DeliveryItemAdmin(admin.ModelAdmin):
     def condition_status(self, obj):
         """Display condition status with visual indicators."""
         if obj.is_damaged and obj.is_expired:
-            return format_html('<span style="color: red;">⚠️ Damaged & Expired</span>')
+            return mark_safe('<span style="color: red;">⚠️ Damaged & Expired</span>')
         elif obj.is_damaged:
-            return format_html('<span style="color: orange;">⚠️ Damaged</span>')
+            return mark_safe('<span style="color: orange;">⚠️ Damaged</span>')
         elif obj.is_expired:
-            return format_html('<span style="color: red;">⚠️ Expired</span>')
+            return mark_safe('<span style="color: red;">⚠️ Expired</span>')
         else:
-            return format_html('<span style="color: green;">✓ Good</span>')
+            return mark_safe('<span style="color: green;">✓ Good</span>')
 
 
 # Analytics Admin
@@ -534,7 +535,7 @@ class LeadTimeLogAdmin(admin.ModelAdmin):
         """Display variance with color coding."""
         variance = obj.variance_days
         if variance == 0:
-            return format_html('<span style="color: green;">✓ On Time</span>')
+            return mark_safe('<span style="color: green;">✓ On Time</span>')
         elif variance < 0:
             return format_html('<span style="color: blue;">⚡ {} days early</span>', abs(variance))
         else:
@@ -611,7 +612,7 @@ class WebHookAdmin(admin.ModelAdmin):
         """Display success rate with color coding."""
         total = obj.success_count + obj.failure_count
         if total == 0:
-            return format_html('<span style="color: gray;">No triggers yet</span>')
+            return mark_safe('<span style="color: gray;">No triggers yet</span>')
 
         rate = (obj.success_count / total) * 100
         if rate >= 95:

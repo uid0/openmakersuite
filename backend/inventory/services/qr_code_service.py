@@ -163,23 +163,24 @@ class QRCodeService:
             ValueError: If the QR code doesn't decode to the expected URL
         """
         try:
-            # Use qrcode library's decoder or PIL-based decoding
-            # We'll decode using a simple approach: save to buffer and decode
+            # Render the QR to a PNG buffer and reopen as a real PIL.Image.
+            # `img` is a qrcode.image.pil.PilImage wrapper, not a
+            # PIL.Image.Image — pyzbar's isinstance() check misses the
+            # wrapper and falls through to a tuple-unpack path that fails
+            # with "cannot unpack non-iterable PilImage object" under
+            # Pillow 12+. Going via PNG bytes sidesteps the wrapper and
+            # also normalizes the mode so pyzbar's grayscale conversion
+            # always lands on a supported input.
             buffer = BytesIO()
             img.save(buffer, format="PNG")
             buffer.seek(0)
+            pil_image = Image.open(buffer)
 
-            # Decode the QR code
-            # Create a new QRCode instance to decode
-            # Note: qrcode library doesn't have a built-in decoder
-            # We'll use pyzbar or another library, but for now we'll use a simpler approach
-            # For validation, we can use the qrcode library's ability to verify
-            # by creating a new QR code and comparing, or use pyzbar if available
-            # Try to decode using pyzbar if available, otherwise skip validation
+            # Try to decode using pyzbar if available, otherwise skip validation.
             try:
                 from pyzbar.pyzbar import decode
 
-                decoded_objects = decode(img)
+                decoded_objects = decode(pil_image)
                 if decoded_objects:
                     decoded_url = decoded_objects[0].data.decode("utf-8")
                     if decoded_url != expected_url:

@@ -13,7 +13,7 @@ django-celery-results==2.6.0
 flower==2.0.1
 
 # QR Code and PDF generation
-qrcode[pil]==7.4.2
+qrcode[pil]==8.2
 reportlab==4.5.1
 Pillow==12.2.0
 # Server-side PNG charts for the monthly analytics pulse email (analytics app).

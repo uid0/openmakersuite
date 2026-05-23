@@ -482,7 +482,7 @@ class PurchaseOrderItem(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=(
+                condition=(
                     models.Q(item_supplier__isnull=False, asset__isnull=True)
                     | models.Q(item_supplier__isnull=True, asset__isnull=False)
                     | (

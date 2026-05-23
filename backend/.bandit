@@ -11,4 +11,9 @@ exclude_dirs = /tests,/migrations,/__pycache__,/.pytest_cache,/venv,/env,create_
 #       (e.g. flags 'token_type' and user-facing error strings like
 #       "Invalid registration token." — none are credentials)
 # B106: hardcoded_password_funcarg - acceptable in test files
-skips = B101,B105,B106
+# B308: mark_safe - flagged unconditionally, but every call site in
+#       this repo passes a literal HTML fragment (admin status icons,
+#       not user input). Django 6 made format_html() reject no-arg
+#       calls, which forced the migration to mark_safe across
+#       inventory/membership/reorder_queue admins.
+skips = B101,B105,B106,B308

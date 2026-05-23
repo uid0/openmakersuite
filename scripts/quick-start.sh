@@ -54,7 +54,7 @@ if command -v pip3 > /dev/null 2>&1; then
 elif command -v pip > /dev/null 2>&1; then
     pip install -q -r requirements.txt -r requirements-dev.txt
 else
-    echo "❌ Error: pip not found. Please install Python 3.11"
+    echo "❌ Error: pip not found. Please install Python 3.13 (the same version `.mise.toml` pins for local dev)"
     exit 1
 fi
 cd ..
@@ -74,7 +74,7 @@ if command -v python3 > /dev/null 2>&1; then
 elif command -v python > /dev/null 2>&1; then
     python manage.py migrate --no-input
 else
-    echo "❌ Error: python not found. Please install Python 3.11"
+    echo "❌ Error: python not found. Please install Python 3.13 (the same version `.mise.toml` pins for local dev)"
     exit 1
 fi
 cd ..

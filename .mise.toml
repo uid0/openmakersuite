@@ -1,0 +1,9 @@
+# Local toolchain pins for `mise` (https://mise.jdx.dev/).
+#
+# Mirrors the versions the Docker image / CI workflows install, so that
+# `mise install` on a contributor's laptop yields the same Python the
+# backend container runs against. The Dockerfile base image
+# (`backend/Dockerfile*`) and the GitHub Actions `setup-python` steps in
+# `.github/workflows/ci.yml` are updated together with this file.
+[tools]
+python = "3.13"

@@ -46,6 +46,7 @@ export function initHighlight(
     environment: env,
     version: release || undefined,
     serviceName: 'oms-frontend',
+    backendUrl: "https://highlighter.openmakersuite.net/public",
     tracingOrigins: true,
     // gh #378: header + body redaction for the network recording surface.
     // Mirrors the backend's `_KEY_PATTERNS` in

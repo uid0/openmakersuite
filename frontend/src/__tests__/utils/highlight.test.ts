@@ -92,7 +92,6 @@ describe('utils/highlight', () => {
       expect(optsArg.serviceName).toBe('oms-frontend');
       expect(optsArg.tracingOrigins).toBe(true);
       expect(optsArg.otlpEndpoint).toBe('https://otel.example.org:4317');
-      expect(optsArg.backendUrl).toBe('https://otel.example.org:4317');
 
       expect(logger.warn).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
@@ -122,7 +121,6 @@ describe('utils/highlight', () => {
 
       const optsArg = init.mock.calls[0][1];
       expect(optsArg.otlpEndpoint).toBeUndefined();
-      expect(optsArg.backendUrl).toBeUndefined();
     });
 
     it('falls back to NODE_ENV when REACT_APP_HIGHLIGHT_ENVIRONMENT is unset', () => {

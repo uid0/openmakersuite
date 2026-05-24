@@ -31,8 +31,11 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
     lookup_field = "stint_id"
 
     def get_permissions(self):
-        # Read-side: warden tooling. Mutating actions below set their own.
-        if self.action in ("start", "label"):
+        # AllowAny on the kiosk + Pi-daemon paths; staff for everything
+        # else. The decorators below also set permission_classes so the
+        # routing is obvious at the call site, but this central list is
+        # the safety net for actions reached through self.get_object().
+        if self.action in ("start", "label", "print_queue", "mark_printed"):
             return [AllowAny()]
         return [IsAdminUser()]
 
@@ -217,7 +220,9 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
     def label(self, request, stint_id: str):
         """Return the label PNG. ?printer=brother_ql (default) or epson_tm."""
         stint = get_object_or_404(ProjectStorageStint, stint_id=stint_id)
-        printer: PrinterFamily = request.query_params.get("printer", "brother_ql")
+        printer: PrinterFamily = request.query_params.get(
+            "printer", stint.print_target or "brother_ql"
+        )
         if printer not in ("brother_ql", "epson_tm"):
             return Response(
                 {"detail": f"Unknown printer family '{printer}'.", "code": "bad_printer"},
@@ -225,3 +230,72 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
             )
         png_bytes = render_stint_label(stint, printer=printer)
         return HttpResponse(png_bytes, content_type="image/png")
+
+    # ------------------------------------------------------------------
+    # Pi print-daemon plumbing
+    # ------------------------------------------------------------------
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="print-queue",
+        permission_classes=[AllowAny],
+    )
+    def print_queue(self, request):
+        """Return the list of stints that still need their label printed.
+
+        AllowAny because the daemon talks to the API without Django auth;
+        the only thing it can do with the queue is print a label (which
+        is itself an AllowAny endpoint). If the daemon ever needs to
+        mutate something more sensitive, add token auth.
+        """
+        pending = (
+            ProjectStorageStint.objects.filter(
+                printed_at__isnull=True,
+                removed_at__isnull=True,
+                moved_to_purgatory_at__isnull=True,
+            )
+            .order_by("created_at")
+            .values(
+                "stint_id",
+                "print_target",
+                "created_at",
+            )
+        )
+        # Materialize + add the absolute label URL so the daemon doesn't
+        # have to know about path construction.
+        base = request.build_absolute_uri("/api/project-storage/stints/")
+        return Response(
+            [
+                {
+                    "stint_id": row["stint_id"],
+                    "print_target": row["print_target"] or "brother_ql",
+                    "created_at": row["created_at"],
+                    "label_url": (
+                        f"{base}{row['stint_id']}/label/"
+                        f"?printer={row['print_target'] or 'brother_ql'}"
+                    ),
+                }
+                for row in pending
+            ]
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="mark-printed",
+        permission_classes=[AllowAny],
+    )
+    def mark_printed(self, request, stint_id: str):
+        """Daemon calls this after a successful print so the queue empties."""
+        stint = self.get_object()
+        if stint.printed_at is None:
+            stint.printed_at = timezone.now()
+            stint.save(update_fields=["printed_at", "updated_at"])
+            ProjectStorageEvent.objects.create(
+                stint=stint,
+                event_type=ProjectStorageEvent.EVENT_NOTE_ADDED,
+                actor_label="pi-daemon: printed",
+                note=request.data.get("note", ""),
+            )
+        return Response(ProjectStorageStintSerializer(stint).data)

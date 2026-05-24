@@ -99,6 +99,19 @@ class ProjectStorageStint(models.Model):
     storage_location_name = models.CharField(max_length=120, blank=True)
     purgatory_location_name = models.CharField(max_length=120, blank=True)
 
+    # Print pipeline state. printed_at is set by the Pi daemon after a
+    # successful print; print_target picks the layout the daemon should
+    # use (defaults to brother_ql when blank). NULL printed_at on a
+    # stint is the queue signal.
+    printed_at = models.DateTimeField(null=True, blank=True)
+    PRINT_TARGET_BROTHER = "brother_ql"
+    PRINT_TARGET_EPSON = "epson_tm"
+    PRINT_TARGET_CHOICES = [
+        (PRINT_TARGET_BROTHER, "Brother QL label printer"),
+        (PRINT_TARGET_EPSON, "Epson TM receipt printer"),
+    ]
+    print_target = models.CharField(max_length=16, blank=True, choices=PRINT_TARGET_CHOICES)
+
     notes = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -110,6 +123,7 @@ class ProjectStorageStint(models.Model):
             models.Index(fields=["username", "-started_at"]),
             models.Index(fields=["expires_at"]),
             models.Index(fields=["removed_at"]),
+            models.Index(fields=["printed_at"]),
         ]
 
     def __str__(self) -> str:

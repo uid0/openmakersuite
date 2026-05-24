@@ -1824,12 +1824,18 @@ views:
       list:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      mark_printed:
+        permission_classes:
+        - AllowAny
       mark_removed:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       move_to_purgatory:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      print_queue:
+        permission_classes:
+        - AllowAny
       retrieve:
         permission_classes:
         - IsAuthenticatedOrReadOnly

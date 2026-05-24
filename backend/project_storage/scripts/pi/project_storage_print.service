@@ -1,0 +1,29 @@
+[Unit]
+Description=OMS Project Storage print daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Set the OMS endpoint + printer config here (or use an EnvironmentFile).
+Environment=OMS_API_BASE=https://oms.example.com/api
+Environment=OMS_POLL_INTERVAL_S=10
+# Brother QL example — swap for Epson by replacing these three:
+Environment=OMS_PRINTER_KIND=brother_ql
+Environment=OMS_BROTHER_DEVICE=/dev/usb/lp0
+Environment=OMS_BROTHER_MODEL=QL-820NWB
+Environment=OMS_BROTHER_LABEL=62
+
+User=pi
+WorkingDirectory=/opt/oms-print-daemon
+ExecStart=/usr/bin/python3 /opt/oms-print-daemon/print_daemon.py
+
+# Restart on crash but back off so a stuck printer doesn't pin a CPU
+Restart=on-failure
+RestartSec=15s
+
+# Talk to USB printer
+SupplementaryGroups=lp dialout
+
+[Install]
+WantedBy=multi-user.target

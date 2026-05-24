@@ -8,8 +8,14 @@ x-logging: &default-logging
 
 services:
   db:
-    # Digest pinned from `docker pull postgres:15-alpine` on 2026-04-21 (resolved to postgres 15.17).
+    # Digest pinned from `docker pull postgres:18-alpine` on 2026-05-24 (resolved to postgres 18.4).
     # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
+    #
+    # PostgreSQL 18+ alpine images changed the on-disk layout to use
+    # major-version-specific directory names (see docker-library/postgres#1259).
+    # Setting PGDATA to a subdirectory of the mount keeps the existing volume
+    # path valid AND gives the image a clean directory it can initialize
+    # under the new layout.
     image: postgres:18.4-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88
     logging: *default-logging
     volumes:
@@ -18,6 +24,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-makerspace_inventory}
       - POSTGRES_USER=${POSTGRES_USER:-makerspace}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data/pgdata
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-makerspace} -d ${POSTGRES_DB:-makerspace_inventory}"]
       interval: 10s

@@ -113,7 +113,7 @@ def _print_brother(png_bytes: bytes) -> None:
 
 def _print_epson(png_bytes: bytes) -> None:
     """Send PNG bytes to an Epson TM receipt printer via CUPS `lp`."""
-    import subprocess
+    import subprocess  # noqa: S404 # nosec B404 - controlled lp invocation on the Pi
     import tempfile
 
     queue = os.environ.get("OMS_EPSON_CUPS_QUEUE")
@@ -126,7 +126,10 @@ def _print_epson(png_bytes: bytes) -> None:
         path = fh.name
     args.append(path)
     try:
-        subprocess.run(args, check=True, capture_output=True, text=True)
+        # nosec B603 - args is a fixed list (lp + -d <env queue> + temp path);
+        # no user input ever reaches argv. Shell=False (default) so even the
+        # env-derived queue name can't expand.
+        subprocess.run(args, check=True, capture_output=True, text=True)  # noqa: S603  # nosec B603
     finally:
         os.unlink(path)
 

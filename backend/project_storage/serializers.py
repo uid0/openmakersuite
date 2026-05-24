@@ -90,6 +90,4 @@ class StartStintSerializer(serializers.Serializer):
     last_name = serializers.CharField(max_length=64, required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
     project_title = serializers.CharField(max_length=120, required=False, allow_blank=True)
-    storage_location_name = serializers.CharField(
-        max_length=120, required=False, allow_blank=True
-    )
+    storage_location_name = serializers.CharField(max_length=120, required=False, allow_blank=True)

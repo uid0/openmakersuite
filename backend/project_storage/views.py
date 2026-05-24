@@ -170,11 +170,13 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         if location:
             stint.purgatory_location_name = location
         stint.moved_to_purgatory_at = timezone.now()
-        stint.save(update_fields=[
-            "moved_to_purgatory_at",
-            "purgatory_location_name",
-            "updated_at",
-        ])
+        stint.save(
+            update_fields=[
+                "moved_to_purgatory_at",
+                "purgatory_location_name",
+                "updated_at",
+            ]
+        )
         ProjectStorageEvent.objects.create(
             stint=stint,
             event_type=ProjectStorageEvent.EVENT_MOVED_TO_PURGATORY,

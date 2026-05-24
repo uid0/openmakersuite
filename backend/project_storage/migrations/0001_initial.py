@@ -125,28 +125,28 @@ class Migration(migrations.Migration):
             model_name="projectstoragestint",
             index=models.Index(
                 fields=["username", "-started_at"],
-                name="project_sto_usernam_b86d3c_idx",
+                name="project_sto_usernam_8b38d4_idx",
             ),
         ),
         migrations.AddIndex(
             model_name="projectstoragestint",
             index=models.Index(
                 fields=["expires_at"],
-                name="project_sto_expires_5db2a4_idx",
+                name="project_sto_expires_4b879a_idx",
             ),
         ),
         migrations.AddIndex(
             model_name="projectstoragestint",
             index=models.Index(
                 fields=["removed_at"],
-                name="project_sto_removed_2c3b4a_idx",
+                name="project_sto_removed_912a13_idx",
             ),
         ),
         migrations.AddIndex(
             model_name="projectstorageevent",
             index=models.Index(
                 fields=["stint", "-created_at"],
-                name="project_sto_stint_i_c1b2a3_idx",
+                name="project_sto_stint_i_421529_idx",
             ),
         ),
     ]

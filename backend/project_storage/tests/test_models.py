@@ -78,32 +78,24 @@ class TestStintHelpers:
     def test_purgatory_at_is_notice_plus_grace(self):
         notice = timezone.now() - timedelta(days=2)
         stint = ProjectStorageStintFactory(notice_sent_at=notice)
-        assert stint.purgatory_at == notice + timedelta(
-            days=DEFAULT_PURGATORY_GRACE_DAYS
-        )
+        assert stint.purgatory_at == notice + timedelta(days=DEFAULT_PURGATORY_GRACE_DAYS)
 
     def test_purgatory_at_is_none_without_notice(self):
         stint = ProjectStorageStintFactory()
         assert stint.purgatory_at is None
 
     def test_display_name_prefers_first_last(self):
-        stint = ProjectStorageStintFactory(
-            first_name="Alex", last_name="Smith", username="asmith"
-        )
+        stint = ProjectStorageStintFactory(first_name="Alex", last_name="Smith", username="asmith")
         assert stint.display_name == "Alex Smith"
 
     def test_display_name_falls_back_to_username(self):
-        stint = ProjectStorageStintFactory(
-            first_name="", last_name="", username="asmith"
-        )
+        stint = ProjectStorageStintFactory(first_name="", last_name="", username="asmith")
         assert stint.display_name == "asmith"
 
     def test_expiry_week_and_day_returns_iso_week_and_doy(self):
         # Fixed date: 2026-12-31 is week 53, day 365.
         stint = ProjectStorageStintFactory(
-            expires_at=timezone.make_aware(
-                timezone.datetime(2026, 12, 31, 12, 0)
-            ),
+            expires_at=timezone.make_aware(timezone.datetime(2026, 12, 31, 12, 0)),
         )
         week, doy = stint.expiry_week_and_day
         assert isinstance(week, int) and 1 <= week <= 53
@@ -128,8 +120,7 @@ class TestCooldown:
         username = "freeagent"
         ProjectStorageStintFactory(
             username=username,
-            removed_at=timezone.now()
-            - timedelta(days=DEFAULT_REENTRY_COOLDOWN_DAYS + 1),
+            removed_at=timezone.now() - timedelta(days=DEFAULT_REENTRY_COOLDOWN_DAYS + 1),
         )
         assert ProjectStorageStint.cooldown_blocks_new_stint(username) is None
 

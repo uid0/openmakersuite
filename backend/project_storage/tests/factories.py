@@ -18,7 +18,5 @@ class ProjectStorageStintFactory(factory.django.DjangoModelFactory):
     email = factory.LazyAttribute(lambda o: f"{o.username}@example.com")
     project_title = "Test project"
     started_at = factory.LazyFunction(timezone.now)
-    expires_at = factory.LazyAttribute(
-        lambda o: o.started_at + timedelta(days=DEFAULT_STINT_DAYS)
-    )
+    expires_at = factory.LazyAttribute(lambda o: o.started_at + timedelta(days=DEFAULT_STINT_DAYS))
     storage_location_name = "Project Shelf A"

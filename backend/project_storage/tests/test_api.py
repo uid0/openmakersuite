@@ -27,9 +27,7 @@ def client():
 @pytest.fixture
 def staff_client():
     User = get_user_model()
-    user = User.objects.create_user(
-        username="warden", password="x", is_staff=True
-    )
+    user = User.objects.create_user(username="warden", password="x", is_staff=True)
     api = APIClient()
     api.force_authenticate(user=user)
     return api
@@ -59,19 +57,13 @@ class TestKioskStart:
         assert body["username"] == "newbie"
         assert body["stint_id"].startswith("PS-")
         # 30 day window — allow a few seconds of test-runtime drift.
-        expires_at = timezone.datetime.fromisoformat(
-            body["expires_at"].replace("Z", "+00:00")
-        )
-        started_at = timezone.datetime.fromisoformat(
-            body["started_at"].replace("Z", "+00:00")
-        )
+        expires_at = timezone.datetime.fromisoformat(body["expires_at"].replace("Z", "+00:00"))
+        started_at = timezone.datetime.fromisoformat(body["started_at"].replace("Z", "+00:00"))
         delta = expires_at - started_at
         assert timedelta(days=29, hours=23) <= delta <= timedelta(days=30, hours=1)
         # Audit event logged.
         stint = ProjectStorageStint.objects.get(stint_id=body["stint_id"])
-        assert stint.events.filter(
-            event_type=ProjectStorageEvent.EVENT_CREATED
-        ).exists()
+        assert stint.events.filter(event_type=ProjectStorageEvent.EVENT_CREATED).exists()
 
     def test_blocks_member_with_active_stint(self, client):
         ProjectStorageStintFactory(username="busy")
@@ -99,8 +91,7 @@ class TestKioskStart:
     def test_allows_member_after_cooldown_window(self, client):
         ProjectStorageStintFactory(
             username="clear",
-            removed_at=timezone.now()
-            - timedelta(days=DEFAULT_REENTRY_COOLDOWN_DAYS + 1),
+            removed_at=timezone.now() - timedelta(days=DEFAULT_REENTRY_COOLDOWN_DAYS + 1),
         )
         resp = client.post(
             "/api/project-storage/stints/start/",
@@ -164,9 +155,7 @@ class TestSendViolationNotice:
         assert resp.status_code == 200, resp.content
         stint.refresh_from_db()
         assert stint.notice_sent_at is not None
-        assert stint.events.filter(
-            event_type=ProjectStorageEvent.EVENT_NOTICE_SENT
-        ).exists()
+        assert stint.events.filter(event_type=ProjectStorageEvent.EVENT_NOTICE_SENT).exists()
         assert len(mail.outbox) == 1
         assert mail.outbox[0].to == ["member@example.com"]
         assert stint.stint_id in mail.outbox[0].subject
@@ -221,9 +210,7 @@ class TestMoveToPurgatory:
         stint.refresh_from_db()
         assert stint.moved_to_purgatory_at is not None
         assert stint.purgatory_location_name == "Project Purgatory"
-        assert stint.events.filter(
-            event_type=ProjectStorageEvent.EVENT_MOVED_TO_PURGATORY
-        ).exists()
+        assert stint.events.filter(event_type=ProjectStorageEvent.EVENT_MOVED_TO_PURGATORY).exists()
 
 
 class TestMarkRemoved:
@@ -237,19 +224,13 @@ class TestMarkRemoved:
         assert resp.status_code == 200, resp.content
         stint.refresh_from_db()
         assert stint.removed_at is not None
-        assert stint.events.filter(
-            event_type=ProjectStorageEvent.EVENT_REMOVED
-        ).exists()
+        assert stint.events.filter(event_type=ProjectStorageEvent.EVENT_REMOVED).exists()
         # Cooldown should now be enforced for this username.
-        assert (
-            ProjectStorageStint.cooldown_blocks_new_stint(stint.username) is not None
-        )
+        assert ProjectStorageStint.cooldown_blocks_new_stint(stint.username) is not None
 
     def test_idempotent_returns_409(self, staff_client):
         stint = ProjectStorageStintFactory(removed_at=timezone.now())
-        resp = staff_client.post(
-            f"/api/project-storage/stints/{stint.stint_id}/mark-removed/"
-        )
+        resp = staff_client.post(f"/api/project-storage/stints/{stint.stint_id}/mark-removed/")
         assert resp.status_code == 409
 
 
@@ -268,17 +249,13 @@ class TestLabelEndpoint:
 
     def test_epson_printer_returns_png(self, client):
         stint = ProjectStorageStintFactory()
-        resp = client.get(
-            f"/api/project-storage/stints/{stint.stint_id}/label/?printer=epson_tm"
-        )
+        resp = client.get(f"/api/project-storage/stints/{stint.stint_id}/label/?printer=epson_tm")
         assert resp.status_code == 200
         assert resp["Content-Type"] == "image/png"
 
     def test_unknown_printer_returns_400(self, client):
         stint = ProjectStorageStintFactory()
-        resp = client.get(
-            f"/api/project-storage/stints/{stint.stint_id}/label/?printer=daisychain"
-        )
+        resp = client.get(f"/api/project-storage/stints/{stint.stint_id}/label/?printer=daisychain")
         assert resp.status_code == 400
         assert resp.json()["code"] == "bad_printer"
 

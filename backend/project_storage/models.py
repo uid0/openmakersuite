@@ -190,9 +190,7 @@ class ProjectStorageStint(models.Model):
         )
         if latest_removed is None:
             return None
-        unblock = latest_removed.removed_at + timedelta(
-            days=DEFAULT_REENTRY_COOLDOWN_DAYS
-        )
+        unblock = latest_removed.removed_at + timedelta(days=DEFAULT_REENTRY_COOLDOWN_DAYS)
         if now >= unblock:
             return None
         return unblock

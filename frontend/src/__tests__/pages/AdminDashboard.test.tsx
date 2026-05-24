@@ -21,7 +21,7 @@ import AdminDashboard from '../../pages/AdminDashboard';
 import { assetsAPI, inventoryAPI, reorderAPI } from '../../services/api';
 import { ReorderRequest } from '../../types';
 
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   assetsAPI: {
     getNotCheckedIn: jest.fn(),
   },

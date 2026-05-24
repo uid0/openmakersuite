@@ -11,9 +11,9 @@ import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto
  * - Otherwise, uses relative URL for nginx forwarding
  */
 export const resolveApiBaseUrl = () => {
-  const rawBase = process.env.REACT_APP_API_URL;
+  const rawBase = import.meta.env.VITE_API_URL;
 
-  // If REACT_APP_API_URL is explicitly set, use it (handles production and docker dev)
+  // If VITE_API_URL is explicitly set, use it (handles production and docker dev)
   if (rawBase && rawBase.trim().length > 0) {
     const trimmedBase = rawBase.replace(/\/+$/, '');
 

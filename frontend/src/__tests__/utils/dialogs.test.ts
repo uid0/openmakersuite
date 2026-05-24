@@ -13,7 +13,7 @@ import {
   showSuccess,
 } from '../../utils/dialogs';
 
-jest.mock('@mantine/modals', () => ({
+vi.mock('@mantine/modals', () => ({
   modals: {
     open: jest.fn(),
     close: jest.fn(),
@@ -21,7 +21,7 @@ jest.mock('@mantine/modals', () => ({
   },
 }));
 
-jest.mock('@mantine/notifications', () => ({
+vi.mock('@mantine/notifications', () => ({
   notifications: {
     show: jest.fn(),
   },

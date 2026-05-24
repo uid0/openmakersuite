@@ -2,14 +2,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
 import SharedWeatherBlock from '../../../components/screens/SharedWeatherBlock';
+import api from '../../../services/api';
 
-jest.mock('../../../services/api', () => ({
+vi.mock('../../../services/api', () => ({
   __esModule: true,
-  default: { get: jest.fn() },
+  default: { get: vi.fn() },
 }));
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const api = require('../../../services/api').default;
 
 describe('SharedWeatherBlock', () => {
   beforeEach(() => {

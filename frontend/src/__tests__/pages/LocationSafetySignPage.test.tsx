@@ -7,7 +7,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import LocationSafetySignPage from '../../pages/LocationSafetySignPage';
 import { SafetySheet, safetySheetAPI } from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 const mockSafetySheetAPI = safetySheetAPI as jest.Mocked<typeof safetySheetAPI>;
 

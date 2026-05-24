@@ -8,7 +8,7 @@
  */
 /* eslint-disable import/first */
 
-jest.mock('axios', () => {
+vi.mock('axios', () => {
   const post = jest.fn().mockResolvedValue({ data: {} });
   const get = jest.fn().mockResolvedValue({ data: { results: [] } });
   const del = jest.fn().mockResolvedValue({ data: {} });

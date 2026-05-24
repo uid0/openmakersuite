@@ -11,8 +11,8 @@ interface FooterProps {
 
 const Footer: React.FC<FooterProps> = ({ className = '' }) => {
   // Get git hash from environment variable (set at build time)
-  const gitHash = process.env.REACT_APP_GIT_HASH || 'dev';
-  const githubUrl = process.env.REACT_APP_GITHUB_URL || 'https://github.com/uid0/openmakersuite';
+  const gitHash = import.meta.env.VITE_GIT_HASH || 'dev';
+  const githubUrl = import.meta.env.VITE_GITHUB_URL || 'https://github.com/uid0/openmakersuite';
 
   return (
     <footer className={`app-footer ${className}`}>

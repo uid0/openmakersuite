@@ -7,11 +7,11 @@ import ScanPage from '../../pages/ScanPage';
 import * as api from '../../services/api';
 
 // Mock the API
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 

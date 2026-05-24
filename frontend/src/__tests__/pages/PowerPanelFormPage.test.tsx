@@ -8,7 +8,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PowerPanelFormPage from '../../pages/PowerPanelFormPage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 const mockLocations = [
   { id: 1, name: 'Sewing Room', description: '', is_active: true },

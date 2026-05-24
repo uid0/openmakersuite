@@ -7,7 +7,7 @@ import React from 'react';
 import AuthSection from '../../components/AuthSection';
 import { authAPI } from '../../services/api';
 
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   authAPI: {
     login: jest.fn(),
     register: jest.fn(),

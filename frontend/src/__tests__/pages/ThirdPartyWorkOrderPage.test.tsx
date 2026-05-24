@@ -10,7 +10,7 @@ import {
   ThirdPartyWorkOrderDto,
 } from '../../services/api';
 
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   thirdPartyMaintenanceAPI: {
     retrieve: jest.fn(),
     setNte: jest.fn(),

@@ -7,7 +7,7 @@ import SIGDashboard from '../pages/SIGDashboard';
 import * as sigAPI from '../services/api';
 
 // Mock the API
-jest.mock('../services/api', () => ({
+vi.mock('../services/api', () => ({
   sigAPI: {
     listMySIGs: jest.fn(),
     getSIGMembers: jest.fn(),

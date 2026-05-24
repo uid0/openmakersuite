@@ -5,7 +5,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import ThirdPartyWoComplianceBanner from '../../components/ThirdPartyWoComplianceBanner';
 import { thirdPartyMaintenanceAPI } from '../../services/api';
 
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   thirdPartyMaintenanceAPI: {
     getAssetWoStatus: jest.fn(),
   },

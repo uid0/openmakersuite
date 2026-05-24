@@ -8,16 +8,16 @@ import { NotificationProvider } from '../../contexts/NotificationContext';
 import InventoryReconciliationPage from '../../pages/InventoryReconciliationPage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
-jest.mock('../../components/QRScanner', () => {
+vi.mock('../../components/QRScanner', () => {
   const MockScanner = () => <div data-testid="qr-scanner-mock" />;
   return { __esModule: true, default: MockScanner };
 });
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 

@@ -11,16 +11,16 @@ import * as api from '../../services/api';
 import { promptInput, showError } from '../../utils/dialogs';
 
 // Mock the API
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
-jest.mock('../../utils/dialogs', () => ({
+vi.mock('../../utils/dialogs', async () => ({
   promptInput: jest.fn(() => Promise.resolve(null)),
   showError: jest.fn(),
 }));
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 

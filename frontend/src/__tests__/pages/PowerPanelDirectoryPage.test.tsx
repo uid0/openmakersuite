@@ -8,7 +8,7 @@ import { MemoryRouter } from 'react-router-dom';
 import PowerPanelDirectoryPage from '../../pages/PowerPanelDirectoryPage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 const renderPage = () =>
   render(

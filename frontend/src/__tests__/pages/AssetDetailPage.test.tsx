@@ -16,9 +16,9 @@ import {
 } from '../../services/api';
 import { Asset, AssetProblem, MaintenanceItem, WorkOrder } from '../../types';
 
-jest.mock('../../services/api');
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('../../services/api');
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useParams: () => ({ id: 'test-id' }),
   useNavigate: () => jest.fn(),
 }));

@@ -6,11 +6,11 @@ import { BrowserRouter } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 
 // Mock RecentPages component
-jest.mock('../../components/RecentPages', () => {
-  return function RecentPages() {
+vi.mock('../../components/RecentPages', () => ({
+  default: function RecentPages() {
     return <div data-testid="recent-pages">Recent Pages</div>;
-  };
-});
+  },
+}));
 
 const renderSidebar = () => {
   return render(

@@ -131,9 +131,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
-      - REACT_APP_GIT_HASH=${GIT_HASH:-dev}
-      - REACT_APP_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
+      - VITE_API_URL=http://localhost:8000
+      - VITE_GIT_HASH=${GIT_HASH:-dev}
+      - VITE_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
     depends_on:
       - backend
 

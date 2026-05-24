@@ -10,8 +10,8 @@ import { MemoryRouter } from 'react-router-dom';
 import MaintenanceDashboardPage from '../../pages/MaintenanceDashboardPage';
 import { activeMaintenanceAPI, maintenanceAPI, MaintenanceDashboardData } from '../../services/api';
 
-jest.mock('../../services/api', () => {
-  const actual = jest.requireActual('../../services/api');
+vi.mock('../../services/api', async () => {
+  const actual = await vi.importActual('../../services/api');
   return {
     ...actual,
     maintenanceAPI: {

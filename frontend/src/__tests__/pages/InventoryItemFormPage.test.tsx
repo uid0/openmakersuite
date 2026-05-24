@@ -9,26 +9,26 @@ import * as api from '../../services/api';
 import { showError } from '../../utils/dialogs';
 
 // Mock the API
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
-jest.mock('../../utils/dialogs', () => ({
+vi.mock('../../utils/dialogs', async () => ({
   promptInput: jest.fn(() => Promise.resolve(null)),
   showError: jest.fn(),
 }));
 
 // Mock qrcode.react
-jest.mock('qrcode.react', () => ({
+vi.mock('qrcode.react', async () => ({
   QRCodeSVG: () => <div data-testid="qr-code">QR Code</div>,
 }));
 
 // Mock NFPADiamond
-jest.mock('../../components/NFPADiamond', () => ({
+vi.mock('../../components/NFPADiamond', async () => ({
   __esModule: true,
   default: () => <div data-testid="nfpa-diamond">NFPA Diamond</div>,
 }));
 
 // Mock SupplierRelationshipForm
-jest.mock('../../components/SupplierRelationshipForm', () => ({
+vi.mock('../../components/SupplierRelationshipForm', async () => ({
   __esModule: true,
   default: ({ onChange }: any) => (
     <div data-testid="supplier-form">
@@ -38,8 +38,8 @@ jest.mock('../../components/SupplierRelationshipForm', () => ({
 }));
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 

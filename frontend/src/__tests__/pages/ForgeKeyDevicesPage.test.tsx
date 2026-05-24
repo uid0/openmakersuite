@@ -14,8 +14,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ForgeKeyDevicesPage from '../../pages/ForgeKeyDevicesPage';
 import { forgekeyAPI, inventoryAPI } from '../../services/api';
 
-jest.mock('../../services/api', () => {
-  const actual = jest.requireActual('../../services/api');
+vi.mock('../../services/api', async () => {
+  const actual = await vi.importActual('../../services/api');
   return {
     ...actual,
     forgekeyAPI: {

@@ -304,9 +304,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.prod
       args:
-        - REACT_APP_API_URL=/api
-        - REACT_APP_GIT_HASH=${GIT_HASH}
-        - REACT_APP_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
+        - VITE_API_URL=/api
+        - VITE_GIT_HASH=${GIT_HASH}
+        - VITE_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
     logging: *default-logging
     volumes:
       - frontend_build:/app/frontend

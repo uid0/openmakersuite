@@ -74,11 +74,16 @@ SIZE=$(du -h "$OUT" | cut -f1)
 echo "Backup written: $OUT ($SIZE)"
 
 # Verify the artifact is openable. A truncated dump fails this without ever
-# touching the live database.
+# touching the live database. For custom-format dumps we hand the file back
+# *into* the db container — host pg_restore is often older than the server
+# (matters across major-version jumps like pg15 → pg18) and would fail the
+# TOC list for that reason alone, masking real corruption.
 verify_status=0
 if [ "$PG_FORMAT" = "custom" ]; then
-    if ! pg_restore -l "$OUT" >/dev/null 2>&1; then
-        echo "WARNING: pg_restore could not list TOC for $OUT (host pg_restore not available or dump corrupt)" >&2
+    if ! docker compose -f "$COMPOSE_FILE" exec -T \
+            -e PGDATABASE="$POSTGRES_DB" \
+            db pg_restore -l /dev/stdin < "$OUT" >/dev/null 2>&1; then
+        echo "WARNING: pg_restore could not list TOC for $OUT (dump corrupt or container unavailable)" >&2
         verify_status=2
     fi
 else

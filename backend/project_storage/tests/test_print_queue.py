@@ -5,7 +5,6 @@ from django.utils import timezone
 import pytest
 from rest_framework.test import APIClient
 
-from project_storage.models import ProjectStorageEvent, ProjectStorageStint
 from project_storage.tests.factories import ProjectStorageStintFactory
 
 pytestmark = pytest.mark.django_db

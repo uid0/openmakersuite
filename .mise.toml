@@ -6,4 +6,4 @@
 # (`backend/Dockerfile*`) and the GitHub Actions `setup-python` steps in
 # `.github/workflows/ci.yml` are updated together with this file.
 [tools]
-python = "3.13"
+python = "3.14.5"

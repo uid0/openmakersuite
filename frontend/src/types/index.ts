@@ -1366,3 +1366,58 @@ export interface NetworkDrop {
   created_at: string;
   updated_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// Project Storage
+// ---------------------------------------------------------------------------
+
+export type ProjectStorageStatus =
+  | 'active'
+  | 'expiring_soon'
+  | 'expired'
+  | 'purgatory_warned'
+  | 'purgatory'
+  | 'removed';
+
+export type ProjectStorageEventType =
+  | 'created'
+  | 'scanned'
+  | 'notice_sent'
+  | 'moved_to_purgatory'
+  | 'removed'
+  | 'note_added';
+
+export interface ProjectStorageEvent {
+  id: number;
+  event_type: ProjectStorageEventType;
+  actor_username: string;
+  actor_label: string;
+  note: string;
+  created_at: string;
+}
+
+export interface ProjectStorageStint {
+  id: number;
+  stint_id: string;
+  username: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  display_name: string;
+  project_title: string;
+  started_at: string;
+  expires_at: string;
+  removed_at: string | null;
+  notice_sent_at: string | null;
+  moved_to_purgatory_at: string | null;
+  storage_location_name: string;
+  purgatory_location_name: string;
+  notes: string;
+  status: ProjectStorageStatus;
+  purgatory_at: string | null;
+  expiry_week: number;
+  expiry_day_of_year: number;
+  events: ProjectStorageEvent[];
+  created_at: string;
+  updated_at: string;
+}

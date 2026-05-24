@@ -3,7 +3,7 @@
  */
 import { H } from 'highlight.run';
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -2888,6 +2888,44 @@ export const pulseAPI = {
 
   createShare: (ttlDays?: number) =>
     api.post<AnalyticsShareResponse>('/analytics/share/', ttlDays ? { ttl_days: ttlDays } : {}),
+};
+
+// ---------------------------------------------------------------------------
+// Project Storage (warden + kiosk)
+// ---------------------------------------------------------------------------
+
+export const projectStorageAPI = {
+  get: (stintId: string) =>
+    api.get<ProjectStorageStint>(`/project-storage/stints/${stintId}/`),
+
+  byMember: (username: string) =>
+    api.get<ProjectStorageStint[]>(`/project-storage/stints/by-member/${encodeURIComponent(username)}/`),
+
+  start: (data: {
+    username: string;
+    first_name?: string;
+    last_name?: string;
+    email?: string;
+    project_title?: string;
+    storage_location_name?: string;
+  }) =>
+    api.post<ProjectStorageStint>('/project-storage/stints/start/', data),
+
+  sendViolationNotice: (stintId: string) =>
+    api.post<ProjectStorageStint>(`/project-storage/stints/${stintId}/send-violation-notice/`, {}),
+
+  moveToPurgatory: (stintId: string, purgatoryLocationName?: string) =>
+    api.post<ProjectStorageStint>(`/project-storage/stints/${stintId}/move-to-purgatory/`, {
+      purgatory_location_name: purgatoryLocationName ?? '',
+    }),
+
+  markRemoved: (stintId: string, note?: string) =>
+    api.post<ProjectStorageStint>(`/project-storage/stints/${stintId}/mark-removed/`, {
+      note: note ?? '',
+    }),
+
+  labelUrl: (stintId: string, printer: 'brother_ql' | 'epson_tm' = 'brother_ql') =>
+    `${API_BASE_URL}/project-storage/stints/${stintId}/label/?printer=${printer}`,
 };
 
 export default api;

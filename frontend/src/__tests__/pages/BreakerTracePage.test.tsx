@@ -7,7 +7,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import BreakerTracePage from '../../pages/BreakerTracePage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 const renderAt = (path: string) =>
   render(

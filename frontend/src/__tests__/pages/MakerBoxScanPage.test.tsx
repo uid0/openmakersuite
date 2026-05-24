@@ -14,7 +14,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import MakerBoxScanPage from '../../pages/MakerBoxScanPage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 type ScanResult = api.MakerBoxScanResult;
 

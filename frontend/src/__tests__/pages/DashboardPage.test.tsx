@@ -8,11 +8,11 @@ import DashboardPage from '../../pages/DashboardPage';
 import { dashboardAPI } from '../../services/api';
 
 // Mock CSS imports
-jest.mock('react-grid-layout/css/styles.css', () => ({}));
-jest.mock('react-resizable/css/styles.css', () => ({}));
+vi.mock('react-grid-layout/css/styles.css', () => ({}));
+vi.mock('react-resizable/css/styles.css', () => ({}));
 
 // Mock the dashboard API
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   dashboardAPI: {
     getWidgets: jest.fn(),
     saveWidgets: jest.fn(),
@@ -25,7 +25,7 @@ jest.mock('../../services/api', () => ({
 }));
 
 // Mock react-grid-layout
-jest.mock('react-grid-layout', () => {
+vi.mock('react-grid-layout', () => {
   return {
     __esModule: true,
     default: ({ children, onLayoutChange }: any) => (
@@ -37,34 +37,34 @@ jest.mock('react-grid-layout', () => {
 });
 
 // Mock the widget components
-jest.mock('../../components/dashboard/LowStockWidget', () => {
-  return function LowStockWidget() {
+vi.mock('../../components/dashboard/LowStockWidget', () => {
+  return { default: function LowStockWidget() {
     return <div data-testid="low-stock-widget">Low Stock Widget</div>;
-  };
+  } };
 });
 
-jest.mock('../../components/dashboard/PendingReordersWidget', () => {
-  return function PendingReordersWidget() {
+vi.mock('../../components/dashboard/PendingReordersWidget', () => {
+  return { default: function PendingReordersWidget() {
     return <div data-testid="pending-reorders-widget">Pending Reorders Widget</div>;
-  };
+  } };
 });
 
-jest.mock('../../components/dashboard/AssetProblemsWidget', () => {
-  return function AssetProblemsWidget() {
+vi.mock('../../components/dashboard/AssetProblemsWidget', () => {
+  return { default: function AssetProblemsWidget() {
     return <div data-testid="asset-problems-widget">Asset Problems Widget</div>;
-  };
+  } };
 });
 
-jest.mock('../../components/dashboard/QRScansWidget', () => {
-  return function QRScansWidget() {
+vi.mock('../../components/dashboard/QRScansWidget', () => {
+  return { default: function QRScansWidget() {
     return <div data-testid="qr-scans-widget">QR Scans Widget</div>;
-  };
+  } };
 });
 
-jest.mock('../../components/dashboard/DeliveriesWidget', () => {
-  return function DeliveriesWidget() {
+vi.mock('../../components/dashboard/DeliveriesWidget', () => {
+  return { default: function DeliveriesWidget() {
     return <div data-testid="deliveries-widget">Deliveries Widget</div>;
-  };
+  } };
 });
 
 describe('DashboardPage', () => {

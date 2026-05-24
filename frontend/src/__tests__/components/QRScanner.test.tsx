@@ -13,7 +13,7 @@ import QRScanner, { QRScannerError, isNoQrFoundSignal } from '../../components/Q
 
 // html5-qrcode loads the browser's WebAssembly decoder on import, which jsdom
 // can't satisfy. We don't reach into it in these tests.
-jest.mock('html5-qrcode', () => ({
+vi.mock('html5-qrcode', () => ({
   Html5Qrcode: jest.fn().mockImplementation(() => ({
     start: jest.fn().mockResolvedValue(undefined),
     stop: jest.fn().mockResolvedValue(undefined),

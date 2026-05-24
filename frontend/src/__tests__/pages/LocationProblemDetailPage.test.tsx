@@ -13,7 +13,7 @@ import LocationProblemDetailPage from '../../pages/LocationProblemDetailPage';
 import api, { locationProblemsAPI, maintenanceAPI } from '../../services/api';
 import { LocationProblem } from '../../types';
 
-jest.mock('../../services/api', () => {
+vi.mock('../../services/api', () => {
   const apiMock = { get: jest.fn() };
   return {
     __esModule: true,

@@ -722,7 +722,6 @@ describe('API Service', () => {
   });
 
   describe('resolveApiBaseUrl (deployment-configurable API base URL)', () => {
-    const ORIGINAL_ENV = process.env;
     const ORIGINAL_LOCATION = window.location;
 
     const setHostname = (hostname: string) => {
@@ -733,35 +732,34 @@ describe('API Service', () => {
     };
 
     beforeEach(() => {
-      process.env = { ...ORIGINAL_ENV };
-      delete process.env.REACT_APP_API_URL;
+      vi.unstubAllEnvs();
     });
 
     afterEach(() => {
-      process.env = ORIGINAL_ENV;
+      vi.unstubAllEnvs();
       Object.defineProperty(window, 'location', {
         configurable: true,
         value: ORIGINAL_LOCATION,
       });
     });
 
-    test('uses absolute REACT_APP_API_URL and appends /api when missing', () => {
-      process.env.REACT_APP_API_URL = 'https://api.example.com';
+    test('uses absolute VITE_API_URL and appends /api when missing', () => {
+      vi.stubEnv('VITE_API_URL', 'https://api.example.com');
       expect(resolveApiBaseUrl()).toBe('https://api.example.com/api');
     });
 
-    test('does not duplicate /api when REACT_APP_API_URL already ends with /api', () => {
-      process.env.REACT_APP_API_URL = 'https://api.example.com/api';
+    test('does not duplicate /api when VITE_API_URL already ends with /api', () => {
+      vi.stubEnv('VITE_API_URL', 'https://api.example.com/api');
       expect(resolveApiBaseUrl()).toBe('https://api.example.com/api');
     });
 
     test('strips trailing slashes before adding /api', () => {
-      process.env.REACT_APP_API_URL = 'https://api.example.com/';
+      vi.stubEnv('VITE_API_URL', 'https://api.example.com/');
       expect(resolveApiBaseUrl()).toBe('https://api.example.com/api');
     });
 
     test('honors a relative /api value (the documented prod default)', () => {
-      process.env.REACT_APP_API_URL = '/api';
+      vi.stubEnv('VITE_API_URL', '/api');
       expect(resolveApiBaseUrl()).toBe('/api');
     });
 

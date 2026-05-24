@@ -14,7 +14,7 @@ import { MemoryRouter } from 'react-router-dom';
 import TaxReceiptLookupPage from '../../pages/TaxReceiptLookupPage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 const renderPage = () =>
   render(

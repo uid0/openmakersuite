@@ -12,7 +12,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PowerPanelDetailPage from '../../pages/PowerPanelDetailPage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 const baseBreaker = {
   id: 5,

@@ -8,8 +8,8 @@ import React from 'react';
 import MaintenanceHistorySection from '../../components/assets/MaintenanceHistorySection';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api', () => {
-  const actual = jest.requireActual('../../services/api');
+vi.mock('../../services/api', async () => {
+  const actual = await vi.importActual('../../services/api');
   return {
     __esModule: true,
     ...actual,

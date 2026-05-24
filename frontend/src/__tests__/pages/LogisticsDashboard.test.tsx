@@ -3,7 +3,7 @@ import React from 'react';
 import LogisticsDashboard from '../../pages/LogisticsDashboard';
 import { analyticsAPI } from '../../services/api';
 
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   analyticsAPI: {
     getLogisticsDashboard: jest.fn(),
   },

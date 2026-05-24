@@ -8,7 +8,7 @@ import UserProfilePage from '../../pages/UserProfilePage';
 import { notificationsAPI, userAPI } from '../../services/api';
 
 // Mock the API services
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   notificationsAPI: {
     getPreferences: jest.fn(),
     updatePreferences: jest.fn(),

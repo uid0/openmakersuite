@@ -1,25 +1,61 @@
-// jest-dom adds custom jest matchers for asserting on DOM nodes.
-// allows you to do things like:
-// expect(element).toHaveTextContent(/react/i)
-// learn more: https://github.com/testing-library/jest-dom
-import '@testing-library/jest-dom';
+// jest-dom adds custom matchers for asserting on DOM nodes.
+import '@testing-library/jest-dom/vitest';
+import { vi } from 'vitest';
 
-// Mock window.matchMedia - must be set up before any imports that use it
-// This is critical for Mantine components that use use-media-query hook
+// Shim: existing test files reference `jest.fn` / `jest.mock` etc.
+// Vitest's `vi` is API-compatible for the operations used here, so
+// alias `jest` to `vi` globally to avoid touching ~400 test sites.
+(globalThis as typeof globalThis & { jest: typeof vi }).jest = vi;
+
+// Node 24's experimental built-in localStorage shadows jsdom's when
+// `window === globalThis`, leaving `localStorage` undefined unless the
+// process was started with `--localstorage-file`. Install a deterministic
+// in-memory backing store so tests don't depend on Node CLI flags.
+const installMemoryStorage = (target: string) => {
+  const store = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (key) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key, value) => {
+      store.set(key, String(value));
+    },
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    key: (index) => Array.from(store.keys())[index] ?? null,
+  };
+  Object.defineProperty(globalThis, target, {
+    configurable: true,
+    writable: true,
+    value: storage,
+  });
+  if (typeof window !== 'undefined') {
+    Object.defineProperty(window, target, {
+      configurable: true,
+      writable: true,
+      value: storage,
+    });
+  }
+};
+installMemoryStorage('localStorage');
+installMemoryStorage('sessionStorage');
+
 const matchMediaMock = (query: string) => ({
   matches: false,
   media: query,
   onchange: null,
-  addListener: jest.fn(),
-  removeListener: jest.fn(),
-  addEventListener: jest.fn(),
-  removeEventListener: jest.fn(),
-  dispatchEvent: jest.fn(),
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  dispatchEvent: vi.fn(),
 });
 
-// Set up matchMedia before any tests run - use both approaches
 if (typeof window !== 'undefined') {
-  (window as any).matchMedia = matchMediaMock;
+  (window as unknown as { matchMedia: typeof matchMediaMock }).matchMedia = matchMediaMock;
 }
 
 Object.defineProperty(window, 'matchMedia', {
@@ -28,25 +64,15 @@ Object.defineProperty(window, 'matchMedia', {
   configurable: true,
 });
 
-// Mock ResizeObserver for Mantine components (used by ScrollArea, etc.)
-global.ResizeObserver = jest.fn().mockImplementation(() => ({
-  observe: jest.fn(),
-  unobserve: jest.fn(),
-  disconnect: jest.fn(),
-}));
-
-// Mock ResizeObserver for Mantine components (used by ScrollArea, etc.)
-// Must be a class, not just a function
 class ResizeObserverMock {
-  observe = jest.fn();
-  unobserve = jest.fn();
-  disconnect = jest.fn();
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
 }
 
-global.ResizeObserver = ResizeObserverMock as any;
+(globalThis as unknown as { ResizeObserver: typeof ResizeObserverMock }).ResizeObserver = ResizeObserverMock;
 if (typeof window !== 'undefined') {
-  (window as any).ResizeObserver = ResizeObserverMock;
+  (window as unknown as { ResizeObserver: typeof ResizeObserverMock }).ResizeObserver = ResizeObserverMock;
 }
 
-// Mock scrollIntoView for Mantine Combobox
-Element.prototype.scrollIntoView = jest.fn();
+Element.prototype.scrollIntoView = vi.fn();

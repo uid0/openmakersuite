@@ -39,18 +39,18 @@ const TVDashboard: React.FC = () => {
   // Memoize config to prevent unnecessary re-renders and API calls
   const config = useMemo(() => {
     // Use site settings if available, fall back to environment variables
-    const siteName = siteSettings?.site_name || process.env.REACT_APP_DASHBOARD_TITLE || 'Dallas Makerspace Inventory';
+    const siteName = siteSettings?.site_name || import.meta.env.VITE_DASHBOARD_TITLE || 'Dallas Makerspace Inventory';
     const dashboardTitle = siteSettings?.dashboard_title || siteName;
-    const dashboardSubtitle = siteSettings?.dashboard_subtitle || process.env.REACT_APP_DASHBOARD_SUBTITLE || 'Items on Order';
-    const logo = siteSettings?.logo_url || process.env.REACT_APP_DASHBOARD_LOGO || null;
-    const showLogo = siteSettings?.show_logo_on_dashboard !== false && process.env.REACT_APP_SHOW_LOGO !== 'false';
+    const dashboardSubtitle = siteSettings?.dashboard_subtitle || import.meta.env.VITE_DASHBOARD_SUBTITLE || 'Items on Order';
+    const logo = siteSettings?.logo_url || import.meta.env.VITE_DASHBOARD_LOGO || null;
+    const showLogo = siteSettings?.show_logo_on_dashboard !== false && import.meta.env.VITE_SHOW_LOGO !== 'false';
 
     const baseConfig = {
       title: dashboardTitle,
       subtitle: dashboardSubtitle,
       logo: logo,
       showLogo: showLogo,
-      showTransparency: process.env.REACT_APP_SHOW_TRANSPARENCY !== 'false',
+      showTransparency: import.meta.env.VITE_SHOW_TRANSPARENCY !== 'false',
       primaryColor: siteSettings?.primary_color || '#007cba',
       secondaryColor: siteSettings?.secondary_color || '#417690',
     };
@@ -60,9 +60,9 @@ const TVDashboard: React.FC = () => {
       const locationUpper = location.toUpperCase();
       return {
         ...baseConfig,
-        title: process.env[`REACT_APP_DASHBOARD_TITLE_${locationUpper}`] || `${baseConfig.title} - ${location.charAt(0).toUpperCase() + location.slice(1)}`,
-        subtitle: process.env[`REACT_APP_DASHBOARD_SUBTITLE_${locationUpper}`] || baseConfig.subtitle,
-        logo: process.env[`REACT_APP_DASHBOARD_LOGO_${locationUpper}`] || baseConfig.logo,
+        title: (import.meta.env as Record<string, string | undefined>)[`VITE_DASHBOARD_TITLE_${locationUpper}`] || `${baseConfig.title} - ${location.charAt(0).toUpperCase() + location.slice(1)}`,
+        subtitle: (import.meta.env as Record<string, string | undefined>)[`VITE_DASHBOARD_SUBTITLE_${locationUpper}`] || baseConfig.subtitle,
+        logo: (import.meta.env as Record<string, string | undefined>)[`VITE_DASHBOARD_LOGO_${locationUpper}`] || baseConfig.logo,
         locationFilter: location.toLowerCase(),
       };
     }
@@ -72,12 +72,12 @@ const TVDashboard: React.FC = () => {
 
   // Configurable footer messages - can be set via environment variables
   const footerMessages = useState(() => {
-    const envMessages = process.env.REACT_APP_FOOTER_MESSAGES;
+    const envMessages = import.meta.env.VITE_FOOTER_MESSAGES;
     if (envMessages) {
       try {
         return JSON.parse(envMessages);
       } catch (e) {
-        console.warn('Invalid REACT_APP_FOOTER_MESSAGES format, using defaults');
+        console.warn('Invalid VITE_FOOTER_MESSAGES format, using defaults');
       }
     }
     // Default messages
@@ -91,7 +91,7 @@ const TVDashboard: React.FC = () => {
   })[0];
 
   // Rotation interval - configurable via environment variable
-  const rotationInterval = parseInt(process.env.REACT_APP_MESSAGE_ROTATION_SECONDS || '10') * 1000;
+  const rotationInterval = parseInt(import.meta.env.VITE_MESSAGE_ROTATION_SECONDS || '10') * 1000;
 
   // Extract locationFilter to make fetchReorderedItems more stable
   const locationFilter = useMemo(() => (config as any).locationFilter, [config]);

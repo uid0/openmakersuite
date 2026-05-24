@@ -10,10 +10,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import AnalyticsDashboardPage from '../../pages/AnalyticsDashboardPage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 // Recharts is heavy — render placeholders so the smoke test stays focused.
-jest.mock('recharts', () => ({
+vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: any) => <div data-testid="responsive-container">{children}</div>,
   LineChart: () => <div data-testid="line-chart" />,
   Line: () => null,

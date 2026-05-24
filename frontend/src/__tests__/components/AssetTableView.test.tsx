@@ -9,10 +9,12 @@ import AssetTableView from '../../components/AssetTableView';
 import { Asset } from '../../types';
 import * as csvExport from '../../utils/csvExport';
 
-jest.mock('../../utils/csvExport');
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
-  useNavigate: () => jest.fn(),
+vi.mock('../../utils/csvExport');
+
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
+  useNavigate: () => mockNavigate,
 }));
 
 const mockAssets: Asset[] = [
@@ -322,8 +324,7 @@ describe('AssetTableView', () => {
   });
 
   it('navigates to asset detail when row is clicked', async () => {
-    const mockNavigate = jest.fn();
-    jest.spyOn(require('react-router-dom'), 'useNavigate').mockReturnValue(mockNavigate);
+    mockNavigate.mockClear();
 
     renderComponent();
 

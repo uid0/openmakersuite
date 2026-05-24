@@ -8,15 +8,15 @@ import SupplierDetailPage from '../../pages/SupplierDetailPage';
 import * as api from '../../services/api';
 
 // Mock the API
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 // Mock chart components
-jest.mock('../../components/LeadTimeChart', () => ({
+vi.mock('../../components/LeadTimeChart', async () => ({
   __esModule: true,
   default: ({ analytics }: any) => <div>LeadTimeChart: {analytics?.total_orders || 0} orders</div>,
 }));
 
-jest.mock('../../components/PriceTrendChart', () => ({
+vi.mock('../../components/PriceTrendChart', async () => ({
   __esModule: true,
   default: ({ priceTrends }: any) => (
     <div>PriceTrendChart: {priceTrends?.summary?.price_changes_count || 0} changes</div>
@@ -24,8 +24,8 @@ jest.mock('../../components/PriceTrendChart', () => ({
 }));
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
   useParams: () => ({ id: '1' }),
 }));

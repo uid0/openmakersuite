@@ -9,20 +9,20 @@ import * as api from '../../services/api';
 import { showError, showInfo, showSuccess } from '../../utils/dialogs';
 
 // Mock the API
-jest.mock('../../services/api');
-jest.mock('../../utils/csvExport', () => ({
+vi.mock('../../services/api');
+vi.mock('../../utils/csvExport', async () => ({
   exportInventoryItemsToCSV: jest.fn(),
 }));
 
-jest.mock('../../utils/dialogs', () => ({
+vi.mock('../../utils/dialogs', async () => ({
   showError: jest.fn(),
   showInfo: jest.fn(),
   showSuccess: jest.fn(),
 }));
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 

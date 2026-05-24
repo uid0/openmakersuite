@@ -9,16 +9,16 @@ import WebhookListPage from '../../pages/WebhookListPage';
 import * as api from '../../services/api';
 import { confirmDelete, showError } from '../../utils/dialogs';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
-jest.mock('../../utils/dialogs', () => ({
+vi.mock('../../utils/dialogs', async () => ({
   confirmDelete: jest.fn(),
   showError: jest.fn(),
 }));
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 

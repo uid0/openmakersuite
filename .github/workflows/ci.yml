@@ -678,9 +678,9 @@ jobs:
           # deploy-time discovery. Build both prod images from scratch.
           docker build -f backend/Dockerfile.prod -t oms-backend:ci backend/
           docker build -f frontend/Dockerfile.prod -t oms-frontend:ci \
-              --build-arg REACT_APP_API_URL=/api \
-              --build-arg REACT_APP_GIT_HASH=ci \
-              --build-arg REACT_APP_GITHUB_URL=https://github.com/uid0/openmakersuite \
+              --build-arg VITE_API_URL=/api \
+              --build-arg VITE_GIT_HASH=ci \
+              --build-arg VITE_GITHUB_URL=https://github.com/uid0/openmakersuite \
               frontend/
 
   prod-stack-smoke:

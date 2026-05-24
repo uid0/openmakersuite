@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import TransparencyPage from '../../pages/TransparencyPage';
 import { analyticsAPI } from '../../services/api';
 
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   analyticsAPI: {
     getTransparencyLedger: jest.fn(),
   },

@@ -209,9 +209,9 @@ jobs:
           push: true
           tags: ${{ needs.determine-tags.outputs.frontend_tags }}
           build-args: |
-            REACT_APP_API_URL=/api
-            REACT_APP_GIT_HASH=${{ steps.git.outputs.hash }}
-            REACT_APP_GITHUB_URL=https://github.com/${{ github.repository }}
+            VITE_API_URL=/api
+            VITE_GIT_HASH=${{ steps.git.outputs.hash }}
+            VITE_GITHUB_URL=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

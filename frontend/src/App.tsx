@@ -67,6 +67,7 @@ import OutletFormPage from './pages/OutletFormPage';
 import ThirdPartyWorkOrderPage from './pages/ThirdPartyWorkOrderPage';
 import WorkOrderPage from './pages/WorkOrderPage';
 import PurchaseOrderFormPage from './pages/PurchaseOrderFormPage';
+import ProjectStorageKioskPage from './pages/ProjectStorageKioskPage';
 import PurchaseOrderListPage from './pages/PurchaseOrderListPage';
 import PurchaseOrderPage from './pages/PurchaseOrderPage';
 import PurchasingReportPage from './pages/PurchasingReportPage';
@@ -151,6 +152,9 @@ function AppContent() {
         <Routes>
           {/* Home/Landing */}
           <Route path="/" element={<HomePage />} />
+
+          {/* Public kiosks (no Django auth) */}
+          <Route path="/project-storage/kiosk" element={<ProjectStorageKioskPage />} />
 
           {/* Redirects for backward compatibility */}
           <Route path="/tv-dashboard" element={<Navigate to="/facilities/tv-dashboard" replace />} />

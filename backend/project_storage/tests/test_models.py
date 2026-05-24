@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-import pytest
 from django.utils import timezone
+
+import pytest
 
 from project_storage.models import (
     DEFAULT_PURGATORY_GRACE_DAYS,

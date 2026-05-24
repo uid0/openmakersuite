@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-import factory
 from django.utils import timezone
+
+import factory
 
 from project_storage.models import DEFAULT_STINT_DAYS, ProjectStorageStint
 

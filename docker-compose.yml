@@ -2,13 +2,17 @@
 
 services:
   db:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
       - POSTGRES_DB=makerspace_inventory
       - POSTGRES_USER=makerspace
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-development_password_only}
+      # pg18 alpine changed the on-disk layout (docker-library/postgres#1259);
+      # nesting PGDATA in a subdir of the mount keeps the volume path valid
+      # AND gives the image a clean dir to initialize the new layout into.
+      - PGDATA=/var/lib/postgresql/data/pgdata
     ports:
       - "5432:5432"
     healthcheck:

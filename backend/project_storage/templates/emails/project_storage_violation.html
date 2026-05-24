@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Project storage notice — {{ stint_id }}</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #222; line-height: 1.55; max-width: 560px;">
+  <p>Hi {{ display_name }},</p>
+
+  <p>This is a notice from the makerspace project-storage warden.</p>
+
+  <p>
+    Your project-storage stint <strong>{{ stint_id }}</strong>{% if project_title %} ("{{ project_title }}"){% endif %}
+    expired on <strong>{{ expires_at|date:"l, F jS" }}</strong>
+    ({{ expires_at|date:"Y-m-d" }}).
+  </p>
+
+  <p>
+    Project-storage stints are limited to 30 days. You have
+    <strong>{{ grace_days }} days</strong> from this notice —
+    until <strong>{{ purgatory_at|date:"l, F jS" }}</strong>
+    ({{ purgatory_at|date:"Y-m-d" }}) — to remove your items
+    from{% if storage_location_name %} <strong>{{ storage_location_name }}</strong>{% else %} the project storage area{% endif %}.
+  </p>
+
+  <p>
+    If your items are not removed by then, they will be moved to{% if purgatory_location_name %} <strong>{{ purgatory_location_name }}</strong>{% else %} project purgatory{% endif %} and held there per our project-purgatory policy.
+  </p>
+
+  <p>If you need more time, please reply to this email or speak with the storage warden.</p>
+
+  <p>After your items are removed, there is a <strong>3-day cool-down</strong> before you can start a new project-storage stint.</p>
+
+  <p>Thanks,<br>The makerspace</p>
+</body>
+</html>

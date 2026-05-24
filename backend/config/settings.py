@@ -99,6 +99,7 @@ INSTALLED_APPS = [
     "lockers",
     "analytics",
     "climate",
+    "project_storage",
 ]
 
 MIDDLEWARE = [

@@ -13,7 +13,6 @@ append-only audit log of events on that stint.
 from __future__ import annotations
 
 import secrets
-import string
 from datetime import timedelta
 from typing import Optional
 

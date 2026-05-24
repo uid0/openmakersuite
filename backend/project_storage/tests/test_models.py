@@ -10,7 +10,6 @@ from project_storage.models import (
     DEFAULT_PURGATORY_GRACE_DAYS,
     DEFAULT_REENTRY_COOLDOWN_DAYS,
     DEFAULT_STINT_DAYS,
-    EXPIRING_SOON_WINDOW_DAYS,
     ProjectStorageStint,
 )
 from project_storage.tests.factories import ProjectStorageStintFactory

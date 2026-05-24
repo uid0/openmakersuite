@@ -1813,6 +1813,32 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  project_storage.views.ProjectStorageStintViewSet:
+    actions:
+      by_member:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      label:
+        permission_classes:
+        - AllowAny
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      mark_removed:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      move_to_purgatory:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      send_violation_notice:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      start:
+        permission_classes:
+        - AllowAny
   reorder_queue.views.AnalyticsViewSet:
     actions:
       lead_time_trends:

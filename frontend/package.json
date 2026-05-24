@@ -116,7 +116,7 @@
       "\\.(css|less|scss|sass)$": "<rootDir>/src/__mocks__/styleMock.js"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!(axios|@hookform/resolvers)/)"
+      "node_modules/(?!(axios|@hookform/resolvers|zod)/)"
     ]
   },
   "devDependencies": {

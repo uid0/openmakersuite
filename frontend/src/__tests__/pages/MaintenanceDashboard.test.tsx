@@ -12,7 +12,7 @@ import MaintenanceDashboard from '../../pages/MaintenanceDashboard';
 import { reorderAPI, workOrderAPI } from '../../services/api';
 import { MaintenanceItem } from '../../types';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 const mockWorkOrderAPI = workOrderAPI as jest.Mocked<typeof workOrderAPI>;
 const mockReorderAPI = reorderAPI as jest.Mocked<typeof reorderAPI>;

@@ -290,7 +290,7 @@ jobs:
           # Force IPv4 only for npm operations (via .npmrc and NODE_OPTIONS)
           npm ci --verbose
           # Verify installation
-          ls -la node_modules/.bin/react-scripts || (echo "❌ react-scripts not found after npm ci!" && exit 1)
+          ls -la node_modules/.bin/vite || (echo "❌ vite not found after npm ci!" && exit 1)
           npm ls @mantine/core @mantine/modals html5-qrcode recharts react-grid-layout
         env:
           NODE_OPTIONS: "--dns-result-order=ipv4first"
@@ -548,8 +548,6 @@ jobs:
           CELERY_BROKER_URL=redis://redis:6379/0
           FRONTEND_URL=https://ci.example.com
           GIT_HASH=ci
-          REACT_APP_HIGHLIGHT_PROJECT_ID=
-          REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=
           GITHUB_URL=https://github.com/uid0/openmakersuite
           EMQX_DASHBOARD_PASSWORD=Strong1Password
           EOF
@@ -680,9 +678,9 @@ jobs:
           # deploy-time discovery. Build both prod images from scratch.
           docker build -f backend/Dockerfile.prod -t oms-backend:ci backend/
           docker build -f frontend/Dockerfile.prod -t oms-frontend:ci \
-              --build-arg REACT_APP_API_URL=/api \
-              --build-arg REACT_APP_GIT_HASH=ci \
-              --build-arg REACT_APP_GITHUB_URL=https://github.com/uid0/openmakersuite \
+              --build-arg VITE_API_URL=/api \
+              --build-arg VITE_GIT_HASH=ci \
+              --build-arg VITE_GITHUB_URL=https://github.com/uid0/openmakersuite \
               frontend/
 
   prod-stack-smoke:
@@ -727,14 +725,10 @@ jobs:
           CELERY_BROKER_URL=redis://redis:6379/0
           FRONTEND_URL=https://ci.example.com
           GIT_HASH=ci
-          REACT_APP_HIGHLIGHT_PROJECT_ID=
-          REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=
           GITHUB_URL=https://github.com/uid0/openmakersuite
           EMQX_DASHBOARD_PASSWORD=Strong1Password
           FORGEKEY_PROVISIONING_TOKEN=ci-provisioning-token-not-for-production-padding
           FORGEKEY_JWT_SIGNING_KEY=${jwt_env}
-          HIGHLIGHT_PROJECT_ID=
-          HIGHLIGHT_OTLP_ENDPOINT=
           EOF
 
           # bootstrap_users for EMQX is normally rendered by deploy.sh; the

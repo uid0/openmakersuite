@@ -9,20 +9,20 @@ import { NotificationProvider } from '../../contexts/NotificationContext';
 import WorkspaceLayout from '../../components/WorkspaceLayout';
 
 // Mock Sidebar and Breadcrumbs
-jest.mock('../../components/Sidebar', () => {
-  return function Sidebar() {
+vi.mock('../../components/Sidebar', () => ({
+  default: function Sidebar() {
     return <div data-testid="sidebar">Sidebar</div>;
-  };
-});
+  },
+}));
 
-jest.mock('../../components/Breadcrumbs', () => {
-  return function Breadcrumbs() {
+vi.mock('../../components/Breadcrumbs', () => ({
+  default: function Breadcrumbs() {
     return <div data-testid="breadcrumbs">Breadcrumbs</div>;
-  };
-});
+  },
+}));
 
 // Mock useCommandPalette hook
-jest.mock('../../hooks/useCommandPalette', () => ({
+vi.mock('../../hooks/useCommandPalette', () => ({
   useCommandPalette: () => ({
     isOpen: false,
     open: jest.fn(),

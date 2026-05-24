@@ -15,8 +15,8 @@ import { MemoryRouter } from 'react-router-dom';
 import ThanksPage from '../../pages/ThanksPage';
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 

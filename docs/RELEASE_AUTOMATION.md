@@ -16,22 +16,10 @@ When all checks are green, the system automatically:
 3. 📦 Creates a release bundle with deployment scripts
 4. 🔐 Cryptographically signs the release using Sigstore
 5. 🚀 Publishes to GitHub Releases
-6. 📊 Uploads frontend source maps to Highlight, tagged with the release SHA
 
 ## ⚙️ Required GitHub Secrets
 
 Configure these secrets in your GitHub repository settings (`Settings` → `Secrets and variables` → `Actions`):
-
-### Highlight Integration
-
-See `docs/HIGHLIGHT_MIGRATION.md` for the full env-var reference. The release
-pipeline reads:
-
-```bash
-HIGHLIGHT_API_KEY=highlight_org_upload_key
-REACT_APP_HIGHLIGHT_PROJECT_ID=highlight_project_verbose_id
-REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=https://otel.highlight.example.org:4317  # self-host only
-```
 
 ### Optional: Slack Notifications
 ```bash
@@ -134,34 +122,12 @@ cosign verify-blob --certificate *.pem --signature *.sig *.tar.gz
 ./deploy.sh
 ```
 
-## 📊 Highlight Integration Features
-
-### Release Tracking
-- 📤 **Automatic Source-Map Upload**: Every release uploads frontend source
-  maps to Highlight, tagged with `--appVersion=$GIT_HASH` so the dashboard
-  resolves minified frames to original TS lines.
-- 🐛 **Error Tracking**: Backend (Python) and frontend (React) exceptions
-  flow through the same OTel collector and appear in the Highlight dashboard.
-- 🎬 **Session Replay**: Frontend sessions are recorded and pivot off the
-  same trace IDs as backend traces, giving end-to-end debugging context.
-
-### Setting Up Highlight
-
-See **`docs/HIGHLIGHT_MIGRATION.md`** for the full setup, env-var reference,
-and operational runbook (cutover procedure, verification, rollback).
-
 ## 🔧 Troubleshooting
 
 ### Release Not Triggering
 - ✅ Check that CI workflow completed successfully
 - ✅ Verify you're on the `main` branch
 - ✅ Ensure there are new commits since last release
-
-### Highlight Source-Map Upload Failing
-- ✅ Verify `HIGHLIGHT_API_KEY` is the org-level upload key (not the project id).
-- ✅ Check `REACT_APP_HIGHLIGHT_PROJECT_ID` matches the project the bundle was built for.
-- ✅ For self-host, confirm the OTel collector / sourcemap endpoint is reachable from the GHA runner.
-- ✅ Confirm `--appVersion` matches `REACT_APP_GIT_HASH` baked into the bundle (otherwise stack frames stay minified at error time).
 
 ### Docker Image Push Failing
 - ✅ Check GitHub Container Registry permissions

@@ -5,9 +5,9 @@ import { render, screen } from '@testing-library/react';
 import App from '../App';
 
 // Mock child components to simplify testing
-jest.mock('../pages/HomePage', () => () => <div>Home Page</div>);
-jest.mock('../pages/ScanPage', () => () => <div>Scan Page</div>);
-jest.mock('../pages/AdminDashboard', () => () => <div>Admin Dashboard</div>);
+vi.mock('../pages/HomePage', () => ({ default: () => <div>Home Page</div> }));
+vi.mock('../pages/ScanPage', () => ({ default: () => <div>Scan Page</div> }));
+vi.mock('../pages/AdminDashboard', () => ({ default: () => <div>Admin Dashboard</div> }));
 
 describe('App Component', () => {
   test('renders without crashing', () => {

@@ -1,7 +1,7 @@
 /**
  * Main App Component
  */
-import { ErrorBoundary } from '@highlight-run/react';
+import React from 'react';
 import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'react-router-dom';
 import ErrorFallback from './components/ErrorFallback';
 import WorkspaceLayout from './components/WorkspaceLayout';
@@ -91,9 +91,35 @@ import WebhookFormPage from './pages/WebhookFormPage';
 import WebhookListPage from './pages/WebhookListPage';
 import './styles/App.css';
 
-// Highlight auto-instruments History API navigation, so route changes are
-// captured on the session timeline without a router-specific HOC (no
-// equivalent of Sentry.withSentryRouting is required).
+interface ErrorBoundaryProps {
+  fallback: (params: { error: Error; resetError: () => void }) => React.ReactNode;
+  children: React.ReactNode;
+}
+
+class ErrorBoundary extends React.Component<
+  ErrorBoundaryProps,
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // eslint-disable-next-line no-console
+    console.error('Uncaught error in render tree:', error, info);
+  }
+
+  resetError = () => this.setState({ error: null });
+
+  render() {
+    if (this.state.error) {
+      return this.props.fallback({ error: this.state.error, resetError: this.resetError });
+    }
+    return this.props.children;
+  }
+}
 
 // Redirect components for dynamic routes
 const RedirectTVDashboardLocation = () => {
@@ -148,7 +174,6 @@ function AppContent() {
         fallback={({ error, resetError }) => (
           <ErrorFallback error={error} resetError={resetError} />
         )}
-        showDialog={false}
       >
         <Routes>
           {/* Home/Landing */}

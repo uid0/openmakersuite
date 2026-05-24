@@ -30,7 +30,7 @@ const renderWithProvider = (component: React.ReactElement) => {
 };
 
 // Mock recharts
-jest.mock('recharts', () => ({
+vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: any) => <div data-testid="responsive-container">{children}</div>,
   LineChart: ({ children }: any) => <div data-testid="line-chart">{children}</div>,
   Line: () => <div data-testid="line" />,

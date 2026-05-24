@@ -9,18 +9,18 @@ import * as api from '../../services/api';
 import { confirmDelete, showError, showSuccess } from '../../utils/dialogs';
 
 // Mock the API
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 // Mock dialogs so confirmDelete invokes onConfirm immediately
-jest.mock('../../utils/dialogs', () => ({
+vi.mock('../../utils/dialogs', async () => ({
   confirmDelete: jest.fn(),
   showError: jest.fn(),
   showSuccess: jest.fn(),
 }));
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 
@@ -244,12 +244,6 @@ describe('LocationListPage', () => {
       expect(screen.getByText('Failed to load locations')).toBeInTheDocument();
     });
   });
-
-  // Note: Testing network errors without response (which trigger the Highlight
-  // error-boundary re-throw) is difficult in unit tests due to Jest's
-  // unhandled-rejection detection. The component's error handling is covered
-  // by the "displays error message" test above. The re-throw behavior is
-  // better tested in integration/e2e tests.
 
   it('displays staff controls when user is staff', async () => {
     localStorageMock.setItem('is_staff', 'true');

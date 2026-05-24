@@ -45,11 +45,6 @@ paho-mqtt==2.1.0
 PyJWT==2.13.0
 cryptography==48.0.0
 
-# Observability — self-hosted Highlight (replaces Sentry, oms-fjs).
-# `highlight-io` ships all OTel instrumentations (Django, Celery, Redis,
-# requests, …) as direct deps; no per-framework extras are required.
-highlight-io==0.10.2
-
 # Email (Postmark via Anymail)
 django-anymail[postmark]==15.0
 

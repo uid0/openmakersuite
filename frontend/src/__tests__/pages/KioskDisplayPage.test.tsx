@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import KioskDisplayPage from '../../pages/KioskDisplayPage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 const makePayload = (overrides: Partial<import('../../types').KioskPayload> = {}) => ({
   screen: {

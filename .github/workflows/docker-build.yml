@@ -209,90 +209,11 @@ jobs:
           push: true
           tags: ${{ needs.determine-tags.outputs.frontend_tags }}
           build-args: |
-            REACT_APP_API_URL=/api
-            REACT_APP_HIGHLIGHT_PROJECT_ID=${{ secrets.REACT_APP_HIGHLIGHT_PROJECT_ID }}
-            REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=${{ secrets.REACT_APP_HIGHLIGHT_OTLP_ENDPOINT }}
-            REACT_APP_HIGHLIGHT_ENVIRONMENT=production
-            REACT_APP_GIT_HASH=${{ steps.git.outputs.hash }}
-            REACT_APP_GITHUB_URL=https://github.com/${{ github.repository }}
+            VITE_API_URL=/api
+            VITE_GIT_HASH=${{ steps.git.outputs.hash }}
+            VITE_GITHUB_URL=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  upload-sourcemaps:
-    name: 📤 Upload Frontend Source Maps to Highlight
-    runs-on: ubuntu-latest
-    needs: [determine-tags, build-frontend]
-    if: |
-      needs.determine-tags.outputs.should_build == 'true' &&
-      (github.ref == 'refs/heads/main' ||
-       (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main'))
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Get git hash
-        id: git
-        run: |
-          GIT_HASH=$(git rev-parse --short HEAD)
-          echo "hash=$GIT_HASH" >> $GITHUB_OUTPUT
-          echo "🔍 Git hash: $GIT_HASH"
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build frontend (with source maps)
-        working-directory: frontend
-        env:
-          REACT_APP_API_URL: /api
-          REACT_APP_HIGHLIGHT_PROJECT_ID: ${{ secrets.REACT_APP_HIGHLIGHT_PROJECT_ID }}
-          REACT_APP_HIGHLIGHT_OTLP_ENDPOINT: ${{ secrets.REACT_APP_HIGHLIGHT_OTLP_ENDPOINT }}
-          REACT_APP_HIGHLIGHT_ENVIRONMENT: production
-          REACT_APP_GIT_HASH: ${{ steps.git.outputs.hash }}
-          REACT_APP_GITHUB_URL: https://github.com/${{ github.repository }}
-          GENERATE_SOURCEMAP: "true"
-        run: npm run build
-
-      - name: Upload source maps to Highlight
-        env:
-          # HIGHLIGHT_API_KEY is the org-level upload key from
-          # app.highlight.io > Settings > API. It is distinct from the per-
-          # project HIGHLIGHT_PROJECT_ID used at runtime by the SDK.
-          HIGHLIGHT_API_KEY: ${{ secrets.HIGHLIGHT_API_KEY }}
-          HIGHLIGHT_PROJECT_ID: ${{ secrets.REACT_APP_HIGHLIGHT_PROJECT_ID }}
-          # Self-hosted upload endpoint. Defaults to the OMS Highlight host
-          # so maps land where the runtime SDK reads them. Override via repo
-          # secret HIGHLIGHT_BACKEND_URL when pointing at staging or cloud.
-          HIGHLIGHT_BACKEND_URL: ${{ secrets.HIGHLIGHT_BACKEND_URL || 'https://highlighter.openmakersuite.net/public' }}
-          GIT_HASH: ${{ steps.git.outputs.hash }}
-        run: |
-          if [ -z "$HIGHLIGHT_API_KEY" ] || [ -z "$HIGHLIGHT_PROJECT_ID" ]; then
-            echo "⚠️  Highlight secrets not configured (HIGHLIGHT_API_KEY / REACT_APP_HIGHLIGHT_PROJECT_ID) — skipping source-map upload."
-            exit 0
-          fi
-          # The uploader walks the build/static/js tree and POSTs each .map to
-          # the Highlight collector, tagged with the project + version so the
-          # dashboard can resolve minified frames during replay. --appVersion
-          # must match REACT_APP_GIT_HASH baked into the bundle, otherwise
-          # Highlight will not match the maps to the bundle at error time.
-          # --backendUrl points the uploader at the self-hosted instance so
-          # maps land where the runtime SDK reads them, not at the cloud.
-          npx --yes @highlight-run/sourcemap-uploader upload \
-            --apiKey "$HIGHLIGHT_API_KEY" \
-            --backendUrl "$HIGHLIGHT_BACKEND_URL" \
-            --path ./frontend/build/static/js \
-            --basePath '/static/js' \
-            --appVersion "$GIT_HASH"
-          echo "✅ Source maps uploaded to $HIGHLIGHT_BACKEND_URL for release $GIT_HASH"
 
   publish-helm:
     name: 📜 Publish Helm Chart

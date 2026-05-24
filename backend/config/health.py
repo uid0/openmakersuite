@@ -176,33 +176,16 @@ def _check_object_store() -> StatusResult:
 
 
 def _check_telemetry() -> StatusResult:
-    """Verify the error/observability backend (Highlight, fallback Sentry).
+    """Verify the error/observability backend (Sentry).
 
-    Highlight replaced Sentry per oms-fjs; we still honour ``SENTRY_DSN``
-    so historical deployments can opt in by setting either variable.
-
-    Reachability is a TCP connect to the OTLP collector (Highlight) or
-    the DSN host (Sentry). We don't post real telemetry — that would
-    pollute the dashboard from every readiness probe.
+    Skipped when SENTRY_DSN is unset so the readiness probe still returns 200
+    in environments without telemetry configured.
     """
-    highlight_project = getattr(settings, "HIGHLIGHT_PROJECT_ID", "") or ""
-    highlight_endpoint = getattr(settings, "HIGHLIGHT_OTLP_ENDPOINT", "") or ""
     sentry_dsn = getattr(settings, "SENTRY_DSN", "") or ""
-    target_url: str = ""
-    if highlight_project:
-        # Highlight cloud uses public OTLP collectors; if the deployment
-        # didn't override the endpoint, the SDK targets Highlight's
-        # default collector — we can't probe that without hardcoding it.
-        # Treat "project set, endpoint default" as ok-by-config.
-        if not highlight_endpoint:
-            return "ok", None
-        target_url = highlight_endpoint
-    elif sentry_dsn:
-        target_url = sentry_dsn
-    else:
+    if not sentry_dsn:
         return "skipped", "no telemetry DSN configured"
     try:
-        parsed = urlparse(target_url)
+        parsed = urlparse(sentry_dsn)
         host = parsed.hostname
         if not host:
             return "fail", "unparseable telemetry URL"

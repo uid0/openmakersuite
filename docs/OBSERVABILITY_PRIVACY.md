@@ -5,12 +5,12 @@ surfaces:
 
 | Surface | Producer | Consumer |
 |---------|----------|----------|
-| Django request logs | gunicorn + nginx | Container stdout, Highlight |
+| Django request logs | gunicorn + nginx | Container stdout, Sentry (if DSN set) |
 | DRF error envelopes | `config.api_errors.standardized_exception_handler` | API clients, frontend toasts |
 | Celery task results | `django_celery_results` | Django admin (`/admin/django_celery_results/`) |
 | Webhook delivery audit | `WebHook.failure_count` + `last_error` | Admin webhook detail view |
-| Forgekey device logs | `forgekey/management/commands/mqtt_consumer.py` | Container stdout, Highlight |
-| Frontend error reporting | `@highlight-run/react` (when `HIGHLIGHT_PROJECT_ID` set) | Highlight |
+| Forgekey device logs | `forgekey/management/commands/mqtt_consumer.py` | Container stdout |
+| Frontend error reporting | Local `ErrorBoundary` in `App.tsx` | Browser console |
 
 ## Redaction policy
 
@@ -88,16 +88,6 @@ All four named surfaces now route through the redactor (gh #378):
   `handle_ota_status_message` scrubs the device-supplied
   `error_message` before `DeviceFirmwareUpdate.error_message` is
   written.
-- `frontend/src/utils/highlight.ts` — `initHighlight` configures
-  `networkHeadersToRedact` (Authorization, Cookie, X-CSRFToken,
-  X-Webhook-Signature, X-Forgekey-Token, etc.) and
-  `networkBodyKeysToRedact` (token, password, secret, etc.) on the
-  Highlight client, plus a `requestResponseSanitizer` that runs the
-  value-shape pass over residual string bodies. The
-  `frontend/src/utils/redact.ts` module mirrors the backend's
-  value-shape regex set so React `ErrorFallback` can scrub
-  `Error.message` + stack via `redactError(error)` before
-  `H.consumeError` ships the report.
 
 ## Tests pinning the rollout
 
@@ -107,8 +97,6 @@ All four named surfaces now route through the redactor (gh #378):
   — webhook `last_error` redaction.
 - `backend/forgekey/tests/test_mqtt_consumer.py::test_handle_occupancy_message_redacts_secret_shaped_payload_keys`
   — MQTT consumer payload scrubbing.
-- `frontend/src/__tests__/utils/redact.test.ts` — frontend value-shape
-  + `redactError` unit tests.
 
 ## Operator obligation
 

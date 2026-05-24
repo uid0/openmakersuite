@@ -13,8 +13,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ForgeKeyDeviceDetailPage from '../../pages/ForgeKeyDeviceDetailPage';
 import { forgekeyAPI } from '../../services/api';
 
-jest.mock('../../services/api', () => {
-  const actual = jest.requireActual('../../services/api');
+vi.mock('../../services/api', async () => {
+  const actual = await vi.importActual('../../services/api');
   return {
     ...actual,
     forgekeyAPI: {
@@ -33,7 +33,7 @@ jest.mock('../../services/api', () => {
 
 // recharts uses ResponsiveContainer which needs a non-zero size in JSDOM —
 // stub it so tests can assert on the surrounding panel without rendering SVG.
-jest.mock('recharts', () => ({
+vi.mock('recharts', async () => ({
   __esModule: true,
   ResponsiveContainer: ({ children }: any) => <div data-testid="chart">{children}</div>,
   LineChart: ({ children }: any) => <div>{children}</div>,

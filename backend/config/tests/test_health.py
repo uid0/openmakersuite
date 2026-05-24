@@ -285,55 +285,15 @@ def test_check_object_store_fails_when_probe_raises(settings):
 def test_check_telemetry_skipped_when_no_dsn(settings):
     from config.health import _check_telemetry
 
-    settings.HIGHLIGHT_PROJECT_ID = ""
-    settings.HIGHLIGHT_OTLP_ENDPOINT = ""
     settings.SENTRY_DSN = ""
     status, reason = _check_telemetry()
     assert status == "skipped"
     assert "DSN" in reason
 
 
-def test_check_telemetry_ok_when_highlight_default_collector(settings):
-    """A configured Highlight project with no explicit endpoint targets
-    the SDK default collector — we accept that as ok-by-config."""
-    from config.health import _check_telemetry
-
-    settings.HIGHLIGHT_PROJECT_ID = "abc123"
-    settings.HIGHLIGHT_OTLP_ENDPOINT = ""
-    status, _ = _check_telemetry()
-    assert status == "ok"
-
-
-def test_check_telemetry_probes_explicit_endpoint(settings):
+def test_check_telemetry_probes_sentry_dsn(settings):
     from config import health
 
-    settings.HIGHLIGHT_PROJECT_ID = "abc123"
-    settings.HIGHLIGHT_OTLP_ENDPOINT = "https://otel.example.org:4317"
-    with patch("socket.create_connection") as connect:
-        connect.return_value.__enter__.return_value = None
-        connect.return_value.__exit__.return_value = False
-        status, _ = health._check_telemetry()
-    assert status == "ok"
-    args, _kwargs = connect.call_args
-    assert args[0] == ("otel.example.org", 4317)
-
-
-def test_check_telemetry_fails_when_endpoint_unreachable(settings):
-    from config import health
-
-    settings.HIGHLIGHT_PROJECT_ID = "abc123"
-    settings.HIGHLIGHT_OTLP_ENDPOINT = "https://otel.example.org:4317"
-    with patch("socket.create_connection", side_effect=OSError("no route")):
-        status, reason = health._check_telemetry()
-    assert status == "fail"
-    assert reason == "OSError"
-
-
-def test_check_telemetry_falls_back_to_sentry_dsn(settings):
-    from config import health
-
-    settings.HIGHLIGHT_PROJECT_ID = ""
-    settings.HIGHLIGHT_OTLP_ENDPOINT = ""
     settings.SENTRY_DSN = "https://k@sentry.io/1234"
     with patch("socket.create_connection") as connect:
         connect.return_value.__enter__.return_value = None
@@ -342,3 +302,13 @@ def test_check_telemetry_falls_back_to_sentry_dsn(settings):
     assert status == "ok"
     args, _kwargs = connect.call_args
     assert args[0] == ("sentry.io", 443)
+
+
+def test_check_telemetry_fails_when_sentry_unreachable(settings):
+    from config import health
+
+    settings.SENTRY_DSN = "https://k@sentry.io/1234"
+    with patch("socket.create_connection", side_effect=OSError("no route")):
+        status, reason = health._check_telemetry()
+    assert status == "fail"
+    assert reason == "OSError"

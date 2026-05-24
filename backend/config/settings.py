@@ -7,10 +7,8 @@ from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
-import highlight_io
 from celery.schedules import crontab
 from decouple import config
-from highlight_io.integrations.django import DjangoIntegration
 
 try:
     import passkeys
@@ -600,19 +598,6 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-# Highlight Configuration (oms-fjs — replaces Sentry).
-# - HIGHLIGHT_PROJECT_ID is the verbose project id from the Highlight dashboard.
-#   Empty/unset => SDK is not initialized (mirrors the prior Sentry behaviour).
-# - HIGHLIGHT_OTLP_ENDPOINT defaults to the Highlight cloud collector. For the
-#   self-hosted stack, point it at the OTel collector on the Highlight host
-#   (e.g. https://otel.highlight.example.org:4317). gRPC over HTTPS.
-# - HIGHLIGHT_SERVICE_VERSION should be the deploy git SHA so source maps and
-#   release context line up between frontend and backend.
-HIGHLIGHT_PROJECT_ID = config("HIGHLIGHT_PROJECT_ID", default="")
-HIGHLIGHT_OTLP_ENDPOINT = config("HIGHLIGHT_OTLP_ENDPOINT", default="")
-HIGHLIGHT_ENVIRONMENT = config("HIGHLIGHT_ENVIRONMENT", default="development")
-HIGHLIGHT_SERVICE_VERSION = config("HIGHLIGHT_SERVICE_VERSION", default="")
-
 # Readiness probe — which checks gate HTTP 200 vs 503 (oms-aam).
 # Comma-separated list. Defaults to db/cache/broker (the historical
 # contract). Optional checks (celery_worker, emqx, object_store, telemetry)
@@ -621,20 +606,6 @@ READYZ_REQUIRED_CHECKS = config(
     "READYZ_REQUIRED_CHECKS",
     default="database,cache,broker",
 )
-
-if HIGHLIGHT_PROJECT_ID:
-    # CeleryIntegration is enabled automatically as part of the SDK's
-    # DEFAULT_INTEGRATIONS list (see highlight_io.integrations.all). Django
-    # is opt-in and must be passed explicitly.
-    highlight_io.H(
-        HIGHLIGHT_PROJECT_ID,
-        integrations=[DjangoIntegration()],
-        otlp_endpoint=HIGHLIGHT_OTLP_ENDPOINT or highlight_io.H.OTLP_HTTP,
-        instrument_logging=True,
-        service_name="oms-backend",
-        service_version=HIGHLIGHT_SERVICE_VERSION,
-        environment=HIGHLIGHT_ENVIRONMENT,
-    )
 
 # Logging configuration
 LOGGING = {

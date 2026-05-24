@@ -17,10 +17,9 @@
 #   - ForgeKey: FORGEKEY_PROVISIONING_TOKEN (warned if empty/placeholder)
 #   - Webhook tokens: POSTMARK_INBOUND_TOKEN, LOCATION_PING_TOKEN (warned if empty)
 #   - Email: EMAIL_BACKEND must not be the console backend in prod
-#   - Highlight: if HIGHLIGHT_OTLP_ENDPOINT set, must be an https:// URL
 #   - Sentry: if SENTRY_DSN / REACT_APP_SENTRY_DSN set, must be an https:// URL.
-#     A warning fires when neither Highlight nor Sentry is configured (no
-#     observability sink — production errors will only land in container logs).
+#     A warning fires when Sentry is unconfigured (no observability sink —
+#     production errors will only land in container logs).
 #   - Cookie security: SESSION_COOKIE_SECURE and CSRF_COOKIE_SECURE default to
 #     `not DEBUG` in settings.py. Operators who explicitly override either to
 #     a falsy value when DEBUG=0 are warned — this re-enables plaintext cookies
@@ -246,25 +245,10 @@ if [ -z "${DEFAULT_FROM_EMAIL:-}" ] || is_placeholder "${DEFAULT_FROM_EMAIL:-}";
     warn "DEFAULT_FROM_EMAIL is unset or a placeholder. Outbound mail will use Django's default."
 fi
 
-# --- 10. Highlight ----------------------------------------------------------
-# HIGHLIGHT_PROJECT_ID may be empty (disables the SDK). When the operator
-# overrides the OTLP collector for a self-hosted deploy, it must be an https
-# endpoint — http would mean either a misconfigured production stack or
-# unencrypted telemetry leaving the host.
-
-if [ -n "${HIGHLIGHT_OTLP_ENDPOINT:-}" ]; then
-    case "$HIGHLIGHT_OTLP_ENDPOINT" in
-        https://*) ;;
-        *) err "HIGHLIGHT_OTLP_ENDPOINT must be https:// for production (got: $HIGHLIGHT_OTLP_ENDPOINT)." ;;
-    esac
-fi
-
-# --- 10a. Sentry -------------------------------------------------------------
-# Highlight replaced Sentry per oms-fjs (#319), but the backend still honours
-# SENTRY_DSN as a fallback path (see backend/config/health.py). Treat Sentry
-# DSNs as optional-but-validated: empty is fine, but any value that's set must
-# be an https:// URL — http leaks events in plaintext, and a typo would
-# silently disable error reporting in production.
+# --- 10. Sentry --------------------------------------------------------------
+# Sentry DSNs are optional-but-validated: empty is fine, but any value that's
+# set must be an https:// URL — http leaks events in plaintext, and a typo
+# would silently disable error reporting in production.
 
 if [ -n "${SENTRY_DSN:-}" ]; then
     case "$SENTRY_DSN" in
@@ -285,11 +269,11 @@ fi
 # Warn (not error) so air-gapped or self-hosted-without-telemetry deploys can
 # proceed if the operator has accepted that trade-off.
 
-if [ -z "${HIGHLIGHT_PROJECT_ID:-}" ] && [ -z "${SENTRY_DSN:-}" ]; then
-    warn "Neither HIGHLIGHT_PROJECT_ID nor SENTRY_DSN is set — production errors will only appear in container logs. Configure one for visibility into crashes and 5xx responses."
+if [ -z "${SENTRY_DSN:-}" ]; then
+    warn "SENTRY_DSN is not set — production errors will only appear in container logs. Configure Sentry for visibility into crashes and 5xx responses."
 fi
 
-# --- 10b. Cookie security ----------------------------------------------------
+# --- 10a. Cookie security ----------------------------------------------------
 # settings.py defaults SESSION_COOKIE_SECURE / CSRF_COOKIE_SECURE to `not DEBUG`,
 # so DEBUG=0 enables them automatically. But the env-driven config() lookup
 # means an operator can still override either to "False"/"0"/"off" and ship a

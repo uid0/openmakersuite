@@ -12,25 +12,18 @@ RUN npm ci --production=false
 COPY . .
 
 # Build arguments for environment variables
-ARG REACT_APP_API_URL
-ARG REACT_APP_HIGHLIGHT_PROJECT_ID
-ARG REACT_APP_HIGHLIGHT_OTLP_ENDPOINT
-ARG REACT_APP_HIGHLIGHT_ENVIRONMENT=production
-ARG REACT_APP_GIT_HASH=dev
-ARG REACT_APP_GITHUB_URL=https://github.com/uid0/openmakersuite
+ARG VITE_API_URL
+ARG VITE_GIT_HASH=dev
+ARG VITE_GITHUB_URL=https://github.com/uid0/openmakersuite
 
-# Set environment variables for build. CRA inlines REACT_APP_* into the bundle
-# at build time — these args must reach the docker-build CI step (oms-78t),
-# otherwise the deployed bundle has empty Highlight config and no events flow.
-ENV REACT_APP_API_URL=$REACT_APP_API_URL
-ENV REACT_APP_HIGHLIGHT_PROJECT_ID=$REACT_APP_HIGHLIGHT_PROJECT_ID
-ENV REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=$REACT_APP_HIGHLIGHT_OTLP_ENDPOINT
-ENV REACT_APP_HIGHLIGHT_ENVIRONMENT=$REACT_APP_HIGHLIGHT_ENVIRONMENT
-ENV REACT_APP_GIT_HASH=$REACT_APP_GIT_HASH
-ENV REACT_APP_GITHUB_URL=$REACT_APP_GITHUB_URL
+# Set environment variables for build. Vite inlines VITE_* into the bundle
+# at build time — these args must reach the docker-build CI step (oms-78t).
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_GIT_HASH=$VITE_GIT_HASH
+ENV VITE_GITHUB_URL=$VITE_GITHUB_URL
 
 # Debug: Print the git hash being used (remove in production if desired)
-RUN echo "Building with REACT_APP_GIT_HASH=$REACT_APP_GIT_HASH"
+RUN echo "Building with VITE_GIT_HASH=$VITE_GIT_HASH"
 
 # Build the application
 RUN npm run build

@@ -14,15 +14,15 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import DonationItemScanPage from '../../pages/DonationItemScanPage';
 import * as api from '../../services/api';
 
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
-jest.mock('../../utils/dialogs', () => ({
+vi.mock('../../utils/dialogs', async () => ({
   showError: jest.fn(),
 }));
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 

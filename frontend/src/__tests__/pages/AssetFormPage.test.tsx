@@ -9,11 +9,14 @@ import AssetFormPage from '../../pages/AssetFormPage';
 import { assetsAPI, inventoryAPI, sigAPI } from '../../services/api';
 import { Asset, Category, InventoryItem, Location, SIG } from '../../types';
 
-jest.mock('../../services/api');
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
-  useParams: () => ({}),
-  useNavigate: () => jest.fn(),
+vi.mock('../../services/api');
+
+const mockUseParams = vi.fn(() => ({}));
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
+  useParams: () => mockUseParams(),
+  useNavigate: () => mockNavigate,
 }));
 
 const renderWithMantine = (component: React.ReactElement) => {
@@ -121,8 +124,8 @@ describe('AssetFormPage', () => {
   });
 
   it('submits form with valid data', async () => {
-    const mockNavigate = jest.fn();
-    jest.spyOn(require('react-router-dom'), 'useNavigate').mockReturnValue(mockNavigate);
+    
+    
 
     const mockCreatedAsset: Asset = {
       id: 'new-id',
@@ -244,7 +247,7 @@ describe('AssetFormPage', () => {
   });
 
   it('loads asset data in edit mode', async () => {
-    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({ id: 'test-id' });
+    mockUseParams.mockReturnValue({ id: 'test-id' });
 
     const mockAsset: Asset = {
       id: 'test-id',
@@ -334,7 +337,7 @@ describe('AssetFormPage', () => {
         })
     );
 
-    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({ id: 'test-id' });
+    mockUseParams.mockReturnValue({ id: 'test-id' });
 
     renderWithMantine(
       <MemoryRouter>
@@ -347,7 +350,7 @@ describe('AssetFormPage', () => {
 
   it('handles API responses with missing results property gracefully', async () => {
     // Ensure useParams returns an empty object (for create mode)
-    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({});
+    mockUseParams.mockReturnValue({});
 
     // Mock API responses where results is missing or undefined
     // This simulates the bug where .map() would be called on undefined
@@ -402,7 +405,7 @@ describe('AssetFormPage', () => {
 
   it('handles API errors gracefully without crashing on .map() calls', async () => {
     // Ensure useParams returns an empty object (for create mode)
-    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({});
+    mockUseParams.mockReturnValue({});
 
     // Mock API calls that reject/fail
     mockInventoryAPI.listCategories.mockRejectedValue(new Error('Network error'));
@@ -432,7 +435,7 @@ describe('AssetFormPage', () => {
   });
 
   it('handles edit mode with missing API results', async () => {
-    jest.spyOn(require('react-router-dom'), 'useParams').mockReturnValue({ id: 'test-id' });
+    mockUseParams.mockReturnValue({ id: 'test-id' });
 
     // Mock API responses with missing results
     mockInventoryAPI.listCategories.mockResolvedValue({

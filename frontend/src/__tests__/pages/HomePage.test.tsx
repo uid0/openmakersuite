@@ -15,9 +15,9 @@ import HomePage from '../../pages/HomePage';
 
 // AuthSection talks to the API and renders auth UI. The homepage tests
 // don't need to exercise that surface; render a stub instead.
-jest.mock('../../components/AuthSection', () => () => <div data-testid="auth-section-stub" />);
+vi.mock('../../components/AuthSection', () => ({ default: () => <div data-testid="auth-section-stub" /> }));
 // Footer pulls in Mantine + assets we don't care about for these tests.
-jest.mock('../../components/Footer', () => () => <div data-testid="footer-stub" />);
+vi.mock('../../components/Footer', () => ({ default: () => <div data-testid="footer-stub" /> }));
 
 const renderHome = () =>
   render(

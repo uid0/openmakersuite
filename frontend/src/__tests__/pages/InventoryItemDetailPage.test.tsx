@@ -8,15 +8,15 @@ import InventoryItemDetailPage from '../../pages/InventoryItemDetailPage';
 import * as api from '../../services/api';
 
 // Mock the API
-jest.mock('../../services/api');
+vi.mock('../../services/api');
 
 // Mock qrcode.react
-jest.mock('qrcode.react', () => ({
+vi.mock('qrcode.react', async () => ({
   QRCodeSVG: () => <div data-testid="qr-code">QR Code</div>,
 }));
 
 // Mock recharts
-jest.mock('recharts', () => ({
+vi.mock('recharts', async () => ({
   ResponsiveContainer: ({ children }: any) => <div data-testid="responsive-container">{children}</div>,
   LineChart: () => <div data-testid="line-chart" />,
   Line: () => <div data-testid="line" />,
@@ -26,8 +26,8 @@ jest.mock('recharts', () => ({
 }));
 
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
 

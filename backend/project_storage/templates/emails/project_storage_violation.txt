@@ -1,0 +1,17 @@
+Hi {{ display_name }},
+
+This is a notice from the makerspace project-storage warden.
+
+Your project-storage stint {{ stint_id }}{% if project_title %} ("{{ project_title }}"){% endif %}
+expired on {{ expires_at|date:"l, F jS" }} ({{ expires_at|date:"Y-m-d" }}).
+
+Project-storage stints are limited to 30 days. You have {{ grace_days }} days from this notice — until {{ purgatory_at|date:"l, F jS" }} ({{ purgatory_at|date:"Y-m-d" }}) — to remove your items from{% if storage_location_name %} {{ storage_location_name }}{% else %} the project storage area{% endif %}.
+
+If your items are not removed by then, they will be moved to{% if purgatory_location_name %} {{ purgatory_location_name }}{% else %} project purgatory{% endif %} and held there per our project-purgatory policy.
+
+If you need more time, please reply to this email or speak with the storage warden.
+
+After your items are removed, there is a 3-day cool-down before you can start a new project-storage stint.
+
+Thanks,
+The makerspace

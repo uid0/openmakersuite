@@ -131,8 +131,7 @@ docker compose -f docker-compose.prod.yml exec backend sh -c \
 ```
 
 If the DSN is unset or unreachable, either fix the DSN or unset it so
-sentry-sdk never initializes. (Note: oms-fjs is migrating away from Sentry to
-Highlight; this hypothesis may resolve naturally once that lands.)
+sentry-sdk never initializes.
 
 ### H4: Celery worker leak (separate container)
 

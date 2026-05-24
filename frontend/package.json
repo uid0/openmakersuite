@@ -6,7 +6,6 @@
     "node": ">=24.0.0"
   },
   "dependencies": {
-    "@highlight-run/react": "^21.0.0",
     "@hookform/resolvers": "^3.3.4",
     "@mantine/core": "^7.11.0",
     "@mantine/dates": "^7.11.0",
@@ -25,7 +24,6 @@
     "axios": "^1.16.0",
     "axios-mock-adapter": "^2.0.0",
     "dayjs": "^1.11.10",
-    "highlight.run": "^9.0.0",
     "html5-qrcode": "^2.3.8",
     "nth-check": ">=2.0.1",
     "qrcode.react": "^4.2.0",

@@ -48,9 +48,6 @@ services:
       - DATABASE_URL=postgresql://makerspace:${POSTGRES_PASSWORD:-development_password_only}@db:5432/makerspace_inventory
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - HIGHLIGHT_PROJECT_ID=${HIGHLIGHT_PROJECT_ID:-}
-      - HIGHLIGHT_OTLP_ENDPOINT=${HIGHLIGHT_OTLP_ENDPOINT:-}
-      - HIGHLIGHT_ENVIRONMENT=${HIGHLIGHT_ENVIRONMENT:-development}
     depends_on:
       db:
         condition: service_healthy
@@ -70,9 +67,6 @@ services:
       - DATABASE_URL=postgresql://makerspace:${POSTGRES_PASSWORD:-development_password_only}@db:5432/makerspace_inventory
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - HIGHLIGHT_PROJECT_ID=${HIGHLIGHT_PROJECT_ID:-}
-      - HIGHLIGHT_OTLP_ENDPOINT=${HIGHLIGHT_OTLP_ENDPOINT:-}
-      - HIGHLIGHT_ENVIRONMENT=${HIGHLIGHT_ENVIRONMENT:-development}
     depends_on:
       db:
         condition: service_healthy
@@ -138,10 +132,6 @@ services:
       - "3000:3000"
     environment:
       - REACT_APP_API_URL=http://localhost:8000
-      - REACT_APP_HIGHLIGHT_PROJECT_ID=${REACT_APP_HIGHLIGHT_PROJECT_ID:-}
-      - REACT_APP_HIGHLIGHT_BACKEND_URL=${REACT_APP_HIGHLIGHT_BACKEND_URL:-}
-      - REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=${REACT_APP_HIGHLIGHT_OTLP_ENDPOINT:-}
-      - REACT_APP_HIGHLIGHT_ENVIRONMENT=${REACT_APP_HIGHLIGHT_ENVIRONMENT:-development}
       - REACT_APP_GIT_HASH=${GIT_HASH:-dev}
       - REACT_APP_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
     depends_on:

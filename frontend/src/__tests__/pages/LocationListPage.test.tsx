@@ -245,12 +245,6 @@ describe('LocationListPage', () => {
     });
   });
 
-  // Note: Testing network errors without response (which trigger the Highlight
-  // error-boundary re-throw) is difficult in unit tests due to Jest's
-  // unhandled-rejection detection. The component's error handling is covered
-  // by the "displays error message" test above. The re-throw behavior is
-  // better tested in integration/e2e tests.
-
   it('displays staff controls when user is staff', async () => {
     localStorageMock.setItem('is_staff', 'true');
     renderPage();

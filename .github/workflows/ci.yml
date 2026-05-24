@@ -548,8 +548,6 @@ jobs:
           CELERY_BROKER_URL=redis://redis:6379/0
           FRONTEND_URL=https://ci.example.com
           GIT_HASH=ci
-          REACT_APP_HIGHLIGHT_PROJECT_ID=
-          REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=
           GITHUB_URL=https://github.com/uid0/openmakersuite
           EMQX_DASHBOARD_PASSWORD=Strong1Password
           EOF
@@ -727,14 +725,10 @@ jobs:
           CELERY_BROKER_URL=redis://redis:6379/0
           FRONTEND_URL=https://ci.example.com
           GIT_HASH=ci
-          REACT_APP_HIGHLIGHT_PROJECT_ID=
-          REACT_APP_HIGHLIGHT_OTLP_ENDPOINT=
           GITHUB_URL=https://github.com/uid0/openmakersuite
           EMQX_DASHBOARD_PASSWORD=Strong1Password
           FORGEKEY_PROVISIONING_TOKEN=ci-provisioning-token-not-for-production-padding
           FORGEKEY_JWT_SIGNING_KEY=${jwt_env}
-          HIGHLIGHT_PROJECT_ID=
-          HIGHLIGHT_OTLP_ENDPOINT=
           EOF
 
           # bootstrap_users for EMQX is normally rendered by deploy.sh; the

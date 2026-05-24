@@ -87,65 +87,6 @@ check_workflow_files() {
     print_success "Workflow files found"
 }
 
-setup_highlight_secrets() {
-    print_info "Setting up Highlight integration..."
-
-    echo "To integrate with Highlight for source-map upload, you need:"
-    echo "1. A Highlight project (self-hosted or app.highlight.io)"
-    echo "2. The verbose project id (Settings > General > Project ID)"
-    echo "3. An organization-level upload API key (Settings > General > API)"
-    echo "4. (Self-host only) The collector OTLP endpoint URL"
-    echo ""
-
-    read -p "Do you want to configure Highlight secrets now? (y/n): " -n 1 -r
-    echo
-
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        read -p "Enter your Highlight project id: " HIGHLIGHT_PROJECT_ID
-        if [ -z "$HIGHLIGHT_PROJECT_ID" ]; then
-            print_warning "Highlight project id not provided, skipping Highlight setup"
-            return
-        fi
-
-        echo "Create an upload key at app.highlight.io > Settings > General > API."
-        read -s -p "Enter your Highlight API key (upload): " HIGHLIGHT_API_KEY
-        echo
-
-        if [ -z "$HIGHLIGHT_API_KEY" ]; then
-            print_warning "Highlight API key not provided, skipping Highlight setup"
-            return
-        fi
-
-        read -p "Enter your self-host OTLP endpoint (https://...; blank for cloud): " HIGHLIGHT_OTLP_ENDPOINT
-
-        print_info "Setting GitHub secrets..."
-
-        if gh secret set REACT_APP_HIGHLIGHT_PROJECT_ID --body "$HIGHLIGHT_PROJECT_ID"; then
-            print_success "REACT_APP_HIGHLIGHT_PROJECT_ID secret set"
-        else
-            print_error "Failed to set REACT_APP_HIGHLIGHT_PROJECT_ID secret"
-        fi
-
-        if gh secret set HIGHLIGHT_API_KEY --body "$HIGHLIGHT_API_KEY"; then
-            print_success "HIGHLIGHT_API_KEY secret set"
-        else
-            print_error "Failed to set HIGHLIGHT_API_KEY secret"
-        fi
-
-        if [ -n "$HIGHLIGHT_OTLP_ENDPOINT" ]; then
-            if gh secret set REACT_APP_HIGHLIGHT_OTLP_ENDPOINT --body "$HIGHLIGHT_OTLP_ENDPOINT"; then
-                print_success "REACT_APP_HIGHLIGHT_OTLP_ENDPOINT secret set"
-            else
-                print_error "Failed to set REACT_APP_HIGHLIGHT_OTLP_ENDPOINT secret"
-            fi
-        fi
-
-        print_success "Highlight integration configured!"
-    else
-        print_warning "Skipping Highlight setup. You can configure it later by running this script again."
-    fi
-}
-
 setup_slack_notifications() {
     print_info "Setting up Slack notifications (optional)..."
 
@@ -231,10 +172,6 @@ show_summary() {
     echo "• ✅ Multi-architecture Docker images"
     echo "• ✅ GitHub Releases with deployment bundles"
 
-    if gh secret list | grep -q "HIGHLIGHT_"; then
-        echo "• ✅ Highlight source-map upload"
-    fi
-
     if gh secret list | grep -q "SLACK_"; then
         echo "• ✅ Slack notifications"
     fi
@@ -259,7 +196,6 @@ main() {
     check_prerequisites
     check_workflow_files
     setup_container_registry
-    setup_highlight_secrets
     setup_slack_notifications
     test_release_trigger
     show_summary

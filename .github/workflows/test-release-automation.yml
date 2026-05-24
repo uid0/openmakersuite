@@ -146,41 +146,6 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: 1
 
-  test-highlight-config:
-    name: 📊 Test Highlight Configuration
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Highlight secrets
-        run: |
-          echo "🔍 Checking Highlight configuration..."
-          HIGHLIGHT_OK=true
-
-          if [ -z "${{ secrets.HIGHLIGHT_API_KEY }}" ]; then
-            echo "⚠️  HIGHLIGHT_API_KEY not configured (org-level upload key)"
-            HIGHLIGHT_OK=false
-          else
-            echo "✅ HIGHLIGHT_API_KEY is configured"
-          fi
-
-          if [ -z "${{ secrets.REACT_APP_HIGHLIGHT_PROJECT_ID }}" ]; then
-            echo "⚠️  REACT_APP_HIGHLIGHT_PROJECT_ID not configured (frontend project id)"
-            HIGHLIGHT_OK=false
-          else
-            echo "✅ REACT_APP_HIGHLIGHT_PROJECT_ID is configured"
-          fi
-
-          if [ -z "${{ secrets.REACT_APP_HIGHLIGHT_OTLP_ENDPOINT }}" ]; then
-            echo "ℹ️  REACT_APP_HIGHLIGHT_OTLP_ENDPOINT not set — frontend will default to the Highlight cloud collector"
-          else
-            echo "✅ REACT_APP_HIGHLIGHT_OTLP_ENDPOINT is configured (self-host collector)"
-          fi
-
-          if [ "$HIGHLIGHT_OK" = true ]; then
-            echo "✅ Highlight integration is properly configured"
-          else
-            echo "⚠️  Highlight integration needs configuration — see docs/HIGHLIGHT_MIGRATION.md"
-          fi
-
   test-changelog-generation:
     name: 📝 Test Changelog Generation
     runs-on: ubuntu-latest
@@ -215,7 +180,7 @@ jobs:
   test-summary:
     name: 📋 Test Summary
     runs-on: ubuntu-latest
-    needs: [test-prerequisites, test-docker-build, test-signing, test-highlight-config, test-changelog-generation]
+    needs: [test-prerequisites, test-docker-build, test-signing, test-changelog-generation]
     if: always()
     steps:
       - name: Generate test report
@@ -229,7 +194,6 @@ jobs:
           echo "- Prerequisites: ${{ needs.test-prerequisites.result }}"
           echo "- Docker Build: ${{ needs.test-docker-build.result }}"
           echo "- Signing: ${{ needs.test-signing.result }}"
-          echo "- Highlight Config: ${{ needs.test-highlight-config.result }}"
           echo "- Changelog: ${{ needs.test-changelog-generation.result }}"
           echo ""
 
@@ -237,14 +201,12 @@ jobs:
           if [[ "${{ needs.test-prerequisites.result }}" == "success" && \
                 "${{ needs.test-docker-build.result }}" == "success" && \
                 ("${{ needs.test-signing.result }}" == "success" || "${{ needs.test-signing.result }}" == "skipped") && \
-                "${{ needs.test-highlight-config.result }}" == "success" && \
                 "${{ needs.test-changelog-generation.result }}" == "success" ]]; then
             echo "✅ All tests passed! Release automation is ready."
             echo ""
             echo "Next steps:"
-            echo "1. 🔧 Configure any missing Highlight secrets (see docs/HIGHLIGHT_MIGRATION.md)"
-            echo "2. 🚀 Push commits to main branch to trigger automatic releases"
-            echo "3. 📖 Read RELEASE_AUTOMATION.md for full documentation"
+            echo "1. 🚀 Push commits to main branch to trigger automatic releases"
+            echo "2. 📖 Read RELEASE_AUTOMATION.md for full documentation"
           else
             echo "❌ Some tests failed. Please review the job outputs above."
             echo ""

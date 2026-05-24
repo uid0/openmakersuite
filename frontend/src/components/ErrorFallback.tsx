@@ -1,13 +1,8 @@
 /**
  * Error Fallback Component
- * Displays an error and offers retry / go-home actions. Errors caught by the
- * Highlight ErrorBoundary are reported to the dashboard automatically; this
- * component only re-fires the report on remount as a safety net for cases
- * where the boundary fired before Highlight initialized.
+ * Displays an error and offers retry / go-home actions.
  */
-import { H } from 'highlight.run';
 import React from 'react';
-import { redactError } from '../utils/redact';
 import './ErrorFallback.css';
 
 interface ErrorFallbackProps {
@@ -17,11 +12,8 @@ interface ErrorFallbackProps {
 
 const ErrorFallback: React.FC<ErrorFallbackProps> = ({ error, resetError }) => {
   React.useEffect(() => {
-    // gh #378: scrub the error message + stack before they reach Highlight.
-    // Errors thrown deep in the network code occasionally include the
-    // failed request URL (which can carry an embedded signing key) or
-    // an upstream's quoted Authorization header in the message string.
-    H.consumeError(redactError(error), 'ErrorFallback');
+    // eslint-disable-next-line no-console
+    console.error('Error caught by ErrorFallback:', error);
   }, [error]);
 
   return (

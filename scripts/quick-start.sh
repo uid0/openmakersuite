@@ -32,11 +32,6 @@ CELERY_BROKER_URL=redis://localhost:6379/0
 # Frontend
 FRONTEND_URL=http://localhost:3000
 
-# Highlight observability (optional - leave empty to disable)
-HIGHLIGHT_PROJECT_ID=
-HIGHLIGHT_OTLP_ENDPOINT=
-HIGHLIGHT_ENVIRONMENT=development
-
 # CI Flag
 CI=false
 EOF

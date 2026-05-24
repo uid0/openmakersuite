@@ -1,7 +1,6 @@
 /**
  * API service for communicating with the Django backend
  */
-import { H } from 'highlight.run';
 import axios from 'axios';
 import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
@@ -201,30 +200,6 @@ api.interceptors.response.use(
       }
     }
 
-    // Log API errors to Highlight. H.consume accepts a structured payload that
-    // shows up as searchable attributes on the error event in the dashboard.
-    if (error.response) {
-      H.consume(error, {
-        source: 'api',
-        payload: {
-          url: error.config?.url,
-          method: error.config?.method,
-          status: error.response.status,
-          data: error.response.data,
-        },
-      });
-    } else if (error.request) {
-      H.consume(error, {
-        source: 'api',
-        payload: {
-          url: error.config?.url,
-          method: error.config?.method,
-          error: 'No response received',
-        },
-      });
-    } else {
-      H.consumeError(error);
-    }
     return Promise.reject(error);
   }
 );

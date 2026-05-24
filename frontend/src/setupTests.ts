@@ -4,26 +4,6 @@
 // learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom';
 
-// Mock Highlight to avoid initialization in tests. We mock both packages
-// because @highlight-run/react re-exports ErrorBoundary independently of the
-// core highlight.run runtime; the boundary needs to render its children
-// without requiring the real H global to exist.
-jest.mock('highlight.run', () => ({
-  H: {
-    init: jest.fn(),
-    consume: jest.fn(),
-    consumeError: jest.fn(),
-    identify: jest.fn(),
-    track: jest.fn(),
-    start: jest.fn(),
-    stop: jest.fn(),
-  },
-}));
-
-jest.mock('@highlight-run/react', () => ({
-  ErrorBoundary: ({ children }: any) => children,
-}));
-
 // Mock window.matchMedia - must be set up before any imports that use it
 // This is critical for Mantine components that use use-media-query hook
 const matchMediaMock = (query: string) => ({

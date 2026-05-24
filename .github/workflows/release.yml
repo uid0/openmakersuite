@@ -345,13 +345,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Highlight has no "create release + set-commits" REST flow analogous to
-  # Sentry's `sentry-cli releases`. Release/version tagging happens at
-  # source-map upload time via @highlight-run/sourcemap-uploader --appVersion
-  # in docker-build.yml, which is the only piece the dashboard needs to
-  # resolve minified frames. Removing the dedicated release job keeps the
-  # release pipeline shorter (oms-fjs).
-
   notify-success:
     name: 🎉 Notification
     runs-on: ubuntu-latest
@@ -366,11 +359,10 @@ jobs:
           echo "🎉 SUCCESS: Release $NEW_TAG has been created and published!"
           echo "📦 Release URL: $RELEASE_URL"
           echo "🔐 Cryptographically signed with Sigstore"
-          echo "📊 Highlight source maps tagged with this version"
 
           # If Slack webhook is configured, send notification
           if [ ! -z "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
             curl -X POST -H 'Content-type: application/json' \
-              --data "{\"text\":\"🚀 *OpenMakerSuite $NEW_TAG Released!*\n📦 <$RELEASE_URL|Download Release>\n🔐 Cryptographically signed\n📊 Highlight monitoring enabled\"}" \
+              --data "{\"text\":\"🚀 *OpenMakerSuite $NEW_TAG Released!*\n📦 <$RELEASE_URL|Download Release>\n🔐 Cryptographically signed\"}" \
               "${{ secrets.SLACK_WEBHOOK_URL }}"
           fi

@@ -124,7 +124,6 @@ class TestProductionEnvValidatorAC23:
             ("EMQX_DASHBOARD_PASSWORD", "Short1", "8 characters"),
             ("DOMAIN", "change-me", "DOMAIN"),
             ("LETSENCRYPT_EMAIL", "", "LETSENCRYPT_EMAIL"),
-            ("HIGHLIGHT_OTLP_ENDPOINT", "http://otel.example.org:4317", "HIGHLIGHT_OTLP_ENDPOINT"),
             ("FORGEKEY_FIRMWARE_SIGNING_KEY", "not-a-pem", "FORGEKEY_FIRMWARE_SIGNING_KEY"),
             ("SENTRY_DSN", "http://abc@o0.ingest.sentry.io/123", "SENTRY_DSN"),
             ("REACT_APP_SENTRY_DSN", "http://abc@o0.ingest.sentry.io/123", "REACT_APP_SENTRY_DSN"),
@@ -185,29 +184,20 @@ class TestProductionEnvValidatorAC23:
         result = _run_validator(env)
         assert result.returncode == 0, result.stdout + result.stderr
 
-    def test_observability_warning_when_highlight_and_sentry_both_unset(self, tmp_path):
-        env = _write_env(
-            tmp_path,
-            overrides={"HIGHLIGHT_PROJECT_ID": "", "SENTRY_DSN": ""},
-        )
+    def test_observability_warning_when_sentry_unset(self, tmp_path):
+        env = _write_env(tmp_path, overrides={"SENTRY_DSN": ""})
         result = _run_validator(env)
         assert result.returncode == 0, result.stdout
-        assert "Neither HIGHLIGHT_PROJECT_ID nor SENTRY_DSN" in result.stdout
+        assert "SENTRY_DSN" in result.stdout
 
-    @pytest.mark.parametrize(
-        "overrides",
-        [
-            {"HIGHLIGHT_PROJECT_ID": "proj_123", "SENTRY_DSN": ""},
-            {"HIGHLIGHT_PROJECT_ID": "", "SENTRY_DSN": "https://abc@o0.ingest.sentry.io/123"},
-        ],
-    )
-    def test_observability_warning_absent_when_highlight_or_sentry_present(
-        self, tmp_path, overrides
-    ):
-        env = _write_env(tmp_path, overrides=overrides)
+    def test_observability_warning_absent_when_sentry_present(self, tmp_path):
+        env = _write_env(
+            tmp_path,
+            overrides={"SENTRY_DSN": "https://abc@o0.ingest.sentry.io/123"},
+        )
         result = _run_validator(env)
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "Neither HIGHLIGHT_PROJECT_ID nor SENTRY_DSN" not in result.stdout
+        assert "no error reporting configured" not in result.stdout.lower()
 
     @pytest.mark.parametrize("value", ["False", "false", "0", "off", "no", ""])
     @pytest.mark.parametrize("key", ["SESSION_COOKIE_SECURE", "CSRF_COOKIE_SECURE"])
@@ -520,7 +510,8 @@ def test_validator_handles_quoted_values(tmp_path):
     secret stores) must be parsed correctly without leaking the quotes into
     length/comparison checks."""
     env = tmp_path / ".env"
-    body = textwrap.dedent("""\
+    body = textwrap.dedent(
+        """\
         DOMAIN="oms.example.com"
         LETSENCRYPT_EMAIL='admin@oms.example.com'
         LETSENCRYPT_DOMAINS=oms.example.com
@@ -540,7 +531,8 @@ def test_validator_handles_quoted_values(tmp_path):
         DEFAULT_FROM_EMAIL=noreply@oms.example.com
         POSTMARK_INBOUND_TOKEN=tok
         LOCATION_PING_TOKEN=tok
-        """)
+        """
+    )
     env.write_text(body)
     result = _run_validator(env)
     assert result.returncode == 0, result.stdout

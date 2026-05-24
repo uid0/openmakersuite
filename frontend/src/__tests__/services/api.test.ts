@@ -1,12 +1,8 @@
 /**
  * Tests for API service
  */
-import { H } from 'highlight.run';
 import MockAdapter from 'axios-mock-adapter';
 import api, { assetPartsAPI, assetsAPI, authAPI, checklistsAPI, inventoryAPI, reorderAPI, resolveApiBaseUrl, workOrderAPI } from '../../services/api';
-
-// highlight.run is globally mocked in setupTests.ts; the cast keeps jest's
-// mock helpers available without re-declaring the module shape here.
 
 describe('API Service', () => {
   let mock: MockAdapter;
@@ -14,8 +10,6 @@ describe('API Service', () => {
   beforeEach(() => {
     mock = new MockAdapter(api);
     localStorage.clear();
-    (H.consume as jest.Mock).mockClear();
-    (H.consumeError as jest.Mock).mockClear();
   });
 
   afterEach(() => {
@@ -425,49 +419,6 @@ describe('API Service', () => {
       });
 
       await inventoryAPI.getItem('test-id');
-    });
-
-    test('captures response errors with highlight context', async () => {
-      const errorPayload = { detail: 'boom' };
-
-      mock
-        .onGet('/inventory/items/error/')
-        .reply(500, errorPayload);
-
-      await expect(inventoryAPI.getItem('error')).rejects.toBeDefined();
-
-      expect(H.consume).toHaveBeenCalledWith(expect.any(Error), {
-        source: 'api',
-        payload: expect.objectContaining({ status: 500, data: errorPayload }),
-      });
-    });
-
-    test('captures network errors with highlight context', async () => {
-      const handler = (api as any).interceptors.response.handlers[0].rejected;
-      const networkError = Object.assign(new Error('Network Error'), {
-        request: {},
-        config: { url: '/inventory/items/network/', method: 'get' },
-      });
-
-      await expect(handler(networkError)).rejects.toBe(networkError);
-
-      expect(H.consume).toHaveBeenCalledWith(networkError, {
-        source: 'api',
-        payload: expect.objectContaining({
-          url: '/inventory/items/network/',
-          method: 'get',
-          error: 'No response received',
-        }),
-      });
-    });
-
-    test('captures unexpected errors without context', async () => {
-      const handler = (api as any).interceptors.response.handlers[0].rejected;
-      const setupError = new Error('Config exploded');
-
-      await expect(handler(setupError)).rejects.toBe(setupError);
-
-      expect(H.consumeError).toHaveBeenCalledWith(setupError);
     });
   });
 

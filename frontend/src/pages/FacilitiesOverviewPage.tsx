@@ -9,6 +9,7 @@ import {
   IconChecklist,
   IconDeviceTv,
   IconKey,
+  IconPackage,
   IconScreenshot,
   IconTruck,
 } from '@tabler/icons-react';
@@ -82,6 +83,14 @@ const FacilitiesOverviewPage: React.FC = () => (
       icon={<IconChecklist size={22} stroke={1.8} />}
       eyebrow="Routine"
       testId="facilities-overview-card-/facilities/checklist"
+    />
+    <CapabilityCard
+      to="/facilities/project-storage"
+      title="Project storage"
+      description="Look up project-storage stints, send violation notices, and move items to purgatory."
+      icon={<IconPackage size={22} stroke={1.8} />}
+      eyebrow="Members"
+      testId="facilities-overview-card-/facilities/project-storage"
     />
   </WorkspaceLanding>
 );

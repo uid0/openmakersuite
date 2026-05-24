@@ -28,6 +28,7 @@ import ElectricalCircuitsPage from './pages/ElectricalCircuitsPage';
 import ElectricalOverviewPage from './pages/ElectricalOverviewPage';
 import FacilitiesChecklistsPage from './pages/FacilitiesChecklistsPage';
 import FacilitiesOverviewPage from './pages/FacilitiesOverviewPage';
+import FacilitiesProjectStoragePage from './pages/FacilitiesProjectStoragePage';
 import PowerBreakerFormPage from './pages/PowerBreakerFormPage';
 import PowerCircuitFormPage from './pages/PowerCircuitFormPage';
 import PowerOutletFormPage from './pages/PowerOutletFormPage';
@@ -274,6 +275,7 @@ function AppContent() {
           <Route path="/maintenance/location-problems/:id" element={<WorkspaceLayout><LocationProblemDetailPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist" element={<WorkspaceLayout><FacilitiesChecklistsPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist/:checklistId/complete/:completionId" element={<WorkspaceLayout><ChecklistCompletionPage /></WorkspaceLayout>} />
+          <Route path="/facilities/project-storage" element={<WorkspaceLayout><FacilitiesProjectStoragePage /></WorkspaceLayout>} />
 
           {/* SIGs Workspace */}
           <Route path="/sigs" element={<Navigate to="/sigs/dashboard" replace />} />

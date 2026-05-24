@@ -199,7 +199,7 @@ jobs:
 
       - name: Upload OpenAPI schema artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openapi-schema
           path: /tmp/openapi-schema.yaml
@@ -481,7 +481,7 @@ jobs:
 
       - name: Upload security reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-reports
           path: |
@@ -993,7 +993,7 @@ jobs:
 
       - name: Upload rendered manifests on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deploy-renders
           path: /tmp/render/

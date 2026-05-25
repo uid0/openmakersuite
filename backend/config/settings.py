@@ -7,10 +7,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
+import sentry_sdk
 from celery.schedules import crontab
 from decouple import config
-
-import sentry_sdk
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
@@ -622,7 +621,9 @@ READYZ_REQUIRED_CHECKS = config(
 # - LoggingIntegration(event_level=ERROR): forwards logger.error / logger.exception
 #   calls as Sentry events. INFO/WARNING become breadcrumbs.
 SENTRY_DSN = config("SENTRY_DSN", default="")
-SENTRY_ENVIRONMENT = config("SENTRY_ENVIRONMENT", default="production" if not DEBUG else "development")
+SENTRY_ENVIRONMENT = config(
+    "SENTRY_ENVIRONMENT", default="production" if not DEBUG else "development"
+)
 SENTRY_RELEASE = config("GIT_HASH", default="") or None
 SENTRY_TRACES_SAMPLE_RATE = config("SENTRY_TRACES_SAMPLE_RATE", default=0.1, cast=float)
 SENTRY_PROFILES_SAMPLE_RATE = config("SENTRY_PROFILES_SAMPLE_RATE", default=0.0, cast=float)

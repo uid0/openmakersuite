@@ -2,5 +2,50 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
-  ]
+  ],
+  "timezone": "America/Chicago",
+  "dependencyDashboard": true,
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 0,
+  "packageRules": [
+    {
+      "description": "Daily rollup PR for all patch + minor + digest updates. Renovate keeps rebasing it through the day as new updates arrive; CI runs once per rebase; auto-merge fires when green. The 24h release-age gate keeps us out of the npm/pypi malware-yank window — typo-squatted or compromised packages almost always get pulled within that window.",
+      "matchUpdateTypes": [
+        "patch",
+        "minor",
+        "digest",
+        "lockFileMaintenance"
+      ],
+      "groupName": "all non-major dependencies",
+      "groupSlug": "renovate-rollup",
+      "schedule": [
+        "after 4am and before 7am"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true,
+      "minimumReleaseAge": "24h"
+    },
+    {
+      "description": "Major updates stay one PR per package. They're breaking changes that need individual review and may need follow-up code edits; bundling them would mean a single bad major holds everything else hostage.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "automerge": true,
+    "automergeType": "pr",
+    "platformAutomerge": true,
+    "schedule": [
+      "at any time"
+    ],
+    "labels": [
+      "security",
+      "renovate"
+    ],
+    "prPriority": 99
+  }
 }

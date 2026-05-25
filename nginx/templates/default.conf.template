@@ -61,6 +61,13 @@ server {
         proxy_redirect off;
     }
 
+    # Slashless /admin must redirect to /admin/ before the SPA catch-all sees
+    # it — otherwise the React shell loads, React-Router has no route for
+    # /admin, and the service worker can cache the resulting blank page.
+    location = /admin {
+        return 301 $scheme://$host/admin/;
+    }
+
     location /admin/ {
         proxy_pass http://backend;
         proxy_set_header Host $host;

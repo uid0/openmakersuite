@@ -1,6 +1,7 @@
 /**
  * Main App Component
  */
+import * as Sentry from '@sentry/react';
 import React from 'react';
 import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'react-router-dom';
 import ErrorFallback from './components/ErrorFallback';
@@ -109,6 +110,9 @@ class ErrorBoundary extends React.Component<
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     // eslint-disable-next-line no-console
     console.error('Uncaught error in render tree:', error, info);
+    // Report to Sentry with the React component stack as context.
+    // No-op when Sentry.init wasn't called (VITE_SENTRY_DSN unset).
+    Sentry.captureException(error, { contexts: { react: { componentStack: info.componentStack ?? '' } } });
   }
 
   resetError = () => this.setState({ error: null });

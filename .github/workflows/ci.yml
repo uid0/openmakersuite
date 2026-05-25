@@ -322,8 +322,14 @@ jobs:
         # stack traces resolve to real TS lines.
         #
         # Skip when the secret isn't configured (PRs from forks, local act
-        # runs, fresh-clone builds before the secret is set up).
-        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        # runs, fresh-clone builds before the secret is set up). `secrets`
+        # is the only context available at `if:` time that reflects the
+        # actual secret presence; `env.SENTRY_AUTH_TOKEN` here would only
+        # see workflow-level env, not the step's own env block.
+        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        # Don't fail CI if Sentry itself is briefly unreachable — releases
+        # are best-effort observability metadata, not a deploy gate.
+        continue-on-error: true
         run: |
           cd frontend
           SCLI="npx --yes @sentry/cli@2.39.1"

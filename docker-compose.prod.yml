@@ -192,6 +192,15 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - SKIP_DB_MIGRATIONS=1
+    # Override the backend image's HTTP healthcheck — workers don't serve
+    # gunicorn so /api/health/livez/ never resolves. `inspect ping` does a
+    # broker round-trip to this worker, which is the actual liveness signal.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME -t 5 >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       db:
         condition: service_healthy
@@ -234,6 +243,15 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - SKIP_DB_MIGRATIONS=1
+    # Override the backend image's HTTP healthcheck — this is a long-running
+    # MQTT subscriber, not a gunicorn server. Verify the manage.py command is
+    # actually running; the consumer handles broker reconnection internally.
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'manage.py mqtt_consumer' >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       db:
         condition: service_healthy
@@ -285,6 +303,15 @@ services:
       # but it does need to import the same Django settings to load
       # CELERY_BEAT_SCHEDULE.
       - SKIP_DB_MIGRATIONS=1
+    # Override the backend image's HTTP healthcheck — beat doesn't serve
+    # gunicorn. Confirm the pidfile exists and the recorded PID is alive;
+    # beat writes its pid on start and removes it on shutdown.
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/.beat-state/celerybeat.pid && kill -0 $$(cat /app/.beat-state/celerybeat.pid) 2>/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       redis:
         condition: service_healthy

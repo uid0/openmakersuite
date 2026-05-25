@@ -24,7 +24,9 @@ from django.utils import timezone
 import pytest
 
 from forgekey.management.commands.mqtt_consumer import (
+    LOG_RATE_LIMIT_MAX_EVENTS,
     dispatch_message,
+    handle_log_message,
     handle_occupancy_message,
     handle_status_message,
 )
@@ -151,6 +153,93 @@ class TestMqttConsumer:
             with caplog.at_level(logging.ERROR):
                 dispatch_message("forgekey/aabbccddeeff/people_counter/occupancy", b"{}")
         assert any("Unhandled error" in r.message for r in caplog.records)
+
+    # ---------- AC-2b: device log forwarding (forgekey/<mac>/logs) -------
+
+    def _log_topic(self, mac: str) -> str:
+        return f"forgekey/{_topic_segment(mac)}/logs"
+
+    @pytest.fixture(autouse=True)
+    def _reset_log_rate_limit(self):
+        # Each test gets a fresh rate-limit window — otherwise the prior
+        # test's traffic counts against this one's budget.
+        from django.core.cache import cache as _cache
+
+        _cache.clear()
+        yield
+        _cache.clear()
+
+    def test_handle_log_warning_forwards_to_sentry_with_device_tags(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:DE:AD:01", firmware_version="1.2.3")
+        payload = json.dumps(
+            {"ts": 1234, "level": "warning", "tag": "lock", "msg": "latch stuck open"}
+        ).encode("utf-8")
+        with patch("forgekey.management.commands.mqtt_consumer.sentry_sdk") as mock_sentry:
+            mock_scope = MagicMock()
+            mock_sentry.new_scope.return_value.__enter__.return_value = mock_scope
+            result = handle_log_message(self._log_topic(device.mac_address), payload)
+        assert result is True
+        mock_sentry.capture_message.assert_called_once_with("latch stuck open", level="warning")
+        # Tags on the scope identify which device, firmware, tag.
+        tag_calls = {c.args[0]: c.args[1] for c in mock_scope.set_tag.call_args_list}
+        assert tag_calls["origin"] == "device"
+        assert tag_calls["device_mac"] == device.mac_address
+        assert tag_calls["device_firmware"] == "1.2.3"
+        assert tag_calls["device_log_tag"] == "lock"
+
+    def test_handle_log_info_does_not_call_sentry(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:DE:AD:02")
+        payload = json.dumps({"ts": 1234, "level": "info", "tag": "boot", "msg": "online"}).encode(
+            "utf-8"
+        )
+        with patch("forgekey.management.commands.mqtt_consumer.sentry_sdk") as mock_sentry:
+            result = handle_log_message(self._log_topic(device.mac_address), payload)
+        assert result is False
+        mock_sentry.capture_message.assert_not_called()
+
+    def test_handle_log_drops_unknown_mac(self):
+        # No ESP32Device row for this MAC — must drop, not forward.
+        with patch("forgekey.management.commands.mqtt_consumer.sentry_sdk") as mock_sentry:
+            result = handle_log_message(
+                "forgekey/aabbccddee99/logs",
+                json.dumps({"level": "error", "msg": "boom"}).encode("utf-8"),
+            )
+        assert result is False
+        mock_sentry.capture_message.assert_not_called()
+
+    def test_handle_log_drops_malformed_json(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:DE:AD:03")
+        with patch("forgekey.management.commands.mqtt_consumer.sentry_sdk") as mock_sentry:
+            result = handle_log_message(self._log_topic(device.mac_address), b"not json")
+        assert result is False
+        mock_sentry.capture_message.assert_not_called()
+
+    def test_handle_log_redacts_jwt_in_message_before_forwarding(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:DE:AD:04")
+        # A JWT-shaped token in the device's log line must be scrubbed by
+        # observability_redaction before it reaches Sentry.
+        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature_blob_long_enough_to_match"
+        payload = json.dumps(
+            {"level": "error", "tag": "auth", "msg": f"verify failed for token {jwt}"}
+        ).encode("utf-8")
+        with patch("forgekey.management.commands.mqtt_consumer.sentry_sdk") as mock_sentry:
+            mock_sentry.new_scope.return_value.__enter__.return_value = MagicMock()
+            handle_log_message(self._log_topic(device.mac_address), payload)
+        forwarded_msg = mock_sentry.capture_message.call_args.args[0]
+        assert "***REDACTED***" in forwarded_msg
+        assert jwt not in forwarded_msg
+
+    def test_handle_log_per_device_rate_limit_caps_forwards(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:DE:AD:05")
+        payload = json.dumps({"level": "error", "tag": "spam", "msg": "x"}).encode("utf-8")
+        forwarded_count = 0
+        with patch("forgekey.management.commands.mqtt_consumer.sentry_sdk") as mock_sentry:
+            mock_sentry.new_scope.return_value.__enter__.return_value = MagicMock()
+            for _ in range(LOG_RATE_LIMIT_MAX_EVENTS + 5):
+                if handle_log_message(self._log_topic(device.mac_address), payload):
+                    forwarded_count += 1
+        assert forwarded_count == LOG_RATE_LIMIT_MAX_EVENTS
+        assert mock_sentry.capture_message.call_count == LOG_RATE_LIMIT_MAX_EVENTS
 
     def test_handle_occupancy_message_redacts_secret_shaped_payload_keys(self, settings):
         """gh #378: payload keys that match the redactor's sensitive-name

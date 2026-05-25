@@ -25,7 +25,7 @@
     "react-dom": "^18.2.0",
     "react-grid-layout": "^1.5.3",
     "react-hook-form": "^7.50.0",
-    "react-router-dom": "^6.30.3",
+    "react-router-dom": "^7.0.0",
     "react-swipeable": "^7.0.2",
     "recharts": "^2.15.4",
     "web-vitals": "^5.0.0",

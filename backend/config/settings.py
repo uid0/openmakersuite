@@ -10,6 +10,11 @@ import dj_database_url
 from celery.schedules import crontab
 from decouple import config
 
+import sentry_sdk
+from sentry_sdk.integrations.celery import CeleryIntegration
+from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
+
 try:
     import passkeys
 
@@ -606,6 +611,42 @@ READYZ_REQUIRED_CHECKS = config(
     "READYZ_REQUIRED_CHECKS",
     default="database,cache,broker",
 )
+
+# Sentry error reporting. No-op when SENTRY_DSN is unset; in production the
+# DSN is set in `.env` and `scripts/validate-prod-env.sh` warns if it's
+# empty. `_check_telemetry` in `config/health.py` verifies reachability.
+#
+# - DjangoIntegration: captures unhandled view exceptions, 5xx, slow ORM.
+# - CeleryIntegration: captures task failures + propagates trace IDs across
+#   the Redis broker so a request → task chain shows up as one transaction.
+# - LoggingIntegration(event_level=ERROR): forwards logger.error / logger.exception
+#   calls as Sentry events. INFO/WARNING become breadcrumbs.
+SENTRY_DSN = config("SENTRY_DSN", default="")
+SENTRY_ENVIRONMENT = config("SENTRY_ENVIRONMENT", default="production" if not DEBUG else "development")
+SENTRY_RELEASE = config("GIT_HASH", default="") or None
+SENTRY_TRACES_SAMPLE_RATE = config("SENTRY_TRACES_SAMPLE_RATE", default=0.1, cast=float)
+SENTRY_PROFILES_SAMPLE_RATE = config("SENTRY_PROFILES_SAMPLE_RATE", default=0.0, cast=float)
+
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=SENTRY_ENVIRONMENT,
+        release=SENTRY_RELEASE,
+        integrations=[
+            DjangoIntegration(transaction_style="url"),
+            CeleryIntegration(monitor_beat_tasks=True),
+            LoggingIntegration(event_level="ERROR"),
+        ],
+        traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
+        profiles_sample_rate=SENTRY_PROFILES_SAMPLE_RATE,
+        # Don't ship request bodies / user PII by default; the redactor in
+        # config.observability_redaction handles fine-grained scrubbing for
+        # our own log/audit surfaces.
+        send_default_pii=False,
+    )
+    # Drop noisy framework warnings; let LoggingIntegration carry the real
+    # signal (logger.error / .exception in app code).
+    sentry_sdk.integrations.logging.ignore_logger("django.security.DisallowedHost")
 
 # Logging configuration
 LOGGING = {

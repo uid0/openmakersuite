@@ -4,13 +4,13 @@ import logging
 from datetime import timedelta
 from typing import Dict, List
 
-import sentry_sdk
 from django.conf import settings
 from django.contrib.auth.models import Group
 from django.core.mail import EmailMessage
 from django.db.models import Q
 from django.utils import timezone
 
+import sentry_sdk
 from celery import shared_task
 
 from .models import Vendor

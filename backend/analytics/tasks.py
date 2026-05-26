@@ -14,11 +14,11 @@ from decimal import Decimal, InvalidOperation
 from email.mime.image import MIMEImage
 from typing import Iterable
 
-import sentry_sdk
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 
+import sentry_sdk
 from celery import shared_task
 
 from .services.aggregation import category_spend, top_users, value_summary, wo_volume

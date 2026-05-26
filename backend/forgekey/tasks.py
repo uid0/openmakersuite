@@ -9,11 +9,11 @@ from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from typing import Any, Dict, Optional
 
-import sentry_sdk
 from django.conf import settings
 from django.utils import timezone
 
 import paho.mqtt.client as mqtt
+import sentry_sdk
 from celery import shared_task
 
 from .models import ESP32Device, ESP32DevicePhoto, OccupancyEvent, PowerMeterReading

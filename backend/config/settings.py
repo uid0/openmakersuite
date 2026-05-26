@@ -4,8 +4,22 @@ Django settings for makerspace inventory management system.
 
 import logging
 import sys
+import warnings
 from datetime import timedelta
 from pathlib import Path
+
+# Django 6.0.5's django.contrib.auth.decorators emits a DeprecationWarning
+# from `asyncio.iscoroutinefunction` on every login_required call. The
+# upstream fix is queued for the next Django patch — until then, suppress
+# this single deprecation so dev consoles and `manage.py check` aren't
+# noisy. Scoped to the exact module so unrelated asyncio deprecations
+# still surface.
+warnings.filterwarnings(
+    "ignore",
+    message=r"'asyncio\.iscoroutinefunction' is deprecated.*",
+    category=DeprecationWarning,
+    module=r"django\.contrib\.auth\.decorators",
+)
 
 import dj_database_url
 import sentry_sdk

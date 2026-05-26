@@ -6,6 +6,7 @@ Handles quarterly email updates to donors.
 
 import logging
 
+import sentry_sdk
 from celery import shared_task
 
 from donations.models import Donation
@@ -15,6 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task
+@sentry_sdk.crons.monitor(
+    monitor_slug="donations-quarterly-donor-updates",
+    monitor_config={
+        # Beat schedule is 90 days (see CELERY_BEAT_SCHEDULE). One missed run
+        # is a real outage — donors expect quarterly statements — so failure
+        # threshold is 1 (alert on the first miss).
+        "schedule": {"type": "interval", "value": 90, "unit": "day"},
+        "timezone": "America/Chicago",
+        "checkin_margin": 60,
+        "max_runtime": 15,
+        "failure_issue_threshold": 1,
+        "recovery_threshold": 1,
+    },
+)
 def send_quarterly_donor_updates():
     """
     Send quarterly update emails to all donors who have received tax receipts.

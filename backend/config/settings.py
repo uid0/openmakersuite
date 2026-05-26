@@ -639,7 +639,24 @@ if SENTRY_DSN:
         release=SENTRY_RELEASE,
         integrations=[
             DjangoIntegration(transaction_style="url"),
-            CeleryIntegration(monitor_beat_tasks=True),
+            CeleryIntegration(
+                # Auto-create Sentry Cron monitors for every periodic task
+                # that fires through Celery beat — anything in
+                # CELERY_BEAT_SCHEDULE gets a check-in for free.
+                monitor_beat_tasks=True,
+                # Tasks listed below have explicit @sentry_sdk.crons.monitor
+                # decorators with tuned margins / max_runtime /
+                # failure_issue_threshold. Excluding them here prevents a
+                # second auto-monitor with default config from cluttering
+                # the Crons UI.
+                exclude_beat_tasks=[
+                    "send-quarterly-donor-updates",
+                    "flag-expiring-vendor-compliance",
+                    "forgekey-mark-stale-devices-offline",
+                    "forgekey-prune-device-photos",
+                    "analytics-send-monthly-pulse",
+                ],
+            ),
             LoggingIntegration(event_level="ERROR"),
         ],
         traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,

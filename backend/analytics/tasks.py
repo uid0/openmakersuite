@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from email.mime.image import MIMEImage
 from typing import Iterable
 
+import sentry_sdk
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
@@ -221,6 +222,20 @@ def send_monthly_pulse(
 
 
 @shared_task(bind=True, ignore_result=True, name="analytics.send_monthly_pulse_email")
+@sentry_sdk.crons.monitor(
+    monitor_slug="analytics-monthly-pulse-email",
+    monitor_config={
+        # Fires at 09:00 America/Chicago on the 1st of each month. Failure
+        # threshold is 1 — board + staff expect this every month, so a
+        # missed run should page immediately.
+        "schedule": {"type": "crontab", "value": "0 9 1 * *"},
+        "timezone": "America/Chicago",
+        "checkin_margin": 60,
+        "max_runtime": 10,
+        "failure_issue_threshold": 1,
+        "recovery_threshold": 1,
+    },
+)
 def send_monthly_pulse_email(self):
     """Celery entry-point fired by Beat at 09:00 on the 1st of each month."""
     try:

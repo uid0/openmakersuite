@@ -4,6 +4,7 @@ import logging
 from datetime import timedelta
 from typing import Dict, List
 
+import sentry_sdk
 from django.conf import settings
 from django.contrib.auth.models import Group
 from django.core.mail import EmailMessage
@@ -82,6 +83,20 @@ def _format_digest(buckets: Dict[str, List[Vendor]]) -> str:
 
 
 @shared_task(name="vendors.flag_expiring_compliance")
+@sentry_sdk.crons.monitor(
+    monitor_slug="vendors-flag-expiring-compliance",
+    monitor_config={
+        # Daily TDLR / COI expiry digest to Logistics. Two consecutive misses
+        # before alerting — a single missed day rarely matters, but two
+        # days dark and we risk an expired-cert vendor slipping through.
+        "schedule": {"type": "interval", "value": 1, "unit": "day"},
+        "timezone": "America/Chicago",
+        "checkin_margin": 30,
+        "max_runtime": 5,
+        "failure_issue_threshold": 2,
+        "recovery_threshold": 1,
+    },
+)
 def flag_expiring_compliance() -> Dict[str, int]:
     """Email Logistics a digest of vendors with expiring/expired TDLR or COI.
 

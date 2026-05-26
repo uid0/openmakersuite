@@ -13,6 +13,7 @@ from django.conf import settings
 from django.utils import timezone
 
 import paho.mqtt.client as mqtt
+import sentry_sdk
 from celery import shared_task
 
 from .models import ESP32Device, ESP32DevicePhoto, OccupancyEvent, PowerMeterReading
@@ -632,6 +633,19 @@ def trigger_ota(
 
 
 @shared_task
+@sentry_sdk.crons.monitor(
+    monitor_slug="forgekey-prune-device-photos",
+    monitor_config={
+        # Daily ESP32DevicePhoto retention sweep. Two misses before alerting —
+        # photos accumulate slowly enough that a single missed day is fine.
+        "schedule": {"type": "interval", "value": 1, "unit": "day"},
+        "timezone": "America/Chicago",
+        "checkin_margin": 60,
+        "max_runtime": 10,
+        "failure_issue_threshold": 2,
+        "recovery_threshold": 1,
+    },
+)
 def prune_device_photos(retention_days: int = 30) -> Dict[str, Any]:
     """
     Delete ESP32DevicePhoto rows older than ``retention_days`` (default 30).
@@ -653,6 +667,21 @@ def prune_device_photos(retention_days: int = 30) -> Dict[str, Any]:
 
 
 @shared_task
+@sentry_sdk.crons.monitor(
+    monitor_slug="forgekey-mark-stale-devices-offline",
+    monitor_config={
+        # Every-30-min sweep that flips ESP32Device.is_online to False once
+        # last_seen exceeds threshold_hours. Three misses (90 min dark)
+        # before alerting — short enough to catch a wedged scheduler, long
+        # enough not to page on a single redis-broker hiccup.
+        "schedule": {"type": "interval", "value": 30, "unit": "minute"},
+        "timezone": "America/Chicago",
+        "checkin_margin": 5,
+        "max_runtime": 2,
+        "failure_issue_threshold": 3,
+        "recovery_threshold": 1,
+    },
+)
 def mark_stale_devices_offline(threshold_hours: int = 5) -> Dict[str, Any]:
     """Flip ``ESP32Device.is_online`` to False for devices whose ``last_seen``
     is older than ``threshold_hours`` (default 5).

@@ -306,10 +306,49 @@ jobs:
       - name: Build production bundle
         run: |
           cd frontend
+          # Vite source maps are on by default (vite.config.ts: build.sourcemap=true),
+          # so build/ ends up with `assets/index-*.js.map` siblings ready for upload.
           npm run build
         env:
           CI: false
           NODE_OPTIONS: "--dns-result-order=ipv4first"
+          VITE_GIT_HASH: ${{ github.sha }}
+
+      - name: Register Sentry release + upload frontend source maps
+        # Creates a single org-wide release identified by the commit SHA,
+        # associated with both projects so backend (Python) errors and
+        # frontend (React + Replay) events both link back to the same
+        # commit + diff. Upload the frontend assets/*.js.map so minified
+        # stack traces resolve to real TS lines.
+        #
+        # The `secrets` context is NOT available inside step-level `if:`
+        # expressions, so the step itself always runs — but its body bails
+        # immediately when SENTRY_AUTH_TOKEN is unset (PRs from forks,
+        # local act runs, fresh-clone builds before the secret is set up).
+        # `continue-on-error: true` so a Sentry outage or transient API
+        # failure never fails CI — releases are best-effort metadata, not
+        # a deploy gate.
+        continue-on-error: true
+        run: |
+          cd frontend
+          if [ -z "${SENTRY_AUTH_TOKEN:-}" ]; then
+            echo "⏭️  SENTRY_AUTH_TOKEN not set; skipping Sentry release + sourcemap upload."
+            exit 0
+          fi
+          SCLI="npx --yes @sentry/cli@2.39.1"
+          $SCLI releases new "$GITHUB_SHA" --project backend --project frontend
+          $SCLI releases files "$GITHUB_SHA" \
+            upload-sourcemaps build/assets \
+            --url-prefix "~/assets" \
+            --rewrite \
+            --validate \
+            --project frontend
+          $SCLI releases set-commits "$GITHUB_SHA" --auto
+          $SCLI releases finalize "$GITHUB_SHA"
+        env:
+          SENTRY_URL: https://highlighter.openmakersuite.net
+          SENTRY_ORG: sentry
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
       - name: Install Playwright browsers
         run: |

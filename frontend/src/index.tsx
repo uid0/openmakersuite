@@ -32,6 +32,23 @@ if (sentryDsn) {
         maskAllText: false,
         blockAllMedia: false,
       }),
+      // Floating "Report a Bug" widget. When a member files a report, the
+      // SDK auto-links the active Session Replay so uid0 can watch what the
+      // member did right before clicking. autoInject:true renders the
+      // default trigger button bottom-right; per-page customization can use
+      // Sentry.getFeedback()?.attachTo(el) later.
+      Sentry.feedbackIntegration({
+        autoInject: true,
+        showBranding: false,
+        colorScheme: 'system',
+        enableScreenshot: true,
+        triggerLabel: 'Report a Bug',
+        formTitle: 'Report a Bug',
+        submitButtonLabel: 'Send Report',
+        messagePlaceholder:
+          "What happened? Steps to reproduce help — uid0 will see your screen recording from the last minute.",
+        successMessageText: 'Thanks — your report and session replay are on their way to uid0.',
+      }),
     ],
     // 0.5 = 50% of page navigations and SPA route changes emit a full
     // transaction. At this org's traffic that's well within self-hosted
@@ -42,6 +59,11 @@ if (sentryDsn) {
     // Sentry is tractable at this org's traffic; revisit if SeaweedFS fills up.
     replaysSessionSampleRate: 1.0,
     replaysOnErrorSampleRate: 1.0,
+    // Opt into the Logs beta — Sentry.logger.{info,warn,error}(...) ships
+    // structured log entries (searchable, no alerting) alongside events.
+    // Self-hosted instance has ourlogs-enabled, ourlogs-ingestion, and
+    // ourlogs-stats turned on for the `sentry` org.
+    enableLogs: true,
     // Don't ship full request bodies; explicit logger.error / captureException
     // calls in app code carry the curated context.
     sendDefaultPii: false,

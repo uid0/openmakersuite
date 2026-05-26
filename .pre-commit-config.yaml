@@ -105,7 +105,7 @@ repos:
     hooks:
       - id: npm-test
         name: npm test
-        entry: bash -c 'cd frontend && npm test -- --coverage --ci --watchAll=false'
+        entry: bash -c 'cd frontend && npm run test:ci:coverage'
         language: system
         files: ^frontend/src/.*\.(ts|tsx|js|jsx)$
         pass_filenames: false

@@ -117,6 +117,12 @@ services:
       - .env
     environment:
       - DEBUG=0
+      # GIT_HASH propagates into Sentry's `release` field so events from
+      # Python (backend, celery, mqtt_consumer, celery_beat) get attributed
+      # to the same release tag the frontend bundle was built with — that's
+      # what powers per-release Session Health, regression detection, and
+      # the "first seen in release X" issue grouping.
+      - GIT_HASH=${GIT_HASH:-}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -188,6 +194,12 @@ services:
       - .env
     environment:
       - DEBUG=0
+      # GIT_HASH propagates into Sentry's `release` field so events from
+      # Python (backend, celery, mqtt_consumer, celery_beat) get attributed
+      # to the same release tag the frontend bundle was built with — that's
+      # what powers per-release Session Health, regression detection, and
+      # the "first seen in release X" issue grouping.
+      - GIT_HASH=${GIT_HASH:-}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -230,6 +242,12 @@ services:
       - .env
     environment:
       - DEBUG=0
+      # GIT_HASH propagates into Sentry's `release` field so events from
+      # Python (backend, celery, mqtt_consumer, celery_beat) get attributed
+      # to the same release tag the frontend bundle was built with — that's
+      # what powers per-release Session Health, regression detection, and
+      # the "first seen in release X" issue grouping.
+      - GIT_HASH=${GIT_HASH:-}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -278,6 +296,12 @@ services:
       - .env
     environment:
       - DEBUG=0
+      # GIT_HASH propagates into Sentry's `release` field so events from
+      # Python (backend, celery, mqtt_consumer, celery_beat) get attributed
+      # to the same release tag the frontend bundle was built with — that's
+      # what powers per-release Session Health, regression detection, and
+      # the "first seen in release X" issue grouping.
+      - GIT_HASH=${GIT_HASH:-}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0

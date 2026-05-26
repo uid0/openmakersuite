@@ -33,7 +33,11 @@ if (sentryDsn) {
         blockAllMedia: false,
       }),
     ],
-    tracesSampleRate: 0.1,
+    // 0.5 = 50% of page navigations and SPA route changes emit a full
+    // transaction. At this org's traffic that's well within self-hosted
+    // Sentry's headroom and gives uid0 real coverage of slow renders +
+    // axios call timing instead of a 10% sample.
+    tracesSampleRate: 0.5,
     // Replay every session and every error. Storage cost on a self-hosted
     // Sentry is tractable at this org's traffic; revisit if SeaweedFS fills up.
     replaysSessionSampleRate: 1.0,

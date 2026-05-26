@@ -625,7 +625,11 @@ SENTRY_ENVIRONMENT = config(
     "SENTRY_ENVIRONMENT", default="production" if not DEBUG else "development"
 )
 SENTRY_RELEASE = config("GIT_HASH", default="") or None
-SENTRY_TRACES_SAMPLE_RATE = config("SENTRY_TRACES_SAMPLE_RATE", default=0.1, cast=float)
+# 0.5 = 50% of requests / tasks emit a full transaction. Makerspace
+# traffic is well under any rate that'd strain Sentry storage at this
+# sample, and the higher rate gives uid0 real coverage for finding
+# slow views + N+1 queries. Override via env if storage pressure climbs.
+SENTRY_TRACES_SAMPLE_RATE = config("SENTRY_TRACES_SAMPLE_RATE", default=0.5, cast=float)
 SENTRY_PROFILES_SAMPLE_RATE = config("SENTRY_PROFILES_SAMPLE_RATE", default=0.0, cast=float)
 
 if SENTRY_DSN:

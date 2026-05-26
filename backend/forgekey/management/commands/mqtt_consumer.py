@@ -1,12 +1,17 @@
 """
 Long-running MQTT subscriber for ForgeKey devices.
 
-Subscribes to two wildcard topics:
+Subscribes to four wildcard topics:
 
 * ``forgekey/+/+/occupancy`` — per-event occupancy messages from people
   counters and door counters. Persisted as :class:`OccupancyEvent` rows.
 * ``forgekey/+/status`` — periodic status / boot messages from any device.
   Updates :class:`ESP32Device.last_seen` and related fields in place.
+* ``forgekey/+/ota/status`` — OTA progress reports against an in-flight
+  :class:`DeviceFirmwareUpdate`.
+* ``forgekey/+/logs`` — structured log lines from device firmware
+  (``MqttClient::publishLog``). Level ≥ WARNING forwards to Sentry with
+  device tags; lower levels are recorded as Django log breadcrumbs only.
 
 The command is intended to be run under a process supervisor (systemd unit
 or docker-compose service). It handles broker disconnects, malformed
@@ -24,16 +29,39 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.management.base import BaseCommand
 from django.utils import timezone as dj_timezone
 
 import paho.mqtt.client as mqtt
+import sentry_sdk
 
 from config.observability_redaction import redact
 from forgekey.models import DeviceFirmwareUpdate, ESP32Device, OccupancyEvent
 from forgekey.utils import normalize_mac_address, normalize_sensor_kind
 
 logger = logging.getLogger(__name__)
+
+# Per-device rate cap for log forwarding so a wedged device can't fill the
+# Sentry project. 60 forwarded events per 5 minutes per device covers a
+# normal error storm while bounding the worst case. Drops past the cap
+# bump a Sentry-side counter so the misbehaving device is still visible.
+LOG_RATE_LIMIT_MAX_EVENTS = 60
+LOG_RATE_LIMIT_WINDOW_SECONDS = 300
+
+# Firmware-supplied log level strings → Python logging level ints + the
+# Sentry level wire format. Anything not in this map is treated as INFO.
+_LOG_LEVELS: dict[str, tuple[int, str]] = {
+    "trace": (logging.DEBUG, "debug"),
+    "debug": (logging.DEBUG, "debug"),
+    "info": (logging.INFO, "info"),
+    "warn": (logging.WARNING, "warning"),
+    "warning": (logging.WARNING, "warning"),
+    "error": (logging.ERROR, "error"),
+    "fatal": (logging.CRITICAL, "fatal"),
+    "crit": (logging.CRITICAL, "fatal"),
+    "critical": (logging.CRITICAL, "fatal"),
+}
 
 
 def _mac_from_topic_segment(segment: str) -> Optional[str]:
@@ -360,6 +388,135 @@ def _topic_matches_ota_status(topic: str) -> bool:
     )
 
 
+def _topic_matches_log(topic: str) -> bool:
+    parts = topic.split("/")
+    return len(parts) == 3 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[2] == "logs"
+
+
+def _device_log_allowed(mac: str) -> bool:
+    """Sliding-window rate limiter for per-device log forwarding to Sentry.
+
+    Uses the Django cache (django-redis in prod) so the budget is shared
+    across the cluster. Returns True when this event is within budget;
+    False when it should be dropped.
+    """
+    bucket_key = f"forgekey:log_rate:{mac}"
+    try:
+        # Seed the key (no-op if already set) so incr has something to bump.
+        # get_or_set + incr is atomic enough for our purposes on the redis
+        # backend; we don't need exact accuracy, just a hard cap.
+        cache.get_or_set(bucket_key, 0, timeout=LOG_RATE_LIMIT_WINDOW_SECONDS)
+        next_value = cache.incr(bucket_key)
+    except ValueError:
+        # Key expired between get_or_set and incr — start over.
+        cache.set(bucket_key, 1, timeout=LOG_RATE_LIMIT_WINDOW_SECONDS)
+        next_value = 1
+    except Exception:
+        # Cache backend wedged — fail open so a redis outage doesn't drop
+        # all device logs. Logged once per call so we notice in Sentry.
+        logger.exception("Rate-limit cache backend unavailable; fail-open for %s", mac)
+        return True
+    return next_value <= LOG_RATE_LIMIT_MAX_EVENTS
+
+
+def handle_log_message(topic: str, payload: bytes) -> bool:
+    """Forward a device log line to Sentry (level ≥ WARNING) and Django logs.
+
+    Firmware contract: ``MqttClient::publishLog(timestampMs, level, tag, message)``
+    publishes ``{"ts": <ms>, "level": "<info|warning|error|...>",
+    "tag": "<subsystem>", "msg": "<text>"}`` to
+    ``forgekey/<mac>/logs``. We:
+
+    * drop the message when MAC isn't registered (don't trust unknown devices),
+    * scrub ``msg`` + ``tag`` through ``observability_redaction.redact`` so a
+      device echoing a JWT or PEM never reaches Sentry verbatim,
+    * rate-limit per device to bound the worst case (wedged firmware loop),
+    * call ``sentry_sdk.capture_message`` for warning/error/fatal — lower
+      levels become Django log records only (Sentry's LoggingIntegration
+      turns those into breadcrumbs on the next captured event).
+
+    Returns ``True`` if forwarded to Sentry, ``False`` otherwise.
+    """
+    parts = topic.split("/")
+    if len(parts) != 3:
+        logger.warning("Dropping log message: malformed topic %r", topic)
+        return False
+    mac = _mac_from_topic_segment(parts[1])
+    if mac is None:
+        logger.warning("Dropping log message: bad MAC segment %r in %r", parts[1], topic)
+        return False
+
+    try:
+        body = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning("Dropping log message on %s: invalid JSON (%s)", topic, exc)
+        return False
+    if not isinstance(body, dict):
+        logger.warning("Dropping log message on %s: payload is not an object", topic)
+        return False
+
+    device = (
+        ESP32Device.objects.filter(mac_address=mac)
+        .only("id", "mac_address", "firmware_version", "location_id")
+        .first()
+    )
+    if device is None:
+        # Unregistered MACs: don't trust their input. Provisioning will create
+        # the row before any legitimate log traffic.
+        logger.info("Dropping log message: unknown MAC %s on topic %s", mac, topic)
+        return False
+
+    raw_level = str(body.get("level") or "info").strip().lower()
+    py_level, sentry_level = _LOG_LEVELS.get(raw_level, (logging.INFO, "info"))
+    raw_tag = body.get("tag")
+    tag = redact(raw_tag) if isinstance(raw_tag, str) else None
+    raw_msg = body.get("msg") or body.get("message") or ""
+    message = redact(raw_msg) if isinstance(raw_msg, str) else str(raw_msg)
+
+    # Always echo to Django logger — LoggingIntegration converts INFO/DEBUG
+    # into Sentry breadcrumbs that ride along with the next captured event,
+    # so even sub-warning lines stay useful for postmortem.
+    logger.log(
+        py_level,
+        "[device %s/%s] %s",
+        device.mac_address,
+        tag or "-",
+        message,
+        extra={"device_id": device.id, "device_mac": device.mac_address, "device_log_tag": tag},
+    )
+
+    # Only forward warning+ to Sentry as a discrete event, and only when the
+    # device hasn't blown its rate budget for the window.
+    if py_level < logging.WARNING:
+        return False
+    if not _device_log_allowed(device.mac_address):
+        # One-line drop record per cap-exceed so a wedged device is still
+        # visible (this line itself rides the rate budget so the meta-event
+        # doesn't loop forever).
+        logger.warning(
+            "Rate-limit drop: device %s exceeded %d log forwards / %ds",
+            device.mac_address,
+            LOG_RATE_LIMIT_MAX_EVENTS,
+            LOG_RATE_LIMIT_WINDOW_SECONDS,
+        )
+        return False
+
+    # Tag the event on a fresh scope so device context doesn't leak into
+    # unrelated requests on the same thread (sentry-sdk 2.x scope model).
+    with sentry_sdk.new_scope() as scope:
+        scope.set_tag("origin", "device")
+        scope.set_tag("device_id", str(device.id))
+        scope.set_tag("device_mac", device.mac_address)
+        if device.firmware_version:
+            scope.set_tag("device_firmware", device.firmware_version)
+        if device.location_id is not None:
+            scope.set_tag("device_location", str(device.location_id))
+        if tag:
+            scope.set_tag("device_log_tag", tag)
+        sentry_sdk.capture_message(message, level=sentry_level)
+    return True
+
+
 def dispatch_message(topic: str, payload: bytes) -> None:
     """Route an inbound MQTT message to the appropriate handler.
 
@@ -371,6 +528,8 @@ def dispatch_message(topic: str, payload: bytes) -> None:
             handle_ota_status_message(topic, payload)
         elif _topic_matches_occupancy(topic):
             handle_occupancy_message(topic, payload)
+        elif _topic_matches_log(topic):
+            handle_log_message(topic, payload)
         elif _topic_matches_status(topic):
             handle_status_message(topic, payload)
         else:
@@ -414,24 +573,27 @@ class Command(BaseCommand):
         occupancy_filter = f"{prefix}/+/+/occupancy"
         status_filter = f"{prefix}/+/status"
         ota_status_filter = f"{prefix}/+/ota/status"
+        log_filter = f"{prefix}/+/logs"
 
         def on_connect(c, userdata, flags, rc, properties=None):
             if rc != 0:
                 logger.error("MQTT consumer connect failed rc=%s", rc)
                 return
             logger.info(
-                "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s",
+                "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s, %s",
                 host,
                 port,
                 occupancy_filter,
                 status_filter,
                 ota_status_filter,
+                log_filter,
             )
             c.subscribe(
                 [
                     (occupancy_filter, 1),
                     (status_filter, 1),
                     (ota_status_filter, 1),
+                    (log_filter, 1),
                 ]
             )
 

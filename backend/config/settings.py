@@ -4,6 +4,7 @@ Django settings for makerspace inventory management system.
 
 import logging
 import sys
+import warnings
 from datetime import timedelta
 from pathlib import Path
 
@@ -21,6 +22,19 @@ try:
     PASSKEYS_TEMPLATE_DIR = passkeys.template_directory
 except ImportError:
     PASSKEYS_TEMPLATE_DIR = None
+
+# Django 6.0.5's django.contrib.auth.decorators emits a DeprecationWarning
+# from `asyncio.iscoroutinefunction` on every login_required call. The
+# upstream fix is queued for the next Django patch — until then, suppress
+# this single deprecation so dev consoles and `manage.py check` aren't
+# noisy. Scoped to the exact module so unrelated asyncio deprecations
+# still surface. Placed after the import block to satisfy flake8 E402.
+warnings.filterwarnings(
+    "ignore",
+    message=r"'asyncio\.iscoroutinefunction' is deprecated.*",
+    category=DeprecationWarning,
+    module=r"django\.contrib\.auth\.decorators",
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent

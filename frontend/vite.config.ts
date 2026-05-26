@@ -53,6 +53,26 @@ const config: UserConfig & { test?: unknown } = {
     outDir: 'build',
     sourcemap: true,
     chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        // Manual vendor chunking so the main bundle stays under the
+        // chunkSizeWarningLimit. Splits the heaviest libraries off into
+        // their own files so the SW + browser cache them independently of
+        // app code (changes to a page don't bust the mantine chunk).
+        // Rolldown only supports the function form (the object form
+        // throws "manualChunks is not a function").
+        manualChunks(id: string): string | undefined {
+          if (!id.includes('node_modules/')) return undefined;
+          if (/node_modules\/@mantine\//.test(id)) return 'vendor-mantine';
+          if (/node_modules\/recharts\//.test(id)) return 'vendor-charts';
+          if (/node_modules\/@sentry\//.test(id)) return 'vendor-sentry';
+          if (/node_modules\/(react|react-dom|react-router|scheduler)\//.test(id)) {
+            return 'vendor-react';
+          }
+          return undefined;
+        },
+      },
+    },
   },
   test: {
     globals: true,

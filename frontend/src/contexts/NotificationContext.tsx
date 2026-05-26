@@ -5,6 +5,8 @@
 import { notifications } from '@mantine/notifications';
 import React, { createContext, ReactNode, useCallback, useContext, useState } from 'react';
 
+import { notificationsAPI } from '../services/api';
+
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
 
 export interface Notification {
@@ -136,8 +138,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   // Backend notifications
   const loadNotifications = useCallback(async () => {
     try {
-      const { notificationsAPI } = await import('../services/api');
-      const response = await notificationsAPI.list();
+const response = await notificationsAPI.list();
       const notifications: Notification[] = response.data.results.map((n) => ({
         id: n.id,
         type: n.type,
@@ -156,8 +157,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
   const markAsRead = useCallback(async (id: string) => {
     try {
-      const { notificationsAPI } = await import('../services/api');
-      await notificationsAPI.markAsRead(id);
+await notificationsAPI.markAsRead(id);
       setBackendNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, read: true } : n))
       );
@@ -168,8 +168,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
   const markAllAsRead = useCallback(async () => {
     try {
-      const { notificationsAPI } = await import('../services/api');
-      await notificationsAPI.markAllAsRead();
+await notificationsAPI.markAllAsRead();
       setBackendNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     } catch (error) {
       console.error('Failed to mark all notifications as read:', error);
@@ -178,8 +177,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
   const deleteNotification = useCallback(async (id: string) => {
     try {
-      const { notificationsAPI } = await import('../services/api');
-      await notificationsAPI.delete(id);
+await notificationsAPI.delete(id);
       setBackendNotifications((prev) => prev.filter((n) => n.id !== id));
     } catch (error) {
       console.error('Failed to delete notification:', error);

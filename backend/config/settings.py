@@ -2,6 +2,7 @@
 Django settings for makerspace inventory management system.
 """
 
+import logging
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -618,8 +619,9 @@ READYZ_REQUIRED_CHECKS = config(
 # - DjangoIntegration: captures unhandled view exceptions, 5xx, slow ORM.
 # - CeleryIntegration: captures task failures + propagates trace IDs across
 #   the Redis broker so a request → task chain shows up as one transaction.
-# - LoggingIntegration(event_level=ERROR): forwards logger.error / logger.exception
-#   calls as Sentry events. INFO/WARNING become breadcrumbs.
+# - LoggingIntegration: ERROR → Sentry events (alertable). INFO+ → Sentry
+#   Logs (searchable, no alerting) once enable_logs is on, so debug-shaped
+#   signal lands in the Logs UI without paging anyone.
 SENTRY_DSN = config("SENTRY_DSN", default="")
 SENTRY_ENVIRONMENT = config(
     "SENTRY_ENVIRONMENT", default="production" if not DEBUG else "development"
@@ -640,10 +642,14 @@ if SENTRY_DSN:
         integrations=[
             DjangoIntegration(transaction_style="url"),
             CeleryIntegration(monitor_beat_tasks=True),
-            LoggingIntegration(event_level="ERROR"),
+            LoggingIntegration(
+                event_level=logging.ERROR,
+                sentry_logs_level=logging.INFO,
+            ),
         ],
         traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
         profiles_sample_rate=SENTRY_PROFILES_SAMPLE_RATE,
+        enable_logs=True,
         # Don't ship request bodies / user PII by default; the redactor in
         # config.observability_redaction handles fine-grained scrubbing for
         # our own log/audit surfaces.

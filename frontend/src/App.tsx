@@ -51,6 +51,7 @@ import ThermostatFormPage from './pages/ThermostatFormPage';
 import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
 import InventoryItemFormPage from './pages/InventoryItemFormPage';
 import InventoryListPage from './pages/InventoryListPage';
+import InventoryOverviewPage from './pages/InventoryOverviewPage';
 import InventoryReportPage from './pages/InventoryReportPage';
 import InventoryReconciliationPage from './pages/InventoryReconciliationPage';
 import LocationDetailPage from './pages/LocationDetailPage';
@@ -192,7 +193,7 @@ function AppContent() {
           <Route path="/tv-logistics" element={<Navigate to="/facilities/logistics" replace />} />
 
           {/* Inventory Workspace */}
-          <Route path="/inventory" element={<WorkspaceLayout><HomePage /></WorkspaceLayout>} />
+          <Route path="/inventory" element={<WorkspaceLayout><InventoryOverviewPage /></WorkspaceLayout>} />
           <Route path="/dashboard" element={<WorkspaceLayout><DashboardPage /></WorkspaceLayout>} />
           <Route path="/inventory/items" element={<WorkspaceLayout><InventoryListPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/new" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />

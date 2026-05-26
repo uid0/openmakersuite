@@ -15,7 +15,7 @@
     "@mantine/hooks": "^7.11.0",
     "@mantine/modals": "^7.17.8",
     "@mantine/notifications": "^7.17.8",
-    "@sentry/react": "^8.49.0",
+    "@sentry/react": "^10.0.0",
     "@tabler/icons-react": "^3.35.0",
     "axios": "^1.16.0",
     "dayjs": "^1.11.10",

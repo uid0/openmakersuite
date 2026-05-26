@@ -2,6 +2,7 @@
 Django settings for makerspace inventory management system.
 """
 
+import logging
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -618,8 +619,9 @@ READYZ_REQUIRED_CHECKS = config(
 # - DjangoIntegration: captures unhandled view exceptions, 5xx, slow ORM.
 # - CeleryIntegration: captures task failures + propagates trace IDs across
 #   the Redis broker so a request → task chain shows up as one transaction.
-# - LoggingIntegration(event_level=ERROR): forwards logger.error / logger.exception
-#   calls as Sentry events. INFO/WARNING become breadcrumbs.
+# - LoggingIntegration: ERROR → Sentry events (alertable). INFO+ → Sentry
+#   Logs (searchable, no alerting) once enable_logs is on, so debug-shaped
+#   signal lands in the Logs UI without paging anyone.
 SENTRY_DSN = config("SENTRY_DSN", default="")
 SENTRY_ENVIRONMENT = config(
     "SENTRY_ENVIRONMENT", default="production" if not DEBUG else "development"
@@ -639,28 +641,15 @@ if SENTRY_DSN:
         release=SENTRY_RELEASE,
         integrations=[
             DjangoIntegration(transaction_style="url"),
-            CeleryIntegration(
-                # Auto-create Sentry Cron monitors for every periodic task
-                # that fires through Celery beat — anything in
-                # CELERY_BEAT_SCHEDULE gets a check-in for free.
-                monitor_beat_tasks=True,
-                # Tasks listed below have explicit @sentry_sdk.crons.monitor
-                # decorators with tuned margins / max_runtime /
-                # failure_issue_threshold. Excluding them here prevents a
-                # second auto-monitor with default config from cluttering
-                # the Crons UI.
-                exclude_beat_tasks=[
-                    "send-quarterly-donor-updates",
-                    "flag-expiring-vendor-compliance",
-                    "forgekey-mark-stale-devices-offline",
-                    "forgekey-prune-device-photos",
-                    "analytics-send-monthly-pulse",
-                ],
+            CeleryIntegration(monitor_beat_tasks=True),
+            LoggingIntegration(
+                event_level=logging.ERROR,
+                sentry_logs_level=logging.INFO,
             ),
-            LoggingIntegration(event_level="ERROR"),
         ],
         traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
         profiles_sample_rate=SENTRY_PROFILES_SAMPLE_RATE,
+        enable_logs=True,
         # Don't ship request bodies / user PII by default; the redactor in
         # config.observability_redaction handles fine-grained scrubbing for
         # our own log/audit surfaces.

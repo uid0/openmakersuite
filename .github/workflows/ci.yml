@@ -335,16 +335,25 @@ jobs:
             echo "⏭️  SENTRY_AUTH_TOKEN not set; skipping Sentry release + sourcemap upload."
             exit 0
           fi
+          # Match the release identifier the rest of the stack uses.
+          # deploy.sh exports `GIT_HASH=$(git rev-parse --short HEAD)`, the
+          # frontend bundle bakes that via VITE_GIT_HASH, and the backend
+          # Python SDK reads it as SENTRY_RELEASE. CI was using
+          # $GITHUB_SHA (40-char) which never matched the 7-char value
+          # events report — releases stayed empty and source-maps
+          # uploaded against the wrong identifier never resolved.
+          RELEASE_SHA="${GITHUB_SHA:0:7}"
+          echo "Sentry release: $RELEASE_SHA"
           SCLI="npx --yes @sentry/cli@2.39.1"
-          $SCLI releases new "$GITHUB_SHA" --project backend --project frontend
-          $SCLI releases files "$GITHUB_SHA" \
+          $SCLI releases new "$RELEASE_SHA" --project backend --project frontend
+          $SCLI releases files "$RELEASE_SHA" \
             upload-sourcemaps build/assets \
             --url-prefix "~/assets" \
             --rewrite \
             --validate \
             --project frontend
-          $SCLI releases set-commits "$GITHUB_SHA" --auto
-          $SCLI releases finalize "$GITHUB_SHA"
+          $SCLI releases set-commits "$RELEASE_SHA" --auto --commit "uid0/openmakersuite@$GITHUB_SHA"
+          $SCLI releases finalize "$RELEASE_SHA"
         env:
           SENTRY_URL: https://highlighter.openmakersuite.net
           SENTRY_ORG: sentry

@@ -38,7 +38,13 @@ import sentry_sdk
 
 from config.observability_redaction import redact
 from forgekey.models import DeviceFirmwareUpdate, ESP32Device, OccupancyEvent
-from forgekey.utils import normalize_mac_address, normalize_sensor_kind
+from forgekey.services.jwt_signing import JwtSigningError, is_jwt_signing_configured
+from forgekey.utils import (
+    SERVER_JWT_SUBJECT,
+    generate_server_jwt,
+    normalize_mac_address,
+    normalize_sensor_kind,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -561,7 +567,21 @@ class Command(BaseCommand):
             protocol=mqtt.MQTTv5,
         )
 
-        if settings.MQTT_BROKER_USERNAME:
+        # Prefer the server-JWT pattern (oms-y5p): a self-issued ES256 JWT
+        # signed with the device-JWT key. EMQX's JWT authenticator verifies
+        # it via the same JWKS endpoint at /api/forgekey/jwks/, so no
+        # separate user-management is required. Fall back to literal
+        # MQTT_BROKER_USERNAME / MQTT_BROKER_PASSWORD only when JWT signing
+        # is unconfigured — exists for dev rigs that haven't enrolled in
+        # JWT auth yet. Mirrors `forgekey.tasks.get_mqtt_client` exactly so
+        # the consumer and the publisher authenticate identically.
+        if is_jwt_signing_configured():
+            try:
+                client.username_pw_set(SERVER_JWT_SUBJECT, generate_server_jwt())
+            except JwtSigningError as exc:
+                logger.error("Failed to mint server JWT for MQTT consumer: %s", exc)
+                raise
+        elif settings.MQTT_BROKER_USERNAME:
             client.username_pw_set(
                 settings.MQTT_BROKER_USERNAME,
                 settings.MQTT_BROKER_PASSWORD,

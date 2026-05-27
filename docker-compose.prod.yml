@@ -406,6 +406,12 @@ services:
       - DOMAIN=${DOMAIN:-oms.example.com}
       - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-}
       - LETSENCRYPT_DOMAINS=${LETSENCRYPT_DOMAINS:-oms.example.com}
+      # CSP connect-src whitelist for the self-hosted Sentry host.
+      # Browser blocks every Sentry SDK POST (errors + replays + envelope)
+      # unless the DSN host is in connect-src; this defaults to the
+      # production highlighter host but can be overridden via .env for
+      # staging / a future migration to a different Sentry domain.
+      - SENTRY_HOST=${SENTRY_HOST:-highlighter.openmakersuite.net}
     depends_on:
       backend:
         condition: service_healthy

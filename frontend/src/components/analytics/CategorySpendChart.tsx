@@ -38,7 +38,7 @@ export const CategorySpendChart: React.FC<CategorySpendChartProps> = ({ data }) 
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="category" />
             <YAxis tickFormatter={fmtMoney} />
-            <Tooltip formatter={(value: number) => fmtMoney(value)} />
+            <Tooltip formatter={(value) => fmtMoney(Number(value))} />
             <Legend />
             <Bar dataKey="Internal estimated" fill="var(--mantine-color-blue-5)" />
             <Bar dataKey="External actual" fill="var(--mantine-color-orange-6)" />

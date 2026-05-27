@@ -120,12 +120,13 @@ const LeadTimeChart: React.FC<LeadTimeChartProps> = ({ analytics }) => {
             />
             <YAxis />
             <Tooltip
-              formatter={(value: number, name: string) => {
-                if (name === 'estimated') return [`${value} days`, 'Estimated'];
-                if (name === 'actual') return [`${value} days`, 'Actual'];
-                if (name === 'variance')
-                  return [`${value > 0 ? '+' : ''}${value} days`, 'Variance'];
-                return [value, name];
+              formatter={(value, name) => {
+                const v = Number(value);
+                const n = String(name);
+                if (n === 'estimated') return [`${v} days`, 'Estimated'];
+                if (n === 'actual') return [`${v} days`, 'Actual'];
+                if (n === 'variance') return [`${v > 0 ? '+' : ''}${v} days`, 'Variance'];
+                return [value as string, n];
               }}
               labelFormatter={(label) => `Item: ${label}`}
             />

@@ -386,6 +386,10 @@ views:
         permission_classes:
         - IsAuthenticated
         - IsStaffUser
+      critical:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
       destroy:
         permission_classes:
         - IsAuthenticated
@@ -2071,6 +2075,9 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  scanner.views.dispatch_scan:
+    permission_classes:
+    - AllowAny
   screens.views.ScreenContentBlockViewSet:
     actions:
       create:

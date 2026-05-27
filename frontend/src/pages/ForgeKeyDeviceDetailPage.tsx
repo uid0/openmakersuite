@@ -170,8 +170,8 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
                     />
                     <YAxis allowDecimals={false} domain={[0, 'auto']} />
                     <Tooltip
-                      labelFormatter={(v: string) => new Date(v).toLocaleString()}
-                      formatter={(value: any) => [`${value} people`, 'Occupancy']}
+                      labelFormatter={(v) => new Date(String(v)).toLocaleString()}
+                      formatter={(value) => [`${value} people`, 'Occupancy']}
                     />
                     <Line
                       type="stepAfter"

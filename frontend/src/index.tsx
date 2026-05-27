@@ -12,9 +12,11 @@ import App from './App';
 import { NotificationProvider } from './contexts/NotificationContext';
 import './styles/index.css';
 
-// Sentry — no-op when VITE_SENTRY_DSN is unset. CSP already allows
-// *.ingest.sentry.io / sentry.io / sentry-cdn.com (nginx template);
-// replay also uses `worker-src 'self' blob:` which is already allowed.
+// Sentry — no-op when VITE_SENTRY_DSN is unset. CSP needs the DSN
+// host (set via SENTRY_HOST in the nginx env, defaults to
+// `highlighter.openmakersuite.net`) included in `connect-src`, or the
+// browser silently blocks every replay + envelope POST. Replay also
+// uses a Web Worker (`worker-src 'self' blob:` is already allowed).
 const sentryDsn = import.meta.env.VITE_SENTRY_DSN;
 if (sentryDsn) {
   Sentry.init({

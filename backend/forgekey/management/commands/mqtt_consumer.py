@@ -55,6 +55,31 @@ logger = logging.getLogger(__name__)
 LOG_RATE_LIMIT_MAX_EVENTS = 60
 LOG_RATE_LIMIT_WINDOW_SECONDS = 300
 
+# Tolerance for transient CONNACK failures at consumer startup. EMQX's JWT
+# authenticator populates its JWKS cache asynchronously after a (re)start;
+# during that window every JWT-bearing CONNECT returns rc=5. The paho loop
+# retries on a backoff schedule and the consumer always recovers, so log
+# these as WARNING until either the consumer successfully connects or the
+# grace window expires. Past that point, rc!=0 escalates to ERROR (and
+# therefore Sentry-alertable).
+_STARTUP_GRACE_SECONDS = 60.0
+
+
+def _connack_log_level(first_connect_done: bool, elapsed_seconds: float) -> int:
+    """Return the log level to emit for a non-zero CONNACK return code.
+
+    Splits a transient startup failure (WARNING, won't page) from a
+    sustained or post-connect failure (ERROR, paging). Exported as a
+    module-level helper so the matrix is unit-testable without spinning
+    up the paho loop.
+    """
+    if first_connect_done:
+        return logging.ERROR
+    if elapsed_seconds < _STARTUP_GRACE_SECONDS:
+        return logging.WARNING
+    return logging.ERROR
+
+
 # Firmware-supplied log level strings → Python logging level ints + the
 # Sentry level wire format. Anything not in this map is treated as INFO.
 _LOG_LEVELS: dict[str, tuple[int, str]] = {
@@ -595,10 +620,34 @@ class Command(BaseCommand):
         ota_status_filter = f"{prefix}/+/ota/status"
         log_filter = f"{prefix}/+/logs"
 
+        # Startup grace window for CONNACK failures. EMQX's JWT authenticator
+        # populates its JWKS cache asynchronously after a (re)start; in that
+        # ~30s window every JWT-bearing CONNECT returns rc=5 "Not authorized".
+        # paho retries automatically and the consumer always recovers, but
+        # each rc!=0 used to log ERROR — that floods Sentry on every deploy
+        # (BACKEND-6: 174 events across one deploy window). Treat rc!=0 as
+        # WARNING until either (a) we've connected at least once, or (b) we
+        # exceed `_STARTUP_GRACE_SECONDS` without a successful connect, after
+        # which CONNACK failures escalate to ERROR.
+        connect_state = {
+            "started_at": time.monotonic(),
+            "first_connect_done": False,
+        }
+
         def on_connect(c, userdata, flags, rc, properties=None):
             if rc != 0:
-                logger.error("MQTT consumer connect failed rc=%s", rc)
+                elapsed = time.monotonic() - connect_state["started_at"]
+                level = _connack_log_level(connect_state["first_connect_done"], elapsed)
+                if level == logging.WARNING:
+                    logger.warning(
+                        "MQTT consumer connect failed rc=%s (startup, %.1fs elapsed); paho will retry",
+                        rc,
+                        elapsed,
+                    )
+                else:
+                    logger.error("MQTT consumer connect failed rc=%s", rc)
                 return
+            connect_state["first_connect_done"] = True
             logger.info(
                 "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s, %s",
                 host,

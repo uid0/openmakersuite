@@ -24,7 +24,9 @@ from django.utils import timezone
 import pytest
 
 from forgekey.management.commands.mqtt_consumer import (
+    _STARTUP_GRACE_SECONDS,
     LOG_RATE_LIMIT_MAX_EVENTS,
+    _connack_log_level,
     dispatch_message,
     handle_log_message,
     handle_occupancy_message,
@@ -452,3 +454,47 @@ class TestOccupancyEndpoint:
         url = f"/api/forgekey/devices/{device.id}/occupancy/?since=banana"
         response = admin_api_client.get(url)
         assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# CONNACK log-level matrix (BACKEND-6 — EMQX JWKS warm-up suppression)
+# ---------------------------------------------------------------------------
+
+
+class TestConnackLogLevel:
+    """The CONNACK-failure log level decides what's a Sentry issue vs noise.
+
+    EMQX takes ~30s after restart to populate its JWKS cache; during that
+    window every JWT-bearing CONNECT returns rc=5 even though the consumer
+    will recover on its own. Promoting those to ERROR fills Sentry with
+    transient startup events (BACKEND-6: 174 in a single deploy window).
+    The matrix:
+
+        * pre-first-connect + within grace window  → WARNING (don't page)
+        * pre-first-connect + grace expired        → ERROR (real outage)
+        * post-first-connect, any time             → ERROR (broker drop)
+    """
+
+    def test_transient_startup_failure_is_warning(self):
+        assert _connack_log_level(first_connect_done=False, elapsed_seconds=5.0) == logging.WARNING
+
+    def test_failure_at_grace_boundary_is_error(self):
+        # Sitting exactly on the boundary should escalate — anything older
+        # is a sustained outage worth paging on.
+        assert (
+            _connack_log_level(first_connect_done=False, elapsed_seconds=_STARTUP_GRACE_SECONDS)
+            == logging.ERROR
+        )
+
+    def test_sustained_failure_is_error(self):
+        assert (
+            _connack_log_level(
+                first_connect_done=False, elapsed_seconds=_STARTUP_GRACE_SECONDS + 30
+            )
+            == logging.ERROR
+        )
+
+    def test_post_connect_failure_is_error_regardless_of_elapsed(self):
+        # Once we've connected at least once, any subsequent rc!=0 is a
+        # broker drop / re-auth failure — that's real signal even at 1s.
+        assert _connack_log_level(first_connect_done=True, elapsed_seconds=1.0) == logging.ERROR

@@ -389,3 +389,87 @@ class NotificationListBehaviorTest(TestCase):
         self.assertEqual(response.status_code, 404)
         other_notif.refresh_from_db()
         self.assertFalse(other_notif.read)
+
+
+class NotificationListEtagTest(TestCase):
+    """ETag-based conditional GET on the notification list endpoint.
+
+    The frontend polls /api/notifications/ on a short interval. Without
+    an ETag, every poll serializes every row even when nothing has
+    changed; with one, most polls become 304 Not Modified.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        self.user = User.objects.create_user(
+            username="etag-user", email="etag@example.com", password="testpass123"
+        )
+        self.other = User.objects.create_user(
+            username="etag-other", email="o@example.com", password="testpass123"
+        )
+        self.client = APIClient()
+        token = RefreshToken.for_user(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
+        # Seed a couple of notifications for the user under test.
+        Notification.objects.create(user=self.user, type="info", title="A", message="m")
+        Notification.objects.create(user=self.user, type="info", title="B", message="m")
+
+    def _list(self, **headers):
+        return self.client.get("/api/notifications/", **headers)
+
+    def test_list_returns_etag_header(self):
+        response = self._list()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("ETag", response)
+        self.assertTrue(response["ETag"].startswith('W/"'))
+        self.assertEqual(response["Cache-Control"], "private, must-revalidate")
+
+    def test_repeated_request_with_matching_etag_returns_304(self):
+        first = self._list()
+        etag = first["ETag"]
+        again = self._list(HTTP_IF_NONE_MATCH=etag)
+        self.assertEqual(again.status_code, 304)
+        self.assertEqual(again["ETag"], etag)
+
+    def test_etag_changes_after_new_notification(self):
+        first = self._list()
+        etag_before = first["ETag"]
+        Notification.objects.create(user=self.user, type="info", title="C", message="m")
+        again = self._list(HTTP_IF_NONE_MATCH=etag_before)
+        # New notification → fingerprint changed → full 200 with new ETag.
+        self.assertEqual(again.status_code, 200)
+        self.assertNotEqual(again["ETag"], etag_before)
+
+    def test_etag_changes_after_read_flag_flip(self):
+        first = self._list()
+        etag_before = first["ETag"]
+        notif = Notification.objects.filter(user=self.user).first()
+        notif.read = True
+        notif.save()
+        again = self._list(HTTP_IF_NONE_MATCH=etag_before)
+        self.assertEqual(again.status_code, 200)
+        self.assertNotEqual(again["ETag"], etag_before)
+
+    def test_etag_differs_per_query_filter(self):
+        # ?read=true uses a different cache entry than ?read=false even
+        # when total + unread counts are the same.
+        unfiltered = self._list()
+        filtered_true = self.client.get("/api/notifications/?read=true")
+        filtered_false = self.client.get("/api/notifications/?read=false")
+        self.assertNotEqual(unfiltered["ETag"], filtered_true["ETag"])
+        self.assertNotEqual(filtered_true["ETag"], filtered_false["ETag"])
+
+    def test_etag_isolated_per_user(self):
+        # Same DB state, different user → different ETag (per-user salt).
+        from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        other_client = APIClient()
+        token = RefreshToken.for_user(self.other)
+        other_client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
+        Notification.objects.create(user=self.other, type="info", title="Z", message="m")
+        ours = self._list()
+        theirs = other_client.get("/api/notifications/")
+        self.assertNotEqual(ours["ETag"], theirs["ETag"])

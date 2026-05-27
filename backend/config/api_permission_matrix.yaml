@@ -386,6 +386,10 @@ views:
         permission_classes:
         - IsAuthenticated
         - IsStaffUser
+      critical:
+        permission_classes:
+        - IsAuthenticated
+        - IsStaffUser
       destroy:
         permission_classes:
         - IsAuthenticated

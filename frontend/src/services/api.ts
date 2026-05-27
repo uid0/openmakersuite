@@ -2950,4 +2950,85 @@ export const locationCheckinsAPI = {
     ),
 };
 
+// Invite-code self-signup workflow.
+//
+// Staff mint single-use invite codes (`inviteCodesAdminAPI`) and send the
+// resulting redemption URL to an outside person; that person hits
+// `/invite/<code>` (anonymous), the page previews the role, and they
+// create their own OMS account via `invitePublicAPI.redeem`. New users
+// are added to the `intended_groups` on redeem, so ForgeKey door access
+// follows automatically via existing group-membership rules.
+
+export type InviteCodeState = 'open' | 'redeemed' | 'revoked' | 'expired';
+
+export interface InviteCodeListEntry {
+  id: number;
+  code: string;
+  intended_label: string;
+  intended_group_names: string[];
+  notes: string;
+  expires_at: string;
+  is_active: boolean;
+  redeemed: boolean;
+  redeemed_at: string | null;
+  redeemed_by_username: string | null;
+  redeemed_ip: string | null;
+  created_at: string;
+  created_by_username: string | null;
+  state: InviteCodeState;
+}
+
+export interface InviteCodeCreatePayload {
+  intended_label: string;
+  intended_groups?: number[];
+  notes?: string;
+  expires_at: string;
+}
+
+export interface InvitePreviewResponse {
+  intended_label: string;
+  intended_group_names: string[];
+  expires_at: string;
+}
+
+export interface InviteRedeemPayload {
+  code: string;
+  username: string;
+  email: string;
+  password: string;
+  first_name?: string;
+  last_name?: string;
+}
+
+export interface InviteRedeemResponse {
+  message: string;
+  username: string;
+}
+
+// Admin-only CRUD on invite codes. Hits `IsAdminUser`-gated endpoints.
+export const inviteCodesAdminAPI = {
+  list: () => api.get<{ results: InviteCodeListEntry[] }>('/membership/invite-codes/'),
+
+  create: (data: InviteCodeCreatePayload) =>
+    api.post<InviteCodeListEntry>('/membership/invite-codes/', data),
+
+  revoke: (id: number) =>
+    api.post<InviteCodeListEntry>(`/membership/invite-codes/${id}/revoke/`),
+
+  destroy: (id: number) => api.delete(`/membership/invite-codes/${id}/`),
+};
+
+// Anonymous endpoints used by the public `/invite/<code>` page. No auth
+// header is required; the page is reachable before the user has an
+// account.
+export const invitePublicAPI = {
+  preview: (code: string) =>
+    api.get<InvitePreviewResponse>('/membership/invite/preview/', {
+      params: { code },
+    }),
+
+  redeem: (data: InviteRedeemPayload) =>
+    api.post<InviteRedeemResponse>('/membership/invite/redeem/', data),
+};
+
 export default api;

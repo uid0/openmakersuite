@@ -205,6 +205,17 @@ sleep 5
 echo "🔄 Restarting nginx to pick up frontend changes..."
 $COMPOSE restart nginx
 
+# Restart EMQX so its JWKS cache re-fetches against the freshly-recreated
+# backend container. When `docker compose up -d` recreates `backend`, the
+# container's IP changes; EMQX may still hold a stale connection pool /
+# DNS entry and the JWKS refresh (every 300s) hits nxdomain. With an
+# empty key cache, every device + server JWT then fails with CONNACK
+# rc=5 "Not authorized" — Sentry BACKEND-6, diagnosed live this cycle.
+# Cheap restart: ~5s; device mTLS listener reconnects from each device's
+# end on backoff.
+echo "🔄 Restarting EMQX to refresh JWKS cache against the new backend..."
+$COMPOSE restart emqx
+
 # Verify frontend build
 echo "🔍 Verifying frontend build..."
 if $COMPOSE exec -T nginx ls -la /app/frontend/index.html >/dev/null 2>&1; then

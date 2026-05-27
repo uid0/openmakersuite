@@ -103,11 +103,11 @@ export const StockHistoryChart: React.FC<StockHistoryChartProps> = ({
               const date = new Date(value);
               return date.toLocaleDateString();
             }}
-            formatter={(value: any, name: string) => {
-              if (name === 'stock') {
+            formatter={(value, name) => {
+              if (String(name) === 'stock') {
                 return [`${value} units`, 'Stock Level'];
               }
-              return value;
+              return [String(value), String(name)];
             }}
           />
           <Line

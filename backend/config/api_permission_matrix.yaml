@@ -1813,6 +1813,52 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  preventive_maintenance.views.PMScheduleViewSet:
+    actions:
+      board:
+        permission_classes:
+        - AllowAny
+      create:
+        permission_classes:
+        - PMSchedulePermissions
+      destroy:
+        permission_classes:
+        - PMSchedulePermissions
+      list:
+        permission_classes:
+        - PMSchedulePermissions
+      log_service:
+        permission_classes:
+        - PMSchedulePermissions
+      partial_update:
+        permission_classes:
+        - PMSchedulePermissions
+      retrieve:
+        permission_classes:
+        - PMSchedulePermissions
+      update:
+        permission_classes:
+        - PMSchedulePermissions
+  preventive_maintenance.views.PMServiceLogViewSet:
+    actions:
+      create:
+        permission_classes:
+        - PMSchedulePermissions
+      destroy:
+        permission_classes:
+        - PMSchedulePermissions
+      list:
+        permission_classes:
+        - PMSchedulePermissions
+      partial_update:
+        permission_classes:
+        - PMSchedulePermissions
+      retrieve:
+        permission_classes:
+        - PMSchedulePermissions
+      update:
+        permission_classes:
+        - PMSchedulePermissions
   project_storage.views.ProjectStorageStintViewSet:
     actions:
       by_member:

@@ -526,6 +526,28 @@ class PowerBreaker(models.Model):
     # review/cleanup of its downstream wiring. Surfaced visually on the
     # panel layout grid so operators can spot stale entries from across
     # the room before they touch anything.
+    # Life-safety classification. Critical breakers feed loads that must
+    # not be de-energized without protocol — fire alarms, emergency
+    # lighting, exit signs, egress door power, refrigerated medicine
+    # storage. Surfaced as a red badge on the panel grid, the Location
+    # Safety Sign, and the LOTO planning view; consulted by future
+    # automation (breaker-trip-impact, scheduled load shedding) to
+    # block dangerous actions.
+    CRITICAL_CATEGORY_NONE = ""
+    CRITICAL_FIRE_ALARM = "fire_alarm"
+    CRITICAL_EMERGENCY_LIGHTING = "emergency_lighting"
+    CRITICAL_EXIT_SIGN = "exit_sign"
+    CRITICAL_EGRESS_DOOR = "egress_door"
+    CRITICAL_LIFE_SAFETY_OTHER = "life_safety_other"
+    CRITICAL_CATEGORY_CHOICES = [
+        (CRITICAL_CATEGORY_NONE, "Not critical"),
+        (CRITICAL_FIRE_ALARM, "Fire alarm"),
+        (CRITICAL_EMERGENCY_LIGHTING, "Emergency lighting"),
+        (CRITICAL_EXIT_SIGN, "Exit sign"),
+        (CRITICAL_EGRESS_DOOR, "Egress door power"),
+        (CRITICAL_LIFE_SAFETY_OTHER, "Life-safety (other)"),
+    ]
+
     REVIEW_OK = "ok"
     REVIEW_NEEDS_ATTENTION = "needs_attention"
     REVIEW_CIRCUIT_MOVED = "circuit_moved"
@@ -589,6 +611,31 @@ class PowerBreaker(models.Model):
     )
     notes = models.TextField(blank=True)
     needs_review = models.BooleanField(default=False)
+    is_critical = models.BooleanField(
+        default=False,
+        help_text=(
+            "Flags a life-safety circuit (fire alarm, emergency lighting, "
+            "exit sign, egress door). Critical breakers render with a red "
+            "warning badge and block / warn in LOTO planning."
+        ),
+    )
+    critical_category = models.CharField(
+        max_length=32,
+        choices=CRITICAL_CATEGORY_CHOICES,
+        blank=True,
+        default=CRITICAL_CATEGORY_NONE,
+        help_text=(
+            "Type of life-safety load (e.g., fire_alarm, emergency_lighting). "
+            "Required when is_critical=True; ignored otherwise."
+        ),
+    )
+    critical_note = models.TextField(
+        blank=True,
+        help_text=(
+            "Free-text context for the critical flag — what's downstream, "
+            "code reference, last inspection, recovery procedure if tripped."
+        ),
+    )
     required_loto_devices = models.ManyToManyField(
         "loto.LOTODevice",
         blank=True,
@@ -616,6 +663,32 @@ class PowerBreaker(models.Model):
 
     def __str__(self) -> str:
         return f"{self.panel.name}/{self.position} ({self.amperage}A {self.phase})"
+
+    def clean(self) -> None:
+        # Critical flag + category are paired: setting one without the other
+        # is meaningless and would let a "critical" breaker slip through
+        # without telling operators *why* it's critical.
+        from django.core.exceptions import ValidationError
+
+        if self.is_critical and not self.critical_category:
+            raise ValidationError(
+                {
+                    "critical_category": (
+                        "Pick a critical category when is_critical=True so "
+                        "the warning badge and Location Safety Sign can label "
+                        "what's protected."
+                    ),
+                }
+            )
+        if self.critical_category and not self.is_critical:
+            raise ValidationError(
+                {
+                    "is_critical": (
+                        "critical_category is set but is_critical=False — "
+                        "either flip the flag or clear the category."
+                    ),
+                }
+            )
 
 
 class PowerCircuit(models.Model):

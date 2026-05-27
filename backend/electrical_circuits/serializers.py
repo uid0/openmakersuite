@@ -222,6 +222,9 @@ class PowerBreakerSerializer(serializers.ModelSerializer):
             "label",
             "notes",
             "needs_review",
+            "is_critical",
+            "critical_category",
+            "critical_note",
             "circuit_count",
             "created_at",
             "updated_at",
@@ -230,6 +233,27 @@ class PowerBreakerSerializer(serializers.ModelSerializer):
 
     def get_circuit_count(self, obj) -> int:
         return obj.circuits.count()
+
+    def validate(self, attrs):
+        # Mirror PowerBreaker.clean's pairing rule here so API callers get a
+        # 400 field error rather than a 500 from full_clean during save.
+        is_critical = attrs.get(
+            "is_critical",
+            getattr(self.instance, "is_critical", False) if self.instance else False,
+        )
+        critical_category = attrs.get(
+            "critical_category",
+            getattr(self.instance, "critical_category", "") if self.instance else "",
+        )
+        if is_critical and not critical_category:
+            raise serializers.ValidationError(
+                {"critical_category": "Pick a critical category when is_critical=True."}
+            )
+        if critical_category and not is_critical:
+            raise serializers.ValidationError(
+                {"is_critical": "critical_category is set but is_critical=False."}
+            )
+        return attrs
 
 
 class PowerCircuitSerializer(serializers.ModelSerializer):

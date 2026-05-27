@@ -302,7 +302,8 @@ opening a panel. All staff-gated (oms-b25 AC-5).
 | GET | `electrical/panels/<id>/topology/` | staff | `PowerPanelTopologyView` — full panel → breaker → circuit → outlet tree. |
 | GET | `assets/<id>/power-chain/` | staff | `AssetPowerChainView` — every hop from an asset back to its panel. |
 | any  | `electrical/panels-crud/...` | staff | `PowerPanelViewSet` — full CRUD on PowerPanel rows so the frontend can create and edit panels without Django admin. |
-| any  | `electrical/breakers-crud/...` | staff | `PowerBreakerViewSet` — full CRUD on PowerBreaker rows. Supports `?panel=<id>` filter on list. |
+| any  | `electrical/breakers-crud/...` | staff | `PowerBreakerViewSet` — full CRUD on PowerBreaker rows. Supports `?panel=<id>` filter on list. New `is_critical` + `critical_category` + `critical_note` fields flag life-safety circuits (fire alarm, emergency lighting, exit signs, egress door). |
+| GET  | `electrical/breakers-crud/critical/` | staff | `PowerBreakerViewSet.critical` — every active critical breaker, optional `?location=<id>` filter. Feeds the Location Safety Sign and LOTO planning warning. |
 | any  | `electrical/circuits-crud/...` | staff | `PowerCircuitViewSet` — full CRUD on PowerCircuit rows. Supports `?breaker=<id>` filter on list. `max_load_amps` defaults to 80% of the breaker amperage per NEC continuous-load rule when omitted. |
 | any  | `electrical/outlets-crud/...` | staff | `PowerOutletViewSet` — full CRUD on PowerOutlet rows. Supports `?circuit=<id>` filter on list. |
 

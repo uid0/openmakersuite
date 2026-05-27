@@ -4,6 +4,7 @@ from django.db.models import Count
 from django.http import HttpResponse
 
 from rest_framework import viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -188,6 +189,21 @@ class PowerBreakerViewSet(viewsets.ModelViewSet):
         if panel_id:
             qs = qs.filter(panel_id=panel_id)
         return qs
+
+    @action(detail=False, methods=["get"])
+    def critical(self, request):
+        """Every active critical breaker, sorted by panel + position.
+
+        Used by the Location Safety Sign and LOTO planning view to flag
+        circuits feeding life-safety equipment. ``?location=<id>`` filters
+        to breakers in a specific room.
+        """
+        qs = self.get_queryset().filter(is_critical=True).select_related("panel", "panel__location")
+        location_id = request.query_params.get("location")
+        if location_id:
+            qs = qs.filter(panel__location_id=location_id)
+        serializer = self.get_serializer(qs, many=True)
+        return Response({"count": qs.count(), "breakers": serializer.data})
 
 
 class PowerCircuitViewSet(viewsets.ModelViewSet):

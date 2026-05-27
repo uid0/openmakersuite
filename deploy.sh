@@ -223,6 +223,34 @@ else
     echo "❌ Django static files NOT found!"
 fi
 
+# Finalize the Sentry release. The CI release-tagging step in
+# .github/workflows/ci.yml already creates `${GIT_HASH}` against the
+# backend + frontend projects on push to main, but the release stays in
+# the `created` state until something marks it deployed. Calling
+# `sentry-cli releases finalize` here flips it to `released` once the
+# stack is actually serving traffic, so the Sentry UI shows accurate
+# crash-free-by-release windows and the deploy timestamp lines up with
+# the rolling event stream.
+#
+# Soft-fails: never block a deploy on Sentry's REST API being reachable.
+# Requires SENTRY_AUTH_TOKEN (from .env) and the npx-shipped sentry-cli;
+# if either is missing, we skip with a hint rather than abort.
+if [ -n "${SENTRY_AUTH_TOKEN:-}" ] && [ -n "${GIT_HASH:-}" ] && [ "${GIT_HASH}" != "dev" ]; then
+    echo "📡 Finalizing Sentry release ${GIT_HASH}..."
+    if command -v npx >/dev/null 2>&1; then
+        SENTRY_URL="${SENTRY_URL:-https://highlighter.openmakersuite.net}" \
+        SENTRY_ORG="${SENTRY_ORG:-sentry}" \
+        SENTRY_AUTH_TOKEN="${SENTRY_AUTH_TOKEN}" \
+            npx --yes @sentry/cli@2.39.1 releases finalize "${GIT_HASH}" \
+                --project backend --project frontend \
+            || echo "⚠️  Sentry release finalize failed (non-fatal) — check token / network."
+    else
+        echo "⚠️  npx not found — skipping Sentry release finalize."
+    fi
+else
+    echo "ℹ️  Skipping Sentry release finalize (SENTRY_AUTH_TOKEN unset or GIT_HASH=dev)."
+fi
+
 echo "✅ Deployment complete!"
 echo ""
 echo "📍 Your application is now running at:"

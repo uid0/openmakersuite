@@ -58,7 +58,20 @@ repos:
       - id: bandit
         files: ^backend/
         exclude: ^(backend/.*migrations/|backend/.*tests.*)
-        args: ["-r", "-s", "B101", "backend"] # Match CI: skip B101 (assert_used) and B106 (hardcoded_password_funcarg)
+        # Match CI invocation in .github/workflows/ci.yml: skip B101
+        # (assert_used), B105 (hardcoded_password_string), B106
+        # (hardcoded_password_funcarg), and B308 (mark_safe); exclude
+        # tests and migrations from the recursive scan so local
+        # pre-commit and CI surface the same set of findings.
+        args:
+          [
+            "-r",
+            "-s",
+            "B101,B105,B106,B308",
+            "-x",
+            "*/tests/*,*/migrations/*",
+            "backend",
+          ]
 
   # Backend: Security checks - pip-audit (dependency vulnerabilities)
   - repo: local

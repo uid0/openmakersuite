@@ -68,6 +68,7 @@ fixed in the same PR.
 | POST | `auth/logout/` | public | Destroys the Django session; safe no-op for anonymous callers. |
 | POST | `auth/refresh/` | public | Refresh access token using a refresh token. **Abuse control:** required (refresh throttle). |
 | POST | `auth/test-membership/` | public (DEBUG only) | Test fixture used by E2E suites. The view is `AllowAny` but returns 403 unless `settings.DEBUG` is true; production deployments MUST set `DEBUG=False`. |
+| POST | `auth/test-invite-code/` | public (DEBUG only) | Test fixture used by mobile invite-redeem E2E. Mints an open `InviteCode` so Playwright can drive the full public redeem path. Returns 403 unless `settings.DEBUG` is true. |
 | any | `auth/passkey/...` | public/member | Passkey (WebAuthn) registration and assertion flows. **Abuse control:** required on registration; assertion is signed. |
 
 ## Inventory and reporting (`/api/inventory/`)

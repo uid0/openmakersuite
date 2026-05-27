@@ -648,6 +648,19 @@ SENTRY_RELEASE = config("GIT_HASH", default="") or None
 # sample, and the higher rate gives uid0 real coverage for finding
 # slow views + N+1 queries. Override via env if storage pressure climbs.
 SENTRY_TRACES_SAMPLE_RATE = config("SENTRY_TRACES_SAMPLE_RATE", default=0.5, cast=float)
+# Continuous profiling (sentry-sdk 2.x). `profile_session_sample_rate`
+# samples at the *session* (i.e. process) level rather than per-trace —
+# combined with `profile_lifecycle="trace"` the sampler only runs while
+# a transaction is active, so idle workers don't burn CPU on samples
+# that nothing will reference. 1.0 = every gunicorn/celery process that
+# emits traces also emits a profile; revisit if Sentry storage grows.
+SENTRY_PROFILE_SESSION_SAMPLE_RATE = config(
+    "SENTRY_PROFILE_SESSION_SAMPLE_RATE", default=1.0, cast=float
+)
+# Legacy transaction-bound profiling (deprecated in sentry-sdk 2.x but
+# still honoured). Left as an escape hatch for the operator — set this
+# instead of the session knob if the new continuous mode misbehaves on
+# a specific worker class.
 SENTRY_PROFILES_SAMPLE_RATE = config("SENTRY_PROFILES_SAMPLE_RATE", default=0.0, cast=float)
 
 if SENTRY_DSN:
@@ -665,6 +678,8 @@ if SENTRY_DSN:
         ],
         traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
         profiles_sample_rate=SENTRY_PROFILES_SAMPLE_RATE,
+        profile_session_sample_rate=SENTRY_PROFILE_SESSION_SAMPLE_RATE,
+        profile_lifecycle="trace",
         enable_logs=True,
         # Don't ship request bodies / user PII by default; the redactor in
         # config.observability_redaction handles fine-grained scrubbing for

@@ -40,6 +40,12 @@ server {
     index index.html;
 
     add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://highlighter.openmakersuite.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https:; font-src 'self' data:; connect-src 'self' wss: https://highlighter.openmakersuite.net; frame-src 'self' https://www.wunderground.com https://embed.waze.com https://www.youtube.com https://www.youtube-nocookie.com; worker-src 'self' blob:; media-src 'self' https:;" always;
+    # Allow the V8 sampling profiler so @sentry/react browserProfilingIntegration()
+    # can collect flame charts. Without this header the SDK silently emits
+    # empty profiles. Document-Policy applies to the HTML document only;
+    # the static-asset location blocks below override `add_header` and so
+    # don't need (and shouldn't carry) this directive.
+    add_header Document-Policy "js-profiling" always;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;

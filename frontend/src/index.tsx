@@ -25,6 +25,13 @@ if (sentryDsn) {
     release: import.meta.env.VITE_GIT_HASH || undefined,
     integrations: [
       Sentry.browserTracingIntegration(),
+      // Browser CPU profiling. Requires the `Document-Policy: js-profiling`
+      // response header on the HTML document — nginx (templates/default.conf
+      // .template) emits it; without that header the V8 sampler is
+      // disallowed and profiles silently come back empty. Sample rate
+      // below is relative to tracesSampleRate (so the effective profile
+      // rate is tracesSampleRate * profilesSampleRate).
+      Sentry.browserProfilingIntegration(),
       // Session Replay: maskAllText / blockAllMedia are off so the replay
       // is fully visible — this is an internal makerspace tool, not a
       // multi-tenant SaaS, so we accept the privacy trade-off in exchange
@@ -57,6 +64,11 @@ if (sentryDsn) {
     // Sentry's headroom and gives uid0 real coverage of slow renders +
     // axios call timing instead of a 10% sample.
     tracesSampleRate: 0.5,
+    // Profile every traced transaction. The effective profile rate is
+    // tracesSampleRate * profilesSampleRate, so this lands at ~25% of
+    // page-loads / route changes carrying a flame chart. Drop to 0.5 or
+    // 0.25 if Sentry storage gets tight.
+    profilesSampleRate: 1.0,
     // Replay every session and every error. Storage cost on a self-hosted
     // Sentry is tractable at this org's traffic; revisit if SeaweedFS fills up.
     replaysSessionSampleRate: 1.0,

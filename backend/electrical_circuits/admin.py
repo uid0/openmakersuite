@@ -133,9 +133,19 @@ class PowerBreakerAdmin(admin.ModelAdmin):
         "phase",
         "status",
         "label",
+        "is_critical",
+        "critical_category",
         "needs_review",
     ]
-    list_filter = ["status", "pole_count", "phase", "needs_review", "panel"]
+    list_filter = [
+        "status",
+        "is_critical",
+        "critical_category",
+        "pole_count",
+        "phase",
+        "needs_review",
+        "panel",
+    ]
     search_fields = ["panel__name", "position", "label", "panel__location__name"]
     autocomplete_fields = ["panel"]
     filter_horizontal = ["required_loto_devices"]

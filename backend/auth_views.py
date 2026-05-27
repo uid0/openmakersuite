@@ -12,8 +12,6 @@ from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
 
-User = get_user_model()
-
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -21,6 +19,8 @@ from rest_framework.response import Response
 
 from config.api_errors import ErrorCode, error_response
 from config.tokens import CustomRefreshToken
+
+User = get_user_model()
 
 
 def _tokens_for(user):
@@ -226,6 +226,49 @@ def create_test_membership(request):
             "detail": f"Active membership created for {username}",
             "membership_id": membership.id,
             "username": username,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def create_test_invite_code(request):
+    """Mint an InviteCode for E2E tests. DEBUG-only.
+
+    Mirrors `create_test_membership` so Playwright can seed an open
+    invite without holding admin credentials. Body: `{label?: str,
+    expires_in_days?: int}`. Returns `{code, redeem_url}`.
+    """
+    from django.conf import settings
+    from django.utils import timezone
+
+    from membership.models import InviteCode
+
+    if not settings.DEBUG:
+        return error_response(
+            ErrorCode.PERMISSION_DENIED,
+            "This endpoint is only available in DEBUG mode",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
+    label = (request.data.get("label") or "E2E test invite").strip()
+    try:
+        days = int(request.data.get("expires_in_days") or 7)
+    except (TypeError, ValueError):
+        days = 7
+    expires_at = timezone.now() + timezone.timedelta(days=days)
+    invite = InviteCode.objects.create(
+        code=InviteCode.generate_code(),
+        intended_label=label,
+        expires_at=expires_at,
+    )
+    return Response(
+        {
+            "code": invite.code,
+            "intended_label": invite.intended_label,
+            "expires_at": invite.expires_at.isoformat(),
+            "redeem_url": f"/invite/{invite.code}",
         },
         status=status.HTTP_201_CREATED,
     )

@@ -9,7 +9,14 @@ from django.urls import include, path
 
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from auth_views import create_test_membership, login_user, logout_user, refresh_token, register_user
+from auth_views import (
+    create_test_invite_code,
+    create_test_membership,
+    login_user,
+    logout_user,
+    refresh_token,
+    register_user,
+)
 from config.health import livez, readyz
 from electrical_circuits.urls import (
     asset_power_chain_urlpatterns as electrical_asset_power_chain_urls,
@@ -35,6 +42,7 @@ urlpatterns = [
     path("api/auth/logout/", logout_user, name="logout"),
     path("api/auth/refresh/", refresh_token, name="refresh"),
     path("api/auth/test-membership/", create_test_membership, name="test_membership"),
+    path("api/auth/test-invite-code/", create_test_invite_code, name="test_invite_code"),
     # Passkey/WebAuthn endpoints
     path("auth/passkey/", include("passkeys.urls")),
     path("api/inventory/", include("inventory.urls")),

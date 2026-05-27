@@ -371,6 +371,27 @@ export async function createTestInventoryItem(
 }
 
 /**
+ * Mint an InviteCode via the DEBUG-only test helper endpoint. Returns
+ * the freshly minted code and the redeem URL the public landing page
+ * uses. Used by the /invite/:code mobile E2E (R-10 / AC-15).
+ */
+export async function createTestInviteCode(
+  label = 'E2E mobile invite',
+  expiresInDays = 7
+): Promise<{ code: string; redeem_url: string; expires_at: string; intended_label: string }> {
+  const response = await fetch(`${API_BASE_URL}/auth/test-invite-code/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, expires_in_days: expiresInDays }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to mint test invite code: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+/**
  * Approve a reorder request via the staff API. Used to demonstrate staff
  * triage of a public submission in the public-to-staff e2e loop.
  */

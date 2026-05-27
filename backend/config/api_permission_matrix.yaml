@@ -12,6 +12,9 @@ views:
   analytics.views.AnalyticsShareView:
     permission_classes:
     - IsAnalyticsSharer
+  auth_views.create_test_invite_code:
+    permission_classes:
+    - AllowAny
   auth_views.create_test_membership:
     permission_classes:
     - AllowAny

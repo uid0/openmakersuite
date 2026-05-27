@@ -32,7 +32,7 @@ export const VolumeTrendChart: React.FC<VolumeTrendChartProps> = ({ data }) => (
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="period" tickFormatter={formatPeriodLabel} />
           <YAxis allowDecimals={false} />
-          <Tooltip labelFormatter={formatPeriodLabel} />
+          <Tooltip labelFormatter={(label) => formatPeriodLabel(String(label))} />
           <Line type="monotone" dataKey="count" stroke="var(--mantine-color-blue-6)" strokeWidth={2} dot={{ r: 3 }} />
         </LineChart>
       </ResponsiveContainer>

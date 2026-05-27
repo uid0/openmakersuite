@@ -517,3 +517,106 @@ class UserCertification(models.Model):
         if notes:
             self.notes = (self.notes + "\n" if self.notes else "") + notes
         self.save(update_fields=["revoked_at", "revoked_by", "notes"])
+
+
+class InviteCode(models.Model):
+    """A single-use invite code that lets an outside person create their
+    own OMS account without staff pre-provisioning.
+
+    Distinct from `UserRegistrationToken`, which binds to a pre-created
+    User and is meant for "claim this account" flows. An InviteCode has
+    no user on creation; redeeming it creates a fresh User and adds them
+    to whichever Django auth Groups the inviting staff member specified
+    (Board, Safety Committee, etc.) — ForgeKey door access then follows
+    from existing group-membership rules.
+
+    Anonymous code-as-credential: anyone with the code can redeem
+    once. Pair with a short `expires_at` to bound exposure.
+    """
+
+    code = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Random, opaque, single-use token. Generated server-side.",
+    )
+    intended_label = models.CharField(
+        max_length=120,
+        help_text=(
+            "Human label shown on the redemption page and in the staff list "
+            "(e.g. 'Board Member — Q3 2026', 'Safety Committee'). Not "
+            "load-bearing on permissions; the groups M2M is."
+        ),
+    )
+    intended_groups = models.ManyToManyField(
+        Group,
+        blank=True,
+        related_name="invite_codes",
+        help_text=(
+            "Django auth groups the new user is added to on redeem. Drives "
+            "ForgeKey door access via the existing group-membership rule."
+        ),
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Staff-only notes about who this is for, why, when issued.",
+    )
+    expires_at = models.DateTimeField(
+        help_text="UTC. Redemption fails after this instant.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Manually revoked codes flip to False; redemption fails.",
+    )
+    redeemed = models.BooleanField(
+        default=False,
+        help_text="Flipped to True on successful redemption (single-use).",
+    )
+    redeemed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the redemption happened.",
+    )
+    redeemed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="redeemed_invite_codes",
+        help_text="The User account created by redeeming this code.",
+    )
+    redeemed_ip = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="Source IP captured at redemption time for audit.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_invite_codes",
+        help_text="Staff who minted this code.",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["code", "redeemed"]),
+            models.Index(fields=["expires_at", "redeemed"]),
+        ]
+
+    def __str__(self) -> str:
+        state = "redeemed" if self.redeemed else ("revoked" if not self.is_active else "open")
+        return f"{self.intended_label} [{state}]"
+
+    @classmethod
+    def generate_code(cls) -> str:
+        """Generate a URL-safe code. ~21 chars of base64url ≈ 132 bits entropy."""
+        return secrets.token_urlsafe(16)
+
+    def is_redeemable(self, now=None) -> bool:
+        """True only if active, not yet redeemed, and not expired."""
+        now = now or timezone.now()
+        return self.is_active and not self.redeemed and self.expires_at > now

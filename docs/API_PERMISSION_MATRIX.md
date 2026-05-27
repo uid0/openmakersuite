@@ -174,6 +174,15 @@ below are public.
 | GET | `location-checkins/reports/{traffic,top}/` | member | `IsAuthenticated` traffic/visit reports. |
 | POST | `location-checkins/webhook/` | webhook-secret | `AllowAny` + HMAC verification in the view. |
 
+## Preventive maintenance (`/api/preventive-maintenance/`)
+
+| Method | Path | Class | Notes |
+| --- | --- | --- | --- |
+| GET | `preventive-maintenance/schedules/board/` | public | `AllowAny` so the Inkplate kiosk can poll without a JWT. Read-only projection of every active PM schedule sorted by urgency. |
+| any | `preventive-maintenance/schedules/...` (CRUD) | staff-or-readonly | `PMSchedulePermissions`: read for anyone (so the React admin can show the board on a regular browser); write requires `is_staff`. |
+| POST | `preventive-maintenance/schedules/<id>/log_service/` | staff | `PMSchedulePermissions` — staff-only record "I just performed this task now" shortcut. |
+| any | `preventive-maintenance/service-logs/...` (CRUD) | staff-or-readonly | Same `PMSchedulePermissions` rule as schedules — anyone reads, staff writes. |
+
 ## Checklists (`/api/checklists/`)
 
 | Method | Path | Class | Notes |

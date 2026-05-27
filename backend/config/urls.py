@@ -46,6 +46,7 @@ urlpatterns = [
     path("api/lockers/", include("lockers.urls")),
     path("api/customization/", include("customization.urls")),
     path("api/location-checkins/", include("location_checkins.urls")),
+    path("api/preventive-maintenance/", include("preventive_maintenance.urls")),
     path("api/checklists/", include("checklists.urls")),
     path("api/donations/", include("donations.urls")),
     path("api/search/", include("search.urls")),

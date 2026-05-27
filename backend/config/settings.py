@@ -118,6 +118,7 @@ INSTALLED_APPS = [
     "climate",
     "project_storage",
     "scanner",
+    "preventive_maintenance",
 ]
 
 MIDDLEWARE = [

@@ -15,12 +15,19 @@ COPY . .
 ARG VITE_API_URL
 ARG VITE_GIT_HASH=dev
 ARG VITE_GITHUB_URL=https://github.com/uid0/openmakersuite
+# Sentry DSN must be inlined at build time (vite handles VITE_* by
+# string-replacing import.meta.env.VITE_* at bundling). Default to
+# empty so a deploy without the env var still builds (`Sentry.init`
+# no-ops on empty DSN per index.tsx); set in .env on rigs that want
+# crash reporting + session replays.
+ARG VITE_SENTRY_DSN=
 
 # Set environment variables for build. Vite inlines VITE_* into the bundle
 # at build time — these args must reach the docker-build CI step (oms-78t).
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_GIT_HASH=$VITE_GIT_HASH
 ENV VITE_GITHUB_URL=$VITE_GITHUB_URL
+ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN
 
 # Debug: Print the git hash being used (remove in production if desired)
 RUN echo "Building with VITE_GIT_HASH=$VITE_GIT_HASH"

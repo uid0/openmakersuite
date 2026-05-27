@@ -347,6 +347,10 @@ services:
         - VITE_API_URL=/api
         - VITE_GIT_HASH=${GIT_HASH}
         - VITE_GITHUB_URL=${GITHUB_URL:-https://github.com/uid0/openmakersuite}
+        # Sentry DSN must reach the build step (vite inlines VITE_* at
+        # bundling). Without this `Sentry.init` silently no-ops in prod
+        # because import.meta.env.VITE_SENTRY_DSN is undefined.
+        - VITE_SENTRY_DSN=${VITE_SENTRY_DSN:-}
     logging: *default-logging
     volumes:
       - frontend_build:/app/frontend

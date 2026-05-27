@@ -52,6 +52,8 @@ import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
 import InventoryItemFormPage from './pages/InventoryItemFormPage';
 import InventoryListPage from './pages/InventoryListPage';
 import InventoryOverviewPage from './pages/InventoryOverviewPage';
+import InviteCodeAdminPage from './pages/InviteCodeAdminPage';
+import InviteRedeemPage from './pages/InviteRedeemPage';
 import InventoryReportPage from './pages/InventoryReportPage';
 import InventoryReconciliationPage from './pages/InventoryReconciliationPage';
 import LocationDetailPage from './pages/LocationDetailPage';
@@ -185,6 +187,12 @@ function AppContent() {
           {/* Home/Landing */}
           <Route path="/" element={<HomePage />} />
           <Route path="/scan" element={<WorkspaceLayout><UniversalScannerPage /></WorkspaceLayout>} />
+
+          {/* Anonymous invite redemption: outside person creates their own account */}
+          <Route path="/invite/:code" element={<InviteRedeemPage />} />
+
+          {/* Staff: mint + revoke invite codes */}
+          <Route path="/admin/invite-codes" element={<WorkspaceLayout><InviteCodeAdminPage /></WorkspaceLayout>} />
 
           {/* Public kiosks (no Django auth) */}
           <Route path="/project-storage/kiosk" element={<ProjectStorageKioskPage />} />

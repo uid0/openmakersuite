@@ -213,6 +213,12 @@ below are public.
 | GET | `search/recent/` | member | Per-user recent search history. |
 | POST | `search/recent/save/` | member | Record a recent search hit. |
 
+## Scanner (`/api/scanner/`)
+
+| Method | Path | Class | Notes |
+| --- | --- | --- | --- |
+| POST | `scanner/dispatch/` | public | `AllowAny` so the workshop kiosk can scan without a JWT. Read-only: never mutates state — side effects happen via the per-entity endpoints (reorder / asset.scan / location-checkins.create) which enforce their own auth. |
+
 ## Notifications (`/api/notifications/`)
 
 | Method | Path | Class | Notes |

@@ -453,12 +453,9 @@ class NotificationListEtagTest(TestCase):
         self.assertNotEqual(again["ETag"], etag_before)
 
     def test_etag_differs_per_query_filter(self):
-        unfiltered = self._list()
-        from rest_framework.test import APIClient
-        from rest_framework_simplejwt.tokens import RefreshToken
-
         # ?read=true uses a different cache entry than ?read=false even
         # when total + unread counts are the same.
+        unfiltered = self._list()
         filtered_true = self.client.get("/api/notifications/?read=true")
         filtered_false = self.client.get("/api/notifications/?read=false")
         self.assertNotEqual(unfiltered["ETag"], filtered_true["ETag"])

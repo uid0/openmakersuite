@@ -1719,6 +1719,29 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  membership.views.InviteCodeViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAdminUser
+      destroy:
+        permission_classes:
+        - IsAdminUser
+      list:
+        permission_classes:
+        - IsAdminUser
+      partial_update:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAdminUser
+      revoke:
+        permission_classes:
+        - IsAdminUser
+      update:
+        permission_classes:
+        - IsAdminUser
   membership.views.SIGAdminViewSet:
     actions:
       create:
@@ -1784,6 +1807,12 @@ views:
   membership.views.change_password:
     permission_classes:
     - IsAuthenticated
+  membership.views.invite_code_preview:
+    permission_classes:
+    - AllowAny
+  membership.views.redeem_invite_code:
+    permission_classes:
+    - AllowAny
   membership.views.register_user_with_token:
     permission_classes: []
   membership.views.validate_registration_token:

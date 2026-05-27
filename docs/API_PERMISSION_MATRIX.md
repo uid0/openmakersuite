@@ -106,6 +106,10 @@ below are public.
 | POST | `membership/register/validate-token/` | public | Token validation for the registration QR flow (no `permission_classes` set; falls back to the per-environment default — `AllowAny` in dev, `IsAuthenticatedOrReadOnly` in prod, which still answers GET-style POSTs). |
 | POST | `membership/register/complete/` | public | Token-gated user registration; the token (carried in the body) gates access. |
 | POST | `membership/change-password/` | member | Password change for the authenticated user. |
+| any | `membership/invite-codes/...` (CRUD) | admin | `IsAdminUser` on `InviteCodeViewSet`. Staff mint single-use codes; the `code` field is server-generated, never client-supplied. |
+| POST | `membership/invite-codes/<id>/revoke/` | admin | Flip `is_active` so an open code can no longer be redeemed (no-op on already-redeemed codes). |
+| GET | `membership/invite/preview/?code=<code>` | public | Anonymous probe: returns `intended_label` + group names for a valid+open code, 404 for invalid/expired/redeemed (does not leak existence). |
+| POST | `membership/invite/redeem/` | public | Anonymous self-signup: creates a fresh `User`, adds them to `intended_groups`, marks the code redeemed. Single-use, transactional, password-validated, captures `redeemed_ip`. **Abuse control:** required — per-IP throttle on the redeem path; codes themselves are ~132-bit entropy + single-use + bounded expiry. |
 
 ## Reorder queue (`/api/reorders/`)
 

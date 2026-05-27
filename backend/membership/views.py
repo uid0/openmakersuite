@@ -376,3 +376,167 @@ def register_user_with_token(request):
             status=status.HTTP_200_OK,
         )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ---------------------------------------------------------------------
+# Invite codes — staff-mint, anonymous-redeem self-signup workflow.
+# ---------------------------------------------------------------------
+
+from django.utils import timezone  # noqa: E402
+
+from rest_framework.permissions import AllowAny, IsAdminUser  # noqa: E402
+
+from .models import InviteCode  # noqa: E402
+from .serializers import (  # noqa: E402
+    InviteCodeCreateSerializer,
+    InviteCodeListSerializer,
+    InviteCodeRedeemSerializer,
+)
+
+
+def _client_ip(request) -> str | None:
+    """Best-effort client IP, honoring X-Forwarded-For when behind nginx."""
+    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR")
+
+
+class InviteCodeViewSet(viewsets.ModelViewSet):
+    """Staff-only CRUD for invite codes.
+
+    Reads + writes are admin-gated; the public redemption path is the
+    separate `redeem_invite_code` view below (AllowAny).
+    """
+
+    permission_classes = [IsAdminUser]
+    queryset = InviteCode.objects.select_related("created_by", "redeemed_by").prefetch_related(
+        "intended_groups"
+    )
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return InviteCodeCreateSerializer
+        return InviteCodeListSerializer
+
+    def perform_create(self, serializer):
+        # Mint the random code server-side; never trust client-supplied codes.
+        serializer.save(
+            code=InviteCode.generate_code(),
+            created_by=self.request.user,
+        )
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdminUser])
+    def revoke(self, request, pk=None):
+        """Flip is_active to False so the code can no longer be redeemed."""
+        invite = self.get_object()
+        if invite.redeemed:
+            return Response(
+                {"detail": "Already redeemed; revocation is a no-op."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        invite.is_active = False
+        invite.save(update_fields=["is_active"])
+        serializer = InviteCodeListSerializer(invite)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def invite_code_preview(request):
+    """Anonymous preview: shows the invitee what they're signing up for.
+
+    `?code=<code>` returns the intended_label + group names so the
+    public redeem page can show 'Sign up as Board Member' before the
+    person commits to a password. Doesn't leak the full invite record.
+    """
+    code = request.query_params.get("code", "").strip()
+    if not code:
+        return Response(
+            {"detail": "Missing ?code query parameter."}, status=status.HTTP_400_BAD_REQUEST
+        )
+    invite = InviteCode.objects.filter(code=code).first()
+    if invite is None or not invite.is_redeemable():
+        # Don't reveal whether the code exists-but-expired vs never-existed.
+        # Both are dead from the invitee's perspective.
+        return Response(
+            {"detail": "Invite code is not valid or has expired."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return Response(
+        {
+            "intended_label": invite.intended_label,
+            "intended_group_names": [g.name for g in invite.intended_groups.all()],
+            "expires_at": invite.expires_at,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def redeem_invite_code(request):
+    """Anonymous: create a fresh User + add to intended_groups, mark code used.
+
+    Single-use; expires_at is enforced; intended_groups drives Django
+    permission + ForgeKey door access (per the existing group-derived
+    rule).
+    """
+    from django.contrib.auth import get_user_model
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from django.db import IntegrityError, transaction
+
+    serializer = InviteCodeRedeemSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+
+    try:
+        validate_password(data["password"])
+    except DjangoValidationError as exc:
+        return Response({"password": list(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    User = get_user_model()
+
+    # Lock the invite row for the duration of redemption so two concurrent
+    # POSTs of the same code can't both create users.
+    with transaction.atomic():
+        invite = InviteCode.objects.select_for_update().filter(code=data["code"]).first()
+        if invite is None or not invite.is_redeemable():
+            return Response(
+                {"detail": "Invite code is not valid or has expired."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = User.objects.create_user(
+                username=data["username"],
+                email=data["email"],
+                password=data["password"],
+                first_name=data.get("first_name", ""),
+                last_name=data.get("last_name", ""),
+            )
+        except IntegrityError:
+            return Response(
+                {"username": ["A user with that username or badge already exists."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Apply group membership BEFORE marking redeemed so a failure rolls
+        # the whole transaction back (no orphan user, no half-redeemed code).
+        for group in invite.intended_groups.all():
+            user.groups.add(group)
+
+        invite.redeemed = True
+        invite.redeemed_at = timezone.now()
+        invite.redeemed_by = user
+        invite.redeemed_ip = _client_ip(request)
+        invite.save(update_fields=["redeemed", "redeemed_at", "redeemed_by", "redeemed_ip"])
+
+    return Response(
+        {
+            "message": "Account created. You can now sign in.",
+            "username": user.username,
+        },
+        status=status.HTTP_201_CREATED,
+    )

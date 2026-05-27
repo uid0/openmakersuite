@@ -421,9 +421,20 @@ jobs:
           docker volume prune -f 2>/dev/null || true
 
       - name: Build and test with docker compose
+        env:
+          POSTGRES_PASSWORD: test_password_for_ci_only
+          # COMPOSE_BAKE delegates `compose build` to `buildx bake`, which
+          # parallelizes per-service builds across BuildKit workers
+          # instead of running them sequentially. Backend + frontend +
+          # nginx (~3 builds today) drop from serial to concurrent.
+          COMPOSE_BAKE: "true"
+          DOCKER_BUILDKIT: "1"
         run: |
-          # Start services
-          docker compose up -d --build
+          # Pre-build in parallel, then `up` with --no-build so the
+          # serial-build path inside compose-up is skipped. Saves ~1/2
+          # of build wall-clock when frontend + backend rebuild together.
+          docker compose build --parallel
+          docker compose up -d --no-build
 
           # Wait for services to be healthy
           timeout 300 bash -c 'while [[ "$(docker compose ps -q | xargs docker inspect -f "{{.State.Health.Status}}" 2>/dev/null | grep -v healthy | wc -l)" != "0" ]]; do sleep 5; done'
@@ -433,8 +444,6 @@ jobs:
 
           # Run tests in Docker environment
           docker compose exec -T backend pytest -v
-        env:
-          POSTGRES_PASSWORD: test_password_for_ci_only
 
       - name: Show logs on failure
         if: failure()

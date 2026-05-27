@@ -346,3 +346,87 @@ class UserRegistrationSerializer(serializers.Serializer):
         registration_token.mark_as_used()
 
         return user
+
+
+class InviteCodeListSerializer(serializers.ModelSerializer):
+    """Compact read serializer for the staff list view."""
+
+    created_by_username = serializers.CharField(
+        source="created_by.username", read_only=True, allow_null=True
+    )
+    redeemed_by_username = serializers.CharField(
+        source="redeemed_by.username", read_only=True, allow_null=True
+    )
+    intended_group_names = serializers.SerializerMethodField()
+    state = serializers.SerializerMethodField()
+
+    class Meta:
+        from .models import InviteCode  # late import to avoid cycle
+
+        model = InviteCode
+        fields = [
+            "id",
+            "code",
+            "intended_label",
+            "intended_group_names",
+            "notes",
+            "expires_at",
+            "is_active",
+            "redeemed",
+            "redeemed_at",
+            "redeemed_by_username",
+            "redeemed_ip",
+            "created_at",
+            "created_by_username",
+            "state",
+        ]
+        read_only_fields = fields
+
+    def get_intended_group_names(self, obj) -> list[str]:
+        return [g.name for g in obj.intended_groups.all()]
+
+    def get_state(self, obj) -> str:
+        if obj.redeemed:
+            return "redeemed"
+        if not obj.is_active:
+            return "revoked"
+        from django.utils import timezone
+
+        if obj.expires_at <= timezone.now():
+            return "expired"
+        return "open"
+
+
+class InviteCodeCreateSerializer(serializers.ModelSerializer):
+    """Staff-side create. `code` and audit fields are server-set."""
+
+    intended_groups = serializers.PrimaryKeyRelatedField(
+        queryset=Group.objects.all(),
+        many=True,
+        required=False,
+    )
+
+    class Meta:
+        from .models import InviteCode
+
+        model = InviteCode
+        fields = [
+            "id",
+            "intended_label",
+            "intended_groups",
+            "notes",
+            "expires_at",
+            "code",
+        ]
+        read_only_fields = ["id", "code"]
+
+
+class InviteCodeRedeemSerializer(serializers.Serializer):
+    """Anonymous redeem. Creates the User and adds them to intended_groups."""
+
+    code = serializers.CharField(max_length=64)
+    username = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=12)
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)

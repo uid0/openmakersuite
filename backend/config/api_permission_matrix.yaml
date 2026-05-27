@@ -2075,6 +2075,9 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  scanner.views.dispatch_scan:
+    permission_classes:
+    - AllowAny
   screens.views.ScreenContentBlockViewSet:
     actions:
       create:

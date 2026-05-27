@@ -83,6 +83,7 @@ import SupplierListPage from './pages/SupplierListPage';
 import TaxReceiptLookupPage from './pages/TaxReceiptLookupPage';
 import ThanksPage from './pages/ThanksPage';
 import TransparencyPage from './pages/TransparencyPage';
+import UniversalScannerPage from './pages/UniversalScannerPage';
 import KioskDisplayPage from './pages/KioskDisplayPage';
 import ScreenEditPage from './pages/ScreenEditPage';
 import ScreensListPage from './pages/ScreensListPage';
@@ -183,6 +184,7 @@ function AppContent() {
         <Routes>
           {/* Home/Landing */}
           <Route path="/" element={<HomePage />} />
+          <Route path="/scan" element={<WorkspaceLayout><UniversalScannerPage /></WorkspaceLayout>} />
 
           {/* Public kiosks (no Django auth) */}
           <Route path="/project-storage/kiosk" element={<ProjectStorageKioskPage />} />

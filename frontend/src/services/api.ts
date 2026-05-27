@@ -2903,4 +2903,51 @@ export const projectStorageAPI = {
     `${API_BASE_URL}/project-storage/stints/${stintId}/label/?printer=${printer}`,
 };
 
+// Universal scanner dispatcher — resolves any barcode/QR payload to an
+// action descriptor without mutating state. Side effects (reorder,
+// receive, asset/location check-in) follow via the per-entity endpoints
+// below. AllowAny on the backend so the workshop kiosk can hit it
+// without a JWT.
+export interface ScanDispatchResult {
+  action:
+    | 'inventory_reorder'
+    | 'inventory_receive'
+    | 'asset_checkin'
+    | 'location_checkin'
+    | 'fixture'
+    | 'donation_item'
+    | 'unknown';
+  target_type?: string;
+  target_id?: string;
+  target_name?: string;
+  target_url?: string;
+  message?: string;
+  item_supplier_id?: number;
+  supplier_name?: string;
+  item_id?: string;
+  item_name?: string;
+  is_package?: boolean;
+  current_stock?: number;
+  raw_payload: string;
+}
+
+export const scannerAPI = {
+  dispatch: (payload: string) =>
+    api.post<ScanDispatchResult>('/scanner/dispatch/', { payload }),
+};
+
+// LocationCheckIn create — used by the universal scanner page to record
+// an anonymous "I was here" stamp when someone scans a location QR.
+export const locationCheckinsAPI = {
+  create: (data: {
+    location: number;
+    checkin_type?: 'volunteer' | 'contractor' | 'anonymous';
+    notes?: string;
+  }) =>
+    api.post<{ id: string; location: number; checked_in_at: string }>(
+      '/location-checkins/check-ins/',
+      { checkin_type: 'anonymous', ...data },
+    ),
+};
+
 export default api;

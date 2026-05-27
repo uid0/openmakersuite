@@ -47,29 +47,46 @@ const InventoryItemDetailPage: React.FC = () => {
   const loadData = async () => {
     if (!id) return;
 
-    try {
-      setLoading(true);
-      const [itemRes, usageLogsRes, reorderRes, assetsRes] = await Promise.all([
-        inventoryAPI.getItem(id),
-        inventoryAPI.getUsageLogs(id),
-        reorderAPI.listRequests({ status: undefined }),
-        assetsAPI.listAssets({ inventory_item: id }),
-      ]);
+    setLoading(true);
+    // Use allSettled so the page still renders the item when a sibling
+    // call (usage logs, reorder history, linked assets) fails. Previously
+    // any one of these rejecting would short-circuit the whole try-block
+    // and show "Item not found" even though the item exists — uid0 hit
+    // this on items with no linked-assets filter match where assetsAPI
+    // returned a 400.
+    const [itemRes, usageLogsRes, reorderRes, assetsRes] = await Promise.allSettled([
+      inventoryAPI.getItem(id),
+      inventoryAPI.getUsageLogs(id),
+      reorderAPI.listRequests({ status: undefined }),
+      assetsAPI.listAssets({ inventory_item: id }),
+    ]);
 
-      setItem(itemRes.data);
-      setUsageLogs(usageLogsRes.data.results || []);
-      
-      // Filter reorder requests for this item
-      const allRequests = reorderRes.data.results || [];
-      const itemRequests = allRequests.filter((req) => req.item === id);
-      setReorderHistory(itemRequests);
-
-      setLinkedAssets(assetsRes.data.results || []);
-    } catch (err) {
-      console.error('Error loading item details:', err);
-    } finally {
-      setLoading(false);
+    if (itemRes.status === 'fulfilled') {
+      setItem(itemRes.value.data);
+    } else {
+      console.error('Error loading item:', itemRes.reason);
     }
+
+    if (usageLogsRes.status === 'fulfilled') {
+      setUsageLogs(usageLogsRes.value.data.results || []);
+    } else {
+      console.error('Error loading usage logs:', usageLogsRes.reason);
+    }
+
+    if (reorderRes.status === 'fulfilled') {
+      const allRequests = reorderRes.value.data.results || [];
+      setReorderHistory(allRequests.filter((req) => req.item === id));
+    } else {
+      console.error('Error loading reorder requests:', reorderRes.reason);
+    }
+
+    if (assetsRes.status === 'fulfilled') {
+      setLinkedAssets(assetsRes.value.data.results || []);
+    } else {
+      console.error('Error loading linked assets:', assetsRes.reason);
+    }
+
+    setLoading(false);
   };
 
   const handleGenerateQR = async () => {

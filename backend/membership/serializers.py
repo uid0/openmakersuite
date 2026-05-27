@@ -397,14 +397,11 @@ class InviteCodeListSerializer(serializers.ModelSerializer):
         return "open"
 
 
-from django.contrib.auth.models import Group as _AuthGroup  # used by InviteCodeCreateSerializer
-
-
 class InviteCodeCreateSerializer(serializers.ModelSerializer):
     """Staff-side create. `code` and audit fields are server-set."""
 
     intended_groups = serializers.PrimaryKeyRelatedField(
-        queryset=_AuthGroup.objects.all(),
+        queryset=Group.objects.all(),
         many=True,
         required=False,
     )

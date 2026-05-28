@@ -21,6 +21,7 @@ from analytics.tasks import (
     METRIC_SNAPSHOT_NAMES,
     _collect_metric_snapshot,
     _emit_metric_snapshot_to_sentry,
+    _safe_count,
 )
 from forgekey.tests.factories import ESP32DeviceFactory
 from inventory.models import Asset, InventoryItem, Location
@@ -194,3 +195,38 @@ class TestEmitMetricSnapshotToSentry:
         assert attrs["value"] == 7
         assert attrs["metric.name"] == "oms.metric.user.total"
         assert attrs["metric.kind"] == "gauge"
+
+
+class TestSafeCount:
+    """`_safe_count` swallows database errors so a single absent table
+    doesn't take the whole snapshot down (BACKEND-8). Pin the contract
+    so a future refactor doesn't accidentally re-raise."""
+
+    def test_returns_int_on_success(self):
+        assert _safe_count("ok", lambda: 5) == 5
+
+    def test_returns_zero_on_programming_error(self):
+        from django.db.utils import ProgrammingError
+
+        def raises():
+            raise ProgrammingError('relation "missing" does not exist')
+
+        assert _safe_count("missing", raises) == 0
+
+    def test_returns_zero_on_operational_error(self):
+        from django.db.utils import OperationalError
+
+        def raises():
+            raise OperationalError("connection refused")
+
+        assert _safe_count("conn-down", raises) == 0
+
+    def test_unexpected_exception_propagates(self):
+        # _safe_count only swallows DB-shaped errors. A logic bug in
+        # the snapshot collector should still surface so it's caught
+        # in CI rather than silently zeroing out forever.
+        def raises():
+            raise RuntimeError("not a db error")
+
+        with pytest.raises(RuntimeError):
+            _safe_count("bug", raises)

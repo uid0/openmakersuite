@@ -247,6 +247,15 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
           ✕
         </button>
       )}
+      <div className="sidebar-brand" data-testid="sidebar-brand">
+        <span className="sidebar-brand-chip" aria-hidden="true">
+          OM
+        </span>
+        <div className="sidebar-brand-text">
+          <span className="sidebar-brand-eyebrow">OpenMakerSuite</span>
+          <span className="sidebar-brand-title">Workspace</span>
+        </div>
+      </div>
       <nav className="sidebar-nav">
         {workspaceSections.map((section) => {
           if (!shouldShowSection(section)) return null;

@@ -131,6 +131,8 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "config.middleware.PermissionsPolicyMiddleware",
+    # Must sit after AuthenticationMiddleware so request.user is set.
+    "config.middleware.SentryUserScopeMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -447,6 +449,15 @@ CELERY_BEAT_SCHEDULE = {
     "analytics-send-monthly-pulse": {
         "task": "analytics.send_monthly_pulse_email",
         "schedule": crontab(minute=0, hour=9, day_of_month=1),
+    },
+    # Every 5 minutes — pushes a fixed list of business-counter gauges
+    # to Sentry Logs (Sentry retired the experimental Metrics SDK in
+    # 2.x, so Logs with a numeric `value` attribute is the supported
+    # replacement). See analytics.tasks.METRIC_SNAPSHOT_NAMES for the
+    # canonical list. Cost is ~10 log entries per emit per environment.
+    "analytics-emit-metric-snapshot": {
+        "task": "analytics.emit_metric_snapshot",
+        "schedule": 300.0,
     },
 }
 

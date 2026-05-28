@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { authAPI } from '../services/api';
+import { applySentryAuth, clearSentryAuth } from '../services/sentryAuth';
 import { consumePendingReturnTo } from './SessionExpiredBanner';
 import '../styles/AuthSection.css';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -50,6 +51,11 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       localStorage.setItem('username', loginUsername);
       localStorage.setItem('is_staff', String(response.data.is_staff || false));
       localStorage.setItem('is_superuser', String(response.data.is_superuser || false));
+      applySentryAuth({
+        username: loginUsername,
+        is_staff: response.data.is_staff,
+        is_superuser: response.data.is_superuser,
+      });
 
       setIsLoggedIn(true);
       setUsername(loginUsername);
@@ -98,6 +104,11 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
       localStorage.setItem('username', registerUsername);
       localStorage.setItem('is_staff', String(loginResponse.data.is_staff || false));
       localStorage.setItem('is_superuser', String(loginResponse.data.is_superuser || false));
+      applySentryAuth({
+        username: registerUsername,
+        is_staff: loginResponse.data.is_staff,
+        is_superuser: loginResponse.data.is_superuser,
+      });
 
       setIsLoggedIn(true);
       setUsername(registerUsername);
@@ -126,6 +137,7 @@ const AuthSection: React.FC<AuthSectionProps> = ({ onAuthChange }) => {
     localStorage.removeItem('username');
     localStorage.removeItem('is_staff');
     localStorage.removeItem('is_superuser');
+    clearSentryAuth();
     setIsLoggedIn(false);
     setUsername('');
     onAuthChange(false);

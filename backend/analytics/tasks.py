@@ -244,3 +244,115 @@ def send_monthly_pulse_email(self):
         logger.exception("send_monthly_pulse_email failed")
         # Re-raise so the Celery result backend records the failure.
         raise
+
+
+# Names emitted by ``emit_metric_snapshot``. Listed here so the test
+# suite can assert the canonical set and so a future operator searching
+# Sentry Logs has a single grep point. Each value is the literal log
+# message; the actual count rides as the ``value`` attribute.
+METRIC_SNAPSHOT_NAMES: tuple[str, ...] = (
+    "oms.metric.user.total",
+    "oms.metric.user.staff",
+    "oms.metric.membership.active",
+    "oms.metric.inventory.item.total",
+    "oms.metric.inventory.asset.total",
+    "oms.metric.inventory.location.total",
+    "oms.metric.forgekey.device.total",
+    "oms.metric.forgekey.device.online",
+    "oms.metric.checkin.location.last_24h",
+    "oms.metric.checkin.occupancy_event.last_24h",
+)
+
+
+def _collect_metric_snapshot() -> dict[str, int]:
+    """Query the current value of every gauge in ``METRIC_SNAPSHOT_NAMES``.
+
+    Split out so the periodic task can be tested without driving Celery.
+    Heavy imports are local so module import stays fast and circular
+    imports between ``analytics`` and the app models stay impossible.
+    """
+    from datetime import timedelta
+
+    from django.contrib.auth import get_user_model
+    from django.utils import timezone as dj_tz
+
+    from forgekey.models import ESP32Device, OccupancyEvent
+    from inventory.models import Asset, InventoryItem, Location
+    from location_checkins.models import LocationCheckIn
+    from membership.models import Membership
+
+    User = get_user_model()
+    now = dj_tz.now()
+    last_24h = now - timedelta(hours=24)
+
+    return {
+        "oms.metric.user.total": User.objects.count(),
+        "oms.metric.user.staff": User.objects.filter(is_staff=True).count(),
+        "oms.metric.membership.active": Membership.objects.filter(
+            status=Membership.STATUS_ACTIVE
+        ).count(),
+        "oms.metric.inventory.item.total": InventoryItem.objects.count(),
+        "oms.metric.inventory.asset.total": Asset.objects.count(),
+        "oms.metric.inventory.location.total": Location.objects.count(),
+        "oms.metric.forgekey.device.total": ESP32Device.objects.count(),
+        "oms.metric.forgekey.device.online": ESP32Device.objects.filter(is_online=True).count(),
+        "oms.metric.checkin.location.last_24h": LocationCheckIn.objects.filter(
+            checked_in_at__gte=last_24h
+        ).count(),
+        "oms.metric.checkin.occupancy_event.last_24h": OccupancyEvent.objects.filter(
+            event_timestamp_utc__gte=last_24h
+        ).count(),
+    }
+
+
+def _emit_metric_snapshot_to_sentry(snapshot: dict[str, int]) -> None:
+    """Push the supplied gauge values to Sentry Logs.
+
+    Split out from the task body so tests can drive this directly with
+    a known input dict — driving the Celery task wrapper from a test
+    would fight the bind=True / crons.monitor machinery for no benefit.
+    """
+    sentry_logger = sentry_sdk.logger
+    for name, value in snapshot.items():
+        # Each message stays a constant string so the Sentry Logs UI can
+        # group on it; the value rides in the structured attribute.
+        sentry_logger.info(
+            name,
+            attributes={
+                "value": value,
+                "metric.name": name,
+                "metric.kind": "gauge",
+            },
+        )
+
+
+@shared_task(bind=True, ignore_result=True, name="analytics.emit_metric_snapshot")
+@sentry_sdk.crons.monitor(
+    monitor_slug="analytics-emit-metric-snapshot",
+    monitor_config={
+        # Beat schedule fires every 5 minutes; a 1-minute checkin margin
+        # absorbs the occasional slow Postgres count without paging.
+        "schedule": {"type": "interval", "value": 5, "unit": "minute"},
+        "timezone": "UTC",
+        "checkin_margin": 1,
+        "max_runtime": 2,
+        "failure_issue_threshold": 3,
+        "recovery_threshold": 1,
+    },
+)
+def emit_metric_snapshot(self):
+    """Celery beat task: emit a snapshot of every gauge to Sentry Logs.
+
+    Sentry deprecated its experimental Metrics SDK in 2.x; the supported
+    replacement for periodic numeric snapshots is the Logs beta with a
+    numeric ``value`` attribute. Failures are logged and re-raised so
+    the cron monitor reflects them — silent count drift would defeat the
+    purpose of the snapshot.
+    """
+    try:
+        snapshot = _collect_metric_snapshot()
+    except Exception:
+        logger.exception("emit_metric_snapshot: failed to collect counts")
+        raise
+    _emit_metric_snapshot_to_sentry(snapshot)
+    return snapshot

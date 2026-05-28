@@ -1386,3 +1386,96 @@ class CertificateAuthority(models.Model):
     @classmethod
     def get_active(cls) -> Optional["CertificateAuthority"]:
         return cls.objects.filter(is_active=True).order_by("-created_at").first()
+
+
+class EPaperDisplay(models.Model):
+    """A XIAO 7.5" ePaper panel bound to an asset, showing PM status.
+
+    Each panel is one ESP32 + e-paper combo glued to the side of a
+    machine. Firmware wakes from deep sleep on its own schedule (or on
+    an MQTT command), pulls the latest PNG from
+    ``GET /api/forgekey/epaper/<display_id>/image.png`` over HTTPS,
+    flashes the e-paper, reports battery level via
+    ``POST /api/forgekey/epaper/<display_id>/battery/``, then sleeps
+    again.
+
+    Pre-rendering server-side keeps the firmware simple — the panel
+    only needs to draw a single PNG, not run any layout logic. Battery
+    telemetry lives on this row so the operator dashboard can flag a
+    panel that needs to swap to a charged twin (the swap workflow is
+    a follow-up; for now low battery surfaces as a Sentry warning).
+    """
+
+    LOW_BATTERY_PERCENT_DEFAULT = 20
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.OneToOneField(
+        ESP32Device,
+        on_delete=models.CASCADE,
+        related_name="epaper_display",
+        help_text="ESP32 driving the panel.",
+    )
+    asset = models.ForeignKey(
+        "inventory.Asset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="epaper_displays",
+        help_text="Asset whose PM status the panel is currently showing.",
+    )
+    # Battery telemetry. Nullable because a freshly-enrolled panel may
+    # not have reported yet; the dashboards treat null as "unknown" and
+    # don't page on it.
+    battery_percent = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text="Last reported battery percentage (0-100).",
+    )
+    last_battery_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the device last reported its battery percentage.",
+    )
+    # Image cache fields. The render service computes a deterministic
+    # ETag from the snapshot inputs (asset id + each schedule's
+    # status + days_since_last) so the device GET can short-circuit
+    # with 304 Not Modified when nothing changed.
+    last_image_etag = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="ETag of the most recently rendered PNG (snapshot fingerprint).",
+    )
+    last_image_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the panel last fetched a non-304 image.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive panels stop receiving refresh commands.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["asset__name", "device__mac_address"]
+        indexes = [
+            models.Index(fields=["is_active"]),
+            models.Index(fields=["asset"]),
+        ]
+
+    def __str__(self) -> str:
+        asset_name = self.asset.name if self.asset_id else "unbound"
+        return f"EPaperDisplay({self.device.mac_address} → {asset_name})"
+
+    @property
+    def is_low_battery(self) -> bool:
+        """True when the panel is below the low-battery threshold."""
+        if self.battery_percent is None:
+            return False
+        threshold = getattr(
+            settings,
+            "FORGEKEY_EPAPER_LOW_BATTERY_PERCENT",
+            self.LOW_BATTERY_PERCENT_DEFAULT,
+        )
+        return self.battery_percent < threshold

@@ -14,6 +14,7 @@ from django.db import transaction
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 
+import sentry_sdk
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -42,6 +43,7 @@ from .models import (
     DeviceLockout,
     DeviceType,
     DeviceUsage,
+    EPaperDisplay,
     ESP32Device,
     ESP32DevicePhoto,
     FirmwareVersion,
@@ -65,11 +67,7 @@ from .serializers import (
     PowerMeterReadingSerializer,
 )
 from .services.ca_key_storage import CaKeyStorageError, decrypt_ca_key
-from .services.csr_signing import (
-    CsrSigningError,
-    CsrValidationError,
-    sign_csr,
-)
+from .services.csr_signing import CsrSigningError, CsrValidationError, sign_csr
 from .services.device_commands import DeviceCommandError, publish_command
 from .services.firmware_download_token import verify_download_token
 from .services.firmware_signing import (
@@ -1747,3 +1745,100 @@ class ForgeKeyCertificateRevocationListView(APIView):
         response = HttpResponse(pem, content_type="application/x-pem-file")
         response["Cache-Control"] = "public, max-age=300"
         return response
+
+
+class EPaperDisplayImageView(APIView):
+    """Return the latest PM-status PNG for a XIAO 7.5" ePaper panel.
+
+    Firmware GETs this URL on every wake-up. Responds 304 Not Modified
+    when the ETag matches the device's `If-None-Match` header so a
+    panel that already shows the right image can flash it back to
+    deep sleep without redrawing. AllowAny because the device cannot
+    carry a JWT — the ESP32 has no kernel-level certificate store
+    that survives a deep-sleep cycle for this firmware class. The
+    image itself contains nothing that wouldn't already be visible
+    on the panel mounted on the asset.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, display_id):
+        try:
+            display = EPaperDisplay.objects.select_related("device", "asset").get(
+                pk=display_id, is_active=True
+            )
+        except EPaperDisplay.DoesNotExist:
+            return HttpResponse(status=404)
+        if display.asset_id is None:
+            return HttpResponse("Display unbound; no asset", status=409)
+
+        # Lazy imports keep the boot path light — Pillow only loads
+        # when a device actually hits this endpoint.
+        from .services.epaper_render import compute_snapshot_etag, render_pm_image
+
+        etag = compute_snapshot_etag(display.asset)
+        if_none_match = request.headers.get("if-none-match", "").strip().strip('"')
+        if if_none_match and if_none_match == etag:
+            return HttpResponse(status=304)
+
+        png_bytes = render_pm_image(display.asset)
+        # Record what version the panel just flashed; the operator
+        # dashboard reads `last_image_at` to spot stale panels.
+        EPaperDisplay.objects.filter(pk=display.pk).update(
+            last_image_etag=etag,
+            last_image_at=timezone.now(),
+        )
+        response = HttpResponse(png_bytes, content_type="image/png")
+        response["ETag"] = f'"{etag}"'
+        response["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
+
+class EPaperDisplayBatteryView(APIView):
+    """Receive a battery-percent telemetry report from an ePaper panel.
+
+    Body: ``{"percent": 0..100}``. Stores the value + timestamp, and
+    captures a Sentry warning when the panel drops below the
+    low-battery threshold so ops can prep a charged swap before the
+    panel goes dark. AllowAny for the same reasons as the image
+    endpoint — the firmware has no auth credential.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request, display_id):
+        try:
+            display = EPaperDisplay.objects.select_related("device", "asset").get(
+                pk=display_id, is_active=True
+            )
+        except EPaperDisplay.DoesNotExist:
+            return HttpResponse(status=404)
+
+        try:
+            percent = int(request.data.get("percent"))
+        except (TypeError, ValueError):
+            return Response({"detail": "percent must be an integer 0..100"}, status=400)
+        if percent < 0 or percent > 100:
+            return Response({"detail": "percent must be 0..100"}, status=400)
+
+        EPaperDisplay.objects.filter(pk=display.pk).update(
+            battery_percent=percent,
+            last_battery_at=timezone.now(),
+        )
+        display.refresh_from_db()
+
+        # Sentry warning when crossing the low-battery threshold —
+        # ops dashboards can subscribe to this and prep a charged
+        # swap before the panel dies.
+        if display.is_low_battery:
+            asset_name = display.asset.name if display.asset_id else "unbound"
+            with sentry_sdk.new_scope() as scope:
+                scope.set_tag("forgekey.device_mac", display.device.mac_address)
+                scope.set_tag("forgekey.display_id", str(display.pk))
+                scope.set_tag("forgekey.asset", asset_name)
+                scope.set_extra("battery_percent", percent)
+                sentry_sdk.capture_message(
+                    f"ePaper panel low battery: {percent}% on {asset_name}",
+                    level="warning",
+                )
+        return Response({"battery_percent": percent}, status=200)

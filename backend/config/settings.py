@@ -493,6 +493,15 @@ EMQX_API_SECRET = config("EMQX_API_SECRET", default="")
 # The PEM may include literal "\n" newlines (env-friendly). FORGEKEY_SHARED_SECRET
 # is retained for legacy callers but unused by the JWT path.
 FORGEKEY_SHARED_SECRET = config("FORGEKEY_SHARED_SECRET", default="change-me-in-production")
+
+# Low-battery threshold for XIAO ePaper PM-display panels — telemetry
+# reports below this percent emit a Sentry warning so ops can prep a
+# charged swap before the panel goes dark. 20% leaves enough headroom
+# for a multi-day swap window.
+FORGEKEY_EPAPER_LOW_BATTERY_PERCENT = config(
+    "FORGEKEY_EPAPER_LOW_BATTERY_PERCENT", default=20, cast=int
+)
+
 FORGEKEY_JWT_ALGORITHM = "ES256"
 FORGEKEY_JWT_EXPIRATION_SECONDS = config(
     "FORGEKEY_JWT_EXPIRATION_SECONDS", default=2592000, cast=int  # 30 days

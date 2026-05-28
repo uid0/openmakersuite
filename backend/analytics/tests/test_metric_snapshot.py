@@ -22,7 +22,7 @@ from analytics.tasks import (
     _collect_metric_snapshot,
     _emit_metric_snapshot_to_sentry,
 )
-from forgekey.models import ESP32Device
+from forgekey.tests.factories import ESP32DeviceFactory
 from inventory.models import Asset, InventoryItem, Location
 from location_checkins.models import LocationCheckIn
 from membership.models import Membership
@@ -46,33 +46,40 @@ class TestCollectMetricSnapshot:
     set of keys must equal METRIC_SNAPSHOT_NAMES so the canonical list
     stays in sync with what the task actually emits."""
 
-    def test_empty_db_returns_zero_for_every_name(self):
+    def test_snapshot_emits_every_canonical_gauge(self):
+        # The shape contract: every name in METRIC_SNAPSHOT_NAMES must
+        # come back with a non-negative integer. Magnitudes depend on
+        # other migrations + conftest fixtures, so this test only pins
+        # the key set + types — per-subsystem deltas live in the
+        # focused tests below.
         snapshot = _collect_metric_snapshot()
         assert set(snapshot.keys()) == set(METRIC_SNAPSHOT_NAMES)
-        # An empty database should report zeros, not crash. Sentry's
-        # log volume from this task is bounded by the count of names,
-        # not the magnitude of the values.
         for name, value in snapshot.items():
-            assert value == 0, f"{name} returned {value} on an empty DB"
+            assert isinstance(value, int), f"{name} returned a non-int {value!r}"
+            assert value >= 0, f"{name} returned a negative {value}"
 
     def test_counts_users_staff_and_members(self):
+        # Delta against the existing baseline so the test doesn't
+        # care how many migration-seeded users already exist.
+        before = _collect_metric_snapshot()
         User.objects.create_user(
-            username="member-1", email="m1@test.com", password="snapshot-pw-12345"
+            username="member-snap-1", email="member-snap-1@test.com", password="snapshot-pw-12345"
         )
         User.objects.create_user(
-            username="member-2", email="m2@test.com", password="snapshot-pw-12345"
+            username="member-snap-2", email="member-snap-2@test.com", password="snapshot-pw-12345"
         )
         User.objects.create_user(
-            username="staff-1",
-            email="s1@test.com",
+            username="staff-snap-1",
+            email="staff-snap-1@test.com",
             password="snapshot-pw-12345",
             is_staff=True,
         )
-        snapshot = _collect_metric_snapshot()
-        assert snapshot["oms.metric.user.total"] == 3
-        assert snapshot["oms.metric.user.staff"] == 1
+        after = _collect_metric_snapshot()
+        assert after["oms.metric.user.total"] - before["oms.metric.user.total"] == 3
+        assert after["oms.metric.user.staff"] - before["oms.metric.user.staff"] == 1
 
     def test_counts_active_memberships_only(self):
+        before = _collect_metric_snapshot()
         Membership.objects.create(
             membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY,
             status=Membership.STATUS_ACTIVE,
@@ -81,35 +88,48 @@ class TestCollectMetricSnapshot:
             membership_type=Membership.MEMBERSHIP_TYPE_MONTHLY,
             status=Membership.STATUS_INACTIVE,
         )
-        snapshot = _collect_metric_snapshot()
-        assert snapshot["oms.metric.membership.active"] == 1
+        after = _collect_metric_snapshot()
+        # Inactive membership must not bump the active gauge.
+        assert after["oms.metric.membership.active"] - before["oms.metric.membership.active"] == 1
 
     def test_counts_inventory_locations_items_and_assets(self):
-        location = _make_location("L1")
+        before = _collect_metric_snapshot()
+        location = _make_location("Snapshot L1")
         category = _make_category()
-        InventoryItem.objects.create(
-            name="Bolts",
-            category=category,
-            location=location,
+        InventoryItem.objects.create(name="Snapshot Bolts", category=category, location=location)
+        InventoryItem.objects.create(name="Snapshot Screws", category=category, location=location)
+        Asset.objects.create(name="Snapshot Drill", location=location)
+        after = _collect_metric_snapshot()
+        # _make_location creates one location, the helper also creates
+        # one inside it. Delta accounting:
+        assert (
+            after["oms.metric.inventory.location.total"]
+            - before["oms.metric.inventory.location.total"]
+            == 1
         )
-        InventoryItem.objects.create(
-            name="Screws",
-            category=category,
-            location=location,
+        assert (
+            after["oms.metric.inventory.item.total"] - before["oms.metric.inventory.item.total"]
+            == 2
         )
-        Asset.objects.create(name="Drill", location=location)
-        snapshot = _collect_metric_snapshot()
-        assert snapshot["oms.metric.inventory.location.total"] == 1
-        assert snapshot["oms.metric.inventory.item.total"] == 2
-        assert snapshot["oms.metric.inventory.asset.total"] == 1
+        assert (
+            after["oms.metric.inventory.asset.total"] - before["oms.metric.inventory.asset.total"]
+            == 1
+        )
 
     def test_counts_forgekey_device_online_split(self):
-        ESP32Device.objects.create(mac_address="AA:BB:CC:00:00:01", is_online=True)
-        ESP32Device.objects.create(mac_address="AA:BB:CC:00:00:02", is_online=False)
-        ESP32Device.objects.create(mac_address="AA:BB:CC:00:00:03", is_online=True)
-        snapshot = _collect_metric_snapshot()
-        assert snapshot["oms.metric.forgekey.device.total"] == 3
-        assert snapshot["oms.metric.forgekey.device.online"] == 2
+        before = _collect_metric_snapshot()
+        ESP32DeviceFactory(mac_address="AA:BB:CC:00:00:01", is_online=True)
+        ESP32DeviceFactory(mac_address="AA:BB:CC:00:00:02", is_online=False)
+        ESP32DeviceFactory(mac_address="AA:BB:CC:00:00:03", is_online=True)
+        after = _collect_metric_snapshot()
+        assert (
+            after["oms.metric.forgekey.device.total"] - before["oms.metric.forgekey.device.total"]
+            == 3
+        )
+        assert (
+            after["oms.metric.forgekey.device.online"] - before["oms.metric.forgekey.device.online"]
+            == 2
+        )
 
     def test_checkin_last_24h_window_excludes_older(self):
         location = _make_location("Checkin Loc")

@@ -16,6 +16,7 @@ from typing import Iterable
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
+from django.db.utils import DataError, OperationalError, ProgrammingError
 from django.template.loader import render_to_string
 
 import sentry_sdk
@@ -264,6 +265,23 @@ METRIC_SNAPSHOT_NAMES: tuple[str, ...] = (
 )
 
 
+def _safe_count(name: str, fn) -> int:
+    """Run ``fn()`` (typically a ``.count()`` queryset call) and return its
+    integer result, or 0 if the query raises a database error.
+
+    The snapshot task is best-effort observability — if a gauge can't be
+    computed (e.g. the underlying table doesn't exist in this environment
+    yet, BACKEND-8) we still want every other gauge to ship rather than
+    losing the whole tick. The error is logged so it surfaces in Sentry
+    Logs without paging.
+    """
+    try:
+        return int(fn())
+    except (ProgrammingError, OperationalError, DataError) as exc:
+        logger.warning("metric snapshot: %s failed (%s); reporting 0", name, exc)
+        return 0
+
+
 def _collect_metric_snapshot() -> dict[str, int]:
     """Query the current value of every gauge in ``METRIC_SNAPSHOT_NAMES``.
 
@@ -286,22 +304,38 @@ def _collect_metric_snapshot() -> dict[str, int]:
     last_24h = now - timedelta(hours=24)
 
     return {
-        "oms.metric.user.total": User.objects.count(),
-        "oms.metric.user.staff": User.objects.filter(is_staff=True).count(),
-        "oms.metric.membership.active": Membership.objects.filter(
-            status=Membership.STATUS_ACTIVE
-        ).count(),
-        "oms.metric.inventory.item.total": InventoryItem.objects.count(),
-        "oms.metric.inventory.asset.total": Asset.objects.count(),
-        "oms.metric.inventory.location.total": Location.objects.count(),
-        "oms.metric.forgekey.device.total": ESP32Device.objects.count(),
-        "oms.metric.forgekey.device.online": ESP32Device.objects.filter(is_online=True).count(),
-        "oms.metric.checkin.location.last_24h": LocationCheckIn.objects.filter(
-            checked_in_at__gte=last_24h
-        ).count(),
-        "oms.metric.checkin.occupancy_event.last_24h": OccupancyEvent.objects.filter(
-            event_timestamp_utc__gte=last_24h
-        ).count(),
+        "oms.metric.user.total": _safe_count("user.total", User.objects.count),
+        "oms.metric.user.staff": _safe_count(
+            "user.staff", lambda: User.objects.filter(is_staff=True).count()
+        ),
+        "oms.metric.membership.active": _safe_count(
+            "membership.active",
+            lambda: Membership.objects.filter(status=Membership.STATUS_ACTIVE).count(),
+        ),
+        "oms.metric.inventory.item.total": _safe_count(
+            "inventory.item.total", InventoryItem.objects.count
+        ),
+        "oms.metric.inventory.asset.total": _safe_count(
+            "inventory.asset.total", Asset.objects.count
+        ),
+        "oms.metric.inventory.location.total": _safe_count(
+            "inventory.location.total", Location.objects.count
+        ),
+        "oms.metric.forgekey.device.total": _safe_count(
+            "forgekey.device.total", ESP32Device.objects.count
+        ),
+        "oms.metric.forgekey.device.online": _safe_count(
+            "forgekey.device.online",
+            lambda: ESP32Device.objects.filter(is_online=True).count(),
+        ),
+        "oms.metric.checkin.location.last_24h": _safe_count(
+            "checkin.location.last_24h",
+            lambda: LocationCheckIn.objects.filter(checked_in_at__gte=last_24h).count(),
+        ),
+        "oms.metric.checkin.occupancy_event.last_24h": _safe_count(
+            "checkin.occupancy_event.last_24h",
+            lambda: OccupancyEvent.objects.filter(event_timestamp_utc__gte=last_24h).count(),
+        ),
     }
 
 

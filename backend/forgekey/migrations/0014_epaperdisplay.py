@@ -96,8 +96,8 @@ class Migration(migrations.Migration):
             options={
                 "ordering": ["asset__name", "device__mac_address"],
                 "indexes": [
-                    models.Index(fields=["is_active"], name="forgekey_ep_is_acti_idx"),
-                    models.Index(fields=["asset"], name="forgekey_ep_asset_idx"),
+                    models.Index(fields=["is_active"], name="forgekey_ep_is_acti_947f13_idx"),
+                    models.Index(fields=["asset"], name="forgekey_ep_asset_i_8ab55a_idx"),
                 ],
             },
         ),

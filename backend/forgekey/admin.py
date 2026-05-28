@@ -22,6 +22,7 @@ from .models import (
     DeviceLockout,
     DeviceType,
     DeviceUsage,
+    EPaperDisplay,
     ESP32Device,
     ESP32DevicePhoto,
     FirmwareSigningKey,
@@ -656,3 +657,32 @@ class CertificateAuthorityAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(EPaperDisplay)
+class EPaperDisplayAdmin(admin.ModelAdmin):
+    """Operate-and-bind view for XIAO 7.5" ePaper PM panels."""
+
+    list_display = [
+        "device",
+        "asset",
+        "battery_percent",
+        "last_battery_at",
+        "last_image_at",
+        "is_active",
+    ]
+    list_filter = ["is_active"]
+    search_fields = [
+        "device__mac_address",
+        "device__name",
+        "asset__name",
+    ]
+    readonly_fields = [
+        "id",
+        "battery_percent",
+        "last_battery_at",
+        "last_image_etag",
+        "last_image_at",
+        "created_at",
+        "updated_at",
+    ]

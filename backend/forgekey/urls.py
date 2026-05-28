@@ -13,6 +13,8 @@ from .views import (
     DeviceLockoutViewSet,
     DeviceTypeViewSet,
     DeviceUsageViewSet,
+    EPaperDisplayBatteryView,
+    EPaperDisplayImageView,
     ESP32DeviceViewSet,
     FirmwareVersionViewSet,
     ForgeKeyCertificateRevocationListView,
@@ -81,6 +83,16 @@ urlpatterns = [
         "mqtt-webhook/",
         MqttWebhookView.as_view(),
         name="mqtt-webhook",
+    ),
+    path(
+        "epaper/<uuid:display_id>/image.png",
+        EPaperDisplayImageView.as_view(),
+        name="epaper-image",
+    ),
+    path(
+        "epaper/<uuid:display_id>/battery/",
+        EPaperDisplayBatteryView.as_view(),
+        name="epaper-battery",
     ),
     path("", include(router.urls)),
 ]

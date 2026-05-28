@@ -708,6 +708,12 @@ views:
   forgekey.views.ForgeKeyFirmwareDownloadView:
     permission_classes:
     - AllowAny
+  forgekey.views.EPaperDisplayBatteryView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.EPaperDisplayImageView:
+    permission_classes:
+    - AllowAny
   forgekey.views.ForgeKeyFirmwarePublicKeyView:
     permission_classes:
     - AllowAny

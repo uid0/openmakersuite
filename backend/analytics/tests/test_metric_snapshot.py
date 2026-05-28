@@ -96,8 +96,18 @@ class TestCollectMetricSnapshot:
         before = _collect_metric_snapshot()
         location = _make_location("Snapshot L1")
         category = _make_category()
-        InventoryItem.objects.create(name="Snapshot Bolts", category=category, location=location)
-        InventoryItem.objects.create(name="Snapshot Screws", category=category, location=location)
+        InventoryItem.objects.create(
+            name="Snapshot Bolts",
+            category=category,
+            location=location,
+            reorder_quantity=10,
+        )
+        InventoryItem.objects.create(
+            name="Snapshot Screws",
+            category=category,
+            location=location,
+            reorder_quantity=10,
+        )
         Asset.objects.create(name="Snapshot Drill", location=location)
         after = _collect_metric_snapshot()
         # _make_location creates one location, the helper also creates

@@ -10,6 +10,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { restoreSentryAuthFromStorage } from './services/sentryAuth';
 import './styles/index.css';
 
 // Sentry — no-op when VITE_SENTRY_DSN is unset. CSP needs the DSN
@@ -64,6 +65,14 @@ if (sentryDsn) {
     // Sentry's headroom and gives uid0 real coverage of slow renders +
     // axios call timing instead of a 10% sample.
     tracesSampleRate: 0.5,
+    // Propagate the W3C `sentry-trace` + `baggage` headers to the
+    // backend so the SPA → DRF call chain shows up as one distributed
+    // trace. Without this the trace stops at the SPA boundary and the
+    // matching Django transaction comes back as an orphan. Locked to
+    // same-origin requests (the API is served from `/api/` on the same
+    // host as the SPA) plus an explicit `localhost:8000` for dev so
+    // tracing works end-to-end with `vite` + `manage.py runserver`.
+    tracePropagationTargets: [/^\//, /^http:\/\/localhost:8000/],
     // Profile every traced transaction. The effective profile rate is
     // tracesSampleRate * profilesSampleRate, so this lands at ~25% of
     // page-loads / route changes carrying a flame chart. Drop to 0.5 or
@@ -82,6 +91,10 @@ if (sentryDsn) {
     // calls in app code carry the curated context.
     sendDefaultPii: false,
   });
+  // Restore the Sentry user scope from localStorage so the very first
+  // page-load transaction (and any error during initial render) lands
+  // attributed to the signed-in user rather than as anonymous.
+  restoreSentryAuthFromStorage();
 }
 
 const root = ReactDOM.createRoot(

@@ -37,6 +37,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "analytics.send_monthly_pulse_email",
         crontab(minute=0, hour=9, day_of_month=1),  # 09:00 on the 1st
     ),
+    "analytics-emit-metric-snapshot": (
+        "analytics.emit_metric_snapshot",
+        300.0,  # every 5 min — periodic gauge snapshot to Sentry Logs
+    ),
 }
 
 

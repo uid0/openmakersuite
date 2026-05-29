@@ -1773,6 +1773,11 @@ export const forgekeyAPI = {
       `/forgekey/devices/${id}/recent-commands/`,
       { params: { limit } },
     ),
+  bindEPaper: (displayId: string, assetId: string) =>
+    api.post<{ display_id: string; asset_id: string; asset_name: string }>(
+      `/forgekey/epaper/${displayId}/bind/`,
+      { asset_id: assetId },
+    ),
 };
 
 export const makerBoxesAPI = {

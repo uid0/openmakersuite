@@ -1,0 +1,3 @@
+queue_rules: []
+merge_queue:
+  queued_label: automerge

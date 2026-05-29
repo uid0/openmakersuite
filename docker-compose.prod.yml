@@ -201,6 +201,11 @@ services:
           memory: 256M
     volumes:
       - media_volume:/app/media
+      # Named volume for the scheduled `backups.daily_postgres_backup`
+      # Celery task. Mounted on `celery` so the worker can write
+      # pg_dump archives, and on `backend` (below) so the staff
+      # dashboard / `manage.py` commands can inspect what's there.
+      - backups_volume:/var/backups/oms
     env_file:
       - .env
     environment:
@@ -443,6 +448,11 @@ volumes:
   emqx_data:
   emqx_log:
   celery_beat_state:
+  # Daily Postgres backups land here, written by the `celery` worker
+  # (`backups.daily_postgres_backup`). Retention is enforced inside
+  # the task itself (OMS_BACKUP_RETENTION_DAYS, default 14 days), so
+  # the volume size scales with that constant times the DB size.
+  backups_volume:
 
 networks:
   app-network:

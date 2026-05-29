@@ -14,6 +14,7 @@ from .views import (
     DeviceTypeViewSet,
     DeviceUsageViewSet,
     EPaperDisplayBatteryView,
+    EPaperDisplayBindView,
     EPaperDisplayImageView,
     ESP32DeviceViewSet,
     FirmwareVersionViewSet,
@@ -93,6 +94,11 @@ urlpatterns = [
         "epaper/<uuid:display_id>/battery/",
         EPaperDisplayBatteryView.as_view(),
         name="epaper-battery",
+    ),
+    path(
+        "epaper/<uuid:display_id>/bind/",
+        EPaperDisplayBindView.as_view(),
+        name="epaper-bind",
     ),
     path("", include(router.urls)),
 ]

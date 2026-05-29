@@ -5,16 +5,21 @@ Covers:
   - Render service: deterministic ETag, image bytes are valid PNG,
     status-line content reflects PMSchedule state.
   - Image endpoint: 200 on first fetch with ETag header, 304 on
-    matching If-None-Match, 404 for an unknown display, 409 for an
-    unbound display.
+    matching If-None-Match, auto-creates an unbound row on first
+    contact (409), 404 for a retired display, 409 for an unbound
+    display.
   - Battery endpoint: persists percent + timestamp, captures Sentry
     warning when below threshold, ignores non-integer payloads.
+  - Bind endpoint: staff-authenticated, sets asset_id (auto-creates
+    display row if needed), rejects unauthenticated callers, rejects
+    unknown asset_id, rejects retired displays, supports re-bind.
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.urls import reverse
 from django.utils import timezone
@@ -31,8 +36,17 @@ pytestmark = pytest.mark.django_db
 
 
 def _make_asset(name: str = "ePaper Asset") -> Asset:
-    location = Location.objects.create(name="ePaper Loc")
-    return Asset.objects.create(name=name, location=location)
+    # Both Location.name and Asset.asset_tag have unique constraints;
+    # the auto-generated asset_tag is deterministic enough that two
+    # back-to-back calls in the same test collide. Suffix everything
+    # with a uuid fragment to keep tests independent.
+    suffix = uuid4().hex[:8].upper()
+    location = Location.objects.create(name=f"ePaper Loc {suffix}")
+    return Asset.objects.create(
+        name=name,
+        location=location,
+        asset_tag=f"TEST-{suffix}",
+    )
 
 
 def _bind_display(asset: Asset | None = None) -> EPaperDisplay:
@@ -133,11 +147,26 @@ class TestEPaperImageEndpoint:
         second = client.get(url, HTTP_IF_NONE_MATCH=etag_value)
         assert second.status_code == 304
 
-    def test_image_endpoint_returns_404_for_unknown_display(self, client):
-        url = reverse(
-            "forgekey:epaper-image",
-            args=["00000000-0000-0000-0000-000000000000"],
-        )
+    def test_image_endpoint_auto_registers_first_contact(self, client):
+        # A panel fresh off the shelf generates its own display_id and
+        # hits image.png before any staff has bound it to an asset.
+        # The server creates a stub row and returns 409 so the firmware
+        # knows to paint the bind QR.
+        unknown_id = uuid4()
+        assert not EPaperDisplay.objects.filter(pk=unknown_id).exists()
+        url = reverse("forgekey:epaper-image", args=[unknown_id])
+        response = client.get(url)
+        assert response.status_code == 409
+        display = EPaperDisplay.objects.get(pk=unknown_id)
+        assert display.is_active is True
+        assert display.asset_id is None
+        assert display.device_id is None
+
+    def test_image_endpoint_returns_404_for_retired_display(self, client):
+        display = _bind_display(_make_asset())
+        display.is_active = False
+        display.save(update_fields=["is_active"])
+        url = reverse("forgekey:epaper-image", args=[display.id])
         response = client.get(url)
         assert response.status_code == 404
 
@@ -146,6 +175,99 @@ class TestEPaperImageEndpoint:
         url = reverse("forgekey:epaper-image", args=[display.id])
         response = client.get(url)
         assert response.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Bind endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestEPaperBindEndpoint:
+    def _url(self, display_id) -> str:
+        return reverse("forgekey:epaper-bind", args=[display_id])
+
+    def test_bind_requires_authentication(self, client):
+        display = _bind_display(asset=None)
+        response = client.post(
+            self._url(display.id),
+            data={"asset_id": str(_make_asset().pk)},
+            content_type="application/json",
+        )
+        assert response.status_code in (401, 403)
+
+    def test_bind_sets_asset_id(self, authenticated_client):
+        client, _user = authenticated_client
+        asset = _make_asset("Bandsaw")
+        display = _bind_display(asset=None)
+        response = client.post(
+            self._url(display.id),
+            data={"asset_id": str(asset.pk)},
+            format="json",
+        )
+        assert response.status_code == 200
+        display.refresh_from_db()
+        assert display.asset_id == asset.pk
+        assert response.json()["asset_name"] == "Bandsaw"
+
+    def test_bind_auto_creates_display_on_first_call(self, authenticated_client):
+        # The mobile bind page may run before the panel has hit
+        # image.png even once, so the bind endpoint can't depend on a
+        # pre-existing row.
+        client, _user = authenticated_client
+        asset = _make_asset("New Asset")
+        new_did = uuid4()
+        assert not EPaperDisplay.objects.filter(pk=new_did).exists()
+        response = client.post(
+            self._url(new_did),
+            data={"asset_id": str(asset.pk)},
+            format="json",
+        )
+        assert response.status_code == 200
+        display = EPaperDisplay.objects.get(pk=new_did)
+        assert display.asset_id == asset.pk
+        assert display.is_active is True
+
+    def test_bind_rebinds_to_a_different_asset(self, authenticated_client):
+        client, _user = authenticated_client
+        first = _make_asset("First")
+        second = _make_asset("Second")
+        display = _bind_display(asset=first)
+        response = client.post(
+            self._url(display.id),
+            data={"asset_id": str(second.pk)},
+            format="json",
+        )
+        assert response.status_code == 200
+        display.refresh_from_db()
+        assert display.asset_id == second.pk
+
+    def test_bind_missing_asset_id_returns_400(self, authenticated_client):
+        client, _user = authenticated_client
+        display = _bind_display(asset=None)
+        response = client.post(self._url(display.id), data={}, format="json")
+        assert response.status_code == 400
+
+    def test_bind_unknown_asset_returns_404(self, authenticated_client):
+        client, _user = authenticated_client
+        display = _bind_display(asset=None)
+        response = client.post(
+            self._url(display.id),
+            data={"asset_id": "00000000-0000-0000-0000-000000000000"},
+            format="json",
+        )
+        assert response.status_code == 404
+
+    def test_bind_retired_display_returns_410(self, authenticated_client):
+        client, _user = authenticated_client
+        display = _bind_display(asset=None)
+        display.is_active = False
+        display.save(update_fields=["is_active"])
+        response = client.post(
+            self._url(display.id),
+            data={"asset_id": str(_make_asset().pk)},
+            format="json",
+        )
+        assert response.status_code == 410
 
 
 # ---------------------------------------------------------------------------

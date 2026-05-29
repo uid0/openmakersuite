@@ -1413,7 +1413,13 @@ class EPaperDisplay(models.Model):
         ESP32Device,
         on_delete=models.CASCADE,
         related_name="epaper_display",
-        help_text="ESP32 driving the panel.",
+        null=True,
+        blank=True,
+        help_text=(
+            "ESP32 driving the panel. Nullable for HTTPS-only ePaper "
+            "devices that self-register by display_id and never enroll "
+            "via the MAC-based MQTT pathway."
+        ),
     )
     asset = models.ForeignKey(
         "inventory.Asset",
@@ -1466,7 +1472,11 @@ class EPaperDisplay(models.Model):
 
     def __str__(self) -> str:
         asset_name = self.asset.name if self.asset_id else "unbound"
-        return f"EPaperDisplay({self.device.mac_address} → {asset_name})"
+        if self.device_id:
+            label = self.device.mac_address
+        else:
+            label = f"did:{str(self.pk)[:8]}"
+        return f"EPaperDisplay({label} → {asset_name})"
 
     @property
     def is_low_battery(self) -> bool:

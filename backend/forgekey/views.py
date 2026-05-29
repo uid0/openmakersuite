@@ -1763,11 +1763,16 @@ class EPaperDisplayImageView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, display_id):
+        # First contact from a panel pulled off the shelf: auto-register
+        # an unbound row so the staff bind page has something to write
+        # to when they scan the QR. The 409 below tells the firmware to
+        # paint the bind QR. A retired (is_active=False) display does
+        # not auto-resurrect — those still 404.
         try:
-            display = EPaperDisplay.objects.select_related("device", "asset").get(
-                pk=display_id, is_active=True
-            )
+            display = EPaperDisplay.objects.select_related("device", "asset").get(pk=display_id)
         except EPaperDisplay.DoesNotExist:
+            display = EPaperDisplay.objects.create(pk=display_id, is_active=True)
+        if not display.is_active:
             return HttpResponse(status=404)
         if display.asset_id is None:
             return HttpResponse("Display unbound; no asset", status=409)
@@ -1842,3 +1847,52 @@ class EPaperDisplayBatteryView(APIView):
                     level="warning",
                 )
         return Response({"battery_percent": percent}, status=200)
+
+
+class EPaperDisplayBindView(APIView):
+    """Bind (or re-bind) an ePaper display to an asset.
+
+    Called from the mobile bind page after staff scans the QR on an
+    unbound panel and picks an asset from the searchable list. The
+    display_id is the UUID the firmware generated at first boot and
+    rendered into the QR. Auto-creates the display row on first call
+    so the picker page doesn't need to coordinate with the firmware's
+    initial image.png fetch. Re-bind is a plain PATCH of the asset FK
+    — useful when a panel moves from one machine to another.
+
+    Requires staff JWT. Anyone with the QR + a logged-in OMS session
+    can bind, which matches our floor-trust model: physical access to
+    the panel is the gate, and a rebind is reversible.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, display_id):
+        from inventory.models import Asset
+
+        asset_id = request.data.get("asset_id")
+        if not asset_id:
+            return Response({"detail": "asset_id required"}, status=400)
+        try:
+            asset = Asset.objects.get(pk=asset_id)
+        except (Asset.DoesNotExist, ValueError):
+            return Response({"detail": "asset not found"}, status=404)
+
+        display, _ = EPaperDisplay.objects.get_or_create(
+            pk=display_id,
+            defaults={"is_active": True},
+        )
+        if not display.is_active:
+            return Response({"detail": "display is retired"}, status=410)
+
+        display.asset = asset
+        display.save(update_fields=["asset", "updated_at"])
+
+        return Response(
+            {
+                "display_id": str(display.pk),
+                "asset_id": str(asset.pk),
+                "asset_name": asset.name,
+            },
+            status=200,
+        )

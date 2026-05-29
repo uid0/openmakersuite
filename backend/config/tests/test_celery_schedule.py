@@ -41,6 +41,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "analytics.emit_metric_snapshot",
         300.0,  # every 5 min — periodic gauge snapshot to Sentry Logs
     ),
+    "backups-daily-postgres": (
+        "backups.daily_postgres_backup",
+        crontab(minute=0, hour=2),  # 02:00 UTC daily — R-03 mitigation
+    ),
 }
 
 

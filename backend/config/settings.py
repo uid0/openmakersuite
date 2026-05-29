@@ -119,6 +119,7 @@ INSTALLED_APPS = [
     "project_storage",
     "scanner",
     "preventive_maintenance",
+    "backups",
 ]
 
 MIDDLEWARE = [
@@ -459,7 +460,25 @@ CELERY_BEAT_SCHEDULE = {
         "task": "analytics.emit_metric_snapshot",
         "schedule": 300.0,
     },
+    # Daily PostgreSQL backup at 02:00 UTC. Pairs with the existing
+    # scripts/restore-drill.sh which CI runs on every deploy-touching
+    # PR — this is the production scheduled write half of R-03. See
+    # backups/tasks.py for the dump format and retention policy
+    # (OMS_BACKUP_RETENTION_DAYS, default 14 days).
+    "backups-daily-postgres": {
+        "task": "backups.daily_postgres_backup",
+        "schedule": crontab(minute=0, hour=2),
+    },
 }
+
+# Backups (R-03). Output volume and retention window for the
+# `backups.daily_postgres_backup` Celery task. The directory must be
+# a writable named volume on the celery container — see the `backups_volume`
+# mount in docker-compose.prod.yml. The retention default lines up with
+# `scripts/restore-drill.sh`'s assumption that the freshest dump is the
+# one to restore from.
+OMS_BACKUP_DIR = config("OMS_BACKUP_DIR", default="/var/backups/oms")
+OMS_BACKUP_RETENTION_DAYS = config("OMS_BACKUP_RETENTION_DAYS", default=14, cast=int)
 
 # MQTT Configuration for ForgeKey
 MQTT_BROKER_HOST = config("MQTT_BROKER_HOST", default="localhost")

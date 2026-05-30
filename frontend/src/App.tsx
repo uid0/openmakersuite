@@ -7,6 +7,7 @@ import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'rea
 import ErrorFallback from './components/ErrorFallback';
 import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
+import AuditFeedPage from './pages/AuditFeedPage';
 import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
 import AssetDetailPage from './pages/AssetDetailPage';
 import AssetFormPage from './pages/AssetFormPage';
@@ -197,6 +198,7 @@ function AppContent() {
 
           {/* Staff: mint + revoke invite codes */}
           <Route path="/admin/invite-codes" element={<WorkspaceLayout><InviteCodeAdminPage /></WorkspaceLayout>} />
+          <Route path="/admin/audit-feed" element={<WorkspaceLayout><AuditFeedPage /></WorkspaceLayout>} />
 
           {/* Public kiosks (no Django auth) */}
           <Route path="/project-storage/kiosk" element={<ProjectStorageKioskPage />} />

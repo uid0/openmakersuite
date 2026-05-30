@@ -1539,7 +1539,34 @@ export const dashboardAPI = {
 
   getDeliveriesData: () =>
     api.get<DeliveriesData>('/dashboard/widget-data/deliveries/'),
+
+  getAuditFeed: (params?: {
+    domain?: string;
+    entity_type?: string;
+    entity_id?: string;
+    action?: string;
+    actor_id?: number | string;
+    since?: string;
+    until?: string;
+    limit?: number;
+  }) =>
+    api.get<{ count: number; events: AuditFeedEvent[] }>(
+      '/dashboard/audit-feed/',
+      { params },
+    ),
 };
+
+export interface AuditFeedEvent {
+  domain: string;
+  action: string;
+  actor_id: number | null;
+  actor_username: string | null;
+  created_at: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  notes: string;
+  metadata: Record<string, unknown>;
+}
 
 // Webhooks API
 export const webhooksAPI = {

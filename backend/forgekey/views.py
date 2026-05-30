@@ -1817,6 +1817,31 @@ class EPaperDisplayImageView(APIView):
         return response
 
 
+def _serialize_loto(asset) -> dict:
+    """Lockout/tagout payload for the work-order page: free-form
+    instructions plus each energy source to isolate and the lock devices
+    it needs. Stale (de-derived) sources are omitted.
+    """
+    sources = asset.energy_sources.filter(is_stale=False).prefetch_related("required_devices")
+    return {
+        "instructions": getattr(asset, "lockout_instructions", "") or "",
+        "energy_sources": [
+            {
+                "source_type": source.source_type,
+                "source_type_display": source.get_source_type_display(),
+                "magnitude": source.magnitude or "",
+                "isolation_point": source.isolation_point or "",
+                "notes": source.notes or "",
+                "devices": [
+                    {"device_type": device.get_device_type_display(), "label": device.label}
+                    for device in source.required_devices.all()
+                ],
+            }
+            for source in sources
+        ],
+    }
+
+
 class EPaperServiceInfoView(APIView):
     """What-needs-doing payload for the scan-to-log front-end page.
 
@@ -1866,6 +1891,28 @@ class EPaperServiceInfoView(APIView):
                     item.last_completed_at.date().isoformat() if item.last_completed_at else None
                 ),
                 "instructions": item.instructions or "",
+                "estimated_time_minutes": item.estimated_time_minutes,
+                # Ordered checklist of what to actually do (printed-work-order parity).
+                "steps": [
+                    {
+                        "order": task.order,
+                        "title": task.title,
+                        "description": task.description or "",
+                        "is_required": task.is_required,
+                    }
+                    for task in item.tasks.order_by("order", "title")
+                ],
+                # Tools / parts / supplies needed for the job.
+                "materials": [
+                    {
+                        "name": material.name,
+                        "quantity": (
+                            str(material.quantity) if material.quantity is not None else None
+                        ),
+                        "unit": material.unit or "",
+                    }
+                    for material in item.materials.all()
+                ],
             }
 
         return Response(
@@ -1878,6 +1925,9 @@ class EPaperServiceInfoView(APIView):
                     "asset_tag": getattr(asset, "asset_tag", "") or "",
                     "location": asset.location.name if asset.location_id else None,
                 },
+                # Asset-level lockout/tagout: free-form instructions plus the
+                # energy sources to isolate and the lock devices needed.
+                "loto": _serialize_loto(asset),
                 "items": [serialize(i) for i in items],
                 "primary_item_id": str(primary.pk) if primary else None,
             }

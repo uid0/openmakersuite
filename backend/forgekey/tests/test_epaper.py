@@ -3,7 +3,7 @@
 Covers:
   - Model: low-battery threshold, default ordering, asset binding.
   - Render service: deterministic ETag, image bytes are valid PNG,
-    status-line content reflects PMSchedule state.
+    status-line content reflects MaintenanceItem state.
   - Image endpoint: 200 on first fetch with ETag header, 304 on
     matching If-None-Match, auto-creates an unbound row on first
     contact (409), 404 for a retired display, 409 for an unbound
@@ -29,10 +29,24 @@ import pytest
 from forgekey.models import EPaperDisplay
 from forgekey.services.epaper_render import compute_snapshot_etag, render_pm_image
 from forgekey.tests.factories import ESP32DeviceFactory
-from inventory.models import Asset, Location
-from preventive_maintenance.models import PMSchedule, PMServiceLog
+from inventory.models import Asset, Location, MaintenanceItem
 
 pytestmark = pytest.mark.django_db
+
+
+def _make_item(
+    asset: Asset,
+    title: str = "Blade tension",
+    interval_days: int = 30,
+    last_done_days: int | None = None,
+) -> MaintenanceItem:
+    """A recurring (= preventive) maintenance item, optionally last completed
+    ``last_done_days`` ago. ``last_done_days=None`` leaves it never-completed."""
+    item = MaintenanceItem.objects.create(asset=asset, title=title, interval_days=interval_days)
+    if last_done_days is not None:
+        item.last_completed_at = timezone.now() - timedelta(days=last_done_days)
+        item.save(update_fields=["last_completed_at"])
+    return item
 
 
 def _make_asset(name: str = "ePaper Asset") -> Asset:
@@ -88,30 +102,29 @@ class TestEPaperDisplayModel:
 class TestEPaperRender:
     def test_etag_is_stable_for_same_state(self):
         asset = _make_asset("Bandsaw")
-        PMSchedule.objects.create(asset=asset, task_name="Blade tension", interval_days=30)
+        _make_item(asset, "Blade tension", interval_days=30)
         first = compute_snapshot_etag(asset)
         second = compute_snapshot_etag(asset)
         assert first == second
 
     def test_etag_changes_when_service_logged(self):
         asset = _make_asset("Bandsaw")
-        schedule = PMSchedule.objects.create(
-            asset=asset, task_name="Blade tension", interval_days=30
-        )
+        item = _make_item(asset, "Blade tension", interval_days=30)
         before = compute_snapshot_etag(asset)
-        PMServiceLog.objects.create(schedule=schedule, performed_at=timezone.now())
+        item.last_completed_at = timezone.now()
+        item.save(update_fields=["last_completed_at"])
         after = compute_snapshot_etag(asset)
         assert before != after
 
     def test_render_returns_png_bytes(self):
         asset = _make_asset()
-        PMSchedule.objects.create(asset=asset, task_name="Filter swap", interval_days=90)
+        _make_item(asset, "Filter swap", interval_days=90)
         png = render_pm_image(asset)
         # PNG magic: 89 50 4E 47 0D 0A 1A 0A.
         assert png[:8] == b"\x89PNG\r\n\x1a\n"
         assert len(png) > 100  # not an empty buffer
 
-    def test_render_handles_asset_without_schedules(self):
+    def test_render_handles_asset_without_items(self):
         asset = _make_asset("Idle")
         png = render_pm_image(asset)
         assert png[:8] == b"\x89PNG\r\n\x1a\n"
@@ -125,7 +138,7 @@ class TestEPaperRender:
 class TestEPaperImageEndpoint:
     def test_image_endpoint_returns_png_with_etag(self, client):
         asset = _make_asset()
-        PMSchedule.objects.create(asset=asset, task_name="Lube", interval_days=90)
+        _make_item(asset, "Lube", interval_days=90)
         display = _bind_display(asset)
         url = reverse("forgekey:epaper-image", args=[display.id])
         response = client.get(url)
@@ -354,3 +367,104 @@ class TestEPaperBatteryEndpoint:
         client.post(self._url(display), data={"percent": 40}, content_type="application/json")
         display.refresh_from_db()
         assert display.battery_percent == 40
+
+
+# ---------------------------------------------------------------------------
+# Scan-to-log service endpoints (front-end "complete this PM" page)
+# ---------------------------------------------------------------------------
+
+
+class TestEPaperServiceInfo:
+    def _url(self, display_id) -> str:
+        return reverse("forgekey:epaper-service-info", args=[display_id])
+
+    def test_info_is_public_and_lists_due_task(self, client):
+        asset = _make_asset("Bandsaw")
+        item = _make_item(asset, "Blade tension", interval_days=30, last_done_days=41)
+        display = _bind_display(asset)
+        response = client.get(self._url(display.id))
+        assert response.status_code == 200
+        body = response.json()
+        assert body["bound"] is True
+        assert body["asset"]["name"] == "Bandsaw"
+        assert body["primary_item_id"] == str(item.pk)
+        assert body["items"][0]["title"] == "Blade tension"
+        assert body["items"][0]["status"] == "overdue"
+
+    def test_info_excludes_non_recurring_items(self, client):
+        # One-off items (no interval) are not "preventive" → off the panel.
+        asset = _make_asset("Bandsaw")
+        MaintenanceItem.objects.create(asset=asset, title="One-off fix", interval_days=None)
+        display = _bind_display(asset)
+        body = client.get(self._url(display.id)).json()
+        assert body["items"] == []
+        assert body["primary_item_id"] is None
+
+    def test_info_409_when_unbound(self, client):
+        display = _bind_display(asset=None)
+        response = client.get(self._url(display.id))
+        assert response.status_code == 409
+        assert response.json()["bound"] is False
+
+    def test_info_404_when_retired(self, client):
+        display = _bind_display(_make_asset())
+        display.is_active = False
+        display.save(update_fields=["is_active"])
+        response = client.get(self._url(display.id))
+        assert response.status_code == 404
+
+
+class TestEPaperServiceComplete:
+    def _url(self, display_id) -> str:
+        return reverse("forgekey:epaper-complete", args=[display_id])
+
+    def test_complete_requires_authentication(self, client):
+        display = _bind_display(_make_asset())
+        _make_item(display.asset, "Lube", interval_days=30)
+        response = client.post(self._url(display.id), data={}, content_type="application/json")
+        assert response.status_code in (401, 403)
+
+    def test_complete_logs_attributable_service_and_resets_status(self, authenticated_client):
+        client, user = authenticated_client
+        asset = _make_asset("Bandsaw")
+        item = _make_item(asset, "Blade tension", interval_days=30, last_done_days=41)
+        assert item.is_overdue is True
+        display = _bind_display(asset)
+
+        response = client.post(
+            self._url(display.id), data={"notes": "swapped blade"}, format="json"
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["ok"] is True
+        assert body["status"] == "ok"
+
+        latest = item.logs.order_by("-completed_at").first()
+        assert latest.completed_by_id == user.pk
+        assert latest.notes == "swapped blade"
+        item.refresh_from_db()
+        assert item.is_overdue is False
+
+    def test_complete_honours_explicit_item_id(self, authenticated_client):
+        client, _user = authenticated_client
+        asset = _make_asset("Mill")
+        lube = _make_item(asset, "Lube", interval_days=30)
+        belt = _make_item(asset, "Belt", interval_days=60)
+        display = _bind_display(asset)
+
+        response = client.post(self._url(display.id), data={"item_id": str(belt.pk)}, format="json")
+        assert response.status_code == 201
+        assert belt.logs.exists() is True
+        assert lube.logs.exists() is False
+
+    def test_complete_400_when_asset_has_no_schedule(self, authenticated_client):
+        client, _user = authenticated_client
+        display = _bind_display(_make_asset("Idle"))
+        response = client.post(self._url(display.id), data={}, format="json")
+        assert response.status_code == 400
+
+    def test_complete_409_when_unbound(self, authenticated_client):
+        client, _user = authenticated_client
+        display = _bind_display(asset=None)
+        response = client.post(self._url(display.id), data={}, format="json")
+        assert response.status_code == 409

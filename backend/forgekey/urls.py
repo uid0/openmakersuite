@@ -16,6 +16,8 @@ from .views import (
     EPaperDisplayBatteryView,
     EPaperDisplayBindView,
     EPaperDisplayImageView,
+    EPaperServiceCompleteView,
+    EPaperServiceInfoView,
     ESP32DeviceViewSet,
     FirmwareVersionViewSet,
     ForgeKeyCertificateRevocationListView,
@@ -99,6 +101,16 @@ urlpatterns = [
         "epaper/<uuid:display_id>/bind/",
         EPaperDisplayBindView.as_view(),
         name="epaper-bind",
+    ),
+    path(
+        "epaper/<uuid:display_id>/service-info/",
+        EPaperServiceInfoView.as_view(),
+        name="epaper-service-info",
+    ),
+    path(
+        "epaper/<uuid:display_id>/complete/",
+        EPaperServiceCompleteView.as_view(),
+        name="epaper-complete",
     ),
     path("", include(router.urls)),
 ]

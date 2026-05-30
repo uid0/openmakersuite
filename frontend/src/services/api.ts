@@ -1778,6 +1778,38 @@ export const forgekeyAPI = {
       `/forgekey/epaper/${displayId}/bind/`,
       { asset_id: assetId },
     ),
+  // Scan-to-log page: read the panel's recurring maintenance tasks (public)…
+  getEPaperServiceInfo: (displayId: string) =>
+    api.get<{
+      display_id: string;
+      bound: boolean;
+      asset: { id: string; name: string; asset_tag: string; location: string | null };
+      items: Array<{
+        id: string;
+        title: string;
+        interval_days: number | null;
+        status: string;
+        days_until_due: number | null;
+        status_line: string;
+        last_completed: string | null;
+        instructions: string;
+      }>;
+      primary_item_id: string | null;
+    }>(`/forgekey/epaper/${displayId}/service-info/`),
+  // …and log a completed maintenance task (auth required, attributed to the user).
+  completeEPaperService: (
+    displayId: string,
+    payload: { item_id?: string; notes?: string },
+  ) =>
+    api.post<{
+      ok: boolean;
+      item_id: string;
+      title: string;
+      status: string;
+      status_line: string;
+      completed_at: string;
+      completed_by: string | null;
+    }>(`/forgekey/epaper/${displayId}/complete/`, payload),
 };
 
 export const makerBoxesAPI = {

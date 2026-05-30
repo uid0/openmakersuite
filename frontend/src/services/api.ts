@@ -3087,4 +3087,25 @@ export const invitePublicAPI = {
     api.post<InviteRedeemResponse>('/membership/invite/redeem/', data),
 };
 
+// Anonymous endpoints for the public `/register/<token>` page. An admin
+// pre-creates the user + one-time token (Django admin); this page only
+// validates the token and lets the new member set their password.
+export interface RegistrationTokenUser {
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
+export const registrationPublicAPI = {
+  validate: (token: string) =>
+    api.post<{ valid: boolean; user: RegistrationTokenUser; expires_at: string }>(
+      '/membership/register/validate-token/',
+      { token },
+    ),
+
+  complete: (data: { token: string; password: string; password2: string }) =>
+    api.post<RegistrationTokenUser>('/membership/register/complete/', data),
+};
+
 export default api;

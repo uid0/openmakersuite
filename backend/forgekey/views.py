@@ -1747,6 +1747,18 @@ class ForgeKeyCertificateRevocationListView(APIView):
         return response
 
 
+def epaper_service_url(request, display_pk) -> str:
+    """Front-end "log service" page a maintainer lands on from a panel QR.
+
+    This is a React-Router route (mirrors the bind page's
+    ``/forgekey/epaper/...`` path), not a Django view, so it is built as a
+    plain path rather than reversed. Front-end and API share the origin
+    behind nginx in prod, so deriving it from the request host keeps the
+    QR correct across dev/staging/prod without a hardcoded domain.
+    """
+    return request.build_absolute_uri(f"/forgekey/epaper/service?did={display_pk}")
+
+
 class EPaperDisplayImageView(APIView):
     """Return the latest PM-status PNG for a XIAO 7.5" ePaper panel.
 
@@ -1786,7 +1798,13 @@ class EPaperDisplayImageView(APIView):
         if if_none_match and if_none_match == etag:
             return HttpResponse(status=304)
 
-        png_bytes = render_pm_image(display.asset)
+        # The QR encodes the front-end "log service" page for this panel
+        # (mirrors the bind page's /forgekey/epaper/... route). Built from
+        # the host the firmware reached us on so it stays correct across
+        # dev/staging/prod without a hardcoded domain — front-end and API
+        # share the origin behind nginx in prod.
+        service_url = epaper_service_url(request, display.pk)
+        png_bytes = render_pm_image(display.asset, service_url=service_url)
         # Record what version the panel just flashed; the operator
         # dashboard reads `last_image_at` to spot stale panels.
         EPaperDisplay.objects.filter(pk=display.pk).update(
@@ -1797,6 +1815,134 @@ class EPaperDisplayImageView(APIView):
         response["ETag"] = f'"{etag}"'
         response["Cache-Control"] = "no-cache, must-revalidate"
         return response
+
+
+class EPaperServiceInfoView(APIView):
+    """What-needs-doing payload for the scan-to-log front-end page.
+
+    AllowAny: reading the task is as public as the panel face mounted on
+    the asset. Logging the work (``/complete/``) requires auth so the
+    MaintenanceLog is attributable.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, display_id):
+        try:
+            display = EPaperDisplay.objects.select_related("asset", "asset__location").get(
+                pk=display_id
+            )
+        except EPaperDisplay.DoesNotExist:
+            return Response({"detail": "Unknown display."}, status=status.HTTP_404_NOT_FOUND)
+        if not display.is_active:
+            return Response({"detail": "Display retired."}, status=status.HTTP_404_NOT_FOUND)
+        if display.asset_id is None:
+            return Response(
+                {"detail": "Display is not bound to an asset.", "bound": False},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        from .services.epaper_render import (
+            _days_until_due,
+            _item_status,
+            _next_due_item,
+            _recurring_items,
+            _status_line,
+        )
+
+        asset = display.asset
+        items = _recurring_items(asset)
+        primary = _next_due_item(asset)
+
+        def serialize(item):
+            return {
+                "id": str(item.pk),
+                "title": item.title,
+                "interval_days": item.interval_days,
+                "status": _item_status(item),
+                "days_until_due": _days_until_due(item),
+                "status_line": _status_line(item),
+                "last_completed": (
+                    item.last_completed_at.date().isoformat() if item.last_completed_at else None
+                ),
+                "instructions": item.instructions or "",
+            }
+
+        return Response(
+            {
+                "display_id": str(display.pk),
+                "bound": True,
+                "asset": {
+                    "id": str(asset.pk),
+                    "name": asset.name,
+                    "asset_tag": getattr(asset, "asset_tag", "") or "",
+                    "location": asset.location.name if asset.location_id else None,
+                },
+                "items": [serialize(i) for i in items],
+                "primary_item_id": str(primary.pk) if primary else None,
+            }
+        )
+
+
+class EPaperServiceCompleteView(APIView):
+    """Log a PM service from the scanned panel page.
+
+    Login required (any member) so ``MaintenanceLog.completed_by`` records
+    who did the work. Logging a service shifts the asset's ETag, so the
+    panel paints the reset countdown on its next wake.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, display_id):
+        try:
+            display = EPaperDisplay.objects.select_related("asset").get(pk=display_id)
+        except EPaperDisplay.DoesNotExist:
+            return Response({"detail": "Unknown display."}, status=status.HTTP_404_NOT_FOUND)
+        if not display.is_active or display.asset_id is None:
+            return Response(
+                {"detail": "Display is not bound to an active asset."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        from inventory.models import MaintenanceLog
+
+        from .services.epaper_render import _item_status, _next_due_item, _status_line
+
+        active = display.asset.maintenance_items.filter(is_active=True)
+        item_id = request.data.get("item_id")
+        if item_id:
+            item = active.filter(pk=item_id).first()
+        else:
+            item = _next_due_item(display.asset)
+        if item is None:
+            return Response(
+                {"detail": "No matching active maintenance task for this asset."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Mirror inventory's MaintenanceItem.complete action: log the
+        # completion (attributed) and roll the item's due date forward.
+        notes = (request.data.get("notes") or "").strip()
+        log = MaintenanceLog.objects.create(
+            maintenance_item=item,
+            completed_by=request.user,
+            notes=notes,
+        )
+        item.last_completed_at = log.completed_at
+        item.save(update_fields=["last_completed_at"])
+        return Response(
+            {
+                "ok": True,
+                "item_id": str(item.pk),
+                "title": item.title,
+                "status": _item_status(item),
+                "status_line": _status_line(item),
+                "completed_at": log.completed_at.isoformat(),
+                "completed_by": getattr(request.user, "username", None),
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class EPaperDisplayBatteryView(APIView):

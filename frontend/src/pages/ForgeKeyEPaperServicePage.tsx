@@ -1,22 +1,62 @@
 /**
- * ForgeKey ePaper "Log Service" Page
+ * ForgeKey ePaper "Work Order" Page
  *
  * Mobile-first page a maintainer lands on after scanning the QR on a
- * mounted ePaper panel (`?did=<uuid>`). It shows the asset's recurring
- * maintenance task(s) — readable by anyone, like the panel face itself —
- * and lets a logged-in member check the work off. Logging a completion
- * records an attributable MaintenanceLog; the panel repaints the reset
- * countdown on its next wake.
+ * mounted ePaper panel (`?did=<uuid>`). It presents the asset's recurring
+ * maintenance as a work order — lockout/tagout to perform first, tools &
+ * materials to gather, the ordered steps to follow — and lets a logged-in
+ * member check the work off. Logging a completion records an attributable
+ * MaintenanceLog; the panel repaints the reset countdown on its next wake.
  *
  * Mirrors ForgeKeyEPaperBindPage's shape (route param, api service,
  * Mantine UI). Viewing is public; the "Mark complete" action requires a
  * login (`token` in localStorage) and the backend re-checks auth.
  */
-import { Alert, Badge, Button, Loader, Paper, Stack, Text, Title } from '@mantine/core';
+import {
+  Alert,
+  Badge,
+  Button,
+  Divider,
+  Group,
+  List,
+  Loader,
+  Paper,
+  Stack,
+  Text,
+  ThemeIcon,
+  Title,
+} from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { forgekeyAPI } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+
+interface Step {
+  order: number;
+  title: string;
+  description: string;
+  is_required: boolean;
+}
+
+interface Material {
+  name: string;
+  quantity: string | null;
+  unit: string;
+}
+
+interface EnergySource {
+  source_type: string;
+  source_type_display: string;
+  magnitude: string;
+  isolation_point: string;
+  notes: string;
+  devices: Array<{ device_type: string; label: string }>;
+}
+
+interface Loto {
+  instructions: string;
+  energy_sources: EnergySource[];
+}
 
 interface ItemRow {
   id: string;
@@ -27,12 +67,16 @@ interface ItemRow {
   status_line: string;
   last_completed: string | null;
   instructions: string;
+  estimated_time_minutes: number | null;
+  steps: Step[];
+  materials: Material[];
 }
 
 interface ServiceInfo {
   display_id: string;
   bound: boolean;
   asset: { id: string; name: string; asset_tag: string; location: string | null };
+  loto: Loto;
   items: ItemRow[];
   primary_item_id: string | null;
 }
@@ -48,6 +92,52 @@ const statusColor = (status: string): string => {
     default:
       return 'green';
   }
+};
+
+const formatMaterial = (material: Material): string => {
+  const qty = [material.quantity, material.unit].filter(Boolean).join(' ').trim();
+  return qty ? `${material.name} — ${qty}` : material.name;
+};
+
+const LotoSection: React.FC<{ loto: Loto }> = ({ loto }) => {
+  const hasContent = loto.instructions || loto.energy_sources.length > 0;
+  if (!hasContent) {
+    return null;
+  }
+  return (
+    <Alert color="red" variant="light" title="Lockout / Tagout — isolate before servicing">
+      <Stack gap="xs">
+        {loto.instructions && (
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+            {loto.instructions}
+          </Text>
+        )}
+        {loto.energy_sources.map((source, idx) => (
+          <Stack key={idx} gap={2}>
+            <Text size="sm" fw={600}>
+              {source.source_type_display}
+              {source.magnitude ? ` · ${source.magnitude}` : ''}
+            </Text>
+            {source.isolation_point && (
+              <Text size="xs" c="dimmed">
+                Isolate at: {source.isolation_point}
+              </Text>
+            )}
+            {source.devices.length > 0 && (
+              <Text size="xs" c="dimmed">
+                Locks: {source.devices.map((d) => `${d.label} (${d.device_type})`).join(', ')}
+              </Text>
+            )}
+            {source.notes && (
+              <Text size="xs" c="dimmed">
+                {source.notes}
+              </Text>
+            )}
+          </Stack>
+        ))}
+      </Stack>
+    </Alert>
+  );
 };
 
 const ForgeKeyEPaperServicePage: React.FC = () => {
@@ -134,7 +224,7 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
       <Stack align="center" gap="xs" py="xl">
         <Loader />
         <Text size="sm" c="dimmed">
-          Loading panel…
+          Loading work order…
         </Text>
       </Stack>
     );
@@ -162,7 +252,7 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
       <Stack gap="md">
         <Stack gap={2}>
           <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
-            Preventive maintenance
+            Maintenance work order
           </Text>
           <Title order={2}>{info.asset.name}</Title>
           <Text size="sm" c="dimmed">
@@ -170,6 +260,8 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
             {info.asset.asset_tag ? ` · ${info.asset.asset_tag}` : ''}
           </Text>
         </Stack>
+
+        <LotoSection loto={info.loto} />
 
         {!loggedIn && (
           <Alert color="blue" variant="light">
@@ -187,7 +279,7 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
             No recurring maintenance tasks are scheduled for this asset.
           </Text>
         ) : (
-          <Stack gap="sm">
+          <Stack gap="md">
             {info.items.map((item) => {
               const done = justCompleted[item.id];
               return (
@@ -198,24 +290,75 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
                   radius="md"
                   data-testid={`item-row-${item.id}`}
                 >
-                  <Stack gap="xs">
-                    <Stack gap={2}>
+                  <Stack gap="sm">
+                    <Group justify="space-between" wrap="nowrap" align="flex-start">
                       <Text fw={600}>{item.title}</Text>
                       <Badge color={statusColor(done ? 'ok' : item.status)} variant="light">
                         {done || item.status_line}
                       </Badge>
-                      <Text size="xs" c="dimmed">
-                        {item.last_completed
-                          ? `Last serviced: ${item.last_completed}`
-                          : 'Last serviced: never'}
-                        {item.interval_days ? ` · every ${item.interval_days} days` : ''}
+                    </Group>
+
+                    <Text size="xs" c="dimmed">
+                      {item.last_completed
+                        ? `Last serviced: ${item.last_completed}`
+                        : 'Last serviced: never'}
+                      {item.interval_days ? ` · every ${item.interval_days} days` : ''}
+                      {item.estimated_time_minutes ? ` · ~${item.estimated_time_minutes} min` : ''}
+                    </Text>
+
+                    {item.instructions && (
+                      <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+                        {item.instructions}
                       </Text>
-                      {item.instructions && (
-                        <Text size="sm" mt={4} style={{ whiteSpace: 'pre-wrap' }}>
-                          {item.instructions}
+                    )}
+
+                    {item.materials.length > 0 && (
+                      <Stack gap={4}>
+                        <Text size="sm" fw={600}>
+                          Tools &amp; materials
                         </Text>
-                      )}
-                    </Stack>
+                        <List size="sm" spacing={2}>
+                          {item.materials.map((material, idx) => (
+                            <List.Item key={idx}>{formatMaterial(material)}</List.Item>
+                          ))}
+                        </List>
+                      </Stack>
+                    )}
+
+                    {item.steps.length > 0 && (
+                      <Stack gap={4}>
+                        <Text size="sm" fw={600}>
+                          Steps
+                        </Text>
+                        <List type="ordered" size="sm" spacing={4}>
+                          {item.steps.map((step) => (
+                            <List.Item
+                              key={step.order}
+                              icon={
+                                step.is_required ? (
+                                  <ThemeIcon color="red" size={16} radius="xl">
+                                    <Text size="9px" fw={700}>
+                                      !
+                                    </Text>
+                                  </ThemeIcon>
+                                ) : undefined
+                              }
+                            >
+                              <Text size="sm" fw={500} span>
+                                {step.title}
+                              </Text>
+                              {step.description && (
+                                <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
+                                  {step.description}
+                                </Text>
+                              )}
+                            </List.Item>
+                          ))}
+                        </List>
+                      </Stack>
+                    )}
+
+                    <Divider />
                     <Button
                       onClick={() => handleComplete(item.id)}
                       loading={submittingId === item.id}

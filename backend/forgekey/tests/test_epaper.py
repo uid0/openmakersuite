@@ -400,6 +400,57 @@ class TestEPaperServiceInfo:
         assert body["items"] == []
         assert body["primary_item_id"] is None
 
+    def test_info_includes_work_order_detail(self, client):
+        from decimal import Decimal
+
+        from inventory.models import MaintenanceMaterial, MaintenanceTask
+        from loto.models import AssetEnergySource, LOTODevice
+
+        asset = _make_asset("Mill")
+        asset.lockout_instructions = "Verify zero energy at the panel."
+        asset.save(update_fields=["lockout_instructions"])
+
+        item = _make_item(asset, "Lube", interval_days=30, last_done_days=5)
+        item.instructions = "Use way oil only."
+        item.estimated_time_minutes = 20
+        item.save(update_fields=["instructions", "estimated_time_minutes"])
+        MaintenanceTask.objects.create(
+            maintenance_item=item, order=1, title="Wipe ways", is_required=True
+        )
+        MaintenanceTask.objects.create(maintenance_item=item, order=2, title="Apply oil")
+        MaintenanceMaterial.objects.create(
+            maintenance_item=item, name="Way oil", quantity=Decimal("50"), unit="ml"
+        )
+
+        source = AssetEnergySource.objects.create(
+            asset=asset,
+            source_type=AssetEnergySource.SOURCE_ELECTRICAL,
+            magnitude="240V",
+            isolation_point="Panel A breaker 12",
+        )
+        device = LOTODevice.objects.create(
+            device_type=LOTODevice.DEVICE_TYPE_CHOICES[0][0], label="PAD-001"
+        )
+        source.required_devices.add(device)
+
+        display = _bind_display(asset)
+        body = client.get(self._url(display.id)).json()
+
+        # Asset-level lockout/tagout
+        assert body["loto"]["instructions"] == "Verify zero energy at the panel."
+        es = body["loto"]["energy_sources"][0]
+        assert es["magnitude"] == "240V"
+        assert es["isolation_point"] == "Panel A breaker 12"
+        assert es["devices"][0]["label"] == "PAD-001"
+
+        # Per-task work-order detail
+        work_order = body["items"][0]
+        assert work_order["estimated_time_minutes"] == 20
+        assert work_order["instructions"] == "Use way oil only."
+        assert [s["title"] for s in work_order["steps"]] == ["Wipe ways", "Apply oil"]
+        assert work_order["steps"][0]["is_required"] is True
+        assert work_order["materials"][0]["name"] == "Way oil"
+
     def test_info_409_when_unbound(self, client):
         display = _bind_display(asset=None)
         response = client.get(self._url(display.id))

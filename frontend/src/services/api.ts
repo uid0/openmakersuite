@@ -1784,6 +1784,17 @@ export const forgekeyAPI = {
       display_id: string;
       bound: boolean;
       asset: { id: string; name: string; asset_tag: string; location: string | null };
+      loto: {
+        instructions: string;
+        energy_sources: Array<{
+          source_type: string;
+          source_type_display: string;
+          magnitude: string;
+          isolation_point: string;
+          notes: string;
+          devices: Array<{ device_type: string; label: string }>;
+        }>;
+      };
       items: Array<{
         id: string;
         title: string;
@@ -1793,6 +1804,14 @@ export const forgekeyAPI = {
         status_line: string;
         last_completed: string | null;
         instructions: string;
+        estimated_time_minutes: number | null;
+        steps: Array<{
+          order: number;
+          title: string;
+          description: string;
+          is_required: boolean;
+        }>;
+        materials: Array<{ name: string; quantity: string | null; unit: string }>;
       }>;
       primary_item_id: string | null;
     }>(`/forgekey/epaper/${displayId}/service-info/`),

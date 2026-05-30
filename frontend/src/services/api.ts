@@ -1805,6 +1805,57 @@ export const forgekeyAPI = {
       `/forgekey/epaper/${displayId}/bind/`,
       { asset_id: assetId },
     ),
+  // Scan-to-log page: read the panel's recurring maintenance tasks (public)…
+  getEPaperServiceInfo: (displayId: string) =>
+    api.get<{
+      display_id: string;
+      bound: boolean;
+      asset: { id: string; name: string; asset_tag: string; location: string | null };
+      loto: {
+        instructions: string;
+        energy_sources: Array<{
+          source_type: string;
+          source_type_display: string;
+          magnitude: string;
+          isolation_point: string;
+          notes: string;
+          devices: Array<{ device_type: string; label: string }>;
+        }>;
+      };
+      items: Array<{
+        id: string;
+        title: string;
+        interval_days: number | null;
+        status: string;
+        days_until_due: number | null;
+        status_line: string;
+        last_completed: string | null;
+        instructions: string;
+        estimated_time_minutes: number | null;
+        steps: Array<{
+          order: number;
+          title: string;
+          description: string;
+          is_required: boolean;
+        }>;
+        materials: Array<{ name: string; quantity: string | null; unit: string }>;
+      }>;
+      primary_item_id: string | null;
+    }>(`/forgekey/epaper/${displayId}/service-info/`),
+  // …and log a completed maintenance task (auth required, attributed to the user).
+  completeEPaperService: (
+    displayId: string,
+    payload: { item_id?: string; notes?: string },
+  ) =>
+    api.post<{
+      ok: boolean;
+      item_id: string;
+      title: string;
+      status: string;
+      status_line: string;
+      completed_at: string;
+      completed_by: string | null;
+    }>(`/forgekey/epaper/${displayId}/complete/`, payload),
 };
 
 export const makerBoxesAPI = {
@@ -3061,6 +3112,27 @@ export const invitePublicAPI = {
 
   redeem: (data: InviteRedeemPayload) =>
     api.post<InviteRedeemResponse>('/membership/invite/redeem/', data),
+};
+
+// Anonymous endpoints for the public `/register/<token>` page. An admin
+// pre-creates the user + one-time token (Django admin); this page only
+// validates the token and lets the new member set their password.
+export interface RegistrationTokenUser {
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
+export const registrationPublicAPI = {
+  validate: (token: string) =>
+    api.post<{ valid: boolean; user: RegistrationTokenUser; expires_at: string }>(
+      '/membership/register/validate-token/',
+      { token },
+    ),
+
+  complete: (data: { token: string; password: string; password2: string }) =>
+    api.post<RegistrationTokenUser>('/membership/register/complete/', data),
 };
 
 export default api;

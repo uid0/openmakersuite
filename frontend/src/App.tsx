@@ -42,6 +42,7 @@ import FixtureScanPage from './pages/FixtureScanPage';
 import ForgeKeyDeviceDetailPage from './pages/ForgeKeyDeviceDetailPage';
 import ForgeKeyDevicesPage from './pages/ForgeKeyDevicesPage';
 import ForgeKeyEPaperBindPage from './pages/ForgeKeyEPaperBindPage';
+import ForgeKeyEPaperServicePage from './pages/ForgeKeyEPaperServicePage';
 import HomePage from './pages/HomePage';
 import PurchasingOverviewPage from './pages/PurchasingOverviewPage';
 import ReportsOverviewPage from './pages/ReportsOverviewPage';
@@ -56,6 +57,7 @@ import InventoryListPage from './pages/InventoryListPage';
 import InventoryOverviewPage from './pages/InventoryOverviewPage';
 import InviteCodeAdminPage from './pages/InviteCodeAdminPage';
 import InviteRedeemPage from './pages/InviteRedeemPage';
+import RegisterWithTokenPage from './pages/RegisterWithTokenPage';
 import InventoryReportPage from './pages/InventoryReportPage';
 import InventoryReconciliationPage from './pages/InventoryReconciliationPage';
 import LocationDetailPage from './pages/LocationDetailPage';
@@ -192,6 +194,7 @@ function AppContent() {
 
           {/* Anonymous invite redemption: outside person creates their own account */}
           <Route path="/invite/:code" element={<InviteRedeemPage />} />
+          <Route path="/register/:token" element={<RegisterWithTokenPage />} />
 
           {/* Staff: mint + revoke invite codes */}
           <Route path="/admin/invite-codes" element={<WorkspaceLayout><InviteCodeAdminPage /></WorkspaceLayout>} />
@@ -221,6 +224,7 @@ function AppContent() {
           <Route path="/facilities/forgekey-devices" element={<WorkspaceLayout><ForgeKeyDevicesPage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-devices/:id" element={<WorkspaceLayout><ForgeKeyDeviceDetailPage /></WorkspaceLayout>} />
           <Route path="/forgekey/epaper/bind" element={<WorkspaceLayout><ForgeKeyEPaperBindPage /></WorkspaceLayout>} />
+          <Route path="/forgekey/epaper/service" element={<WorkspaceLayout><ForgeKeyEPaperServicePage /></WorkspaceLayout>} />
           <Route path="/inventory/code-entry" element={<Navigate to="/inventory/scan" replace />} />
           <Route path="/inventory/transparency" element={<WorkspaceLayout><TransparencyPage /></WorkspaceLayout>} />
           <Route path="/inventory/scan" element={<WorkspaceLayout><CodeEntryPage /></WorkspaceLayout>} />

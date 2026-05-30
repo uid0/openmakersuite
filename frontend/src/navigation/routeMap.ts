@@ -72,6 +72,7 @@ const ENTRIES: RouteEntry[] = [
   { path: 'facilities/forgekey-devices', label: 'ForgeKey Devices' },
   { path: 'admin/audit-feed', label: 'Audit Feed' },
   { path: 'forgekey/epaper/bind', label: 'Bind ePaper Panel' },
+  { path: 'forgekey/epaper/service', label: 'Log ePaper Service' },
 
   { path: 'maintenance', label: 'Maintenance' },
   { path: 'maintenance/dashboard', label: 'PM Dashboard' },

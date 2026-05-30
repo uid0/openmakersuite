@@ -7,6 +7,8 @@ import logging
 from django import forms
 from django.contrib import admin, messages
 from django.db import transaction
+from django.http import Http404, HttpResponse
+from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
@@ -670,6 +672,7 @@ class EPaperDisplayAdmin(admin.ModelAdmin):
         "last_battery_at",
         "last_image_at",
         "is_active",
+        "preview_link",
     ]
     list_filter = ["is_active"]
     search_fields = [
@@ -679,6 +682,7 @@ class EPaperDisplayAdmin(admin.ModelAdmin):
     ]
     readonly_fields = [
         "id",
+        "panel_preview",
         "battery_percent",
         "last_battery_at",
         "last_image_etag",
@@ -686,3 +690,54 @@ class EPaperDisplayAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     ]
+
+    # --- Live panel preview -------------------------------------------------
+    # Renders the exact PNG a panel would flash, so the layout can be
+    # iterated on from the admin without a device in hand.
+
+    def get_urls(self):
+        custom = [
+            path(
+                "<uuid:pk>/preview.png",
+                self.admin_site.admin_view(self.preview_png),
+                name="forgekey_epaperdisplay_preview",
+            ),
+        ]
+        return custom + super().get_urls()
+
+    def preview_png(self, request, pk):
+        from .services.epaper_render import render_pm_image
+        from .views import epaper_service_url
+
+        display = self.get_object(request, pk)
+        if display is None:
+            raise Http404("No such ePaper display.")
+        if display.asset_id is None:
+            return HttpResponse(
+                "Display is unbound — bind it to an asset to preview the panel.",
+                content_type="text/plain",
+                status=409,
+            )
+        png = render_pm_image(display.asset, service_url=epaper_service_url(request, display.pk))
+        return HttpResponse(png, content_type="image/png")
+
+    @admin.display(description="Preview")
+    def preview_link(self, obj):
+        if obj.asset_id is None:
+            return "—"
+        url = reverse("admin:forgekey_epaperdisplay_preview", args=[obj.pk])
+        return format_html('<a href="{}" target="_blank">Preview Image</a>', url)
+
+    @admin.display(description="Panel preview")
+    def panel_preview(self, obj):
+        if obj is None or obj.pk is None:
+            return "(save the display first)"
+        if obj.asset_id is None:
+            return "Bind an asset to preview the panel."
+        url = reverse("admin:forgekey_epaperdisplay_preview", args=[obj.pk])
+        return format_html(
+            '<div><a href="{0}" target="_blank">Open full size (800×480)</a></div>'
+            '<img src="{0}" alt="panel preview" style="margin-top:8px;width:480px;'
+            'max-width:100%;border:1px solid #ccc;image-rendering:pixelated"/>',
+            url,
+        )

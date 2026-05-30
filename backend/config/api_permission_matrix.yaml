@@ -623,6 +623,21 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  forgekey.views.EPaperDisplayBatteryView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.EPaperDisplayBindView:
+    permission_classes:
+    - IsAuthenticated
+  forgekey.views.EPaperDisplayImageView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.EPaperServiceCompleteView:
+    permission_classes:
+    - IsAuthenticated
+  forgekey.views.EPaperServiceInfoView:
+    permission_classes:
+    - AllowAny
   forgekey.views.ESP32DeviceViewSet:
     actions:
       command_blink:
@@ -706,12 +721,6 @@ views:
     permission_classes:
     - AllowAny
   forgekey.views.ForgeKeyFirmwareDownloadView:
-    permission_classes:
-    - AllowAny
-  forgekey.views.EPaperDisplayBatteryView:
-    permission_classes:
-    - AllowAny
-  forgekey.views.EPaperDisplayImageView:
     permission_classes:
     - AllowAny
   forgekey.views.ForgeKeyFirmwarePublicKeyView:

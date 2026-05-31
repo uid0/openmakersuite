@@ -103,7 +103,9 @@ class TestPublishUnlock:
         client = MagicMock()
         client.publish.return_value = MagicMock(rc=0)
         topic = publish_unlock(locker=locker, actor=staff, client=client)
-        assert device.mac_address.replace(":", "-") in topic
+        # The command topic uses the firmware-contract MAC encoding
+        # (lowercase hex, no separators) — see forgekey.utils.get_mqtt_topic.
+        assert device.mac_address.replace(":", "").lower() in topic
         body = _published_payload(client)
         assert body["cmd"] == "unlock"
         # JWT verifies + carries (mac, cmd).

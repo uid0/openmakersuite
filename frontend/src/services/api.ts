@@ -3362,9 +3362,29 @@ export interface ForgeKeyLocker {
   status: ForgeKeyLockerStatus | null;
 }
 
+export interface ForgeKeyLockerOtp {
+  id: string;
+  locker: string;
+  locker_name: string;
+  requesting_user: number | null;
+  code: string;
+  expires_at: string;
+  used_at: string | null;
+  revoked_at: string | null;
+  revoked_by: number | null;
+  created_at: string;
+  state: string;
+}
+
 export const lockersAPI = {
   listLockers: () => api.get<{ results?: ForgeKeyLocker[] } | ForgeKeyLocker[]>('/lockers/'),
   getLocker: (id: string) => api.get<ForgeKeyLocker>(`/lockers/${id}/`),
+  unlock: (id: string) =>
+    api.post<{ status: string; topic: string; reason: string }>(`/lockers/${id}/unlock/`),
+  issueOtp: (id: string) => api.post<ForgeKeyLockerOtp>(`/lockers/${id}/issue-otp/`),
+  listOtps: (id: string) => api.get<ForgeKeyLockerOtp[]>(`/lockers/${id}/otps/`),
+  revokeOtp: (id: string, otpId: string) =>
+    api.post<ForgeKeyLockerOtp>(`/lockers/${id}/revoke-otp/`, { otp_id: otpId }),
 };
 
 export default api;

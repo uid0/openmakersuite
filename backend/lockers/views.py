@@ -15,20 +15,30 @@ from __future__ import annotations
 import logging
 
 from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from forgekey.models import ESP32Device
+from forgekey.services.device_commands import DeviceCommandError
 
-from .models import Locker, LockerStatus
+from .models import Locker, LockerOtp, LockerStatus
 from .serializers import (
     IrBreakEventSerializer,
     LockerDetailSerializer,
+    LockerOtpSerializer,
     LockoutEventSerializer,
     LockStatusEventSerializer,
     ReedStatusEventSerializer,
 )
+from .services.access import (
+    OtpDenied,
+    can_user_manage_locker,
+    decide_locker_access,
+    generate_otp,
+)
+from .services.commands import NoSuchLockerDevice, publish_unlock
 
 logger = logging.getLogger(__name__)
 
@@ -204,3 +214,80 @@ class LockerViewSet(viewsets.ReadOnlyModelViewSet):
     )
     serializer_class = LockerDetailSerializer
     permission_classes = [IsAuthenticated]
+
+    @action(detail=True, methods=["post"])
+    def unlock(self, request, pk=None):
+        """Sign + publish the ES256 unlock command to the latch device, gated
+        by the locker access decision and audited via ``publish_unlock``."""
+        locker = self.get_object()
+        decision = decide_locker_access(request.user, locker)
+        if not decision.allowed:
+            return Response(
+                {
+                    "detail": f"Access denied ({decision.reason}).",
+                    "reason": decision.reason,
+                    "missing_certifications": list(decision.missing_certifications),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            topic = publish_unlock(locker=locker, actor=request.user)
+        except NoSuchLockerDevice as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except DeviceCommandError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"status": "unlock_sent", "topic": topic, "reason": decision.reason})
+
+    @action(detail=True, methods=["post"], url_path="issue-otp")
+    def issue_otp(self, request, pk=None):
+        """Mint a one-time access code, gated by the same access decision as a
+        direct unlock. Returns the code (the bearer credential)."""
+        locker = self.get_object()
+        try:
+            otp = generate_otp(user=request.user, locker=locker)
+        except OtpDenied as exc:
+            return Response(
+                {
+                    "detail": f"Access denied ({exc.decision.reason}).",
+                    "reason": exc.decision.reason,
+                    "missing_certifications": list(exc.decision.missing_certifications),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return Response(LockerOtpSerializer(otp).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"])
+    def otps(self, request, pk=None):
+        """List recent OTPs for the locker (managers only)."""
+        locker = self.get_object()
+        if not can_user_manage_locker(request.user, locker):
+            return Response(
+                {"detail": "Only locker managers may view OTPs."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        rows = locker.otps.select_related("requesting_user", "revoked_by").order_by("-created_at")[
+            :50
+        ]
+        return Response(LockerOtpSerializer(rows, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="revoke-otp")
+    def revoke_otp(self, request, pk=None):
+        """Revoke an outstanding OTP (managers only)."""
+        locker = self.get_object()
+        if not can_user_manage_locker(request.user, locker):
+            return Response(
+                {"detail": "Only locker managers may revoke OTPs."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        otp_id = request.data.get("otp_id")
+        if not otp_id:
+            return Response({"detail": "otp_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            otp = locker.otps.get(id=otp_id)
+        except LockerOtp.DoesNotExist:
+            return Response(
+                {"detail": "OTP not found for this locker."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        otp.revoke(by=request.user)
+        return Response(LockerOtpSerializer(otp).data)

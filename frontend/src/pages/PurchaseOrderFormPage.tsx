@@ -13,6 +13,7 @@ import {
   ReorderDataAsset,
   ReorderDataItem,
   ReorderDataSupplier,
+  scannerAPI,
 } from '../services/api';
 import '../styles/PurchaseOrderFormPage.css';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -263,9 +264,9 @@ const PurchaseOrderFormPage: React.FC = () => {
       // Try barcode lookup first if barcode is provided
       if (barcodeToSearch.trim()) {
         try {
-          const lookupResponse = await inventoryAPI.lookupByCode(barcodeToSearch.trim().toUpperCase());
-          if (lookupResponse.data.type === 'item') {
-            itemId = lookupResponse.data.id;
+          const lookupResponse = await scannerAPI.dispatch(barcodeToSearch.trim());
+          if (lookupResponse.data.target_type === 'inventory_item' && lookupResponse.data.target_id) {
+            itemId = lookupResponse.data.target_id;
           } else {
             setError('Barcode does not match an inventory item');
             setSearchingProduct(false);

@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import QRScanner, { QRScannerError } from '../components/QRScanner';
 import { useNotifications } from '../hooks/useNotifications';
-import { checklistsAPI, inventoryAPI } from '../services/api';
+import { checklistsAPI, scannerAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Checklist, ChecklistCompletion, ChecklistStep } from '../types';
 import { confirmAction } from '../utils/dialogs';
@@ -63,17 +63,18 @@ const ChecklistCompletionPage: React.FC = () => {
 
     try {
       setScanning(true);
-      // Extract code from URL if it's a full URL
-      let codeToUse = code;
-      if (code.includes('/')) {
-        // Extract the last part of the URL path
-        const urlParts = code.split('/');
-        codeToUse = urlParts[urlParts.length - 1];
-      }
+      // Resolve the scan through the unified scanner dispatcher, which handles
+      // our QR URLs, UPC barcodes, and location codes.
+      const lookupResponse = await scannerAPI.dispatch(code.trim());
+      const { target_type: type, target_id: id } = lookupResponse.data;
 
-      // Look up the code
-      const lookupResponse = await inventoryAPI.lookupByCode(codeToUse.toUpperCase());
-      const { type, id } = lookupResponse.data;
+      if (!id) {
+        notifications.showWarning(
+          'Code not recognized',
+          lookupResponse.data.message || "Couldn't identify this scan.",
+        );
+        return;
+      }
 
       // Find the current step that needs to be scanned
       const completedStepIds = new Set(completion.step_completions.map(sc => sc.step));
@@ -96,7 +97,7 @@ const ChecklistCompletionPage: React.FC = () => {
       } else if (type === 'location' && nextStep.location === parseInt(id)) {
         matches = true;
         scannedItem = { location_id: parseInt(id) };
-      } else if (type === 'item' && nextStep.inventory_item === id) {
+      } else if (type === 'inventory_item' && nextStep.inventory_item === id) {
         matches = true;
         scannedItem = { item_id: id };
       }

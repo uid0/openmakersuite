@@ -233,8 +233,6 @@ export const inventoryAPI = {
 
   generateQR: (id: string) =>
     api.post(`/inventory/items/${id}/generate_qr/`),
-  lookupByCode: (code: string) =>
-    api.get(`/inventory/lookup-code/`, { params: { code } }),
 
   logUsage: (id: string, quantity: number, notes?: string) =>
     api.post(`/inventory/items/${id}/log_usage/`, {

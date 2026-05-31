@@ -1,84 +1,45 @@
 /**
- * Code Entry Page
- * Allows users who are phobic of scanning QR codes to enter a 6-character code
- * to navigate to the appropriate asset, inventory item, or location page.
+ * Inventory Scan Page (`/inventory/scan`)
+ *
+ * Camera-based QR scanner for inventory. A scanned payload is resolved through
+ * the unified scanner dispatcher (`/scanner/dispatch/`), which understands our
+ * QR URLs, UPC/EAN barcodes, and location codes, then navigates to the target.
+ *
+ * The legacy 6-character manual access-code entry was removed once the org
+ * standardized on QR/UPC scanning. Inventory items and assets no longer carry
+ * an `access_code`; the dispatcher resolves them by QR URL or UPC instead.
  */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import QRScanner, { QRScannerError } from '../components/QRScanner';
-import { inventoryAPI } from '../services/api';
+import { scannerAPI } from '../services/api';
 import '../styles/ScanPage.css';
 
 const CodeEntryPage: React.FC = () => {
   const navigate = useNavigate();
-  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!code || code.length !== 6) {
-      setError('Please enter a 6-character code');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await inventoryAPI.lookupByCode(code.toUpperCase());
-      const { url } = response.data;
-      
-      // Navigate to the URL
-      if (url) {
-        // Extract path from full URL if needed
-        const urlObj = new URL(url);
-        navigate(urlObj.pathname);
-      } else {
-        setError('Invalid response from server');
-      }
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.error || 'Code not found. Please check and try again.';
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Convert to uppercase and filter out invalid characters
-    const value = e.target.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '');
-    // Limit to 6 characters
-    const limitedValue = value.slice(0, 6);
-    setCode(limitedValue);
-    setError(null);
-  };
 
   const processScannedCode = async (scannedText: string) => {
     setLoading(true);
     setError(null);
 
     try {
-      // Extract code from URL if it's a full URL
-      let codeToUse = scannedText;
-      if (scannedText.includes('/')) {
-        const urlParts = scannedText.split('/');
-        codeToUse = urlParts[urlParts.length - 1];
-      }
+      const { data } = await scannerAPI.dispatch(scannedText.trim());
 
-      const response = await inventoryAPI.lookupByCode(codeToUse.toUpperCase());
-      const { url } = response.data;
-      
-      if (url) {
-        const urlObj = new URL(url);
-        navigate(urlObj.pathname);
+      // A resolved scan always carries a target_url (a frontend route path);
+      // a miss comes back as action `unknown` with no target.
+      if (data.target_url) {
+        navigate(data.target_url);
       } else {
-        setError('Invalid response from server');
+        setError(data.message || 'Code not found. Please check and try again.');
       }
     } catch (err: any) {
-      const errorMessage = err.response?.data?.error || 'Code not found. Please check and try again.';
+      const errorMessage =
+        err.response?.data?.detail ||
+        err.response?.data?.error ||
+        'Could not reach the scanner. Please try again.';
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -116,81 +77,39 @@ const CodeEntryPage: React.FC = () => {
       )}
       <div className="scan-page">
         <div className="scan-container">
-          <h1>Enter Access Code</h1>
+          <h1>Scan QR Code</h1>
           <p className="scan-description">
-            Scan a QR code or enter the 6-character code manually to access the item.
+            Scan an item, asset, or location QR code to open it.
           </p>
 
           <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
             <button
               onClick={handleOpenScanner}
+              disabled={loading}
               className="submit-button"
               style={{
                 padding: '1rem 2rem',
                 fontSize: '1.2rem',
                 backgroundColor: '#28a745',
-                marginBottom: '1rem',
               }}
             >
               📱 Scan QR Code
             </button>
-            <p style={{ color: '#666', fontSize: '0.9rem' }}>or</p>
           </div>
 
-        <form onSubmit={handleSubmit} className="code-entry-form">
-          <div className="code-input-group">
-            <label htmlFor="code">Access Code</label>
-            <input
-              id="code"
-              type="text"
-              value={code}
-              onChange={handleCodeChange}
-              placeholder="Enter 6-character code"
-              maxLength={6}
-              autoFocus
-              className="code-input"
-              style={{
-                fontSize: '2rem',
-                letterSpacing: '0.5rem',
-                textAlign: 'center',
-                textTransform: 'uppercase',
-                fontFamily: 'monospace',
-                padding: '1rem',
-                border: '2px solid #ccc',
-                borderRadius: '8px',
-                width: '100%',
-                maxWidth: '300px',
-              }}
-            />
-            <p className="code-hint">
-              Enter the 6-character code (letters and numbers, excluding I, O, 0, 1, L)
-            </p>
-          </div>
+          {loading && (
+            <p style={{ textAlign: 'center', color: '#666' }}>Looking up…</p>
+          )}
 
           {error && (
             <div className="error-message" style={{ marginTop: '1rem' }}>
               {error}
             </div>
           )}
-
-          <button
-            type="submit"
-            disabled={loading || code.length !== 6}
-            className="submit-button"
-            style={{
-              marginTop: '1.5rem',
-              padding: '1rem 2rem',
-              fontSize: '1.2rem',
-            }}
-          >
-            {loading ? 'Looking up...' : 'Go to Item'}
-          </button>
-        </form>
-      </div>
+        </div>
       </div>
     </>
   );
 };
 
 export default CodeEntryPage;
-

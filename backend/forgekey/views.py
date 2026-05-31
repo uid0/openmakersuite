@@ -51,6 +51,7 @@ from .models import (
     OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
+    TemperatureReading,
 )
 from .serializers import (
     AssetAuthorizationSerializer,
@@ -65,6 +66,7 @@ from .serializers import (
     OccupancyEventSerializer,
     OperationalModeSerializer,
     PowerMeterReadingSerializer,
+    TemperatureReadingSerializer,
 )
 from .services.ca_key_storage import CaKeyStorageError, decrypt_ca_key
 from .services.csr_signing import CsrSigningError, CsrValidationError, sign_csr
@@ -88,6 +90,7 @@ from .tasks import (
     process_mqtt_firmware_update_response,
     process_mqtt_occupancy,
     process_mqtt_power_reading,
+    process_mqtt_reading,
     process_mqtt_status_message,
     request_device_status,
 )
@@ -576,6 +579,7 @@ class MqttWebhookView(APIView):
     parser_classes = [JSONParser]
 
     OCCUPANCY_SUFFIX = "occupancy"
+    READING_SUFFIX = "reading"
     STATUS_SUFFIX = "status"
     POWER_SUFFIX = "power"
     CAPABILITIES_SUFFIX = "capabilities"
@@ -714,6 +718,12 @@ class MqttWebhookView(APIView):
         if len(parts) == 4 and last == self.OCCUPANCY_SUFFIX:
             sensor_kind = normalize_sensor_kind(parts[2])
             process_mqtt_occupancy.delay(mac, sensor_kind, message_data or {})
+            return True
+
+        # Temperature/humidity: <prefix>/<mac>/<sensor>/reading (4 parts)
+        if len(parts) == 4 and last == self.READING_SUFFIX:
+            sensor_kind = normalize_sensor_kind(parts[2])
+            process_mqtt_reading.delay(mac, sensor_kind, message_data or {})
             return True
 
         # Power: <prefix>/<mac>/power or <prefix>/<mac>/<sensor>/power
@@ -1002,6 +1012,39 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
                 "since": cutoff.isoformat(),
                 "current_occupancy": OccupancyEvent.current_occupancy_for(device),
                 "events": OccupancyEventSerializer(events, many=True).data,
+            }
+        )
+
+    @action(detail=True, methods=["get"], url_path="temperature")
+    def temperature(self, request, pk=None):
+        """Return recent temperature/humidity readings for charting in the UI."""
+        device = self.get_object()
+        since = request.query_params.get("since", "24h")
+        try:
+            cutoff = _parse_since_window(since)
+        except ValueError:
+            return Response(
+                {"detail": "since must be like '24h', '7d', or an ISO timestamp."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        readings = list(
+            TemperatureReading.objects.filter(
+                device=device,
+                recorded_at__gte=cutoff,
+            ).order_by(
+                "recorded_at"
+            )[:1000]
+        )
+        latest = TemperatureReading.objects.filter(device=device).order_by("-recorded_at").first()
+
+        return Response(
+            {
+                "device": device.mac_address,
+                "since": cutoff.isoformat(),
+                "latest_temperature_c": latest.temperature_c if latest else None,
+                "latest_humidity_percent": latest.humidity_percent if latest else None,
+                "readings": TemperatureReadingSerializer(readings, many=True).data,
             }
         )
 

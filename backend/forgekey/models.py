@@ -851,6 +851,60 @@ class OccupancyEvent(models.Model):
         return max(delta, 0)
 
 
+class TemperatureReading(models.Model):
+    """
+    A single temperature/humidity sample published over MQTT by a ForgeKey
+    temperature-sensor device on ``forgekey/<mac>/temperature_sensor/reading``.
+    The firmware reports ``tempC`` and ``humidity`` roughly every 30s. We stamp
+    ``recorded_at`` server-side because the device's own ``timestamp`` field is
+    an uptime counter (millis since boot), not a wall-clock time. ``raw_payload``
+    keeps the full original body for forward compatibility.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(
+        ESP32Device,
+        on_delete=models.CASCADE,
+        related_name="temperature_readings",
+        help_text="Device that published this reading",
+    )
+    sensor_kind = models.CharField(
+        max_length=50,
+        help_text="Sensor kind extracted from the MQTT topic (e.g. 'temperature_sensor')",
+    )
+    temperature_c = models.FloatField(
+        help_text="Temperature in degrees Celsius",
+    )
+    humidity_percent = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Relative humidity (0-100%), if the sensor reports it",
+    )
+    recorded_at = models.DateTimeField(
+        auto_now_add=True,
+        db_index=True,
+        help_text="When the backend persisted this reading",
+    )
+    raw_payload = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Original MQTT message body, kept for forward compatibility",
+    )
+
+    class Meta:
+        ordering = ["-recorded_at"]
+        indexes = [
+            models.Index(fields=["device", "recorded_at"]),
+        ]
+
+    def __str__(self) -> str:
+        hum = f" {self.humidity_percent:.0f}%RH" if self.humidity_percent is not None else ""
+        return (
+            f"{self.device.mac_address} {self.temperature_c:.1f}C{hum} "
+            f"@ {self.recorded_at:%Y-%m-%d %H:%M:%S}"
+        )
+
+
 class FirmwareSigningKey(models.Model):
     """
     Database-managed ECDSA(P-256) firmware signing keypair.

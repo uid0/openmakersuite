@@ -2008,6 +2008,14 @@ class MaintenanceMaterial(models.Model):
         default=Decimal("0.00"),
         help_text="Estimated cost per unit",
     )
+    location_hint = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text=(
+            "Where to find this consumable when it isn't a tracked inventory "
+            "item (e.g., 'Shop supply cabinet, bin 4')."
+        ),
+    )
     notes = models.TextField(blank=True, help_text="Notes about sourcing or usage")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -2021,6 +2029,60 @@ class MaintenanceMaterial(models.Model):
     def total_estimated_cost(self) -> Decimal:
         """Calculate total estimated cost for this material."""
         return self.quantity * self.estimated_cost_per_unit
+
+
+class MaintenanceTool(models.Model):
+    """A tool needed to perform a :class:`MaintenanceItem` — and where to find it.
+
+    Distinct from :class:`MaintenanceMaterial` (consumables that get used up):
+    a tool is gathered, used, and returned. The optional ``inventory_item``
+    link resolves a real storage location + on-hand count automatically;
+    ``location_hint`` is a free-text fallback ("Tool crib, drawer 3") for
+    tools that aren't tracked as inventory. Surfaced on the e-paper
+    scan-to-log work order so a maintainer knows what to grab — and where it
+    lives — before starting.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    maintenance_item = models.ForeignKey(
+        MaintenanceItem,
+        on_delete=models.CASCADE,
+        related_name="tools",
+        help_text="The maintenance task that requires this tool",
+    )
+    inventory_item = models.ForeignKey(
+        "InventoryItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="maintenance_tools",
+        help_text=(
+            "Optional link to an inventory item so the tool's storage location "
+            "and on-hand count resolve automatically."
+        ),
+    )
+    name = models.CharField(max_length=200, help_text="Name of the tool")
+    quantity = models.PositiveIntegerField(default=1, help_text="How many are needed")
+    location_hint = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text=(
+            "Where to find this tool when it isn't a tracked inventory item "
+            "(e.g., 'Tool crib, drawer 3')."
+        ),
+    )
+    is_required = models.BooleanField(
+        default=True,
+        help_text="Required tools are highlighted on the work order",
+    )
+    notes = models.TextField(blank=True, help_text="Notes about the tool or its use")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return f"{self.name} (for {self.maintenance_item.title})"
 
 
 class MaintenanceLog(models.Model):

@@ -670,6 +670,9 @@ views:
       enable:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      fleet_summary:
+        permission_classes:
+        - IsAuthenticated
       list:
         permission_classes:
         - IsAuthenticatedOrReadOnly

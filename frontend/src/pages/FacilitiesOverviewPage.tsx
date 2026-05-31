@@ -8,6 +8,7 @@ import {
   IconBox,
   IconChecklist,
   IconDeviceTv,
+  IconGauge,
   IconKey,
   IconPackage,
   IconScreenshot,
@@ -67,6 +68,14 @@ const FacilitiesOverviewPage: React.FC = () => (
       icon={<IconBolt size={22} stroke={1.8} />}
       eyebrow="Plant"
       testId="facilities-overview-card-/facilities/electrical"
+    />
+    <CapabilityCard
+      to="/facilities/forgekey-dashboard"
+      title="ForgeKey dashboard"
+      description="Fleet health at a glance — online/offline, firmware, e-paper panels, and alerts."
+      icon={<IconGauge size={22} stroke={1.8} />}
+      eyebrow="Access"
+      testId="facilities-overview-card-/facilities/forgekey-dashboard"
     />
     <CapabilityCard
       to="/facilities/forgekey-devices"

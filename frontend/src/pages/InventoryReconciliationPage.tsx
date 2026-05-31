@@ -28,6 +28,7 @@ import QRScanner from '../components/QRScanner';
 import { useNotifications } from '../hooks/useNotifications';
 import {
   inventoryAPI,
+  scannerAPI,
   ReconciliationGridItem,
   ReconciliationRow,
   ReconciliationUploadResponse,
@@ -208,8 +209,8 @@ const InventoryReconciliationPage: React.FC = () => {
   const handleScanSuccess = async (decodedText: string) => {
     setScannerOpen(false);
     try {
-      const response = await inventoryAPI.lookupByCode(decodedText);
-      const scannedId = (response.data as { id?: string })?.id;
+      const response = await scannerAPI.dispatch(decodedText.trim());
+      const scannedId = response.data.target_id;
       if (!scannedId) {
         notifications.showWarning('Unknown code', 'Could not resolve scanned code.');
         return;

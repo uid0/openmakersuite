@@ -47,7 +47,6 @@ const RecentPages: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed = false 
       '/inventory': 'Inventory Dashboard',
       '/inventory/assets': 'Assets',
       '/inventory/admin': 'Admin Dashboard',
-      '/inventory/code-entry': 'Code Entry',
       '/inventory/transparency': 'Transparency',
       '/inventory/scan': 'Scan Items',
       '/purchasing/orders': 'Purchase Orders',

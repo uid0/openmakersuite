@@ -1005,6 +1005,180 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="fleet-summary",
+        permission_classes=[IsAuthenticated],
+    )
+    def fleet_summary(self, request):
+        """Aggregate fleet health for the ForgeKey dashboard.
+
+        One round-trip: device counts (online/offline, by type, by capability,
+        by firmware), an e-paper battery summary, firmware-update activity, a
+        prioritised "needs attention" feed, and recent commands/updates — so the
+        dashboard never has to fan out per device.
+        """
+        from collections import Counter
+
+        devices = list(ESP32Device.objects.select_related("device_type").all())
+        active = [d for d in devices if d.is_active]
+        online = [d for d in active if d.is_online]
+        offline = [d for d in active if not d.is_online]
+        never_seen = [d for d in devices if d.last_seen is None]
+
+        type_buckets: dict = {}
+        for d in devices:
+            code = d.device_type.code if d.device_type else "unknown"
+            name = d.device_type.name if d.device_type else "Unknown"
+            bucket = type_buckets.setdefault(
+                code, {"code": code, "name": name, "count": 0, "online": 0}
+            )
+            bucket["count"] += 1
+            if d.is_online:
+                bucket["online"] += 1
+        by_type = sorted(type_buckets.values(), key=lambda b: (-b["count"], b["name"]))
+
+        cap_counter: Counter = Counter()
+        for d in devices:
+            for cap in d.capabilities or []:
+                cap_counter[cap] += 1
+        by_capability = [
+            {"capability": cap, "count": n}
+            for cap, n in sorted(cap_counter.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+
+        fw_counter = Counter(d.firmware_version or "unknown" for d in devices)
+        by_firmware = [
+            {"version": v, "count": n}
+            for v, n in sorted(fw_counter.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+
+        low_battery_threshold = int(getattr(settings, "FORGEKEY_EPAPER_LOW_BATTERY_PERCENT", 20))
+        epaper_qs = EPaperDisplay.objects.filter(is_active=True)
+        epaper_total = epaper_qs.count()
+        epaper_unbound = epaper_qs.filter(asset__isnull=True).count()
+        low_battery_panels = list(
+            epaper_qs.filter(
+                battery_percent__isnull=False,
+                battery_percent__lt=low_battery_threshold,
+            )
+            .select_related("asset")
+            .order_by("battery_percent")[:20]
+        )
+
+        updates_in_flight = DeviceFirmwareUpdate.objects.filter(
+            status__in=[
+                DeviceFirmwareUpdate.STATUS_PENDING,
+                DeviceFirmwareUpdate.STATUS_IN_PROGRESS,
+            ]
+        ).count()
+        recent_failed = list(
+            DeviceFirmwareUpdate.objects.filter(status=DeviceFirmwareUpdate.STATUS_FAILED)
+            .select_related("device", "firmware_version")
+            .order_by("-requested_at")[:10]
+        )
+
+        # Needs-attention feed. Offline devices are ordered never-seen first,
+        # then longest-offline (oldest last_seen) first.
+        offline_sorted = sorted(
+            offline,
+            key=lambda d: (d.last_seen is not None, d.last_seen or timezone.now()),
+        )
+        attention_offline = [
+            {
+                "kind": "offline",
+                "device_id": str(d.id),
+                "name": d.name or d.mac_address,
+                "mac_address": d.mac_address,
+                "last_seen": d.last_seen.isoformat() if d.last_seen else None,
+            }
+            for d in offline_sorted[:15]
+        ]
+        attention_low_battery = [
+            {
+                "kind": "low_battery",
+                "display_id": str(p.id),
+                "asset_name": p.asset.name if p.asset else None,
+                "battery_percent": p.battery_percent,
+                "last_battery_at": p.last_battery_at.isoformat() if p.last_battery_at else None,
+            }
+            for p in low_battery_panels
+        ]
+        attention_ota = [
+            {
+                "kind": "ota_failed",
+                "device_id": str(u.device_id),
+                "name": u.device.name or u.device.mac_address,
+                "version": u.firmware_version.version if u.firmware_version else None,
+                "error": u.error_message or "",
+                "requested_at": u.requested_at.isoformat(),
+            }
+            for u in recent_failed
+        ]
+
+        recent_commands = [
+            {
+                "id": str(c.id),
+                "device_id": str(c.device_id),
+                "device_name": c.device.name or c.device.mac_address,
+                "command": c.command,
+                "ack_status": c.effective_ack_status,
+                "sent_at": c.sent_at.isoformat(),
+                "sent_by": c.sent_by.username if c.sent_by else None,
+            }
+            for c in DeviceCommand.objects.select_related("device", "sent_by").order_by("-sent_at")[
+                :10
+            ]
+        ]
+        recent_updates = [
+            {
+                "id": str(u.id),
+                "device_id": str(u.device_id),
+                "device_name": u.device.name or u.device.mac_address,
+                "version": u.firmware_version.version if u.firmware_version else None,
+                "status": u.status,
+                "requested_at": u.requested_at.isoformat(),
+                "requested_by": u.requested_by.username if u.requested_by else None,
+            }
+            for u in DeviceFirmwareUpdate.objects.select_related(
+                "device", "firmware_version", "requested_by"
+            ).order_by("-requested_at")[:10]
+        ]
+
+        return Response(
+            {
+                "generated_at": timezone.now().isoformat(),
+                "devices": {
+                    "total": len(devices),
+                    "active": len(active),
+                    "online": len(online),
+                    "offline": len(offline),
+                    "never_seen": len(never_seen),
+                    "by_type": by_type,
+                    "by_capability": by_capability,
+                    "by_firmware": by_firmware,
+                },
+                "epaper": {
+                    "total": epaper_total,
+                    "bound": epaper_total - epaper_unbound,
+                    "unbound": epaper_unbound,
+                    "low_battery": len(attention_low_battery),
+                },
+                "firmware": {
+                    "updates_in_flight": updates_in_flight,
+                    "recent_failures": len(attention_ota),
+                },
+                "attention": {
+                    "offline": attention_offline,
+                    "low_battery": attention_low_battery,
+                    "ota_failed": attention_ota,
+                },
+                "recent_commands": recent_commands,
+                "recent_updates": recent_updates,
+            }
+        )
+
     def _dispatch_command(self, device, actor, payload, audit_action):
         # Persist an audit row first so the firmware can echo its UUID back
         # on the status topic and the UI can render live ack feedback. The

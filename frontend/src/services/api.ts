@@ -1768,11 +1768,71 @@ export interface ForgeKeyRecentCommandsResponse {
   results: ForgeKeyDeviceCommand[];
 }
 
+export interface ForgeKeyFleetSummary {
+  generated_at: string;
+  devices: {
+    total: number;
+    active: number;
+    online: number;
+    offline: number;
+    never_seen: number;
+    by_type: Array<{ code: string; name: string; count: number; online: number }>;
+    by_capability: Array<{ capability: string; count: number }>;
+    by_firmware: Array<{ version: string; count: number }>;
+  };
+  epaper: { total: number; bound: number; unbound: number; low_battery: number };
+  firmware: { updates_in_flight: number; recent_failures: number };
+  attention: {
+    offline: Array<{
+      kind: 'offline';
+      device_id: string;
+      name: string;
+      mac_address: string;
+      last_seen: string | null;
+    }>;
+    low_battery: Array<{
+      kind: 'low_battery';
+      display_id: string;
+      asset_name: string | null;
+      battery_percent: number;
+      last_battery_at: string | null;
+    }>;
+    ota_failed: Array<{
+      kind: 'ota_failed';
+      device_id: string;
+      name: string;
+      version: string | null;
+      error: string;
+      requested_at: string;
+    }>;
+  };
+  recent_commands: Array<{
+    id: string;
+    device_id: string;
+    device_name: string;
+    command: string;
+    ack_status: ForgeKeyAckStatus;
+    sent_at: string;
+    sent_by: string | null;
+  }>;
+  recent_updates: Array<{
+    id: string;
+    device_id: string;
+    device_name: string;
+    version: string | null;
+    status: string;
+    requested_at: string;
+    requested_by: string | null;
+  }>;
+}
+
 export const forgekeyAPI = {
   listDevices: (opts: { capability?: string } = {}) =>
     api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
       params: opts.capability ? { capability: opts.capability } : undefined,
     }),
+  getFleetSummary: () =>
+    api.get<ForgeKeyFleetSummary>('/forgekey/devices/fleet-summary/'),
   getDevice: (id: string) => api.get<ForgeKeyDevice>(`/forgekey/devices/${id}/`),
   updateDevice: (id: string, data: Partial<ForgeKeyDevice>) =>
     api.patch<ForgeKeyDevice>(`/forgekey/devices/${id}/`, data),

@@ -14,6 +14,7 @@ from .models import (
     DeviceUsage,
     EPaperDisplay,
     ESP32Device,
+    FirmwareRollout,
     FirmwareVersion,
     OccupancyEvent,
     OperationalMode,
@@ -242,3 +243,52 @@ class EPaperDisplaySerializer(serializers.ModelSerializer):
 
     def get_device_mac_address(self, obj):
         return obj.device.mac_address if obj.device_id else None
+
+
+class FirmwareRolloutSerializer(serializers.ModelSerializer):
+    """Serializer for the firmware rollout campaigns management screen."""
+
+    firmware_version_string = serializers.CharField(
+        source="firmware_version.version", read_only=True
+    )
+    device_type_name = serializers.CharField(
+        source="firmware_version.device_type.name", read_only=True
+    )
+    created_by_username = serializers.CharField(source="created_by.username", read_only=True)
+    progress = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FirmwareRollout
+        fields = [
+            "id",
+            "firmware_version",
+            "firmware_version_string",
+            "device_type_name",
+            "name",
+            "status",
+            "batch_size_percent",
+            "interval_minutes",
+            "created_by",
+            "created_by_username",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "last_advanced_at",
+            "progress",
+        ]
+        read_only_fields = [
+            "id",
+            "status",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "last_advanced_at",
+        ]
+
+    def get_progress(self, obj):
+        from .services.firmware_rollout import rollout_progress
+
+        return rollout_progress(obj)

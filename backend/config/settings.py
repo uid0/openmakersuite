@@ -444,6 +444,12 @@ CELERY_BEAT_SCHEDULE = {
             "retention_days": config("FORGEKEY_PHOTO_RETENTION_DAYS", default=30, cast=int),
         },
     },
+    "forgekey-advance-firmware-rollouts": {
+        "task": "forgekey.tasks.advance_firmware_rollouts",
+        # Every 5 min. Each active rollout still self-limits to its own
+        # interval_minutes, so this only dispatches a wave when one is due.
+        "schedule": 300.0,
+    },
     # Monthly board / staff pulse email — covers the prior calendar month.
     # Uses crontab so we land at 09:00 on the 1st regardless of how the
     # worker scheduler restarted during the month.

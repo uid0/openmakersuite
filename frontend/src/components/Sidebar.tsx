@@ -116,6 +116,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
         { path: '/facilities/forgekey-dashboard', label: 'ForgeKey Dashboard', icon: '📊', requiresStaff: true },
         { path: '/facilities/forgekey-devices', label: 'ForgeKey Devices', icon: '📡', requiresStaff: true },
         { path: '/facilities/forgekey-epaper', label: 'e-Paper Panels', icon: '🖼️', requiresStaff: true },
+        { path: '/facilities/forgekey-rollouts', label: 'Firmware Rollouts', icon: '🚀', requiresStaff: true },
         { path: '/facilities/electrical', label: 'Electrical & Network', icon: '⚡', requiresStaff: true },
       ],
     },

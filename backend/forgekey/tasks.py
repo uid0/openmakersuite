@@ -769,3 +769,27 @@ def mark_stale_devices_offline(threshold_hours: int = 5) -> Dict[str, Any]:
         cutoff.isoformat(),
     )
     return {"updated": updated, "threshold_hours": threshold_hours}
+
+
+@shared_task
+def advance_firmware_rollouts() -> None:
+    """Beat task: advance each active firmware rollout whose interval has elapsed.
+
+    For every ACTIVE FirmwareRollout where ``interval_minutes`` has passed since
+    its last wave (or which has never advanced), dispatch the next wave via
+    ``forgekey.services.firmware_rollout.advance_rollout``. Failures on one
+    rollout are logged and don't block the others.
+    """
+    from .models import FirmwareRollout
+    from .services.firmware_rollout import advance_rollout
+
+    now = timezone.now()
+    for rollout in FirmwareRollout.objects.filter(status=FirmwareRollout.STATUS_ACTIVE):
+        if rollout.last_advanced_at is not None:
+            elapsed_minutes = (now - rollout.last_advanced_at).total_seconds() / 60.0
+            if elapsed_minutes < rollout.interval_minutes:
+                continue
+        try:
+            advance_rollout(rollout)
+        except Exception:
+            logger.exception("Failed to advance firmware rollout %s", rollout.id)

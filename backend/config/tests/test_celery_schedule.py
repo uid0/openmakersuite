@@ -33,6 +33,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "forgekey.tasks.prune_device_photos",
         86400.0,  # 1 day
     ),
+    "forgekey-advance-firmware-rollouts": (
+        "forgekey.tasks.advance_firmware_rollouts",
+        300.0,  # every 5 min — advances active rollouts past their interval
+    ),
     "analytics-send-monthly-pulse": (
         "analytics.send_monthly_pulse_email",
         crontab(minute=0, hour=9, day_of_month=1),  # 09:00 on the 1st

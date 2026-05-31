@@ -45,6 +45,7 @@ import ForgeKeyDevicesPage from './pages/ForgeKeyDevicesPage';
 import ForgeKeyEPaperBindPage from './pages/ForgeKeyEPaperBindPage';
 import ForgeKeyEPaperPanelsPage from './pages/ForgeKeyEPaperPanelsPage';
 import ForgeKeyEPaperServicePage from './pages/ForgeKeyEPaperServicePage';
+import ForgeKeyFirmwareRolloutsPage from './pages/ForgeKeyFirmwareRolloutsPage';
 import HomePage from './pages/HomePage';
 import PurchasingOverviewPage from './pages/PurchasingOverviewPage';
 import ReportsOverviewPage from './pages/ReportsOverviewPage';
@@ -227,6 +228,7 @@ function AppContent() {
           <Route path="/facilities/forgekey-devices" element={<WorkspaceLayout><ForgeKeyDevicesPage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-devices/:id" element={<WorkspaceLayout><ForgeKeyDeviceDetailPage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-epaper" element={<WorkspaceLayout><ForgeKeyEPaperPanelsPage /></WorkspaceLayout>} />
+          <Route path="/facilities/forgekey-rollouts" element={<WorkspaceLayout><ForgeKeyFirmwareRolloutsPage /></WorkspaceLayout>} />
           <Route path="/forgekey/epaper/bind" element={<WorkspaceLayout><ForgeKeyEPaperBindPage /></WorkspaceLayout>} />
           <Route path="/forgekey/epaper/service" element={<WorkspaceLayout><ForgeKeyEPaperServicePage /></WorkspaceLayout>} />
           <Route path="/inventory/code-entry" element={<Navigate to="/inventory/scan" replace />} />

@@ -112,6 +112,7 @@ def publish_ota_trigger(
     requested_by=None,
     client: Optional[mqtt.Client] = None,
     ttl_seconds: int = DEFAULT_TTL_SECONDS,
+    rollout=None,
 ) -> DeviceFirmwareUpdate:
     """Publish an OTA trigger for a single device and record an update row.
 
@@ -132,6 +133,7 @@ def publish_ota_trigger(
         firmware_version=firmware,
         status=DeviceFirmwareUpdate.STATUS_PENDING,
         requested_by=requested_by,
+        rollout=rollout,
     )
     record_audit_event(
         action="firmware_request",

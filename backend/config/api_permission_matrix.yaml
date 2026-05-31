@@ -703,6 +703,38 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  forgekey.views.FirmwareRolloutViewSet:
+    actions:
+      advance:
+        permission_classes:
+        - IsAuthenticated
+      cancel:
+        permission_classes:
+        - IsAuthenticated
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      pause:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      start:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
   forgekey.views.FirmwareVersionViewSet:
     actions:
       create:

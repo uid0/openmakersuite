@@ -1987,7 +1987,13 @@ export const forgekeyAPI = {
     api.get<{
       display_id: string;
       bound: boolean;
-      asset: { id: string; name: string; asset_tag: string; location: string | null };
+      asset: {
+        id: string;
+        name: string;
+        asset_tag: string;
+        location: string | null;
+        location_id: string | null;
+      };
       loto: {
         instructions: string;
         energy_sources: Array<{
@@ -2054,18 +2060,39 @@ export const forgekeyAPI = {
   // …and log a completed maintenance task (auth required, attributed to the user).
   completeEPaperService: (
     displayId: string,
-    payload: { item_id?: string; notes?: string },
-  ) =>
-    api.post<{
-      ok: boolean;
-      item_id: string;
-      title: string;
-      status: string;
-      status_line: string;
-      completed_at: string;
-      completed_by: string | null;
-    }>(`/forgekey/epaper/${displayId}/complete/`, payload),
+    payload: { item_id?: string; notes?: string; location_id?: string; photo?: File | null },
+  ) => {
+    const url = `/forgekey/epaper/${displayId}/complete/`;
+    // Multipart when a photo of the work is attached; JSON otherwise.
+    if (payload.photo) {
+      const form = new FormData();
+      if (payload.item_id) form.append('item_id', payload.item_id);
+      if (payload.notes) form.append('notes', payload.notes);
+      if (payload.location_id) form.append('location_id', payload.location_id);
+      form.append('photo', payload.photo);
+      return api.post<EPaperCompleteResponse>(url, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    const json: { item_id?: string; notes?: string; location_id?: string } = {};
+    if (payload.item_id) json.item_id = payload.item_id;
+    if (payload.notes) json.notes = payload.notes;
+    if (payload.location_id) json.location_id = payload.location_id;
+    return api.post<EPaperCompleteResponse>(url, json);
+  },
 };
+
+interface EPaperCompleteResponse {
+  ok: boolean;
+  item_id: string;
+  title: string;
+  status: string;
+  status_line: string;
+  completed_at: string;
+  completed_by: string | null;
+  location: string | null;
+  photo_attached: boolean;
+}
 
 export const makerBoxesAPI = {
   list: () => api.get<{ results: MakerBox[] } | MakerBox[]>('/maker-boxes/'),

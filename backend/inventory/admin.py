@@ -24,6 +24,7 @@ from .models import (
     LocationProblem,
     MaintenanceItem,
     MaintenanceLog,
+    MaintenanceLogPhoto,
     MaintenanceMaterial,
     MaintenanceRecord,
     MaintenanceTask,
@@ -1534,17 +1535,26 @@ class MaintenanceItemAdmin(admin.ModelAdmin):
     ]
 
 
+class MaintenanceLogPhotoInline(admin.TabularInline):
+    model = MaintenanceLogPhoto
+    extra = 0
+    fields = ["image", "caption", "uploaded_by", "uploaded_at"]
+    readonly_fields = ["uploaded_at"]
+
+
 @admin.register(MaintenanceLog)
 class MaintenanceLogAdmin(admin.ModelAdmin):
     list_display = [
         "maintenance_item",
         "completed_by",
+        "location",
         "completed_at",
         "time_spent_minutes",
         "cost_incurred",
     ]
     list_filter = ["completed_at"]
     search_fields = ["maintenance_item__title", "maintenance_item__asset__name", "notes"]
+    inlines = [MaintenanceLogPhotoInline]
     readonly_fields = ["completed_at", "created_at"]
 
 

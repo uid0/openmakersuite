@@ -590,3 +590,52 @@ class TestEPaperServiceComplete:
         display = _bind_display(asset=None)
         response = client.post(self._url(display.id), data={}, format="json")
         assert response.status_code == 409
+
+    def test_complete_stamps_location_and_attaches_photo(self, authenticated_client):
+        from io import BytesIO
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from PIL import Image
+
+        client, user = authenticated_client
+        asset = _make_asset("Lathe")  # _make_asset gives the asset a Location
+        item = _make_item(asset, "Lube", interval_days=30, last_done_days=5)
+        display = _bind_display(asset)
+
+        buf = BytesIO()
+        Image.new("RGB", (8, 8), "blue").save(buf, format="JPEG")
+        buf.seek(0)
+        photo = SimpleUploadedFile("work.jpg", buf.read(), content_type="image/jpeg")
+
+        response = client.post(
+            self._url(display.id),
+            data={"item_id": str(item.pk), "photo": photo},
+            format="multipart",
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["photo_attached"] is True
+        # Location defaults to the asset's location.
+        assert body["location"] == asset.location.name
+
+        log = item.logs.order_by("-completed_at").first()
+        assert log.location_id == asset.location_id
+        assert log.photos.count() == 1
+        assert log.photos.first().uploaded_by_id == user.pk
+
+    def test_complete_honours_explicit_location(self, authenticated_client):
+        client, _user = authenticated_client
+        asset = _make_asset("Drill")
+        item = _make_item(asset, "Oil", interval_days=30)
+        display = _bind_display(asset)
+        other = Location.objects.create(name="Annex bench")
+
+        response = client.post(
+            self._url(display.id),
+            data={"item_id": str(item.pk), "location_id": str(other.pk)},
+            format="json",
+        )
+        assert response.status_code == 201
+        assert response.json()["location"] == "Annex bench"
+        assert item.logs.order_by("-completed_at").first().location_id == other.pk

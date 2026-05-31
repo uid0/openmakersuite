@@ -2108,6 +2108,14 @@ class MaintenanceLog(models.Model):
         related_name="maintenance_logs",
         help_text="The user who completed the task",
     )
+    location = models.ForeignKey(
+        "Location",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="maintenance_logs",
+        help_text="Where the work was performed (defaults to the asset's location).",
+    )
     completed_at = models.DateTimeField(
         auto_now_add=True,
         help_text="When the task was completed",
@@ -2139,6 +2147,41 @@ class MaintenanceLog(models.Model):
     def __str__(self) -> str:
         completed_by = self.completed_by.get_full_name() if self.completed_by else "Unknown"
         return f"{self.maintenance_item.title} — completed by {completed_by} at {self.completed_at}"
+
+
+class MaintenanceLogPhoto(models.Model):
+    """A photo of the work attached to a completed :class:`MaintenanceLog`.
+
+    Lets a maintainer document what they worked on from the e-paper
+    scan-to-log flow. Mirrors :class:`WorkOrderPhoto` / `AssetProblemPhoto`.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    maintenance_log = models.ForeignKey(
+        MaintenanceLog,
+        on_delete=models.CASCADE,
+        related_name="photos",
+        help_text="The maintenance log this photo documents",
+    )
+    image = models.ImageField(
+        upload_to="maintenance_log_photos/%Y/%m/",
+        help_text="Photo of the work performed",
+    )
+    caption = models.CharField(max_length=500, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="maintenance_log_photos",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+
+    def __str__(self) -> str:
+        return f"Photo for log {self.maintenance_log_id} ({self.uploaded_at.date()})"
 
 
 class MaintenanceTask(models.Model):

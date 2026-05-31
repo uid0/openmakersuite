@@ -31,7 +31,6 @@ from .views import (
     SupplierViewSet,
     UsageLogViewSet,
     WorkOrderViewSet,
-    lookup_by_code,
     postmark_inbound_work_order,
 )
 
@@ -81,7 +80,6 @@ urlpatterns = [
         name="inventory-location-reconcile-export",
     ),
     path("", include(router.urls)),
-    path("lookup-code/", lookup_by_code, name="lookup-by-code"),
     path(
         "webhooks/postmark-inbound-work-order/",
         postmark_inbound_work_order,

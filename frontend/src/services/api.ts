@@ -214,8 +214,21 @@ export const inventoryAPI = {
   markItemSupplierDiscontinued: (itemSupplierId: string) =>
     api.post(`/inventory/item-suppliers/${itemSupplierId}/mark_discontinued/`),
 
-  listItems: (params?: { category?: number; location?: number; search?: string; low_stock?: boolean; owning_group?: number }) =>
-    api.get<{ results: InventoryItem[] }>('/inventory/items/', { params }),
+  listItems: (params?: {
+    category?: number;
+    location?: number;
+    search?: string;
+    low_stock?: boolean;
+    owning_group?: number;
+    is_active?: boolean;
+    ordering?: string;
+    page?: number;
+    page_size?: number;
+  }) =>
+    api.get<{ count: number; next: string | null; previous: string | null; results: InventoryItem[] }>(
+      '/inventory/items/',
+      { params }
+    ),
 
   getMySIGInventory: () =>
     api.get<InventoryItem[]>('/inventory/items/my_sig_inventory/'),

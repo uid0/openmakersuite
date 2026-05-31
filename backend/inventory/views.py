@@ -545,12 +545,37 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         low_stock = self.request.query_params.get("low_stock", "").lower()
         if low_stock == "true":
             queryset = queryset.filter(current_stock__lte=F("minimum_stock"))
+        elif low_stock == "false":
+            queryset = queryset.filter(current_stock__gt=F("minimum_stock"))
 
         # Filter by active status if specified
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == "true")
 
+        # Ordering support (validated against an allow-list to keep the
+        # client-driven `ordering` param from reaching arbitrary fields).
+        ordering = self.request.query_params.get("ordering", "name")
+        valid_ordering_fields = {
+            "name",
+            "-name",
+            "sku",
+            "-sku",
+            "current_stock",
+            "-current_stock",
+            "minimum_stock",
+            "-minimum_stock",
+            "category__name",
+            "-category__name",
+            "location__name",
+            "-location__name",
+            "created_at",
+            "-created_at",
+            "updated_at",
+            "-updated_at",
+        }
+        if ordering in valid_ordering_fields:
+            return queryset.order_by(ordering)
         return queryset.order_by("name")
 
     def create(self, request, *args, **kwargs):

@@ -93,6 +93,55 @@ class TestInventoryItemAPI:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data["results"]) == 3
 
+    def test_list_items_filter_low_stock_true(self, api_client):
+        """low_stock=true returns only items at or under their minimum."""
+        low = InventoryItemFactory(current_stock=5, minimum_stock=10)
+        InventoryItemFactory(current_stock=50, minimum_stock=10)
+
+        url = reverse("inventoryitem-list")
+        response = api_client.get(url, {"low_stock": "true"})
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = [r["id"] for r in response.data["results"]]
+        assert ids == [str(low.id)]
+
+    def test_list_items_filter_low_stock_false(self, api_client):
+        """low_stock=false returns only items above their minimum."""
+        InventoryItemFactory(current_stock=5, minimum_stock=10)
+        in_stock = InventoryItemFactory(current_stock=50, minimum_stock=10)
+
+        url = reverse("inventoryitem-list")
+        response = api_client.get(url, {"low_stock": "false"})
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = [r["id"] for r in response.data["results"]]
+        assert ids == [str(in_stock.id)]
+
+    def test_list_items_ordering(self, api_client):
+        """The ordering param sorts by the requested allow-listed field."""
+        InventoryItemFactory(name="Banana")
+        InventoryItemFactory(name="Apple")
+        InventoryItemFactory(name="Cherry")
+
+        url = reverse("inventoryitem-list")
+
+        asc = api_client.get(url, {"ordering": "name"})
+        assert [r["name"] for r in asc.data["results"]] == ["Apple", "Banana", "Cherry"]
+
+        desc = api_client.get(url, {"ordering": "-name"})
+        assert [r["name"] for r in desc.data["results"]] == ["Cherry", "Banana", "Apple"]
+
+    def test_list_items_invalid_ordering_falls_back_to_name(self, api_client):
+        """An ordering value outside the allow-list is ignored (defaults to name)."""
+        InventoryItemFactory(name="Banana")
+        InventoryItemFactory(name="Apple")
+
+        url = reverse("inventoryitem-list")
+        response = api_client.get(url, {"ordering": "current_stock); DROP TABLE"})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [r["name"] for r in response.data["results"]] == ["Apple", "Banana"]
+
     def test_retrieve_item(self, api_client):
         """Test retrieving a single item with details."""
         item = InventoryItemFactory()

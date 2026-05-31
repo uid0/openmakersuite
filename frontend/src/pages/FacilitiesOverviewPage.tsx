@@ -11,6 +11,7 @@ import {
   IconGauge,
   IconKey,
   IconPackage,
+  IconRocket,
   IconScreenshot,
   IconTruck,
 } from '@tabler/icons-react';
@@ -92,6 +93,14 @@ const FacilitiesOverviewPage: React.FC = () => (
       icon={<IconDeviceTv size={22} stroke={1.8} />}
       eyebrow="Access"
       testId="facilities-overview-card-/facilities/forgekey-epaper"
+    />
+    <CapabilityCard
+      to="/facilities/forgekey-rollouts"
+      title="Firmware rollouts"
+      description="Stage a firmware version across the fleet — set the pace and watch each wave land."
+      icon={<IconRocket size={22} stroke={1.8} />}
+      eyebrow="Access"
+      testId="facilities-overview-card-/facilities/forgekey-rollouts"
     />
     <CapabilityCard
       to="/facilities/checklist"

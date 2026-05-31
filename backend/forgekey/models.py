@@ -11,7 +11,7 @@ from typing import Optional
 
 from django.conf import settings
 from django.contrib.auth.models import Group
-from django.core.validators import RegexValidator
+from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 
@@ -987,6 +987,89 @@ class FirmwareSigningKey(models.Model):
         return cls.objects.filter(is_active=True).order_by("-created_at").first()
 
 
+class FirmwareRollout(models.Model):
+    """A staged firmware rollout campaign.
+
+    Targets a FirmwareVersion at every active device of its device type and
+    advances in waves: each wave dispatches the OTA to the next
+    ``batch_size_percent`` of the target fleet, no more often than
+    ``interval_minutes``. The ``advance_firmware_rollouts`` Celery-beat task
+    drives active rollouts; operators can also pause, cancel, or advance a wave
+    by hand. This is the "how aggressively to roll out" control.
+    """
+
+    STATUS_DRAFT = "draft"
+    STATUS_ACTIVE = "active"
+    STATUS_PAUSED = "paused"
+    STATUS_COMPLETED = "completed"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_PAUSED, "Paused"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    firmware_version = models.ForeignKey(
+        FirmwareVersion,
+        on_delete=models.PROTECT,
+        related_name="rollouts",
+        help_text="Firmware version this campaign is rolling out.",
+    )
+    name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Optional operator label for the campaign.",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+    )
+    batch_size_percent = models.PositiveSmallIntegerField(
+        default=20,
+        validators=[MinValueValidator(1), MaxValueValidator(100)],
+        help_text="Percent of the target fleet to dispatch per wave (1-100).",
+    )
+    interval_minutes = models.PositiveIntegerField(
+        default=60,
+        validators=[MinValueValidator(1)],
+        help_text="Minimum minutes between waves.",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="firmware_rollouts",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    last_advanced_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the most recent wave was dispatched.",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Rollout({self.firmware_version.version} · {self.status})"
+
+    def target_devices(self):
+        """Active devices of the firmware's device type — the rollout's fleet."""
+        return ESP32Device.objects.filter(
+            device_type=self.firmware_version.device_type,
+            is_active=True,
+        )
+
+
 class DeviceFirmwareUpdate(models.Model):
     """
     Tracks firmware update requests and status for ESP32 devices.
@@ -1018,6 +1101,14 @@ class DeviceFirmwareUpdate(models.Model):
         on_delete=models.PROTECT,
         related_name="device_updates",
         help_text="Firmware version to install",
+    )
+    rollout = models.ForeignKey(
+        FirmwareRollout,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="device_updates",
+        help_text="Rollout campaign that dispatched this update, if any.",
     )
     status = models.CharField(
         max_length=20,

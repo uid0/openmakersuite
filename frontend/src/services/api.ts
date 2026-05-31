@@ -1861,6 +1861,46 @@ export interface ForgeKeyEPaperDisplay {
   updated_at: string;
 }
 
+export interface ForgeKeyFirmwareVersion {
+  id: string;
+  version: string;
+  device_type: number;
+  device_type_name?: string | null;
+  is_active: boolean;
+  mandatory?: boolean;
+}
+
+export interface ForgeKeyRolloutProgress {
+  total: number;
+  on_target: number;
+  pending: number;
+  in_progress: number;
+  failed: number;
+  remaining: number;
+}
+
+export type ForgeKeyRolloutStatus = 'draft' | 'active' | 'paused' | 'completed' | 'cancelled';
+
+export interface ForgeKeyFirmwareRollout {
+  id: string;
+  firmware_version: string;
+  firmware_version_string: string;
+  device_type_name: string;
+  name: string;
+  status: ForgeKeyRolloutStatus;
+  batch_size_percent: number;
+  interval_minutes: number;
+  created_by: number | null;
+  created_by_username: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  last_advanced_at: string | null;
+  progress: ForgeKeyRolloutProgress;
+  dispatched?: number;
+}
+
 export const forgekeyAPI = {
   listDevices: (opts: { capability?: string } = {}) =>
     api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
@@ -1920,6 +1960,28 @@ export const forgekeyAPI = {
     api.post<ForgeKeyEPaperDisplay>(`/forgekey/epaper/${displayId}/set-active/`, {
       is_active: isActive,
     }),
+  listFirmwareVersions: () =>
+    api.get<{ results?: ForgeKeyFirmwareVersion[] } | ForgeKeyFirmwareVersion[]>(
+      '/forgekey/firmware-versions/',
+    ),
+  listFirmwareRollouts: () =>
+    api.get<{ results?: ForgeKeyFirmwareRollout[] } | ForgeKeyFirmwareRollout[]>(
+      '/forgekey/firmware-rollouts/',
+    ),
+  createFirmwareRollout: (body: {
+    firmware_version: string;
+    batch_size_percent: number;
+    interval_minutes: number;
+    name?: string;
+  }) => api.post<ForgeKeyFirmwareRollout>('/forgekey/firmware-rollouts/', body),
+  startRollout: (id: string) =>
+    api.post<ForgeKeyFirmwareRollout>(`/forgekey/firmware-rollouts/${id}/start/`),
+  pauseRollout: (id: string) =>
+    api.post<ForgeKeyFirmwareRollout>(`/forgekey/firmware-rollouts/${id}/pause/`),
+  cancelRollout: (id: string) =>
+    api.post<ForgeKeyFirmwareRollout>(`/forgekey/firmware-rollouts/${id}/cancel/`),
+  advanceRollout: (id: string) =>
+    api.post<ForgeKeyFirmwareRollout>(`/forgekey/firmware-rollouts/${id}/advance/`),
   // Scan-to-log page: read the panel's recurring maintenance tasks (public)…
   getEPaperServiceInfo: (displayId: string) =>
     api.get<{

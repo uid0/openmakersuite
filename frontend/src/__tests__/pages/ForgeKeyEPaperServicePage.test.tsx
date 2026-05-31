@@ -13,7 +13,7 @@ import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ForgeKeyEPaperServicePage from '../../pages/ForgeKeyEPaperServicePage';
-import { forgekeyAPI } from '../../services/api';
+import { forgekeyAPI, inventoryAPI } from '../../services/api';
 
 vi.mock('../../services/api', async () => {
   const actual = await vi.importActual('../../services/api');
@@ -24,17 +24,28 @@ vi.mock('../../services/api', async () => {
       getEPaperServiceInfo: jest.fn(),
       completeEPaperService: jest.fn(),
     },
+    inventoryAPI: {
+      ...actual.inventoryAPI,
+      listLocations: jest.fn(),
+    },
   };
 });
 
 const mockForgekey = forgekeyAPI as jest.Mocked<typeof forgekeyAPI>;
+const mockLocations = inventoryAPI as jest.Mocked<typeof inventoryAPI>;
 
 const DID = '11111111-2222-3333-4444-555555555555';
 
 const buildServiceInfo = (overrides: Partial<any> = {}) => ({
   display_id: DID,
   bound: true,
-  asset: { id: 'a1', name: 'Lathe', asset_tag: 'LA-001', location: 'Machine shop' },
+  asset: {
+    id: 'a1',
+    name: 'Lathe',
+    asset_tag: 'LA-001',
+    location: 'Machine shop',
+    location_id: 'loc5',
+  },
   power: {
     wiring_type: 'Hardwired',
     breaker: {
@@ -117,6 +128,12 @@ describe('ForgeKeyEPaperServicePage', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     localStorage.clear();
+    mockLocations.listLocations.mockResolvedValue({
+      data: [
+        { id: 'loc5', name: 'Machine shop' },
+        { id: 'loc9', name: 'Annex bench' },
+      ],
+    } as any);
   });
 
   afterEach(() => {
@@ -172,9 +189,47 @@ describe('ForgeKeyEPaperServicePage', () => {
     fireEvent.click(btn);
 
     await waitFor(() => {
-      expect(mockForgekey.completeEPaperService).toHaveBeenCalledWith(DID, { item_id: 'i1' });
+      expect(mockForgekey.completeEPaperService).toHaveBeenCalledWith(
+        DID,
+        expect.objectContaining({ item_id: 'i1', location_id: 'loc5' }),
+      );
     });
     expect(await screen.findByText('Completed — thank you')).toBeInTheDocument();
+  });
+
+  it('attaches a photo of the work when one is selected', async () => {
+    localStorage.setItem('token', 'jwt');
+    mockForgekey.getEPaperServiceInfo.mockResolvedValue({ data: buildServiceInfo() } as any);
+    mockForgekey.completeEPaperService.mockResolvedValue({
+      data: {
+        ok: true,
+        item_id: 'i1',
+        title: 'Lube',
+        status_line: 'Logged',
+        photo_attached: true,
+      },
+    } as any);
+
+    const { container } = renderPage();
+
+    // The completion controls only render once logged in.
+    await screen.findByTestId('completion-details');
+
+    const file = new File(['x'], 'work.jpg', { type: 'image/jpeg' });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    // The staged filename confirms the photo is attached.
+    expect(await screen.findByText('work.jpg')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Mark complete'));
+
+    await waitFor(() => {
+      expect(mockForgekey.completeEPaperService).toHaveBeenCalledWith(
+        DID,
+        expect.objectContaining({ item_id: 'i1', photo: file }),
+      );
+    });
   });
 
   it('shows the help card when did is missing', async () => {

@@ -17,10 +17,12 @@ import {
   Badge,
   Button,
   Divider,
+  FileButton,
   Group,
   List,
   Loader,
   Paper,
+  Select,
   Stack,
   Text,
   ThemeIcon,
@@ -28,7 +30,7 @@ import {
 } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { forgekeyAPI } from '../services/api';
+import { forgekeyAPI, inventoryAPI } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface Step {
@@ -106,7 +108,13 @@ interface ItemRow {
 interface ServiceInfo {
   display_id: string;
   bound: boolean;
-  asset: { id: string; name: string; asset_tag: string; location: string | null };
+  asset: {
+    id: string;
+    name: string;
+    asset_tag: string;
+    location: string | null;
+    location_id: string | null;
+  };
   loto: Loto;
   power: Power;
   items: ItemRow[];
@@ -279,6 +287,9 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [justCompleted, setJustCompleted] = useState<Record<string, string>>({});
+  const [locations, setLocations] = useState<Array<{ value: string; label: string }>>([]);
+  const [locationId, setLocationId] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<File | null>(null);
 
   const load = useCallback(async () => {
     if (!did) {
@@ -309,6 +320,42 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
     load();
   }, [load]);
 
+  // Default the completion location to the asset's own location once loaded.
+  useEffect(() => {
+    if (info?.asset.location_id && locationId === null) {
+      setLocationId(info.asset.location_id);
+    }
+  }, [info, locationId]);
+
+  // Locations for the override picker — only needed for the (logged-in)
+  // completion flow. Non-fatal if it fails; the field just won't be offered.
+  useEffect(() => {
+    if (!loggedIn) {
+      return;
+    }
+    let active = true;
+    inventoryAPI
+      .listLocations()
+      .then((res) => {
+        if (!active) {
+          return;
+        }
+        const raw = Array.isArray(res.data) ? res.data : (res.data.results ?? []);
+        setLocations(
+          raw.map((l: { id: string; name: string }) => ({
+            value: String(l.id),
+            label: l.name,
+          })),
+        );
+      })
+      .catch(() => {
+        /* location override is optional */
+      });
+    return () => {
+      active = false;
+    };
+  }, [loggedIn]);
+
   const handleComplete = useCallback(
     async (itemId: string) => {
       if (!loggedIn) {
@@ -321,8 +368,11 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
       try {
         const response = await forgekeyAPI.completeEPaperService(did, {
           item_id: itemId,
+          location_id: locationId ?? undefined,
+          photo,
         });
         setJustCompleted((prev) => ({ ...prev, [itemId]: response.data.status_line }));
+        setPhoto(null);
         await load();
       } catch (err) {
         setActionError(extractErrorMessage(err, 'Failed to record completion.'));
@@ -330,7 +380,7 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
         setSubmittingId(null);
       }
     },
-    [did, loggedIn, navigate, load],
+    [did, loggedIn, navigate, load, locationId, photo],
   );
 
   if (!did) {
@@ -399,6 +449,57 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
           <Alert color="red" variant="light">
             {actionError}
           </Alert>
+        )}
+
+        {loggedIn && info.items.length > 0 && (
+          <Paper p="md" withBorder radius="md" data-testid="completion-details">
+            <Stack gap="sm">
+              <Text size="sm" fw={600}>
+                When you finish
+              </Text>
+              <Select
+                label="Location"
+                description="Where you did the work"
+                placeholder="Select a location"
+                data={locations}
+                value={locationId}
+                onChange={setLocationId}
+                searchable
+                clearable
+              />
+              <Group gap="sm" align="center" wrap="nowrap">
+                <FileButton onChange={setPhoto} accept="image/*" capture="environment">
+                  {(props) => (
+                    <Button {...props} variant="light" size="sm">
+                      {photo ? 'Change photo' : 'Take a photo of the work'}
+                    </Button>
+                  )}
+                </FileButton>
+                {photo && (
+                  <>
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    >
+                      {photo.name}
+                    </Text>
+                    <Button
+                      variant="subtle"
+                      color="gray"
+                      size="compact-sm"
+                      onClick={() => setPhoto(null)}
+                    >
+                      Remove
+                    </Button>
+                  </>
+                )}
+              </Group>
+              <Text size="xs" c="dimmed">
+                The photo is optional and saved to the maintenance log.
+              </Text>
+            </Stack>
+          </Paper>
         )}
 
         {info.items.length === 0 ? (

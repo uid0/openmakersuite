@@ -2316,6 +2316,7 @@ class EPaperServiceInfoView(APIView):
                     "name": asset.name,
                     "asset_tag": getattr(asset, "asset_tag", "") or "",
                     "location": asset.location.name if asset.location_id else None,
+                    "location_id": str(asset.location_id) if asset.location_id else None,
                 },
                 # Where the asset's power is + how to kill it before servicing.
                 "power": _serialize_power(asset),
@@ -2337,10 +2338,15 @@ class EPaperServiceCompleteView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    # Accept JSON (notes-only) and multipart (when a photo of the work is
+    # attached) on the same endpoint.
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request, display_id):
         try:
-            display = EPaperDisplay.objects.select_related("asset").get(pk=display_id)
+            display = EPaperDisplay.objects.select_related("asset", "asset__location").get(
+                pk=display_id
+            )
         except EPaperDisplay.DoesNotExist:
             return Response({"detail": "Unknown display."}, status=status.HTTP_404_NOT_FOUND)
         if not display.is_active or display.asset_id is None:
@@ -2349,7 +2355,7 @@ class EPaperServiceCompleteView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        from inventory.models import MaintenanceLog
+        from inventory.models import Location, MaintenanceLog, MaintenanceLogPhoto
 
         from .services.epaper_render import _item_status, _next_due_item, _status_line
 
@@ -2365,14 +2371,34 @@ class EPaperServiceCompleteView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Where the work happened — default to the asset's location, but let
+        # the maintainer override (e.g., the asset was moved to another room).
+        location = display.asset.location
+        location_id = request.data.get("location_id")
+        if location_id:
+            location = Location.objects.filter(pk=location_id).first() or location
+
         # Mirror inventory's MaintenanceItem.complete action: log the
         # completion (attributed) and roll the item's due date forward.
         notes = (request.data.get("notes") or "").strip()
         log = MaintenanceLog.objects.create(
             maintenance_item=item,
             completed_by=request.user,
+            location=location,
             notes=notes,
         )
+
+        # Optional photo of the work performed (multipart ``photo`` field).
+        photo_file = request.FILES.get("photo")
+        photo_attached = False
+        if photo_file is not None:
+            MaintenanceLogPhoto.objects.create(
+                maintenance_log=log,
+                image=photo_file,
+                uploaded_by=request.user,
+            )
+            photo_attached = True
+
         item.last_completed_at = log.completed_at
         item.save(update_fields=["last_completed_at"])
         return Response(
@@ -2384,6 +2410,8 @@ class EPaperServiceCompleteView(APIView):
                 "status_line": _status_line(item),
                 "completed_at": log.completed_at.isoformat(),
                 "completed_by": getattr(request.user, "username", None),
+                "location": location.name if location else None,
+                "photo_attached": photo_attached,
             },
             status=status.HTTP_201_CREATED,
         )

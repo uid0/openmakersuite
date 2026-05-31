@@ -1524,6 +1524,18 @@ views:
     - IsAuthenticated
   lockers.views.LockerViewSet:
     actions:
+      add_device:
+        permission_classes:
+        - IsAuthenticated
+      available_certifications:
+        permission_classes:
+        - IsAuthenticated
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
       issue_otp:
         permission_classes:
         - IsAuthenticated
@@ -1533,6 +1545,12 @@ views:
       otps:
         permission_classes:
         - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      remove_device:
+        permission_classes:
+        - IsAuthenticated
       retrieve:
         permission_classes:
         - IsAuthenticated
@@ -1540,6 +1558,9 @@ views:
         permission_classes:
         - IsAuthenticated
       unlock:
+        permission_classes:
+        - IsAuthenticated
+      update:
         permission_classes:
         - IsAuthenticated
   lockers.views.LockoutEventView:

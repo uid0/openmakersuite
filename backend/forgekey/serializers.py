@@ -12,6 +12,7 @@ from .models import (
     DeviceLockout,
     DeviceType,
     DeviceUsage,
+    EPaperDisplay,
     ESP32Device,
     FirmwareVersion,
     OccupancyEvent,
@@ -203,3 +204,41 @@ class DeviceFirmwareUpdateSerializer(serializers.ModelSerializer):
         model = DeviceFirmwareUpdate
         fields = "__all__"
         read_only_fields = ["id", "requested_at", "updated_at"]
+
+
+class EPaperDisplaySerializer(serializers.ModelSerializer):
+    """Serializer for the e-paper panels management screen."""
+
+    asset_name = serializers.SerializerMethodField()
+    asset_tag = serializers.SerializerMethodField()
+    device_mac_address = serializers.SerializerMethodField()
+    is_low_battery = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = EPaperDisplay
+        fields = [
+            "id",
+            "device",
+            "device_mac_address",
+            "asset",
+            "asset_name",
+            "asset_tag",
+            "battery_percent",
+            "is_low_battery",
+            "last_battery_at",
+            "last_image_etag",
+            "last_image_at",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_asset_name(self, obj):
+        return obj.asset.name if obj.asset_id else None
+
+    def get_asset_tag(self, obj):
+        return obj.asset.asset_tag if obj.asset_id else None
+
+    def get_device_mac_address(self, obj):
+        return obj.device.mac_address if obj.device_id else None

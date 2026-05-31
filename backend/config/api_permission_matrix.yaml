@@ -632,6 +632,12 @@ views:
   forgekey.views.EPaperDisplayImageView:
     permission_classes:
     - AllowAny
+  forgekey.views.EPaperDisplayListView:
+    permission_classes:
+    - IsAuthenticated
+  forgekey.views.EPaperDisplaySetActiveView:
+    permission_classes:
+    - IsAuthenticated
   forgekey.views.EPaperServiceCompleteView:
     permission_classes:
     - IsAuthenticated

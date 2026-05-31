@@ -16,6 +16,8 @@ from .views import (
     EPaperDisplayBatteryView,
     EPaperDisplayBindView,
     EPaperDisplayImageView,
+    EPaperDisplayListView,
+    EPaperDisplaySetActiveView,
     EPaperServiceCompleteView,
     EPaperServiceInfoView,
     ESP32DeviceViewSet,
@@ -88,6 +90,11 @@ urlpatterns = [
         name="mqtt-webhook",
     ),
     path(
+        "epaper/",
+        EPaperDisplayListView.as_view(),
+        name="epaper-list",
+    ),
+    path(
         "epaper/<uuid:display_id>/image.png",
         EPaperDisplayImageView.as_view(),
         name="epaper-image",
@@ -101,6 +108,11 @@ urlpatterns = [
         "epaper/<uuid:display_id>/bind/",
         EPaperDisplayBindView.as_view(),
         name="epaper-bind",
+    ),
+    path(
+        "epaper/<uuid:display_id>/set-active/",
+        EPaperDisplaySetActiveView.as_view(),
+        name="epaper-set-active",
     ),
     path(
         "epaper/<uuid:display_id>/service-info/",

@@ -8,7 +8,7 @@ import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import LockersPage from '../../pages/LockersPage';
-import { lockersAPI } from '../../services/api';
+import { assetsAPI, forgekeyAPI, inventoryAPI, lockersAPI, sigAPI } from '../../services/api';
 import { showSuccess } from '../../utils/dialogs';
 
 vi.mock('../../utils/dialogs', async () => ({
@@ -27,11 +27,34 @@ vi.mock('../../services/api', async () => {
       issueOtp: jest.fn(),
       listOtps: jest.fn(),
       revokeOtp: jest.fn(),
+      getLocker: jest.fn(),
+      createLocker: jest.fn(),
+      updateLocker: jest.fn(),
+      deleteLocker: jest.fn(),
+      addLockerDevice: jest.fn(),
+      removeLockerDevice: jest.fn(),
+      listAvailableCertifications: jest.fn(),
     },
+    inventoryAPI: { ...(actual as any).inventoryAPI, listLocations: jest.fn() },
+    sigAPI: { ...(actual as any).sigAPI, listMySIGs: jest.fn() },
+    assetsAPI: { ...(actual as any).assetsAPI, listAssets: jest.fn() },
+    forgekeyAPI: { ...(actual as any).forgekeyAPI, listDevices: jest.fn() },
   };
 });
 
 const mockApi = lockersAPI as jest.Mocked<typeof lockersAPI>;
+const mockInventory = inventoryAPI as jest.Mocked<typeof inventoryAPI>;
+const mockSig = sigAPI as jest.Mocked<typeof sigAPI>;
+const mockAssets = assetsAPI as jest.Mocked<typeof assetsAPI>;
+const mockForgekey = forgekeyAPI as jest.Mocked<typeof forgekeyAPI>;
+
+const mockOptionLists = () => {
+  mockInventory.listLocations.mockResolvedValue({ data: [{ id: 1, name: 'Wood Shop' }] } as any);
+  mockSig.listMySIGs.mockResolvedValue({ data: { results: [{ id: 2, name: 'Wood SIG' }] } } as any);
+  mockAssets.listAssets.mockResolvedValue({ data: { results: [] } } as any);
+  mockForgekey.listDevices.mockResolvedValue({ data: [] } as any);
+  mockApi.listAvailableCertifications.mockResolvedValue({ data: [] } as any);
+};
 
 const SECURE_STATUS = {
   secure: true,
@@ -156,5 +179,33 @@ describe('LockersPage', () => {
 
     await waitFor(() => expect(mockApi.unlock).toHaveBeenCalledWith('lk1'));
     await waitFor(() => expect(showSuccess).toHaveBeenCalled());
+  });
+
+  test('opens the setup drawer to create a new locker', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listLockers.mockResolvedValue({ data: [] } as any);
+    mockOptionLists();
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('new-locker'));
+
+    // The create-mode submit button confirms the drawer opened fresh...
+    expect(await screen.findByText('Create locker')).toBeInTheDocument();
+    // ...and the drawer loaded its picker option lists.
+    await waitFor(() => expect(mockInventory.listLocations).toHaveBeenCalled());
+  });
+
+  test('opens the setup drawer to edit an existing locker', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listLockers.mockResolvedValue({ data: [buildLocker()] } as any);
+    mockOptionLists();
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('setup-lk1'));
+
+    expect(await screen.findByText(/Locker setup/)).toBeInTheDocument();
+    expect(screen.getByText('Save changes')).toBeInTheDocument();
   });
 });

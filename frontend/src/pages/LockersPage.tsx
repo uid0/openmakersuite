@@ -24,9 +24,10 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
+import LockerSetupDrawer from '../components/LockerSetupDrawer';
 import { ForgeKeyLocker, ForgeKeyLockerOtp, lockersAPI } from '../services/api';
 import { showError, showSuccess } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -90,6 +91,18 @@ const LockersPage: React.FC = () => {
   const [otpsLoading, setOtpsLoading] = useState(false);
   const [issuing, setIssuing] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupLocker, setSetupLocker] = useState<ForgeKeyLocker | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const res = await lockersAPI.listLockers();
+      setLockers(asList(res.data));
+      setError(null);
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to load lockers.'));
+    }
+  }, []);
 
   useEffect(() => {
     if (!isStaff && !isSuperuser) return undefined;
@@ -212,6 +225,19 @@ const LockersPage: React.FC = () => {
             />
           </SimpleGrid>
 
+          <Group justify="space-between">
+            <Title order={4}>Locker fleet</Title>
+            <Button
+              onClick={() => {
+                setSetupLocker(null);
+                setSetupOpen(true);
+              }}
+              data-testid="new-locker"
+            >
+              New locker
+            </Button>
+          </Group>
+
           {lockers.length === 0 ? (
             <Paper p="xl" withBorder>
               <Text c="dimmed" data-testid="lockers-empty">
@@ -220,9 +246,6 @@ const LockersPage: React.FC = () => {
             </Paper>
           ) : (
             <Box>
-              <Group mb="sm" gap="xs">
-                <Title order={4}>Locker fleet</Title>
-              </Group>
               <Paper withBorder>
                 <Table.ScrollContainer minWidth={820}>
                   <Table highlightOnHover>
@@ -301,6 +324,17 @@ const LockersPage: React.FC = () => {
                                   data-testid={`otps-${lk.id}`}
                                 >
                                   Codes
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="default"
+                                  onClick={() => {
+                                    setSetupLocker(lk);
+                                    setSetupOpen(true);
+                                  }}
+                                  data-testid={`setup-${lk.id}`}
+                                >
+                                  Setup
                                 </Button>
                               </Group>
                             </Table.Td>
@@ -382,6 +416,13 @@ const LockersPage: React.FC = () => {
           )}
         </Stack>
       </Modal>
+
+      <LockerSetupDrawer
+        opened={setupOpen}
+        onClose={() => setSetupOpen(false)}
+        locker={setupLocker}
+        onSaved={reload}
+      />
     </WorkspacePage>
   );
 };

@@ -113,11 +113,12 @@ def can_user_access_locker(user, locker: Locker) -> bool:
     return decide_locker_access(user, locker).allowed
 
 
-def can_user_manage_locker(user, locker: Locker) -> bool:
-    """True if the user is a *manager* of the locker — staff / superuser,
-    a logistics member, or an admin of the owning SIG — as opposed to a
-    member who merely has access. Gates OTP administration (list / revoke)
-    and other operator-only surfaces.
+def can_user_manage_sig(user, sig: Group) -> bool:
+    """True if the user can manage the given SIG (Group) — staff / superuser,
+    a logistics member, or an admin of that SIG.
+
+    Split out from :func:`can_user_manage_locker` so locker *creation* can be
+    gated against the chosen owning SIG before any Locker row exists.
     """
     if not user or not user.is_authenticated:
         return False
@@ -125,7 +126,16 @@ def can_user_manage_locker(user, locker: Locker) -> bool:
         return True
     if is_logistics_member(user):
         return True
-    return _is_sig_admin_for(user, locker.owning_sig)
+    return _is_sig_admin_for(user, sig)
+
+
+def can_user_manage_locker(user, locker: Locker) -> bool:
+    """True if the user is a *manager* of the locker — staff / superuser,
+    a logistics member, or an admin of the owning SIG — as opposed to a
+    member who merely has access. Gates OTP administration (list / revoke),
+    device binding, and other operator-only surfaces.
+    """
+    return can_user_manage_sig(user, locker.owning_sig)
 
 
 # ---------------------------------------------------------------------------

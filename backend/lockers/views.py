@@ -16,6 +16,7 @@ import logging
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -23,11 +24,13 @@ from rest_framework.views import APIView
 from forgekey.models import ESP32Device
 from forgekey.services.device_commands import DeviceCommandError
 
-from .models import Locker, LockerOtp, LockerStatus
+from .models import Locker, LockerDevice, LockerOtp, LockerStatus
 from .serializers import (
     IrBreakEventSerializer,
     LockerDetailSerializer,
+    LockerDeviceSerializer,
     LockerOtpSerializer,
+    LockerWriteSerializer,
     LockoutEventSerializer,
     LockStatusEventSerializer,
     ReedStatusEventSerializer,
@@ -35,6 +38,7 @@ from .serializers import (
 from .services.access import (
     OtpDenied,
     can_user_manage_locker,
+    can_user_manage_sig,
     decide_locker_access,
     generate_otp,
 )
@@ -199,21 +203,120 @@ class RegistrationAckView(APIView):
         )
 
 
-class LockerViewSet(viewsets.ReadOnlyModelViewSet):
-    """Read-only locker list + detail with bound devices and live lock status.
+class LockerViewSet(viewsets.ModelViewSet):
+    """Locker fleet API: list/detail (with bound devices + live lock status),
+    plus setup CRUD and device binding for managers.
 
-    The monitoring surface for the locker fleet — each locker carries its
-    device bindings and its latest ``cabinet_lock/status`` so the UI can show
-    secure / online state and flag possible intrusions.
+    Reading is open to any authenticated user (the monitoring console gates on
+    staff in the UI). Mutating a locker — create, edit, delete, bind/unbind a
+    device — requires *managing* the owning SIG (staff, logistics, or a SIG
+    admin); the unlock/OTP actions keep their own per-call access checks.
     """
 
     queryset = (
         Locker.objects.select_related("location", "owning_sig", "current_asset", "status")
-        .prefetch_related("device_assignments__device")
+        .prefetch_related("device_assignments__device", "required_certifications")
         .all()
     )
     serializer_class = LockerDetailSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return LockerWriteSerializer
+        return LockerDetailSerializer
+
+    def perform_create(self, serializer):
+        sig = serializer.validated_data.get("owning_sig")
+        if not can_user_manage_sig(self.request.user, sig):
+            raise PermissionDenied("You must manage the owning SIG to create a locker for it.")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        locker = serializer.instance
+        if not can_user_manage_locker(self.request.user, locker):
+            raise PermissionDenied("Only locker managers may edit this locker.")
+        # Reassigning the locker to a SIG you don't manage is also forbidden.
+        new_sig = serializer.validated_data.get("owning_sig")
+        if new_sig is not None and new_sig != locker.owning_sig:
+            if not can_user_manage_sig(self.request.user, new_sig):
+                raise PermissionDenied("You must manage the target SIG to reassign this locker.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not can_user_manage_locker(self.request.user, instance):
+            raise PermissionDenied("Only locker managers may delete this locker.")
+        instance.delete()
+
+    @action(detail=False, methods=["get"], url_path="available-certifications")
+    def available_certifications(self, request):
+        """Active certifications, for the setup form's required-certs picker."""
+        from membership.models import Certification
+
+        rows = Certification.objects.filter(is_active=True).order_by("name").values("id", "name")
+        return Response(list(rows))
+
+    @action(detail=True, methods=["post"], url_path="devices")
+    def add_device(self, request, pk=None):
+        """Bind an ESP32 device to this locker in a role (managers only).
+
+        Setting ``is_primary`` demotes any existing primary for the same role.
+        """
+        locker = self.get_object()
+        if not can_user_manage_locker(request.user, locker):
+            return Response(
+                {"detail": "Only locker managers may bind devices."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        device_id = request.data.get("device")
+        role = request.data.get("role")
+        if not device_id or not role:
+            return Response(
+                {"detail": "device and role are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if role not in dict(LockerDevice.ROLE_CHOICES):
+            return Response(
+                {"detail": f"Invalid role '{role}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        device = ESP32Device.objects.filter(pk=device_id).first()
+        if device is None:
+            return Response({"detail": "Unknown device."}, status=status.HTTP_404_NOT_FOUND)
+        if LockerDevice.objects.filter(locker=locker, device=device, role=role).exists():
+            return Response(
+                {"detail": "That device is already bound to this locker in that role."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        is_primary = bool(request.data.get("is_primary"))
+        if is_primary:
+            locker.device_assignments.filter(role=role, is_primary=True).update(is_primary=False)
+        assignment = LockerDevice.objects.create(
+            locker=locker,
+            device=device,
+            role=role,
+            is_primary=is_primary,
+            notes=(request.data.get("notes") or "").strip(),
+        )
+        return Response(LockerDeviceSerializer(assignment).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["delete"], url_path="devices/(?P<assignment_id>[^/.]+)")
+    def remove_device(self, request, pk=None, assignment_id=None):
+        """Unbind a device from this locker (managers only)."""
+        locker = self.get_object()
+        if not can_user_manage_locker(request.user, locker):
+            return Response(
+                {"detail": "Only locker managers may unbind devices."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        assignment = locker.device_assignments.filter(pk=assignment_id).first()
+        if assignment is None:
+            return Response(
+                {"detail": "Device binding not found for this locker."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        assignment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"])
     def unlock(self, request, pk=None):

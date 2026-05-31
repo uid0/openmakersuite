@@ -3414,11 +3414,32 @@ export interface ForgeKeyLocker {
   current_asset_name: string | null;
   is_high_trust: boolean;
   led_count: number;
+  required_certifications: number[];
+  required_certification_names: string[];
   is_active: boolean;
   created_at: string;
   updated_at: string;
   devices: ForgeKeyLockerDevice[];
   status: ForgeKeyLockerStatus | null;
+}
+
+export interface ForgeKeyLockerWriteInput {
+  name: string;
+  slug?: string;
+  location: number;
+  owning_sig: number;
+  description?: string;
+  power_source?: string;
+  current_asset?: string | null;
+  is_high_trust?: boolean;
+  led_count?: number;
+  required_certifications?: number[];
+  is_active?: boolean;
+}
+
+export interface ForgeKeyCertificationOption {
+  id: number;
+  name: string;
 }
 
 export interface ForgeKeyLockerOtp {
@@ -3444,6 +3465,19 @@ export const lockersAPI = {
   listOtps: (id: string) => api.get<ForgeKeyLockerOtp[]>(`/lockers/${id}/otps/`),
   revokeOtp: (id: string, otpId: string) =>
     api.post<ForgeKeyLockerOtp>(`/lockers/${id}/revoke-otp/`, { otp_id: otpId }),
+  // Setup / device binding (manager-gated server-side).
+  createLocker: (data: ForgeKeyLockerWriteInput) => api.post<ForgeKeyLocker>('/lockers/', data),
+  updateLocker: (id: string, data: Partial<ForgeKeyLockerWriteInput>) =>
+    api.patch<ForgeKeyLocker>(`/lockers/${id}/`, data),
+  deleteLocker: (id: string) => api.delete(`/lockers/${id}/`),
+  addLockerDevice: (
+    id: string,
+    data: { device: string; role: string; is_primary?: boolean; notes?: string },
+  ) => api.post<ForgeKeyLockerDevice>(`/lockers/${id}/devices/`, data),
+  removeLockerDevice: (id: string, assignmentId: number) =>
+    api.delete(`/lockers/${id}/devices/${assignmentId}/`),
+  listAvailableCertifications: () =>
+    api.get<ForgeKeyCertificationOption[]>('/lockers/available-certifications/'),
 };
 
 export default api;

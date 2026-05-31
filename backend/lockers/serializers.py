@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from django.utils.text import slugify
+
 from rest_framework import serializers
 
 from .models import Locker, LockerDevice, LockerOtp, LockerStatus
@@ -13,6 +15,7 @@ class LockerSerializer(serializers.ModelSerializer):
     current_asset_name = serializers.CharField(
         source="current_asset.name", read_only=True, default=None, allow_null=True
     )
+    required_certification_names = serializers.SerializerMethodField()
 
     class Meta:
         model = Locker
@@ -30,11 +33,16 @@ class LockerSerializer(serializers.ModelSerializer):
             "current_asset_name",
             "is_high_trust",
             "led_count",
+            "required_certifications",
+            "required_certification_names",
             "is_active",
             "created_at",
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+
+    def get_required_certification_names(self, obj) -> list[str]:
+        return [c.name for c in obj.required_certifications.all()]
 
 
 class LockerOtpSerializer(serializers.ModelSerializer):
@@ -130,6 +138,63 @@ class LockerDetailSerializer(LockerSerializer):
     def get_status(self, obj):
         status = getattr(obj, "status", None)
         return LockerStatusSerializer(status).data if status is not None else None
+
+
+class LockerWriteSerializer(serializers.ModelSerializer):
+    """Create/update payload for the locker setup UI.
+
+    ``slug`` auto-derives from the name when omitted (deduped against
+    existing lockers); the response echoes the full detail representation
+    so the UI gets bound devices + status back without a second fetch.
+    """
+
+    slug = serializers.SlugField(max_length=120, required=False, allow_blank=True)
+
+    class Meta:
+        model = Locker
+        fields = (
+            "id",
+            "name",
+            "slug",
+            "location",
+            "owning_sig",
+            "description",
+            "power_source",
+            "current_asset",
+            "is_high_trust",
+            "led_count",
+            "required_certifications",
+            "is_active",
+        )
+        read_only_fields = ("id",)
+
+    @staticmethod
+    def _unique_slug(name: str, *, exclude_pk=None) -> str:
+        base = slugify(name) or "locker"
+        slug = base
+        n = 2
+        qs = Locker.objects.all()
+        if exclude_pk is not None:
+            qs = qs.exclude(pk=exclude_pk)
+        while qs.filter(slug=slug).exists():
+            slug = f"{base}-{n}"
+            n += 1
+        return slug
+
+    def create(self, validated_data):
+        if not validated_data.get("slug"):
+            validated_data["slug"] = self._unique_slug(validated_data["name"])
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if "slug" in validated_data and not validated_data["slug"]:
+            validated_data["slug"] = self._unique_slug(
+                validated_data.get("name", instance.name), exclude_pk=instance.pk
+            )
+        return super().update(instance, validated_data)
+
+    def to_representation(self, instance):
+        return LockerDetailSerializer(instance, context=self.context).data
 
 
 # ---------------------------------------------------------------------------

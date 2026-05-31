@@ -4,15 +4,19 @@
  * Live status of the locker fleet from the firmware's cabinet_lock/status
  * heartbeat: secure / online / state per locker, with possible intrusions
  * (ALARM or a sustained not-secure reading) flagged. Refreshes every 30s.
- * Setup, OTP issuance, and operator unlock land in follow-up PRs.
+ * Staff can also unlock a locker (signs + publishes the ES256 command) and
+ * issue / revoke one-time access codes.
  */
 import {
   Alert,
   Badge,
   Box,
+  Button,
   Card,
+  CopyButton,
   Group,
   Loader,
+  Modal,
   Paper,
   SimpleGrid,
   Stack,
@@ -23,7 +27,8 @@ import {
 import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { ForgeKeyLocker, lockersAPI } from '../services/api';
+import { ForgeKeyLocker, ForgeKeyLockerOtp, lockersAPI } from '../services/api';
+import { showError, showSuccess } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const POLL_INTERVAL_MS = 30_000;
@@ -79,6 +84,12 @@ const LockersPage: React.FC = () => {
   const [lockers, setLockers] = useState<ForgeKeyLocker[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unlockingId, setUnlockingId] = useState<string | null>(null);
+  const [otpLocker, setOtpLocker] = useState<ForgeKeyLocker | null>(null);
+  const [otps, setOtps] = useState<ForgeKeyLockerOtp[]>([]);
+  const [otpsLoading, setOtpsLoading] = useState(false);
+  const [issuing, setIssuing] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isStaff && !isSuperuser) return undefined;
@@ -110,6 +121,59 @@ const LockersPage: React.FC = () => {
     const attention = lockers.filter(needsAttention).length;
     return { total, secure, attention };
   }, [lockers]);
+
+  const handleUnlock = async (lk: ForgeKeyLocker) => {
+    setUnlockingId(lk.id);
+    try {
+      await lockersAPI.unlock(lk.id);
+      showSuccess(`Unlock command sent to ${lk.name}.`);
+    } catch (err) {
+      showError(extractErrorMessage(err, 'Unlock failed.'));
+    } finally {
+      setUnlockingId(null);
+    }
+  };
+
+  const openOtps = async (lk: ForgeKeyLocker) => {
+    setOtpLocker(lk);
+    setOtps([]);
+    setOtpsLoading(true);
+    try {
+      const res = await lockersAPI.listOtps(lk.id);
+      setOtps(res.data);
+    } catch (err) {
+      showError(extractErrorMessage(err, 'Failed to load access codes.'));
+    } finally {
+      setOtpsLoading(false);
+    }
+  };
+
+  const handleIssueOtp = async () => {
+    if (!otpLocker) return;
+    setIssuing(true);
+    try {
+      const res = await lockersAPI.issueOtp(otpLocker.id);
+      setOtps((prev) => [res.data, ...prev]);
+      showSuccess(`New access code: ${res.data.code}`);
+    } catch (err) {
+      showError(extractErrorMessage(err, 'Could not issue an access code.'));
+    } finally {
+      setIssuing(false);
+    }
+  };
+
+  const handleRevokeOtp = async (otpId: string) => {
+    if (!otpLocker) return;
+    setRevokingId(otpId);
+    try {
+      const res = await lockersAPI.revokeOtp(otpLocker.id, otpId);
+      setOtps((prev) => prev.map((o) => (o.id === otpId ? res.data : o)));
+    } catch (err) {
+      showError(extractErrorMessage(err, 'Revoke failed.'));
+    } finally {
+      setRevokingId(null);
+    }
+  };
 
   if (!isStaff && !isSuperuser) {
     return <Navigate to="/" replace />;
@@ -171,6 +235,7 @@ const LockersPage: React.FC = () => {
                         <Table.Th>Lock state</Table.Th>
                         <Table.Th>Online</Table.Th>
                         <Table.Th>Updated</Table.Th>
+                        <Table.Th>Actions</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
@@ -219,6 +284,26 @@ const LockersPage: React.FC = () => {
                                 {formatRelative(lk.status?.last_status_at ?? null)}
                               </Text>
                             </Table.Td>
+                            <Table.Td onClick={(e) => e.stopPropagation()}>
+                              <Group gap="xs">
+                                <Button
+                                  size="xs"
+                                  loading={unlockingId === lk.id}
+                                  onClick={() => handleUnlock(lk)}
+                                  data-testid={`unlock-${lk.id}`}
+                                >
+                                  Unlock
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="light"
+                                  onClick={() => openOtps(lk)}
+                                  data-testid={`otps-${lk.id}`}
+                                >
+                                  Codes
+                                </Button>
+                              </Group>
+                            </Table.Td>
                           </Table.Tr>
                         );
                       })}
@@ -230,6 +315,73 @@ const LockersPage: React.FC = () => {
           )}
         </Stack>
       )}
+
+      <Modal
+        opened={otpLocker !== null}
+        onClose={() => setOtpLocker(null)}
+        title={otpLocker ? `Access codes — ${otpLocker.name}` : 'Access codes'}
+      >
+        <Stack gap="sm" data-testid="otp-modal">
+          <Button onClick={handleIssueOtp} loading={issuing} data-testid="issue-otp">
+            Issue new code
+          </Button>
+          {otpsLoading ? (
+            <Group justify="center" p="md">
+              <Loader size="sm" />
+            </Group>
+          ) : otps.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              No access codes yet.
+            </Text>
+          ) : (
+            <Table>
+              <Table.Tbody>
+                {otps.map((otp) => (
+                  <Table.Tr key={otp.id}>
+                    <Table.Td>
+                      <Group gap="xs">
+                        <Text fw={600} ff="monospace">
+                          {otp.code}
+                        </Text>
+                        <CopyButton value={otp.code}>
+                          {({ copied, copy }) => (
+                            <Button size="compact-xs" variant="subtle" onClick={copy}>
+                              {copied ? 'Copied' : 'Copy'}
+                            </Button>
+                          )}
+                        </CopyButton>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge
+                        size="sm"
+                        color={
+                          otp.state === 'active' ? 'green' : otp.state === 'used' ? 'blue' : 'gray'
+                        }
+                      >
+                        {otp.state}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      {otp.state === 'active' && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="red"
+                          loading={revokingId === otp.id}
+                          onClick={() => handleRevokeOtp(otp.id)}
+                        >
+                          Revoke
+                        </Button>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+        </Stack>
+      </Modal>
     </WorkspacePage>
   );
 };

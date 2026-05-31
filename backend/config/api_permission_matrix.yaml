@@ -1524,10 +1524,22 @@ views:
     - IsAuthenticated
   lockers.views.LockerViewSet:
     actions:
+      issue_otp:
+        permission_classes:
+        - IsAuthenticated
       list:
         permission_classes:
         - IsAuthenticated
+      otps:
+        permission_classes:
+        - IsAuthenticated
       retrieve:
+        permission_classes:
+        - IsAuthenticated
+      revoke_otp:
+        permission_classes:
+        - IsAuthenticated
+      unlock:
         permission_classes:
         - IsAuthenticated
   lockers.views.LockoutEventView:

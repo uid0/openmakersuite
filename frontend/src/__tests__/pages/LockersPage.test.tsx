@@ -5,10 +5,17 @@
  * intrusion (ALARM / not-secure) highlight.
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import LockersPage from '../../pages/LockersPage';
 import { lockersAPI } from '../../services/api';
+import { showSuccess } from '../../utils/dialogs';
+
+vi.mock('../../utils/dialogs', async () => ({
+  showError: jest.fn(),
+  showSuccess: jest.fn(),
+  showInfo: jest.fn(),
+}));
 
 vi.mock('../../services/api', async () => {
   const actual = await vi.importActual('../../services/api');
@@ -16,6 +23,10 @@ vi.mock('../../services/api', async () => {
     ...actual,
     lockersAPI: {
       listLockers: jest.fn(),
+      unlock: jest.fn(),
+      issueOtp: jest.fn(),
+      listOtps: jest.fn(),
+      revokeOtp: jest.fn(),
     },
   };
 });
@@ -129,5 +140,21 @@ describe('LockersPage', () => {
     expect(await screen.findByText('ALARM')).toBeInTheDocument();
     expect(screen.getByText('Alarm')).toBeInTheDocument(); // the attention badge
     expect(screen.getByTestId('stat-attention')).toHaveTextContent('1');
+  });
+
+  test('staff can send an unlock command', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listLockers.mockResolvedValue({ data: [buildLocker()] } as any);
+    mockApi.unlock.mockResolvedValue({
+      data: { status: 'unlock_sent', topic: 'forgekey/x/command', reason: 'staff_bypass' },
+    } as any);
+
+    renderPage();
+
+    const unlockBtn = await screen.findByTestId('unlock-lk1');
+    fireEvent.click(unlockBtn);
+
+    await waitFor(() => expect(mockApi.unlock).toHaveBeenCalledWith('lk1'));
+    await waitFor(() => expect(showSuccess).toHaveBeenCalled());
   });
 });

@@ -279,6 +279,88 @@ def test_completion_allowed_after_full_validation(api, staff_user):
     assert wo.status == WorkOrder.STATUS_COMPLETED
 
 
+def test_completion_stamps_completed_at(api):
+    """Digitally completing a work order stamps completed_at.
+
+    The digital path used to leave it null, surfacing as "Completed N/A" in
+    the asset detail view.
+    """
+    wo = _build_wo()
+    assert wo.completed_at is None
+
+    api.post(
+        f"/api/inventory/work-orders/{wo.id}/validate/",
+        {
+            "electrical_acknowledged": True,
+            "loto_acknowledged": True,
+            "required_fields_acknowledged": True,
+        },
+        format="json",
+    )
+    res = api.patch(
+        f"/api/inventory/work-orders/{wo.id}/",
+        {"status": WorkOrder.STATUS_COMPLETED},
+        format="json",
+    )
+
+    assert res.status_code == status.HTTP_200_OK
+    wo.refresh_from_db()
+    assert wo.status == WorkOrder.STATUS_COMPLETED
+    assert wo.completed_at is not None
+
+
+def test_reopening_clears_completed_at(api):
+    """Reopening a completed work order clears its completion timestamp."""
+    wo = _build_wo()
+    api.post(
+        f"/api/inventory/work-orders/{wo.id}/validate/",
+        {
+            "electrical_acknowledged": True,
+            "loto_acknowledged": True,
+            "required_fields_acknowledged": True,
+        },
+        format="json",
+    )
+    api.patch(
+        f"/api/inventory/work-orders/{wo.id}/",
+        {"status": WorkOrder.STATUS_COMPLETED},
+        format="json",
+    )
+    wo.refresh_from_db()
+    assert wo.completed_at is not None
+
+    res = api.patch(
+        f"/api/inventory/work-orders/{wo.id}/",
+        {"status": WorkOrder.STATUS_IN_PROGRESS},
+        format="json",
+    )
+
+    assert res.status_code == status.HTTP_200_OK
+    wo.refresh_from_db()
+    assert wo.status == WorkOrder.STATUS_IN_PROGRESS
+    assert wo.completed_at is None
+
+
+def test_backfill_migration_populates_completed_at():
+    """The 0062 data migration repairs legacy completed work orders that have
+    no completion timestamp, using updated_at as the proxy."""
+    import importlib
+
+    from django.apps import apps as global_apps
+
+    wo = _build_wo()
+    # Simulate a legacy digital completion: completed status, no timestamp.
+    # .update() bypasses auto_now, so updated_at stays at creation time.
+    WorkOrder.objects.filter(pk=wo.pk).update(status=WorkOrder.STATUS_COMPLETED, completed_at=None)
+
+    migration = importlib.import_module("inventory.migrations.0062_backfill_workorder_completed_at")
+    migration.backfill_completed_at(global_apps, None)
+
+    wo.refresh_from_db()
+    assert wo.completed_at is not None
+    assert wo.completed_at == wo.updated_at
+
+
 def test_pdf_allowed_after_full_validation(api):
     wo = _build_wo()
     api.post(

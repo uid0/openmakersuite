@@ -3218,8 +3218,27 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             )
         return None
 
+    @staticmethod
+    def _sync_completion_timestamp(work_order, *, was_completed: bool) -> None:
+        """Keep completed_at in step with the completed status.
+
+        completed_at is read-only over the API, so the server owns it: stamp it
+        when a work order becomes completed (the digital-completion path used to
+        leave it null, surfacing as "Completed N/A" in the asset view) and clear
+        it if a completed work order is reopened. An already-set timestamp (e.g.
+        from the paper-form ingest) is left untouched.
+        """
+        if work_order.status == WorkOrder.STATUS_COMPLETED:
+            if work_order.completed_at is None:
+                work_order.completed_at = timezone.now()
+                work_order.save(update_fields=["completed_at"])
+        elif was_completed and work_order.completed_at is not None:
+            work_order.completed_at = None
+            work_order.save(update_fields=["completed_at"])
+
     def perform_create(self, serializer):
         work_order = serializer.save()
+        self._sync_completion_timestamp(work_order, was_completed=False)
         record_maintenance_audit_event(
             action="wo_create",
             actor=self.request.user,
@@ -3233,6 +3252,9 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         old_status = serializer.instance.status
         work_order = serializer.save()
+        self._sync_completion_timestamp(
+            work_order, was_completed=(old_status == WorkOrder.STATUS_COMPLETED)
+        )
         if (
             work_order.status == WorkOrder.STATUS_COMPLETED
             and old_status != WorkOrder.STATUS_COMPLETED

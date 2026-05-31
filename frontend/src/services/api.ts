@@ -1999,6 +1999,20 @@ export const forgekeyAPI = {
           devices: Array<{ device_type: string; label: string }>;
         }>;
       };
+      power: {
+        wiring_type: string;
+        breaker: {
+          label: string;
+          position: string;
+          amperage: number | null;
+          panel: string;
+          panel_location: string;
+        } | null;
+        disconnect: { label: string; type: string; location: string } | null;
+        breaker_location: string;
+        electrical_box: string;
+        suite: string;
+      };
       items: Array<{
         id: string;
         title: string;
@@ -2015,7 +2029,25 @@ export const forgekeyAPI = {
           description: string;
           is_required: boolean;
         }>;
-        materials: Array<{ name: string; quantity: string | null; unit: string }>;
+        tools: Array<{
+          name: string;
+          quantity: number;
+          is_required: boolean;
+          notes: string;
+          location: string;
+          on_hand: number | null;
+          sku: string;
+          inventory_item_id: string | null;
+        }>;
+        materials: Array<{
+          name: string;
+          quantity: string | null;
+          unit: string;
+          location: string;
+          on_hand: number | null;
+          sku: string;
+          inventory_item_id: string | null;
+        }>;
       }>;
       primary_item_id: string | null;
     }>(`/forgekey/epaper/${displayId}/service-info/`),

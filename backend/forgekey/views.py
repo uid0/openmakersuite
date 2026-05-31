@@ -2154,6 +2154,70 @@ def _serialize_loto(asset) -> dict:
     }
 
 
+def _supply_location(obj) -> dict:
+    """Where a tool/consumable lives + how many are on hand.
+
+    Prefers the linked inventory item (real storage location, shelf, and live
+    stock count); falls back to the free-text ``location_hint`` when nothing
+    is linked. Keeps the e-paper work order honest about where to find the
+    thing without making the maintainer go hunting.
+    """
+    inv = getattr(obj, "inventory_item", None)
+    if inv is not None:
+        loc = inv.location.name if inv.location_id else ""
+        shelf = inv.get_shelf_position_display() if inv.shelf_position else ""
+        where = f"{loc} · {shelf}" if loc and shelf else (loc or shelf)
+        return {
+            "location": where or "",
+            "on_hand": inv.current_stock,
+            "sku": inv.sku or "",
+            "inventory_item_id": str(inv.pk),
+        }
+    return {
+        "location": getattr(obj, "location_hint", "") or "",
+        "on_hand": None,
+        "sku": "",
+        "inventory_item_id": None,
+    }
+
+
+def _serialize_power(asset) -> dict:
+    """Where the asset's power comes from + how to kill it.
+
+    Resolves the structured breaker→panel→location and disconnect→location
+    chains so the maintainer can walk straight to the breaker before starting,
+    falling back to the legacy free-text fields (``breaker_location``,
+    ``electrical_box``, ``suite``) when the structured links aren't set.
+    """
+    breaker = asset.breaker
+    disconnect = asset.disconnect
+    panel = breaker.panel if breaker else None
+    breaker_block = None
+    if breaker is not None:
+        breaker_block = {
+            "label": breaker.label or "",
+            "position": breaker.position or "",
+            "amperage": breaker.amperage,
+            "panel": panel.name if panel else "",
+            "panel_location": (panel.location.name if panel and panel.location_id else ""),
+        }
+    disconnect_block = None
+    if disconnect is not None:
+        disconnect_block = {
+            "label": disconnect.label or "",
+            "type": disconnect.get_disconnect_type_display(),
+            "location": (disconnect.location.name if disconnect.location_id else ""),
+        }
+    return {
+        "wiring_type": asset.get_wiring_type_display() if asset.wiring_type else "",
+        "breaker": breaker_block,
+        "disconnect": disconnect_block,
+        "breaker_location": asset.breaker_location or "",
+        "electrical_box": asset.electrical_box or "",
+        "suite": asset.suite or "",
+    }
+
+
 class EPaperServiceInfoView(APIView):
     """What-needs-doing payload for the scan-to-log front-end page.
 
@@ -2166,9 +2230,12 @@ class EPaperServiceInfoView(APIView):
 
     def get(self, request, display_id):
         try:
-            display = EPaperDisplay.objects.select_related("asset", "asset__location").get(
-                pk=display_id
-            )
+            display = EPaperDisplay.objects.select_related(
+                "asset",
+                "asset__location",
+                "asset__breaker__panel__location",
+                "asset__disconnect__location",
+            ).get(pk=display_id)
         except EPaperDisplay.DoesNotExist:
             return Response({"detail": "Unknown display."}, status=status.HTTP_404_NOT_FOUND)
         if not display.is_active:
@@ -2214,7 +2281,19 @@ class EPaperServiceInfoView(APIView):
                     }
                     for task in item.tasks.order_by("order", "title")
                 ],
-                # Tools / parts / supplies needed for the job.
+                # Tools to gather (not consumed) + where each one lives.
+                "tools": [
+                    {
+                        "name": tool.name,
+                        "quantity": tool.quantity,
+                        "is_required": tool.is_required,
+                        "notes": tool.notes or "",
+                        **_supply_location(tool),
+                    }
+                    for tool in item.tools.all()
+                ],
+                # Consumables/supplies used for the job, with where they're
+                # stocked + how many are on hand.
                 "materials": [
                     {
                         "name": material.name,
@@ -2222,6 +2301,7 @@ class EPaperServiceInfoView(APIView):
                             str(material.quantity) if material.quantity is not None else None
                         ),
                         "unit": material.unit or "",
+                        **_supply_location(material),
                     }
                     for material in item.materials.all()
                 ],
@@ -2237,6 +2317,8 @@ class EPaperServiceInfoView(APIView):
                     "asset_tag": getattr(asset, "asset_tag", "") or "",
                     "location": asset.location.name if asset.location_id else None,
                 },
+                # Where the asset's power is + how to kill it before servicing.
+                "power": _serialize_power(asset),
                 # Asset-level lockout/tagout: free-form instructions plus the
                 # energy sources to isolate and the lock devices needed.
                 "loto": _serialize_loto(asset),

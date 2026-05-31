@@ -451,6 +451,77 @@ class TestEPaperServiceInfo:
         assert work_order["steps"][0]["is_required"] is True
         assert work_order["materials"][0]["name"] == "Way oil"
 
+    def test_info_surfaces_tools_locations_and_power(self, client):
+        """The work order resolves where tools/consumables live + how much is
+        on hand, and where the asset's power is — the data a maintainer needs
+        before walking up to the machine."""
+        from decimal import Decimal
+
+        from electrical_circuits.models import PowerBreaker, PowerPanel
+        from inventory.models import MaintenanceMaterial, MaintenanceTool
+        from inventory.tests.factories import InventoryItemFactory
+
+        asset = _make_asset("Lathe")
+        # Free-text power fields + a structured breaker→panel→location chain.
+        asset.suite = "East wing"
+        asset.electrical_box = "East enclosure"
+        asset.breaker_location = "Panel A, Breaker 12"
+        panel = PowerPanel.objects.create(location=asset.location, name="Panel A")
+        asset.breaker = PowerBreaker.objects.create(
+            panel=panel, position="12", amperage=20, label="Lathe feed"
+        )
+        asset.save(update_fields=["suite", "electrical_box", "breaker_location", "breaker"])
+
+        item = _make_item(asset, "Lube", interval_days=30, last_done_days=5)
+
+        # A consumable stocked in inventory → location + on-hand resolve.
+        oil_loc = Location.objects.create(name="Oil cabinet")
+        oil = InventoryItemFactory(name="Way oil", location=oil_loc, current_stock=7)
+        MaintenanceMaterial.objects.create(
+            maintenance_item=item,
+            name="Way oil",
+            quantity=Decimal("50"),
+            unit="ml",
+            inventory_item=oil,
+        )
+
+        # A tool tracked in inventory (location auto-resolves) ...
+        crib = Location.objects.create(name="Tool crib")
+        wrench = InventoryItemFactory(name="17mm wrench", location=crib, current_stock=3)
+        MaintenanceTool.objects.create(
+            maintenance_item=item, name="17mm wrench", inventory_item=wrench
+        )
+        # ... and a tool that's only a free-text hint.
+        MaintenanceTool.objects.create(
+            maintenance_item=item,
+            name="Torque wrench",
+            location_hint="Calibration shelf, bay 2",
+        )
+
+        display = _bind_display(asset)
+        body = client.get(self._url(display.id)).json()
+
+        power = body["power"]
+        assert power["suite"] == "East wing"
+        assert power["electrical_box"] == "East enclosure"
+        assert power["breaker_location"] == "Panel A, Breaker 12"
+        assert power["breaker"]["panel"] == "Panel A"
+        assert power["breaker"]["panel_location"] == asset.location.name
+        assert power["breaker"]["position"] == "12"
+
+        work_order = body["items"][0]
+        material = work_order["materials"][0]
+        assert material["name"] == "Way oil"
+        assert material["location"] == "Oil cabinet"
+        assert material["on_hand"] == 7
+
+        tools = {t["name"]: t for t in work_order["tools"]}
+        assert tools["17mm wrench"]["location"] == "Tool crib"
+        assert tools["17mm wrench"]["on_hand"] == 3
+        assert tools["17mm wrench"]["is_required"] is True
+        assert tools["Torque wrench"]["location"] == "Calibration shelf, bay 2"
+        assert tools["Torque wrench"]["on_hand"] is None
+
     def test_info_409_when_unbound(self, client):
         display = _bind_display(asset=None)
         response = client.get(self._url(display.id))

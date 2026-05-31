@@ -27,6 +27,7 @@ from .models import (
     MaintenanceMaterial,
     MaintenanceRecord,
     MaintenanceTask,
+    MaintenanceTool,
     PriceHistory,
     StockReconciliation,
     Supplier,
@@ -1473,7 +1474,23 @@ class LocationProblemAdmin(admin.ModelAdmin):
 class MaintenanceMaterialInline(admin.TabularInline):
     model = MaintenanceMaterial
     extra = 1
-    fields = ["name", "quantity", "unit", "estimated_cost_per_unit", "notes"]
+    fields = [
+        "name",
+        "quantity",
+        "unit",
+        "inventory_item",
+        "location_hint",
+        "estimated_cost_per_unit",
+        "notes",
+    ]
+    autocomplete_fields = ["inventory_item"]
+
+
+class MaintenanceToolInline(admin.TabularInline):
+    model = MaintenanceTool
+    extra = 1
+    fields = ["name", "quantity", "inventory_item", "location_hint", "is_required", "notes"]
+    autocomplete_fields = ["inventory_item"]
 
 
 class MaintenanceTaskInline(admin.TabularInline):
@@ -1496,7 +1513,7 @@ class MaintenanceItemAdmin(admin.ModelAdmin):
     list_filter = ["is_active", "asset__category"]
     search_fields = ["title", "description", "asset__name", "asset__asset_tag"]
     autocomplete_fields = ["asset"]
-    inlines = [MaintenanceMaterialInline, MaintenanceTaskInline]
+    inlines = [MaintenanceToolInline, MaintenanceMaterialInline, MaintenanceTaskInline]
     readonly_fields = ["is_overdue", "days_overdue", "next_due_at", "created_at", "updated_at"]
     fieldsets = [
         (None, {"fields": ["asset", "title", "description", "is_active"]}),

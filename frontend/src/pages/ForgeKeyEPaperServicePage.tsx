@@ -42,6 +42,21 @@ interface Material {
   name: string;
   quantity: string | null;
   unit: string;
+  location: string;
+  on_hand: number | null;
+  sku: string;
+  inventory_item_id: string | null;
+}
+
+interface Tool {
+  name: string;
+  quantity: number;
+  is_required: boolean;
+  notes: string;
+  location: string;
+  on_hand: number | null;
+  sku: string;
+  inventory_item_id: string | null;
 }
 
 interface EnergySource {
@@ -58,6 +73,21 @@ interface Loto {
   energy_sources: EnergySource[];
 }
 
+interface Power {
+  wiring_type: string;
+  breaker: {
+    label: string;
+    position: string;
+    amperage: number | null;
+    panel: string;
+    panel_location: string;
+  } | null;
+  disconnect: { label: string; type: string; location: string } | null;
+  breaker_location: string;
+  electrical_box: string;
+  suite: string;
+}
+
 interface ItemRow {
   id: string;
   title: string;
@@ -69,6 +99,7 @@ interface ItemRow {
   instructions: string;
   estimated_time_minutes: number | null;
   steps: Step[];
+  tools: Tool[];
   materials: Material[];
 }
 
@@ -77,6 +108,7 @@ interface ServiceInfo {
   bound: boolean;
   asset: { id: string; name: string; asset_tag: string; location: string | null };
   loto: Loto;
+  power: Power;
   items: ItemRow[];
   primary_item_id: string | null;
 }
@@ -137,6 +169,100 @@ const LotoSection: React.FC<{ loto: Loto }> = ({ loto }) => {
         ))}
       </Stack>
     </Alert>
+  );
+};
+
+const hasPower = (power: Power): boolean =>
+  Boolean(
+    power.breaker ||
+      power.disconnect ||
+      power.breaker_location ||
+      power.electrical_box ||
+      power.suite,
+  );
+
+const PowerSection: React.FC<{ power: Power }> = ({ power }) => {
+  if (!hasPower(power)) {
+    return null;
+  }
+  const breakerLine = power.breaker
+    ? [
+        power.breaker.label,
+        power.breaker.position ? `pos ${power.breaker.position}` : '',
+        power.breaker.amperage ? `${power.breaker.amperage}A` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
+  return (
+    <Alert color="orange" variant="light" title="Power — find this before servicing">
+      <Stack gap={4}>
+        {power.breaker && (
+          <Text size="sm">
+            <Text span fw={600}>
+              Breaker:
+            </Text>{' '}
+            {breakerLine || 'see panel'}
+            {power.breaker.panel ? ` — ${power.breaker.panel}` : ''}
+            {power.breaker.panel_location ? ` (${power.breaker.panel_location})` : ''}
+          </Text>
+        )}
+        {!power.breaker && power.breaker_location && (
+          <Text size="sm">
+            <Text span fw={600}>
+              Breaker:
+            </Text>{' '}
+            {power.breaker_location}
+          </Text>
+        )}
+        {power.disconnect && (
+          <Text size="sm">
+            <Text span fw={600}>
+              Disconnect:
+            </Text>{' '}
+            {[power.disconnect.label, power.disconnect.type].filter(Boolean).join(' · ')}
+            {power.disconnect.location ? ` — ${power.disconnect.location}` : ''}
+          </Text>
+        )}
+        {power.electrical_box && (
+          <Text size="sm">
+            <Text span fw={600}>
+              Panel / box:
+            </Text>{' '}
+            {power.electrical_box}
+          </Text>
+        )}
+        {power.suite && (
+          <Text size="sm">
+            <Text span fw={600}>
+              Area:
+            </Text>{' '}
+            {power.suite}
+          </Text>
+        )}
+        {power.wiring_type && (
+          <Text size="xs" c="dimmed">
+            Wiring: {power.wiring_type}
+          </Text>
+        )}
+      </Stack>
+    </Alert>
+  );
+};
+
+/** Where a tool/consumable lives + how many are on hand (when known). */
+const SupplyWhere: React.FC<{ location: string; onHand: number | null }> = ({
+  location,
+  onHand,
+}) => {
+  if (!location && onHand == null) {
+    return null;
+  }
+  return (
+    <Text size="xs" c="dimmed">
+      {location ? `📍 ${location}` : 'Location not set'}
+      {onHand != null ? ` · ${onHand} on hand` : ''}
+    </Text>
   );
 };
 
@@ -261,6 +387,7 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
           </Text>
         </Stack>
 
+        <PowerSection power={info.power} />
         <LotoSection loto={info.loto} />
 
         {!loggedIn && (
@@ -312,14 +439,57 @@ const ForgeKeyEPaperServicePage: React.FC = () => {
                       </Text>
                     )}
 
+                    {item.tools.length > 0 && (
+                      <Stack gap={4}>
+                        <Text size="sm" fw={600}>
+                          Tools to gather
+                        </Text>
+                        <List size="sm" spacing={4}>
+                          {item.tools.map((tool, idx) => (
+                            <List.Item
+                              key={idx}
+                              icon={
+                                tool.is_required ? (
+                                  <ThemeIcon color="red" size={16} radius="xl">
+                                    <Text size="9px" fw={700}>
+                                      !
+                                    </Text>
+                                  </ThemeIcon>
+                                ) : undefined
+                              }
+                            >
+                              <Text size="sm" span>
+                                {tool.quantity > 1 ? `${tool.quantity}× ` : ''}
+                                {tool.name}
+                              </Text>
+                              <SupplyWhere location={tool.location} onHand={tool.on_hand} />
+                              {tool.notes && (
+                                <Text size="xs" c="dimmed">
+                                  {tool.notes}
+                                </Text>
+                              )}
+                            </List.Item>
+                          ))}
+                        </List>
+                      </Stack>
+                    )}
+
                     {item.materials.length > 0 && (
                       <Stack gap={4}>
                         <Text size="sm" fw={600}>
-                          Tools &amp; materials
+                          Consumables
                         </Text>
-                        <List size="sm" spacing={2}>
+                        <List size="sm" spacing={4}>
                           {item.materials.map((material, idx) => (
-                            <List.Item key={idx}>{formatMaterial(material)}</List.Item>
+                            <List.Item key={idx}>
+                              <Text size="sm" span>
+                                {formatMaterial(material)}
+                              </Text>
+                              <SupplyWhere
+                                location={material.location}
+                                onHand={material.on_hand}
+                              />
+                            </List.Item>
                           ))}
                         </List>
                       </Stack>

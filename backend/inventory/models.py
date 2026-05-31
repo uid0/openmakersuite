@@ -254,13 +254,6 @@ class InventoryItem(models.Model):
 
     # QR code data
     qr_code = models.ImageField(upload_to="inventory/qrcodes/", blank=True, null=True)
-    access_code = models.CharField(
-        max_length=6,
-        unique=True,
-        blank=True,
-        null=True,
-        help_text="Unique 6-character code for manual entry (excludes I, 0, O, 1, L)",
-    )
     last_scanned_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -1348,13 +1341,6 @@ class Asset(models.Model):
         blank=True,
         null=True,
         help_text="QR code for quick asset identification",
-    )
-    access_code = models.CharField(
-        max_length=6,
-        unique=True,
-        blank=True,
-        null=True,
-        help_text="Unique 6-character code for manual entry (excludes I, 0, O, 1, L)",
     )
 
     # Status and condition

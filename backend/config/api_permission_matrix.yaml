@@ -1365,9 +1365,6 @@ views:
       validate_checklist:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
-  inventory.views.lookup_by_code:
-    permission_classes:
-    - AllowAny
   inventory.views.postmark_inbound_work_order:
     permission_classes:
     - AllowAny

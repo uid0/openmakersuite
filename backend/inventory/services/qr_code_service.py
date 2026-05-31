@@ -221,13 +221,6 @@ class QRCodeService:
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         scan_url = f"{frontend_url}/scan/asset/{asset.id}"
 
-        # Generate or get access code
-        if not asset.access_code:
-            from inventory.models import Asset
-
-            asset.access_code = generate_unique_code(Asset, "access_code")
-            asset.save(update_fields=["access_code"])
-
         # Generate QR code image
         qr_img = self.generate_qr_code_image(scan_url)
 
@@ -259,13 +252,6 @@ class QRCodeService:
         """
         base_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
         scan_url = f"{base_url}/scan/{item.id}"
-
-        # Generate or get access code
-        if not item.access_code:
-            from inventory.models import InventoryItem
-
-            item.access_code = generate_unique_code(InventoryItem, "access_code")
-            item.save(update_fields=["access_code"])
 
         # Generate QR code image
         qr_img = self.generate_qr_code_image(scan_url)

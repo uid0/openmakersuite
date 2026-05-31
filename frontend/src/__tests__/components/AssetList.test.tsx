@@ -2,7 +2,7 @@
  * Tests for AssetList component
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import AssetList from '../../components/AssetList';
@@ -10,6 +10,10 @@ import { assetsAPI, inventoryAPI, sigAPI } from '../../services/api';
 import { Asset, Location, SIG } from '../../types';
 
 vi.mock('../../services/api');
+
+// Capture the IntersectionObserver callback so tests can simulate the
+// infinite-scroll sentinel coming into view.
+let intersectionCallback: IntersectionObserverCallback | null = null;
 const mockNavigate = jest.fn();
 vi.mock('react-router-dom', async () => ({
   ...(await vi.importActual('react-router-dom')),
@@ -151,6 +155,18 @@ describe('AssetList', () => {
     jest.clearAllMocks();
     // Clear localStorage before each test
     localStorage.clear();
+
+    intersectionCallback = null;
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
+      constructor(cb: IntersectionObserverCallback) {
+        intersectionCallback = cb;
+      }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+      takeRecords = () => [];
+    };
+
     mockAssetsAPI.listAssets.mockResolvedValue({
       data: {
         count: mockAssets.length,
@@ -386,37 +402,56 @@ describe('AssetList', () => {
     });
   });
 
-  it('switches to server mode when count exceeds threshold', async () => {
-    const largeAssetList = Array.from({ length: 300 }, (_, i) => ({
-      ...mockAssets[0],
-      id: String(i + 1),
-      name: `Asset ${i + 1}`,
-    }));
+  it('appends the next page when the scroll sentinel intersects', async () => {
+    const page1Asset = { ...mockAssets[0], id: '101', name: 'Asset Page One' };
+    const page2Asset = { ...mockAssets[1], id: '102', name: 'Asset Page Two' };
 
-    mockAssetsAPI.listAssets.mockResolvedValueOnce({
-      data: {
-        count: 300,
-        next: 'http://api/inventory/assets/?page=2',
-        previous: null,
-        results: largeAssetList.slice(0, 50),
-      },
-      status: 200,
-      statusText: 'OK',
-      headers: {},
-      config: {} as any,
-    });
+    mockAssetsAPI.listAssets
+      .mockResolvedValueOnce({
+        data: {
+          count: 2,
+          next: 'http://api/inventory/assets/?page=2',
+          previous: null,
+          results: [page1Asset],
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          count: 2,
+          next: null,
+          previous: null,
+          results: [page2Asset],
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
 
     renderComponent();
 
-    // Switch to table view first
-    const tableViewButton = screen.getByText('Table View');
-    await userEvent.click(tableViewButton);
+    await waitFor(() => {
+      expect(screen.getByText('Asset Page One')).toBeInTheDocument();
+    });
+    // Second page not loaded yet.
+    expect(screen.queryByText('Asset Page Two')).not.toBeInTheDocument();
+
+    // Simulate the sentinel scrolling into view.
+    await act(async () => {
+      intersectionCallback?.(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        null as unknown as IntersectionObserver
+      );
+    });
 
     await waitFor(() => {
-      // Should show pagination in server mode (check for pagination component)
-      const paginationButtons = screen.queryAllByRole('button');
-      // Should have pagination controls
-      expect(paginationButtons.length).toBeGreaterThan(0);
-    }, { timeout: 3000 });
+      expect(screen.getByText('Asset Page Two')).toBeInTheDocument();
+    });
+    const calls = (mockAssetsAPI.listAssets as jest.Mock).mock.calls;
+    expect(calls.some((c) => c[0]?.page === 2)).toBe(true);
   });
 });

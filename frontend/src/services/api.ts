@@ -3312,4 +3312,59 @@ export const registrationPublicAPI = {
     api.post<RegistrationTokenUser>('/membership/register/complete/', data),
 };
 
+export interface ForgeKeyLockerStatus {
+  secure: boolean | null;
+  state: string;
+  reed_closed: boolean | null;
+  latch_locked: boolean | null;
+  ir_broken: boolean | null;
+  mortise_active: boolean | null;
+  item_present: boolean | null;
+  last_trigger: string;
+  firmware_version: string;
+  last_status_at: string | null;
+  is_alarm: boolean;
+  is_insecure: boolean;
+  device_mac: string | null;
+  device_is_online: boolean | null;
+}
+
+export interface ForgeKeyLockerDevice {
+  id: number;
+  locker: string;
+  device: string;
+  device_mac: string;
+  device_is_online: boolean;
+  role: string;
+  role_display: string;
+  is_primary: boolean;
+  notes: string;
+}
+
+export interface ForgeKeyLocker {
+  id: string;
+  name: string;
+  slug: string;
+  location: number | null;
+  location_name: string | null;
+  owning_sig: number | null;
+  owning_sig_name: string | null;
+  description: string;
+  power_source: string;
+  current_asset: string | null;
+  current_asset_name: string | null;
+  is_high_trust: boolean;
+  led_count: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  devices: ForgeKeyLockerDevice[];
+  status: ForgeKeyLockerStatus | null;
+}
+
+export const lockersAPI = {
+  listLockers: () => api.get<{ results?: ForgeKeyLocker[] } | ForgeKeyLocker[]>('/lockers/'),
+  getLocker: (id: string) => api.get<ForgeKeyLocker>(`/lockers/${id}/`),
+};
+
 export default api;

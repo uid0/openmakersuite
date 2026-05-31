@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-from .models import Locker, LockerDevice, LockerOtp
+from .models import Locker, LockerDevice, LockerOtp, LockerStatus
 
 
 class LockerSerializer(serializers.ModelSerializer):
@@ -70,11 +70,66 @@ class LockerOtpSerializer(serializers.ModelSerializer):
 
 class LockerDeviceSerializer(serializers.ModelSerializer):
     device_mac = serializers.CharField(source="device.mac_address", read_only=True)
+    device_is_online = serializers.BooleanField(source="device.is_online", read_only=True)
+    role_display = serializers.CharField(source="get_role_display", read_only=True)
 
     class Meta:
         model = LockerDevice
-        fields = ("id", "locker", "device", "device_mac", "role", "is_primary", "notes")
+        fields = (
+            "id",
+            "locker",
+            "device",
+            "device_mac",
+            "device_is_online",
+            "role",
+            "role_display",
+            "is_primary",
+            "notes",
+        )
         read_only_fields = ("id",)
+
+
+class LockerStatusSerializer(serializers.ModelSerializer):
+    is_alarm = serializers.BooleanField(read_only=True)
+    is_insecure = serializers.BooleanField(read_only=True)
+    device_mac = serializers.CharField(source="device.mac_address", read_only=True, default=None)
+    device_is_online = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LockerStatus
+        fields = (
+            "secure",
+            "state",
+            "reed_closed",
+            "latch_locked",
+            "ir_broken",
+            "mortise_active",
+            "item_present",
+            "last_trigger",
+            "firmware_version",
+            "last_status_at",
+            "is_alarm",
+            "is_insecure",
+            "device_mac",
+            "device_is_online",
+        )
+
+    def get_device_is_online(self, obj):
+        return obj.device.is_online if obj.device_id else None
+
+
+class LockerDetailSerializer(LockerSerializer):
+    """Locker + its bound devices + latest lock status, for the management UI."""
+
+    devices = LockerDeviceSerializer(source="device_assignments", many=True, read_only=True)
+    status = serializers.SerializerMethodField()
+
+    class Meta(LockerSerializer.Meta):
+        fields = LockerSerializer.Meta.fields + ("devices", "status")
+
+    def get_status(self, obj):
+        status = getattr(obj, "status", None)
+        return LockerStatusSerializer(status).data if status is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -112,3 +167,19 @@ class ReedStatusEventSerializer(_WebhookEventBase):
     uses this for unlock-to-secure duration tracking."""
 
     closed = serializers.BooleanField()
+
+
+class LockStatusEventSerializer(_WebhookEventBase):
+    """The firmware's comprehensive ``cabinet_lock/status`` heartbeat
+    (~every 10s). Every hardware field is optional so a partial/older
+    firmware payload still upserts what it carries."""
+
+    secure = serializers.BooleanField(required=False, allow_null=True)
+    state = serializers.CharField(required=False, allow_blank=True, default="")
+    reed_closed = serializers.BooleanField(required=False, allow_null=True)
+    latch_locked = serializers.BooleanField(required=False, allow_null=True)
+    ir_broken = serializers.BooleanField(required=False, allow_null=True)
+    mortise_active = serializers.BooleanField(required=False, allow_null=True)
+    item_present = serializers.BooleanField(required=False, allow_null=True)
+    last_trigger = serializers.CharField(required=False, allow_blank=True, default="")
+    firmware_version = serializers.CharField(required=False, allow_blank=True, default="")

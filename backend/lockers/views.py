@@ -14,17 +14,19 @@ from __future__ import annotations
 
 import logging
 
-from rest_framework import status
+from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from forgekey.models import ESP32Device
 
-from .models import Locker
+from .models import Locker, LockerStatus
 from .serializers import (
     IrBreakEventSerializer,
+    LockerDetailSerializer,
     LockoutEventSerializer,
+    LockStatusEventSerializer,
     ReedStatusEventSerializer,
 )
 
@@ -104,6 +106,35 @@ class ReedStatusEventView(_WebhookBase):
     event_kind = "reed_status"
 
 
+class LockStatusEventView(_WebhookBase):
+    """Ingest the firmware's comprehensive ``cabinet_lock/status`` heartbeat
+    and upsert the locker's latest :class:`LockerStatus`."""
+
+    serializer_class = LockStatusEventSerializer
+    event_kind = "lock_status"
+
+    def handle(self, *, locker: Locker, payload: dict) -> None:
+        device = ESP32Device.objects.filter(mac_address__iexact=payload["mac"]).first()
+        raw = {k: v for k, v in payload.items() if k not in ("mac", "timestamp")}
+        LockerStatus.objects.update_or_create(
+            locker=locker,
+            defaults={
+                "device": device,
+                "secure": payload.get("secure"),
+                "state": payload.get("state") or "",
+                "reed_closed": payload.get("reed_closed"),
+                "latch_locked": payload.get("latch_locked"),
+                "ir_broken": payload.get("ir_broken"),
+                "mortise_active": payload.get("mortise_active"),
+                "item_present": payload.get("item_present"),
+                "last_trigger": payload.get("last_trigger") or "",
+                "firmware_version": payload.get("firmware_version") or "",
+                "raw_payload": raw,
+            },
+        )
+        super().handle(locker=locker, payload=payload)
+
+
 # ---------------------------------------------------------------------------
 # Init-handshake ack
 # ---------------------------------------------------------------------------
@@ -156,3 +187,20 @@ class RegistrationAckView(APIView):
             {"status": "ack_published", "topic": topic},
             status=status.HTTP_202_ACCEPTED,
         )
+
+
+class LockerViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only locker list + detail with bound devices and live lock status.
+
+    The monitoring surface for the locker fleet — each locker carries its
+    device bindings and its latest ``cabinet_lock/status`` so the UI can show
+    secure / online state and flag possible intrusions.
+    """
+
+    queryset = (
+        Locker.objects.select_related("location", "owning_sig", "current_asset", "status")
+        .prefetch_related("device_assignments__device")
+        .all()
+    )
+    serializer_class = LockerDetailSerializer
+    permission_classes = [IsAuthenticated]

@@ -1,6 +1,8 @@
 /**
  * Inventory List Page
- * Advanced data table with filtering, sorting, search, bulk actions, and inline stock adjustment
+ * Advanced data table with server-side filtering, sorting, and search.
+ * Items are loaded lazily (infinite scroll) so the list is no longer
+ * capped at the first page of results.
  */
 import {
     ActionIcon,
@@ -8,6 +10,7 @@ import {
     Button,
     Checkbox,
     Group,
+    Loader,
     NumberInput,
     Paper,
     Select,
@@ -18,7 +21,7 @@ import {
     Tooltip,
 } from '@mantine/core';
 import { IconDownload, IconQrcode, IconSearch, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { indexCardsAPI, inventoryAPI } from '../services/api';
@@ -26,8 +29,20 @@ import { Category, InventoryItem, Location } from '../types';
 import { exportInventoryItemsToCSV } from '../utils/csvExport';
 import { showError, showInfo, showSuccess } from '../utils/dialogs';
 
-type SortField = 'name' | 'sku' | 'current_stock' | 'category_name' | 'location' | 'unit_cost';
+type SortField = 'name' | 'sku' | 'current_stock' | 'category_name' | 'location';
 type SortDirection = 'asc' | 'desc';
+
+// Map the table's sortable columns onto the backend's allow-listed
+// `ordering` fields (see InventoryItemViewSet.get_queryset).
+const SORT_FIELD_TO_BACKEND: Record<SortField, string> = {
+  name: 'name',
+  sku: 'sku',
+  current_stock: 'current_stock',
+  category_name: 'category__name',
+  location: 'location__name',
+};
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 const InventoryListPage: React.FC = () => {
   const navigate = useNavigate();
@@ -35,7 +50,9 @@ const InventoryListPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
   const [lowStockFilter, setLowStockFilter] = useState<string | null>(null);
@@ -46,27 +63,122 @@ const InventoryListPage: React.FC = () => {
   const [generatingQR, setGeneratingQR] = useState(false);
   const [generatingTestSheet, setGeneratingTestSheet] = useState(false);
 
+  // Pagination / infinite-scroll state.
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
+  // Load the filter dropdown data once.
   useEffect(() => {
-    loadData();
+    const loadFilters = async () => {
+      try {
+        const [categoriesRes, locationsRes] = await Promise.all([
+          inventoryAPI.listCategories(),
+          inventoryAPI.listLocations(),
+        ]);
+        setCategories(categoriesRes.data.results);
+        setLocations(locationsRes.data.results);
+      } catch (err) {
+        console.error('Error loading filters:', err);
+      }
+    };
+    loadFilters();
   }, []);
 
-  const loadData = async () => {
+  // Debounce the free-text search so each keystroke doesn't hit the API.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const buildListParams = (targetPage: number) => {
+    const params: Parameters<typeof inventoryAPI.listItems>[0] = {
+      page: targetPage,
+      ordering: `${sortDirection === 'desc' ? '-' : ''}${SORT_FIELD_TO_BACKEND[sortField]}`,
+    };
+    const trimmedSearch = debouncedSearch.trim();
+    if (trimmedSearch) {
+      params.search = trimmedSearch;
+    }
+    if (selectedCategory) {
+      params.category = Number(selectedCategory);
+    }
+    if (selectedLocation) {
+      params.location = Number(selectedLocation);
+    }
+    if (lowStockFilter === 'true') {
+      params.low_stock = true;
+    } else if (lowStockFilter === 'false') {
+      params.low_stock = false;
+    }
+    return params;
+  };
+
+  // (Re)load the first page whenever the filters, search, or sort change.
+  useEffect(() => {
+    const loadFirstPage = async () => {
+      try {
+        setLoading(true);
+        const res = await inventoryAPI.listItems(buildListParams(1));
+        setItems(res.data.results);
+        setTotalCount(res.data.count ?? res.data.results.length);
+        setHasMore(Boolean(res.data.next));
+        setPage(1);
+      } catch (err) {
+        console.error('Error loading data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadFirstPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, selectedCategory, selectedLocation, lowStockFilter, sortField, sortDirection]);
+
+  const loadMore = async () => {
+    if (loadingMore || loading || !hasMore) {
+      return;
+    }
     try {
-      setLoading(true);
-      const [itemsRes, categoriesRes, locationsRes] = await Promise.all([
-        inventoryAPI.listItems(),
-        inventoryAPI.listCategories(),
-        inventoryAPI.listLocations(),
-      ]);
-      setItems(itemsRes.data.results);
-      setCategories(categoriesRes.data.results);
-      setLocations(locationsRes.data.results);
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const res = await inventoryAPI.listItems(buildListParams(nextPage));
+      setItems((prev) => [...prev, ...res.data.results]);
+      setTotalCount(res.data.count ?? totalCount);
+      setHasMore(Boolean(res.data.next));
+      setPage(nextPage);
     } catch (err) {
-      console.error('Error loading data:', err);
+      console.error('Error loading more items:', err);
     } finally {
-      setLoading(false);
+      setLoadingMore(false);
     }
   };
+
+  // Keep the latest loadMore reachable from the (stable) observer callback,
+  // so the observer never has to be torn down just to capture fresh state.
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+
+  // Callback ref: attach an IntersectionObserver as soon as the sentinel
+  // mounts (it isn't present during the initial loading screen) and tear it
+  // down when the sentinel unmounts.
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+    if (node && typeof IntersectionObserver !== 'undefined') {
+      observerRef.current = new IntersectionObserver(
+        (entries) => {
+          if (entries[0]?.isIntersecting) {
+            loadMoreRef.current();
+          }
+        },
+        { rootMargin: '200px' }
+      );
+      observerRef.current.observe(node);
+    }
+  }, []);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -77,87 +189,27 @@ const InventoryListPage: React.FC = () => {
     }
   };
 
-  const sortedAndFilteredItems = useMemo(() => {
-    let filtered = [...items];
-
-    // Search filter
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (item) =>
-          item.name.toLowerCase().includes(term) ||
-          item.sku.toLowerCase().includes(term) ||
-          (item.description && item.description.toLowerCase().includes(term))
-      );
-    }
-
-    // Category filter
-    if (selectedCategory) {
-      filtered = filtered.filter((item) => item.category === Number(selectedCategory));
-    }
-
-    // Location filter
-    if (selectedLocation) {
-      filtered = filtered.filter((item) => {
-        const location = locations.find((l) => l.id === Number(selectedLocation));
-        return location && item.location === location.name;
-      });
-    }
-
-    // Low stock filter
-    if (lowStockFilter === 'true') {
-      filtered = filtered.filter((item) => item.needs_reorder);
-    } else if (lowStockFilter === 'false') {
-      filtered = filtered.filter((item) => !item.needs_reorder);
-    }
-
-    // Sort
-    filtered.sort((a, b) => {
-      let aVal: any;
-      let bVal: any;
-
-      switch (sortField) {
-        case 'name':
-          aVal = a.name.toLowerCase();
-          bVal = b.name.toLowerCase();
-          break;
-        case 'sku':
-          aVal = a.sku.toLowerCase();
-          bVal = b.sku.toLowerCase();
-          break;
-        case 'current_stock':
-          aVal = a.current_stock;
-          bVal = b.current_stock;
-          break;
-        case 'category_name':
-          aVal = a.category_name || '';
-          bVal = b.category_name || '';
-          break;
-        case 'location':
-          aVal = a.location || '';
-          bVal = b.location || '';
-          break;
-        case 'unit_cost':
-          aVal = a.unit_cost ? parseFloat(a.unit_cost) : 0;
-          bVal = b.unit_cost ? parseFloat(b.unit_cost) : 0;
-          break;
-        default:
-          return 0;
+  // Fetch every item matching the current filters (used by the export
+  // actions when nothing is explicitly selected).
+  const fetchAllMatchingItems = async (): Promise<InventoryItem[]> => {
+    const all: InventoryItem[] = [];
+    let targetPage = 1;
+    for (;;) {
+      const res = await inventoryAPI.listItems(buildListParams(targetPage));
+      all.push(...res.data.results);
+      if (!res.data.next) {
+        break;
       }
-
-      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-
-    return filtered;
-  }, [items, searchTerm, selectedCategory, selectedLocation, lowStockFilter, sortField, sortDirection, locations]);
+      targetPage += 1;
+    }
+    return all;
+  };
 
   const handleSelectAll = () => {
-    if (selectedItems.size === sortedAndFilteredItems.length) {
+    if (selectedItems.size === items.length) {
       setSelectedItems(new Set());
     } else {
-      setSelectedItems(new Set(sortedAndFilteredItems.map((item) => item.id)));
+      setSelectedItems(new Set(items.map((item) => item.id)));
     }
   };
 
@@ -177,8 +229,10 @@ const InventoryListPage: React.FC = () => {
 
   const handleStockSave = async (id: string, newValue: number) => {
     try {
-      await inventoryAPI.updateStock(id, newValue);
-      await loadData();
+      const res = await inventoryAPI.updateStock(id, newValue);
+      // Patch the row in place so we don't disturb scroll position or
+      // the already-loaded pages.
+      setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...res.data } : item)));
       setEditingStock(null);
     } catch (err) {
       console.error('Error updating stock:', err);
@@ -198,7 +252,6 @@ const InventoryListPage: React.FC = () => {
       await Promise.all(promises);
       showSuccess(`Successfully generated QR codes for ${selectedItems.size} items.`);
       setSelectedItems(new Set());
-      await loadData();
     } catch (err) {
       console.error('Error generating QR codes:', err);
       showError('Failed to generate QR codes. Please try again.');
@@ -207,22 +260,29 @@ const InventoryListPage: React.FC = () => {
     }
   };
 
-  const handleExportCSV = () => {
-    const itemsToExport = sortedAndFilteredItems.filter((item) => selectedItems.has(item.id));
-    exportInventoryItemsToCSV(itemsToExport.length > 0 ? itemsToExport : sortedAndFilteredItems);
+  const handleExportCSV = async () => {
+    try {
+      const selected = items.filter((item) => selectedItems.has(item.id));
+      const itemsToExport = selected.length > 0 ? selected : await fetchAllMatchingItems();
+      exportInventoryItemsToCSV(itemsToExport);
+    } catch (err) {
+      console.error('Error exporting items:', err);
+      showError('Failed to export items. Please try again.');
+    }
   };
 
   const handleGenerateTestSheet = async () => {
-    const itemsToExport = sortedAndFilteredItems.filter((item) => selectedItems.has(item.id));
-    const itemIds = itemsToExport.length > 0 ? itemsToExport.map((i) => i.id) : sortedAndFilteredItems.map((i) => i.id);
-
-    if (itemIds.length === 0) {
-      showInfo('No items to generate test sheet for.');
-      return;
-    }
-
     try {
       setGeneratingTestSheet(true);
+      const selected = items.filter((item) => selectedItems.has(item.id));
+      const itemsToExport = selected.length > 0 ? selected : await fetchAllMatchingItems();
+      const itemIds = itemsToExport.map((i) => i.id);
+
+      if (itemIds.length === 0) {
+        showInfo('No items to generate test sheet for.');
+        return;
+      }
+
       const response = await indexCardsAPI.generateTestSheet(itemIds);
       const blob = new Blob([response.data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
@@ -246,7 +306,7 @@ const InventoryListPage: React.FC = () => {
     return sortDirection === 'asc' ? <IconSortAscending size={16} /> : <IconSortDescending size={16} />;
   };
 
-  if (loading) {
+  if (loading && items.length === 0) {
     return (
       <WorkspacePage
         hero={{ eyebrow: 'Inventory', title: 'Items', description: 'Loading…' }}
@@ -265,7 +325,7 @@ const InventoryListPage: React.FC = () => {
       hero={{
         eyebrow: 'Inventory',
         title: 'Items',
-        description: `${sortedAndFilteredItems.length} of ${items.length} items in stock.`,
+        description: `Showing ${items.length} of ${totalCount} item${totalCount === 1 ? '' : 's'}.`,
         action: (
           <Button onClick={() => navigate('/inventory/items/new')}>Add new item</Button>
         ),
@@ -350,8 +410,8 @@ const InventoryListPage: React.FC = () => {
               <Table.Tr>
                 <Table.Th style={{ width: 40 }}>
                   <Checkbox
-                    checked={selectedItems.size === sortedAndFilteredItems.length && sortedAndFilteredItems.length > 0}
-                    indeterminate={selectedItems.size > 0 && selectedItems.size < sortedAndFilteredItems.length}
+                    checked={selectedItems.size === items.length && items.length > 0}
+                    indeterminate={selectedItems.size > 0 && selectedItems.size < items.length}
                     onChange={handleSelectAll}
                   />
                 </Table.Th>
@@ -385,18 +445,13 @@ const InventoryListPage: React.FC = () => {
                     <SortIcon field="current_stock" />
                   </Group>
                 </Table.Th>
-                <Table.Th>
-                  <Group gap="xs" style={{ cursor: 'pointer' }} onClick={() => handleSort('unit_cost')}>
-                    Unit Cost
-                    <SortIcon field="unit_cost" />
-                  </Group>
-                </Table.Th>
+                <Table.Th>Unit Cost</Table.Th>
                 <Table.Th>Status</Table.Th>
                 <Table.Th>Actions</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {sortedAndFilteredItems.map((item) => (
+              {items.map((item) => (
                 <Table.Tr
                   key={item.id}
                   style={{
@@ -488,10 +543,27 @@ const InventoryListPage: React.FC = () => {
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
-        {sortedAndFilteredItems.length === 0 && (
+        {items.length === 0 ? (
           <Paper p="xl" ta="center">
             <Text c="dimmed">No items found matching your filters.</Text>
           </Paper>
+        ) : (
+          // Infinite-scroll sentinel: observed to fetch the next page.
+          <div ref={sentinelRef} data-testid="inventory-scroll-sentinel">
+            {loadingMore && (
+              <Group justify="center" p="md">
+                <Loader size="sm" />
+                <Text size="sm" c="dimmed">
+                  Loading more…
+                </Text>
+              </Group>
+            )}
+            {!hasMore && (
+              <Text ta="center" c="dimmed" size="sm" p="md">
+                All {totalCount} item{totalCount === 1 ? '' : 's'} loaded.
+              </Text>
+            )}
+          </div>
         )}
       </Paper>
     </WorkspacePage>

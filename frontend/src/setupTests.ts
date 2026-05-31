@@ -75,4 +75,22 @@ if (typeof window !== 'undefined') {
   (window as unknown as { ResizeObserver: typeof ResizeObserverMock }).ResizeObserver = ResizeObserverMock;
 }
 
+// jsdom has no IntersectionObserver; provide an inert default so components
+// using it for infinite scroll render without throwing. Individual tests may
+// override this to capture the callback and simulate intersections.
+class IntersectionObserverMock {
+  constructor(_callback: IntersectionObserverCallback) {}
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+  takeRecords = vi.fn(() => []);
+}
+
+(globalThis as unknown as { IntersectionObserver: typeof IntersectionObserverMock }).IntersectionObserver =
+  IntersectionObserverMock;
+if (typeof window !== 'undefined') {
+  (window as unknown as { IntersectionObserver: typeof IntersectionObserverMock }).IntersectionObserver =
+    IntersectionObserverMock;
+}
+
 Element.prototype.scrollIntoView = vi.fn();

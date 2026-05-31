@@ -2,7 +2,7 @@
  * Tests for InventoryListPage component
  */
 import { MantineProvider } from '@mantine/core';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import InventoryListPage from '../../pages/InventoryListPage';
 import * as api from '../../services/api';
@@ -25,6 +25,10 @@ vi.mock('react-router-dom', async () => ({
   ...(await vi.importActual('react-router-dom')),
   useNavigate: () => mockNavigate,
 }));
+
+// Capture the IntersectionObserver callback so tests can simulate the
+// infinite-scroll sentinel coming into view.
+let intersectionCallback: IntersectionObserverCallback | null = null;
 
 describe('InventoryListPage', () => {
   const mockItems = [
@@ -133,11 +137,26 @@ describe('InventoryListPage', () => {
     { id: 2, name: 'Shelf B', description: 'Shelf B location', is_active: true },
   ];
 
+  // A full page of results: no further pages to fetch.
+  const fullPage = (results: typeof mockItems) => ({
+    data: { count: results.length, next: null, previous: null, results },
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
-    (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue({
-      data: { results: mockItems },
-    });
+
+    intersectionCallback = null;
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
+      constructor(cb: IntersectionObserverCallback) {
+        intersectionCallback = cb;
+      }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+      takeRecords = () => [];
+    };
+
+    (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue(fullPage(mockItems));
     (api.inventoryAPI.listCategories as jest.Mock).mockResolvedValue({
       data: { results: mockCategories },
     });
@@ -172,66 +191,125 @@ describe('InventoryListPage', () => {
     });
   });
 
-  it('filters items by search term', async () => {
+  it('requests page 1 with default ordering on first load', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.listItems).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 1, ordering: 'name' })
+      );
+    });
+  });
+
+  it('requests server-side search filtering (debounced)', async () => {
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Test Item 1')).toBeInTheDocument();
     });
+    (api.inventoryAPI.listItems as jest.Mock).mockClear();
 
     const searchInput = screen.getByPlaceholderText(/Search by name/);
     fireEvent.change(searchInput, { target: { value: 'Low' } });
 
-    expect(screen.queryByText('Test Item 1')).not.toBeInTheDocument();
-    expect(screen.getByText('Low Stock Item')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(api.inventoryAPI.listItems).toHaveBeenCalledWith(
+        expect.objectContaining({ search: 'Low', page: 1 })
+      );
+    });
   });
 
-  it('filters items by category', async () => {
+  it('requests server-side category filtering', async () => {
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Test Item 1')).toBeInTheDocument();
     });
+    (api.inventoryAPI.listItems as jest.Mock).mockClear();
 
     const categorySelect = screen.getByPlaceholderText('All Categories');
-    fireEvent.change(categorySelect, { target: { value: '1' } });
+    fireEvent.click(categorySelect);
+    const option = await screen.findByRole('option', { name: 'Tools' });
+    fireEvent.click(option);
 
-    // Items should still be visible as they both have category 1
-    expect(screen.getByText('Test Item 1')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(api.inventoryAPI.listItems).toHaveBeenCalledWith(
+        expect.objectContaining({ category: 1, page: 1 })
+      );
+    });
   });
 
-  it('filters items by low stock status', async () => {
+  it('requests server-side low-stock filtering', async () => {
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Test Item 1')).toBeInTheDocument();
     });
+    (api.inventoryAPI.listItems as jest.Mock).mockClear();
 
-    // Find the select input and interact with it
     const stockSelect = screen.getByPlaceholderText('Stock Status');
-    
-    // Click to open dropdown
     fireEvent.click(stockSelect);
-    
-    // Wait for dropdown and select "Low Stock" option (not the badge)
+    const option = await screen.findByRole('option', { name: 'Low Stock' });
+    fireEvent.click(option);
+
     await waitFor(() => {
-      const lowStockOptions = screen.getAllByText('Low Stock');
-      // Find the one that's in the dropdown (not the badge in the table)
-      const dropdownOption = lowStockOptions.find(opt => {
-        const parent = opt.closest('[role="option"]') || opt.closest('div[data-combobox-option]');
-        return parent !== null;
-      });
-      if (dropdownOption) {
-        fireEvent.click(dropdownOption);
-      }
+      expect(api.inventoryAPI.listItems).toHaveBeenCalledWith(
+        expect.objectContaining({ low_stock: true, page: 1 })
+      );
     });
-    
-    // Wait for filter to apply
+  });
+
+  it('requests server-side sorting when a column header is clicked', async () => {
+    renderPage();
+
     await waitFor(() => {
-      expect(screen.queryByText('Test Item 1')).not.toBeInTheDocument();
-    }, { timeout: 3000 });
-    
-    expect(screen.getByText('Low Stock Item')).toBeInTheDocument();
+      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
+    });
+    (api.inventoryAPI.listItems as jest.Mock).mockClear();
+
+    fireEvent.click(screen.getByText('SKU'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.listItems).toHaveBeenCalledWith(
+        expect.objectContaining({ ordering: 'sku', page: 1 })
+      );
+    });
+  });
+
+  it('loads the next page when the scroll sentinel intersects', async () => {
+    (api.inventoryAPI.listItems as jest.Mock)
+      .mockResolvedValueOnce({
+        data: {
+          count: 2,
+          next: 'http://test/api/inventory/items/?page=2',
+          previous: null,
+          results: [mockItems[0]],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: { count: 2, next: null, previous: null, results: [mockItems[1]] },
+      });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
+    });
+    // Second page not loaded yet.
+    expect(screen.queryByText('Low Stock Item')).not.toBeInTheDocument();
+
+    // Simulate the sentinel scrolling into view.
+    await act(async () => {
+      intersectionCallback?.(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        null as unknown as IntersectionObserver
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Low Stock Item')).toBeInTheDocument();
+    });
+    expect(api.inventoryAPI.listItems).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
   });
 
   it('handles item selection', async () => {
@@ -302,11 +380,8 @@ describe('InventoryListPage', () => {
       expect(screen.getByText('Test Item 1')).toBeInTheDocument();
     });
 
-    // Bulk QR button is only visible when items are selected, so this exercise
-    // is best achieved by directly invoking through the selection flow:
-    // Select an item, click Generate QR, then deselect — but simplest path:
-    // call setSelectedItems via toggling. We instead verify via a select-and-act
-    // that *with* selections, success notification fires below.
+    // Bulk QR button is only visible when items are selected, so with no
+    // selection there is nothing to fire an info notification yet.
     expect(showInfo).not.toHaveBeenCalled();
   });
 
@@ -330,12 +405,9 @@ describe('InventoryListPage', () => {
     });
   });
 
-  it('updates stock inline', async () => {
+  it('updates stock inline and patches the row in place', async () => {
     (api.inventoryAPI.updateStock as jest.Mock).mockResolvedValue({
       data: { ...mockItems[0], current_stock: 15 },
-    });
-    (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue({
-      data: { results: [{ ...mockItems[0], current_stock: 15 }] },
     });
 
     renderPage();
@@ -344,37 +416,21 @@ describe('InventoryListPage', () => {
       expect(screen.getByText('Test Item 1')).toBeInTheDocument();
     });
 
-    // Find the stock cell in the table - look for the table cell containing stock value
-    const tableRows = screen.getAllByRole('row');
-    const itemRow = tableRows.find(row => row.textContent?.includes('Test Item 1'));
-    
-    if (itemRow) {
-      // Find the stock cell (should be in a td)
-      const stockCell = itemRow.querySelector('td:nth-child(6)') || itemRow.querySelector('td');
-      
-      if (stockCell && stockCell.textContent?.includes('10')) {
-        fireEvent.click(stockCell);
+    // Click the first item's stock value to open the inline editor.
+    fireEvent.click(screen.getByText('10'));
 
-        await waitFor(() => {
-          expect(screen.getByRole('spinbutton')).toBeInTheDocument();
-        });
+    // Editor reveals Save/Cancel and a number input pre-filled with the value.
+    await screen.findByText('Save');
+    const numberInput = screen.getByDisplayValue('10');
+    fireEvent.change(numberInput, { target: { value: '15' } });
+    fireEvent.click(screen.getByText('Save'));
 
-        const numberInput = screen.getByRole('spinbutton');
-        fireEvent.change(numberInput, { target: { value: '15' } });
-
-        const saveButton = screen.getByText('Save');
-        fireEvent.click(saveButton);
-
-        await waitFor(() => {
-          expect(api.inventoryAPI.updateStock).toHaveBeenCalledWith('1', 15);
-        });
-      } else {
-        // Fallback: just verify the component renders correctly
-        expect(screen.getByText('Test Item 1')).toBeInTheDocument();
-      }
-    } else {
-      // Fallback: just verify the component renders correctly
-      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
-    }
+    await waitFor(() => {
+      expect(api.inventoryAPI.updateStock).toHaveBeenCalledWith('1', 15);
+    });
+    // Row reflects the new value without a full reload.
+    await waitFor(() => {
+      expect(screen.getByText('15')).toBeInTheDocument();
+    });
   });
 });

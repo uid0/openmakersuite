@@ -1,11 +1,12 @@
 /**
  * Asset List Component
- * Displays all hard assets with search and filtering (status, location, SIG)
- * Supports both Card view and Table view with smart client/server-side mode switching
+ * Displays all hard assets with search and filtering (status, location, SIG).
+ * Supports Card and Table views, both lazily loaded via infinite scroll with
+ * server-side filtering and sorting.
  */
-import { Button, Group } from '@mantine/core';
+import { Button, Group, Loader, Text } from '@mantine/core';
 import { IconLayoutGrid, IconTable } from '@tabler/icons-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
 import { assetsAPI, inventoryAPI, sigAPI } from '../services/api';
@@ -119,7 +120,6 @@ const AssetCard: React.FC<AssetCardProps> = ({
   );
 };
 
-const CLIENT_SIDE_THRESHOLD = 250;
 const ASSET_VIEW_MODE_KEY = 'assetViewMode';
 
 // Helper function to get view mode from localStorage
@@ -144,24 +144,28 @@ const saveViewMode = (mode: 'card' | 'table'): void => {
   }
 };
 
+const SEARCH_DEBOUNCE_MS = 300;
+
 const AssetList: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [locationFilter, setLocationFilter] = useState<number | null>(null);
   const [sigFilter, setSigFilter] = useState<number | null>(null);
   const [inventoryItemFilter, setInventoryItemFilter] = useState<string | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [sigs, setSigs] = useState<SIG[]>([]);
-  
-  // View mode and pagination state - initialize from localStorage
+
+  // View mode and infinite-scroll pagination state.
   const [viewMode, setViewMode] = useState<'card' | 'table'>(getStoredViewMode());
-  const [serverMode, setServerMode] = useState(false);
   const [totalCount, setTotalCount] = useState<number>(0);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
@@ -177,14 +181,11 @@ const AssetList: React.FC = () => {
     loadInitialData();
   }, []);
 
-  // Reset to page 1 when filters or search change
+  // Debounce the free-text search so each keystroke doesn't hit the API.
   useEffect(() => {
-    setCurrentPage(1);
-  }, [statusFilter, locationFilter, sigFilter, inventoryItemFilter, searchTerm]);
-
-  useEffect(() => {
-    loadAssets();
-  }, [statusFilter, locationFilter, sigFilter, inventoryItemFilter, searchTerm, currentPage, sortField, sortDirection]);
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const loadInitialData = async () => {
     try {
@@ -199,122 +200,134 @@ const AssetList: React.FC = () => {
     }
   };
 
-  const loadAssets = async () => {
+  // Map table sort fields to backend ordering fields
+  const mapSortFieldToBackend = (field: string): string => {
+    const fieldMap: Record<string, string> = {
+      'name': 'name',
+      'asset_tag': 'asset_tag',
+      'serial_number': 'serial_number',
+      'status': 'status',
+      'location_name': 'location__name',
+      'category_name': 'category__name',
+      'display_manufacturer': 'manufacturer__name',
+      'date_received': 'date_received',
+      'age_in_days': 'date_received', // Age is calculated from date_received
+      'inventory_item_name': 'inventory_item__name',
+      'owning_group_name': 'owning_group__name',
+      'operational_status': 'operational_status',
+      'is_active': 'is_active',
+    };
+    return fieldMap[field] || field;
+  };
+
+  // Get the backend sort field for API calls
+  const getBackendSortField = (): string | null => {
+    if (!sortField) return null;
+    const backendField = mapSortFieldToBackend(sortField);
+    // Remove leading minus if present (we'll add it based on direction)
+    const fieldWithoutMinus = backendField.startsWith('-') ? backendField.slice(1) : backendField;
+
+    // Special handling for age_in_days: older assets (higher age) = earlier
+    // date_received, so ascending age = descending date_received.
+    if (sortField === 'age_in_days') {
+      return sortDirection === 'asc' ? `-${fieldWithoutMinus}` : fieldWithoutMinus;
+    }
+
+    return sortDirection === 'desc' ? `-${fieldWithoutMinus}` : fieldWithoutMinus;
+  };
+
+  const buildAssetParams = (targetPage: number) => {
+    const params: Parameters<typeof assetsAPI.listAssets>[0] = { page: targetPage };
+    if (statusFilter !== 'all') {
+      params.status = statusFilter;
+    }
+    if (locationFilter) {
+      params.location = locationFilter;
+    }
+    if (sigFilter) {
+      params.owning_group = sigFilter;
+    }
+    if (inventoryItemFilter) {
+      params.inventory_item = inventoryItemFilter;
+    }
+    if (debouncedSearch.trim()) {
+      params.search = debouncedSearch.trim();
+    }
+    const backendSortField = getBackendSortField();
+    if (backendSortField) {
+      params.ordering = backendSortField;
+    }
+    return params;
+  };
+
+  // (Re)load the first page whenever the filters, search, or sort change.
+  useEffect(() => {
+    const loadFirstPage = async () => {
+      try {
+        setLoading(true);
+        const response = await assetsAPI.listAssets(buildAssetParams(1));
+        const data = response.data;
+        setAssets(data.results);
+        setTotalCount(data.count ?? data.results.length);
+        setHasMore(Boolean(data.next));
+        setPage(1);
+      } catch (err) {
+        console.error('AssetList: Error loading assets:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadFirstPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, statusFilter, locationFilter, sigFilter, inventoryItemFilter, sortField, sortDirection]);
+
+  const loadMore = async () => {
+    if (loadingMore || loading || !hasMore) {
+      return;
+    }
     try {
-      setLoading(true);
-      const params: any = {};
-      if (statusFilter !== 'all') {
-        params.status = statusFilter;
-      }
-      if (locationFilter) {
-        params.location = locationFilter;
-      }
-      if (sigFilter) {
-        params.owning_group = sigFilter;
-      }
-      if (inventoryItemFilter) {
-        params.inventory_item = inventoryItemFilter;
-      }
-      if (searchTerm) {
-        params.search = searchTerm;
-      }
-      
-      // Add sorting
-      const backendSortField = getBackendSortField();
-      if (backendSortField) {
-        params.ordering = backendSortField;
-      }
-      
-      // For initial load or server mode, use pagination
-      if (serverMode || currentPage > 1) {
-        params.page = currentPage;
-      }
-      
-      const response = await assetsAPI.listAssets(params);
-      const responseData = response.data;
-      
-      // Check if we should switch modes
-      const count = responseData.count ?? responseData.results.length;
-      setTotalCount(count);
-      
-      // Determine mode on first load or when filters change significantly
-      const shouldUseServerMode = count >= CLIENT_SIDE_THRESHOLD;
-      
-      if (shouldUseServerMode && !serverMode) {
-        // Switch to server mode
-        setServerMode(true);
-        setCurrentPage(1); // Reset to first page
-        setAssets(responseData.results);
-      } else if (!shouldUseServerMode && serverMode) {
-        // Switch to client mode - fetch all pages
-        setServerMode(false);
-        setCurrentPage(1);
-        const allAssets: Asset[] = [...responseData.results];
-        let page = 2;
-        while (responseData.next && page <= Math.ceil(count / 50)) {
-          params.page = page;
-          const nextResponse = await assetsAPI.listAssets(params);
-          allAssets.push(...nextResponse.data.results);
-          if (!nextResponse.data.next) break;
-          page++;
-        }
-        setAssets(allAssets);
-      } else if (serverMode) {
-        // Server mode: just use current page results
-        setAssets(responseData.results);
-      } else {
-        // Client-side mode: fetch all pages if needed
-        if (count > responseData.results.length && responseData.next) {
-          // Need to fetch all pages
-          const allAssets: Asset[] = [...responseData.results];
-          let page = 2;
-          while (responseData.next && page <= Math.ceil(count / 50)) {
-            params.page = page;
-            const nextResponse = await assetsAPI.listAssets(params);
-            allAssets.push(...nextResponse.data.results);
-            if (!nextResponse.data.next) break;
-            page++;
-          }
-          setAssets(allAssets);
-        } else {
-          setAssets(responseData.results);
-        }
-      }
-    } catch (err: any) {
-      console.error('AssetList: Error loading assets:', err);
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const response = await assetsAPI.listAssets(buildAssetParams(nextPage));
+      const data = response.data;
+      setAssets((prev) => [...prev, ...data.results]);
+      setTotalCount(data.count ?? totalCount);
+      setHasMore(Boolean(data.next));
+      setPage(nextPage);
+    } catch (err) {
+      console.error('AssetList: Error loading more assets:', err);
     } finally {
-      setLoading(false);
+      setLoadingMore(false);
     }
   };
 
-  // Client-side filtering for card view when in client mode
-  const filteredAssets = useMemo(() => {
-    if (serverMode || viewMode === 'table') {
-      // Server-side filtering or table view handles its own display
-      return assets;
-    }
-    // Client-side mode: apply filters locally (though they're already applied server-side)
-    return assets;
-  }, [assets, serverMode, viewMode]);
+  // Keep the latest loadMore reachable from the (stable) observer callback.
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
 
-  const statusCounts = useMemo(() => {
-    if (serverMode) {
-      // In server mode, we can't calculate accurate counts without fetching all data
-      // For now, just use the current page's counts
-      return {
-        all: totalCount,
-        active: assets.filter(a => a.status === 'active').length,
-        maintenance: assets.filter(a => a.status === 'maintenance').length,
-        retired: assets.filter(a => a.status === 'retired').length,
-      };
+  // Callback ref: attach an IntersectionObserver as soon as the sentinel
+  // mounts and tear it down when it unmounts.
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
     }
-    return {
-      all: assets.length,
-      active: assets.filter(a => a.status === 'active').length,
-      maintenance: assets.filter(a => a.status === 'maintenance').length,
-      retired: assets.filter(a => a.status === 'retired').length,
-    };
-  }, [assets, serverMode, totalCount]);
+    if (node && typeof IntersectionObserver !== 'undefined') {
+      observerRef.current = new IntersectionObserver(
+        (entries) => {
+          if (entries[0]?.isIntersecting) {
+            loadMoreRef.current();
+          }
+        },
+        { rootMargin: '200px' }
+      );
+      observerRef.current.observe(node);
+    }
+  }, []);
+
+  // Loaded-page maintenance tally (approximate until the full list scrolls in).
+  const maintenanceCount = assets.filter((a) => a.status === 'maintenance').length;
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
@@ -353,7 +366,6 @@ const AssetList: React.FC = () => {
 
   const handleSwipeRight = (assetId: string) => {
     // Swipe right to report issue or quick action
-    // For now, navigate to asset detail page where user can report issues
     navigate(`/assets/${assetId}?action=report`);
   };
 
@@ -364,104 +376,32 @@ const AssetList: React.FC = () => {
       setSortField(field);
       setSortDirection('asc');
     }
-    // Reset to first page when sorting changes
-    setCurrentPage(1);
+    // The first-page effect resets pagination when sort changes.
   };
 
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-    // Scroll to top when page changes
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // Map table sort fields to backend ordering fields
-  const mapSortFieldToBackend = (field: string): string => {
-    const fieldMap: Record<string, string> = {
-      'name': 'name',
-      'asset_tag': 'asset_tag',
-      'serial_number': 'serial_number',
-      'status': 'status',
-      'location_name': 'location__name',
-      'category_name': 'category__name',
-      'display_manufacturer': 'manufacturer__name',
-      'date_received': 'date_received',
-      'age_in_days': 'date_received', // Age is calculated from date_received, we'll handle direction separately
-      'inventory_item_name': 'inventory_item__name',
-      'owning_group_name': 'owning_group__name',
-      'operational_status': 'operational_status',
-      'is_active': 'is_active',
-    };
-    return fieldMap[field] || field;
-  };
-
-  // Get the backend sort field for API calls
-  const getBackendSortField = (): string | null => {
-    if (!sortField) return null;
-    const backendField = mapSortFieldToBackend(sortField);
-    // Remove leading minus if present (we'll add it based on direction)
-    const fieldWithoutMinus = backendField.startsWith('-') ? backendField.slice(1) : backendField;
-    
-    // Special handling for age_in_days: older assets (higher age) = earlier date_received
-    // So ascending age = descending date_received, and vice versa
-    if (sortField === 'age_in_days') {
-      return sortDirection === 'asc' ? `-${fieldWithoutMinus}` : fieldWithoutMinus;
-    }
-    
-    return sortDirection === 'desc' ? `-${fieldWithoutMinus}` : fieldWithoutMinus;
-  };
-
-  // Export function to fetch all assets for CSV export
+  // Fetch every asset matching the current filters (used by CSV export).
   const handleExportAllAssets = async (): Promise<Asset[]> => {
-    const params: any = {};
-    if (statusFilter !== 'all') {
-      params.status = statusFilter;
-    }
-    if (locationFilter) {
-      params.location = locationFilter;
-    }
-    if (sigFilter) {
-      params.owning_group = sigFilter;
-    }
-    if (inventoryItemFilter) {
-      params.inventory_item = inventoryItemFilter;
-    }
-    if (searchTerm) {
-      params.search = searchTerm;
-    }
-    
-    // Add sorting
-    const backendSortField = getBackendSortField();
-    if (backendSortField) {
-      params.ordering = backendSortField;
-    }
-
-    // Fetch all pages
-    const allAssets: Asset[] = [];
-    let page = 1;
-    let hasMore = true;
-
-    while (hasMore) {
-      params.page = page;
-      const response = await assetsAPI.listAssets(params);
-      const responseData = response.data;
-      allAssets.push(...responseData.results);
-      
-      if (!responseData.next || responseData.results.length === 0) {
-        hasMore = false;
-      } else {
-        page++;
+    const all: Asset[] = [];
+    let targetPage = 1;
+    for (;;) {
+      const response = await assetsAPI.listAssets(buildAssetParams(targetPage));
+      all.push(...response.data.results);
+      if (!response.data.next) {
+        break;
       }
+      targetPage += 1;
     }
-
-    return allAssets;
+    return all;
   };
 
-  const displayCount = serverMode ? totalCount : assets.length;
+  const hasActiveFilters = Boolean(
+    searchTerm || locationFilter || sigFilter || statusFilter !== 'all' || inventoryItemFilter
+  );
 
   return (
     <div className="asset-list-container">
       <div className="asset-header">
-        <h2>Makerspace Assets ({displayCount} total)</h2>
+        <h2>Makerspace Assets ({totalCount} total)</h2>
         <div className="asset-header-actions">
           <Group gap="md">
             <Group gap={0}>
@@ -493,9 +433,9 @@ const AssetList: React.FC = () => {
             </Button>
           </Group>
           <div className="asset-stats">
-            {statusCounts.maintenance > 0 && (
+            {maintenanceCount > 0 && (
               <span className="stat-badge maintenance">
-                {statusCounts.maintenance} in maintenance
+                {maintenanceCount} in maintenance
               </span>
             )}
           </div>
@@ -584,7 +524,7 @@ const AssetList: React.FC = () => {
                 setInventoryItemFilter(null);
                 const newSearchParams = new URLSearchParams(searchParams);
                 newSearchParams.delete('inventory_item');
-                const newUrl = newSearchParams.toString() 
+                const newUrl = newSearchParams.toString()
                   ? `/inventory/assets?${newSearchParams.toString()}`
                   : '/inventory/assets';
                 navigate(newUrl, { replace: true });
@@ -605,42 +545,53 @@ const AssetList: React.FC = () => {
 
       {viewMode === 'table' ? (
         <AssetTableView
-          assets={filteredAssets}
+          assets={assets}
           loading={loading}
           totalCount={totalCount}
-          currentPage={currentPage}
-          pageSize={50}
-          onPageChange={handlePageChange}
           sortField={sortField}
           sortDirection={sortDirection}
           onSort={handleSort}
-          serverMode={serverMode}
           onExport={handleExportAllAssets}
         />
+      ) : loading && assets.length === 0 ? (
+        <div className="no-results">Loading assets…</div>
+      ) : assets.length === 0 ? (
+        <div className="no-results">
+          {hasActiveFilters ? 'No assets match your filters.' : 'No assets found.'}
+        </div>
       ) : (
-        <>
-          {filteredAssets.length === 0 ? (
-            <div className="no-results">
-              {searchTerm || locationFilter || sigFilter || statusFilter !== 'all'
-                ? 'No assets match your filters.'
-                : 'No assets found.'}
-            </div>
-          ) : (
-            <div className="asset-grid">
-              {filteredAssets.map((asset) => (
-                <AssetCard
-                  key={asset.id}
-                  asset={asset}
-                  onClick={handleAssetClick}
-                  onSwipeLeft={handleSwipeLeft}
-                  onSwipeRight={handleSwipeRight}
-                  getStatusBadgeClass={getStatusBadgeClass}
-                  getStatusLabel={getStatusLabel}
-                />
-              ))}
-            </div>
+        <div className="asset-grid">
+          {assets.map((asset) => (
+            <AssetCard
+              key={asset.id}
+              asset={asset}
+              onClick={handleAssetClick}
+              onSwipeLeft={handleSwipeLeft}
+              onSwipeRight={handleSwipeRight}
+              getStatusBadgeClass={getStatusBadgeClass}
+              getStatusLabel={getStatusLabel}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Shared infinite-scroll sentinel for both card and table views. */}
+      {assets.length > 0 && (
+        <div ref={sentinelRef} data-testid="asset-scroll-sentinel" style={{ padding: '1rem', textAlign: 'center' }}>
+          {loadingMore && (
+            <Group justify="center" gap="xs">
+              <Loader size="sm" />
+              <Text size="sm" c="dimmed">
+                Loading more…
+              </Text>
+            </Group>
           )}
-        </>
+          {!hasMore && (
+            <Text size="sm" c="dimmed">
+              All {totalCount} asset{totalCount === 1 ? '' : 's'} loaded.
+            </Text>
+          )}
+        </div>
       )}
     </div>
   );

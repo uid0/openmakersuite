@@ -139,7 +139,6 @@ describe('AssetTableView', () => {
     sortField: null,
     sortDirection: 'asc' as const,
     onSort: jest.fn(),
-    serverMode: false,
   };
 
   const renderComponent = (props = {}) => {
@@ -235,41 +234,17 @@ describe('AssetTableView', () => {
     expect(screen.getByText('No assets found.')).toBeInTheDocument();
   });
 
-  it('displays pagination in server mode', () => {
-    renderComponent({
-      serverMode: true,
-      totalCount: 100,
-      currentPage: 1,
-      pageSize: 50,
-      onPageChange: jest.fn(),
-    });
+  it('shows loaded-of-total count when more results remain', () => {
+    renderComponent({ totalCount: 100 });
 
-    // Pagination should be visible
-    expect(screen.getByText(/Showing page 1 of 2/)).toBeInTheDocument();
+    expect(screen.getByText('Showing 2 of 100 assets')).toBeInTheDocument();
   });
 
-  it('does not show pagination in client mode', () => {
-    renderComponent({ serverMode: false });
+  it('shows a simple count when no total is provided', () => {
+    renderComponent();
 
     expect(screen.queryByText(/Showing page/)).not.toBeInTheDocument();
     expect(screen.getByText(/Showing 2 asset/)).toBeInTheDocument();
-  });
-
-  it('handles page change in server mode', async () => {
-    const onPageChange = jest.fn();
-    renderComponent({
-      serverMode: true,
-      totalCount: 100,
-      currentPage: 1,
-      pageSize: 50,
-      onPageChange,
-    });
-
-    // Pagination should be visible
-    expect(screen.getByText(/Showing page 1 of 2/)).toBeInTheDocument();
-    // Pagination buttons should be present
-    const paginationButtons = screen.getAllByRole('button');
-    expect(paginationButtons.length).toBeGreaterThan(0);
   });
 
   it('handles export when export button is clicked', async () => {

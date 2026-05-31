@@ -7,7 +7,6 @@ import {
   Badge,
   Group,
   Loader,
-  Pagination,
   Paper,
   Stack,
   Table,
@@ -25,14 +24,10 @@ interface AssetTableViewProps {
   assets: Asset[];
   loading: boolean;
   totalCount?: number;
-  currentPage?: number;
-  pageSize?: number;
-  onPageChange?: (page: number) => void;
   sortField: string | null;
   sortDirection: 'asc' | 'desc';
   onSort: (field: string) => void;
-  serverMode: boolean;
-  onExport?: () => Promise<Asset[]> | Asset[]; // Optional function to fetch all assets for export
+  onExport?: () => Promise<Asset[]> | Asset[]; // Optional: fetch all assets for export
 }
 
 type SortableField = 
@@ -74,13 +69,9 @@ const AssetTableView: React.FC<AssetTableViewProps> = ({
   assets,
   loading,
   totalCount,
-  currentPage = 1,
-  pageSize = 50,
-  onPageChange,
   sortField,
   sortDirection,
   onSort,
-  serverMode,
   onExport,
 }) => {
   const navigate = useNavigate();
@@ -170,8 +161,6 @@ const AssetTableView: React.FC<AssetTableViewProps> = ({
     }
   };
 
-  const totalPages = serverMode && totalCount ? Math.ceil(totalCount / pageSize) : 1;
-
   if (loading && assets.length === 0) {
     return (
       <Paper withBorder p="xl">
@@ -195,10 +184,9 @@ const AssetTableView: React.FC<AssetTableViewProps> = ({
     <Stack gap="md">
       <Group justify="space-between" align="center">
         <Text size="sm" c="dimmed">
-          {serverMode 
-            ? `Showing page ${currentPage} of ${totalPages} (${totalCount} total assets)`
-            : `Showing ${assets.length} asset${assets.length !== 1 ? 's' : ''}`
-          }
+          {totalCount != null && totalCount > assets.length
+            ? `Showing ${assets.length} of ${totalCount} assets`
+            : `Showing ${assets.length} asset${assets.length !== 1 ? 's' : ''}`}
         </Text>
         <Tooltip label="Export to CSV">
           <ActionIcon
@@ -363,18 +351,6 @@ const AssetTableView: React.FC<AssetTableViewProps> = ({
           </Table>
         </Table.ScrollContainer>
       </Paper>
-
-      {serverMode && totalCount && totalCount > pageSize && (
-        <Group justify="center">
-          <Pagination
-            value={currentPage}
-            onChange={onPageChange}
-            total={totalPages}
-            siblings={1}
-            boundaries={1}
-          />
-        </Group>
-      )}
     </Stack>
   );
 };

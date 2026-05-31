@@ -61,6 +61,7 @@ from .serializers import (
     DeviceLockoutSerializer,
     DeviceTypeSerializer,
     DeviceUsageSerializer,
+    EPaperDisplaySerializer,
     ESP32DeviceSerializer,
     FirmwareVersionSerializer,
     OccupancyEventSerializer,
@@ -2309,3 +2310,45 @@ class EPaperDisplayBindView(APIView):
             },
             status=200,
         )
+
+
+class EPaperDisplayListView(APIView):
+    """List every ePaper panel for the management screen.
+
+    Staff use this to see each panel's asset binding, battery level, last
+    image fetch, and active/retired state at a glance. Rebinding reuses the
+    existing bind endpoint; retiring uses EPaperDisplaySetActiveView below.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        displays = EPaperDisplay.objects.select_related("asset", "device").all()
+        return Response(EPaperDisplaySerializer(displays, many=True).data)
+
+
+class EPaperDisplaySetActiveView(APIView):
+    """Retire or reactivate an ePaper panel.
+
+    ``POST {"is_active": false}`` retires the panel — the firmware's image.png
+    fetch then paints the "retired" card and the panel stops refreshing.
+    ``{"is_active": true}`` brings it back into service.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, display_id):
+        try:
+            display = EPaperDisplay.objects.get(pk=display_id)
+        except EPaperDisplay.DoesNotExist:
+            return Response({"detail": "Display not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        raw = request.data.get("is_active", False)
+        if isinstance(raw, str):
+            is_active = raw.strip().lower() in {"true", "1", "yes"}
+        else:
+            is_active = bool(raw)
+
+        display.is_active = is_active
+        display.save(update_fields=["is_active", "updated_at"])
+        return Response(EPaperDisplaySerializer(display).data)

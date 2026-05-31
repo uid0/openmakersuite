@@ -70,6 +70,7 @@ const ENTRIES: RouteEntry[] = [
   { path: 'facilities/electrical/network-drops', label: 'Network Drops', clickable: false },
   { path: 'facilities/forgekey-dashboard', label: 'ForgeKey Dashboard' },
   { path: 'facilities/forgekey-devices', label: 'ForgeKey Devices' },
+  { path: 'facilities/forgekey-epaper', label: 'e-Paper Panels' },
   { path: 'admin/audit-feed', label: 'Audit Feed' },
   { path: 'forgekey/epaper/bind', label: 'Bind ePaper Panel' },
   { path: 'forgekey/epaper/service', label: 'Log ePaper Service' },

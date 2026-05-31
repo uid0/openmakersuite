@@ -1844,6 +1844,23 @@ export interface ForgeKeyTemperatureResponse {
   readings: ForgeKeyTemperatureReading[];
 }
 
+export interface ForgeKeyEPaperDisplay {
+  id: string;
+  device: string | null;
+  device_mac_address: string | null;
+  asset: string | null;
+  asset_name: string | null;
+  asset_tag: string | null;
+  battery_percent: number | null;
+  is_low_battery: boolean;
+  last_battery_at: string | null;
+  last_image_etag: string;
+  last_image_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export const forgekeyAPI = {
   listDevices: (opts: { capability?: string } = {}) =>
     api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
@@ -1898,6 +1915,11 @@ export const forgekeyAPI = {
       `/forgekey/epaper/${displayId}/bind/`,
       { asset_id: assetId },
     ),
+  listEPaperDisplays: () => api.get<ForgeKeyEPaperDisplay[]>('/forgekey/epaper/'),
+  setEPaperActive: (displayId: string, isActive: boolean) =>
+    api.post<ForgeKeyEPaperDisplay>(`/forgekey/epaper/${displayId}/set-active/`, {
+      is_active: isActive,
+    }),
   // Scan-to-log page: read the panel's recurring maintenance tasks (public)…
   getEPaperServiceInfo: (displayId: string) =>
     api.get<{

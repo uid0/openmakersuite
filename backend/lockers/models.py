@@ -330,3 +330,60 @@ class LockerOtp(models.Model):
         self.revoked_at = timezone.now()
         self.revoked_by = by
         self.save(update_fields=["revoked_at", "revoked_by"])
+
+
+class LockerStatus(models.Model):
+    """Latest hardware status for a locker, from the firmware's
+    ``forgekey/<mac>/cabinet_lock/status`` telemetry (published ~every 10s).
+
+    Upserted in place (one row per locker) so the management UI can show whether
+    each locker is secure / online and flag possible intrusions. ``secure`` is
+    trustworthy only when both the reed switch and the latch supervisor agree —
+    the firmware computes ``secure = reed_closed AND latch_locked``, so a
+    sustained ``secure=False`` (or ``state=ALARM``) is a possible intrusion.
+    """
+
+    locker = models.OneToOneField(
+        Locker,
+        on_delete=models.CASCADE,
+        related_name="status",
+        help_text="The locker this status belongs to.",
+    )
+    device = models.ForeignKey(
+        "forgekey.ESP32Device",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="The latch device that reported this status.",
+    )
+    secure = models.BooleanField(null=True, blank=True)
+    state = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Firmware state: INITIALIZING / SECURE / UNLOCKED / ACCESSING / ALARM.",
+    )
+    reed_closed = models.BooleanField(null=True, blank=True)
+    latch_locked = models.BooleanField(null=True, blank=True)
+    ir_broken = models.BooleanField(null=True, blank=True)
+    mortise_active = models.BooleanField(null=True, blank=True)
+    item_present = models.BooleanField(null=True, blank=True)
+    last_trigger = models.CharField(max_length=40, blank=True)
+    firmware_version = models.CharField(max_length=50, blank=True)
+    last_status_at = models.DateTimeField(auto_now=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name_plural = "Locker statuses"
+
+    def __str__(self) -> str:
+        return f"{self.locker.name} [{self.state or 'unknown'}]"
+
+    @property
+    def is_alarm(self) -> bool:
+        return self.state == "ALARM"
+
+    @property
+    def is_insecure(self) -> bool:
+        """True when the lock is reporting NOT secure (a possible intrusion)."""
+        return self.secure is False

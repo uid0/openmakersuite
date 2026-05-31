@@ -1519,6 +1519,17 @@ views:
   lockers.views.IrBreakEventView:
     permission_classes:
     - IsAuthenticated
+  lockers.views.LockStatusEventView:
+    permission_classes:
+    - IsAuthenticated
+  lockers.views.LockerViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
   lockers.views.LockoutEventView:
     permission_classes:
     - IsAuthenticated

@@ -20,6 +20,7 @@ vi.mock('../../services/api', async () => {
     forgekeyAPI: {
       getDevice: jest.fn(),
       getOccupancy: jest.fn(),
+      getTemperature: jest.fn(),
       restart: jest.fn(),
       capturePhoto: jest.fn(),
       blink: jest.fn(),
@@ -92,6 +93,15 @@ const seedHappyPath = () => {
       events: [],
     },
   } as any);
+  mockApi.getTemperature.mockResolvedValue({
+    data: {
+      device: 'AA:BB:CC:DD:EE:FF',
+      since: '2026-04-30T03:00:00Z',
+      latest_temperature_c: null,
+      latest_humidity_percent: null,
+      readings: [],
+    },
+  } as any);
   mockApi.recentCommands.mockResolvedValue({
     data: { device: 'AA:BB:CC:DD:EE:FF', results: [] },
   } as any);
@@ -106,6 +116,33 @@ describe('ForgeKeyDeviceDetailPage', () => {
   afterEach(() => {
     localStorage.removeItem('is_staff');
     localStorage.removeItem('is_superuser');
+  });
+
+  it('renders the temperature chart when the device reports readings', async () => {
+    seedHappyPath();
+    mockApi.getTemperature.mockResolvedValue({
+      data: {
+        device: 'AA:BB:CC:DD:EE:FF',
+        since: '2026-04-30T03:00:00Z',
+        latest_temperature_c: 21.4,
+        latest_humidity_percent: 47.1,
+        readings: [
+          {
+            id: 'r1',
+            device: 'dev-1',
+            sensor_kind: 'temperature_sensor',
+            temperature_c: 21.4,
+            humidity_percent: 47.1,
+            recorded_at: '2026-05-01T03:00:00Z',
+            raw_payload: {},
+          },
+        ],
+      },
+    } as any);
+
+    renderAt('/facilities/forgekey-devices/dev-1');
+
+    expect(await screen.findByTestId('latest-temperature')).toHaveTextContent('21.4°C');
   });
 
   it('renders all five command buttons for staff', async () => {

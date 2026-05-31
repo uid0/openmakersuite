@@ -37,7 +37,12 @@ import paho.mqtt.client as mqtt
 import sentry_sdk
 
 from config.observability_redaction import redact
-from forgekey.models import DeviceFirmwareUpdate, ESP32Device, OccupancyEvent
+from forgekey.models import (
+    DeviceFirmwareUpdate,
+    ESP32Device,
+    OccupancyEvent,
+    TemperatureReading,
+)
 from forgekey.services.jwt_signing import JwtSigningError, is_jwt_signing_configured
 from forgekey.utils import (
     SERVER_JWT_SUBJECT,
@@ -203,6 +208,70 @@ def handle_occupancy_message(topic: str, payload: bytes) -> Optional[OccupancyEv
         is_online=True,
     )
     return event
+
+
+def _coerce_float(raw) -> Optional[float]:
+    """Best-effort float coercion; returns ``None`` on missing/non-numeric input."""
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def handle_reading_message(topic: str, payload: bytes) -> Optional[TemperatureReading]:
+    """Parse and persist a temperature/humidity reading. Returns the row, or
+    ``None`` on drop. Mirrors :func:`handle_occupancy_message` so the
+    temperature-sensor firmware's ``temperature_sensor/reading`` topic feeds the
+    same dashboards the people-counter occupancy events do.
+    """
+    parts = topic.split("/")
+    if len(parts) < 4:
+        logger.warning("Dropping reading message: malformed topic %r", topic)
+        return None
+
+    mac = _mac_from_topic_segment(parts[1])
+    if mac is None:
+        logger.warning("Dropping reading message: bad MAC segment %r in %r", parts[1], topic)
+        return None
+
+    sensor_kind = normalize_sensor_kind(parts[2])
+
+    try:
+        body = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning("Dropping reading message on %s: invalid JSON (%s)", topic, exc)
+        return None
+    if not isinstance(body, dict):
+        logger.warning("Dropping reading message on %s: payload is not an object", topic)
+        return None
+
+    try:
+        device = ESP32Device.objects.get(mac_address=mac)
+    except ESP32Device.DoesNotExist:
+        logger.info("Dropping reading message: unknown MAC %s on topic %s", mac, topic)
+        return None
+
+    temperature_c = _coerce_float(body.get("tempC"))
+    if temperature_c is None:
+        logger.warning("Dropping reading message on %s: missing/invalid tempC", topic)
+        return None
+    humidity_percent = _coerce_float(body.get("humidity"))
+
+    reading = TemperatureReading.objects.create(
+        device=device,
+        sensor_kind=sensor_kind,
+        temperature_c=temperature_c,
+        humidity_percent=humidity_percent,
+        # Scrub the raw payload before persisting (mirrors occupancy ingest).
+        raw_payload=redact(body),
+    )
+    ESP32Device.objects.filter(pk=device.pk).update(
+        last_seen=dj_timezone.now(),
+        is_online=True,
+    )
+    return reading
 
 
 def handle_status_message(topic: str, payload: bytes) -> bool:
@@ -404,6 +473,11 @@ def _topic_matches_occupancy(topic: str) -> bool:
     return len(parts) == 4 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[3] == "occupancy"
 
 
+def _topic_matches_reading(topic: str) -> bool:
+    parts = topic.split("/")
+    return len(parts) == 4 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[3] == "reading"
+
+
 def _topic_matches_status(topic: str) -> bool:
     parts = topic.split("/")
     return len(parts) == 3 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[2] == "status"
@@ -559,6 +633,8 @@ def dispatch_message(topic: str, payload: bytes) -> None:
             handle_ota_status_message(topic, payload)
         elif _topic_matches_occupancy(topic):
             handle_occupancy_message(topic, payload)
+        elif _topic_matches_reading(topic):
+            handle_reading_message(topic, payload)
         elif _topic_matches_log(topic):
             handle_log_message(topic, payload)
         elif _topic_matches_status(topic):
@@ -616,6 +692,7 @@ class Command(BaseCommand):
             client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
 
         occupancy_filter = f"{prefix}/+/+/occupancy"
+        reading_filter = f"{prefix}/+/+/reading"
         status_filter = f"{prefix}/+/status"
         ota_status_filter = f"{prefix}/+/ota/status"
         log_filter = f"{prefix}/+/logs"
@@ -649,10 +726,11 @@ class Command(BaseCommand):
                 return
             connect_state["first_connect_done"] = True
             logger.info(
-                "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s, %s",
+                "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s, %s, %s",
                 host,
                 port,
                 occupancy_filter,
+                reading_filter,
                 status_filter,
                 ota_status_filter,
                 log_filter,
@@ -660,6 +738,7 @@ class Command(BaseCommand):
             c.subscribe(
                 [
                     (occupancy_filter, 1),
+                    (reading_filter, 1),
                     (status_filter, 1),
                     (ota_status_filter, 1),
                     (log_filter, 1),

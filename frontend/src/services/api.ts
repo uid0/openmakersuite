@@ -1826,6 +1826,24 @@ export interface ForgeKeyFleetSummary {
   }>;
 }
 
+export interface ForgeKeyTemperatureReading {
+  id: string;
+  device: string;
+  sensor_kind: string;
+  temperature_c: number;
+  humidity_percent: number | null;
+  recorded_at: string;
+  raw_payload: Record<string, unknown>;
+}
+
+export interface ForgeKeyTemperatureResponse {
+  device: string;
+  since: string;
+  latest_temperature_c: number | null;
+  latest_humidity_percent: number | null;
+  readings: ForgeKeyTemperatureReading[];
+}
+
 export const forgekeyAPI = {
   listDevices: (opts: { capability?: string } = {}) =>
     api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
@@ -1838,6 +1856,10 @@ export const forgekeyAPI = {
     api.patch<ForgeKeyDevice>(`/forgekey/devices/${id}/`, data),
   getOccupancy: (id: string, since: string = '24h') =>
     api.get<ForgeKeyOccupancyResponse>(`/forgekey/devices/${id}/occupancy/`, {
+      params: { since },
+    }),
+  getTemperature: (id: string, since: string = '24h') =>
+    api.get<ForgeKeyTemperatureResponse>(`/forgekey/devices/${id}/temperature/`, {
       params: { since },
     }),
   restart: (id: string) =>

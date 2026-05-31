@@ -691,6 +691,9 @@ views:
       status:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      temperature:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly

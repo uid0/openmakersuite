@@ -15,6 +15,7 @@ import {
   ForgeKeyCommandResponse,
   ForgeKeyDevice,
   ForgeKeyOccupancyResponse,
+  ForgeKeyTemperatureResponse,
   forgekeyAPI,
 } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -39,6 +40,7 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
 
   const [device, setDevice] = useState<ForgeKeyDevice | null>(null);
   const [occupancy, setOccupancy] = useState<ForgeKeyOccupancyResponse | null>(null);
+  const [temperature, setTemperature] = useState<ForgeKeyTemperatureResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [otaInputs, setOtaInputs] = useState({ version: '', url: '' });
@@ -50,12 +52,14 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
   const loadAll = useCallback(async () => {
     if (!id) return;
     try {
-      const [deviceRes, occRes] = await Promise.all([
+      const [deviceRes, occRes, tempRes] = await Promise.all([
         forgekeyAPI.getDevice(id),
         forgekeyAPI.getOccupancy(id, '24h'),
+        forgekeyAPI.getTemperature(id, '24h'),
       ]);
       setDevice(deviceRes.data);
       setOccupancy(occRes.data);
+      setTemperature(tempRes.data);
       setLoadError(null);
     } catch (err: any) {
       setLoadError(extractErrorMessage(err, 'Failed to load device.'));
@@ -83,6 +87,15 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
       };
     });
   }, [occupancy]);
+
+  const tempChartData = useMemo(() => {
+    if (!temperature) return [];
+    return temperature.readings.map((reading) => ({
+      ts: reading.recorded_at,
+      temp: reading.temperature_c,
+      humidity: reading.humidity_percent,
+    }));
+  }, [temperature]);
 
   const runCommand = useCallback(
     async (key: ControlKey, fn: () => Promise<{ data: ForgeKeyCommandResponse }>) => {
@@ -190,6 +203,67 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
               </p>
             )}
           </section>
+
+          {tempChartData.length > 0 && (
+            <section aria-label="Temperature chart">
+              <h3>Temperature (last 24h)</h3>
+              <p style={{ color: '#555', marginTop: 0 }}>
+                Latest:{' '}
+                <strong data-testid="latest-temperature">
+                  {temperature?.latest_temperature_c != null
+                    ? `${temperature.latest_temperature_c.toFixed(1)}°C`
+                    : '—'}
+                </strong>
+                {temperature?.latest_humidity_percent != null && (
+                  <> · {temperature.latest_humidity_percent.toFixed(0)}% RH</>
+                )}
+              </p>
+              <div style={{ width: '100%', height: 240 }}>
+                <ResponsiveContainer>
+                  <LineChart data={tempChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                    <XAxis
+                      dataKey="ts"
+                      tickFormatter={(v: string) => new Date(v).toLocaleTimeString()}
+                    />
+                    <YAxis
+                      yAxisId="temp"
+                      domain={['auto', 'auto']}
+                      tickFormatter={(v) => `${v}°`}
+                    />
+                    <YAxis
+                      yAxisId="humidity"
+                      orientation="right"
+                      domain={[0, 100]}
+                      tickFormatter={(v) => `${v}%`}
+                    />
+                    <Tooltip labelFormatter={(v) => new Date(String(v)).toLocaleString()} />
+                    <Line
+                      yAxisId="temp"
+                      type="monotone"
+                      dataKey="temp"
+                      name="Temp °C"
+                      stroke="#e8590c"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                    <Line
+                      yAxisId="humidity"
+                      type="monotone"
+                      dataKey="humidity"
+                      name="Humidity %"
+                      stroke="#228be6"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                      connectNulls
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+          )}
 
           <DeviceControlsCard device={device} />
 

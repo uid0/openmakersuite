@@ -17,6 +17,7 @@ from .models import (
     OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
+    TemperatureReading,
 )
 
 
@@ -147,6 +148,23 @@ class OccupancyEventSerializer(serializers.ModelSerializer):
             "raw_payload",
         ]
         read_only_fields = ["id", "ingested_at", "occupancy_delta"]
+
+
+class TemperatureReadingSerializer(serializers.ModelSerializer):
+    """Serializer for TemperatureReading rows, used by the device-detail chart."""
+
+    class Meta:
+        model = TemperatureReading
+        fields = [
+            "id",
+            "device",
+            "sensor_kind",
+            "temperature_c",
+            "humidity_percent",
+            "recorded_at",
+            "raw_payload",
+        ]
+        read_only_fields = ["id", "recorded_at"]
 
 
 class DeviceCommandSerializer(serializers.ModelSerializer):

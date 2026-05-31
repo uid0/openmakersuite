@@ -16,7 +16,13 @@ import paho.mqtt.client as mqtt
 import sentry_sdk
 from celery import shared_task
 
-from .models import ESP32Device, ESP32DevicePhoto, OccupancyEvent, PowerMeterReading
+from .models import (
+    ESP32Device,
+    ESP32DevicePhoto,
+    OccupancyEvent,
+    PowerMeterReading,
+    TemperatureReading,
+)
 from .services.jwt_signing import JwtSigningError, is_jwt_signing_configured
 from .utils import (
     SERVER_JWT_SUBJECT,
@@ -412,6 +418,58 @@ def process_mqtt_occupancy(
         is_online=True,
     )
     logger.info("Recorded occupancy event for device %s", normalized_mac)
+
+
+def _coerce_optional_float(raw: Any) -> Optional[float]:
+    """Best-effort float coercion; ``None`` on missing/non-numeric input."""
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+@shared_task
+def process_mqtt_reading(mac_address: str, sensor_kind: str, message_data: Dict[str, Any]) -> None:
+    """Persist a single temperature/humidity reading from an EMQX webhook
+    dispatch. Mirrors the long-running consumer's ``handle_reading_message`` so
+    the two ingest paths converge on the same model state.
+    """
+    try:
+        normalized_mac = normalize_mac_address(mac_address)
+    except Exception:
+        logger.warning("Dropping reading: malformed MAC %r", mac_address)
+        return
+
+    if not isinstance(message_data, dict):
+        logger.warning("Dropping reading from %s: payload is not an object", normalized_mac)
+        return
+
+    try:
+        device = ESP32Device.objects.get(mac_address=normalized_mac)
+    except ESP32Device.DoesNotExist:
+        logger.info("Dropping reading: unknown MAC %s", normalized_mac)
+        return
+
+    temperature_c = _coerce_optional_float(message_data.get("tempC"))
+    if temperature_c is None:
+        logger.warning("Dropping reading from %s: missing/invalid tempC", normalized_mac)
+        return
+    humidity_percent = _coerce_optional_float(message_data.get("humidity"))
+
+    TemperatureReading.objects.create(
+        device=device,
+        sensor_kind=sensor_kind or "",
+        temperature_c=temperature_c,
+        humidity_percent=humidity_percent,
+        raw_payload=message_data,
+    )
+    ESP32Device.objects.filter(pk=device.pk).update(
+        last_seen=timezone.now(),
+        is_online=True,
+    )
+    logger.info("Recorded temperature reading for device %s", normalized_mac)
 
 
 def _normalize_capabilities(raw: Any) -> list[str]:

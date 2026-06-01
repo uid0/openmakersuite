@@ -231,6 +231,55 @@ services:
     networks:
       - app-network
 
+  firmware_builder:
+    # Self-hosted firmware build worker. Unlike celery / mqtt_consumer (which
+    # reuse oms-backend:local), this carries the git + PlatformIO toolchain via
+    # Dockerfile.firmware-builder, and it is the ONLY consumer of the dedicated
+    # `builds` queue that forgekey.tasks.build_firmware is routed to. Without
+    # it, queued firmware builds sit in Redis forever.
+    #
+    # Provide a read-only SSH deploy key with read access to the ForgeKey repo
+    # via FORGEKEY_DEPLOY_KEY in .env; until it's set the container still runs,
+    # but each build fails at `git clone`. See docs/FORGEKEY_FIRMWARE_BUILD.md.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.firmware-builder
+    image: oms-firmware-builder:local
+    logging: *default-logging
+    # concurrency=1: builds are heavy and serialized. --max-tasks-per-child
+    # recycles the worker so a leaky toolchain run can't accumulate.
+    command: celery -A config worker -Q builds --concurrency=1 -l info --max-tasks-per-child=20
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    volumes:
+      - media_volume:/app/media
+      # Read-only SSH deploy key with read access to the ForgeKey repo.
+      - ${FORGEKEY_DEPLOY_KEY:-/dev/null}:/root/.ssh/id_ed25519:ro
+    env_file:
+      - .env
+    environment:
+      - DEBUG=0
+      - GIT_HASH=${GIT_HASH:-}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-makerspace}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-makerspace_inventory}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - SKIP_DB_MIGRATIONS=1
+      - FORGEKEY_FIRMWARE_REPO_URL=${FORGEKEY_FIRMWARE_REPO_URL:-git@github.com:uid0/ForgeKey.git}
+    depends_on:
+      backend:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
   # Long-running MQTT consumer: subscribes to forgekey/+/status,
   # forgekey/+/+/occupancy, forgekey/+/ota/status, etc. and updates the
   # backing ESP32Device rows (last_seen, is_online, occupancy, firmware

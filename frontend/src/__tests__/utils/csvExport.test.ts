@@ -5,7 +5,9 @@ import { exportAssetsToCSV, exportInventoryItemsToCSV } from '../../utils/csvExp
 
 // Mock URL.createObjectURL and Blob for test environment
 global.URL.createObjectURL = jest.fn(() => 'mock-url');
-global.Blob = jest.fn((content, options) => ({ content, options })) as any;
+global.Blob = jest.fn(function MockBlob(content, options) {
+  return { content, options };
+}) as any;
 
 // Mock document.createElement and related DOM methods
 const mockClick = jest.fn();

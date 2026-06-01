@@ -14,13 +14,15 @@ import QRScanner, { QRScannerError, isNoQrFoundSignal } from '../../components/Q
 // html5-qrcode loads the browser's WebAssembly decoder on import, which jsdom
 // can't satisfy. We don't reach into it in these tests.
 vi.mock('html5-qrcode', () => ({
-  Html5Qrcode: jest.fn().mockImplementation(() => ({
-    start: jest.fn().mockResolvedValue(undefined),
-    stop: jest.fn().mockResolvedValue(undefined),
-    clear: jest.fn().mockResolvedValue(undefined),
-    getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
-    applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
-  })),
+  Html5Qrcode: jest.fn().mockImplementation(function MockHtml5Qrcode() {
+    return {
+      start: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue(undefined),
+      clear: jest.fn().mockResolvedValue(undefined),
+      getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
+      applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
+    };
+  }),
 }));
 
 // Babel-jest in CRA's preset can't parse `jest.Mock` in type-cast positions,
@@ -180,13 +182,15 @@ describe('QRScanner — camera lifecycle', () => {
       trackStoppedAtStart = trackStop.mock.calls.length > 0;
     });
 
-    Html5QrcodeMock.mockImplementation(() => ({
-      start,
-      stop: jest.fn().mockResolvedValue(undefined),
-      clear: jest.fn().mockResolvedValue(undefined),
-      getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
-      applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
-    }));
+    Html5QrcodeMock.mockImplementation(function MockHtml5Qrcode() {
+      return {
+        start,
+        stop: jest.fn().mockResolvedValue(undefined),
+        clear: jest.fn().mockResolvedValue(undefined),
+        getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
+        applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
+      };
+    });
 
     setMediaDevices({
       getUserMedia: jest.fn().mockResolvedValue(stream),
@@ -211,13 +215,15 @@ describe('QRScanner — camera lifecycle', () => {
     // failed with NotReadableError ("camera in use").
     const stop = jest.fn().mockResolvedValue(undefined);
     const clear = jest.fn().mockResolvedValue(undefined);
-    Html5QrcodeMock.mockImplementation(() => ({
-      start: jest.fn().mockResolvedValue(undefined),
-      stop,
-      clear,
-      getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
-      applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
-    }));
+    Html5QrcodeMock.mockImplementation(function MockHtml5Qrcode() {
+      return {
+        start: jest.fn().mockResolvedValue(undefined),
+        stop,
+        clear,
+        getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
+        applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
+      };
+    });
 
     setMediaDevices({
       getUserMedia: jest.fn().mockResolvedValue({
@@ -248,13 +254,15 @@ describe('QRScanner — camera lifecycle', () => {
       .mockImplementation(async (_camera, _config, _onSuccess, onError) => {
         errorCallback = onError;
       });
-    Html5QrcodeMock.mockImplementation(() => ({
-      start,
-      stop: jest.fn().mockResolvedValue(undefined),
-      clear: jest.fn().mockResolvedValue(undefined),
-      getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
-      applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
-    }));
+    Html5QrcodeMock.mockImplementation(function MockHtml5Qrcode() {
+      return {
+        start,
+        stop: jest.fn().mockResolvedValue(undefined),
+        clear: jest.fn().mockResolvedValue(undefined),
+        getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
+        applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
+      };
+    });
 
     setMediaDevices({
       getUserMedia: jest.fn().mockResolvedValue({
@@ -288,13 +296,15 @@ describe('QRScanner — camera lifecycle', () => {
       .mockImplementation(async (_camera, _config, _onSuccess, onError) => {
         errorCallback = onError;
       });
-    Html5QrcodeMock.mockImplementation(() => ({
-      start,
-      stop: jest.fn().mockResolvedValue(undefined),
-      clear: jest.fn().mockResolvedValue(undefined),
-      getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
-      applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
-    }));
+    Html5QrcodeMock.mockImplementation(function MockHtml5Qrcode() {
+      return {
+        start,
+        stop: jest.fn().mockResolvedValue(undefined),
+        clear: jest.fn().mockResolvedValue(undefined),
+        getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
+        applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
+      };
+    });
 
     setMediaDevices({
       getUserMedia: jest.fn().mockResolvedValue({
@@ -326,13 +336,15 @@ describe('QRScanner — camera lifecycle', () => {
     const start = jest.fn().mockImplementation(async (_camera, _config, onSuccess) => {
       successCallback = onSuccess;
     });
-    Html5QrcodeMock.mockImplementation(() => ({
-      start,
-      stop: jest.fn().mockResolvedValue(undefined),
-      clear: jest.fn().mockResolvedValue(undefined),
-      getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
-      applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
-    }));
+    Html5QrcodeMock.mockImplementation(function MockHtml5Qrcode() {
+      return {
+        start,
+        stop: jest.fn().mockResolvedValue(undefined),
+        clear: jest.fn().mockResolvedValue(undefined),
+        getRunningTrackCapabilities: jest.fn().mockReturnValue({}),
+        applyVideoConstraints: jest.fn().mockResolvedValue(undefined),
+      };
+    });
 
     setMediaDevices({
       getUserMedia: jest.fn().mockResolvedValue({

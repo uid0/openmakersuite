@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import subprocess
+import subprocess  # nosec B404 — fixed git/pio argv, no shell; see _run()
 import tempfile
 from pathlib import Path
 
@@ -42,7 +42,11 @@ def _run(cmd: list[str], cwd: str, log_lines: list[str]) -> str:
     Raises ``RuntimeError`` on a non-zero exit so the caller records a failure.
     """
     log_lines.append(f"$ {' '.join(cmd)}")
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=_BUILD_TIMEOUT_S)
+    # `cmd` is a fixed git/pio argv list (no shell=True); the only variable
+    # parts (source_ref, pio_env) come from staff-created FirmwareBuild rows.
+    proc = subprocess.run(  # nosec B603
+        cmd, cwd=cwd, capture_output=True, text=True, timeout=_BUILD_TIMEOUT_S
+    )
     if proc.stdout:
         log_lines.append(proc.stdout)
     if proc.stderr:

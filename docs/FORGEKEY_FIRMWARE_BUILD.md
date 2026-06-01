@@ -40,17 +40,27 @@ A failed build is recorded with its log + `error_message` — not retried.
 
 ## Deploying the worker
 
-The worker is an opt-in compose service (profile `firmware-build`):
+**Production (`docker-compose.prod.yml`)** — `firmware_builder` is **always-on**:
+it comes up with the rest of the stack, so a normal
+`docker compose -f docker-compose.prod.yml up -d --build` starts it alongside
+everything else. You only need to give it the deploy key. In your prod `.env`:
 
 ```bash
-# 1. A read-only SSH deploy key with read access to the ForgeKey repo.
-#    (GitHub → repo → Settings → Deploy keys.)
+# A read-only SSH deploy key with read access to the ForgeKey repo
+# (GitHub → repo → Settings → Deploy keys). Host path, mounted read-only.
+FORGEKEY_DEPLOY_KEY=/abs/path/to/forgekey_deploy_key
+# (optional) override the repo if you fork it
+FORGEKEY_FIRMWARE_REPO_URL=git@github.com:uid0/ForgeKey.git
+```
+
+Until `FORGEKEY_DEPLOY_KEY` is set the container still runs, but each build fails
+at `git clone`.
+
+**Development (`docker-compose.yml`)** — the worker is **opt-in** (compose
+profile `firmware-build`) so a routine `docker compose up` stays lightweight:
+
+```bash
 export FORGEKEY_DEPLOY_KEY=/abs/path/to/forgekey_deploy_key
-
-# 2. (optional) override the repo if you fork it
-export FORGEKEY_FIRMWARE_REPO_URL=git@github.com:uid0/ForgeKey.git
-
-# 3. start it
 docker compose --profile firmware-build up -d --build firmware_builder
 ```
 

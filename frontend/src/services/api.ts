@@ -1916,6 +1916,34 @@ export interface ForgeKeyFirmwareBuild {
   completed_at: string | null;
 }
 
+export interface ForgeKeyCertificateAuthority {
+  id: string;
+  name: string;
+  common_name: string | null;
+  fingerprint_sha256: string | null;
+  not_before: string;
+  not_after: string;
+  is_active: boolean;
+  created_at: string;
+  active_cert_count: number | null;
+  revoked_cert_count: number | null;
+}
+
+export interface ForgeKeyDeviceCertificate {
+  id: string;
+  device: string | null;
+  device_chip_id: string | null;
+  serial: string;
+  subject: string;
+  fingerprint_sha256: string;
+  not_before: string;
+  not_after: string;
+  revoked_at: string | null;
+  issued_by: string;
+  created_at: string;
+  status: 'active' | 'expired' | 'revoked';
+}
+
 export interface ForgeKeyFirmwareRollout {
   id: string;
   firmware_version: string;
@@ -2042,6 +2070,20 @@ export const forgekeyAPI = {
   }) => api.post<ForgeKeyFirmwareBuild>('/forgekey/firmware-builds/', body),
   cancelFirmwareBuild: (id: string) =>
     api.post<ForgeKeyFirmwareBuild>(`/forgekey/firmware-builds/${id}/cancel/`),
+  // PKI: read-only certificate visibility + CA rotation (staff).
+  listCertificateAuthorities: () =>
+    api.get<{ results?: ForgeKeyCertificateAuthority[] } | ForgeKeyCertificateAuthority[]>(
+      '/forgekey/certificate-authorities/',
+    ),
+  listDeviceCertificates: () =>
+    api.get<{ results?: ForgeKeyDeviceCertificate[] } | ForgeKeyDeviceCertificate[]>(
+      '/forgekey/device-certificates/',
+    ),
+  rotateCA: (body?: { name?: string; common_name?: string; validity_years?: number }) =>
+    api.post<ForgeKeyCertificateAuthority>(
+      '/forgekey/certificate-authorities/rotate/',
+      body || {},
+    ),
   // Scan-to-log page: read the panel's recurring maintenance tasks (public)…
   getEPaperServiceInfo: (displayId: string) =>
     api.get<{

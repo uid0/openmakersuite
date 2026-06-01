@@ -11,8 +11,10 @@ import {
   Badge,
   Button,
   Card,
+  Code,
   Group,
   Loader,
+  Modal,
   NumberInput,
   Paper,
   Progress,
@@ -54,6 +56,34 @@ const BUILD_STATUS_COLORS: Record<string, string> = {
   cancelled: 'gray',
 };
 
+// Default PlatformIO env per device-type code (matches the firmware's
+// platformio.ini). Picking a device type pre-fills the env; the operator can
+// still override it.
+const PIO_ENV_BY_CODE: Record<string, string> = {
+  epaper_screen: 'seeed_xiao_epaper',
+  temperature_sensor: 'seeed_xiao_esp32s3_temperature',
+  env_sensor: 'seeed_xiao_esp32s3_temperature',
+};
+const DEFAULT_PIO_ENV = 'seeed_xiao_esp32s3';
+
+/** Default PlatformIO env for a device-type code (overridable in the form). */
+export const defaultPioEnv = (code: string): string => PIO_ENV_BY_CODE[code] ?? DEFAULT_PIO_ENV;
+
+const fmtBuildElapsed = (build: ForgeKeyFirmwareBuild): string | null => {
+  if (!build.started_at) return null;
+  const start = new Date(build.started_at).getTime();
+  const end = build.completed_at
+    ? new Date(build.completed_at).getTime()
+    : build.status === 'building'
+      ? Date.now()
+      : null;
+  if (end == null) return null;
+  const secs = Math.max(0, Math.round((end - start) / 1000));
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+};
+
 const asList = <T,>(data: { results?: T[] } | T[]): T[] =>
   Array.isArray(data) ? data : data.results ?? [];
 
@@ -83,6 +113,7 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
   const [buildVersion, setBuildVersion] = useState('');
   const [buildRef, setBuildRef] = useState('main');
   const [building, setBuilding] = useState(false);
+  const [logBuildId, setLogBuildId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isStaff && !isSuperuser) return undefined;
@@ -199,6 +230,9 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
     }
   };
 
+  // Derived from the polled list so the modal stays live while a build runs.
+  const logBuild = builds.find((b) => b.id === logBuildId) ?? null;
+
   const pct = (n: number, total: number) => (total > 0 ? (n / total) * 100 : 0);
 
   return (
@@ -228,7 +262,11 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
             placeholder={deviceTypes.length ? 'Pick a type' : 'No device types'}
             data={deviceTypes.map((d) => ({ value: String(d.id), label: d.name }))}
             value={buildDeviceType}
-            onChange={setBuildDeviceType}
+            onChange={(v) => {
+              setBuildDeviceType(v);
+              const dt = deviceTypes.find((d) => String(d.id) === v);
+              setBuildEnv(dt ? defaultPioEnv(dt.code) : '');
+            }}
             searchable
             style={{ minWidth: 180 }}
           />
@@ -270,6 +308,7 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
                 <Table.Th>Ref</Table.Th>
                 <Table.Th>Status</Table.Th>
                 <Table.Th>Requested</Table.Th>
+                <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -291,6 +330,16 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
                       {new Date(b.requested_at).toLocaleString()}
                     </Text>
                   </Table.Td>
+                  <Table.Td>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      onClick={() => setLogBuildId(b.id)}
+                      data-testid={`build-log-${b.id}`}
+                    >
+                      Log
+                    </Button>
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
@@ -298,9 +347,72 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
         )}
         <Text size="xs" c="dimmed" mt="xs">
           Builds run on the self-hosted firmware-builder worker; a succeeded
-          build becomes a firmware version you can roll out below.
+          build becomes a firmware version you can roll out below. This list
+          refreshes every 30s.
         </Text>
       </Paper>
+
+      <Modal
+        opened={logBuildId !== null}
+        onClose={() => setLogBuildId(null)}
+        size="lg"
+        title={logBuild ? `Build ${logBuild.version} · ${logBuild.pio_env}` : 'Build'}
+      >
+        {logBuild && (
+          <Stack gap="xs">
+            <Group gap="xs">
+              <Badge color={BUILD_STATUS_COLORS[logBuild.status] || 'gray'}>{logBuild.status}</Badge>
+              {logBuild.status === 'queued' && (
+                <Text size="sm" c="dimmed">
+                  {
+                    builds.filter(
+                      (x) =>
+                        x.status === 'queued' &&
+                        new Date(x.requested_at) < new Date(logBuild.requested_at),
+                    ).length
+                  }{' '}
+                  build(s) ahead in the queue
+                </Text>
+              )}
+              {fmtBuildElapsed(logBuild) && (
+                <Text size="sm" c="dimmed">
+                  {logBuild.status === 'building' ? 'running ' : ''}
+                  {fmtBuildElapsed(logBuild)}
+                </Text>
+              )}
+            </Group>
+            <Text size="xs" c="dimmed">
+              Requested {new Date(logBuild.requested_at).toLocaleString()}
+              {logBuild.started_at &&
+                ` · started ${new Date(logBuild.started_at).toLocaleTimeString()}`}
+              {logBuild.completed_at &&
+                ` · finished ${new Date(logBuild.completed_at).toLocaleTimeString()}`}
+            </Text>
+            {logBuild.status === 'queued' && (
+              <Alert color="blue" variant="light">
+                Queued builds only start once the self-hosted firmware-builder worker is running and
+                consuming the builds queue. If this stays queued, that worker isn&rsquo;t up.
+              </Alert>
+            )}
+            {logBuild.error_message && (
+              <Alert color="red" variant="light">
+                {logBuild.error_message}
+              </Alert>
+            )}
+            <Text size="xs" fw={600}>
+              Build log
+            </Text>
+            <Code
+              block
+              style={{ maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap' }}
+              data-testid="build-log"
+            >
+              {logBuild.log ||
+                (logBuild.status === 'queued' ? 'Not started yet.' : 'No log captured.')}
+            </Code>
+          </Stack>
+        )}
+      </Modal>
 
       {/* Create campaign */}
       <Paper p="md" withBorder data-testid="rollout-create">

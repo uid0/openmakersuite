@@ -412,6 +412,18 @@ CELERY_TASK_TRACK_STARTED = True  # Track when tasks start
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes hard timeout
 CELERY_RESULT_EXTENDED = True  # Store additional task metadata
 
+# Route the heavyweight firmware build to a dedicated "builds" queue so it runs
+# on the self-hosted firmware-builder worker (git + PlatformIO), not the app
+# worker pool. The app image ships no toolchain; only that worker consumes it.
+CELERY_TASK_ROUTES = {
+    "forgekey.tasks.build_firmware": {"queue": "builds"},
+}
+
+# Git URL the firmware-builder worker clones to build ForgeKey firmware.
+FORGEKEY_FIRMWARE_REPO_URL = config(
+    "FORGEKEY_FIRMWARE_REPO_URL", default="git@github.com:uid0/ForgeKey.git"
+)
+
 # Celery Beat Schedule for periodic tasks
 CELERY_BEAT_SCHEDULE = {
     "send-quarterly-donor-updates": {

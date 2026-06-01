@@ -46,6 +46,7 @@ from .models import (
     EPaperDisplay,
     ESP32Device,
     ESP32DevicePhoto,
+    FirmwareBuild,
     FirmwareRollout,
     FirmwareVersion,
     LockoutLevel,
@@ -64,6 +65,7 @@ from .serializers import (
     DeviceUsageSerializer,
     EPaperDisplaySerializer,
     ESP32DeviceSerializer,
+    FirmwareBuildSerializer,
     FirmwareRolloutSerializer,
     FirmwareVersionSerializer,
     OccupancyEventSerializer,
@@ -1636,6 +1638,51 @@ class DeviceFirmwareUpdateViewSet(viewsets.ModelViewSet):
         serializer.save(requested_by=self.request.user)
         # TODO: Trigger firmware update via MQTT
         # This would send the firmware file and signature to the device
+
+
+class FirmwareBuildViewSet(viewsets.ModelViewSet):
+    """Queue + track self-hosted firmware builds (staff only).
+
+    Creating a build enqueues ``build_firmware`` on the ``builds`` queue, which
+    the dedicated firmware-builder worker consumes (clone → inject CA + pubkey
+    → ``pio run`` → upload a signed FirmwareVersion). The result is then rolled
+    out via the firmware-rollouts API.
+    """
+
+    queryset = FirmwareBuild.objects.select_related(
+        "device_type", "firmware_version", "requested_by"
+    ).all()
+    serializer_class = FirmwareBuildSerializer
+    permission_classes = [IsAdminUser]
+    http_method_names = ["get", "post", "delete", "head", "options"]
+
+    def perform_create(self, serializer):
+        build = serializer.save(requested_by=self.request.user)
+        from .tasks import build_firmware
+
+        build_firmware.delay(str(build.pk))
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        """Mark a queued / in-flight build cancelled.
+
+        A build already executing on the worker runs to completion, but the
+        worker re-checks this flag before starting and a not-yet-started build
+        is skipped.
+        """
+        build = self.get_object()
+        if build.status not in (
+            FirmwareBuild.STATUS_QUEUED,
+            FirmwareBuild.STATUS_BUILDING,
+        ):
+            return Response(
+                {"detail": f"Build is {build.status}; nothing to cancel."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        build.status = FirmwareBuild.STATUS_CANCELLED
+        build.completed_at = timezone.now()
+        build.save(update_fields=["status", "completed_at"])
+        return Response(FirmwareBuildSerializer(build).data)
 
 
 class FirmwareRolloutViewSet(viewsets.ModelViewSet):

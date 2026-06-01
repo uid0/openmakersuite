@@ -14,6 +14,7 @@ from .models import (
     DeviceUsage,
     EPaperDisplay,
     ESP32Device,
+    FirmwareBuild,
     FirmwareRollout,
     FirmwareVersion,
     OccupancyEvent,
@@ -129,6 +130,56 @@ class FirmwareVersionSerializer(serializers.ModelSerializer):
         model = FirmwareVersion
         fields = "__all__"
         read_only_fields = ["id", "created_at"]
+
+
+class FirmwareBuildSerializer(serializers.ModelSerializer):
+    """A self-hosted firmware build request + its outcome."""
+
+    device_type_name = serializers.CharField(source="device_type.name", read_only=True)
+    requested_by_username = serializers.CharField(
+        source="requested_by.username", read_only=True, default=None
+    )
+    firmware_version_string = serializers.CharField(
+        source="firmware_version.version", read_only=True, default=None
+    )
+
+    class Meta:
+        model = FirmwareBuild
+        fields = [
+            "id",
+            "device_type",
+            "device_type_name",
+            "pio_env",
+            "source_ref",
+            "version",
+            "mandatory",
+            "release_notes",
+            "status",
+            "ca_fingerprint",
+            "commit_sha",
+            "log",
+            "error_message",
+            "firmware_version",
+            "firmware_version_string",
+            "requested_by",
+            "requested_by_username",
+            "requested_at",
+            "started_at",
+            "completed_at",
+        ]
+        read_only_fields = [
+            "id",
+            "status",
+            "ca_fingerprint",
+            "commit_sha",
+            "log",
+            "error_message",
+            "firmware_version",
+            "requested_by",
+            "requested_at",
+            "started_at",
+            "completed_at",
+        ]
 
 
 class OccupancyEventSerializer(serializers.ModelSerializer):

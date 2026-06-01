@@ -21,6 +21,7 @@ from .views import (
     EPaperServiceCompleteView,
     EPaperServiceInfoView,
     ESP32DeviceViewSet,
+    FirmwareBuildViewSet,
     FirmwareRolloutViewSet,
     FirmwareVersionViewSet,
     ForgeKeyCertificateRevocationListView,
@@ -47,6 +48,7 @@ router.register(r"power-readings", PowerMeterReadingViewSet, basename="power-rea
 router.register(r"firmware-versions", FirmwareVersionViewSet, basename="firmware-version")
 router.register(r"firmware-updates", DeviceFirmwareUpdateViewSet, basename="firmware-update")
 router.register(r"firmware-rollouts", FirmwareRolloutViewSet, basename="firmware-rollout")
+router.register(r"firmware-builds", FirmwareBuildViewSet, basename="firmware-build")
 
 app_name = "forgekey"
 

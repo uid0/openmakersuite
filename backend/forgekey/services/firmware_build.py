@@ -75,6 +75,46 @@ def _truncate(text: str) -> str:
     return text if len(text) <= _LOG_TAIL_LIMIT else text[-_LOG_TAIL_LIMIT:]
 
 
+def _notify_requester(build, *, succeeded: bool) -> None:
+    """Notify the user who queued a build that it finished.
+
+    Best-effort and in-app (the notifications surface the frontend already
+    polls): a notification failure must never mask the recorded build outcome.
+    """
+    requester = build.requested_by
+    if requester is None:
+        return
+    try:
+        from notifications.services import create_notification
+
+        if succeeded:
+            create_notification(
+                user=requester,
+                type="success",
+                title="Firmware build succeeded",
+                message=(
+                    f"{build.pio_env} {build.version} built successfully and is "
+                    "ready to roll out."
+                ),
+                action_url="/facilities/forgekey-rollouts",
+                metadata={"build_id": str(build.pk), "kind": "firmware_build_succeeded"},
+            )
+        else:
+            create_notification(
+                user=requester,
+                type="error",
+                title="Firmware build failed",
+                message=(
+                    f"{build.pio_env} {build.version} failed to build: "
+                    f"{build.error_message or 'see the build log'}"
+                ),
+                action_url="/facilities/forgekey-rollouts",
+                metadata={"build_id": str(build.pk), "kind": "firmware_build_failed"},
+            )
+    except Exception:  # noqa: BLE001 — notification delivery must not break build recording
+        logger.exception("Failed to notify %s about firmware build %s", requester, build.pk)
+
+
 def run_firmware_build(build_id: str) -> dict:
     """Execute a :class:`~forgekey.models.FirmwareBuild` end to end.
 
@@ -140,6 +180,7 @@ def run_firmware_build(build_id: str) -> dict:
         build.completed_at = timezone.now()
         build.log = _truncate("\n".join(log_lines))
         build.save()
+        _notify_requester(build, succeeded=True)
         return {
             "status": "succeeded",
             "build_id": str(build.pk),
@@ -152,4 +193,5 @@ def run_firmware_build(build_id: str) -> dict:
         build.completed_at = timezone.now()
         build.log = _truncate("\n".join(log_lines))
         build.save()
+        _notify_requester(build, succeeded=False)
         return {"status": "failed", "build_id": str(build.pk), "error": str(exc)}

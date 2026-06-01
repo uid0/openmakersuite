@@ -585,6 +585,13 @@ class DeviceCertificateAdmin(admin.ModelAdmin):
     ]
     fields = readonly_fields + ["revoked_at"]
 
+    def has_add_permission(self, request):
+        # Certificates are issued by the CSR / enrollment flow, never created
+        # by hand. Without this guard the admin renders an Add form whose
+        # fields are all read-only, so POST submits null/empty values and
+        # 500s on NOT NULL constraints (e.g. not_before).
+        return False
+
     @admin.display(description="fingerprint")
     def fingerprint_sha256_short(self, obj):
         return (obj.fingerprint_sha256 or "")[:16]
@@ -631,6 +638,11 @@ class DeviceEnrollmentAdmin(admin.ModelAdmin):
         "enrollment_photo",
     ]
     fields = readonly_fields + ["status"]
+
+    def has_add_permission(self, request):
+        # Enrollments come from devices POSTing CSRs to /enroll/, never from
+        # the admin. Same read-only-form NOT-NULL trap as DeviceCertificate.
+        return False
 
 
 @admin.register(CertificateAuthority)

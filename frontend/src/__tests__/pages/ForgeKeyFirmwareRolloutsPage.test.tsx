@@ -7,7 +7,9 @@
 import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import ForgeKeyFirmwareRolloutsPage from '../../pages/ForgeKeyFirmwareRolloutsPage';
+import ForgeKeyFirmwareRolloutsPage, {
+  defaultPioEnv,
+} from '../../pages/ForgeKeyFirmwareRolloutsPage';
 import { forgekeyAPI } from '../../services/api';
 
 vi.mock('../../services/api', async () => {
@@ -164,5 +166,47 @@ describe('ForgeKeyFirmwareRolloutsPage', () => {
     expect(await screen.findByTestId('build-b1')).toBeInTheDocument();
     expect(screen.getByText('5.0.0')).toBeInTheDocument();
     expect(screen.getByText('seeed_xiao_epaper')).toBeInTheDocument();
+  });
+
+  test('defaultPioEnv maps device codes to PlatformIO envs', () => {
+    expect(defaultPioEnv('epaper_screen')).toBe('seeed_xiao_epaper');
+    expect(defaultPioEnv('temperature_sensor')).toBe('seeed_xiao_esp32s3_temperature');
+    expect(defaultPioEnv('ac_relay')).toBe('seeed_xiao_esp32s3');
+  });
+
+  test('opens a build log modal', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listFirmwareRollouts.mockResolvedValue({ data: [] } as any);
+    mockApi.listFirmwareBuilds.mockResolvedValue({
+      data: [
+        {
+          id: 'b1',
+          device_type: 3,
+          device_type_name: 'E-paper',
+          pio_env: 'seeed_xiao_epaper',
+          source_ref: 'main',
+          version: '5.0.0',
+          mandatory: false,
+          release_notes: '',
+          status: 'failed',
+          ca_fingerprint: '',
+          commit_sha: '',
+          log: 'cloning...\npio run\n[ERROR] boom',
+          error_message: 'pio failed',
+          firmware_version: null,
+          firmware_version_string: null,
+          requested_by_username: 'admin',
+          requested_at: '2026-06-01T00:00:00Z',
+          started_at: '2026-06-01T00:01:00Z',
+          completed_at: '2026-06-01T00:05:00Z',
+        },
+      ],
+    } as any);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('build-log-b1'));
+    const log = await screen.findByTestId('build-log');
+    expect(log).toHaveTextContent('[ERROR] boom');
   });
 });

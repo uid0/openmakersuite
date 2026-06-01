@@ -688,7 +688,13 @@ views:
       partial_update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      reactivate:
+        permission_classes:
+        - IsAdminUser
       recent_commands:
+        permission_classes:
+        - IsAdminUser
+      retire:
         permission_classes:
         - IsAdminUser
       retrieve:

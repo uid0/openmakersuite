@@ -777,6 +777,13 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(id__in=ids)
         return qs
 
+    def get_permissions(self):
+        # Deleting a device is destructive (drops its command history) — keep
+        # it staff-only even though reads/edits are open to authenticated users.
+        if self.action == "destroy":
+            return [IsAdminUser()]
+        return super().get_permissions()
+
     @action(detail=True, methods=["post"])
     def enable(self, request, pk=None):
         """Enable a device (turn on power, etc.)."""
@@ -804,6 +811,26 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
         device = self.get_object()
         request_device_status.delay(device.mac_address)
         return Response({"status": "status request sent", "device": device.mac_address})
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdminUser])
+    def retire(self, request, pk=None):
+        """Take a device out of service (``is_active=False``) — staff only.
+
+        Keeps the row + its history (unlike delete) and is reversible via
+        ``reactivate``.
+        """
+        device = self.get_object()
+        device.is_active = False
+        device.save(update_fields=["is_active", "updated_at"])
+        return Response(self.get_serializer(device).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdminUser])
+    def reactivate(self, request, pk=None):
+        """Return a retired device to service (``is_active=True``) — staff only."""
+        device = self.get_object()
+        device.is_active = True
+        device.save(update_fields=["is_active", "updated_at"])
+        return Response(self.get_serializer(device).data)
 
     @action(
         detail=True,

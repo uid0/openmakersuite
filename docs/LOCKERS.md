@@ -1,10 +1,12 @@
 # Lockers (ForgeKey expansion)
 
 OMS supports SIG-owned lockable enclosures controlled by ForgeKey
-hardware. This document covers the data model and the access-decision
-pipeline that landed in Phase 1+2 of the expansion. Phase 3 (MQTT
-integration) and Phase 4+5 (audit + automation) are tracked as
-separate follow-up PRs.
+hardware. This document covers the data model, the access-decision
+pipeline, and the web console / API used to run the fleet. The console
+(live monitoring, operator unlock + OTP administration, and locker
+setup / device binding) and the MQTT command + telemetry integration
+are all shipped; the remaining audit-correlation and automation work is
+tracked under [Status & roadmap](#status--roadmap) below.
 
 ## Concepts
 
@@ -67,6 +69,17 @@ the structured reason.
 `(locker, code)` pair, marks it used, and returns it. Returns `None`
 when the code is unknown, expired, revoked, or already used.
 
+### Who may *manage* a locker
+
+Opening a locker (access) and configuring one (management) are separate
+gates. `access.py::can_user_manage_locker(user, locker)` — and
+`can_user_manage_sig(user, sig)` for the create case, before any locker
+row exists — return true for staff / superusers, Logistics members, and
+SIG admins of the owning SIG. This gate guards locker **setup** (create /
+edit / delete), **device binding**, and **OTP administration** (list /
+revoke). A merely-certified member can request access but cannot manage
+the locker.
+
 ## Certifications
 
 `backend/membership/models.Certification` is a SIG-owned certification
@@ -105,11 +118,81 @@ latency and ±1 s NTP drift.
 - `unpowered` — mechanical-only keypad; dashboards skip the
   propped-door + lockout polling because there's nothing to poll
 
-## What's not in Phase 1+2
+## Web console & API
 
-The following land in later PRs:
+The locker fleet is run from **Facilities → Lockers**
+(`/facilities/lockers`, staff-only) and the matching DRF API under
+`/api/lockers/` (`backend/lockers/views.LockerViewSet` +
+`backend/lockers/urls.py`).
 
-- Phase 3: MQTT integration — the `lockers.services.commands.publish_unlock` helper, EMQX rule-engine HTTP webhooks for IR-break / reed-status / lockout, and the registration-acknowledge handshake.
-- Phase 4: `LockerAccessEvent` state machine, IR-break correlation, mortise-key admin-physical-entry events, high-trust return acceptance flow.
-- Phase 5: Celery beat — OTP janitor, propped-door alert, lockout reset task.
-- Phase 6: Firmware contract (fail-secure, supervision, LED diagnostic patterns).
+### Endpoints
+
+| Method + path | Purpose | Gate |
+|---|---|---|
+| `GET /lockers/` · `GET /lockers/{id}/` | Fleet list + detail — each locker carries its bound devices and latest `cabinet_lock/status` (secure / online / state). | authenticated |
+| `POST /lockers/` | Create a locker. | manage owning SIG |
+| `PATCH /lockers/{id}/` · `DELETE /lockers/{id}/` | Edit / delete a locker. | manage locker |
+| `POST /lockers/{id}/devices/` | Bind an `ESP32Device` in a `role`; `is_primary` demotes the existing primary for that role; a duplicate `(locker, device, role)` is a 409. | manage locker |
+| `DELETE /lockers/{id}/devices/{assignment_id}/` | Unbind a device. | manage locker |
+| `POST /lockers/{id}/unlock/` | Sign + publish the ES256 unlock command to the latch. | access decision |
+| `POST /lockers/{id}/issue-otp/` | Mint an OTP (returns the code). | access decision |
+| `GET /lockers/{id}/otps/` · `POST /lockers/{id}/revoke-otp/` | List recent / revoke an outstanding OTP. | manage locker |
+| `GET /lockers/available-certifications/` | Active certifications, for the setup form's required-certs picker. | authenticated |
+
+`POST` / `PATCH` use `LockerWriteSerializer` (slug auto-derives from the
+name when omitted; accepts `required_certifications`) and echo the full
+detail representation back, so the UI gets the bound devices + status
+without a second fetch.
+
+### Web console surfaces
+
+- **Monitoring** — a fleet table with secure / online / state per
+  locker, stat cards, and an intrusion highlight (ALARM or a sustained
+  not-secure reading). Polls every 30 s.
+- **Operator unlock + OTP** — an Unlock button per row, and an
+  access-codes modal to issue / copy / revoke OTPs.
+- **Setup** — a "New locker" button and a per-row "Setup" action open a
+  drawer to create / edit a locker (location, owning SIG, stored asset,
+  power source, LED count, high-trust, required certs, active) and to
+  bind / unbind its ESP32 devices by role.
+
+### Telemetry + command webhooks
+
+EMQX's rule engine forwards firmware events to authenticated HTTP
+receivers (`backend/lockers/views.py`):
+
+- `POST /api/lockers/events/lock-status/` — upserts the locker's latest
+  `LockerStatus` (secure, reed, latch, IR, mortise, item-present,
+  firmware version) that drives the monitoring console.
+- `POST /api/lockers/events/lockout/` · `events/ir-break/` ·
+  `events/reed-status/` — logged today; correlation into access events
+  is Phase 4 (below).
+- `POST /api/lockers/registration/ack/` — replies to a freshly-flashed
+  locker's bring-up handshake (`publish_init_ack`) so it exits its
+  initialization LED pattern.
+
+Outbound command publishers live in
+`backend/lockers/services/commands.py`: `publish_unlock`,
+`publish_lockout`, `publish_clear_lockout`, `publish_init_ack` — each
+signs a `make_command_jwt` (see [Command JWT](#command-jwt)) and
+publishes to the latch device's `forgekey/<mac>/cmd` topic.
+
+## Status & roadmap
+
+**Shipped**
+
+- Phase 1+2 — data model, access decision, certification gating.
+- Phase 3 — MQTT command publishers (`publish_unlock` et al.), the EMQX
+  webhook receivers, and the registration-ack handshake.
+- Web console — monitoring, operator unlock + OTP administration, and
+  locker setup / device binding (the API + surfaces above).
+
+**Remaining**
+
+- Phase 4 — `LockerAccessEvent` state machine, IR-break ↔ reed
+  correlation ("item removed"), mortise-key admin-entry events, and the
+  high-trust return-acceptance flow. The `lockout` / `ir_break` /
+  `reed_status` receivers log today and become state transitions here.
+- Phase 5 — Celery beat: OTP janitor, propped-door alert, lockout-reset.
+- Phase 6 — firmware contract (fail-secure, supervision, LED diagnostic
+  patterns).

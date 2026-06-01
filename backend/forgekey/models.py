@@ -737,6 +737,93 @@ class FirmwareVersion(models.Model):
         return ""
 
 
+class FirmwareBuild(models.Model):
+    """A request to build firmware on the self-hosted build worker.
+
+    The worker (a dedicated Celery process consuming the ``builds`` queue —
+    the OMS app image ships no git/PlatformIO) clones the ForgeKey repo at
+    ``source_ref``, writes the active OMS CA + command public key into the
+    firmware security headers, runs ``pio run -e <pio_env>``, and uploads the
+    resulting binary as a signed :class:`FirmwareVersion` (``firmware_version``)
+    ready to roll out. Best-effort, no retry — a failed build keeps its log.
+    """
+
+    STATUS_QUEUED = "queued"
+    STATUS_BUILDING = "building"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_QUEUED, "Queued"),
+        (STATUS_BUILDING, "Building"),
+        (STATUS_SUCCEEDED, "Succeeded"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device_type = models.ForeignKey(
+        DeviceType,
+        on_delete=models.CASCADE,
+        related_name="firmware_builds",
+        help_text="Target device type the built firmware is for.",
+    )
+    pio_env = models.CharField(
+        max_length=100,
+        help_text="PlatformIO environment to build (e.g. 'seeed_xiao_esp32s3').",
+    )
+    source_ref = models.CharField(
+        max_length=200,
+        default="main",
+        help_text="Git ref (branch / tag / commit) of the ForgeKey repo to build.",
+    )
+    version = models.CharField(
+        max_length=50,
+        help_text="Version string assigned to the resulting FirmwareVersion.",
+    )
+    mandatory = models.BooleanField(
+        default=False, help_text="Mark the built FirmwareVersion mandatory."
+    )
+    release_notes = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_QUEUED, db_index=True
+    )
+    ca_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA-256 of the active CA cert injected into this build (audit).",
+    )
+    commit_sha = models.CharField(
+        max_length=64, blank=True, help_text="Resolved commit the worker built."
+    )
+    log = models.TextField(blank=True, help_text="Build log (git + pio output, tail).")
+    error_message = models.TextField(blank=True)
+    firmware_version = models.ForeignKey(
+        "FirmwareVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="builds",
+        help_text="The FirmwareVersion produced on success.",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="firmware_builds",
+    )
+    requested_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+
+    def __str__(self) -> str:
+        return f"Build {self.version} ({self.pio_env}) — {self.status}"
+
+
 class ESP32DevicePhoto(models.Model):
     """
     Periodic surveillance photo uploaded by an ESP32 sensor device.

@@ -709,6 +709,29 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  forgekey.views.FirmwareBuildViewSet:
+    actions:
+      cancel:
+        permission_classes:
+        - IsAdminUser
+      create:
+        permission_classes:
+        - IsAdminUser
+      destroy:
+        permission_classes:
+        - IsAdminUser
+      list:
+        permission_classes:
+        - IsAdminUser
+      partial_update:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAdminUser
+      update:
+        permission_classes:
+        - IsAdminUser
   forgekey.views.FirmwareRolloutViewSet:
     actions:
       advance:

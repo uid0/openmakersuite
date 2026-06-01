@@ -1881,6 +1881,41 @@ export interface ForgeKeyRolloutProgress {
 
 export type ForgeKeyRolloutStatus = 'draft' | 'active' | 'paused' | 'completed' | 'cancelled';
 
+export interface ForgeKeyDeviceType {
+  id: number;
+  name: string;
+  code: string;
+}
+
+export type ForgeKeyFirmwareBuildStatus =
+  | 'queued'
+  | 'building'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+export interface ForgeKeyFirmwareBuild {
+  id: string;
+  device_type: number;
+  device_type_name: string | null;
+  pio_env: string;
+  source_ref: string;
+  version: string;
+  mandatory: boolean;
+  release_notes: string;
+  status: ForgeKeyFirmwareBuildStatus;
+  ca_fingerprint: string;
+  commit_sha: string;
+  log: string;
+  error_message: string;
+  firmware_version: string | null;
+  firmware_version_string: string | null;
+  requested_by_username: string | null;
+  requested_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
 export interface ForgeKeyFirmwareRollout {
   id: string;
   firmware_version: string;
@@ -1990,6 +2025,23 @@ export const forgekeyAPI = {
     api.post<ForgeKeyFirmwareRollout>(`/forgekey/firmware-rollouts/${id}/cancel/`),
   advanceRollout: (id: string) =>
     api.post<ForgeKeyFirmwareRollout>(`/forgekey/firmware-rollouts/${id}/advance/`),
+  // Firmware build pipeline (self-hosted build worker).
+  listDeviceTypes: () =>
+    api.get<{ results?: ForgeKeyDeviceType[] } | ForgeKeyDeviceType[]>('/forgekey/device-types/'),
+  listFirmwareBuilds: () =>
+    api.get<{ results?: ForgeKeyFirmwareBuild[] } | ForgeKeyFirmwareBuild[]>(
+      '/forgekey/firmware-builds/',
+    ),
+  createFirmwareBuild: (body: {
+    device_type: number;
+    pio_env: string;
+    version: string;
+    source_ref?: string;
+    mandatory?: boolean;
+    release_notes?: string;
+  }) => api.post<ForgeKeyFirmwareBuild>('/forgekey/firmware-builds/', body),
+  cancelFirmwareBuild: (id: string) =>
+    api.post<ForgeKeyFirmwareBuild>(`/forgekey/firmware-builds/${id}/cancel/`),
   // Scan-to-log page: read the panel's recurring maintenance tasks (public)…
   getEPaperServiceInfo: (displayId: string) =>
     api.get<{

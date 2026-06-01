@@ -793,3 +793,17 @@ def advance_firmware_rollouts() -> None:
             advance_rollout(rollout)
         except Exception:
             logger.exception("Failed to advance firmware rollout %s", rollout.id)
+
+
+@shared_task(bind=True, queue="builds", max_retries=0)
+def build_firmware(self, build_id: str) -> Dict[str, Any]:
+    """Build firmware on the self-hosted build worker (the ``builds`` queue).
+
+    Delegates to ``services.firmware_build.run_firmware_build`` (git + PlatformIO
+    orchestration). Runs only on the dedicated ``firmware-builder`` worker — the
+    OMS app image has no toolchain. Best-effort: a failure is recorded on the
+    FirmwareBuild row, never retried.
+    """
+    from .services.firmware_build import run_firmware_build
+
+    return run_firmware_build(build_id)

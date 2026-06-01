@@ -19,6 +19,7 @@ from rest_framework.test import APIClient
 
 from forgekey.models import DeviceType, FirmwareBuild
 from forgekey.services import firmware_build as fb
+from notifications.models import Notification
 
 User = get_user_model()
 pytestmark = pytest.mark.django_db
@@ -131,6 +132,58 @@ class TestRunFirmwareBuild:
         assert result["status"] == "failed"
         build.refresh_from_db()
         assert "CertificateAuthority" in build.error_message
+
+
+class TestBuildCompletionNotifications:
+    """The requester gets an in-app notification when their build finishes."""
+
+    def test_success_notifies_requester(self, device_type, admin_user):
+        build = FirmwareBuild.objects.create(
+            device_type=device_type,
+            pio_env="seeed_xiao_epaper",
+            source_ref="main",
+            version="9.9.9",
+            requested_by=admin_user,
+        )
+        with (
+            patch("forgekey.models.CertificateAuthority.get_active", return_value=_FAKE_CA),
+            patch(
+                "forgekey.services.jwt_signing.get_jwt_public_key_pem",
+                return_value=_FAKE_PUBKEY,
+            ),
+            patch("forgekey.services.firmware_build.subprocess.run", side_effect=_fake_run),
+        ):
+            fb.run_firmware_build(str(build.id))
+
+        note = Notification.objects.filter(user=admin_user, type="success").first()
+        assert note is not None
+        assert "succeeded" in note.title.lower()
+        assert note.metadata.get("build_id") == str(build.id)
+        assert note.action_url == "/facilities/forgekey-rollouts"
+
+    def test_failure_notifies_requester(self, device_type, admin_user):
+        # The "no active CA" path fails fast without needing the subprocess mock.
+        build = FirmwareBuild.objects.create(
+            device_type=device_type,
+            pio_env="x",
+            source_ref="main",
+            version="8.8.8",
+            requested_by=admin_user,
+        )
+        with patch("forgekey.models.CertificateAuthority.get_active", return_value=None):
+            fb.run_firmware_build(str(build.id))
+
+        note = Notification.objects.filter(user=admin_user, type="error").first()
+        assert note is not None
+        assert "failed" in note.title.lower()
+
+    def test_no_requester_means_no_notification(self, device_type):
+        build = FirmwareBuild.objects.create(
+            device_type=device_type, pio_env="x", source_ref="main", version="6.6.6"
+        )
+        with patch("forgekey.models.CertificateAuthority.get_active", return_value=None):
+            fb.run_firmware_build(str(build.id))
+        assert not Notification.objects.exists()
 
 
 class TestFirmwareBuildViewSet:

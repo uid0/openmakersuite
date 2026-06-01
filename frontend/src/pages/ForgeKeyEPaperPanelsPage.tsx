@@ -5,11 +5,11 @@
  * image fetch, and active/retired state. Staff can rebind a panel to a
  * different asset (via the existing QR bind flow) or retire / reactivate it.
  */
-import { Alert, Anchor, Badge, Button, Group, Loader, Paper, Table, Text } from '@mantine/core';
-import React, { useEffect, useState } from 'react';
+import { Alert, Anchor, Badge, Button, Group, Loader, Paper, Select, Table, Text } from '@mantine/core';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { ForgeKeyEPaperDisplay, forgekeyAPI } from '../services/api';
+import { assetsAPI, ForgeKeyEPaperDisplay, forgekeyAPI } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const formatRelative = (iso: string | null): string => {
@@ -31,32 +31,44 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
     typeof window !== 'undefined' && localStorage.getItem('is_superuser') === 'true';
 
   const [panels, setPanels] = useState<ForgeKeyEPaperDisplay[]>([]);
+  const [assets, setAssets] = useState<{ value: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const load = useCallback(async () => {
+    try {
+      const res = await forgekeyAPI.listEPaperDisplays();
+      setPanels(res.data);
+      setError(null);
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to load e-paper panels.'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!isStaff && !isSuperuser) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await forgekeyAPI.listEPaperDisplays();
-        if (!cancelled) {
-          setPanels(res.data);
-          setError(null);
+    if (!isStaff && !isSuperuser) return;
+    load();
+  }, [isStaff, isSuperuser, load]);
+
+  // Assets for the inline "bind to asset" picker.
+  useEffect(() => {
+    if (!isStaff && !isSuperuser) return;
+    let alive = true;
+    assetsAPI
+      .listAssets()
+      .then((res) => {
+        if (alive) {
+          setAssets(res.data.results.map((a) => ({ value: String(a.id), label: a.name })));
         }
-      } catch (err) {
-        if (!cancelled) {
-          setError(extractErrorMessage(err, 'Failed to load e-paper panels.'));
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
+      })
+      .catch(() => {
+        /* the asset picker is optional */
+      });
     return () => {
-      cancelled = true;
+      alive = false;
     };
   }, [isStaff, isSuperuser]);
 
@@ -72,6 +84,21 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
       setError(null);
     } catch (err) {
       setError(extractErrorMessage(err, 'Failed to update the panel.'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleBind = async (panel: ForgeKeyEPaperDisplay, assetId: string | null) => {
+    if (!assetId || assetId === panel.asset) {
+      return;
+    }
+    setBusyId(panel.id);
+    try {
+      await forgekeyAPI.bindEPaper(panel.id, assetId);
+      await load();
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to bind the panel.'));
     } finally {
       setBusyId(null);
     }
@@ -164,10 +191,19 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      <Group gap="xs">
-                        <Anchor component={Link} to={`/forgekey/epaper/bind?did=${p.id}`} size="sm">
-                          Rebind
-                        </Anchor>
+                      <Group gap="xs" wrap="nowrap" align="center">
+                        <Select
+                          size="xs"
+                          placeholder="Bind asset…"
+                          data={assets}
+                          value={p.asset}
+                          onChange={(v) => handleBind(p, v)}
+                          searchable
+                          disabled={busyId === p.id}
+                          comboboxProps={{ withinPortal: true }}
+                          style={{ minWidth: 170 }}
+                          data-testid={`bind-select-${p.id}`}
+                        />
                         <Button
                           size="xs"
                           variant="subtle"
@@ -177,6 +213,15 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
                         >
                           {p.is_active ? 'Retire' : 'Reactivate'}
                         </Button>
+                        <Anchor
+                          component={Link}
+                          to={`/forgekey/epaper/bind?did=${p.id}`}
+                          size="xs"
+                          c="dimmed"
+                          title="Bind by scanning the panel QR instead"
+                        >
+                          QR
+                        </Anchor>
                       </Group>
                     </Table.Td>
                   </Table.Tr>

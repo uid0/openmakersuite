@@ -231,6 +231,7 @@ function AppContent() {
           <Route path="/facilities/forgekey-epaper" element={<WorkspaceLayout><ForgeKeyEPaperPanelsPage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-rollouts" element={<WorkspaceLayout><ForgeKeyFirmwareRolloutsPage /></WorkspaceLayout>} />
           <Route path="/facilities/lockers" element={<WorkspaceLayout><LockersPage /></WorkspaceLayout>} />
+          <Route path="/forgekey/epaper" element={<Navigate to="/facilities/forgekey-epaper" replace />} />
           <Route path="/forgekey/epaper/bind" element={<WorkspaceLayout><ForgeKeyEPaperBindPage /></WorkspaceLayout>} />
           <Route path="/forgekey/epaper/service" element={<WorkspaceLayout><ForgeKeyEPaperServicePage /></WorkspaceLayout>} />
           <Route path="/inventory/code-entry" element={<Navigate to="/inventory/scan" replace />} />

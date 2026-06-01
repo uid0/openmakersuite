@@ -8,7 +8,7 @@ import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ForgeKeyEPaperPanelsPage from '../../pages/ForgeKeyEPaperPanelsPage';
-import { forgekeyAPI } from '../../services/api';
+import { assetsAPI, forgekeyAPI } from '../../services/api';
 
 vi.mock('../../services/api', async () => {
   const actual = await vi.importActual('../../services/api');
@@ -17,11 +17,14 @@ vi.mock('../../services/api', async () => {
     forgekeyAPI: {
       listEPaperDisplays: jest.fn(),
       setEPaperActive: jest.fn(),
+      bindEPaper: jest.fn(),
     },
+    assetsAPI: { ...(actual as any).assetsAPI, listAssets: jest.fn() },
   };
 });
 
 const mockApi = forgekeyAPI as jest.Mocked<typeof forgekeyAPI>;
+const mockAssets = assetsAPI as jest.Mocked<typeof assetsAPI>;
 
 const buildPanel = (overrides: Partial<any> = {}) => ({
   id: 'p1',
@@ -57,6 +60,9 @@ describe('ForgeKeyEPaperPanelsPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorage.clear();
+    mockAssets.listAssets.mockResolvedValue({
+      data: { results: [{ id: 'a9', name: 'Drill' }] },
+    } as any);
   });
 
   test('non-staff users are redirected', async () => {
@@ -100,5 +106,16 @@ describe('ForgeKeyEPaperPanelsPage', () => {
       expect(screen.getByText('Retired')).toBeInTheDocument();
     });
     expect(screen.getByText('Reactivate')).toBeInTheDocument();
+  });
+
+  test('renders an inline asset rebind picker per panel', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({ data: [buildPanel()] } as any);
+
+    renderPage();
+
+    // The inline picker means rebinding happens from this page (not a bounce
+    // to the QR flow). Asset options come from the assets feed.
+    expect(await screen.findByTestId('bind-select-p1')).toBeInTheDocument();
   });
 });

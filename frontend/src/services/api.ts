@@ -1966,6 +1966,46 @@ export interface ForgeKeyFirmwareRollout {
   dispatched?: number;
 }
 
+export interface ForgeKeyOperationalMode {
+  id: number;
+  asset: string;
+  asset_name: string;
+  mode: 'available' | 'classroom' | 'maintenance' | 'locked_out';
+  classroom_mode_enabled: boolean;
+  classroom_mode_enabled_by: number | null;
+  classroom_mode_enabled_by_username: string | null;
+  classroom_mode_enabled_at: string | null;
+  updated_at: string;
+}
+
+export interface ForgeKeyAssetAuthorization {
+  id: number;
+  asset: string;
+  asset_name: string;
+  user: number;
+  username: string;
+  authorized_by: number | null;
+  authorized_by_username: string | null;
+  authorized_at: string;
+  is_active: boolean;
+  notes: string;
+}
+
+export interface ForgeKeyDeviceLockout {
+  id: string;
+  asset: string;
+  asset_name: string;
+  locked_by: number | null;
+  locked_by_username: string | null;
+  lockout_level: string;
+  reason: string;
+  locked_at: string;
+  unlocked_at: string | null;
+  unlocked_by: number | null;
+  unlocked_by_username: string | null;
+  is_active: boolean;
+}
+
 export const forgekeyAPI = {
   listDevices: (opts: { capability?: string } = {}) =>
     api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
@@ -1984,6 +2024,38 @@ export const forgekeyAPI = {
   retireDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/retire/`),
   reactivateDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/reactivate/`),
   deleteDevice: (id: string) => api.delete(`/forgekey/devices/${id}/`),
+  // Asset access controls (#7b): operational mode + authorizations + lockouts,
+  // surfaced on the asset detail page. All keyed to an inventory Asset id.
+  listOperationalModes: (assetId: string) =>
+    api.get<{ results?: ForgeKeyOperationalMode[] } | ForgeKeyOperationalMode[]>(
+      '/forgekey/operational-modes/',
+      { params: { asset: assetId } },
+    ),
+  enableClassroomMode: (id: number) =>
+    api.post<ForgeKeyOperationalMode>(
+      `/forgekey/operational-modes/${id}/enable_classroom_mode/`,
+    ),
+  disableClassroomMode: (id: number) =>
+    api.post<ForgeKeyOperationalMode>(
+      `/forgekey/operational-modes/${id}/disable_classroom_mode/`,
+    ),
+  listAuthorizations: (assetId: string, opts: { activeOnly?: boolean } = {}) =>
+    api.get<{ results?: ForgeKeyAssetAuthorization[] } | ForgeKeyAssetAuthorization[]>(
+      '/forgekey/authorizations/',
+      { params: { asset: assetId, ...(opts.activeOnly ? { is_active: 'true' } : {}) } },
+    ),
+  revokeAuthorization: (id: number, notes?: string) =>
+    api.post<ForgeKeyAssetAuthorization>(
+      `/forgekey/authorizations/${id}/revoke/`,
+      notes ? { notes } : {},
+    ),
+  listLockouts: (assetId: string, opts: { activeOnly?: boolean } = {}) =>
+    api.get<{ results?: ForgeKeyDeviceLockout[] } | ForgeKeyDeviceLockout[]>(
+      '/forgekey/lockouts/',
+      { params: { asset: assetId, ...(opts.activeOnly ? { is_active: 'true' } : {}) } },
+    ),
+  unlockLockout: (id: string) =>
+    api.post<ForgeKeyDeviceLockout>(`/forgekey/lockouts/${id}/unlock/`),
   getOccupancy: (id: string, since: string = '24h') =>
     api.get<ForgeKeyOccupancyResponse>(`/forgekey/devices/${id}/occupancy/`, {
       params: { since },

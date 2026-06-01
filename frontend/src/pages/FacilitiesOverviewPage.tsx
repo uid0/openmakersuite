@@ -88,6 +88,14 @@ const FacilitiesOverviewPage: React.FC = () => (
       testId="facilities-overview-card-/facilities/forgekey-devices"
     />
     <CapabilityCard
+      to="/facilities/forgekey-device-types"
+      title="Device types"
+      description="The ForgeKey device-type catalog — name, code, and active state."
+      icon={<IconKey size={22} stroke={1.8} />}
+      eyebrow="Access"
+      testId="facilities-overview-card-/facilities/forgekey-device-types"
+    />
+    <CapabilityCard
       to="/facilities/forgekey-epaper"
       title="e-Paper panels"
       description="PM status panels glued to machines — binding, battery, and refresh state."

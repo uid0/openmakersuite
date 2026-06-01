@@ -752,6 +752,13 @@ class DeviceTypeViewSet(viewsets.ModelViewSet):
     serializer_class = DeviceTypeSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
+    def get_permissions(self):
+        # Reads stay open to authenticated users (the device + build forms need
+        # the type list); managing the lookup table itself is staff-only.
+        if self.action in ("create", "update", "partial_update", "destroy"):
+            return [IsAdminUser()]
+        return super().get_permissions()
+
 
 class ESP32DeviceViewSet(viewsets.ModelViewSet):
     """API endpoint for ESP32 devices."""

@@ -286,6 +286,32 @@ class TestPublishCommandWaitsForBrokerAck:
             publish_command(device, {"cmd": "restart"}, client=client)
 
 
+class TestPublishCommandCircuitBreaker:
+    """When the shared "mqtt" breaker is open, publish_command fails fast with
+    DeviceCommandError so dispatch_command still drops its phantom audit row
+    and the broker is never touched."""
+
+    def test_open_breaker_fails_fast_with_device_command_error(self, settings):
+        from forgekey.services.device_commands import DeviceCommandError
+        from resilience.circuit import InMemoryStorage, get_breaker, reset_storage
+
+        settings.CIRCUIT_BREAKERS_ENABLED = True
+        settings.CIRCUIT_BREAKER_USE_REDIS = False
+        reset_storage(InMemoryStorage())
+        try:
+            get_breaker("mqtt").storage.trip_open("mqtt")
+
+            device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0C:01")
+            client = MagicMock()
+            client.publish.return_value = MagicMock(rc=0)
+
+            with pytest.raises(DeviceCommandError, match="circuit breaker"):
+                publish_command(device, {"cmd": "restart"}, client=client)
+            client.publish.assert_not_called()
+        finally:
+            reset_storage(None)
+
+
 class TestStatusHandlerAcceptsFlatCmdAck:
     """Current firmware emits ``cmd_ack: "<verb>"`` (a flat string) rather
     than the richer object form. The consumer must accept both."""

@@ -14,6 +14,7 @@ import requests
 from celery import shared_task
 
 from config.observability_redaction import redact
+from resilience.circuit import CircuitBreakerOpen, get_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -101,13 +102,23 @@ def send_webhook_notification(
                 ).hexdigest()
                 headers["X-Webhook-Signature"] = f"sha256={signature}"
 
-            # Send webhook
-            response = requests.post(
-                webhook.url,
-                data=json_payload,
-                headers=headers,
-                timeout=30,  # 30 second timeout
-            )
+            # Send webhook through a per-endpoint circuit breaker so a
+            # persistently failing URL fails fast instead of tying up a worker
+            # on every delivery attempt.
+            def _post_webhook():
+                return requests.post(
+                    webhook.url,
+                    data=json_payload,
+                    headers=headers,
+                    timeout=30,  # 30 second timeout
+                )
+
+            try:
+                response = get_breaker(f"webhook:{webhook.id}").call(_post_webhook)
+            except CircuitBreakerOpen as exc:
+                raise requests.exceptions.ConnectionError(
+                    f"Webhook circuit open for '{webhook.name}'"
+                ) from exc
 
             # Check response
             response.raise_for_status()
@@ -314,8 +325,16 @@ def run_webhook_test(webhook_id: int) -> Dict[str, Any]:
             ).hexdigest()
             headers["X-Webhook-Signature"] = f"sha256={signature}"
 
-        # Send test webhook
-        response = requests.post(webhook.url, data=json_payload, headers=headers, timeout=30)
+        # Send test webhook through the same per-endpoint circuit breaker.
+        def _post_test():
+            return requests.post(webhook.url, data=json_payload, headers=headers, timeout=30)
+
+        try:
+            response = get_breaker(f"webhook:{webhook.id}").call(_post_test)
+        except CircuitBreakerOpen as exc:
+            raise requests.exceptions.ConnectionError(
+                f"Webhook circuit open for '{webhook.name}'"
+            ) from exc
 
         response_time_ms = (time.time() - start_time) * 1000
         response.raise_for_status()

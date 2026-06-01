@@ -1,0 +1,7 @@
+from django.apps import AppConfig
+
+
+class ResilienceConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "resilience"
+    verbose_name = "Resilience"

@@ -120,6 +120,7 @@ INSTALLED_APPS = [
     "scanner",
     "preventive_maintenance",
     "backups",
+    "resilience",
 ]
 
 MIDDLEWARE = [
@@ -371,6 +372,17 @@ TRAFFIC_URL = config(
 
 # Redis configuration
 REDIS_URL = config("REDIS_URL", default="redis://192.168.1.36:6379/0")
+
+# Circuit breakers (resilience app): fail fast when an external dependency
+# (MQTT broker, vendor HTTP API, ...) is unhealthy instead of hammering it
+# from every web/worker process. State is shared via Redis so one trip
+# protects the whole fleet. Disabled under tests so each test stays hermetic —
+# the resilience suite re-enables them explicitly.
+_RUNNING_TESTS = "pytest" in sys.modules or (len(sys.argv) > 1 and sys.argv[1] == "test")
+CIRCUIT_BREAKERS_ENABLED = config("CIRCUIT_BREAKERS_ENABLED", default=not _RUNNING_TESTS, cast=bool)
+CIRCUIT_BREAKER_USE_REDIS = config(
+    "CIRCUIT_BREAKER_USE_REDIS", default=not _RUNNING_TESTS, cast=bool
+)
 
 # Cache configuration
 CACHES = {

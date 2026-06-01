@@ -1885,6 +1885,8 @@ export interface ForgeKeyDeviceType {
   id: number;
   name: string;
   code: string;
+  description?: string;
+  is_active?: boolean;
 }
 
 export type ForgeKeyFirmwareBuildStatus =
@@ -2056,6 +2058,14 @@ export const forgekeyAPI = {
   // Firmware build pipeline (self-hosted build worker).
   listDeviceTypes: () =>
     api.get<{ results?: ForgeKeyDeviceType[] } | ForgeKeyDeviceType[]>('/forgekey/device-types/'),
+  createDeviceType: (data: {
+    name: string;
+    code: string;
+    description?: string;
+    is_active?: boolean;
+  }) => api.post<ForgeKeyDeviceType>('/forgekey/device-types/', data),
+  updateDeviceType: (id: number, data: Partial<ForgeKeyDeviceType>) =>
+    api.patch<ForgeKeyDeviceType>(`/forgekey/device-types/${id}/`, data),
   listFirmwareBuilds: () =>
     api.get<{ results?: ForgeKeyFirmwareBuild[] } | ForgeKeyFirmwareBuild[]>(
       '/forgekey/firmware-builds/',

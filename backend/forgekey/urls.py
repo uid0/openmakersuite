@@ -9,6 +9,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AssetAuthorizationViewSet,
     AssetDeviceViewSet,
+    CertificateAuthorityViewSet,
+    DeviceCertificateViewSet,
     DeviceFirmwareUpdateViewSet,
     DeviceLockoutViewSet,
     DeviceTypeViewSet,
@@ -49,6 +51,10 @@ router.register(r"firmware-versions", FirmwareVersionViewSet, basename="firmware
 router.register(r"firmware-updates", DeviceFirmwareUpdateViewSet, basename="firmware-update")
 router.register(r"firmware-rollouts", FirmwareRolloutViewSet, basename="firmware-rollout")
 router.register(r"firmware-builds", FirmwareBuildViewSet, basename="firmware-build")
+router.register(
+    r"certificate-authorities", CertificateAuthorityViewSet, basename="certificate-authority"
+)
+router.register(r"device-certificates", DeviceCertificateViewSet, basename="device-certificate")
 
 app_name = "forgekey"
 

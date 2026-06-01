@@ -39,6 +39,7 @@ import PowerPanelPrintPage from './pages/PowerPanelPrintPage';
 import PowerPanelDirectoryPage from './pages/PowerPanelDirectoryPage';
 import PowerPanelFormPage from './pages/PowerPanelFormPage';
 import FixtureScanPage from './pages/FixtureScanPage';
+import ForgeKeyCertificatesPage from './pages/ForgeKeyCertificatesPage';
 import ForgeKeyDashboardPage from './pages/ForgeKeyDashboardPage';
 import ForgeKeyDeviceDetailPage from './pages/ForgeKeyDeviceDetailPage';
 import ForgeKeyDevicesPage from './pages/ForgeKeyDevicesPage';
@@ -230,6 +231,7 @@ function AppContent() {
           <Route path="/facilities/forgekey-devices/:id" element={<WorkspaceLayout><ForgeKeyDeviceDetailPage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-epaper" element={<WorkspaceLayout><ForgeKeyEPaperPanelsPage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-rollouts" element={<WorkspaceLayout><ForgeKeyFirmwareRolloutsPage /></WorkspaceLayout>} />
+          <Route path="/facilities/forgekey-certificates" element={<WorkspaceLayout><ForgeKeyCertificatesPage /></WorkspaceLayout>} />
           <Route path="/facilities/lockers" element={<WorkspaceLayout><LockersPage /></WorkspaceLayout>} />
           <Route path="/forgekey/epaper" element={<Navigate to="/facilities/forgekey-epaper" replace />} />
           <Route path="/forgekey/epaper/bind" element={<WorkspaceLayout><ForgeKeyEPaperBindPage /></WorkspaceLayout>} />

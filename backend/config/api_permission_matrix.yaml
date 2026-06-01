@@ -537,6 +537,25 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  forgekey.views.CertificateAuthorityViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAdminUser
+      rotate:
+        permission_classes:
+        - IsAdminUser
+  forgekey.views.DeviceCertificateViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAdminUser
   forgekey.views.DeviceFirmwareUpdateViewSet:
     actions:
       create:

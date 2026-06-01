@@ -104,6 +104,14 @@ const FacilitiesOverviewPage: React.FC = () => (
       testId="facilities-overview-card-/facilities/forgekey-rollouts"
     />
     <CapabilityCard
+      to="/facilities/forgekey-certificates"
+      title="Certificates (PKI)"
+      description="The internal CA + issued device certificates — and rotate the root CA."
+      icon={<IconKey size={22} stroke={1.8} />}
+      eyebrow="Access"
+      testId="facilities-overview-card-/facilities/forgekey-certificates"
+    />
+    <CapabilityCard
       to="/facilities/lockers"
       title="Lockers"
       description="ForgeKey-gated lockers — live secure / online status with intrusions flagged."

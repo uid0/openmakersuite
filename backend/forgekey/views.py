@@ -1342,6 +1342,15 @@ class OperationalModeViewSet(viewsets.ModelViewSet):
     serializer_class = OperationalModeSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
+    def get_queryset(self):
+        """Allow ``?asset=<id>`` so the asset detail page can fetch just the
+        single OperationalMode (if any) for the asset it's showing."""
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        return qs
+
     @action(detail=True, methods=["post"])
     def enable_classroom_mode(self, request, pk=None):
         """Enable classroom mode for an asset."""
@@ -1392,6 +1401,19 @@ class AssetAuthorizationViewSet(viewsets.ModelViewSet):
     queryset = AssetAuthorization.objects.select_related("asset", "user", "authorized_by").all()
     serializer_class = AssetAuthorizationSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        """Support ``?asset=<id>`` and ``?is_active=<bool>`` so the asset
+        detail page can list just that asset's authorizations (typically the
+        active ones)."""
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() in ("1", "true", "yes"))
+        return qs
 
     def perform_create(self, serializer):
         """Set authorized_by to current user when creating authorization."""
@@ -1499,6 +1521,19 @@ class DeviceLockoutViewSet(viewsets.ModelViewSet):
     queryset = DeviceLockout.objects.select_related("asset", "locked_by", "unlocked_by").all()
     serializer_class = DeviceLockoutSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        """Support ``?asset=<id>`` and ``?is_active=<bool>`` so the asset
+        detail page can list just that asset's lockouts (typically the active
+        ones)."""
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() in ("1", "true", "yes"))
+        return qs
 
     def perform_create(self, serializer):
         """Create a lockout and determine the lockout level."""

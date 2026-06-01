@@ -5,6 +5,7 @@
 import { Badge, Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import AssetForgeKeyAccessCard from '../components/AssetForgeKeyAccessCard';
 import MaintenanceHistorySection from '../components/assets/MaintenanceHistorySection';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
@@ -1001,6 +1002,12 @@ const AssetDetailPage: React.FC = () => {
             canManage={isLoggedIn && localStorage.getItem('is_staff') === 'true'}
           />
         )}
+
+        {id &&
+          (localStorage.getItem('is_staff') === 'true' ||
+            localStorage.getItem('is_superuser') === 'true') && (
+            <AssetForgeKeyAccessCard assetId={id} />
+          )}
 
         {id &&
           (localStorage.getItem('is_staff') === 'true' ||

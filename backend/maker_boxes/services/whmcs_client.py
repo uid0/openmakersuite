@@ -25,6 +25,8 @@ from django.utils import timezone
 
 import requests
 
+from resilience.circuit import CircuitBreakerOpen, get_breaker
+
 logger = logging.getLogger(__name__)
 
 GRACE_PERIOD_DAYS = 7
@@ -96,9 +98,22 @@ def _classify(expires_at: Optional[datetime], whmcs_status: str) -> tuple[str, O
 
 
 def _request(url: str, payload: dict) -> dict:
-    response = requests.post(url, data=payload, timeout=REQUEST_TIMEOUT_SECONDS)
-    response.raise_for_status()
-    return response.json()
+    # Route the WHMCS round-trip through a circuit breaker: a billing-API
+    # outage (or repeated 5xx) trips it so member lookups fail fast instead
+    # of every scan blocking on the 10s timeout. An open breaker surfaces as
+    # a normal ConnectionError so callers' requests-exception handling (and
+    # the 503 mapping) applies unchanged.
+    def _post() -> requests.Response:
+        response = requests.post(url, data=payload, timeout=REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        return response
+
+    try:
+        return get_breaker("whmcs").call(_post).json()
+    except CircuitBreakerOpen as exc:
+        raise requests.exceptions.ConnectionError(
+            "WHMCS circuit breaker open — vendor API unhealthy"
+        ) from exc
 
 
 def lookup_member(username: str, *, use_cache: bool = True) -> Optional[MemberLookup]:

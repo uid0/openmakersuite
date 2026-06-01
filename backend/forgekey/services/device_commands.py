@@ -19,6 +19,8 @@ from django.utils import timezone
 
 import paho.mqtt.client as mqtt
 
+from resilience.circuit import CircuitBreakerOpen, get_breaker
+
 from ..models import DeviceCommand, ESP32Device
 from ..tasks import get_mqtt_client
 from ..utils import get_mqtt_command_topic
@@ -63,37 +65,54 @@ def publish_command(
 
     body = json.dumps(payload)
     broker = client or get_mqtt_client()
-    result = broker.publish(topic, body, qos=1)
-    rc = getattr(result, "rc", 0)
-    if rc != mqtt.MQTT_ERR_SUCCESS:
-        logger.error(
-            "Command publish failed: device=%s topic=%s rc=%s payload=%s",
-            device.mac_address,
-            topic,
-            rc,
-            payload,
-        )
-        raise DeviceCommandError(f"MQTT publish failed (rc={rc})")
 
-    # Block briefly for the broker PUBACK. paho's wait_for_publish blocks
-    # the calling thread until the broker confirms (QoS 1) or the timeout
-    # fires; a False return signals the broker dropped or never confirmed.
-    wait_for_publish = getattr(result, "wait_for_publish", None)
-    if callable(wait_for_publish):
-        try:
-            acknowledged = wait_for_publish(timeout=PUBACK_WAIT_SECONDS)
-        except (RuntimeError, ValueError):
-            # Older paho releases raise instead of returning False — treat
-            # as "broker never PUBACK'd" rather than letting it bubble up.
-            acknowledged = False
-        # paho < 2.0 returns None (no signal); only fail on explicit False.
-        if acknowledged is False:
+    def _publish_and_confirm() -> None:
+        result = broker.publish(topic, body, qos=1)
+        rc = getattr(result, "rc", 0)
+        if rc != mqtt.MQTT_ERR_SUCCESS:
             logger.error(
-                "Command publish broker PUBACK timeout: device=%s topic=%s",
+                "Command publish failed: device=%s topic=%s rc=%s payload=%s",
                 device.mac_address,
                 topic,
+                rc,
+                payload,
             )
-            raise DeviceCommandError(f"MQTT broker did not PUBACK within {PUBACK_WAIT_SECONDS}s")
+            raise DeviceCommandError(f"MQTT publish failed (rc={rc})")
+
+        # Block briefly for the broker PUBACK. paho's wait_for_publish blocks
+        # the calling thread until the broker confirms (QoS 1) or the timeout
+        # fires; a False return signals the broker dropped or never confirmed.
+        wait_for_publish = getattr(result, "wait_for_publish", None)
+        if callable(wait_for_publish):
+            try:
+                acknowledged = wait_for_publish(timeout=PUBACK_WAIT_SECONDS)
+            except (RuntimeError, ValueError):
+                # Older paho releases raise instead of returning False — treat
+                # as "broker never PUBACK'd" rather than letting it bubble up.
+                acknowledged = False
+            # paho < 2.0 returns None (no signal); only fail on explicit False.
+            if acknowledged is False:
+                logger.error(
+                    "Command publish broker PUBACK timeout: device=%s topic=%s",
+                    device.mac_address,
+                    topic,
+                )
+                raise DeviceCommandError(
+                    f"MQTT broker did not PUBACK within {PUBACK_WAIT_SECONDS}s"
+                )
+
+    # Route the broker round-trip through a circuit breaker so a wedged or
+    # unreachable EMQX fails fast (and alerts via Sentry + an audit row)
+    # instead of every web/worker thread blocking on the PUBACK timeout. An
+    # open breaker surfaces as DeviceCommandError so existing callers'
+    # retry/cleanup paths (e.g. dispatch_command dropping the audit row) are
+    # unchanged.
+    try:
+        get_breaker("mqtt").call(_publish_and_confirm)
+    except CircuitBreakerOpen as exc:
+        raise DeviceCommandError(
+            "MQTT circuit breaker is open — broker unhealthy; command not published."
+        ) from exc
 
     actor_id = None
     actor_username = None

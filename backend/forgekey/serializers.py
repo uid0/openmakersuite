@@ -7,6 +7,8 @@ from rest_framework import serializers
 from .models import (
     AssetAuthorization,
     AssetDevice,
+    CertificateAuthority,
+    DeviceCertificate,
     DeviceCommand,
     DeviceFirmwareUpdate,
     DeviceLockout,
@@ -343,3 +345,96 @@ class FirmwareRolloutSerializer(serializers.ModelSerializer):
         from .services.firmware_rollout import rollout_progress
 
         return rollout_progress(obj)
+
+
+class CertificateAuthoritySerializer(serializers.ModelSerializer):
+    """Read-only view of an internal CA, with the CN + fingerprint parsed from
+    the stored certificate. Active-CA rows also carry the device-cert counts."""
+
+    common_name = serializers.SerializerMethodField()
+    fingerprint_sha256 = serializers.SerializerMethodField()
+    active_cert_count = serializers.SerializerMethodField()
+    revoked_cert_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CertificateAuthority
+        fields = [
+            "id",
+            "name",
+            "common_name",
+            "fingerprint_sha256",
+            "not_before",
+            "not_after",
+            "is_active",
+            "created_at",
+            "active_cert_count",
+            "revoked_cert_count",
+        ]
+
+    @staticmethod
+    def _cert(obj):
+        from cryptography import x509
+
+        try:
+            return x509.load_pem_x509_certificate(obj.cert_pem.encode("utf-8"))
+        except Exception:
+            return None
+
+    def get_common_name(self, obj):
+        cert = self._cert(obj)
+        if cert is None:
+            return None
+        return next(
+            (a.value for a in cert.subject if a.oid.dotted_string == "2.5.4.3"),
+            None,
+        )
+
+    def get_fingerprint_sha256(self, obj):
+        from cryptography.hazmat.primitives import hashes
+
+        cert = self._cert(obj)
+        return cert.fingerprint(hashes.SHA256()).hex() if cert is not None else None
+
+    def get_active_cert_count(self, obj):
+        if not obj.is_active:
+            return None
+        return DeviceCertificate.objects.filter(revoked_at__isnull=True).count()
+
+    def get_revoked_cert_count(self, obj):
+        if not obj.is_active:
+            return None
+        return DeviceCertificate.objects.filter(revoked_at__isnull=False).count()
+
+
+class DeviceCertificateSerializer(serializers.ModelSerializer):
+    """Read-only view of an issued device (mTLS) certificate + its lifecycle
+    status."""
+
+    device_chip_id = serializers.CharField(source="device.device_id", read_only=True, default=None)
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DeviceCertificate
+        fields = [
+            "id",
+            "device",
+            "device_chip_id",
+            "serial",
+            "subject",
+            "fingerprint_sha256",
+            "not_before",
+            "not_after",
+            "revoked_at",
+            "issued_by",
+            "created_at",
+            "status",
+        ]
+
+    def get_status(self, obj):
+        from django.utils import timezone
+
+        if obj.revoked_at is not None:
+            return "revoked"
+        if obj.not_after is not None and obj.not_after < timezone.now():
+            return "expired"
+        return "active"

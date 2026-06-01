@@ -58,6 +58,8 @@ from .models import (
 from .serializers import (
     AssetAuthorizationSerializer,
     AssetDeviceSerializer,
+    CertificateAuthoritySerializer,
+    DeviceCertificateSerializer,
     DeviceCommandSerializer,
     DeviceFirmwareUpdateSerializer,
     DeviceLockoutSerializer,
@@ -1665,6 +1667,57 @@ class DeviceFirmwareUpdateViewSet(viewsets.ModelViewSet):
         serializer.save(requested_by=self.request.user)
         # TODO: Trigger firmware update via MQTT
         # This would send the firmware file and signature to the device
+
+
+class CertificateAuthorityViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only view of the internal CA(s) + a staff CA-rotate action.
+
+    Device-cert issuance / revocation stays in the enrollment flow / admin;
+    this surface is for visibility and rotating the root CA. Rotation mints a
+    fresh self-signed root and retires the prior one — devices must be
+    re-flashed (or rebuilt via the firmware pipeline) to trust the new root.
+    """
+
+    queryset = CertificateAuthority.objects.all()
+    serializer_class = CertificateAuthoritySerializer
+    permission_classes = [IsAdminUser]
+
+    @action(detail=False, methods=["post"])
+    def rotate(self, request):
+        from .services.ca_lifecycle import mint_ca
+
+        name = (request.data.get("name") or "forgekey-root").strip() or "forgekey-root"
+        cn = (request.data.get("common_name") or "").strip() or "ForgeKey Internal Root CA"
+        raw_validity = request.data.get("validity_years")
+        try:
+            validity_years = int(raw_validity) if raw_validity is not None else 10
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "validity_years must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if validity_years <= 0:
+            return Response(
+                {"detail": "validity_years must be positive."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ca = mint_ca(name=name, cn=cn, validity_years=validity_years, replace_active=True)
+        except Exception as exc:  # noqa: BLE001 — surface any CA-gen failure
+            logger.exception("CA rotation failed")
+            return Response(
+                {"detail": f"Failed to rotate the CA: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return Response(CertificateAuthoritySerializer(ca).data, status=status.HTTP_201_CREATED)
+
+
+class DeviceCertificateViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only list of issued device (mTLS) certificates + their status."""
+
+    queryset = DeviceCertificate.objects.select_related("device").all()
+    serializer_class = DeviceCertificateSerializer
+    permission_classes = [IsAdminUser]
 
 
 class FirmwareBuildViewSet(viewsets.ModelViewSet):

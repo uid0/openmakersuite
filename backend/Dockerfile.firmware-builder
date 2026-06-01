@@ -1,0 +1,46 @@
+# Firmware build worker.
+#
+# Extends the OMS backend runtime with git + PlatformIO so it can clone the
+# ForgeKey repo and compile firmware. It consumes the dedicated `builds` Celery
+# queue (CELERY_TASK_ROUTES["forgekey.tasks.build_firmware"]); the OMS app image
+# deliberately omits this toolchain, so only this worker carries it.
+#
+# Build (from the backend/ context):
+#   docker build -f backend/Dockerfile.firmware-builder -t oms-firmware-builder backend/
+#
+# It needs an SSH deploy key with read access to the ForgeKey repo mounted at
+# /root/.ssh/id_ed25519 — see docs/FORGEKEY_FIRMWARE_BUILD.md.
+FROM python:3.14-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+
+# App runtime deps (mirrors backend/Dockerfile) + git/ssh + the PlatformIO
+# build toolchain prerequisites.
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    build-essential \
+    libpq-dev \
+    libzbar0 \
+    libgl1 \
+    libglib2.0-0 \
+    git \
+    openssh-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /app/
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt \
+    && pip install platformio
+
+COPY . /app/
+RUN mkdir -p /app/staticfiles /app/media
+
+# Pre-trust GitHub's host key so `git clone git@github.com:...` won't prompt.
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh \
+    && ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null || true
+
+# Consume only the dedicated builds queue; one build at a time.
+CMD ["celery", "-A", "config", "worker", "-Q", "builds", "--concurrency=1", "-l", "info"]

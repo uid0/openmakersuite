@@ -22,6 +22,10 @@ vi.mock('../../services/api', async () => {
       pauseRollout: jest.fn(),
       cancelRollout: jest.fn(),
       advanceRollout: jest.fn(),
+      listFirmwareBuilds: jest.fn(),
+      listDeviceTypes: jest.fn(),
+      createFirmwareBuild: jest.fn(),
+      cancelFirmwareBuild: jest.fn(),
     },
   };
 });
@@ -68,6 +72,8 @@ describe('ForgeKeyFirmwareRolloutsPage', () => {
     jest.clearAllMocks();
     localStorage.clear();
     mockApi.listFirmwareVersions.mockResolvedValue({ data: [] } as any);
+    mockApi.listFirmwareBuilds.mockResolvedValue({ data: [] } as any);
+    mockApi.listDeviceTypes.mockResolvedValue({ data: [] } as any);
   });
 
   test('non-staff users are redirected', async () => {
@@ -111,5 +117,52 @@ describe('ForgeKeyFirmwareRolloutsPage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('rollout-status-r1')).toHaveTextContent('active'),
     );
+  });
+
+  test('staff sees the firmware build form', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listFirmwareRollouts.mockResolvedValue({ data: [] } as any);
+
+    renderPage();
+
+    expect(await screen.findByTestId('build-create')).toBeInTheDocument();
+    // Disabled until device type + env + version are filled in.
+    expect(screen.getByTestId('build-submit')).toBeDisabled();
+  });
+
+  test('shows queued firmware builds', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listFirmwareRollouts.mockResolvedValue({ data: [] } as any);
+    mockApi.listFirmwareBuilds.mockResolvedValue({
+      data: [
+        {
+          id: 'b1',
+          device_type: 3,
+          device_type_name: 'E-paper',
+          pio_env: 'seeed_xiao_epaper',
+          source_ref: 'main',
+          version: '5.0.0',
+          mandatory: false,
+          release_notes: '',
+          status: 'queued',
+          ca_fingerprint: '',
+          commit_sha: '',
+          log: '',
+          error_message: '',
+          firmware_version: null,
+          firmware_version_string: null,
+          requested_by_username: 'admin',
+          requested_at: '2026-06-01T00:00:00Z',
+          started_at: null,
+          completed_at: null,
+        },
+      ],
+    } as any);
+
+    renderPage();
+
+    expect(await screen.findByTestId('build-b1')).toBeInTheDocument();
+    expect(screen.getByText('5.0.0')).toBeInTheDocument();
+    expect(screen.getByText('seeed_xiao_epaper')).toBeInTheDocument();
   });
 });

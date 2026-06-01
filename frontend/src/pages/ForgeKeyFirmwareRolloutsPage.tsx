@@ -19,6 +19,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Table,
   Text,
   TextInput,
   Title,
@@ -27,6 +28,8 @@ import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
+  ForgeKeyDeviceType,
+  ForgeKeyFirmwareBuild,
   ForgeKeyFirmwareRollout,
   ForgeKeyFirmwareVersion,
   forgekeyAPI,
@@ -41,6 +44,14 @@ const STATUS_COLORS: Record<string, string> = {
   paused: 'yellow',
   completed: 'green',
   cancelled: 'red',
+};
+
+const BUILD_STATUS_COLORS: Record<string, string> = {
+  queued: 'gray',
+  building: 'blue',
+  succeeded: 'green',
+  failed: 'red',
+  cancelled: 'gray',
 };
 
 const asList = <T,>(data: { results?: T[] } | T[]): T[] =>
@@ -64,6 +75,15 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
   const [formName, setFormName] = useState('');
   const [creating, setCreating] = useState(false);
 
+  // Firmware build form + list.
+  const [builds, setBuilds] = useState<ForgeKeyFirmwareBuild[]>([]);
+  const [deviceTypes, setDeviceTypes] = useState<ForgeKeyDeviceType[]>([]);
+  const [buildDeviceType, setBuildDeviceType] = useState<string | null>(null);
+  const [buildEnv, setBuildEnv] = useState('');
+  const [buildVersion, setBuildVersion] = useState('');
+  const [buildRef, setBuildRef] = useState('main');
+  const [building, setBuilding] = useState(false);
+
   useEffect(() => {
     if (!isStaff && !isSuperuser) return undefined;
     let cancelled = false;
@@ -80,14 +100,32 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
         if (!cancelled) setLoading(false);
       }
     };
+    const loadBuilds = async () => {
+      try {
+        const res = await forgekeyAPI.listFirmwareBuilds();
+        if (!cancelled) setBuilds(asList(res.data));
+      } catch {
+        /* builds are secondary; ignore transient errors */
+      }
+    };
     forgekeyAPI
       .listFirmwareVersions()
       .then((res) => {
         if (!cancelled) setVersions(asList(res.data).filter((v) => v.is_active !== false));
       })
       .catch(() => undefined);
+    forgekeyAPI
+      .listDeviceTypes()
+      .then((res) => {
+        if (!cancelled) setDeviceTypes(asList(res.data));
+      })
+      .catch(() => undefined);
     loadRollouts();
-    const handle = window.setInterval(loadRollouts, POLL_INTERVAL_MS);
+    loadBuilds();
+    const handle = window.setInterval(() => {
+      loadRollouts();
+      loadBuilds();
+    }, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(handle);
@@ -138,6 +176,29 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
     }
   };
 
+  const handleBuild = async () => {
+    if (!buildDeviceType || !buildEnv.trim() || !buildVersion.trim()) {
+      setError('Device type, PlatformIO env, and version are required to build.');
+      return;
+    }
+    setBuilding(true);
+    try {
+      const res = await forgekeyAPI.createFirmwareBuild({
+        device_type: Number(buildDeviceType),
+        pio_env: buildEnv.trim(),
+        version: buildVersion.trim(),
+        source_ref: buildRef.trim() || 'main',
+      });
+      setBuilds((prev) => [res.data, ...prev]);
+      setBuildVersion('');
+      setError(null);
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to queue the build.'));
+    } finally {
+      setBuilding(false);
+    }
+  };
+
   const pct = (n: number, total: number) => (total > 0 ? (n / total) * 100 : 0);
 
   return (
@@ -155,6 +216,91 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
           {error}
         </Alert>
       )}
+
+      {/* Build firmware */}
+      <Paper p="md" withBorder data-testid="build-create">
+        <Title order={5} mb="sm">
+          Build firmware
+        </Title>
+        <Group align="flex-end" gap="md" wrap="wrap">
+          <Select
+            label="Device type"
+            placeholder={deviceTypes.length ? 'Pick a type' : 'No device types'}
+            data={deviceTypes.map((d) => ({ value: String(d.id), label: d.name }))}
+            value={buildDeviceType}
+            onChange={setBuildDeviceType}
+            searchable
+            style={{ minWidth: 180 }}
+          />
+          <TextInput
+            label="PlatformIO env"
+            placeholder="seeed_xiao_esp32s3"
+            value={buildEnv}
+            onChange={(e) => setBuildEnv(e.currentTarget.value)}
+            style={{ minWidth: 200 }}
+          />
+          <TextInput
+            label="Version"
+            placeholder="2.3.0"
+            value={buildVersion}
+            onChange={(e) => setBuildVersion(e.currentTarget.value)}
+            style={{ width: 140 }}
+          />
+          <TextInput
+            label="Git ref"
+            value={buildRef}
+            onChange={(e) => setBuildRef(e.currentTarget.value)}
+            style={{ width: 140 }}
+          />
+          <Button
+            onClick={handleBuild}
+            loading={building}
+            disabled={!buildDeviceType || !buildEnv.trim() || !buildVersion.trim()}
+            data-testid="build-submit"
+          >
+            Queue build
+          </Button>
+        </Group>
+        {builds.length > 0 && (
+          <Table mt="md" highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Version</Table.Th>
+                <Table.Th>Env</Table.Th>
+                <Table.Th>Ref</Table.Th>
+                <Table.Th>Status</Table.Th>
+                <Table.Th>Requested</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {builds.map((b) => (
+                <Table.Tr key={b.id} data-testid={`build-${b.id}`}>
+                  <Table.Td>{b.version}</Table.Td>
+                  <Table.Td>{b.pio_env}</Table.Td>
+                  <Table.Td>{b.source_ref}</Table.Td>
+                  <Table.Td>
+                    <Badge color={BUILD_STATUS_COLORS[b.status] || 'gray'}>{b.status}</Badge>
+                    {b.status === 'failed' && b.error_message && (
+                      <Text size="xs" c="red" lineClamp={2}>
+                        {b.error_message}
+                      </Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs" c="dimmed">
+                      {new Date(b.requested_at).toLocaleString()}
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+        <Text size="xs" c="dimmed" mt="xs">
+          Builds run on the self-hosted firmware-builder worker; a succeeded
+          build becomes a firmware version you can roll out below.
+        </Text>
+      </Paper>
 
       {/* Create campaign */}
       <Paper p="md" withBorder data-testid="rollout-create">

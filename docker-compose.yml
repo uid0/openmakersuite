@@ -73,6 +73,35 @@ services:
       redis:
         condition: service_healthy
 
+  firmware_builder:
+    # Self-hosted firmware build worker. Opt-in (compose profile) — it carries
+    # git + PlatformIO and consumes the dedicated `builds` queue that
+    # forgekey.tasks.build_firmware is routed to. Start with:
+    #   FORGEKEY_DEPLOY_KEY=/abs/path/to/forgekey_deploy_key \
+    #     docker compose --profile firmware-build up -d firmware_builder
+    # See docs/FORGEKEY_FIRMWARE_BUILD.md.
+    profiles: ["firmware-build"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.firmware-builder
+    command: celery -A config worker -Q builds --concurrency=1 -l info
+    volumes:
+      - ./backend:/app
+      - media_volume:/app/media
+      # Read-only SSH deploy key with read access to the ForgeKey repo.
+      - ${FORGEKEY_DEPLOY_KEY:-/dev/null}:/root/.ssh/id_ed25519:ro
+    environment:
+      - DEBUG=1
+      - DATABASE_URL=postgresql://makerspace:${POSTGRES_PASSWORD:-development_password_only}@db:5432/makerspace_inventory
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FORGEKEY_FIRMWARE_REPO_URL=${FORGEKEY_FIRMWARE_REPO_URL:-git@github.com:uid0/ForgeKey.git}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   celery_beat:
     # Periodic-task scheduler. Without this, CELERY_BEAT_SCHEDULE entries
     # never fire — most visibly, mark_stale_devices_offline never runs and

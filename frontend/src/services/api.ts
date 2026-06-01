@@ -1911,6 +1911,14 @@ export const forgekeyAPI = {
   getDevice: (id: string) => api.get<ForgeKeyDevice>(`/forgekey/devices/${id}/`),
   updateDevice: (id: string, data: Partial<ForgeKeyDevice>) =>
     api.patch<ForgeKeyDevice>(`/forgekey/devices/${id}/`, data),
+  // Lifecycle: lock/unlock = power off/on, reset = restart (above),
+  // retire/reactivate = is_active toggle (staff), delete = remove (staff).
+  enableDevice: (id: string) => api.post(`/forgekey/devices/${id}/enable/`),
+  disableDevice: (id: string, delaySeconds?: number) =>
+    api.post(`/forgekey/devices/${id}/disable/`, delaySeconds ? { delay_seconds: delaySeconds } : {}),
+  retireDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/retire/`),
+  reactivateDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/reactivate/`),
+  deleteDevice: (id: string) => api.delete(`/forgekey/devices/${id}/`),
   getOccupancy: (id: string, since: string = '24h') =>
     api.get<ForgeKeyOccupancyResponse>(`/forgekey/devices/${id}/occupancy/`, {
       params: { since },

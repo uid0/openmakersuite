@@ -7,9 +7,10 @@
  */
 import { Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import DeviceControlsCard from '../components/DeviceControlsCard';
+import DeviceLifecycleCard from '../components/DeviceLifecycleCard';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   ForgeKeyCommandResponse,
@@ -34,6 +35,7 @@ const initialControl: ControlState = { pending: false, lastResult: null, lastErr
 
 const ForgeKeyDeviceDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const isStaff = typeof window !== 'undefined' && localStorage.getItem('is_staff') === 'true';
   const isSuperuser =
     typeof window !== 'undefined' && localStorage.getItem('is_superuser') === 'true';
@@ -266,6 +268,12 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
           )}
 
           <DeviceControlsCard device={device} />
+
+          <DeviceLifecycleCard
+            device={device}
+            onChanged={loadAll}
+            onDeleted={() => navigate('/facilities/forgekey-devices')}
+          />
 
           <CapabilitiesSection
             device={device}

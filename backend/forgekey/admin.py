@@ -35,7 +35,13 @@ from .models import (
     PowerMeterReading,
 )
 from .services.ca_key_storage import CaKeyStorageError, encrypt_ca_key
-from .services.csr_signing import generate_ca_keypair
+from .services.csr_signing import (
+    CsrSigningError,
+    CsrValidationError,
+    generate_ca_keypair,
+    sign_csr,
+    validate_csr,
+)
 from .services.firmware_signing import (
     FirmwareSigningError,
     derive_public_pem,
@@ -562,10 +568,79 @@ class DeviceIdentityAdmin(admin.ModelAdmin):
     fields = ["id", "device_id", "status", "notes", "created_at", "updated_at"]
 
 
+class DeviceCertificateForm(forms.ModelForm):
+    """Add-form for a device certificate: paste a CSR, server signs it.
+
+    The full enrollment flow normally runs over `/api/forgekey/devices/enroll/`
+    — the device generates its own keypair, POSTs the CSR with the
+    provisioning token, gets a signed cert in the response. This admin form
+    is the manual escape-hatch for the cases that flow doesn't cover:
+    factory pre-provisioning, devices on flaky networks, support-driven
+    re-cert, etc. The operator obtains a CSR from the device out-of-band
+    and pastes it here.
+
+    Form-only fields:
+      * ``csr_pem`` — PEM-encoded CSR (parsed + validated on clean()).
+      * ``validity_days`` — optional cert lifetime (defaults to the
+        ``FORGEKEY_CLIENT_CERT_VALIDITY_DAYS`` setting).
+    """
+
+    csr_pem = forms.CharField(
+        label="CSR (PEM)",
+        widget=forms.Textarea(attrs={"rows": 10, "cols": 80, "style": "font-family: monospace;"}),
+        help_text=(
+            "Paste the device's PEM-encoded certificate signing request. "
+            "Must be EC P-256 with SHA-256, matching the /enroll/ contract."
+        ),
+    )
+    validity_days = forms.IntegerField(
+        required=False,
+        min_value=1,
+        max_value=825,  # CA/Browser Forum cap; keeps us off the rails.
+        help_text=(
+            "Days before the cert expires. Leave blank to use the server "
+            "default (FORGEKEY_CLIENT_CERT_VALIDITY_DAYS)."
+        ),
+    )
+
+    class Meta:
+        model = DeviceCertificate
+        fields = ["device"]
+
+    def clean(self):
+        cleaned = super().clean()
+        if not self.instance._state.adding:
+            # Edit path — only `revoked_at` is editable; nothing to validate.
+            return cleaned
+
+        csr_pem = (cleaned.get("csr_pem") or "").strip()
+        if csr_pem:
+            try:
+                validate_csr(csr_pem)
+            except CsrValidationError as exc:
+                raise forms.ValidationError(f"Invalid CSR: {exc}") from exc
+
+        device = cleaned.get("device")
+        if device is not None and device.status == DeviceIdentity.STATUS_DECOMMISSIONED:
+            raise forms.ValidationError(
+                f"Device {device.device_id!r} is decommissioned; cannot issue."
+            )
+        return cleaned
+
+
 @admin.register(DeviceCertificate)
 class DeviceCertificateAdmin(admin.ModelAdmin):
-    """mTLS client certificates issued by the internal CA."""
+    """mTLS client certificates issued by the internal CA.
 
+    Add: paste a CSR for a known DeviceIdentity, server signs it via the
+    same `sign_csr` path the /enroll/ endpoint uses, prior active cert for
+    the same device is revoked atomically, the resulting PEM is returned to
+    the browser as a `cert-<serial>.pem` download (the server doesn't keep
+    the PEM long-term — mirrors the /enroll/ HTTP-only delivery model).
+    Change: revoke only.
+    """
+
+    form = DeviceCertificateForm
     list_display = [
         "serial",
         "device",
@@ -578,7 +653,6 @@ class DeviceCertificateAdmin(admin.ModelAdmin):
     search_fields = ["serial", "fingerprint_sha256", "device__device_id", "subject"]
     readonly_fields = [
         "id",
-        "device",
         "serial",
         "subject",
         "fingerprint_sha256",
@@ -587,14 +661,108 @@ class DeviceCertificateAdmin(admin.ModelAdmin):
         "issued_by",
         "created_at",
     ]
-    fields = readonly_fields + ["revoked_at"]
 
     def has_add_permission(self, request):
-        # Certificates are issued by the CSR / enrollment flow, never created
-        # by hand. Without this guard the admin renders an Add form whose
-        # fields are all read-only, so POST submits null/empty values and
-        # 500s on NOT NULL constraints (e.g. not_before).
-        return False
+        # Signing a device cert mints something the device authenticates
+        # with on every mTLS handshake; superuser-only on purpose.
+        return request.user.is_active and request.user.is_superuser
+
+    def get_fields(self, request, obj=None):
+        if obj is None:
+            return ["device", "csr_pem", "validity_days"]
+        return [
+            "id",
+            "device",
+            "serial",
+            "subject",
+            "fingerprint_sha256",
+            "not_before",
+            "not_after",
+            "issued_by",
+            "created_at",
+            "revoked_at",
+        ]
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return []
+        # `device` is editable only at signing time — never change which
+        # device a cert is bound to.
+        return ["device"] + list(self.readonly_fields)
+
+    def save_model(self, request, obj, form, change):
+        if change:
+            super().save_model(request, obj, form, change)
+            return
+
+        device = form.cleaned_data["device"]
+        csr_pem = form.cleaned_data["csr_pem"].strip()
+        validity_days = form.cleaned_data.get("validity_days")
+
+        try:
+            signed = sign_csr(
+                csr_pem,
+                device_id=device.device_id,
+                validity_days=validity_days,
+            )
+        except CsrSigningError as exc:
+            # Most common: no active CA configured. Surface clearly.
+            messages.error(request, f"CA unavailable: {exc}")
+            raise
+        except CsrValidationError as exc:
+            # clean() should have caught this, but signers re-validate.
+            messages.error(request, f"Invalid CSR: {exc}")
+            raise
+
+        now = timezone.now()
+        active_ca = CertificateAuthority.get_active()
+        ca_name = active_ca.name if active_ca else ""
+
+        with transaction.atomic():
+            revoked_count = DeviceCertificate.objects.filter(
+                device=device, revoked_at__isnull=True
+            ).update(revoked_at=now)
+
+            obj.device = device
+            obj.serial = signed.serial
+            obj.subject = signed.subject
+            obj.fingerprint_sha256 = signed.fingerprint_sha256
+            obj.not_before = signed.not_before
+            obj.not_after = signed.not_after
+            obj.issued_by = ca_name
+            obj.save()
+
+            audit_logger.info(
+                "forgekey.device_certificate.issued_via_admin id=%s device_id=%s "
+                "serial=%s revoked_prior=%d actor_id=%s actor_username=%s",
+                obj.pk,
+                device.device_id,
+                obj.serial,
+                revoked_count,
+                getattr(request.user, "id", None),
+                getattr(request.user, "username", None),
+            )
+
+        if revoked_count:
+            messages.warning(
+                request,
+                f"Revoked {revoked_count} prior active cert(s) for {device.device_id}.",
+            )
+        # Stash the PEM for response_add to serve as a download. We don't
+        # persist the PEM — the /enroll/ contract is also delivery-only,
+        # and storing it would mean an extra ~1.5 KB per cert with no
+        # current consumer.
+        request._signed_cert_pem = signed.cert_pem
+        request._signed_cert_serial = signed.serial
+
+    def response_add(self, request, obj, post_url_continue=None):
+        pem = getattr(request, "_signed_cert_pem", None)
+        serial = getattr(request, "_signed_cert_serial", None)
+        if pem and serial:
+            response = HttpResponse(pem, content_type="application/x-pem-file")
+            response["Content-Disposition"] = f'attachment; filename="cert-{serial}.pem"'
+            return response
+        return super().response_add(request, obj, post_url_continue)
 
     @admin.display(description="fingerprint")
     def fingerprint_sha256_short(self, obj):

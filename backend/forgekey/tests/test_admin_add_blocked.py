@@ -16,17 +16,19 @@ from django.test import Client
 
 import pytest
 
-from forgekey.admin import CertificateAuthorityAdmin, DeviceCertificateAdmin, DeviceEnrollmentAdmin
-from forgekey.models import CertificateAuthority, DeviceCertificate, DeviceEnrollment
+from forgekey.admin import DeviceCertificateAdmin, DeviceEnrollmentAdmin
+from forgekey.models import DeviceCertificate, DeviceEnrollment
 from forgekey.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
 
 
+# CertificateAuthorityAdmin had this same guard in the original BACKEND-D
+# fix, but now exposes an Add path that generates the CA server-side. See
+# test_admin_ca_generate.py for the generation flow's coverage.
 VIEW_ONLY_ADMINS = [
     (DeviceCertificateAdmin, DeviceCertificate, "devicecertificate"),
     (DeviceEnrollmentAdmin, DeviceEnrollment, "deviceenrollment"),
-    (CertificateAuthorityAdmin, CertificateAuthority, "certificateauthority"),
 ]
 
 

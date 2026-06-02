@@ -745,6 +745,9 @@ views:
       partial_update:
         permission_classes:
         - IsAdminUser
+      redispatch:
+        permission_classes:
+        - IsAdminUser
       retrieve:
         permission_classes:
         - IsAdminUser

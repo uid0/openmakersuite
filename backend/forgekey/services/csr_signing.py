@@ -277,6 +277,110 @@ def generate_ca_keypair(
     return private_pem, cert
 
 
+def sign_firmware_signing_csr(
+    public_key: ec.EllipticCurvePublicKey,
+    *,
+    label: str,
+    validity_days: int | None = None,
+) -> SignedCertificate:
+    """Issue a CA-signed leaf cert intended for firmware signature verification.
+
+    Differences from :func:`sign_csr`:
+
+    * Operates on a public key rather than a CSR PEM — firmware signing keys
+      live in :class:`forgekey.models.FirmwareSigningKey`, the caller already
+      has the keypair in hand and there is no separate CSR to validate.
+    * ``ExtendedKeyUsage = CODE_SIGNING`` (OID 1.3.6.1.5.5.7.3.3) rather than
+      CLIENT_AUTH; this leaf is **not** an mTLS client cert and must not be
+      accepted as one by the broker / firmware-download endpoints.
+    * ``SubjectAlternativeName`` carries a ``forgekey://firmware-signers/<label>``
+      URI so devices can introspect which logical signer (not which device)
+      authored a given firmware artifact.
+
+    Returns a :class:`SignedCertificate`; the caller persists ``cert_pem`` on
+    the :class:`FirmwareSigningKey` row.
+    """
+    if not isinstance(public_key, ec.EllipticCurvePublicKey):
+        raise CsrSigningError("firmware signing public key must be elliptic-curve.")
+    if public_key.curve.name != "secp256r1":
+        raise CsrSigningError(
+            f"firmware signing public key must be P-256; got {public_key.curve.name}."
+        )
+
+    ca_cert, ca_private_key, _ca_name = _load_ca()
+
+    if validity_days is None:
+        validity_days = int(getattr(settings, "FORGEKEY_FIRMWARE_SIGNER_CERT_VALIDITY_DAYS", 730))
+    if validity_days <= 0:
+        raise CsrSigningError("validity_days must be positive.")
+
+    now = datetime.now(timezone.utc)
+    not_before = now - timedelta(minutes=1)
+    not_after = now + timedelta(days=validity_days)
+    if not_after > ca_cert.not_valid_after_utc:
+        not_after = ca_cert.not_valid_after_utc
+
+    serial = x509.random_serial_number()
+    subject = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, f"forgekey-firmware-signer-{label}")]
+    )
+
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(ca_cert.subject)
+        .public_key(public_key)
+        .serial_number(serial)
+        .not_valid_before(not_before)
+        .not_valid_after(not_after)
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.ExtendedKeyUsage([x509.ExtendedKeyUsageOID.CODE_SIGNING]),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [x509.UniformResourceIdentifier(f"forgekey://firmware-signers/{label}")]
+            ),
+            critical=False,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(public_key),
+            critical=False,
+        )
+        .add_extension(
+            _authority_key_identifier_from(ca_cert),
+            critical=False,
+        )
+    )
+
+    cert = builder.sign(private_key=ca_private_key, algorithm=hashes.SHA256())
+    cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
+    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+    return SignedCertificate(
+        cert_pem=cert_pem,
+        serial=format(serial, "x"),
+        fingerprint_sha256=fingerprint,
+        not_before=not_before,
+        not_after=not_after,
+        subject=cert.subject.rfc4514_string(),
+    )
+
+
 __all__ = (
     "CsrSigningError",
     "CsrValidationError",

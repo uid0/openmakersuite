@@ -17,7 +17,7 @@ from typing import Iterable, List, Sequence, Union
 from django.db.models import QuerySet
 
 from ..audit import record_event as record_audit_event
-from ..models import DeviceFirmwareUpdate, ESP32Device, FirmwareVersion
+from ..models import DeviceFirmwareUpdate, ESP32Device, FirmwareSigningKey, FirmwareVersion
 from ..tasks import get_mqtt_client
 from ..utils import get_mqtt_firmware_topic, normalize_mac_address
 
@@ -34,13 +34,22 @@ def _coerce_devices(devices: DeviceArg) -> List[ESP32Device]:
 
 
 def _build_payload(firmware: FirmwareVersion) -> dict:
-    return {
+    payload = {
         "url": firmware.effective_binary_url,
         "sha256": firmware.sha256,
         "signature": firmware.signature or "",
         "version": firmware.version,
         "mandatory": firmware.mandatory,
     }
+    # When the active firmware-signing key carries a CA-issued leaf cert,
+    # ship the leaf alongside the signature. Verifying firmware can then
+    # validate signature → leaf → CA root, instead of relying on a single
+    # burned-in pubkey. Devices older than the chain-verifier ignore
+    # unknown fields and continue to verify with the embedded pubkey.
+    active_key = FirmwareSigningKey.get_active()
+    if active_key is not None and active_key.cert_pem:
+        payload["signing_cert"] = active_key.cert_pem
+    return payload
 
 
 def publish_firmware_update(

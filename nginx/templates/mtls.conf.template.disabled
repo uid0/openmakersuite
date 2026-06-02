@@ -1,0 +1,57 @@
+# Dedicated mTLS listener for the ForgeKey firmware-download endpoint.
+#
+# Renamed to `mtls.conf.template` (and consumed by nginx's normal
+# template-rendering pass) only when FORGEKEY_MTLS_ENABLED=1 is set,
+# via the 20-mtls.sh entrypoint. Keeping it inert by default avoids
+# nginx failing to start in deployments that haven't yet set up the
+# CA cert mount.
+#
+# Required env vars when enabled:
+#   FORGEKEY_MTLS_PORT     — listener port (default 8443)
+#   FORGEKEY_MTLS_CA_PATH  — bind-mount path to the OMS CA PEM
+#   LETSENCRYPT_DOMAINS    — already set by the main template
+#   DOMAIN                 — already set by the main template
+
+server {
+    listen ${FORGEKEY_MTLS_PORT} ssl http2;
+    server_name ${LETSENCRYPT_DOMAINS};
+
+    # Server cert (the public LE chain) — same as :443; devices verify
+    # they're talking to the real OMS before presenting their own cert.
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}-0001/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}-0001/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+
+    # Client cert verification against the OMS CA — only certs signed by
+    # the CA mounted at FORGEKEY_MTLS_CA_PATH are accepted. ssl_verify_depth 1
+    # because we issue leaf certs directly (no intermediate).
+    ssl_client_certificate ${FORGEKEY_MTLS_CA_PATH};
+    ssl_verify_client on;
+    ssl_verify_depth 1;
+
+    # Only the firmware-download endpoint accepts mTLS. Everything else
+    # 404s here so an operator misroute doesn't accidentally expose other
+    # routes to cert-authenticated principals.
+    location /api/forgekey/firmware/ {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Forward the verified client cert to Django — verify_mtls_request
+        # re-checks the chain server-side, the headers are an
+        # untrusted-by-Django carrier. Use $ssl_client_escaped_cert so
+        # PEM newlines survive the HTTP header byte set.
+        proxy_set_header X-SSL-Client-Verify $ssl_client_verify;
+        proxy_set_header X-SSL-Client-S-DN $ssl_client_s_dn;
+        proxy_set_header X-SSL-Client-Cert $ssl_client_escaped_cert;
+        proxy_redirect off;
+    }
+
+    location / {
+        return 404 "Only /api/forgekey/firmware/ is exposed on the mTLS listener.\n";
+    }
+}

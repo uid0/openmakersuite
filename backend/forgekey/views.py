@@ -90,6 +90,7 @@ from .services.jwt_signing import (
     get_jwt_public_key_pem,
     is_jwt_signing_configured,
 )
+from .services.mtls_auth import verify_mtls_request
 from .tasks import (
     disable_device,
     enable_device,
@@ -2029,6 +2030,22 @@ class ForgeKeyFirmwareDownloadView(APIView):
 
     @staticmethod
     def _authorize(request, firmware_id: str) -> bool:
+        # mTLS path: nginx terminates on the dedicated mTLS listener
+        # (FORGEKEY_MTLS_PORT, default 8443) and forwards the verified
+        # client cert as X-SSL-Client-* headers. Re-verify here so a
+        # misconfigured proxy can't grant access by sending bare
+        # headers, and so admin-side revoke (revoked_at) gates without
+        # nginx-side CRL plumbing. This path is tried first because
+        # devices on chain-aware firmware should use it exclusively;
+        # token / JWT fallbacks remain for the transition window.
+        mtls = verify_mtls_request(request)
+        if mtls.authorized:
+            return True
+        if request.headers.get("x-ssl-client-verify"):
+            # Headers present but rejected — log so operators can debug
+            # cert issues at the proxy layer instead of silent 401s.
+            logger.info("ForgeKey firmware download: mTLS rejected — %s", mtls.reason)
+
         token = request.query_params.get("token") or request.GET.get("token")
         exp = request.query_params.get("exp") or request.GET.get("exp")
         if token and exp:

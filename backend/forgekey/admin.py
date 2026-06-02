@@ -40,6 +40,7 @@ from .services.csr_signing import (
     CsrValidationError,
     generate_ca_keypair,
     sign_csr,
+    sign_firmware_signing_csr,
     validate_csr,
 )
 from .services.firmware_signing import (
@@ -351,6 +352,12 @@ class FirmwareSigningKeyForm(forms.ModelForm):
         key and encrypts the private PEM with the SECRET_KEY-derived KEK.
       * ``generate_new`` checked — server generates a fresh P-256 keypair
         on save (private PEM never crosses the form).
+
+    For either mode, ``sign_with_ca`` (default on when the active CA + KEK
+    are configured) issues a CODE_SIGNING leaf cert over the keypair's
+    public key, signed by the internal CA. The leaf PEM is stored on the
+    row and shipped with firmware-dispatch payloads so devices can verify
+    binaries against the CA chain instead of a single burned-in pubkey.
     """
 
     private_key_pem = forms.CharField(
@@ -368,6 +375,18 @@ class FirmwareSigningKeyForm(forms.ModelForm):
             "Tick this OR paste a private key — not both."
         ),
     )
+    sign_with_ca = forms.BooleanField(
+        required=False,
+        initial=True,
+        label="Sign with internal CA",
+        help_text=(
+            "Issue a CA-signed leaf cert over this keypair. Recommended — "
+            "lets devices verify firmware signatures against the CA chain "
+            "they already trust from /enroll/, so rotating this key doesn't "
+            "require re-flashing the embedded public key. Requires an active "
+            "CA and FORGEKEY_CA_KEY_ENCRYPTION_KEY set."
+        ),
+    )
 
     class Meta:
         model = FirmwareSigningKey
@@ -377,8 +396,11 @@ class FirmwareSigningKeyForm(forms.ModelForm):
         cleaned = super().clean()
         private_pem = (cleaned.get("private_key_pem") or "").strip()
         generate_new = bool(cleaned.get("generate_new"))
+        sign_with_ca = bool(cleaned.get("sign_with_ca"))
 
-        if self.instance.pk:
+        # `self.instance.pk` is set by the UUID default on construction; the
+        # reliable check for "is this a fresh row" is `_state.adding`.
+        if not self.instance._state.adding:
             # Editing an existing row — uploads aren't allowed via this form;
             # operators rotate by creating a new row instead.
             return cleaned
@@ -403,6 +425,32 @@ class FirmwareSigningKeyForm(forms.ModelForm):
             generated_private, generated_public = generate_signing_keypair()
             cleaned["_resolved_private_pem"] = generated_private
             cleaned["_resolved_public_pem"] = generated_public
+
+        if sign_with_ca:
+            label = (cleaned.get("label") or "").strip()
+            if not label:
+                raise forms.ValidationError(
+                    "Sign with internal CA requires a non-empty label "
+                    "(used in the leaf certificate's subject + SAN URI)."
+                )
+            active_ca = CertificateAuthority.get_active()
+            if active_ca is None:
+                raise forms.ValidationError(
+                    "Sign with internal CA is checked but no active CA "
+                    "exists. Bootstrap one in /admin/forgekey/"
+                    "certificateauthority/add/ first."
+                )
+            public_key = serialization.load_pem_public_key(
+                cleaned["_resolved_public_pem"].encode("ascii")
+            )
+            try:
+                signed = sign_firmware_signing_csr(public_key, label=label)
+            except CsrSigningError as exc:
+                # KEK unset, decrypt failure, etc. — keep this in form-error
+                # land so it doesn't propagate as a 500 / Sentry capture.
+                raise forms.ValidationError(f"Cannot CA-sign keypair: {exc}") from exc
+            cleaned["_resolved_cert_pem"] = signed.cert_pem
+            cleaned["_resolved_ca"] = active_ca
         return cleaned
 
 
@@ -429,6 +477,8 @@ class FirmwareSigningKeyAdmin(admin.ModelAdmin):
     readonly_fields = [
         "id",
         "public_key_pem",
+        "cert_pem",
+        "signed_by_ca",
         "created_at",
         "created_by",
         "rotated_at",
@@ -441,7 +491,10 @@ class FirmwareSigningKeyAdmin(admin.ModelAdmin):
         "is_active",
         "private_key_pem",
         "generate_new",
+        "sign_with_ca",
         "public_key_pem",
+        "cert_pem",
+        "signed_by_ca",
         "created_at",
         "created_by",
         "rotated_at",
@@ -459,7 +512,7 @@ class FirmwareSigningKeyAdmin(admin.ModelAdmin):
         if obj is not None:
             # Once written, the encrypted private PEM is immutable — operators
             # rotate by adding a new row.
-            ro.extend(["label", "private_key_pem", "generate_new"])
+            ro.extend(["label", "private_key_pem", "generate_new", "sign_with_ca"])
         return ro
 
     def save_model(self, request, obj, form, change):
@@ -470,6 +523,8 @@ class FirmwareSigningKeyAdmin(admin.ModelAdmin):
             if not private_pem or not public_pem:
                 raise forms.ValidationError("Internal error: signing key data missing.")
             obj.public_key_pem = public_pem
+            obj.cert_pem = cleaned.get("_resolved_cert_pem") or ""
+            obj.signed_by_ca = cleaned.get("_resolved_ca")
             # Attempt to encrypt the private PEM using the system's secret key derivation
             obj.private_key_pem_encrypted = FirmwareSigningKey.encrypt_private_pem(private_pem)
         except Exception as e:

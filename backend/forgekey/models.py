@@ -1046,6 +1046,25 @@ class FirmwareSigningKey(models.Model):
         related_name="firmware_signing_keys_rotated",
         help_text="User who retired this key",
     )
+    cert_pem = models.TextField(
+        blank=True,
+        help_text=(
+            "PEM-encoded leaf certificate signed by the internal CA over this "
+            "keypair. When present, the cert is shipped alongside firmware "
+            "signatures so devices can verify the chain back to the CA root "
+            "(rotating the firmware signer no longer requires re-flashing the "
+            "embedded public key). Blank for legacy keys generated before the "
+            "CA-issued path landed."
+        ),
+    )
+    signed_by_ca = models.ForeignKey(
+        "CertificateAuthority",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="firmware_signing_keys",
+        help_text="The CA that signed this keypair's leaf cert (NULL for legacy keys).",
+    )
 
     class Meta:
         ordering = ["-created_at"]

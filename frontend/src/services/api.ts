@@ -1866,6 +1866,10 @@ export interface ForgeKeyFirmwareVersion {
   version: string;
   device_type: number;
   device_type_name?: string | null;
+  // Stable identifier (e.g. 'epaper_screen', 'people_counter') — frontend
+  // routes rollout creation to the right endpoint based on this rather
+  // than the human-readable name.
+  device_type_code?: string | null;
   is_active: boolean;
   mandatory?: boolean;
 }
@@ -2127,6 +2131,30 @@ export const forgekeyAPI = {
     api.post<ForgeKeyFirmwareRollout>(`/forgekey/firmware-rollouts/${id}/cancel/`),
   advanceRollout: (id: string) =>
     api.post<ForgeKeyFirmwareRollout>(`/forgekey/firmware-rollouts/${id}/advance/`),
+  // ePaper rollouts — same lifecycle as MQTT rollouts, but dispatch is HTTPS-pull
+  // (panel hits /firmware-check/ on each wake) rather than MQTT-push, so `advance`
+  // promotes target_firmware_version on the next batch of EPaperDisplay rows
+  // instead of publishing OTA messages. Same response shape so the rollouts
+  // page can render both rollout kinds uniformly.
+  listEpaperFirmwareRollouts: () =>
+    api.get<{ results?: ForgeKeyFirmwareRollout[] } | ForgeKeyFirmwareRollout[]>(
+      '/forgekey/epaper-firmware-rollouts/',
+    ),
+  createEpaperFirmwareRollout: (body: {
+    firmware_version: string;
+    batch_size_percent: number;
+    interval_minutes: number;
+    name?: string;
+  }) =>
+    api.post<ForgeKeyFirmwareRollout>('/forgekey/epaper-firmware-rollouts/', body),
+  startEpaperRollout: (id: string) =>
+    api.post<ForgeKeyFirmwareRollout>(`/forgekey/epaper-firmware-rollouts/${id}/start/`),
+  pauseEpaperRollout: (id: string) =>
+    api.post<ForgeKeyFirmwareRollout>(`/forgekey/epaper-firmware-rollouts/${id}/pause/`),
+  cancelEpaperRollout: (id: string) =>
+    api.post<ForgeKeyFirmwareRollout>(`/forgekey/epaper-firmware-rollouts/${id}/cancel/`),
+  advanceEpaperRollout: (id: string) =>
+    api.post<ForgeKeyFirmwareRollout>(`/forgekey/epaper-firmware-rollouts/${id}/advance/`),
   // Firmware build pipeline (self-hosted build worker).
   listDeviceTypes: () =>
     api.get<{ results?: ForgeKeyDeviceType[] } | ForgeKeyDeviceType[]>('/forgekey/device-types/'),

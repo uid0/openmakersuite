@@ -15,6 +15,7 @@ from .models import (
     DeviceType,
     DeviceUsage,
     EPaperDisplay,
+    EpaperFirmwareRollout,
     ESP32Device,
     FirmwareBuild,
     FirmwareRollout,
@@ -126,6 +127,9 @@ class FirmwareVersionSerializer(serializers.ModelSerializer):
     """Serializer for FirmwareVersion model."""
 
     device_type_name = serializers.CharField(source="device_type.name", read_only=True)
+    # device_type_code lets the frontend pick the right rollout API path
+    # without string-matching on the human-readable name.
+    device_type_code = serializers.CharField(source="device_type.code", read_only=True)
     created_by_username = serializers.CharField(source="created_by.username", read_only=True)
 
     class Meta:
@@ -345,6 +349,65 @@ class FirmwareRolloutSerializer(serializers.ModelSerializer):
         from .services.firmware_rollout import rollout_progress
 
         return rollout_progress(obj)
+
+
+class EpaperFirmwareRolloutSerializer(serializers.ModelSerializer):
+    """ePaper rollout campaign — same shape as the MQTT rollout serializer
+    so the frontend rollouts page can render both lists uniformly."""
+
+    firmware_version_string = serializers.CharField(
+        source="firmware_version.version", read_only=True
+    )
+    device_type_name = serializers.CharField(
+        source="firmware_version.device_type.name", read_only=True
+    )
+    created_by_username = serializers.CharField(source="created_by.username", read_only=True)
+    progress = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EpaperFirmwareRollout
+        fields = [
+            "id",
+            "firmware_version",
+            "firmware_version_string",
+            "device_type_name",
+            "name",
+            "status",
+            "batch_size_percent",
+            "interval_minutes",
+            "created_by",
+            "created_by_username",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "last_advanced_at",
+            "progress",
+        ]
+        read_only_fields = [
+            "id",
+            "status",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "last_advanced_at",
+        ]
+
+    def get_progress(self, obj):
+        # Inline (not a separate service fn) — the calculation is trivial
+        # and the result shape matches rollout_progress's so the frontend
+        # can reuse the same display component.
+        target_total = obj.target_displays().count()
+        on_target = (
+            obj.target_displays().filter(target_firmware_version=obj.firmware_version).count()
+        )
+        return {
+            "target_total": target_total,
+            "promoted": on_target,
+            "remaining": max(0, target_total - on_target),
+        }
 
 
 class CertificateAuthoritySerializer(serializers.ModelSerializer):

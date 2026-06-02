@@ -44,6 +44,7 @@ from .models import (
     DeviceType,
     DeviceUsage,
     EPaperDisplay,
+    EpaperFirmwareRollout,
     ESP32Device,
     ESP32DevicePhoto,
     FirmwareBuild,
@@ -66,6 +67,7 @@ from .serializers import (
     DeviceTypeSerializer,
     DeviceUsageSerializer,
     EPaperDisplaySerializer,
+    EpaperFirmwareRolloutSerializer,
     ESP32DeviceSerializer,
     FirmwareBuildSerializer,
     FirmwareRolloutSerializer,
@@ -1960,6 +1962,93 @@ class FirmwareRolloutViewSet(viewsets.ModelViewSet):
         return self._serialized(rollout, {"dispatched": dispatched})
 
 
+class EpaperFirmwareRolloutViewSet(viewsets.ModelViewSet):
+    """Manage ePaper firmware rollout campaigns.
+
+    Same operator UX as ``FirmwareRolloutViewSet``: create draft, start,
+    pause / cancel / advance. The dispatch model is HTTPS-pull (the panel
+    checks ``/firmware-check/`` on each wake) rather than MQTT-push, so
+    ``advance`` here promotes the next batch's ``target_firmware_version``
+    instead of publishing OTA triggers.
+    """
+
+    queryset = EpaperFirmwareRollout.objects.select_related(
+        "firmware_version__device_type", "created_by"
+    ).all()
+    serializer_class = EpaperFirmwareRolloutSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def perform_create(self, serializer):
+        actor = self.request.user if self.request.user.is_authenticated else None
+        serializer.save(created_by=actor)
+
+    def _serialized(self, rollout, extra=None):
+        data = self.get_serializer(rollout).data
+        if extra:
+            data.update(extra)
+        return Response(data)
+
+    @action(detail=True, methods=["post"])
+    def start(self, request, pk=None):
+        rollout = self.get_object()
+        if rollout.status not in (
+            EpaperFirmwareRollout.STATUS_DRAFT,
+            EpaperFirmwareRollout.STATUS_PAUSED,
+        ):
+            return Response(
+                {"detail": f"Cannot start a {rollout.status} rollout."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if rollout.started_at is None:
+            rollout.started_at = timezone.now()
+        rollout.status = EpaperFirmwareRollout.STATUS_ACTIVE
+        rollout.save(update_fields=["status", "started_at", "updated_at"])
+        return self._serialized(rollout)
+
+    @action(detail=True, methods=["post"])
+    def pause(self, request, pk=None):
+        rollout = self.get_object()
+        if rollout.status != EpaperFirmwareRollout.STATUS_ACTIVE:
+            return Response(
+                {"detail": f"Cannot pause a {rollout.status} rollout."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rollout.status = EpaperFirmwareRollout.STATUS_PAUSED
+        rollout.save(update_fields=["status", "updated_at"])
+        return self._serialized(rollout)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        rollout = self.get_object()
+        if rollout.status in (
+            EpaperFirmwareRollout.STATUS_COMPLETED,
+            EpaperFirmwareRollout.STATUS_CANCELLED,
+        ):
+            return Response(
+                {"detail": f"Cannot cancel a {rollout.status} rollout."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rollout.status = EpaperFirmwareRollout.STATUS_CANCELLED
+        rollout.completed_at = timezone.now()
+        rollout.save(update_fields=["status", "completed_at", "updated_at"])
+        return self._serialized(rollout)
+
+    @action(detail=True, methods=["post"])
+    def advance(self, request, pk=None):
+        rollout = self.get_object()
+        if rollout.status != EpaperFirmwareRollout.STATUS_ACTIVE:
+            return Response(
+                {"detail": "Only active rollouts can be advanced."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from .services.epaper_firmware_rollout import advance_rollout
+
+        promoted = advance_rollout(rollout)
+        rollout.refresh_from_db()
+        return self._serialized(rollout, {"promoted": promoted})
+
+
 _RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 
@@ -2711,6 +2800,73 @@ class EPaperDisplayBatteryView(APIView):
                     level="warning",
                 )
         return Response({"battery_percent": percent}, status=200)
+
+
+class EPaperFirmwareCheckView(APIView):
+    """Check whether the ePaper panel has firmware to install on this wake.
+
+    Called by the panel firmware right after wake, before the image fetch.
+    The panel passes its currently-running version as ``?current=<v>``;
+    we look at ``EPaperDisplay.target_firmware_version`` (populated in
+    waves by ``EpaperFirmwareRollout``):
+
+    * No target set, OR target's version matches ``current`` → 204
+      (panel is on the right firmware, proceed to image fetch).
+    * Target differs → 200 with the metadata the panel needs to install:
+      ``{version, url, sha256, signature, signing_cert, mandatory}``.
+      ``url`` carries a short-lived HMAC token so the download endpoint
+      accepts the (anonymous) panel without a device-JWT or mTLS cert.
+
+    Side effect on every call: stamp the reported ``current`` onto
+    ``EPaperDisplay.firmware_version`` so the admin can see what's
+    actually installed in the field.
+
+    AllowAny matches the other ePaper endpoints — these panels skip
+    MQTT enrollment + mTLS by design (display_id is the identity).
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, display_id):
+        try:
+            display = EPaperDisplay.objects.select_related("target_firmware_version").get(
+                pk=display_id, is_active=True
+            )
+        except EPaperDisplay.DoesNotExist:
+            return HttpResponse(status=404)
+
+        current = (request.query_params.get("current") or "").strip()
+        if current and current != display.firmware_version:
+            EPaperDisplay.objects.filter(pk=display.pk).update(firmware_version=current)
+
+        target = display.target_firmware_version
+        if target is None or target.version == current:
+            return HttpResponse(status=204)
+
+        from .models import FirmwareSigningKey
+        from .services.firmware_download_token import make_download_token
+
+        token, expiry = make_download_token(str(target.pk))
+        base_url = target.effective_binary_url
+        if not base_url:
+            # Active row but no file — shouldn't happen, but don't crash.
+            logger.warning("EPaperFirmwareCheckView: target %s has no binary URL", target.pk)
+            return HttpResponse(status=503)
+        # Append our token query so the download endpoint accepts the call.
+        sep = "&" if "?" in base_url else "?"
+        url = f"{base_url}{sep}token={token}&exp={expiry}"
+
+        payload = {
+            "version": target.version,
+            "url": url,
+            "sha256": target.sha256,
+            "signature": target.signature or "",
+            "mandatory": target.mandatory,
+        }
+        active_key = FirmwareSigningKey.get_active()
+        if active_key is not None and active_key.cert_pem:
+            payload["signing_cert"] = active_key.cert_pem
+        return Response(payload, status=200)
 
 
 class EPaperDisplayBindView(APIView):

@@ -24,6 +24,12 @@ vi.mock('../../services/api', async () => {
       pauseRollout: jest.fn(),
       cancelRollout: jest.fn(),
       advanceRollout: jest.fn(),
+      listEpaperFirmwareRollouts: jest.fn(),
+      createEpaperFirmwareRollout: jest.fn(),
+      startEpaperRollout: jest.fn(),
+      pauseEpaperRollout: jest.fn(),
+      cancelEpaperRollout: jest.fn(),
+      advanceEpaperRollout: jest.fn(),
       listFirmwareBuilds: jest.fn(),
       listDeviceTypes: jest.fn(),
       createFirmwareBuild: jest.fn(),
@@ -76,6 +82,7 @@ describe('ForgeKeyFirmwareRolloutsPage', () => {
     mockApi.listFirmwareVersions.mockResolvedValue({ data: [] } as any);
     mockApi.listFirmwareBuilds.mockResolvedValue({ data: [] } as any);
     mockApi.listDeviceTypes.mockResolvedValue({ data: [] } as any);
+    mockApi.listEpaperFirmwareRollouts.mockResolvedValue({ data: [] } as any);
   });
 
   test('non-staff users are redirected', async () => {
@@ -209,4 +216,68 @@ describe('ForgeKeyFirmwareRolloutsPage', () => {
     const log = await screen.findByTestId('build-log');
     expect(log).toHaveTextContent('[ERROR] boom');
   });
+
+  // ------ ePaper rollouts pane ----------------------------------------------
+
+  const buildEpaperRollout = (overrides: Partial<any> = {}) => ({
+    id: 'er1',
+    firmware_version: 'fwe1',
+    firmware_version_string: '0.3.0',
+    device_type_name: 'E-Paper Screen',
+    name: '',
+    status: 'draft',
+    batch_size_percent: 50,
+    interval_minutes: 30,
+    created_by: 1,
+    created_by_username: 'admin',
+    created_at: '2026-06-02T00:00:00Z',
+    updated_at: '2026-06-02T00:00:00Z',
+    started_at: null,
+    completed_at: null,
+    last_advanced_at: null,
+    progress: { target_total: 6, promoted: 0, remaining: 6 },
+    ...overrides,
+  });
+
+  test('ePaper rollouts pane renders when rollouts exist', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listFirmwareRollouts.mockResolvedValue({ data: [] } as any);
+    mockApi.listEpaperFirmwareRollouts.mockResolvedValue({
+      data: [buildEpaperRollout()],
+    } as any);
+
+    renderPage();
+
+    expect(await screen.findByText('ePaper rollouts')).toBeInTheDocument();
+    expect(screen.getByTestId('epaper-rollout-er1')).toBeInTheDocument();
+    expect(screen.getByText(/50% of the fleet every 30 min/)).toBeInTheDocument();
+    expect(screen.getByText(/0 promoted · 6 remaining/)).toBeInTheDocument();
+  });
+
+  test('starting a draft ePaper rollout hits the parallel endpoint', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listFirmwareRollouts.mockResolvedValue({ data: [] } as any);
+    mockApi.listEpaperFirmwareRollouts.mockResolvedValue({
+      data: [buildEpaperRollout()],
+    } as any);
+    mockApi.startEpaperRollout.mockResolvedValue({
+      data: buildEpaperRollout({ status: 'active', started_at: '2026-06-02T00:01:00Z' }),
+    } as any);
+
+    renderPage();
+
+    const startBtn = await screen.findByText('Start');
+    fireEvent.click(startBtn);
+
+    await waitFor(() =>
+      expect(mockApi.startEpaperRollout).toHaveBeenCalledWith('er1'),
+    );
+    // MQTT start API must NOT have been called — the routing is by panel kind.
+    expect(mockApi.startRollout).not.toHaveBeenCalled();
+  });
+
+  // Note: the create-form routing (epaper version → createEpaperFirmwareRollout,
+  // other → createFirmwareRollout) is exercised in the backend serializer
+  // tests via the `device_type_code` field; driving the Mantine Select to
+  // verify it E2E here adds brittle DOM coupling without catching more bugs.
 });

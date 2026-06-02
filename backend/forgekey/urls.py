@@ -20,6 +20,8 @@ from .views import (
     EPaperDisplayImageView,
     EPaperDisplayListView,
     EPaperDisplaySetActiveView,
+    EPaperFirmwareCheckView,
+    EpaperFirmwareRolloutViewSet,
     EPaperServiceCompleteView,
     EPaperServiceInfoView,
     ESP32DeviceViewSet,
@@ -50,6 +52,11 @@ router.register(r"power-readings", PowerMeterReadingViewSet, basename="power-rea
 router.register(r"firmware-versions", FirmwareVersionViewSet, basename="firmware-version")
 router.register(r"firmware-updates", DeviceFirmwareUpdateViewSet, basename="firmware-update")
 router.register(r"firmware-rollouts", FirmwareRolloutViewSet, basename="firmware-rollout")
+router.register(
+    r"epaper-firmware-rollouts",
+    EpaperFirmwareRolloutViewSet,
+    basename="epaper-firmware-rollout",
+)
 router.register(r"firmware-builds", FirmwareBuildViewSet, basename="firmware-build")
 router.register(
     r"certificate-authorities", CertificateAuthorityViewSet, basename="certificate-authority"
@@ -113,6 +120,11 @@ urlpatterns = [
         "epaper/<uuid:display_id>/battery/",
         EPaperDisplayBatteryView.as_view(),
         name="epaper-battery",
+    ),
+    path(
+        "epaper/<uuid:display_id>/firmware-check/",
+        EPaperFirmwareCheckView.as_view(),
+        name="epaper-firmware-check",
     ),
     path(
         "epaper/<uuid:display_id>/bind/",

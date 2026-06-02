@@ -657,6 +657,9 @@ views:
   forgekey.views.EPaperDisplaySetActiveView:
     permission_classes:
     - IsAuthenticated
+  forgekey.views.EPaperFirmwareCheckView:
+    permission_classes:
+    - AllowAny
   forgekey.views.EPaperServiceCompleteView:
     permission_classes:
     - IsAuthenticated
@@ -754,6 +757,38 @@ views:
       update:
         permission_classes:
         - IsAdminUser
+  forgekey.views.EpaperFirmwareRolloutViewSet:
+    actions:
+      advance:
+        permission_classes:
+        - IsAuthenticated
+      cancel:
+        permission_classes:
+        - IsAuthenticated
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      pause:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      start:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
   forgekey.views.FirmwareRolloutViewSet:
     actions:
       advance:

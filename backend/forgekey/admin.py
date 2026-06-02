@@ -12,6 +12,8 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
+from cryptography.hazmat.primitives import serialization
+
 from .models import (
     AssetAuthorization,
     AssetDevice,
@@ -32,6 +34,8 @@ from .models import (
     OperationalMode,
     PowerMeterReading,
 )
+from .services.ca_key_storage import CaKeyStorageError, encrypt_ca_key
+from .services.csr_signing import generate_ca_keypair
 from .services.firmware_signing import (
     FirmwareSigningError,
     derive_public_pem,
@@ -645,16 +649,72 @@ class DeviceEnrollmentAdmin(admin.ModelAdmin):
         return False
 
 
+class CertificateAuthorityForm(forms.ModelForm):
+    """Add-form for a CA: collects metadata, mints the keypair on save.
+
+    Only ``name`` is a real model field on this form. ``cn`` and
+    ``validity_years`` parameterize ``generate_ca_keypair`` at save time;
+    ``force_replace`` gates rotation when an active CA already exists.
+    The private key is generated server-side and never enters the form.
+    """
+
+    cn = forms.CharField(
+        label="Common name",
+        max_length=200,
+        initial="ForgeKey Internal Root CA",
+        help_text="CN baked into the CA certificate's subject. Cosmetic; "
+        "devices identify the CA by full subject + fingerprint.",
+    )
+    validity_years = forms.IntegerField(
+        min_value=1,
+        max_value=20,
+        initial=10,
+        help_text="Years until the CA expires. Rotate before expiry — every "
+        "device certificate it signed stops verifying when it lapses.",
+    )
+    force_replace = forms.BooleanField(
+        required=False,
+        label="Replace the active CA",
+        help_text="Required when an active CA already exists. The prior CA is "
+        "deactivated atomically; device certs it issued only continue to "
+        "verify as long as relying parties still trust the old CA cert.",
+    )
+
+    class Meta:
+        model = CertificateAuthority
+        fields = ["name"]
+
+    def clean(self):
+        cleaned = super().clean()
+        # `self.instance.pk` is unreliable here — the model's UUID pk default
+        # fires on construction so a fresh instance still has a non-None pk.
+        # `_state.adding` flips to False once the row hits the DB.
+        if not self.instance._state.adding:
+            return cleaned
+        active = CertificateAuthority.get_active()
+        if active is not None and not cleaned.get("force_replace"):
+            raise forms.ValidationError(
+                f"An active CA already exists (name={active.name!r}). Tick "
+                "'Replace the active CA' to deactivate it and bootstrap a "
+                "replacement."
+            )
+        return cleaned
+
+
 @admin.register(CertificateAuthority)
 class CertificateAuthorityAdmin(admin.ModelAdmin):
-    """Read-only view of the internal CA. Bootstrap via ``manage.py forgekey_ca``."""
+    """Internal CA admin. Add generates a fresh CA server-side; change view is read-only.
 
+    The CLI command ``manage.py forgekey_ca init`` remains for scripted /
+    headless bootstrap; this admin is the operator-facing equivalent.
+    """
+
+    form = CertificateAuthorityForm
     list_display = ["name", "is_active", "not_before", "not_after", "created_at"]
     list_filter = ["is_active"]
     search_fields = ["name", "key_kid"]
     readonly_fields = [
         "id",
-        "name",
         "cert_pem",
         "key_kid",
         "not_before",
@@ -663,14 +723,79 @@ class CertificateAuthorityAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     ]
-    fields = readonly_fields
     # The encrypted private-key blob never appears in the admin.
 
     def has_add_permission(self, request):
-        return False
+        # Generating a CA mints the root private key for every device cert in
+        # the system — superuser-only on purpose.
+        return request.user.is_active and request.user.is_superuser
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    def get_fields(self, request, obj=None):
+        if obj is None:
+            # Add form: name + generation parameters.
+            return ["name", "cn", "validity_years", "force_replace"]
+        # Change form: existing readonly view (plus the name field).
+        return ["id", "name"] + self.readonly_fields[1:]
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return []
+        return ["name"] + list(self.readonly_fields)
+
+    def save_model(self, request, obj, form, change):
+        if change:
+            super().save_model(request, obj, form, change)
+            return
+
+        cn = form.cleaned_data["cn"]
+        validity_years = form.cleaned_data["validity_years"]
+        try:
+            private_pem, ca_cert = generate_ca_keypair(cn=cn, validity_days=validity_years * 365)
+            ciphertext, kid = encrypt_ca_key(private_pem)
+        except CaKeyStorageError as exc:
+            # Most common cause: FORGEKEY_CA_KEY_ENCRYPTION_KEY unset. Surface
+            # the configuration problem to the operator instead of 500ing.
+            messages.error(request, f"Cannot encrypt CA private key: {exc}")
+            raise
+
+        with transaction.atomic():
+            prior = CertificateAuthority.get_active()
+            if prior is not None:
+                CertificateAuthority.objects.filter(pk=prior.pk).update(is_active=False)
+                audit_logger.info(
+                    "forgekey.certificate_authority.rotated retired_id=%s "
+                    "retired_name=%s actor_id=%s actor_username=%s",
+                    prior.pk,
+                    prior.name,
+                    getattr(request.user, "id", None),
+                    getattr(request.user, "username", None),
+                )
+            obj.cert_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
+            obj.encrypted_private_key = ciphertext
+            obj.key_kid = kid
+            obj.not_before = ca_cert.not_valid_before_utc
+            obj.not_after = ca_cert.not_valid_after_utc
+            obj.is_active = True
+            obj.save()
+            audit_logger.info(
+                "forgekey.certificate_authority.created id=%s name=%s "
+                "validity_years=%d actor_id=%s actor_username=%s",
+                obj.pk,
+                obj.name,
+                validity_years,
+                getattr(request.user, "id", None),
+                getattr(request.user, "username", None),
+            )
+
+        if prior is not None:
+            messages.warning(request, f"Deactivated prior active CA: {prior.name!r}")
+        messages.success(
+            request,
+            f"Generated CA {obj.name!r} (valid until {obj.not_after.isoformat()}).",
+        )
 
 
 @admin.register(EPaperDisplay)

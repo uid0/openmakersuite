@@ -121,6 +121,7 @@ INSTALLED_APPS = [
     "preventive_maintenance",
     "backups",
     "resilience",
+    "bms",
 ]
 
 MIDDLEWARE = [
@@ -641,6 +642,20 @@ FORGEKEY_ENROLLMENT_SESSION_TTL_SECONDS = config(
 FORGEKEY_CLIENT_CERT_VALIDITY_DAYS = config(
     "FORGEKEY_CLIENT_CERT_VALIDITY_DAYS", default=365, cast=int
 )
+
+# Building Management System (BMS) integration. The first concrete adapter
+# is Resideo / Honeywell Home Pro (developer.resideo.com). The app-level
+# OAuth client_id + client_secret live here so per-user tokens (in
+# bms.BmsConfig) carry no credential beyond the access/refresh pair.
+#
+# Resideo's OAuth: authorization_code grant against
+# https://api.honeywell.com/oauth2/{authorize,token}. Access tokens TTL
+# ~30 min; refresh tokens are long-lived but can be revoked from the
+# Resideo dashboard, in which case bms_resideo_auth must be re-run.
+RESIDEO_CLIENT_ID = config("RESIDEO_CLIENT_ID", default="")
+RESIDEO_CLIENT_SECRET = config("RESIDEO_CLIENT_SECRET", default="")
+RESIDEO_REDIRECT_URI = config("RESIDEO_REDIRECT_URI", default="https://localhost/bms/callback")
+RESIDEO_API_BASE = config("RESIDEO_API_BASE", default="https://api.honeywell.com")
 
 # Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {

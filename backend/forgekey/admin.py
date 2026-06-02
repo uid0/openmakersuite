@@ -29,6 +29,7 @@ from .models import (
     EPaperDisplay,
     ESP32Device,
     ESP32DevicePhoto,
+    FirmwareBuild,
     FirmwareSigningKey,
     FirmwareVersion,
     OperationalMode,
@@ -341,6 +342,92 @@ class DeviceFirmwareUpdateAdmin(admin.ModelAdmin):
     search_fields = ["device__mac_address", "device__name", "firmware_version__version"]
     readonly_fields = ["id", "requested_at"]
     raw_id_fields = ["device", "firmware_version", "requested_by"]
+
+
+@admin.register(FirmwareBuild)
+class FirmwareBuildAdmin(admin.ModelAdmin):
+    """Track + recover self-hosted firmware-builder jobs.
+
+    The build worker (Dockerfile.firmware-builder) consumes the `builds`
+    Celery queue. When the worker is down (or Redis is restarted)
+    queued rows pile up with no in-flight message to claim them; the
+    `Re-dispatch to worker` action re-publishes the Celery task for the
+    selected rows so the worker can pick them up once it's back. Same
+    DB row, same parameters — audit chain intact.
+    """
+
+    list_display = [
+        "id_short",
+        "device_type",
+        "pio_env",
+        "version",
+        "source_ref",
+        "status",
+        "requested_at",
+        "requested_by",
+    ]
+    list_filter = ["status", "device_type", "pio_env"]
+    search_fields = ["version", "source_ref", "pio_env", "commit_sha"]
+    readonly_fields = [
+        "id",
+        "ca_fingerprint",
+        "commit_sha",
+        "log",
+        "error_message",
+        "firmware_version",
+        "requested_at",
+        "started_at",
+        "completed_at",
+    ]
+    raw_id_fields = ["device_type", "requested_by", "firmware_version"]
+    actions = ["redispatch_selected"]
+
+    @admin.display(description="id", ordering="id")
+    def id_short(self, obj):
+        return str(obj.id)[:8]
+
+    @admin.action(description="Re-dispatch selected queued / failed builds to the worker")
+    def redispatch_selected(self, request, queryset):
+        from .models import FirmwareBuild as _FB
+        from .tasks import build_firmware
+
+        eligible = queryset.filter(status__in=[_FB.STATUS_QUEUED, _FB.STATUS_FAILED])
+        skipped = queryset.exclude(pk__in=eligible.values_list("pk", flat=True))
+
+        sent = 0
+        for build in eligible:
+            build.status = _FB.STATUS_QUEUED
+            build.started_at = None
+            build.completed_at = None
+            build.error_message = ""
+            build.log = ""
+            build.save(
+                update_fields=[
+                    "status",
+                    "started_at",
+                    "completed_at",
+                    "error_message",
+                    "log",
+                ]
+            )
+            build_firmware.delay(str(build.pk))
+            sent += 1
+            audit_logger.info(
+                "firmware_build.redispatched id=%s actor=%s",
+                build.pk,
+                getattr(request.user, "username", "<anonymous>"),
+            )
+
+        if sent:
+            self.message_user(
+                request, f"Re-dispatched {sent} build(s) to the worker.", messages.SUCCESS
+            )
+        if skipped.exists():
+            self.message_user(
+                request,
+                f"Skipped {skipped.count()} build(s) that were not queued/failed.",
+                messages.WARNING,
+            )
 
 
 class FirmwareSigningKeyForm(forms.ModelForm):

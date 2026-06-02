@@ -31,17 +31,52 @@ logger = logging.getLogger(__name__)
 _CA_HEADER = "src/security/oms_ca.h"
 _PUBKEY_HEADER = "src/security/oms_command_pubkey.h"
 
-_DEFAULT_REPO_URL = "git@github.com:uid0/ForgeKey.git"
+_DEFAULT_REPO_URL = "https://github.com/uid0/ForgeKey.git"
 _LOG_TAIL_LIMIT = 20000
 _BUILD_TIMEOUT_S = 25 * 60
 
 
-def _run(cmd: list[str], cwd: str, log_lines: list[str]) -> str:
+def _clone_url(repo_url: str, token: str) -> str:
+    """Inject a GitHub PAT into an HTTPS repo URL.
+
+    Returns the URL unchanged when no token is configured (operators
+    still on the SSH-key path) or when the URL isn't HTTPS (SSH URLs
+    use the mounted key instead). When both are set, rewrites to
+    ``https://x-access-token:<token>@host/path`` so git clones over
+    HTTPS without ever shelling out to ssh-agent. The PAT can be a
+    classic PAT with `repo:read` or a fine-grained PAT scoped to the
+    ForgeKey repo's `Contents: Read` permission — read-only by design,
+    since this worker only ever clones.
+    """
+    if not token or "://" not in repo_url:
+        return repo_url
+    scheme, rest = repo_url.split("://", 1)
+    if scheme.lower() != "https":
+        return repo_url
+    # If someone already pre-baked credentials into the URL, leave it.
+    if "@" in rest.split("/", 1)[0]:
+        return repo_url
+    return f"https://x-access-token:{token}@{rest}"
+
+
+def _run(
+    cmd: list[str],
+    cwd: str,
+    log_lines: list[str],
+    redacted_cmd: list[str] | None = None,
+) -> str:
     """Run a subprocess, capturing combined output into ``log_lines``.
 
     Raises ``RuntimeError`` on a non-zero exit so the caller records a failure.
+
+    ``redacted_cmd`` is what gets logged when the actual command contains
+    a secret (e.g. a PAT injected into a clone URL); the executed command
+    is still ``cmd``. The error message on a non-zero exit uses
+    ``redacted_cmd`` too, since the FirmwareBuild row's error_message
+    field is visible to every staff user.
     """
-    log_lines.append(f"$ {' '.join(cmd)}")
+    log_cmd = redacted_cmd if redacted_cmd is not None else cmd
+    log_lines.append(f"$ {' '.join(log_cmd)}")
     # `cmd` is a fixed git/pio argv list (no shell=True); the only variable
     # parts (source_ref, pio_env) come from staff-created FirmwareBuild rows.
     proc = subprocess.run(  # nosec B603
@@ -52,7 +87,7 @@ def _run(cmd: list[str], cwd: str, log_lines: list[str]) -> str:
     if proc.stderr:
         log_lines.append(proc.stderr)
     if proc.returncode != 0:
-        raise RuntimeError(f"`{' '.join(cmd)}` failed (exit {proc.returncode})")
+        raise RuntimeError(f"`{' '.join(log_cmd)}` failed (exit {proc.returncode})")
     return proc.stdout or ""
 
 
@@ -134,6 +169,8 @@ def run_firmware_build(build_id: str) -> dict:
     build.save(update_fields=["status", "started_at"])
 
     repo_url = getattr(settings, "FORGEKEY_FIRMWARE_REPO_URL", _DEFAULT_REPO_URL)
+    pat = getattr(settings, "FORGEKEY_BUILDER_GITHUB_TOKEN", "") or ""
+    clone_url = _clone_url(repo_url, pat)
 
     try:
         ca = CertificateAuthority.get_active()
@@ -145,10 +182,36 @@ def run_firmware_build(build_id: str) -> dict:
 
         with tempfile.TemporaryDirectory(prefix="fkbuild-") as tmp:
             repo = Path(tmp) / "ForgeKey"
+            # Use the PAT-injected URL for the actual clone, but show
+            # the bare repo_url in the build log so the PAT never lands
+            # in DB-stored output visible to other staff.
             _run(
-                ["git", "clone", "--depth", "1", "--branch", build.source_ref, repo_url, str(repo)],
+                [
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    build.source_ref,
+                    clone_url,
+                    str(repo),
+                ],
                 cwd=tmp,
                 log_lines=log_lines,
+                redacted_cmd=(
+                    [
+                        "git",
+                        "clone",
+                        "--depth",
+                        "1",
+                        "--branch",
+                        build.source_ref,
+                        repo_url,
+                        str(repo),
+                    ]
+                    if clone_url != repo_url
+                    else None
+                ),
             )
             commit = _run(["git", "rev-parse", "HEAD"], cwd=str(repo), log_lines=log_lines).strip()
             _write_security_headers(repo, ca_pem, cmd_pubkey_pem)

@@ -1807,6 +1807,66 @@ class FirmwareBuildViewSet(viewsets.ModelViewSet):
         build.save(update_fields=["status", "completed_at"])
         return Response(FirmwareBuildSerializer(build).data)
 
+    @action(detail=True, methods=["post"])
+    def redispatch(self, request, pk=None):
+        """Re-publish the build task to the worker queue.
+
+        Use case: the firmware_builder worker was down (or Redis was
+        restarted, dropping the in-flight message) and a row is stuck
+        in ``queued`` even though the worker is now consuming. Re-
+        dispatch republishes the Celery message; the same DB row is
+        the target, so the audit chain stays intact.
+
+        Allowed for ``queued`` AND ``failed`` (a failed build is often
+        a transient infra issue — same row, same parameters, try again).
+        Forbidden for ``building`` (the worker is mid-execution; a
+        second message would race), ``succeeded`` (use ``cancel`` +
+        create a new build to re-roll), and ``cancelled``.
+        """
+        build = self.get_object()
+        if build.status not in (
+            FirmwareBuild.STATUS_QUEUED,
+            FirmwareBuild.STATUS_FAILED,
+        ):
+            return Response(
+                {
+                    "detail": (
+                        f"Build is {build.status}; only queued / failed "
+                        "builds can be re-dispatched. Create a new build "
+                        "instead."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Reset the build so the worker treats it as a fresh attempt.
+        # Otherwise a re-dispatch of a `failed` row would race the
+        # previous error_message with the new run's outcome.
+        build.status = FirmwareBuild.STATUS_QUEUED
+        build.started_at = None
+        build.completed_at = None
+        build.error_message = ""
+        build.log = ""
+        build.save(
+            update_fields=[
+                "status",
+                "started_at",
+                "completed_at",
+                "error_message",
+                "log",
+            ]
+        )
+
+        from .tasks import build_firmware
+
+        build_firmware.delay(str(build.pk))
+        logger.info(
+            "firmware_build re-dispatched id=%s actor=%s",
+            build.pk,
+            getattr(request.user, "username", "<anonymous>"),
+        )
+        return Response(FirmwareBuildSerializer(build).data)
+
 
 class FirmwareRolloutViewSet(viewsets.ModelViewSet):
     """Manage staged firmware rollout campaigns.

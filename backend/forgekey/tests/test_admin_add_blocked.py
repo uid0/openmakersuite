@@ -16,18 +16,20 @@ from django.test import Client
 
 import pytest
 
-from forgekey.admin import DeviceCertificateAdmin, DeviceEnrollmentAdmin
-from forgekey.models import DeviceCertificate, DeviceEnrollment
+from forgekey.admin import DeviceEnrollmentAdmin
+from forgekey.models import DeviceEnrollment
 from forgekey.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
 
 
-# CertificateAuthorityAdmin had this same guard in the original BACKEND-D
-# fix, but now exposes an Add path that generates the CA server-side. See
-# test_admin_ca_generate.py for the generation flow's coverage.
+# CertificateAuthorityAdmin and DeviceCertificateAdmin both had this guard
+# in the original BACKEND-D fix; both now expose Add paths that mint server-
+# side (CA via generate_ca_keypair, device cert via sign_csr). Their flows
+# are covered by test_admin_ca_generate.py and test_admin_csr_sign.py
+# respectively. DeviceEnrollment stays view-only — enrollment rows are an
+# audit trail of /enroll/ POSTs and have no useful admin-creation path.
 VIEW_ONLY_ADMINS = [
-    (DeviceCertificateAdmin, DeviceCertificate, "devicecertificate"),
     (DeviceEnrollmentAdmin, DeviceEnrollment, "deviceenrollment"),
 ]
 

@@ -1176,6 +1176,99 @@ class FirmwareRollout(models.Model):
         )
 
 
+class EpaperFirmwareRollout(models.Model):
+    """A staged firmware rollout campaign for HTTPS-pull ePaper panels.
+
+    Mirrors ``FirmwareRollout`` in shape and operator UX, but the dispatch
+    model is inverted: ePaper panels skip MQTT (they're HTTPS-only by
+    design), so we can't push a Celery-driven OTA at them. Instead the
+    rollout populates ``EPaperDisplay.target_firmware_version`` for the
+    next batch of panels per wave; the ``firmware-check`` view returns
+    that FirmwareVersion's metadata the next time the panel wakes and
+    checks. A wave is therefore a *promotion* of N panels into the
+    eligible pool, not an outbound MQTT publish.
+
+    Same status machine and same advance cadence as ``FirmwareRollout``,
+    driven by the ``advance_epaper_firmware_rollouts`` Celery-beat task.
+    """
+
+    STATUS_DRAFT = "draft"
+    STATUS_ACTIVE = "active"
+    STATUS_PAUSED = "paused"
+    STATUS_COMPLETED = "completed"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_PAUSED, "Paused"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    firmware_version = models.ForeignKey(
+        FirmwareVersion,
+        on_delete=models.PROTECT,
+        related_name="epaper_rollouts",
+        help_text="Firmware version this campaign is rolling out.",
+    )
+    name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Optional operator label for the campaign.",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+    )
+    batch_size_percent = models.PositiveSmallIntegerField(
+        default=25,
+        validators=[MinValueValidator(1), MaxValueValidator(100)],
+        help_text="Percent of the target fleet to promote per wave (1-100).",
+    )
+    interval_minutes = models.PositiveIntegerField(
+        default=30,
+        validators=[MinValueValidator(1)],
+        help_text="Minimum minutes between waves.",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="epaper_firmware_rollouts",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    last_advanced_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the most recent wave promoted panels.",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"EpaperRollout({self.firmware_version.version} · {self.status})"
+
+    def target_displays(self):
+        """Active panels — the rollout's fleet.
+
+        EPaperDisplay rows for the (common) HTTPS-only panels have
+        ``device=None`` (they self-register by display_id and never get
+        an ESP32Device row), so filtering on ``device__device_type`` would
+        wrongly exclude them. Instead, the rollout's firmware_version is
+        constrained at form-time to have ``device_type.code == 'epaper_screen'``,
+        and every active EPaperDisplay matches that implicitly.
+        """
+        return EPaperDisplay.objects.filter(is_active=True)
+
+
 class DeviceFirmwareUpdate(models.Model):
     """
     Tracks firmware update requests and status for ESP32 devices.
@@ -1706,6 +1799,27 @@ class EPaperDisplay(models.Model):
         null=True,
         blank=True,
         help_text="When the panel last fetched a non-304 image.",
+    )
+    # OTA: epaper panels are HTTPS-pull (not MQTT-push) for firmware. On each
+    # wake the firmware calls /api/forgekey/epaper/<display_id>/firmware-check/
+    # with its current version. The check view stamps `firmware_version` here
+    # so the admin can see what's installed, and returns the target if it
+    # differs.
+    firmware_version = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Firmware version the panel last reported running (via the "
+        "firmware-check call on each wake).",
+    )
+    target_firmware_version = models.ForeignKey(
+        "FirmwareVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="epaper_target_displays",
+        help_text="FirmwareVersion this panel is being rolled to. Populated "
+        "by EpaperFirmwareRollout's beat task in waves; the check endpoint "
+        "returns its metadata when the panel's reported version doesn't match.",
     )
     is_active = models.BooleanField(
         default=True,

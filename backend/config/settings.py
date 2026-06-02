@@ -488,6 +488,12 @@ CELERY_BEAT_SCHEDULE = {
         # interval_minutes, so this only dispatches a wave when one is due.
         "schedule": 300.0,
     },
+    "forgekey-advance-epaper-firmware-rollouts": {
+        "task": "forgekey.tasks.advance_epaper_firmware_rollouts",
+        # Same cadence as the MQTT rollout advance task — each rollout
+        # self-limits to its own interval_minutes.
+        "schedule": 300.0,
+    },
     # Monthly board / staff pulse email — covers the prior calendar month.
     # Uses crontab so we land at 09:00 on the 1st regardless of how the
     # worker scheduler restarted during the month.

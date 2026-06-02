@@ -93,6 +93,7 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
     typeof window !== 'undefined' && localStorage.getItem('is_superuser') === 'true';
 
   const [rollouts, setRollouts] = useState<ForgeKeyFirmwareRollout[]>([]);
+  const [epaperRollouts, setEpaperRollouts] = useState<ForgeKeyFirmwareRollout[]>([]);
   const [versions, setVersions] = useState<ForgeKeyFirmwareVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -132,6 +133,14 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
         if (!cancelled) setLoading(false);
       }
     };
+    const loadEpaperRollouts = async () => {
+      try {
+        const res = await forgekeyAPI.listEpaperFirmwareRollouts();
+        if (!cancelled) setEpaperRollouts(asList(res.data));
+      } catch {
+        /* ePaper rollouts are secondary on this page; ignore transient errors */
+      }
+    };
     const loadBuilds = async () => {
       try {
         const res = await forgekeyAPI.listFirmwareBuilds();
@@ -153,9 +162,11 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
       })
       .catch(() => undefined);
     loadRollouts();
+    loadEpaperRollouts();
     loadBuilds();
     const handle = window.setInterval(() => {
       loadRollouts();
+      loadEpaperRollouts();
       loadBuilds();
     }, POLL_INTERVAL_MS);
     return () => {
@@ -184,6 +195,25 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
     }
   };
 
+  // ePaper rollouts hit the parallel /epaper-firmware-rollouts/ endpoints
+  // — same response shape so the rendering is uniform, but they update a
+  // separate state slot so the MQTT rollouts list isn't disturbed.
+  const runEpaperAction = async (
+    id: string,
+    fn: (id: string) => Promise<{ data: ForgeKeyFirmwareRollout }>,
+  ) => {
+    setBusyId(id);
+    try {
+      const res = await fn(id);
+      setEpaperRollouts((prev) => prev.map((r) => (r.id === id ? res.data : r)));
+      setError(null);
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Action failed.'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleCreate = async () => {
     if (!formVersion) {
       setError('Pick a firmware version first.');
@@ -191,13 +221,25 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
     }
     setCreating(true);
     try {
-      const res = await forgekeyAPI.createFirmwareRollout({
+      // ePaper FirmwareVersions need the parallel HTTPS-pull rollout
+      // pipeline (panels skip MQTT); everything else takes the standard
+      // MQTT push pipeline. The picked version's device_type_code is the
+      // routing key — the form is otherwise identical.
+      const pickedVersion = versions.find((v) => v.id === formVersion);
+      const isEpaper = pickedVersion?.device_type_code === 'epaper_screen';
+      const body = {
         firmware_version: formVersion,
         batch_size_percent: formBatch,
         interval_minutes: formInterval,
         name: formName || undefined,
-      });
-      setRollouts((prev) => [res.data, ...prev]);
+      };
+      if (isEpaper) {
+        const res = await forgekeyAPI.createEpaperFirmwareRollout(body);
+        setEpaperRollouts((prev) => [res.data, ...prev]);
+      } else {
+        const res = await forgekeyAPI.createFirmwareRollout(body);
+        setRollouts((prev) => [res.data, ...prev]);
+      }
       setFormVersion(null);
       setFormName('');
       setError(null);
@@ -588,6 +630,125 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
             );
           })}
         </SimpleGrid>
+      )}
+
+      {/* ePaper rollouts — separate pane because they target a different
+          fleet (EPaperDisplay rows, HTTPS-pull) than the MQTT-push rollouts
+          above (ESP32Device rows). Same status machine + action shape, so
+          the buttons mirror the MQTT pane. */}
+      {epaperRollouts.length > 0 && (
+        <>
+          <Title order={4} mt="xl" mb="sm">
+            ePaper rollouts
+          </Title>
+          <Text size="sm" c="dimmed" mb="md">
+            ePaper panels pull firmware over HTTPS on each wake; a wave here
+            promotes the next batch of panels to the target version rather
+            than publishing an MQTT trigger.
+          </Text>
+          <SimpleGrid cols={{ base: 1, lg: 2 }} data-testid="epaper-rollouts">
+            {epaperRollouts.map((r) => {
+              // ePaper progress shape: { target_total, promoted, remaining }
+              // — no in-flight concept since the install happens lazily on the
+              // panel's next wake. Render with just two bands.
+              const p = r.progress as unknown as {
+                target_total: number;
+                promoted: number;
+                remaining: number;
+              };
+              return (
+                <Card
+                  withBorder
+                  p="md"
+                  radius="md"
+                  key={r.id}
+                  data-testid={`epaper-rollout-${r.id}`}
+                >
+                  <Group justify="space-between" mb="xs">
+                    <div>
+                      <Text fw={600}>{r.firmware_version_string}</Text>
+                      <Text size="xs" c="dimmed">
+                        {r.device_type_name}
+                        {r.name ? ` · ${r.name}` : ''}
+                      </Text>
+                    </div>
+                    <Badge color={STATUS_COLORS[r.status] || 'gray'}>{r.status}</Badge>
+                  </Group>
+
+                  <Text size="sm" c="dimmed" mb={4}>
+                    {r.batch_size_percent}% of the fleet every {r.interval_minutes} min
+                  </Text>
+
+                  <Progress.Root size="lg" mb={4}>
+                    <Progress.Section
+                      value={pct(p.promoted, p.target_total)}
+                      color="green"
+                    />
+                  </Progress.Root>
+                  <Text size="xs" c="dimmed" mb="sm">
+                    {p.promoted} promoted · {p.remaining} remaining
+                    {p.target_total ? ` of ${p.target_total}` : ''}
+                  </Text>
+
+                  <Group gap="xs">
+                    {r.status === 'draft' && (
+                      <Button
+                        size="xs"
+                        loading={busyId === r.id}
+                        onClick={() => runEpaperAction(r.id, forgekeyAPI.startEpaperRollout)}
+                      >
+                        Start
+                      </Button>
+                    )}
+                    {r.status === 'paused' && (
+                      <Button
+                        size="xs"
+                        loading={busyId === r.id}
+                        onClick={() => runEpaperAction(r.id, forgekeyAPI.startEpaperRollout)}
+                      >
+                        Resume
+                      </Button>
+                    )}
+                    {r.status === 'active' && (
+                      <>
+                        <Button
+                          size="xs"
+                          variant="light"
+                          loading={busyId === r.id}
+                          onClick={() =>
+                            runEpaperAction(r.id, forgekeyAPI.advanceEpaperRollout)
+                          }
+                        >
+                          Advance now
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color="yellow"
+                          loading={busyId === r.id}
+                          onClick={() => runEpaperAction(r.id, forgekeyAPI.pauseEpaperRollout)}
+                        >
+                          Pause
+                        </Button>
+                      </>
+                    )}
+                    {(r.status === 'active' || r.status === 'paused') && (
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        color="red"
+                        loading={busyId === r.id}
+                        onClick={() => runEpaperAction(r.id, forgekeyAPI.cancelEpaperRollout)}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </Group>
+                </Card>
+              );
+            })}
+          </SimpleGrid>
+        </>
       )}
     </WorkspacePage>
   );

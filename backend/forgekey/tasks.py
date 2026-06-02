@@ -795,6 +795,31 @@ def advance_firmware_rollouts() -> None:
             logger.exception("Failed to advance firmware rollout %s", rollout.id)
 
 
+@shared_task
+def advance_epaper_firmware_rollouts() -> None:
+    """Beat task: advance ePaper firmware rollouts whose interval has elapsed.
+
+    Mirror of ``advance_firmware_rollouts`` for the HTTPS-pull rollout
+    model. A wave here is a *promotion* (setting target_firmware_version
+    on the next batch of panels) rather than an outbound MQTT publish —
+    the actual install happens when each promoted panel next wakes and
+    calls the firmware-check endpoint.
+    """
+    from .models import EpaperFirmwareRollout
+    from .services.epaper_firmware_rollout import advance_rollout as advance_epaper
+
+    now = timezone.now()
+    for rollout in EpaperFirmwareRollout.objects.filter(status=EpaperFirmwareRollout.STATUS_ACTIVE):
+        if rollout.last_advanced_at is not None:
+            elapsed_minutes = (now - rollout.last_advanced_at).total_seconds() / 60.0
+            if elapsed_minutes < rollout.interval_minutes:
+                continue
+        try:
+            advance_epaper(rollout)
+        except Exception:
+            logger.exception("Failed to advance epaper firmware rollout %s", rollout.id)
+
+
 @shared_task(bind=True, queue="builds", max_retries=0)
 def build_firmware(self, build_id: str) -> Dict[str, Any]:
     """Build firmware on the self-hosted build worker (the ``builds`` queue).

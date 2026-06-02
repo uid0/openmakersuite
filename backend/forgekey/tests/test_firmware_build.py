@@ -231,3 +231,60 @@ class TestFirmwareBuildViewSet:
         assert resp.status_code == 200, resp.data
         build.refresh_from_db()
         assert build.status == FirmwareBuild.STATUS_CANCELLED
+
+
+class TestWriteSecurityHeaders:
+    """Cover the contract for `_write_security_headers` that the firmware
+    worker calls between `git clone` and `pio run`."""
+
+    def _setup(self, tmp_path: Path) -> Path:
+        (tmp_path / "src" / "security").mkdir(parents=True)
+        # Place a sentinel `oms_ca.h` so we can prove the rewrite leaves
+        # it alone — overwriting it with the OMS-internal CA would break
+        # HTTPS server-cert verification on every flashed device.
+        (tmp_path / "src/security/oms_ca.h").write_text(
+            "/* canary — must survive _write_security_headers */\n"
+        )
+        return tmp_path
+
+    def test_writes_forgekey_ca_with_extern(self, tmp_path):
+        self._setup(tmp_path)
+        fb._write_security_headers(
+            tmp_path,
+            ca_pem="-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----",
+            cmd_pubkey_pem="-----BEGIN PUBLIC KEY-----\nXYZ\n-----END PUBLIC KEY-----",
+        )
+        out = (tmp_path / "src/security/forgekey_ca.h").read_text()
+        assert "#define FORGEKEY_INTERNAL_CA_PEM" in out
+        # extern declaration is what consumer .cpp files link against.
+        assert "extern const char* kForgekeyInternalCaPem;" in out
+
+    def test_writes_command_pubkey_with_extern(self, tmp_path):
+        self._setup(tmp_path)
+        fb._write_security_headers(
+            tmp_path,
+            ca_pem="-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----",
+            cmd_pubkey_pem="-----BEGIN PUBLIC KEY-----\nXYZ\n-----END PUBLIC KEY-----",
+        )
+        out = (tmp_path / "src/security/oms_command_pubkey.h").read_text()
+        assert "#define FORGEKEY_OMS_COMMAND_PUBKEY_PEM" in out
+        # Regression: every consumer (command_validation.cpp, register.cpp)
+        # needs this extern; an early version dropped it and every build
+        # failed to compile.
+        assert "extern const char* kOmsCommandPubKeyPem;" in out
+
+    def test_does_not_touch_oms_ca(self, tmp_path):
+        """oms_ca.h is the LE root for HTTPS server-cert verification —
+        rewriting it with the OMS-internal CA would break every device's
+        ability to verify the OMS HTTPS endpoint."""
+        self._setup(tmp_path)
+        fb._write_security_headers(
+            tmp_path,
+            ca_pem="-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----",
+            cmd_pubkey_pem="-----BEGIN PUBLIC KEY-----\nXYZ\n-----END PUBLIC KEY-----",
+        )
+        # Sentinel intact.
+        assert (
+            "/* canary — must survive _write_security_headers */"
+            in (tmp_path / "src/security/oms_ca.h").read_text()
+        )

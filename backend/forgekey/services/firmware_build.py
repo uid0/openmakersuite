@@ -26,9 +26,24 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 # Security headers in the cloned checkout, overwritten with live values before
-# the build. The headers guard their defaults behind ``#ifndef`` / ``#pragma
-# once``, so replacing the file injects the real CA + pubkey.
-_CA_HEADER = "src/security/oms_ca.h"
+# the build. Two distinct CAs here, not one:
+#
+#   * forgekey_ca.h carries the OMS-internal CA cert — the root of the
+#     mTLS / firmware-leaf trust chain (PR #33 on the ForgeKey repo). This
+#     is what we inject from the active CertificateAuthority row on every
+#     build, so each artifact is bound to the current operator CA.
+#
+#   * oms_ca.h carries the *public* CA that signs the OMS HTTPS server cert
+#     (typically the Let's Encrypt root). That value doesn't change per
+#     build and is refreshed by scripts/build/fetch-oms-ca.sh when LE
+#     rotates roots — we do NOT touch it during automated builds, since
+#     overwriting it with the OMS-internal CA would break HTTPS server-
+#     cert verification on every device.
+#
+# (Previously oms_ca.h was getting the OMS-internal CA. Devices flashed
+# from those builds couldn't have verified the OMS HTTPS endpoint; the bug
+# never bit because no field device was flashed via the automated path yet.)
+_FORGEKEY_CA_HEADER = "src/security/forgekey_ca.h"
 _PUBKEY_HEADER = "src/security/oms_command_pubkey.h"
 
 _DEFAULT_REPO_URL = "https://github.com/uid0/ForgeKey.git"
@@ -97,12 +112,27 @@ def _c_string_literal(pem: str) -> str:
 
 
 def _write_security_headers(repo: Path, ca_pem: str, cmd_pubkey_pem: str) -> None:
-    (repo / _CA_HEADER).write_text(
-        "#pragma once\n#define OMS_CA_PEM \\\n" + _c_string_literal(ca_pem)
+    """Inject the live OMS-internal CA + command public key into the checkout.
+
+    ``ca_pem`` lands in ``forgekey_ca.h`` (firmware-leaf-cert trust root),
+    NOT ``oms_ca.h`` (HTTPS server-cert trust root). ``oms_ca.h`` is left
+    untouched on purpose — see the module-level comment on _FORGEKEY_CA_HEADER.
+
+    Both rewrites preserve the `extern const char* k…;` declaration that
+    the original headers carry. Without it, every consumer .cpp that uses
+    the symbol fails with `'kX' was not declared in this scope` even
+    though the defining .cpp would still compile fine (it picks up the
+    macro and does `const char* kX = MACRO;`).
+    """
+    (repo / _FORGEKEY_CA_HEADER).write_text(
+        "#pragma once\n"
+        "#define FORGEKEY_INTERNAL_CA_PEM \\\n" + _c_string_literal(ca_pem) + "\n"
+        "extern const char* kForgekeyInternalCaPem;\n"
     )
     (repo / _PUBKEY_HEADER).write_text(
-        "#pragma once\n#define FORGEKEY_OMS_COMMAND_PUBKEY_PEM \\\n"
-        + _c_string_literal(cmd_pubkey_pem)
+        "#pragma once\n"
+        "#define FORGEKEY_OMS_COMMAND_PUBKEY_PEM \\\n" + _c_string_literal(cmd_pubkey_pem) + "\n"
+        "extern const char* kOmsCommandPubKeyPem;\n"
     )
 
 

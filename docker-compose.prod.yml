@@ -238,9 +238,12 @@ services:
     # `builds` queue that forgekey.tasks.build_firmware is routed to. Without
     # it, queued firmware builds sit in Redis forever.
     #
-    # Provide a read-only SSH deploy key with read access to the ForgeKey repo
-    # via FORGEKEY_DEPLOY_KEY in .env; until it's set the container still runs,
-    # but each build fails at `git clone`. See docs/FORGEKEY_FIRMWARE_BUILD.md.
+    # Auth for the git clone — recommended path is a GitHub Personal Access
+    # Token (FORGEKEY_BUILDER_GITHUB_TOKEN, fine-grained, Contents:Read on the
+    # ForgeKey repo). Read-only by design; the worker never pushes. The legacy
+    # SSH deploy-key mount is still honored when FORGEKEY_DEPLOY_KEY is set,
+    # for deployments that haven't rotated to PAT yet. See
+    # docs/FORGEKEY_FIRMWARE_BUILD.md.
     build:
       context: ./backend
       dockerfile: Dockerfile.firmware-builder
@@ -257,7 +260,8 @@ services:
           memory: 512M
     volumes:
       - media_volume:/app/media
-      # Read-only SSH deploy key with read access to the ForgeKey repo.
+      # Legacy SSH deploy key path — ignored when FORGEKEY_BUILDER_GITHUB_TOKEN
+      # is set and FORGEKEY_FIRMWARE_REPO_URL is HTTPS.
       - ${FORGEKEY_DEPLOY_KEY:-/dev/null}:/root/.ssh/id_ed25519:ro
     env_file:
       - .env
@@ -268,7 +272,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - SKIP_DB_MIGRATIONS=1
-      - FORGEKEY_FIRMWARE_REPO_URL=${FORGEKEY_FIRMWARE_REPO_URL:-git@github.com:uid0/ForgeKey.git}
+      - FORGEKEY_FIRMWARE_REPO_URL=${FORGEKEY_FIRMWARE_REPO_URL:-https://github.com/uid0/ForgeKey.git}
+      - FORGEKEY_BUILDER_GITHUB_TOKEN=${FORGEKEY_BUILDER_GITHUB_TOKEN:-}
     depends_on:
       backend:
         condition: service_started

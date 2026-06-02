@@ -43,18 +43,37 @@ A failed build is recorded with its log + `error_message` — not retried.
 **Production (`docker-compose.prod.yml`)** — `firmware_builder` is **always-on**:
 it comes up with the rest of the stack, so a normal
 `docker compose -f docker-compose.prod.yml up -d --build` starts it alongside
-everything else. You only need to give it the deploy key. In your prod `.env`:
+everything else. You only need to give it git auth.
+
+Two supported auth paths — pick one and put the matching env vars in prod `.env`:
+
+**Recommended — GitHub Personal Access Token (PAT, read-only):**
+
+```bash
+# Fine-grained PAT, scoped to the ForgeKey repo, Contents: Read only.
+# The worker never pushes; minimum-privilege.
+FORGEKEY_BUILDER_GITHUB_TOKEN=github_pat_…
+# Repo URL must be HTTPS for the token to take effect.
+FORGEKEY_FIRMWARE_REPO_URL=https://github.com/uid0/ForgeKey.git
+```
+
+Generate the PAT at <https://github.com/settings/personal-access-tokens/new>,
+scoped only to the ForgeKey repository with **Contents: Read** permission.
+Rotation = generate a new PAT, update the env var, `docker compose restart firmware_builder`.
+
+**Legacy — SSH deploy key:**
 
 ```bash
 # A read-only SSH deploy key with read access to the ForgeKey repo
 # (GitHub → repo → Settings → Deploy keys). Host path, mounted read-only.
 FORGEKEY_DEPLOY_KEY=/abs/path/to/forgekey_deploy_key
-# (optional) override the repo if you fork it
 FORGEKEY_FIRMWARE_REPO_URL=git@github.com:uid0/ForgeKey.git
 ```
 
-Until `FORGEKEY_DEPLOY_KEY` is set the container still runs, but each build fails
-at `git clone`.
+The PAT path is honored when `FORGEKEY_BUILDER_GITHUB_TOKEN` is set AND the
+repo URL is HTTPS. Otherwise the worker falls back to the SSH key. Until one
+of the two is configured, the container runs but each build fails at
+`git clone`.
 
 **Development (`docker-compose.yml`)** — the worker is **opt-in** (compose
 profile `firmware-build`) so a routine `docker compose up` stays lightweight:

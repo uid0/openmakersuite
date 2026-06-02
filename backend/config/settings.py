@@ -433,9 +433,22 @@ CELERY_TASK_ROUTES = {
 }
 
 # Git URL the firmware-builder worker clones to build ForgeKey firmware.
+# Default is HTTPS — the PAT-based auth path is the recommended one (see
+# FORGEKEY_BUILDER_GITHUB_TOKEN below). The legacy SSH URL
+# (git@github.com:...) still works when FORGEKEY_DEPLOY_KEY is mounted
+# into the worker container, but PAT is simpler to rotate and never
+# touches ssh-agent.
 FORGEKEY_FIRMWARE_REPO_URL = config(
-    "FORGEKEY_FIRMWARE_REPO_URL", default="git@github.com:uid0/ForgeKey.git"
+    "FORGEKEY_FIRMWARE_REPO_URL", default="https://github.com/uid0/ForgeKey.git"
 )
+
+# GitHub Personal Access Token (or fine-grained token) the firmware-
+# builder injects into the HTTPS clone URL. Read-only by design — the
+# worker only ever clones. A fine-grained PAT scoped to the ForgeKey
+# repo with `Contents: Read` is the minimum-privilege option. When this
+# is empty, the worker falls back to whatever ssh key the container has
+# at /root/.ssh/id_ed25519 (the legacy FORGEKEY_DEPLOY_KEY mount).
+FORGEKEY_BUILDER_GITHUB_TOKEN = config("FORGEKEY_BUILDER_GITHUB_TOKEN", default="")
 
 # Celery Beat Schedule for periodic tasks
 CELERY_BEAT_SCHEDULE = {

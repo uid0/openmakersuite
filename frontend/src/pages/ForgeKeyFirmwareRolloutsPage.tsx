@@ -114,6 +114,7 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
   const [buildRef, setBuildRef] = useState('main');
   const [building, setBuilding] = useState(false);
   const [logBuildId, setLogBuildId] = useState<string | null>(null);
+  const [redispatchingBuildId, setRedispatchingBuildId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isStaff && !isSuperuser) return undefined;
@@ -391,7 +392,33 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
             {logBuild.status === 'queued' && (
               <Alert color="blue" variant="light">
                 Queued builds only start once the self-hosted firmware-builder worker is running and
-                consuming the builds queue. If this stays queued, that worker isn&rsquo;t up.
+                consuming the builds queue. If this stays queued, that worker isn&rsquo;t up — or its
+                task message was lost when Redis last restarted. Re-dispatch republishes the build
+                task so the worker can pick it up:
+                <Group mt="xs">
+                  <Button
+                    size="xs"
+                    variant="light"
+                    color="blue"
+                    loading={redispatchingBuildId === logBuild.id}
+                    onClick={async () => {
+                      setRedispatchingBuildId(logBuild.id);
+                      try {
+                        const res = await forgekeyAPI.redispatchFirmwareBuild(logBuild.id);
+                        setBuilds((prev) =>
+                          prev.map((b) => (b.id === res.data.id ? res.data : b)),
+                        );
+                      } catch (err) {
+                        setError(extractErrorMessage(err, 'Re-dispatch failed.'));
+                      } finally {
+                        setRedispatchingBuildId(null);
+                      }
+                    }}
+                    data-testid="redispatch-build"
+                  >
+                    Re-dispatch to worker
+                  </Button>
+                </Group>
               </Alert>
             )}
             {logBuild.error_message && (

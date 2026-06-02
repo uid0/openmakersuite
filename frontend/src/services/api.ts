@@ -2152,6 +2152,12 @@ export const forgekeyAPI = {
   }) => api.post<ForgeKeyFirmwareBuild>('/forgekey/firmware-builds/', body),
   cancelFirmwareBuild: (id: string) =>
     api.post<ForgeKeyFirmwareBuild>(`/forgekey/firmware-builds/${id}/cancel/`),
+  // Re-publish a stuck queued / failed build's task to the worker. Use case:
+  // the firmware_builder worker was down (or Redis was restarted) at the
+  // time the build was enqueued, so the original task message is gone and
+  // the row sits in `queued` even though the worker is now alive.
+  redispatchFirmwareBuild: (id: string) =>
+    api.post<ForgeKeyFirmwareBuild>(`/forgekey/firmware-builds/${id}/redispatch/`),
   // PKI: read-only certificate visibility + CA rotation (staff).
   listCertificateAuthorities: () =>
     api.get<{ results?: ForgeKeyCertificateAuthority[] } | ForgeKeyCertificateAuthority[]>(

@@ -186,6 +186,143 @@ class TestBuildCompletionNotifications:
         assert not Notification.objects.exists()
 
 
+class TestAutoStagedRollout:
+    """A successful build auto-creates a DRAFT rollout for the new
+    FirmwareVersion so the operator doesn't have to bounce back to the
+    rollouts page and rebuild the campaign by hand."""
+
+    def _run_succeed(self, build):
+        with (
+            patch("forgekey.models.CertificateAuthority.get_active", return_value=_FAKE_CA),
+            patch(
+                "forgekey.services.jwt_signing.get_jwt_public_key_pem",
+                return_value=_FAKE_PUBKEY,
+            ),
+            patch("forgekey.services.firmware_build.subprocess.run", side_effect=_fake_run),
+        ):
+            return fb.run_firmware_build(str(build.id))
+
+    def test_epaper_build_creates_draft_epaper_rollout(self, device_type, admin_user):
+        from forgekey.models import EpaperFirmwareRollout
+
+        build = FirmwareBuild.objects.create(
+            device_type=device_type,
+            pio_env="seeed_xiao_epaper",
+            source_ref="main",
+            version="9.9.1",
+            requested_by=admin_user,
+        )
+        result = self._run_succeed(build)
+        assert result["status"] == "succeeded"
+
+        build.refresh_from_db()
+        rollouts = EpaperFirmwareRollout.objects.filter(firmware_version=build.firmware_version)
+        assert rollouts.count() == 1
+        rollout = rollouts.first()
+        assert rollout.status == EpaperFirmwareRollout.STATUS_DRAFT
+        assert rollout.batch_size_percent == 20
+        assert rollout.interval_minutes == 60
+        assert rollout.created_by_id == admin_user.id
+        assert "9.9.1" in rollout.name
+        # Returned rollout_id matches what we wrote.
+        assert result["rollout_id"] == str(rollout.pk)
+
+    def test_non_epaper_build_creates_draft_mqtt_rollout(self, admin_user):
+        # Any other device type goes through the MQTT-push rollout.
+        from forgekey.models import EpaperFirmwareRollout, FirmwareRollout
+
+        dt, _ = DeviceType.objects.get_or_create(
+            code="temperature_sensor", defaults={"name": "Temperature sensor"}
+        )
+        build = FirmwareBuild.objects.create(
+            device_type=dt,
+            pio_env="seeed_xiao_esp32s3_temperature",
+            source_ref="main",
+            version="9.9.2",
+            requested_by=admin_user,
+        )
+        self._run_succeed(build)
+        build.refresh_from_db()
+
+        # MQTT-push rollout was created…
+        mqtt = FirmwareRollout.objects.filter(firmware_version=build.firmware_version)
+        assert mqtt.count() == 1
+        assert mqtt.first().status == FirmwareRollout.STATUS_DRAFT
+        # …and no ePaper rollout for a non-ePaper device type.
+        assert not EpaperFirmwareRollout.objects.filter(
+            firmware_version=build.firmware_version
+        ).exists()
+
+    def test_rollout_is_draft_not_active(self, device_type, admin_user):
+        """The auto-staged rollout starts in DRAFT so the operator
+        reviews batch%/interval before kicking off the campaign — the
+        same posture as a hand-created rollout."""
+        from forgekey.models import EpaperFirmwareRollout
+
+        build = FirmwareBuild.objects.create(
+            device_type=device_type,
+            pio_env="seeed_xiao_epaper",
+            source_ref="main",
+            version="9.9.3",
+            requested_by=admin_user,
+        )
+        self._run_succeed(build)
+        rollout = EpaperFirmwareRollout.objects.get(firmware_version__version="9.9.3")
+        assert rollout.status == EpaperFirmwareRollout.STATUS_DRAFT
+        assert rollout.started_at is None
+        assert rollout.last_advanced_at is None
+
+    def test_failed_build_does_not_create_rollout(self, device_type, admin_user):
+        from forgekey.models import EpaperFirmwareRollout
+
+        build = FirmwareBuild.objects.create(
+            device_type=device_type,
+            pio_env="x",
+            source_ref="main",
+            version="9.9.4",
+            requested_by=admin_user,
+        )
+        with patch("forgekey.models.CertificateAuthority.get_active", return_value=None):
+            fb.run_firmware_build(str(build.id))
+        assert not EpaperFirmwareRollout.objects.exists()
+
+    def test_rollout_creation_failure_does_not_fail_the_build(self, device_type, admin_user):
+        """If the rollout INSERT blows up for any reason (DB constraint,
+        unexpected duplicate, ...) the build itself must still record as
+        succeeded — the artifact exists and the operator can stage the
+        rollout by hand from the version row."""
+        from forgekey.models import EpaperFirmwareRollout
+
+        build = FirmwareBuild.objects.create(
+            device_type=device_type,
+            pio_env="seeed_xiao_epaper",
+            source_ref="main",
+            version="9.9.5",
+            requested_by=admin_user,
+        )
+
+        with (
+            patch("forgekey.models.CertificateAuthority.get_active", return_value=_FAKE_CA),
+            patch(
+                "forgekey.services.jwt_signing.get_jwt_public_key_pem",
+                return_value=_FAKE_PUBKEY,
+            ),
+            patch("forgekey.services.firmware_build.subprocess.run", side_effect=_fake_run),
+            patch(
+                "forgekey.models.EpaperFirmwareRollout.objects.get_or_create",
+                side_effect=RuntimeError("simulated rollout INSERT failure"),
+            ),
+        ):
+            result = fb.run_firmware_build(str(build.id))
+
+        assert result["status"] == "succeeded"
+        build.refresh_from_db()
+        assert build.status == FirmwareBuild.STATUS_SUCCEEDED
+        assert build.firmware_version is not None
+        assert result["rollout_id"] is None
+        assert not EpaperFirmwareRollout.objects.exists()
+
+
 class TestFirmwareBuildViewSet:
     def test_staff_create_enqueues_build(self, admin_api_client, device_type):
         with patch("forgekey.tasks.build_firmware.delay") as mock_delay:

@@ -1117,6 +1117,7 @@ class EPaperDisplayAdmin(admin.ModelAdmin):
         "asset",
         "battery_percent",
         "last_battery_at",
+        "firmware_version",
         "last_image_at",
         "is_active",
         "preview_link",
@@ -1126,12 +1127,14 @@ class EPaperDisplayAdmin(admin.ModelAdmin):
         "device__mac_address",
         "device__name",
         "asset__name",
+        "asset__asset_tag",
     ]
     readonly_fields = [
         "id",
         "panel_preview",
         "battery_percent",
         "last_battery_at",
+        "firmware_version",
         "last_image_etag",
         "last_image_at",
         "created_at",

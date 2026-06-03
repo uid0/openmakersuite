@@ -20,7 +20,10 @@ import { Asset } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 const SEARCH_DEBOUNCE_MS = 300;
-const MAX_SUGGESTIONS = 15;
+// 50 is enough to show every active asset in the current fleet (~80)
+// without paginating, while still keeping the picker scannable on a
+// phone. Bump this if the active-asset count grows much past it.
+const MAX_SUGGESTIONS = 50;
 
 const ForgeKeyEPaperBindPage: React.FC = () => {
   const [params] = useSearchParams();
@@ -160,7 +163,7 @@ const ForgeKeyEPaperBindPage: React.FC = () => {
 
         <TextInput
           label="Search assets"
-          placeholder="Bandsaw, lift, HVAC…"
+          placeholder="Name, serial #, or asset tag (e.g. DMS-…)"
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
           size="md"

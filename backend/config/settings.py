@@ -582,6 +582,14 @@ FORGEKEY_EPAPER_LOW_BATTERY_PERCENT = config(
     "FORGEKEY_EPAPER_LOW_BATTERY_PERCENT", default=20, cast=int
 )
 
+# How often (minutes) an ePaper panel wakes from deep sleep to pull
+# its image. Served verbatim from /api/forgekey/epaper/<id>/desired.json;
+# the firmware programs its next esp_sleep_enable_timer_wakeup from
+# this. Increase for longer battery life, decrease for snappier
+# response to PM events. 60 is the default panel cadence in firmware
+# too, so this value matters only when operators want to override.
+FORGEKEY_EPAPER_DEFAULT_WAKE_MIN = config("FORGEKEY_EPAPER_DEFAULT_WAKE_MIN", default=60, cast=int)
+
 FORGEKEY_JWT_ALGORITHM = "ES256"
 FORGEKEY_JWT_EXPIRATION_SECONDS = config(
     "FORGEKEY_JWT_EXPIRATION_SECONDS", default=2592000, cast=int  # 30 days

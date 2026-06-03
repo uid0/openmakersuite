@@ -2802,6 +2802,173 @@ class EPaperDisplayBatteryView(APIView):
         return Response({"battery_percent": percent}, status=200)
 
 
+class EPaperDisplayHealthView(APIView):
+    """Receive the full wake-cycle health payload from an ePaper panel.
+
+    The firmware posts a wider envelope than ``/battery/`` (battery is
+    one nested field inside it): firmware version, last-image etag,
+    consecutive-unchanged + consecutive-failure counters, render
+    status, retired flag, and the per-subsystem ``ota`` / ``board`` /
+    ``power`` blocks each capability appends. We persist the fields
+    the model has columns for (battery%, firmware_version,
+    last_image_etag) and accept the rest so the firmware's POST
+    succeeds instead of 404-ing into the serial log.
+
+    Battery handling mirrors :class:`EPaperDisplayBatteryView` — same
+    low-battery Sentry alert, same upsert semantics — so the existing
+    ``/battery/`` endpoint stays a strict subset of this one.
+
+    AllowAny for the same reason as the image / battery endpoints:
+    the panel firmware has no auth credential. The display_id in the
+    URL is the only handle; if it doesn't match a row we 404.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request, display_id):
+        try:
+            display = EPaperDisplay.objects.select_related("device", "asset").get(
+                pk=display_id, is_active=True
+            )
+        except EPaperDisplay.DoesNotExist:
+            return HttpResponse(status=404)
+
+        body = request.data if isinstance(request.data, dict) else {}
+        updates = {}
+
+        # Battery — same coerce-and-validate as the /battery/ endpoint.
+        # Tolerate the firmware sending power={} (battery unavailable
+        # on the stock SKU-6416 panel) without flagging an error.
+        battery_percent = None
+        power_block = body.get("power") if isinstance(body.get("power"), dict) else {}
+        battery_block = (
+            power_block.get("battery") if isinstance(power_block.get("battery"), dict) else {}
+        )
+        raw_percent = battery_block.get("percent")
+        if raw_percent is not None:
+            try:
+                battery_percent = int(raw_percent)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "power.battery.percent must be an integer 0..100"}, status=400
+                )
+            if battery_percent < 0 or battery_percent > 100:
+                return Response({"detail": "power.battery.percent must be 0..100"}, status=400)
+            updates["battery_percent"] = battery_percent
+            updates["last_battery_at"] = timezone.now()
+
+        firmware_version = body.get("firmware_version")
+        if isinstance(firmware_version, str) and firmware_version:
+            updates["firmware_version"] = firmware_version[:50]
+
+        etag = body.get("last_image_etag")
+        if isinstance(etag, str) and etag:
+            updates["last_image_etag"] = etag[:64]
+
+        if updates:
+            EPaperDisplay.objects.filter(pk=display.pk).update(**updates)
+            display.refresh_from_db()
+
+        # Low-battery Sentry alert — only when battery was reported
+        # this cycle. `device` is nullable (HTTPS-only panels skip the
+        # MAC-keyed enrollment path) so guard the mac tag.
+        if battery_percent is not None and display.is_low_battery:
+            asset_name = display.asset.name if display.asset_id else "unbound"
+            with sentry_sdk.new_scope() as scope:
+                if display.device_id is not None:
+                    scope.set_tag("forgekey.device_mac", display.device.mac_address)
+                scope.set_tag("forgekey.display_id", str(display.pk))
+                scope.set_tag("forgekey.asset", asset_name)
+                scope.set_extra("battery_percent", battery_percent)
+                sentry_sdk.capture_message(
+                    f"ePaper panel low battery: {battery_percent}% on {asset_name}",
+                    level="warning",
+                )
+        return Response(
+            {
+                "display_id": str(display.pk),
+                "battery_percent": display.battery_percent,
+                "firmware_version": display.firmware_version,
+            },
+            status=200,
+        )
+
+
+class EPaperDisplayDesiredView(APIView):
+    """Return the panel's desired runtime state on each wake.
+
+    Firmware GETs this right after the OTA check; it applies the
+    cadence (``wake_min``) for the next deep-sleep duration and reacts
+    to one-shot flags (``force_refresh``, ``retired``, ``factory_reset``).
+
+    Today we return a single static cadence — ``wake_min`` — sourced
+    from the ``FORGEKEY_EPAPER_DEFAULT_WAKE_MIN`` setting. Per-panel
+    cadence override is a follow-up (model field + admin) but the
+    endpoint shape is stable so the firmware never needs to relearn it.
+
+    Returns 204 (no changes) when the display has no overrides, 200
+    with the desired-state JSON when something is set. Both halves
+    are valid no-op responses from the firmware's perspective —
+    keeping the 204 path means the wake log says ``no desired-state
+    changes`` instead of always painting it as a state push.
+
+    AllowAny: no auth credential on the panel.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, display_id):
+        try:
+            display = EPaperDisplay.objects.get(pk=display_id, is_active=True)
+        except EPaperDisplay.DoesNotExist:
+            return HttpResponse(status=404)
+
+        wake_min = getattr(settings, "FORGEKEY_EPAPER_DEFAULT_WAKE_MIN", 60)
+        return Response(
+            {
+                "display_id": str(display.pk),
+                "desired": {"wake_min": int(wake_min)},
+            },
+            status=200,
+        )
+
+
+class EPaperDisplayCommandAckView(APIView):
+    """Accept a command-ack POST from the panel.
+
+    The firmware POSTs to ``/command/status/`` after executing a
+    command pulled from the desired-state payload (force_refresh,
+    retire, etc.). We don't yet issue commands so this is a no-op
+    accept — exists only to stop the 404 noise in the panel's serial
+    log and clear the way to surface ack timing later.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request, display_id):
+        if not EPaperDisplay.objects.filter(pk=display_id, is_active=True).exists():
+            return HttpResponse(status=404)
+        return Response(status=204)
+
+
+class EPaperDisplayFirmwareStatusView(APIView):
+    """Accept a firmware-progress POST from the panel.
+
+    The firmware POSTs to ``/firmware/status/`` during an OTA download
+    (started / progress / completed / failed). The panel-side OTA
+    progress isn't visualised in the admin yet, but ``firmware-check``
+    already stamps the running version on success, so this endpoint
+    is a no-op accept that exists to stop the 404 in the wake log.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request, display_id):
+        if not EPaperDisplay.objects.filter(pk=display_id, is_active=True).exists():
+            return HttpResponse(status=404)
+        return Response(status=204)
+
+
 class EPaperFirmwareCheckView(APIView):
     """Check whether the ePaper panel has firmware to install on this wake.
 

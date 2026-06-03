@@ -17,6 +17,10 @@ from .views import (
     DeviceUsageViewSet,
     EPaperDisplayBatteryView,
     EPaperDisplayBindView,
+    EPaperDisplayCommandAckView,
+    EPaperDisplayDesiredView,
+    EPaperDisplayFirmwareStatusView,
+    EPaperDisplayHealthView,
     EPaperDisplayImageView,
     EPaperDisplayListView,
     EPaperDisplaySetActiveView,
@@ -120,6 +124,26 @@ urlpatterns = [
         "epaper/<uuid:display_id>/battery/",
         EPaperDisplayBatteryView.as_view(),
         name="epaper-battery",
+    ),
+    path(
+        "epaper/<uuid:display_id>/health/",
+        EPaperDisplayHealthView.as_view(),
+        name="epaper-health",
+    ),
+    path(
+        "epaper/<uuid:display_id>/desired.json",
+        EPaperDisplayDesiredView.as_view(),
+        name="epaper-desired",
+    ),
+    path(
+        "epaper/<uuid:display_id>/command/status/",
+        EPaperDisplayCommandAckView.as_view(),
+        name="epaper-command-status",
+    ),
+    path(
+        "epaper/<uuid:display_id>/firmware/status/",
+        EPaperDisplayFirmwareStatusView.as_view(),
+        name="epaper-firmware-status",
     ),
     path(
         "epaper/<uuid:display_id>/firmware-check/",

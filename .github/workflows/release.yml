@@ -315,8 +315,12 @@ jobs:
         run: |
           NEW_TAG="${{ needs.generate-version.outputs.new_tag }}"
 
-          # Sign the release bundle with keyless signing (Sigstore)
+          # Sign the release bundle with keyless signing (Sigstore).
+          # --yes auto-confirms the Sigstore transparency-log ToS prompt
+          # that cosign v2 added; without it CI fails with
+          # "upload to tlog: user declined the prompt" on every run.
           cosign sign-blob \
+            --yes \
             --output-signature openmakersuite-$NEW_TAG.tar.gz.sig \
             --output-certificate openmakersuite-$NEW_TAG.tar.gz.pem \
             openmakersuite-$NEW_TAG.tar.gz

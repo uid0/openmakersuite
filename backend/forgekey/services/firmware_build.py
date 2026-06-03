@@ -156,6 +156,63 @@ def _truncate(text: str) -> str:
     return text if len(text) <= _LOG_TAIL_LIMIT else text[-_LOG_TAIL_LIMIT:]
 
 
+def _stage_draft_rollout(build, firmware):
+    """Auto-create a DRAFT rollout for the freshly-built FirmwareVersion.
+
+    Closes the operator UX gap where a successful build dropped a
+    FirmwareVersion into the table but required a separate manual step
+    on the rollouts page to actually stage it for the fleet. With this
+    helper, the build's success notification's `action_url` lands on a
+    rollouts page that already has the new version queued up — one
+    click to Start instead of "now go create a rollout from scratch."
+
+    Picks the rollout model from the build's device_type:
+      * device_type.code == "epaper_screen"  → EpaperFirmwareRollout
+      * everything else                      → FirmwareRollout (MQTT-push)
+
+    Defaults are conservative — 20% batch, 60-minute interval — matching
+    the MQTT-push rollout defaults. Operators can tune both before
+    flipping the rollout to ACTIVE.
+
+    Best-effort: if rollout creation fails the build still succeeds and
+    we log + carry on. The operator can always create a rollout by hand
+    from the version row. Returns the created rollout (or None).
+    """
+    from ..models import EpaperFirmwareRollout, FirmwareRollout
+
+    dt_code = build.device_type.code if build.device_type_id else ""
+    rollout_cls = EpaperFirmwareRollout if dt_code == "epaper_screen" else FirmwareRollout
+    rollout_name = f"Auto-staged from build {firmware.version}"
+
+    try:
+        rollout, created = rollout_cls.objects.get_or_create(
+            firmware_version=firmware,
+            status=rollout_cls.STATUS_DRAFT,
+            defaults={
+                "name": rollout_name,
+                "batch_size_percent": 20,
+                "interval_minutes": 60,
+                "created_by": build.requested_by,
+            },
+        )
+        if created:
+            logger.info(
+                "Staged draft %s %s for firmware %s",
+                rollout_cls.__name__,
+                rollout.pk,
+                firmware.version,
+            )
+        return rollout
+    except Exception:  # noqa: BLE001 — rollout creation must not fail the build
+        logger.exception(
+            "Failed to auto-stage rollout for firmware %s (build %s); "
+            "operator can create one manually from the version row",
+            firmware.version,
+            build.pk,
+        )
+        return None
+
+
 def _notify_requester(build, *, succeeded: bool) -> None:
     """Notify the user who queued a build that it finished.
 
@@ -307,11 +364,15 @@ def run_firmware_build(build_id: str) -> dict:
         build.completed_at = timezone.now()
         build.log = _truncate("\n".join(log_lines))
         build.save()
+
+        rollout = _stage_draft_rollout(build, firmware)
+
         _notify_requester(build, succeeded=True)
         return {
             "status": "succeeded",
             "build_id": str(build.pk),
             "firmware_version_id": str(firmware.pk),
+            "rollout_id": str(rollout.pk) if rollout else None,
         }
     except Exception as exc:  # noqa: BLE001 — record any build failure for the operator
         logger.warning("Firmware build %s failed: %s", build_id, exc)

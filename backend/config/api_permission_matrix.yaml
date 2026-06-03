@@ -648,6 +648,18 @@ views:
   forgekey.views.EPaperDisplayBindView:
     permission_classes:
     - IsAuthenticated
+  forgekey.views.EPaperDisplayCommandAckView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.EPaperDisplayDesiredView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.EPaperDisplayFirmwareStatusView:
+    permission_classes:
+    - AllowAny
+  forgekey.views.EPaperDisplayHealthView:
+    permission_classes:
+    - AllowAny
   forgekey.views.EPaperDisplayImageView:
     permission_classes:
     - AllowAny

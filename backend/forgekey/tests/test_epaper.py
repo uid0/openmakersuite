@@ -370,6 +370,181 @@ class TestEPaperBatteryEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Health endpoint (full wake-cycle envelope)
+# ---------------------------------------------------------------------------
+
+
+class TestEPaperHealthEndpoint:
+    """Wake-cycle health POST: same battery handling as /battery/ but
+    also persists firmware_version + last_image_etag from the wider
+    payload the firmware actually sends."""
+
+    def _url(self, display: EPaperDisplay) -> str:
+        return reverse("forgekey:epaper-health", args=[display.id])
+
+    def _payload(self, **overrides) -> dict:
+        body = {
+            "schema_version": "epaper_v1",
+            "firmware_version": "0.1.0-abc1234",
+            "last_image_etag": "deadbeefcafef00d",
+            "unchanged_count": 0,
+            "failure_count": 0,
+            "wake_interval_min": 60,
+            "configured_wake_min": 60,
+            "render_status": "rendered",
+            "cycle_result": "ok",
+            "last_http_status": 200,
+            "retired": False,
+            "power": {"battery": {"available": True, "percent": 73}},
+        }
+        body.update(overrides)
+        return body
+
+    def test_health_persists_battery_firmware_and_etag(self, client):
+        display = _bind_display(_make_asset())
+        resp = client.post(
+            self._url(display), data=self._payload(), content_type="application/json"
+        )
+        assert resp.status_code == 200
+        display.refresh_from_db()
+        assert display.battery_percent == 73
+        assert display.last_battery_at is not None
+        assert display.firmware_version == "0.1.0-abc1234"
+        assert display.last_image_etag == "deadbeefcafef00d"
+
+    def test_health_without_battery_block_still_succeeds(self, client):
+        """Stock SKU-6416 panels report power={} (battery not wired).
+
+        Firmware still POSTs health every wake; we just don't update
+        battery_percent. Reject would break the wake cycle.
+        """
+        display = _bind_display(_make_asset())
+        resp = client.post(
+            self._url(display),
+            data=self._payload(power={}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        display.refresh_from_db()
+        assert display.battery_percent is None
+        assert display.last_battery_at is None
+        # …but firmware_version still landed.
+        assert display.firmware_version == "0.1.0-abc1234"
+
+    def test_health_rejects_out_of_range_battery(self, client):
+        display = _bind_display(_make_asset())
+        resp = client.post(
+            self._url(display),
+            data=self._payload(power={"battery": {"percent": 250}}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+    def test_health_404s_for_unknown_display(self, client):
+        url = reverse("forgekey:epaper-health", args=["00000000-0000-0000-0000-000000000000"])
+        resp = client.post(url, data=self._payload(), content_type="application/json")
+        assert resp.status_code == 404
+
+    def test_low_battery_alerts_sentry(self, client, settings):
+        settings.FORGEKEY_EPAPER_LOW_BATTERY_PERCENT = 20
+        asset = _make_asset("Lonely Panel")
+        display = _bind_display(asset)
+        with patch("forgekey.views.sentry_sdk", create=True) as mock_sentry:
+            scope = mock_sentry.new_scope.return_value
+            scope.__enter__.return_value = scope
+            scope.__exit__.return_value = False
+            resp = client.post(
+                self._url(display),
+                data=self._payload(power={"battery": {"percent": 5}}),
+                content_type="application/json",
+            )
+        assert resp.status_code == 200
+        assert mock_sentry.capture_message.called
+        msg = mock_sentry.capture_message.call_args.args[0]
+        assert "5%" in msg
+        assert "Lonely Panel" in msg
+
+    def test_health_works_without_device_fk(self, client):
+        """HTTPS-only panels don't have an enrolled ESP32Device.
+
+        Sentry tag for device_mac is guarded — a low-battery report
+        from a deviceless display must not crash with AttributeError.
+        """
+        display = EPaperDisplay.objects.create(asset=_make_asset(), device=None)
+        with patch("forgekey.views.sentry_sdk", create=True) as mock_sentry:
+            scope = mock_sentry.new_scope.return_value
+            scope.__enter__.return_value = scope
+            scope.__exit__.return_value = False
+            resp = client.post(
+                self._url(display),
+                data=self._payload(power={"battery": {"percent": 5}}),
+                content_type="application/json",
+            )
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Desired-state endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestEPaperDesiredEndpoint:
+    def _url(self, display: EPaperDisplay) -> str:
+        return reverse("forgekey:epaper-desired", args=[display.id])
+
+    def test_desired_returns_wake_min_from_setting(self, client, settings):
+        settings.FORGEKEY_EPAPER_DEFAULT_WAKE_MIN = 45
+        display = _bind_display(_make_asset())
+        resp = client.get(self._url(display))
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["desired"]["wake_min"] == 45
+
+    def test_desired_defaults_to_60_when_setting_absent(self, client, settings):
+        # No FORGEKEY_EPAPER_DEFAULT_WAKE_MIN configured → fall back to 60.
+        if hasattr(settings, "FORGEKEY_EPAPER_DEFAULT_WAKE_MIN"):
+            del settings.FORGEKEY_EPAPER_DEFAULT_WAKE_MIN
+        display = _bind_display(_make_asset())
+        resp = client.get(self._url(display))
+        assert resp.json()["desired"]["wake_min"] == 60
+
+    def test_desired_404s_for_unknown_display(self, client):
+        url = reverse("forgekey:epaper-desired", args=["00000000-0000-0000-0000-000000000000"])
+        assert client.get(url).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Command / firmware status ack endpoints (no-ops)
+# ---------------------------------------------------------------------------
+
+
+class TestEPaperStatusAckEndpoints:
+    """Both ack endpoints exist only so the firmware's POSTs stop
+    404-ing in the serial log. They 204 on a known display, 404 on
+    an unknown one. Until OMS actually issues commands or surfaces
+    firmware-OTA progress, that's all the contract they need."""
+
+    def test_command_status_ack_204s_for_known_display(self, client):
+        display = _bind_display(_make_asset())
+        url = reverse("forgekey:epaper-command-status", args=[display.id])
+        resp = client.post(url, data={"any": "shape"}, content_type="application/json")
+        assert resp.status_code == 204
+
+    def test_command_status_404s_for_unknown(self, client):
+        url = reverse(
+            "forgekey:epaper-command-status",
+            args=["00000000-0000-0000-0000-000000000000"],
+        )
+        assert client.post(url, data={}, content_type="application/json").status_code == 404
+
+    def test_firmware_status_ack_204s_for_known_display(self, client):
+        display = _bind_display(_make_asset())
+        url = reverse("forgekey:epaper-firmware-status", args=[display.id])
+        resp = client.post(url, data={"phase": "downloading"}, content_type="application/json")
+        assert resp.status_code == 204
+
+
+# ---------------------------------------------------------------------------
 # Scan-to-log service endpoints (front-end "complete this PM" page)
 # ---------------------------------------------------------------------------
 

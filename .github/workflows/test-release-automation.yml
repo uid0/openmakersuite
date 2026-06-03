@@ -122,8 +122,11 @@ jobs:
         run: |
           echo "🔐 Testing cryptographic signing..."
 
-          # Sign the test file
+          # Sign the test file. --yes auto-confirms the Sigstore
+          # transparency-log ToS prompt cosign v2 added; without it
+          # CI fails with "upload to tlog: user declined the prompt".
           cosign sign-blob \
+            --yes \
             --output-signature test-file.txt.sig \
             --output-certificate test-file.txt.pem \
             test-file.txt

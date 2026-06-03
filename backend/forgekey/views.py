@@ -2834,7 +2834,12 @@ class EPaperDisplayHealthView(APIView):
             return HttpResponse(status=404)
 
         body = request.data if isinstance(request.data, dict) else {}
-        updates = {}
+        updates = {
+            # We got a health envelope — stamp it even when no individual
+            # field below changes, so the dashboard can tell "panel is
+            # checking in" apart from "no contact since enroll".
+            "last_health_at": timezone.now(),
+        }
 
         # Battery — same coerce-and-validate as the /battery/ endpoint.
         # Tolerate the firmware sending power={} (battery unavailable
@@ -2857,6 +2862,19 @@ class EPaperDisplayHealthView(APIView):
             updates["battery_percent"] = battery_percent
             updates["last_battery_at"] = timezone.now()
 
+        # Battery sensor presence — separately from the percent so the
+        # dashboard can distinguish "SKU 6416 hardware has no ADC line"
+        # from "panel hasn't reported yet". Trust the firmware's own
+        # claim: available may be absent (older firmware) or explicit
+        # true/false on current main.
+        raw_available = battery_block.get("available")
+        if isinstance(raw_available, bool):
+            updates["battery_available"] = raw_available
+            reason = battery_block.get("reason")
+            updates["battery_unavailable_reason"] = (
+                reason[:64] if (not raw_available and isinstance(reason, str)) else ""
+            )
+
         firmware_version = body.get("firmware_version")
         if isinstance(firmware_version, str) and firmware_version:
             updates["firmware_version"] = firmware_version[:50]
@@ -2865,9 +2883,8 @@ class EPaperDisplayHealthView(APIView):
         if isinstance(etag, str) and etag:
             updates["last_image_etag"] = etag[:64]
 
-        if updates:
-            EPaperDisplay.objects.filter(pk=display.pk).update(**updates)
-            display.refresh_from_db()
+        EPaperDisplay.objects.filter(pk=display.pk).update(**updates)
+        display.refresh_from_db()
 
         # Low-battery Sentry alert — only when battery was reported
         # this cycle. `device` is nullable (HTTPS-only panels skip the

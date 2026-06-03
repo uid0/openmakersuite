@@ -411,6 +411,11 @@ class TestEPaperHealthEndpoint:
         assert display.last_battery_at is not None
         assert display.firmware_version == "0.1.0-abc1234"
         assert display.last_image_etag == "deadbeefcafef00d"
+        # battery.available=true claim is mirrored so the dashboard can
+        # distinguish "panel has a sensor" from "never reported".
+        assert display.battery_available is True
+        assert display.battery_unavailable_reason == ""
+        assert display.last_health_at is not None
 
     def test_health_without_battery_block_still_succeeds(self, client):
         """Stock SKU-6416 panels report power={} (battery not wired).
@@ -430,6 +435,60 @@ class TestEPaperHealthEndpoint:
         assert display.last_battery_at is None
         # …but firmware_version still landed.
         assert display.firmware_version == "0.1.0-abc1234"
+        # …and the wake itself is stamped, even though no battery fields
+        # changed — operators can see the panel is alive.
+        assert display.last_health_at is not None
+        # Missing `available` doesn't touch the sensor-presence flag —
+        # null means "we still don't know whether this panel has one".
+        assert display.battery_available is None
+
+    def test_health_records_no_sensor_state(self, client):
+        """SKU-6416 firmware reports power.battery.available=false.
+
+        Backend should persist that plus the firmware's reason so the
+        dashboard can render "No sensor (battery_adc_not_configured)"
+        instead of an ambiguous "—".
+        """
+        display = _bind_display(_make_asset())
+        resp = client.post(
+            self._url(display),
+            data=self._payload(
+                power={
+                    "battery": {
+                        "available": False,
+                        "source": "unsupported",
+                        "reason": "battery_adc_not_configured",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        display.refresh_from_db()
+        assert display.battery_percent is None
+        assert display.battery_available is False
+        assert display.battery_unavailable_reason == "battery_adc_not_configured"
+        assert display.last_health_at is not None
+
+    def test_health_clears_unavailable_reason_when_sensor_returns(self, client):
+        """If a panel previously reported no sensor and is later modded
+        (or replaced) to report a percent, the stale reason text must
+        not linger — it would mislead an operator triaging the row."""
+        display = _bind_display(_make_asset())
+        display.battery_available = False
+        display.battery_unavailable_reason = "battery_adc_not_configured"
+        display.save(update_fields=["battery_available", "battery_unavailable_reason"])
+
+        resp = client.post(
+            self._url(display),
+            data=self._payload(power={"battery": {"available": True, "percent": 64}}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        display.refresh_from_db()
+        assert display.battery_percent == 64
+        assert display.battery_available is True
+        assert display.battery_unavailable_reason == ""
 
     def test_health_rejects_out_of_range_battery(self, client):
         display = _bind_display(_make_asset())

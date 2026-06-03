@@ -1786,6 +1786,38 @@ class EPaperDisplay(models.Model):
         blank=True,
         help_text="When the device last reported its battery percentage.",
     )
+    # Hardware-presence telemetry. The stock SKU 6416 panel doesn't route
+    # a battery ADC line to the XIAO socket, so its firmware reports
+    # `power.battery.available=false` instead of a percent. Tracking the
+    # sensor-presence flag separately lets the dashboard distinguish
+    # "no sensor wired" (definite) from "haven't heard from the panel yet"
+    # (transient) — both used to render as a plain "—" and looked alike.
+    battery_available = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Tri-state: null = no health report received yet, True = panel "
+            "has a battery sensor and reported a percent, False = panel "
+            "explicitly reports no battery telemetry available."
+        ),
+    )
+    battery_unavailable_reason = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text=(
+            "When battery_available is False, the reason code the firmware "
+            "supplied (e.g. 'battery_adc_not_configured'). Surfaced as a "
+            "tooltip on the dashboard."
+        ),
+    )
+    last_health_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "When the panel last POSTed a /health/ envelope (regardless of "
+            "whether battery telemetry was included)."
+        ),
+    )
     # Image cache fields. The render service computes a deterministic
     # ETag from the snapshot inputs (asset id + each schedule's
     # status + days_since_last) so the device GET can short-circuit

@@ -36,6 +36,9 @@ const buildPanel = (overrides: Partial<any> = {}) => ({
   battery_percent: 8,
   is_low_battery: true,
   last_battery_at: null,
+  battery_available: true,
+  battery_unavailable_reason: '',
+  last_health_at: null,
   last_image_etag: '',
   last_image_at: null,
   is_active: true,
@@ -117,5 +120,50 @@ describe('ForgeKeyEPaperPanelsPage', () => {
     // The inline picker means rebinding happens from this page (not a bounce
     // to the QR flow). Asset options come from the assets feed.
     expect(await screen.findByTestId('bind-select-p1')).toBeInTheDocument();
+  });
+
+  test('battery cell shows "No sensor" when panel reports no ADC', async () => {
+    // SKU-6416 panels send power.battery.available=false. The dashboard
+    // must distinguish that from "never reported" so the operator
+    // doesn't waste time chasing a non-existent sensor.
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({
+      data: [
+        buildPanel({
+          id: 'no-sensor',
+          battery_percent: null,
+          battery_available: false,
+          battery_unavailable_reason: 'battery_adc_not_configured',
+        }),
+      ],
+    } as any);
+
+    renderPage();
+
+    expect(await screen.findByTestId('battery-no-sensor')).toBeInTheDocument();
+    expect(screen.getByText('No sensor')).toBeInTheDocument();
+  });
+
+  test('battery cell shows "—" only when the panel has never reported', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({
+      data: [
+        buildPanel({
+          id: 'never',
+          battery_percent: null,
+          battery_available: null,
+          battery_unavailable_reason: '',
+        }),
+      ],
+    } as any);
+
+    renderPage();
+
+    await screen.findByText('Lathe');
+    // Several columns render "—" when their field is null (device MAC,
+    // etc.), so we don't pin to text — assert the no-sensor badge isn't
+    // rendered when battery_available is null.
+    expect(screen.queryByTestId('battery-no-sensor')).not.toBeInTheDocument();
+    expect(screen.queryByText('No sensor')).not.toBeInTheDocument();
   });
 });

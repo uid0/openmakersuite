@@ -1854,6 +1854,11 @@ export interface ForgeKeyEPaperDisplay {
   battery_percent: number | null;
   is_low_battery: boolean;
   last_battery_at: string | null;
+  // Tri-state sensor-presence: null=never reported, true=sensor + percent,
+  // false=panel explicitly reports no battery telemetry.
+  battery_available: boolean | null;
+  battery_unavailable_reason: string;
+  last_health_at: string | null;
   last_image_etag: string;
   last_image_at: string | null;
   is_active: boolean;

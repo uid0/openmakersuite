@@ -5,12 +5,46 @@
  * image fetch, and active/retired state. Staff can rebind a panel to a
  * different asset (via the existing QR bind flow) or retire / reactivate it.
  */
-import { Alert, Anchor, Badge, Button, Group, Loader, Paper, Select, Table, Text } from '@mantine/core';
+import { Alert, Anchor, Badge, Button, Group, Loader, Paper, Select, Table, Text, Tooltip } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { assetsAPI, ForgeKeyEPaperDisplay, forgekeyAPI } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+
+// Battery cell handles three distinct states:
+// 1. Sensor + percent → coloured badge.
+// 2. Panel reports `available=false` → "No sensor" badge with the firmware's
+//    reason in a tooltip (SKU 6416 reports `battery_adc_not_configured`).
+// 3. Neither — never checked in, or older firmware that doesn't send
+//    `available` → plain "—".
+const renderBatteryCell = (p: ForgeKeyEPaperDisplay) => {
+  if (p.battery_percent != null) {
+    return (
+      <Badge
+        color={p.is_low_battery ? 'orange' : 'gray'}
+        variant={p.is_low_battery ? 'filled' : 'light'}
+      >
+        {p.battery_percent}%
+      </Badge>
+    );
+  }
+  if (p.battery_available === false) {
+    const reason = p.battery_unavailable_reason || 'no reason reported';
+    return (
+      <Tooltip label={`Panel reports no battery sensor — reason: ${reason}`} withArrow>
+        <Badge color="gray" variant="outline" data-testid="battery-no-sensor">
+          No sensor
+        </Badge>
+      </Tooltip>
+    );
+  }
+  return (
+    <Text size="sm" c="dimmed">
+      —
+    </Text>
+  );
+};
 
 const formatRelative = (iso: string | null): string => {
   if (!iso) return 'never';
@@ -161,20 +195,7 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
                         <Text c="dimmed">Unbound</Text>
                       )}
                     </Table.Td>
-                    <Table.Td>
-                      {p.battery_percent == null ? (
-                        <Text size="sm" c="dimmed">
-                          —
-                        </Text>
-                      ) : (
-                        <Badge
-                          color={p.is_low_battery ? 'orange' : 'gray'}
-                          variant={p.is_low_battery ? 'filled' : 'light'}
-                        >
-                          {p.battery_percent}%
-                        </Badge>
-                      )}
-                    </Table.Td>
+                    <Table.Td>{renderBatteryCell(p)}</Table.Td>
                     <Table.Td>
                       <Text size="sm" c="dimmed">
                         {formatRelative(p.last_image_at)}

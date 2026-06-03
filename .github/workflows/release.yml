@@ -331,23 +331,35 @@ jobs:
 
       - name: Create GitHub Release
         id: create_release
+        env:
+          # Pipe new_tag + changelog through env vars, NOT direct
+          # ${{ ... }} interpolation. Actions substitutes ${{ ... }}
+          # into the script verbatim BEFORE bash parses it, so a
+          # changelog value containing literal parens (e.g.
+          # "Fix(#143): ... (#144)") blows up with
+          # "syntax error near unexpected token '('".
+          # Going through env makes the value a runtime string that
+          # bash never tries to parse as code.
+          NEW_TAG: ${{ needs.generate-version.outputs.new_tag }}
+          CHANGELOG: ${{ needs.generate-version.outputs.changelog }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          NEW_TAG="${{ needs.generate-version.outputs.new_tag }}"
+          # Write the changelog to a file so any embedded quotes,
+          # backticks, or shell metacharacters never reach the
+          # command line at all.
+          printf '%s' "$CHANGELOG" > release-notes.md
 
-          # Create the release
           gh release create "$NEW_TAG" \
             --title "🚀 Release $NEW_TAG" \
-            --notes "${{ needs.generate-version.outputs.changelog }}" \
+            --notes-file release-notes.md \
             --latest \
-            openmakersuite-$NEW_TAG.tar.gz \
-            openmakersuite-$NEW_TAG.tar.gz.sha256 \
-            openmakersuite-$NEW_TAG.tar.gz.sig \
-            openmakersuite-$NEW_TAG.tar.gz.pem
+            "openmakersuite-$NEW_TAG.tar.gz" \
+            "openmakersuite-$NEW_TAG.tar.gz.sha256" \
+            "openmakersuite-$NEW_TAG.tar.gz.sig" \
+            "openmakersuite-$NEW_TAG.tar.gz.pem"
 
           echo "✅ GitHub release created: $NEW_TAG"
-          echo "release_url=$(gh release view $NEW_TAG --json url --jq .url)" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "release_url=$(gh release view "$NEW_TAG" --json url --jq .url)" >> "$GITHUB_OUTPUT"
 
   notify-success:
     name: 🎉 Notification

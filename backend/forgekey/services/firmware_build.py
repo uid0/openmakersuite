@@ -79,6 +79,7 @@ def _run(
     cwd: str,
     log_lines: list[str],
     redacted_cmd: list[str] | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> str:
     """Run a subprocess, capturing combined output into ``log_lines``.
 
@@ -89,13 +90,28 @@ def _run(
     is still ``cmd``. The error message on a non-zero exit uses
     ``redacted_cmd`` too, since the FirmwareBuild row's error_message
     field is visible to every staff user.
+
+    ``extra_env`` is merged on top of the worker's environment for
+    this one call. Used to pin FORGEKEY_FIRMWARE_VERSION /
+    FIRMWARE_GIT_COMMIT into the pio invocation so version.py picks
+    the operator-supplied version instead of the source-tree default.
     """
+    import os
+
     log_cmd = redacted_cmd if redacted_cmd is not None else cmd
     log_lines.append(f"$ {' '.join(log_cmd)}")
+    proc_env = None
+    if extra_env:
+        proc_env = {**os.environ, **extra_env}
     # `cmd` is a fixed git/pio argv list (no shell=True); the only variable
     # parts (source_ref, pio_env) come from staff-created FirmwareBuild rows.
     proc = subprocess.run(  # nosec B603
-        cmd, cwd=cwd, capture_output=True, text=True, timeout=_BUILD_TIMEOUT_S
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=_BUILD_TIMEOUT_S,
+        env=proc_env,
     )
     if proc.stdout:
         log_lines.append(proc.stdout)
@@ -245,7 +261,25 @@ def run_firmware_build(build_id: str) -> dict:
             )
             commit = _run(["git", "rev-parse", "HEAD"], cwd=str(repo), log_lines=log_lines).strip()
             _write_security_headers(repo, ca_pem, cmd_pubkey_pem)
-            _run(["pio", "run", "-e", build.pio_env], cwd=str(repo), log_lines=log_lines)
+            # version.py inside the firmware checkout respects these env vars
+            # and bakes them in as compile-time macros. Without them, the
+            # script falls back to the FORGEKEY_FIRMWARE_VERSION literal in
+            # src/provisioning/device_config.h — which means a build labeled
+            # "0.2.0" in OMS would ship firmware that self-reports the
+            # source-tree default ("0.1.0"). That mismatch breaks rollout
+            # convergence: the panel POSTs current="0.1.0", firmware-check
+            # compares to target="0.2.0" and re-dispatches, every wake,
+            # forever. Pinning both also pins commit_sha so the firmware
+            # log line at boot matches the FirmwareBuild row's commit_sha.
+            _run(
+                ["pio", "run", "-e", build.pio_env],
+                cwd=str(repo),
+                log_lines=log_lines,
+                extra_env={
+                    "FORGEKEY_FIRMWARE_VERSION": build.version,
+                    "FIRMWARE_GIT_COMMIT": commit[:12],
+                },
+            )
 
             bin_path = repo / ".pio" / "build" / build.pio_env / "firmware.bin"
             if not bin_path.exists():

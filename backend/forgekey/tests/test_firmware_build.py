@@ -40,7 +40,7 @@ def device_type():
     return dt
 
 
-def _fake_run(cmd, cwd=None, capture_output=True, text=True, timeout=None):
+def _fake_run(cmd, cwd=None, capture_output=True, text=True, timeout=None, env=None):
     """Stand in for subprocess.run: materialise the files the real git/pio
     would, and report success."""
     result = MagicMock()
@@ -54,8 +54,8 @@ def _fake_run(cmd, cwd=None, capture_output=True, text=True, timeout=None):
     elif cmd[:2] == ["git", "rev-parse"]:
         result.stdout = "abc1234deadbeefcafebabe\n"
     elif cmd[0] == "pio":
-        env = cmd[-1]
-        build_dir = Path(cwd) / ".pio" / "build" / env
+        pio_env = cmd[-1]
+        build_dir = Path(cwd) / ".pio" / "build" / pio_env
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "firmware.bin").write_bytes(b"\x00FIRMWARE\xff" * 16)
         result.stdout = "Building...\n[SUCCESS]\n"
@@ -184,6 +184,84 @@ class TestBuildCompletionNotifications:
         with patch("forgekey.models.CertificateAuthority.get_active", return_value=None):
             fb.run_firmware_build(str(build.id))
         assert not Notification.objects.exists()
+
+
+class TestBuildEnvInjection:
+    """The pio invocation must pin FORGEKEY_FIRMWARE_VERSION and
+    FIRMWARE_GIT_COMMIT in its environment so the firmware
+    self-reports the version the operator typed in OMS — not the
+    source-tree default in device_config.h.
+
+    Without this, a build labeled "0.2.0" would ship a binary that
+    self-reports the literal in device_config.h (currently "0.1.0"),
+    and the firmware-check view would loop the panel through an
+    infinite re-dispatch: current="0.1.0" != target="0.2.0" every
+    wake forever."""
+
+    def test_pio_invocation_pins_version_env(self, device_type, admin_user):
+        build = FirmwareBuild.objects.create(
+            device_type=device_type,
+            pio_env="seeed_xiao_epaper",
+            source_ref="main",
+            version="0.2.0",
+            requested_by=admin_user,
+        )
+        with (
+            patch("forgekey.models.CertificateAuthority.get_active", return_value=_FAKE_CA),
+            patch(
+                "forgekey.services.jwt_signing.get_jwt_public_key_pem",
+                return_value=_FAKE_PUBKEY,
+            ),
+            patch(
+                "forgekey.services.firmware_build.subprocess.run",
+                side_effect=_fake_run,
+            ) as mock_run,
+        ):
+            fb.run_firmware_build(str(build.id))
+
+        # Find the pio invocation among the recorded calls.
+        pio_call = None
+        for call in mock_run.call_args_list:
+            cmd = call.args[0] if call.args else call.kwargs.get("args") or []
+            if cmd and cmd[0] == "pio":
+                pio_call = call
+                break
+        assert pio_call is not None, "pio was not invoked"
+
+        env = pio_call.kwargs.get("env")
+        assert env is not None, "pio call did not pass env=; build will inherit device_config.h"
+        assert env["FORGEKEY_FIRMWARE_VERSION"] == "0.2.0"
+        # Commit comes from `git rev-parse HEAD` (mocked above as
+        # "abc1234deadbeefcafebabe"); we slice to 12 chars.
+        assert env["FIRMWARE_GIT_COMMIT"] == "abc1234deadb"
+
+    def test_git_subprocess_does_not_get_pio_env_overrides(self, device_type):
+        """Only the pio call needs the version env; the earlier git
+        clone / rev-parse calls must not carry it (no semantic effect,
+        but pinning the contract makes it obvious if someone moves the
+        env injection one rung up the call stack later)."""
+        build = FirmwareBuild.objects.create(
+            device_type=device_type, pio_env="x", source_ref="main", version="1.2.3"
+        )
+        with (
+            patch("forgekey.models.CertificateAuthority.get_active", return_value=_FAKE_CA),
+            patch(
+                "forgekey.services.jwt_signing.get_jwt_public_key_pem",
+                return_value=_FAKE_PUBKEY,
+            ),
+            patch(
+                "forgekey.services.firmware_build.subprocess.run",
+                side_effect=_fake_run,
+            ) as mock_run,
+        ):
+            fb.run_firmware_build(str(build.id))
+
+        for call in mock_run.call_args_list:
+            cmd = call.args[0] if call.args else call.kwargs.get("args") or []
+            if cmd and cmd[0] == "git":
+                # git calls go through _run without extra_env, so env
+                # kwarg is None (inherit worker's process env).
+                assert call.kwargs.get("env") is None
 
 
 class TestFirmwareBuildViewSet:

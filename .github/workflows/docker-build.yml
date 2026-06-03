@@ -312,7 +312,13 @@ jobs:
     name: ✅ Build Complete
     runs-on: ubuntu-latest
     needs: [determine-tags, build-backend, build-frontend, publish-helm]
-    if: always() && needs.determine-tags.outputs.should_build == 'true'
+    # `always()` so we report even when an upstream job fails; `!cancelled()`
+    # so we DON'T register a phantom failure on a duplicate-trigger run that
+    # the workflow's `concurrency: cancel-in-progress` supersedes. Without
+    # !cancelled() the cancelled run's dependent jobs report `cancelled`,
+    # this gate hits its else branch, exits 1, and a red ✗ "Build Complete"
+    # lands on the commit alongside the newer run's green ✓ — pure noise.
+    if: always() && !cancelled() && needs.determine-tags.outputs.should_build == 'true'
     steps:
       - name: Report completion
         run: |

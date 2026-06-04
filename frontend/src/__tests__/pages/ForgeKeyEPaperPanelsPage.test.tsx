@@ -129,7 +129,6 @@ describe('ForgeKeyEPaperPanelsPage', () => {
     // SKU-6416 panels send power.battery.available=false. The dashboard
     // must distinguish that from "never reported" so the operator
     // doesn't waste time chasing a non-existent sensor.
-  test('shows reported firmware version and pending rollout target', async () => {
     localStorage.setItem('is_staff', 'true');
     mockApi.listEPaperDisplays.mockResolvedValue({
       data: [
@@ -157,6 +156,25 @@ describe('ForgeKeyEPaperPanelsPage', () => {
           battery_percent: null,
           battery_available: null,
           battery_unavailable_reason: '',
+        }),
+      ],
+    } as any);
+
+    renderPage();
+
+    await screen.findByText('Lathe');
+    // Several columns render "—" when their field is null (device MAC,
+    // etc.), so we don't pin to text — assert the no-sensor badge isn't
+    // rendered when battery_available is null.
+    expect(screen.queryByTestId('battery-no-sensor')).not.toBeInTheDocument();
+    expect(screen.queryByText('No sensor')).not.toBeInTheDocument();
+  });
+
+  test('shows reported firmware version and pending rollout target', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({
+      data: [
+        buildPanel({
           id: 'reported',
           asset_name: 'Lathe',
           firmware_version: '1.5.0',
@@ -174,11 +192,6 @@ describe('ForgeKeyEPaperPanelsPage', () => {
     renderPage();
 
     await screen.findByText('Lathe');
-    // Several columns render "—" when their field is null (device MAC,
-    // etc.), so we don't pin to text — assert the no-sensor badge isn't
-    // rendered when battery_available is null.
-    expect(screen.queryByTestId('battery-no-sensor')).not.toBeInTheDocument();
-    expect(screen.queryByText('No sensor')).not.toBeInTheDocument();
     expect(screen.getAllByText('1.5.0')).toHaveLength(2);
     expect(screen.getByText('→ 2.0.0')).toBeInTheDocument();
   });

@@ -99,6 +99,8 @@ def test_list_includes_battery_sensor_state(api_client):
 
     assert rows[str(never_reported.id)]["battery_available"] is None
     assert rows[str(never_reported.id)]["last_health_at"] is None
+
+
 def test_list_includes_firmware_and_target(api_client):
     target = FirmwareVersionFactory(version="2.0.0")
     reported = EPaperDisplay.objects.create(firmware_version="1.5.0")

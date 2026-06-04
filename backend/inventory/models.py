@@ -1206,6 +1206,17 @@ class Asset(models.Model):
             "shown how to use this safely' flag."
         ),
     )
+    required_certifications = models.ManyToManyField(
+        "membership.Certification",
+        blank=True,
+        related_name="required_for_assets",
+        help_text=(
+            "Specific certifications an operator must hold before this asset "
+            "will unlock. When set, the e-paper panel renders the cert name(s) "
+            "instead of the generic TRAINING REQUIRED badge. Independent of "
+            "training_required — set either, both, or neither."
+        ),
+    )
 
     # Utilization & lifecycle (powers analytics dashboards + maintenance forecast)
     hours_used = models.PositiveIntegerField(

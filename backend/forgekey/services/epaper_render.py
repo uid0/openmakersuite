@@ -130,12 +130,22 @@ def _next_due_item(asset: Asset) -> MaintenanceItem | None:
     return sorted(items, key=sort_key)[0]
 
 
+def _required_cert_names(asset: Asset) -> list[str]:
+    """Active required certifications, name-only, alpha-sorted for stable
+    rendering + etag. Empty list when none are wired."""
+    rel = getattr(asset, "required_certifications", None)
+    if rel is None:
+        return []
+    return sorted(rel.filter(is_active=True).values_list("name", flat=True))
+
+
 def _snapshot_fingerprint(asset: Asset, items: Iterable[MaintenanceItem]) -> str:
     """Return a stable hex fingerprint of the inputs to the rendered image."""
     parts: list[str] = [
         str(asset.pk),
         asset.name,
         f"training={int(bool(getattr(asset, 'training_required', False)))}",
+        "certs=" + "|".join(_required_cert_names(asset)),
     ]
     for item in items:
         last = item.last_completed_at.isoformat() if item.last_completed_at else "never"
@@ -263,10 +273,24 @@ def render_pm_image(asset: Asset, *, service_url: str | None = None) -> bytes:
     # Training-required badge — inverted pill in the right of the eyebrow
     # row when the asset is gated on operator training. Drawn before the
     # rule so the pill bottom aligns with it; readable across the shop
-    # because of the inverse contrast against the eyebrow text.
-    if getattr(asset, "training_required", False):
-        badge_font = _font("mono_bold", 22)
-        badge_text = "TRAINING REQUIRED"
+    # because of the inverse contrast against the eyebrow text. When
+    # the asset has specific required_certifications wired, the pill
+    # shows the cert names ("REQ: WELD-1") instead of the generic
+    # TRAINING REQUIRED text, so an operator knows the exact card to
+    # present. Multiple certs are joined with " · " and auto-fit; on
+    # an 800px panel ~3 short cert names is the realistic ceiling
+    # before the badge starts crowding the eyebrow.
+    cert_names = _required_cert_names(asset)
+    needs_badge = bool(cert_names) or bool(getattr(asset, "training_required", False))
+    if needs_badge:
+        max_badge_w = (right - _MARGIN) // 2
+        if cert_names:
+            badge_text = "REQ: " + " · ".join(cert_names)
+        else:
+            badge_text = "TRAINING REQUIRED"
+        badge_font = _fit_font(
+            draw, badge_text, "mono_bold", 22, 14, max_badge_w - 2 * 12
+        )
         bw, bh = _text_size(draw, badge_text, badge_font)
         pad_x, pad_y = 12, 4
         badge_right = right

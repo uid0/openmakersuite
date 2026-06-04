@@ -213,6 +213,8 @@ export const assetFormSchema = z
     needs_compressed_air: z.boolean().default(false),
     needs_ventilation: z.boolean().default(false),
     is_chargeable: z.boolean().default(false),
+    training_required: z.boolean().default(false),
+    required_certifications: z.array(z.number().int().positive()).default([]),
     report_only: z.boolean().default(false),
     notes: z.string().optional(),
     condition_notes: z.string().optional(),

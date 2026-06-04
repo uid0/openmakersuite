@@ -32,6 +32,7 @@ import {
   Collapse,
   Group,
   Modal,
+  MultiSelect,
   Paper,
   Stack,
   Switch,
@@ -64,7 +65,9 @@ import { useSetBreadcrumb } from '../contexts/BreadcrumbContext';
 import {
   assetPartsAPI,
   assetsAPI,
+  ForgeKeyCertificationOption,
   inventoryAPI,
+  lockersAPI,
   maintenanceAPI,
   sigAPI,
 } from '../services/api';
@@ -100,6 +103,7 @@ const AssetFormPage: React.FC = () => {
   const [locations, setLocations] = useState<Location[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [sigs, setSigs] = useState<SIG[]>([]);
+  const [certifications, setCertifications] = useState<ForgeKeyCertificationOption[]>([]);
   const [assetName, setAssetName] = useState<string | undefined>(undefined);
 
   // Show the asset name as the trailing breadcrumb in edit mode, so the
@@ -143,6 +147,7 @@ const AssetFormPage: React.FC = () => {
       needs_ventilation: false,
       is_chargeable: false,
       training_required: false,
+      required_certifications: [],
       image: null,
       manual_pdf: null,
       wiki_page_url: '',
@@ -168,13 +173,20 @@ const AssetFormPage: React.FC = () => {
       inventoryAPI.listLocations(),
       inventoryAPI.listItems(),
       sigAPI.listMySIGs(),
+      // Certifications are optional — a deploy without the lockers
+      // app, or a 403 from a non-staff caller, shouldn't take the
+      // whole form down. Wrap in Promise.resolve so an automocked
+      // (test) lockersAPI that returns undefined doesn't blow up
+      // Promise.all, and resolve to an empty list on failure.
+      Promise.resolve(lockersAPI.listAvailableCertifications()).catch(() => ({ data: [] })),
     ])
-      .then(([cats, locs, items, sigsRes]) => {
+      .then(([cats, locs, items, sigsRes, certsRes]) => {
         if (cancelled) return;
         setCategories(cats.data.results || []);
         setLocations(locs.data.results || []);
         setInventoryItems(items.data.results || []);
         setSigs(sigsRes.data.results || []);
+        setCertifications(certsRes?.data || []);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -217,6 +229,7 @@ const AssetFormPage: React.FC = () => {
           needs_ventilation: asset.needs_ventilation,
           is_chargeable: asset.is_chargeable,
           training_required: asset.training_required,
+          required_certifications: asset.required_certifications || [],
           wiki_page_url: asset.wiki_page_url || '',
           product_url: asset.product_url || '',
           status: asset.status as AssetFormData['status'],
@@ -306,6 +319,11 @@ const AssetFormPage: React.FC = () => {
           formData.append('image', value);
         } else if (key === 'manual_pdf' && value instanceof File) {
           formData.append('manual_pdf', value);
+        } else if (Array.isArray(value)) {
+          // multipart/form-data with repeated keys is how DRF
+          // ingests M2M ids — `required_certifications=1` repeated
+          // once per selected id.
+          value.forEach((v) => formData.append(key, String(v)));
         } else if (typeof value === 'boolean') {
           formData.append(key, String(value));
         } else if (typeof value === 'number') {
@@ -729,6 +747,25 @@ const AssetFormPage: React.FC = () => {
                     checked={watch('training_required')}
                     onChange={(e) => setValue('training_required', e.currentTarget.checked)}
                     data-testid="training-required-switch"
+                  />
+                  <MultiSelect
+                    label="Required certifications"
+                    description="When set, the panel shows the specific cert name(s) instead of the generic TRAINING REQUIRED text."
+                    placeholder="Pick one or more certifications…"
+                    data={certifications.map((c) => ({
+                      value: String(c.id),
+                      label: c.name,
+                    }))}
+                    value={(watch('required_certifications') || []).map((id) => String(id))}
+                    onChange={(values) =>
+                      setValue(
+                        'required_certifications',
+                        values.map((v) => Number(v)),
+                      )
+                    }
+                    searchable
+                    clearable
+                    data-testid="required-certifications-multiselect"
                   />
                   <Switch
                     label="Report-only"

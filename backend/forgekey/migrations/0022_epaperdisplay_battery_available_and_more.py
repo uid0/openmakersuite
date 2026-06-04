@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('forgekey', '0020_epaper_firmware_rollout'),
+        ('forgekey', '0021_epaperdisplay_event_face_weight_and_more'),
     ]
 
     operations = [

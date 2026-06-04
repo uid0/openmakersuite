@@ -168,6 +168,8 @@ describe('ForgeKeyEPaperPanelsPage', () => {
     // rendered when battery_available is null.
     expect(screen.queryByTestId('battery-no-sensor')).not.toBeInTheDocument();
     expect(screen.queryByText('No sensor')).not.toBeInTheDocument();
+  });
+
   test('asset list pulls all active assets, not just the first page', async () => {
     // Default DRF PAGE_SIZE=50 means a plain listAssets() call would hide
     // any asset past the first page from the rebind dropdown — request a

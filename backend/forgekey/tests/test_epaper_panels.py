@@ -8,6 +8,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from forgekey.models import EPaperDisplay
+from forgekey.tests.factories import FirmwareVersionFactory
 from inventory.tests.factories import AssetFactory
 
 pytestmark = pytest.mark.django_db
@@ -73,3 +74,23 @@ def test_set_active_unknown_display_returns_404(api_client):
         format="json",
     )
     assert response.status_code == 404
+
+
+def test_list_includes_firmware_and_target(api_client):
+    target = FirmwareVersionFactory(version="2.0.0")
+    reported = EPaperDisplay.objects.create(firmware_version="1.5.0")
+    pending = EPaperDisplay.objects.create(firmware_version="1.5.0", target_firmware_version=target)
+    unknown = EPaperDisplay.objects.create()
+
+    response = api_client.get(LIST_URL)
+    assert response.status_code == 200, response.data
+    by_id = {row["id"]: row for row in response.json()}
+
+    assert by_id[str(reported.id)]["firmware_version"] == "1.5.0"
+    assert by_id[str(reported.id)]["target_firmware_version_string"] is None
+
+    assert by_id[str(pending.id)]["firmware_version"] == "1.5.0"
+    assert by_id[str(pending.id)]["target_firmware_version_string"] == "2.0.0"
+
+    assert by_id[str(unknown.id)]["firmware_version"] == ""
+    assert by_id[str(unknown.id)]["target_firmware_version_string"] is None

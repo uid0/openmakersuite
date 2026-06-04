@@ -274,6 +274,7 @@ export interface Asset {
   needs_compressed_air: boolean;
   needs_ventilation: boolean;
   is_chargeable: boolean;
+  training_required: boolean;
   last_scanned_at: string | null;
   // Group ownership and locking
   ownership_type: 'user' | 'group' | 'space';

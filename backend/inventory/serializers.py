@@ -795,6 +795,8 @@ class AssetSerializer(serializers.ModelSerializer):
             "qr_code",
             "qr_code_url",
             "qr_code_scan_url",
+            # Training
+            "training_required",
             # Status
             "status",
             # NOTE: condition_notes is a legacy free-text field kept on the

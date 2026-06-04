@@ -97,6 +97,8 @@ below are public.
 | any  | `inventory/maintenance-records/...` (CRUD) | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` — anyone authenticated can read; staff and SIG leaders can create/update; staff-only delete. |
 | POST | `inventory/assets/<id>/log-hours/` | staff-or-sig-admin | `IsStaffOrSigAdmin` — atomically increments `Asset.hours_used` for utilization metrics + maintenance forecast. |
 | GET  | `inventory/locations/<id>/safety-sheet/` | staff | `LocationSafetySheetView` — printable Safety Sign payload (lights / outlets / thermostats + deduped kill-breaker list for the room). |
+| any  | `inventory/asset-reservations/...` (CRUD) | member | `IsAuthenticated` on `AssetReservationViewSet`. Mutations enforce staff-or-SIG-admin inside the view via `asset.is_user_group_admin(user)`; destroy soft-cancels via `cancelled_at`. |
+| any  | `inventory/asset-out-of-service/...` (CRUD + `restore/`) | member | `IsAuthenticated` on `AssetOutOfServiceViewSet`. Mutations and `restore/` enforce staff-or-SIG-admin inside the view; only one open row per asset (single-open invariant). |
 
 ## Membership (`/api/membership/`)
 

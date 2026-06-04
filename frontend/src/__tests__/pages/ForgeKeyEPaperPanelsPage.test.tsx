@@ -138,6 +138,8 @@ describe('ForgeKeyEPaperPanelsPage', () => {
         ordering: 'name',
       });
     });
+  });
+
   test('shows reported firmware version and pending rollout target', async () => {
     localStorage.setItem('is_staff', 'true');
     mockApi.listEPaperDisplays.mockResolvedValue({

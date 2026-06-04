@@ -11,6 +11,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import F
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 
@@ -2438,9 +2439,9 @@ class EPaperDisplayImageView(APIView):
 
         # Lazy imports keep the boot path light — Pillow only loads
         # when a device actually hits this endpoint.
-        from .services.epaper_render import compute_snapshot_etag, render_pm_image
+        from .services.epaper_render import compute_display_etag, render_image
 
-        etag = compute_snapshot_etag(display.asset)
+        etag = compute_display_etag(display.asset, display)
         if_none_match = request.headers.get("if-none-match", "").strip().strip('"')
         if if_none_match and if_none_match == etag:
             return HttpResponse(status=304)
@@ -2451,12 +2452,19 @@ class EPaperDisplayImageView(APIView):
         # dev/staging/prod without a hardcoded domain — front-end and API
         # share the origin behind nginx in prod.
         service_url = epaper_service_url(request, display.pk)
-        png_bytes = render_pm_image(display.asset, service_url=service_url)
+        png_bytes, _face = render_image(display.asset, display, service_url=service_url)
+
         # Record what version the panel just flashed; the operator
         # dashboard reads `last_image_at` to spot stale panels.
+        # Always advance the rotation counter — when no rotation is in
+        # play (single-face panel) the increment is harmless because
+        # _pick_face only consults counter % (event+pm) and the result
+        # is never read; when rotation IS active, this gives the
+        # next fetch the right next face.
         EPaperDisplay.objects.filter(pk=display.pk).update(
             last_image_etag=etag,
             last_image_at=timezone.now(),
+            rotation_counter=F("rotation_counter") + 1,
         )
         response = HttpResponse(png_bytes, content_type="image/png")
         response["ETag"] = f'"{etag}"'

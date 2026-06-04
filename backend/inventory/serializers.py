@@ -838,6 +838,10 @@ class AssetSerializer(serializers.ModelSerializer):
         ]
 
     def get_required_certification_details(self, obj):
+        # Consume the AssetViewSet's prefetched `required_certifications__sig`
+        # in-memory — calling .filter() / .select_related() here would build
+        # a new queryset that bypasses the prefetch cache and reintroduce an
+        # N+1 across the asset list endpoint (gh: test_asset_list_is_bounded).
         return [
             {
                 "id": cert.id,
@@ -845,7 +849,8 @@ class AssetSerializer(serializers.ModelSerializer):
                 "slug": cert.slug,
                 "sig_name": cert.sig.name,
             }
-            for cert in obj.required_certifications.select_related("sig").filter(is_active=True)
+            for cert in obj.required_certifications.all()
+            if cert.is_active
         ]
 
     def get_operational_mode(self, obj):

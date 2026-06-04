@@ -288,9 +288,7 @@ def render_pm_image(asset: Asset, *, service_url: str | None = None) -> bytes:
             badge_text = "REQ: " + " · ".join(cert_names)
         else:
             badge_text = "TRAINING REQUIRED"
-        badge_font = _fit_font(
-            draw, badge_text, "mono_bold", 22, 14, max_badge_w - 2 * 12
-        )
+        badge_font = _fit_font(draw, badge_text, "mono_bold", 22, 14, max_badge_w - 2 * 12)
         bw, bh = _text_size(draw, badge_text, badge_font)
         pad_x, pad_y = 12, 4
         badge_right = right

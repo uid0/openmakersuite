@@ -174,6 +174,7 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
                   <Table.Th>Battery</Table.Th>
                   <Table.Th>Last refresh</Table.Th>
                   <Table.Th>Device</Table.Th>
+                  <Table.Th>Firmware</Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th>Actions</Table.Th>
                 </Table.Tr>
@@ -205,6 +206,23 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
                       <Text size="sm" c="dimmed">
                         {p.device_mac_address || '—'}
                       </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      {p.firmware_version ? (
+                        <Text size="sm">
+                          {p.firmware_version}
+                          {p.target_firmware_version_string &&
+                            p.target_firmware_version_string !== p.firmware_version && (
+                              <Text size="xs" c="orange" span ml={4}>
+                                → {p.target_firmware_version_string}
+                              </Text>
+                            )}
+                        </Text>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          —
+                        </Text>
+                      )}
                     </Table.Td>
                     <Table.Td>
                       <Badge color={p.is_active ? 'green' : 'gray'}>

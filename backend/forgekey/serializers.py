@@ -271,6 +271,9 @@ class EPaperDisplaySerializer(serializers.ModelSerializer):
     asset_tag = serializers.SerializerMethodField()
     device_mac_address = serializers.SerializerMethodField()
     is_low_battery = serializers.BooleanField(read_only=True)
+    target_firmware_version_string = serializers.CharField(
+        source="target_firmware_version.version", read_only=True, default=None
+    )
 
     class Meta:
         model = EPaperDisplay
@@ -289,6 +292,9 @@ class EPaperDisplaySerializer(serializers.ModelSerializer):
             "last_health_at",
             "last_image_etag",
             "last_image_at",
+            "firmware_version",
+            "target_firmware_version",
+            "target_firmware_version_string",
             "is_active",
             "created_at",
             "updated_at",

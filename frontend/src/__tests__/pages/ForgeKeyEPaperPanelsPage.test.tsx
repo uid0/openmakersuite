@@ -41,6 +41,9 @@ const buildPanel = (overrides: Partial<any> = {}) => ({
   last_health_at: null,
   last_image_etag: '',
   last_image_at: null,
+  firmware_version: '',
+  target_firmware_version: null,
+  target_firmware_version_string: null,
   is_active: true,
   created_at: '2026-05-01T00:00:00Z',
   updated_at: '2026-05-01T00:00:00Z',
@@ -126,6 +129,7 @@ describe('ForgeKeyEPaperPanelsPage', () => {
     // SKU-6416 panels send power.battery.available=false. The dashboard
     // must distinguish that from "never reported" so the operator
     // doesn't waste time chasing a non-existent sensor.
+  test('shows reported firmware version and pending rollout target', async () => {
     localStorage.setItem('is_staff', 'true');
     mockApi.listEPaperDisplays.mockResolvedValue({
       data: [
@@ -153,6 +157,16 @@ describe('ForgeKeyEPaperPanelsPage', () => {
           battery_percent: null,
           battery_available: null,
           battery_unavailable_reason: '',
+          id: 'reported',
+          asset_name: 'Lathe',
+          firmware_version: '1.5.0',
+        }),
+        buildPanel({
+          id: 'pending',
+          asset_name: 'Drill',
+          firmware_version: '1.5.0',
+          target_firmware_version: 'fv-2',
+          target_firmware_version_string: '2.0.0',
         }),
       ],
     } as any);
@@ -165,5 +179,7 @@ describe('ForgeKeyEPaperPanelsPage', () => {
     // rendered when battery_available is null.
     expect(screen.queryByTestId('battery-no-sensor')).not.toBeInTheDocument();
     expect(screen.queryByText('No sensor')).not.toBeInTheDocument();
+    expect(screen.getAllByText('1.5.0')).toHaveLength(2);
+    expect(screen.getByText('→ 2.0.0')).toBeInTheDocument();
   });
 });

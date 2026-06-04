@@ -1861,6 +1861,9 @@ export interface ForgeKeyEPaperDisplay {
   last_health_at: string | null;
   last_image_etag: string;
   last_image_at: string | null;
+  firmware_version: string;
+  target_firmware_version: string | null;
+  target_firmware_version_string: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

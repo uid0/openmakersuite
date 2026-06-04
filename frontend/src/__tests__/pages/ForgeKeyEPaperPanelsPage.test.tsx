@@ -38,6 +38,9 @@ const buildPanel = (overrides: Partial<any> = {}) => ({
   last_battery_at: null,
   last_image_etag: '',
   last_image_at: null,
+  firmware_version: '',
+  target_firmware_version: null,
+  target_firmware_version_string: null,
   is_active: true,
   created_at: '2026-05-01T00:00:00Z',
   updated_at: '2026-05-01T00:00:00Z',
@@ -117,5 +120,31 @@ describe('ForgeKeyEPaperPanelsPage', () => {
     // The inline picker means rebinding happens from this page (not a bounce
     // to the QR flow). Asset options come from the assets feed.
     expect(await screen.findByTestId('bind-select-p1')).toBeInTheDocument();
+  });
+
+  test('shows reported firmware version and pending rollout target', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({
+      data: [
+        buildPanel({
+          id: 'reported',
+          asset_name: 'Lathe',
+          firmware_version: '1.5.0',
+        }),
+        buildPanel({
+          id: 'pending',
+          asset_name: 'Drill',
+          firmware_version: '1.5.0',
+          target_firmware_version: 'fv-2',
+          target_firmware_version_string: '2.0.0',
+        }),
+      ],
+    } as any);
+
+    renderPage();
+
+    await screen.findByText('Lathe');
+    expect(screen.getAllByText('1.5.0')).toHaveLength(2);
+    expect(screen.getByText('→ 2.0.0')).toBeInTheDocument();
   });
 });

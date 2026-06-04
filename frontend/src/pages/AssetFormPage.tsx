@@ -142,6 +142,7 @@ const AssetFormPage: React.FC = () => {
       needs_compressed_air: false,
       needs_ventilation: false,
       is_chargeable: false,
+      training_required: false,
       image: null,
       manual_pdf: null,
       wiki_page_url: '',
@@ -215,6 +216,7 @@ const AssetFormPage: React.FC = () => {
           needs_compressed_air: asset.needs_compressed_air,
           needs_ventilation: asset.needs_ventilation,
           is_chargeable: asset.is_chargeable,
+          training_required: asset.training_required,
           wiki_page_url: asset.wiki_page_url || '',
           product_url: asset.product_url || '',
           status: asset.status as AssetFormData['status'],
@@ -720,6 +722,13 @@ const AssetFormPage: React.FC = () => {
                     label="Chargeable use"
                     checked={watch('is_chargeable')}
                     onChange={(e) => setValue('is_chargeable', e.currentTarget.checked)}
+                  />
+                  <Switch
+                    label="Training required"
+                    description="Renders a TRAINING REQUIRED badge on the e-paper PM panel."
+                    checked={watch('training_required')}
+                    onChange={(e) => setValue('training_required', e.currentTarget.checked)}
+                    data-testid="training-required-switch"
                   />
                   <Switch
                     label="Report-only"

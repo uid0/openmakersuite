@@ -132,7 +132,11 @@ def _next_due_item(asset: Asset) -> MaintenanceItem | None:
 
 def _snapshot_fingerprint(asset: Asset, items: Iterable[MaintenanceItem]) -> str:
     """Return a stable hex fingerprint of the inputs to the rendered image."""
-    parts: list[str] = [str(asset.pk), asset.name]
+    parts: list[str] = [
+        str(asset.pk),
+        asset.name,
+        f"training={int(bool(getattr(asset, 'training_required', False)))}",
+    ]
     for item in items:
         last = item.last_completed_at.isoformat() if item.last_completed_at else "never"
         parts.append("|".join([str(item.pk), item.title, str(item.interval_days), last]))
@@ -255,6 +259,31 @@ def render_pm_image(asset: Asset, *, service_url: str | None = None) -> bytes:
     # Eyebrow + rule.
     eyebrow = _font("mono_bold", 24)
     draw.text((_MARGIN, _MARGIN - 8), "PREVENTIVE MAINTENANCE", font=eyebrow, fill=_FG)
+
+    # Training-required badge — inverted pill in the right of the eyebrow
+    # row when the asset is gated on operator training. Drawn before the
+    # rule so the pill bottom aligns with it; readable across the shop
+    # because of the inverse contrast against the eyebrow text.
+    if getattr(asset, "training_required", False):
+        badge_font = _font("mono_bold", 22)
+        badge_text = "TRAINING REQUIRED"
+        bw, bh = _text_size(draw, badge_text, badge_font)
+        pad_x, pad_y = 12, 4
+        badge_right = right
+        badge_left = badge_right - bw - 2 * pad_x
+        badge_top = _MARGIN - 12
+        badge_bottom = badge_top + bh + 2 * pad_y
+        draw.rectangle(
+            [(badge_left, badge_top), (badge_right, badge_bottom)],
+            fill=_FG,
+        )
+        draw.text(
+            (badge_left + pad_x, badge_top + pad_y - 2),
+            badge_text,
+            font=badge_font,
+            fill=_BG,
+        )
+
     rule_y = _MARGIN + 26
     draw.line([(_MARGIN, rule_y), (right, rule_y)], fill=_FG, width=2)
 

@@ -129,6 +129,33 @@ class TestEPaperRender:
         png = render_pm_image(asset)
         assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
+    def test_etag_changes_when_training_required_toggles(self):
+        # Toggling training_required must invalidate the cached image so
+        # a panel showing the unflagged face flips to the flagged face on
+        # its next wake. Without this, an operator could stand in front
+        # of a panel that says "go ahead" for hours after the asset's
+        # training gate was turned on.
+        asset = _make_asset("Plasma cutter")
+        _make_item(asset, "Consumables check", interval_days=30)
+        before = compute_snapshot_etag(asset)
+        asset.training_required = True
+        asset.save(update_fields=["training_required"])
+        after = compute_snapshot_etag(asset)
+        assert before != after
+
+    def test_render_with_training_required_still_returns_png(self):
+        # The badge is drawn additively over the existing PM face — the
+        # render must keep producing a valid PNG with the badge present.
+        # Pillow doesn't surface layout errors at render time, so this
+        # is a smoke test that the badge codepath doesn't crash.
+        asset = _make_asset("Plasma cutter")
+        asset.training_required = True
+        asset.save(update_fields=["training_required"])
+        _make_item(asset, "Consumables check", interval_days=30)
+        png = render_pm_image(asset)
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        assert len(png) > 100
+
 
 # ---------------------------------------------------------------------------
 # Image endpoint

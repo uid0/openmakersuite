@@ -1196,6 +1196,16 @@ class Asset(models.Model):
             "outages of fire alarms, network APs, freezers, etc."
         ),
     )
+    training_required = models.BooleanField(
+        default=False,
+        help_text=(
+            "Operators must complete training / hold a certification before "
+            "using this asset. Surfaced as a TRAINING REQUIRED banner on the "
+            "e-paper PM panel. Independent of the formal Certification model "
+            "in membership.* — this is the lightweight 'has the operator been "
+            "shown how to use this safely' flag."
+        ),
+    )
 
     # Utilization & lifecycle (powers analytics dashboards + maintenance forecast)
     hours_used = models.PositiveIntegerField(

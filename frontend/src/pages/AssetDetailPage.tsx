@@ -515,7 +515,7 @@ const AssetDetailPage: React.FC = () => {
         </section>
 
         {/* Operational Requirements */}
-        {(asset.circuit || asset.mac_address || asset.needs_compressed_air || asset.needs_ventilation || asset.is_chargeable) && (
+        {(asset.circuit || asset.mac_address || asset.needs_compressed_air || asset.needs_ventilation || asset.is_chargeable || asset.training_required) && (
           <section className="asset-detail-section">
             <h2>Operational Requirements</h2>
             <div className="info-grid">
@@ -546,6 +546,12 @@ const AssetDetailPage: React.FC = () => {
               {asset.is_chargeable && (
                 <div className="info-item">
                   <span className="info-label">Chargeable:</span>
+                  <span className="info-value">Yes</span>
+                </div>
+              )}
+              {asset.training_required && (
+                <div className="info-item" data-testid="training-required-row">
+                  <span className="info-label">Training required:</span>
                   <span className="info-value">Yes</span>
                 </div>
               )}

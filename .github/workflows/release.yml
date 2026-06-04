@@ -214,6 +214,32 @@ jobs:
             --file frontend/Dockerfile \
             frontend/
 
+      - name: Install syft for SBOM generation
+        uses: anchore/sbom-action/download-syft@v0.20.7
+
+      - name: Generate Software Bill of Materials
+        run: |
+          NEW_TAG="${{ needs.generate-version.outputs.new_tag }}"
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+
+          # Per-component CycloneDX SBOMs. Three scopes:
+          #   1. backend source — picks up python deps from requirements*.txt
+          #   2. frontend source — picks up node deps from package-lock.json
+          #   3. each published container image — captures the full OS+runtime
+          #      surface (e.g. alpine packages, system libs) that the source
+          #      SBOMs can't see.
+          # We standardize on CycloneDX 1.5 JSON because both Dependency-Track
+          # and GitHub's dependency graph ingest it natively. SPDX is left
+          # for a follow-up if a consumer asks for it.
+
+          syft scan dir:backend  -o cyclonedx-json="openmakersuite-$NEW_TAG-sbom-backend-source.cdx.json"
+          syft scan dir:frontend -o cyclonedx-json="openmakersuite-$NEW_TAG-sbom-frontend-source.cdx.json"
+          syft scan "ghcr.io/$REPO_LOWER/backend:$NEW_TAG"  -o cyclonedx-json="openmakersuite-$NEW_TAG-sbom-backend-image.cdx.json"
+          syft scan "ghcr.io/$REPO_LOWER/frontend:$NEW_TAG" -o cyclonedx-json="openmakersuite-$NEW_TAG-sbom-frontend-image.cdx.json"
+
+          echo "📋 SBOMs generated:"
+          ls -lh openmakersuite-$NEW_TAG-sbom-*.cdx.json
+
       - name: Create release bundle
         run: |
           NEW_TAG="${{ needs.generate-version.outputs.new_tag }}"
@@ -274,6 +300,19 @@ jobs:
           - Backend: \`ghcr.io/${{ github.repository }}/backend:${{ needs.generate-version.outputs.new_tag }}\`
           - Frontend: \`ghcr.io/${{ github.repository }}/frontend:${{ needs.generate-version.outputs.new_tag }}\`
 
+          ## Software Bill of Materials
+
+          Per-component CycloneDX SBOMs are attached to the GitHub Release:
+
+          - \`*-sbom-backend-source.cdx.json\` — Python deps from backend source
+          - \`*-sbom-frontend-source.cdx.json\` — Node deps from frontend source
+          - \`*-sbom-backend-image.cdx.json\` — backend container (incl. OS packages)
+          - \`*-sbom-frontend-image.cdx.json\` — frontend container (incl. OS packages)
+
+          Each SBOM ships with a Sigstore \`.sig\` + \`.pem\` so consumers can
+          verify provenance with \`cosign verify-blob\` against the same identity
+          that signed the release bundle.
+
           EOF
 
           # Create tarball
@@ -291,6 +330,7 @@ jobs:
           path: |
             openmakersuite-*.tar.gz
             openmakersuite-*.tar.gz.sha256
+            openmakersuite-*-sbom-*.cdx.json
 
   sign-and-release:
     name: 🔐 Sign & Create Release
@@ -325,6 +365,22 @@ jobs:
             --output-certificate openmakersuite-$NEW_TAG.tar.gz.pem \
             openmakersuite-$NEW_TAG.tar.gz
 
+          # Sign each SBOM the same way so downstream consumers can
+          # verify provenance without trusting the GitHub Releases
+          # download path. Loop in a stable order so the .sig/.pem
+          # names match the SBOM file they cover.
+          # nullglob protects against the empty case (the build-artifacts
+          # job is supposed to produce them, but a failed syft step
+          # shouldn't make this loop iterate over the literal glob).
+          shopt -s nullglob
+          for sbom in "openmakersuite-$NEW_TAG"-sbom-*.cdx.json; do
+            cosign sign-blob \
+              --yes \
+              --output-signature "${sbom}.sig" \
+              --output-certificate "${sbom}.pem" \
+              "$sbom"
+          done
+
           echo "🔐 Artifacts signed successfully"
         env:
           COSIGN_EXPERIMENTAL: 1
@@ -349,14 +405,25 @@ jobs:
           # command line at all.
           printf '%s' "$CHANGELOG" > release-notes.md
 
+          # Collect every artifact under one glob so the gh CLI gets a
+          # stable, ordered list. SBOMs (per-component CycloneDX) +
+          # their cosign sig/pem ride alongside the release tarball.
+          shopt -s nullglob
+          ARTIFACTS=(
+            "openmakersuite-$NEW_TAG.tar.gz"
+            "openmakersuite-$NEW_TAG.tar.gz.sha256"
+            "openmakersuite-$NEW_TAG.tar.gz.sig"
+            "openmakersuite-$NEW_TAG.tar.gz.pem"
+            openmakersuite-$NEW_TAG-sbom-*.cdx.json
+            openmakersuite-$NEW_TAG-sbom-*.cdx.json.sig
+            openmakersuite-$NEW_TAG-sbom-*.cdx.json.pem
+          )
+
           gh release create "$NEW_TAG" \
             --title "🚀 Release $NEW_TAG" \
             --notes-file release-notes.md \
             --latest \
-            "openmakersuite-$NEW_TAG.tar.gz" \
-            "openmakersuite-$NEW_TAG.tar.gz.sha256" \
-            "openmakersuite-$NEW_TAG.tar.gz.sig" \
-            "openmakersuite-$NEW_TAG.tar.gz.pem"
+            "${ARTIFACTS[@]}"
 
           echo "✅ GitHub release created: $NEW_TAG"
           echo "release_url=$(gh release view "$NEW_TAG" --json url --jq .url)" >> "$GITHUB_OUTPUT"

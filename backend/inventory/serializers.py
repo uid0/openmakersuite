@@ -6,9 +6,11 @@ from rest_framework import serializers
 
 from .models import (
     Asset,
+    AssetOutOfService,
     AssetPart,
     AssetProblem,
     AssetProblemPhoto,
+    AssetReservation,
     Category,
     Fixture,
     FixtureRefillRequest,
@@ -1835,3 +1837,91 @@ class MaintenanceRecordSerializer(serializers.ModelSerializer):
                 {"completed_on": "completed_on cannot be in the future."}
             )
         return attrs
+
+
+class AssetReservationSerializer(serializers.ModelSerializer):
+    """Per-asset reservation for a class / training / event.
+
+    `reserved_by` is read-only — the viewset injects request.user on
+    create so the caller can't pin a reservation to someone else.
+    `is_current` is computed server-side and surfaces "the e-paper
+    panel will be showing this RIGHT NOW" to clients.
+    """
+
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    reserved_by_username = serializers.CharField(source="reserved_by.username", read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    is_current = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = AssetReservation
+        fields = [
+            "id",
+            "asset",
+            "asset_name",
+            "title",
+            "reserved_by",
+            "reserved_by_username",
+            "starts_at",
+            "ends_at",
+            "notes",
+            "cancelled_at",
+            "is_active",
+            "is_current",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "reserved_by",
+            "reserved_by_username",
+            "asset_name",
+            "is_active",
+            "is_current",
+            "cancelled_at",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class AssetOutOfServiceSerializer(serializers.ModelSerializer):
+    """OOS event against an asset. POST opens, /restore/ closes."""
+
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    placed_by_username = serializers.CharField(source="placed_by.username", read_only=True)
+    restored_by_username = serializers.CharField(
+        source="restored_by.username", read_only=True, allow_null=True
+    )
+    is_open = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = AssetOutOfService
+        fields = [
+            "id",
+            "asset",
+            "asset_name",
+            "placed_out_at",
+            "placed_by",
+            "placed_by_username",
+            "expected_return_at",
+            "reason",
+            "restored_at",
+            "restored_by",
+            "restored_by_username",
+            "is_open",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "asset_name",
+            "placed_out_at",
+            "placed_by",
+            "placed_by_username",
+            "restored_at",
+            "restored_by",
+            "restored_by_username",
+            "is_open",
+            "created_at",
+            "updated_at",
+        ]

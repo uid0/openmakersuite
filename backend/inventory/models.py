@@ -2992,3 +2992,189 @@ class MaintenanceRecord(models.Model):
             )
         if self.completed_on is not None and self.completed_on > timezone.localdate():
             raise ValidationError({"completed_on": "completed_on cannot be in the future."})
+
+
+class AssetReservation(models.Model):
+    """A class / training / event reservation against an asset.
+
+    Reservations show up as a rotating "RESERVED" face on the asset's
+    bound e-paper panel (alongside the usual PM card). The e-paper
+    render service decides on each fetch which face to show using the
+    panel's per-display rotation ratio; see
+    forgekey.services.epaper_render._pick_face.
+
+    Overlap policy: a new reservation cannot start before any existing
+    one for the same asset ends. clean() enforces this; the
+    create/update endpoints surface the ValidationError to the caller
+    as a stable error envelope (code=reservation_overlap).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="reservations",
+        help_text="Asset being reserved",
+    )
+    title = models.CharField(
+        max_length=200,
+        help_text='Short human-readable label, e.g. "Welding Class — John Smith"',
+    )
+    reserved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="asset_reservations",
+        help_text="Member who owns the reservation (staff or SIG admin)",
+    )
+    starts_at = models.DateTimeField(help_text="When the reservation begins")
+    ends_at = models.DateTimeField(help_text="When the reservation ends")
+    notes = models.TextField(
+        blank=True,
+        help_text="Optional context (room, prerequisites, etc.)",
+    )
+    cancelled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "When the reservation was cancelled (soft-delete so the audit "
+            "history sticks). Cancelled rows do not block new overlapping "
+            "reservations and never drive the panel face."
+        ),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-starts_at"]
+        indexes = [
+            models.Index(fields=["asset", "starts_at"]),
+            models.Index(fields=["asset", "ends_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.title} ({self.starts_at:%Y-%m-%d %H:%M})"
+
+    @property
+    def is_active(self) -> bool:
+        """True when not cancelled and not past its end."""
+        if self.cancelled_at is not None:
+            return False
+        return self.ends_at > timezone.now()
+
+    @property
+    def is_current(self) -> bool:
+        """True when the reservation is happening right now (drives the panel face)."""
+        if self.cancelled_at is not None:
+            return False
+        now = timezone.now()
+        return self.starts_at <= now < self.ends_at
+
+    def clean(self) -> None:
+        super().clean()
+        if (
+            self.starts_at is not None
+            and self.ends_at is not None
+            and self.ends_at <= self.starts_at
+        ):
+            raise ValidationError({"ends_at": "ends_at must be after starts_at."})
+        if self.asset_id is None or self.starts_at is None or self.ends_at is None:
+            return
+        # Block overlaps against any other non-cancelled reservation for
+        # the same asset. Bound the lookup by [starts_at, ends_at) so a
+        # back-to-back reservation that begins at the prior one's
+        # ends_at is allowed.
+        overlap = AssetReservation.objects.filter(
+            asset_id=self.asset_id,
+            cancelled_at__isnull=True,
+            starts_at__lt=self.ends_at,
+            ends_at__gt=self.starts_at,
+        )
+        if self.pk is not None:
+            overlap = overlap.exclude(pk=self.pk)
+        if overlap.exists():
+            raise ValidationError(
+                {"starts_at": "Reservation overlaps an existing reservation for this asset."}
+            )
+
+
+class AssetOutOfService(models.Model):
+    """An out-of-service event against an asset.
+
+    Each row is a single OOS window. Opening a new OOS while the asset
+    has an unrestored one in flight is rejected by clean(). Restoring
+    sets ``restored_at``; the row stays for the audit log. The e-paper
+    panel renders the OOS face for any asset with a currently-open
+    row (no rotation — OOS preempts both PM and reservation faces).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="out_of_service_events",
+        help_text="Asset that's out of service",
+    )
+    placed_out_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the OOS was opened",
+    )
+    placed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="asset_out_of_service_events",
+        help_text="Member who placed the asset OOS",
+    )
+    expected_return_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Best-guess return-to-service date; renders as 'expected back: …' on the panel",
+    )
+    reason = models.TextField(help_text="Why it's out of service")
+    restored_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "When the asset was brought back online. Null means the row "
+            "is the current active OOS; only one such row per asset."
+        ),
+    )
+    restored_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="asset_restorations",
+        help_text="Member who cleared the OOS",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-placed_out_at"]
+        indexes = [
+            models.Index(fields=["asset", "restored_at"]),
+        ]
+
+    def __str__(self) -> str:
+        suffix = "open" if self.restored_at is None else f"restored {self.restored_at:%Y-%m-%d}"
+        return f"OOS on asset {self.asset_id} ({suffix})"
+
+    @property
+    def is_open(self) -> bool:
+        return self.restored_at is None
+
+    def clean(self) -> None:
+        super().clean()
+        if self.asset_id is None or self.restored_at is not None:
+            return
+        # Block a second open OOS row on the same asset — closing the
+        # first one is the operator's intended path.
+        existing = AssetOutOfService.objects.filter(
+            asset_id=self.asset_id, restored_at__isnull=True
+        )
+        if self.pk is not None:
+            existing = existing.exclude(pk=self.pk)
+        if existing.exists():
+            raise ValidationError(
+                "Asset already has an open out-of-service event; restore it before opening another."
+            )

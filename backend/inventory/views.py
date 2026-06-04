@@ -1197,6 +1197,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         .prefetch_related(
             "asset_parts__part",
             "asset_parts__part__category",
+            "required_certifications__sig",
         )
         .all()
     )

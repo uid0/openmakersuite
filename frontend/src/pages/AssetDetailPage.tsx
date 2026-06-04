@@ -516,7 +516,7 @@ const AssetDetailPage: React.FC = () => {
         </section>
 
         {/* Operational Requirements */}
-        {(asset.circuit || asset.mac_address || asset.needs_compressed_air || asset.needs_ventilation || asset.is_chargeable || asset.training_required) && (
+        {(asset.circuit || asset.mac_address || asset.needs_compressed_air || asset.needs_ventilation || asset.is_chargeable || asset.training_required || (asset.required_certification_details && asset.required_certification_details.length > 0)) && (
           <section className="asset-detail-section">
             <h2>Operational Requirements</h2>
             <div className="info-grid">
@@ -556,6 +556,17 @@ const AssetDetailPage: React.FC = () => {
                   <span className="info-value">Yes</span>
                 </div>
               )}
+              {asset.required_certification_details &&
+                asset.required_certification_details.length > 0 && (
+                  <div className="info-item" data-testid="required-certifications-row">
+                    <span className="info-label">Required certifications:</span>
+                    <span className="info-value">
+                      {asset.required_certification_details
+                        .map((c) => c.name)
+                        .join(', ')}
+                    </span>
+                  </div>
+                )}
             </div>
           </section>
         )}

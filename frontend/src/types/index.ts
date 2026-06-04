@@ -232,6 +232,15 @@ export interface CreateReorderRequest {
 export type AssetStatus = 'active' | 'maintenance' | 'retired' | 'lost' | 'donated_out';
 export type OperationalStatus = 'available' | 'reserved' | 'needs_maintenance' | 'disabled';
 
+// Light cert summary backend ships alongside Asset.required_certifications
+// so the SPA + e-paper render don't need a second round-trip per id.
+export interface RequiredCertificationSummary {
+  id: number;
+  name: string;
+  slug: string;
+  sig_name: string;
+}
+
 export interface Asset {
   id: string;
   name: string;
@@ -275,6 +284,8 @@ export interface Asset {
   needs_ventilation: boolean;
   is_chargeable: boolean;
   training_required: boolean;
+  required_certifications: number[];
+  required_certification_details: RequiredCertificationSummary[];
   last_scanned_at: string | null;
   // Group ownership and locking
   ownership_type: 'user' | 'group' | 'space';

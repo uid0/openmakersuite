@@ -156,6 +156,54 @@ class TestEPaperRender:
         assert png[:8] == b"\x89PNG\r\n\x1a\n"
         assert len(png) > 100
 
+    def test_etag_changes_when_required_cert_attached(self):
+        # Wiring or unwiring a specific certification must invalidate
+        # the cached image so the panel flips from "TRAINING REQUIRED"
+        # to "REQ: <cert name>" (or vice versa) on the next wake.
+        from django.contrib.auth.models import Group
+
+        from membership.models import Certification
+
+        sig = Group.objects.create(name=f"WeldSIG-{uuid4().hex[:6]}")
+        cert = Certification.objects.create(name="WELD-1", slug="weld-1", sig=sig)
+        asset = _make_asset("Plasma cutter")
+        before = compute_snapshot_etag(asset)
+        asset.required_certifications.add(cert)
+        after = compute_snapshot_etag(asset)
+        assert before != after
+
+    def test_render_with_required_certifications_still_returns_png(self):
+        from django.contrib.auth.models import Group
+
+        from membership.models import Certification
+
+        sig = Group.objects.create(name=f"WeldSIG-{uuid4().hex[:6]}")
+        cert = Certification.objects.create(name="WELD-1", slug="weld-1", sig=sig)
+        asset = _make_asset("MIG welder")
+        asset.required_certifications.add(cert)
+        _make_item(asset, "Wire spool check", interval_days=30)
+        png = render_pm_image(asset)
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        assert len(png) > 100
+
+    def test_inactive_certifications_are_excluded_from_etag(self):
+        # Operators retire certifications via Certification.is_active=False
+        # rather than deleting rows (audit history). An inactive cert
+        # shouldn't gate the asset and shouldn't show up on the panel.
+        from django.contrib.auth.models import Group
+
+        from membership.models import Certification
+
+        sig = Group.objects.create(name=f"OldSIG-{uuid4().hex[:6]}")
+        retired_cert = Certification.objects.create(
+            name="RETIRED-CERT", slug="retired-cert", sig=sig, is_active=False
+        )
+        asset = _make_asset("Lathe")
+        before = compute_snapshot_etag(asset)
+        asset.required_certifications.add(retired_cert)
+        after = compute_snapshot_etag(asset)
+        assert before == after
+
 
 # ---------------------------------------------------------------------------
 # Image endpoint

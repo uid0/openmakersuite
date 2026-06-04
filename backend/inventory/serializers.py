@@ -709,6 +709,11 @@ class AssetSerializer(serializers.ModelSerializer):
     breaker_summary = serializers.SerializerMethodField()
     disconnect_summary = serializers.SerializerMethodField()
 
+    # Required certifications — IDs round-trip for writes; the *_details
+    # array carries name + SIG so the SPA + e-paper render don't need a
+    # second round-trip per cert lookup.
+    required_certification_details = serializers.SerializerMethodField()
+
     class Meta:
         model = Asset
         fields = [
@@ -795,8 +800,10 @@ class AssetSerializer(serializers.ModelSerializer):
             "qr_code",
             "qr_code_url",
             "qr_code_scan_url",
-            # Training
+            # Training / certification
             "training_required",
+            "required_certifications",
+            "required_certification_details",
             # Status
             "status",
             # NOTE: condition_notes is a legacy free-text field kept on the
@@ -825,8 +832,25 @@ class AssetSerializer(serializers.ModelSerializer):
             "qr_code_url",
             "qr_code_scan_url",
             "is_forgekey_managed",
+            "required_certification_details",
             "created_at",
             "updated_at",
+        ]
+
+    def get_required_certification_details(self, obj):
+        # Consume the AssetViewSet's prefetched `required_certifications__sig`
+        # in-memory — calling .filter() / .select_related() here would build
+        # a new queryset that bypasses the prefetch cache and reintroduce an
+        # N+1 across the asset list endpoint (gh: test_asset_list_is_bounded).
+        return [
+            {
+                "id": cert.id,
+                "name": cert.name,
+                "slug": cert.slug,
+                "sig_name": cert.sig.name,
+            }
+            for cert in obj.required_certifications.all()
+            if cert.is_active
         ]
 
     def get_operational_mode(self, obj):

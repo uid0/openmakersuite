@@ -122,6 +122,24 @@ describe('ForgeKeyEPaperPanelsPage', () => {
     expect(await screen.findByTestId('bind-select-p1')).toBeInTheDocument();
   });
 
+  test('asset list pulls all active assets, not just the first page', async () => {
+    // Default DRF PAGE_SIZE=50 means a plain listAssets() call would hide
+    // any asset past the first page from the rebind dropdown — request a
+    // page big enough to cover any realistic makerspace asset count.
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({ data: [buildPanel()] } as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(mockAssets.listAssets).toHaveBeenCalledWith({
+        is_active: true,
+        page_size: 1000,
+        ordering: 'name',
+      });
+    });
+  });
+
   test('shows reported firmware version and pending rollout target', async () => {
     localStorage.setItem('is_staff', 'true');
     mockApi.listEPaperDisplays.mockResolvedValue({

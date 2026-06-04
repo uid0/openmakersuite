@@ -53,12 +53,16 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
     load();
   }, [isStaff, isSuperuser, load]);
 
-  // Assets for the inline "bind to asset" picker.
+  // Assets for the inline "bind to asset" picker. listAssets() is
+  // DRF-paginated (default PAGE_SIZE=50), so without page_size we'd only
+  // show the first 50 — operators couldn't bind a panel to anything past
+  // that page. Pull every active asset in one shot and sort by name; the
+  // Mantine Select filters client-side.
   useEffect(() => {
     if (!isStaff && !isSuperuser) return;
     let alive = true;
     assetsAPI
-      .listAssets()
+      .listAssets({ is_active: true, page_size: 1000, ordering: 'name' })
       .then((res) => {
         if (alive) {
           setAssets(res.data.results.map((a) => ({ value: String(a.id), label: a.name })));

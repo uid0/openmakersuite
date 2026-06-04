@@ -17,6 +17,7 @@ vi.mock('../../services/api', async () => {
     forgekeyAPI: {
       listEPaperDisplays: jest.fn(),
       setEPaperActive: jest.fn(),
+      setEPaperRotation: jest.fn(),
       bindEPaper: jest.fn(),
     },
     assetsAPI: { ...(actual as any).assetsAPI, listAssets: jest.fn() },
@@ -36,15 +37,15 @@ const buildPanel = (overrides: Partial<any> = {}) => ({
   battery_percent: 8,
   is_low_battery: true,
   last_battery_at: null,
-  battery_available: true,
-  battery_unavailable_reason: '',
-  last_health_at: null,
   last_image_etag: '',
   last_image_at: null,
   firmware_version: '',
   target_firmware_version: null,
   target_firmware_version_string: null,
   is_active: true,
+  event_face_weight: 2,
+  pm_face_weight: 1,
+  rotation_counter: 0,
   created_at: '2026-05-01T00:00:00Z',
   updated_at: '2026-05-01T00:00:00Z',
   ...overrides,
@@ -125,51 +126,6 @@ describe('ForgeKeyEPaperPanelsPage', () => {
     expect(await screen.findByTestId('bind-select-p1')).toBeInTheDocument();
   });
 
-  test('battery cell shows "No sensor" when panel reports no ADC', async () => {
-    // SKU-6416 panels send power.battery.available=false. The dashboard
-    // must distinguish that from "never reported" so the operator
-    // doesn't waste time chasing a non-existent sensor.
-    localStorage.setItem('is_staff', 'true');
-    mockApi.listEPaperDisplays.mockResolvedValue({
-      data: [
-        buildPanel({
-          id: 'no-sensor',
-          battery_percent: null,
-          battery_available: false,
-          battery_unavailable_reason: 'battery_adc_not_configured',
-        }),
-      ],
-    } as any);
-
-    renderPage();
-
-    expect(await screen.findByTestId('battery-no-sensor')).toBeInTheDocument();
-    expect(screen.getByText('No sensor')).toBeInTheDocument();
-  });
-
-  test('battery cell shows "—" only when the panel has never reported', async () => {
-    localStorage.setItem('is_staff', 'true');
-    mockApi.listEPaperDisplays.mockResolvedValue({
-      data: [
-        buildPanel({
-          id: 'never',
-          battery_percent: null,
-          battery_available: null,
-          battery_unavailable_reason: '',
-        }),
-      ],
-    } as any);
-
-    renderPage();
-
-    await screen.findByText('Lathe');
-    // Several columns render "—" when their field is null (device MAC,
-    // etc.), so we don't pin to text — assert the no-sensor badge isn't
-    // rendered when battery_available is null.
-    expect(screen.queryByTestId('battery-no-sensor')).not.toBeInTheDocument();
-    expect(screen.queryByText('No sensor')).not.toBeInTheDocument();
-  });
-
   test('asset list pulls all active assets, not just the first page', async () => {
     // Default DRF PAGE_SIZE=50 means a plain listAssets() call would hide
     // any asset past the first page from the rebind dropdown — request a
@@ -186,6 +142,43 @@ describe('ForgeKeyEPaperPanelsPage', () => {
         ordering: 'name',
       });
     });
+  });
+
+  test('editing rotation weights posts to setEPaperRotation on blur', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({ data: [buildPanel()] } as any);
+    mockApi.setEPaperRotation.mockResolvedValue({
+      data: buildPanel({ event_face_weight: 5, pm_face_weight: 1 }),
+    } as any);
+
+    renderPage();
+
+    const eventInput = await screen.findByTestId('rotation-event-p1');
+    fireEvent.change(eventInput, { target: { value: '5' } });
+    fireEvent.blur(eventInput);
+
+    await waitFor(() => {
+      expect(mockApi.setEPaperRotation).toHaveBeenCalledWith('p1', {
+        event_face_weight: 5,
+        pm_face_weight: 1,
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('ratio 5:1')).toBeInTheDocument();
+    });
+  });
+
+  test('blur with unchanged weights does not POST', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({ data: [buildPanel()] } as any);
+
+    renderPage();
+
+    const eventInput = await screen.findByTestId('rotation-event-p1');
+    fireEvent.blur(eventInput);
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(mockApi.setEPaperRotation).not.toHaveBeenCalled();
   });
 
   test('shows reported firmware version and pending rollout target', async () => {

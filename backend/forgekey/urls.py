@@ -24,6 +24,7 @@ from .views import (
     EPaperDisplayImageView,
     EPaperDisplayListView,
     EPaperDisplaySetActiveView,
+    EPaperDisplaySetRotationView,
     EPaperFirmwareCheckView,
     EpaperFirmwareRolloutViewSet,
     EPaperServiceCompleteView,
@@ -159,6 +160,11 @@ urlpatterns = [
         "epaper/<uuid:display_id>/set-active/",
         EPaperDisplaySetActiveView.as_view(),
         name="epaper-set-active",
+    ),
+    path(
+        "epaper/<uuid:display_id>/set-rotation/",
+        EPaperDisplaySetRotationView.as_view(),
+        name="epaper-set-rotation",
     ),
     path(
         "epaper/<uuid:display_id>/service-info/",

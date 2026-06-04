@@ -162,6 +162,7 @@ below are public.
 | POST | `forgekey/mqtt-webhook/` | webhook-secret | `AllowAny` + HMAC validation in the view body. |
 | GET | `forgekey/epaper/<display_id>/image.png` | public | XIAO 7.5" ePaper panel fetches the latest PM-status PNG. AllowAny because the device has no persistent JWT; the image contains nothing not already visible on the panel mounted on the asset. Supports `If-None-Match` → 304. |
 | POST | `forgekey/epaper/<display_id>/battery/` | public | Panel reports its battery percent (0..100). AllowAny for the same reason as the image endpoint. Below `FORGEKEY_EPAPER_LOW_BATTERY_PERCENT` emits a Sentry warning so ops can prep a charged swap. |
+| POST | `forgekey/epaper/<display_id>/set-rotation/` | member | `IsAuthenticated` on `EPaperDisplaySetRotationView` — staff tunes the per-panel event-face / pm-face weighting from the e-paper panels admin. Values clamped to `[0, 100]`. |
 | any | `forgekey/asset-authorizations/...`, `forgekey/operational-modes/...`, `forgekey/power-meter-readings/...` | member-rw | `IsAuthenticatedOrReadOnly` ViewSets feeding the device control panel. |
 
 ## Customization (`/api/customization/`)

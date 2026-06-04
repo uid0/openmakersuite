@@ -1825,6 +1825,26 @@ class EPaperDisplay(models.Model):
         default=True,
         help_text="Inactive panels stop receiving refresh commands.",
     )
+    # Rotation weights when both the PM card and a current reservation are
+    # eligible for display. Used by epaper_render._pick_face: each image
+    # fetch advances rotation_counter; counter % (event+pm) < event_weight
+    # picks the reservation face, otherwise PM. Defaults reflect "more
+    # event than PM" per the floor-ops requirement (2:1).
+    event_face_weight = models.PositiveSmallIntegerField(
+        default=2,
+        help_text="Relative weight of the reservation face in the rotation when both faces are eligible.",
+    )
+    pm_face_weight = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="Relative weight of the PM face in the rotation when both faces are eligible.",
+    )
+    rotation_counter = models.PositiveBigIntegerField(
+        default=0,
+        help_text=(
+            "Monotonic count of image renders since boot, used as the modulo "
+            "input for the event/pm rotation. Advanced server-side on each render."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

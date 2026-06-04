@@ -13,8 +13,9 @@ from django.db.models import F, Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import (
     AllowAny,
@@ -30,8 +31,10 @@ from membership.permissions import IsAuthenticatedOrStaffSigAdminWrite, IsStaffO
 from .audit import record_event as record_maintenance_audit_event
 from .models import (
     Asset,
+    AssetOutOfService,
     AssetPart,
     AssetProblem,
+    AssetReservation,
     Category,
     Fixture,
     FixtureRefillRequest,
@@ -55,9 +58,11 @@ from .models import (
     WorkOrderValidation,
 )
 from .serializers import (
+    AssetOutOfServiceSerializer,
     AssetPartSerializer,
     AssetProblemPhotoSerializer,
     AssetProblemSerializer,
+    AssetReservationSerializer,
     AssetSerializer,
     CategorySerializer,
     FixtureDetailSerializer,
@@ -5110,3 +5115,172 @@ class MaintenanceRecordViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
         return super().destroy(request, *args, **kwargs)
+
+
+def _user_can_manage_asset(user, asset) -> bool:
+    """True for staff/superuser, or SIG admin of the asset's owning_group.
+
+    Matches the "staff or SIG admin" auth contract used by the
+    maintenance + work-order surfaces. Reserving an asset and placing
+    it out of service are both treated as administrative operations on
+    the asset itself, so they share that gate.
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+    if asset is None:
+        return False
+    # asset.is_user_group_admin already handles owning_group=None.
+    return bool(asset.is_user_group_admin(user))
+
+
+class AssetReservationViewSet(viewsets.ModelViewSet):
+    """Reservations against an asset for a class / training / event.
+
+    POST creates; DELETE cancels (soft — sets cancelled_at, preserves
+    history). PATCH allows editing title/notes/window but re-runs the
+    overlap check via clean(). Read access is open to any authenticated
+    user; write access is gated by staff or SIG-admin-of-owning-group.
+    """
+
+    queryset = AssetReservation.objects.select_related("asset", "reserved_by").all()
+    serializer_class = AssetReservationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        active = self.request.query_params.get("active")
+        if active is not None:
+            truthy = active.lower() in ("true", "1", "yes")
+            now = timezone.now()
+            if truthy:
+                qs = qs.filter(cancelled_at__isnull=True, ends_at__gt=now)
+            else:
+                qs = qs.filter(Q(cancelled_at__isnull=False) | Q(ends_at__lte=now))
+        current = self.request.query_params.get("current")
+        if current is not None and current.lower() in ("true", "1", "yes"):
+            now = timezone.now()
+            qs = qs.filter(cancelled_at__isnull=True, starts_at__lte=now, ends_at__gt=now)
+        return qs
+
+    def perform_create(self, serializer):
+        asset = serializer.validated_data.get("asset")
+        if not _user_can_manage_asset(self.request.user, asset):
+            raise PermissionDenied("Only staff or SIG admins can reserve this asset.")
+        instance = AssetReservation(reserved_by=self.request.user, **serializer.validated_data)
+        try:
+            instance.full_clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(_django_to_drf_errors(exc))
+        instance.save()
+        serializer.instance = instance
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        asset = serializer.validated_data.get("asset", instance.asset)
+        if not _user_can_manage_asset(self.request.user, asset):
+            raise PermissionDenied("Only staff or SIG admins can edit this reservation.")
+        for field, value in serializer.validated_data.items():
+            setattr(instance, field, value)
+        try:
+            instance.full_clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(_django_to_drf_errors(exc))
+        instance.save()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not _user_can_manage_asset(request.user, instance.asset):
+            return Response(
+                {"detail": "Only staff or SIG admins can cancel this reservation."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if instance.cancelled_at is None:
+            instance.cancelled_at = timezone.now()
+            instance.save(update_fields=["cancelled_at", "updated_at"])
+        return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
+
+
+class AssetOutOfServiceViewSet(viewsets.ModelViewSet):
+    """Out-of-service events against an asset.
+
+    POST opens; POST /{id}/restore/ closes (sets restored_at +
+    restored_by). The model rejects opening a second OOS while the
+    first is still open. Read open to any authenticated user; write
+    gated to staff or SIG admin of the asset's owning group.
+    """
+
+    queryset = AssetOutOfService.objects.select_related("asset", "placed_by", "restored_by").all()
+    serializer_class = AssetOutOfServiceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        open_only = self.request.query_params.get("open")
+        if open_only is not None and open_only.lower() in ("true", "1", "yes"):
+            qs = qs.filter(restored_at__isnull=True)
+        return qs
+
+    def perform_create(self, serializer):
+        asset = serializer.validated_data.get("asset")
+        if not _user_can_manage_asset(self.request.user, asset):
+            raise PermissionDenied("Only staff or SIG admins can place this asset out of service.")
+        instance = AssetOutOfService(placed_by=self.request.user, **serializer.validated_data)
+        try:
+            instance.full_clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(_django_to_drf_errors(exc))
+        instance.save()
+        serializer.instance = instance
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        asset = serializer.validated_data.get("asset", instance.asset)
+        if not _user_can_manage_asset(self.request.user, asset):
+            raise PermissionDenied("Only staff or SIG admins can edit this OOS event.")
+        for field, value in serializer.validated_data.items():
+            setattr(instance, field, value)
+        try:
+            instance.full_clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(_django_to_drf_errors(exc))
+        instance.save()
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def restore(self, request, pk=None):
+        """Close the OOS — sets restored_at + restored_by."""
+        instance = self.get_object()
+        if not _user_can_manage_asset(request.user, instance.asset):
+            return Response(
+                {"detail": "Only staff or SIG admins can restore this asset."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if instance.restored_at is not None:
+            return Response(
+                self.get_serializer(instance).data,
+                status=status.HTTP_200_OK,
+            )
+        instance.restored_at = timezone.now()
+        instance.restored_by = request.user
+        instance.save(update_fields=["restored_at", "restored_by", "updated_at"])
+        return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
+
+
+def _django_to_drf_errors(exc):
+    """Convert a Django ValidationError into a shape DRF can render.
+
+    Pulls .message_dict when fields were named (clean()'s typical
+    output), falls back to messages otherwise. Keeps the existing
+    error envelope so the frontend gets `{ field: [message] }` rather
+    than a raw exception string.
+    """
+    if hasattr(exc, "message_dict") and exc.message_dict:
+        return {k: list(v) for k, v in exc.message_dict.items()}
+    return {"detail": list(getattr(exc, "messages", [str(exc)]))}

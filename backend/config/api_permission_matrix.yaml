@@ -924,6 +924,29 @@ views:
     permission_classes:
     - IsAuthenticated
     - IsStaffUser
+  inventory.views.AssetOutOfServiceViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      restore:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
+        permission_classes:
+        - IsAuthenticated
   inventory.views.AssetPartViewSet:
     actions:
       create:
@@ -973,6 +996,26 @@ views:
         permission_classes:
         - IsAuthenticated
       utilization:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.AssetReservationViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticated
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      update:
         permission_classes:
         - IsAuthenticated
   inventory.views.AssetViewSet:

@@ -161,6 +161,7 @@ class TestEPaperRender:
         # the cached image so the panel flips from "TRAINING REQUIRED"
         # to "REQ: <cert name>" (or vice versa) on the next wake.
         from django.contrib.auth.models import Group
+
         from membership.models import Certification
 
         sig = Group.objects.create(name=f"WeldSIG-{uuid4().hex[:6]}")
@@ -173,6 +174,7 @@ class TestEPaperRender:
 
     def test_render_with_required_certifications_still_returns_png(self):
         from django.contrib.auth.models import Group
+
         from membership.models import Certification
 
         sig = Group.objects.create(name=f"WeldSIG-{uuid4().hex[:6]}")
@@ -189,6 +191,7 @@ class TestEPaperRender:
         # rather than deleting rows (audit history). An inactive cert
         # shouldn't gate the asset and shouldn't show up on the panel.
         from django.contrib.auth.models import Group
+
         from membership.models import Certification
 
         sig = Group.objects.create(name=f"OldSIG-{uuid4().hex[:6]}")

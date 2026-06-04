@@ -552,6 +552,87 @@ export const assetsAPI = {
     ),
 };
 
+// Asset reservations + out-of-service surfaces — staff + SIG admin
+// gated on write. The e-paper renderer reads these to pick which face
+// to show on a bound panel (see backend/forgekey/services/epaper_render.py).
+export interface AssetReservation {
+  id: string;
+  asset: string;
+  asset_name: string;
+  title: string;
+  reserved_by: number;
+  reserved_by_username: string;
+  starts_at: string;
+  ends_at: string;
+  notes: string;
+  cancelled_at: string | null;
+  is_active: boolean;
+  is_current: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetOutOfService {
+  id: string;
+  asset: string;
+  asset_name: string;
+  placed_out_at: string;
+  placed_by: number;
+  placed_by_username: string;
+  expected_return_at: string | null;
+  reason: string;
+  restored_at: string | null;
+  restored_by: number | null;
+  restored_by_username: string | null;
+  is_open: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const assetReservationsAPI = {
+  list: (params?: { asset?: string; active?: boolean; current?: boolean }) =>
+    api.get<{
+      count: number;
+      next: string | null;
+      previous: string | null;
+      results: AssetReservation[];
+    }>('/inventory/asset-reservations/', { params }),
+
+  create: (data: {
+    asset: string;
+    title: string;
+    starts_at: string;
+    ends_at: string;
+    notes?: string;
+  }) => api.post<AssetReservation>('/inventory/asset-reservations/', data),
+
+  // DELETE soft-cancels (sets cancelled_at server-side); returns 200
+  // with the updated row so callers can flip their cached state
+  // without a follow-up fetch.
+  cancel: (id: string) =>
+    api.delete<AssetReservation>(`/inventory/asset-reservations/${id}/`),
+};
+
+export const assetOutOfServiceAPI = {
+  list: (params?: { asset?: string; open?: boolean }) =>
+    api.get<{
+      count: number;
+      next: string | null;
+      previous: string | null;
+      results: AssetOutOfService[];
+    }>('/inventory/asset-out-of-service/', { params }),
+
+  open: (data: {
+    asset: string;
+    reason: string;
+    expected_return_at?: string | null;
+  }) => api.post<AssetOutOfService>('/inventory/asset-out-of-service/', data),
+
+  // POST .../restore/ closes the OOS row.
+  restore: (id: string) =>
+    api.post<AssetOutOfService>(`/inventory/asset-out-of-service/${id}/restore/`),
+};
+
 // Asset Maintenance History (oms-0xxlp2)
 export interface MaintenanceHistoryRow {
   id: string;
@@ -1860,6 +1941,13 @@ export interface ForgeKeyEPaperDisplay {
   target_firmware_version: string | null;
   target_firmware_version_string: string | null;
   is_active: boolean;
+  // Rotation weights that drive the OOS/reservation/PM face picker on
+  // each image fetch — defaults 2:1 (event:pm). Setting either to 0
+  // disables the rotation in that direction; both zero falls back to
+  // the PM face.
+  event_face_weight: number;
+  pm_face_weight: number;
+  rotation_counter: number;
   created_at: string;
   updated_at: string;
 }
@@ -2112,6 +2200,13 @@ export const forgekeyAPI = {
     api.post<ForgeKeyEPaperDisplay>(`/forgekey/epaper/${displayId}/set-active/`, {
       is_active: isActive,
     }),
+  // Set the per-panel face-rotation knobs. Both fields optional;
+  // the backend clips to [0, 100], coerces strings to int, and 400s
+  // on negative or non-numeric values.
+  setEPaperRotation: (
+    displayId: string,
+    data: Partial<Pick<ForgeKeyEPaperDisplay, 'event_face_weight' | 'pm_face_weight'>>,
+  ) => api.post<ForgeKeyEPaperDisplay>(`/forgekey/epaper/${displayId}/set-rotation/`, data),
   listFirmwareVersions: () =>
     api.get<{ results?: ForgeKeyFirmwareVersion[] } | ForgeKeyFirmwareVersion[]>(
       '/forgekey/firmware-versions/',

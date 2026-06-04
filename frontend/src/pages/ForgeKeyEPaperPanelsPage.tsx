@@ -5,7 +5,20 @@
  * image fetch, and active/retired state. Staff can rebind a panel to a
  * different asset (via the existing QR bind flow) or retire / reactivate it.
  */
-import { Alert, Anchor, Badge, Button, Group, Loader, Paper, Select, Table, Text } from '@mantine/core';
+import {
+  Alert,
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  Loader,
+  NumberInput,
+  Paper,
+  Select,
+  Stack,
+  Table,
+  Text,
+} from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
@@ -35,6 +48,9 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pendingWeights, setPendingWeights] = useState<
+    Record<string, { event: number; pm: number }>
+  >({});
 
   const load = useCallback(async () => {
     try {
@@ -93,6 +109,40 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
     }
   };
 
+  const saveRotation = async (panel: ForgeKeyEPaperDisplay) => {
+    const pending = pendingWeights[panel.id];
+    if (!pending) return;
+    if (
+      pending.event === panel.event_face_weight &&
+      pending.pm === panel.pm_face_weight
+    ) {
+      setPendingWeights((prev) => {
+        const next = { ...prev };
+        delete next[panel.id];
+        return next;
+      });
+      return;
+    }
+    setBusyId(panel.id);
+    try {
+      const res = await forgekeyAPI.setEPaperRotation(panel.id, {
+        event_face_weight: pending.event,
+        pm_face_weight: pending.pm,
+      });
+      setPanels((prev) => prev.map((p) => (p.id === panel.id ? { ...p, ...res.data } : p)));
+      setPendingWeights((prev) => {
+        const next = { ...prev };
+        delete next[panel.id];
+        return next;
+      });
+      setError(null);
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to update rotation weights.'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleBind = async (panel: ForgeKeyEPaperDisplay, assetId: string | null) => {
     if (!assetId || assetId === panel.asset) {
       return;
@@ -136,7 +186,7 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
         </Paper>
       ) : (
         <Paper withBorder>
-          <Table.ScrollContainer minWidth={760}>
+          <Table.ScrollContainer minWidth={920}>
             <Table highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
@@ -145,6 +195,7 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
                   <Table.Th>Last refresh</Table.Th>
                   <Table.Th>Device</Table.Th>
                   <Table.Th>Firmware</Table.Th>
+                  <Table.Th>Rotation</Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th>Actions</Table.Th>
                 </Table.Tr>
@@ -206,6 +257,59 @@ const ForgeKeyEPaperPanelsPage: React.FC = () => {
                           —
                         </Text>
                       )}
+                    </Table.Td>
+                    <Table.Td>
+                      <Stack gap={2} data-testid={`rotation-cell-${p.id}`}>
+                        <Group gap="xs" wrap="nowrap">
+                          <NumberInput
+                            size="xs"
+                            min={0}
+                            max={100}
+                            step={1}
+                            w={68}
+                            label="Event"
+                            value={pendingWeights[p.id]?.event ?? p.event_face_weight}
+                            onChange={(v) => {
+                              const n =
+                                typeof v === 'number' ? v : parseInt(String(v || '0'), 10) || 0;
+                              setPendingWeights((prev) => ({
+                                ...prev,
+                                [p.id]: {
+                                  event: n,
+                                  pm: prev[p.id]?.pm ?? p.pm_face_weight,
+                                },
+                              }));
+                            }}
+                            onBlur={() => saveRotation(p)}
+                            data-testid={`rotation-event-${p.id}`}
+                          />
+                          <NumberInput
+                            size="xs"
+                            min={0}
+                            max={100}
+                            step={1}
+                            w={68}
+                            label="PM"
+                            value={pendingWeights[p.id]?.pm ?? p.pm_face_weight}
+                            onChange={(v) => {
+                              const n =
+                                typeof v === 'number' ? v : parseInt(String(v || '0'), 10) || 0;
+                              setPendingWeights((prev) => ({
+                                ...prev,
+                                [p.id]: {
+                                  event: prev[p.id]?.event ?? p.event_face_weight,
+                                  pm: n,
+                                },
+                              }));
+                            }}
+                            onBlur={() => saveRotation(p)}
+                            data-testid={`rotation-pm-${p.id}`}
+                          />
+                        </Group>
+                        <Text size="xs" c="dimmed">
+                          ratio {p.event_face_weight}:{p.pm_face_weight}
+                        </Text>
+                      </Stack>
                     </Table.Td>
                     <Table.Td>
                       <Badge color={p.is_active ? 'green' : 'gray'}>

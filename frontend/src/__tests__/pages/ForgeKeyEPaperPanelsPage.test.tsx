@@ -17,6 +17,7 @@ vi.mock('../../services/api', async () => {
     forgekeyAPI: {
       listEPaperDisplays: jest.fn(),
       setEPaperActive: jest.fn(),
+      setEPaperRotation: jest.fn(),
       bindEPaper: jest.fn(),
     },
     assetsAPI: { ...(actual as any).assetsAPI, listAssets: jest.fn() },
@@ -42,6 +43,9 @@ const buildPanel = (overrides: Partial<any> = {}) => ({
   target_firmware_version: null,
   target_firmware_version_string: null,
   is_active: true,
+  event_face_weight: 2,
+  pm_face_weight: 1,
+  rotation_counter: 0,
   created_at: '2026-05-01T00:00:00Z',
   updated_at: '2026-05-01T00:00:00Z',
   ...overrides,
@@ -138,6 +142,43 @@ describe('ForgeKeyEPaperPanelsPage', () => {
         ordering: 'name',
       });
     });
+  });
+
+  test('editing rotation weights posts to setEPaperRotation on blur', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({ data: [buildPanel()] } as any);
+    mockApi.setEPaperRotation.mockResolvedValue({
+      data: buildPanel({ event_face_weight: 5, pm_face_weight: 1 }),
+    } as any);
+
+    renderPage();
+
+    const eventInput = await screen.findByTestId('rotation-event-p1');
+    fireEvent.change(eventInput, { target: { value: '5' } });
+    fireEvent.blur(eventInput);
+
+    await waitFor(() => {
+      expect(mockApi.setEPaperRotation).toHaveBeenCalledWith('p1', {
+        event_face_weight: 5,
+        pm_face_weight: 1,
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('ratio 5:1')).toBeInTheDocument();
+    });
+  });
+
+  test('blur with unchanged weights does not POST', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listEPaperDisplays.mockResolvedValue({ data: [buildPanel()] } as any);
+
+    renderPage();
+
+    const eventInput = await screen.findByTestId('rotation-event-p1');
+    fireEvent.blur(eventInput);
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(mockApi.setEPaperRotation).not.toHaveBeenCalled();
   });
 
   test('shows reported firmware version and pending rollout target', async () => {

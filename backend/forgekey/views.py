@@ -3133,3 +3133,50 @@ class EPaperDisplaySetActiveView(APIView):
         display.is_active = is_active
         display.save(update_fields=["is_active", "updated_at"])
         return Response(EPaperDisplaySerializer(display).data)
+
+
+class EPaperDisplaySetRotationView(APIView):
+    """Set the per-panel rotation weights for the OOS/reservation/PM picker.
+
+    ``POST {"event_face_weight": 2, "pm_face_weight": 1}``. Both fields
+    are optional; the omitted one stays put. Values are coerced to
+    non-negative ints and clipped at 100 (anything beyond that produces
+    a useless cycle length). Both at 0 falls back to PM in
+    ``_pick_face``, so the operator can use the same surface to switch
+    rotation off entirely.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, display_id):
+        try:
+            display = EPaperDisplay.objects.get(pk=display_id)
+        except EPaperDisplay.DoesNotExist:
+            return Response({"detail": "Display not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        update_fields: list[str] = ["updated_at"]
+        for field in ("event_face_weight", "pm_face_weight"):
+            if field not in request.data:
+                continue
+            try:
+                raw = int(request.data[field])
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": f"{field} must be an integer."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if raw < 0:
+                return Response(
+                    {"detail": f"{field} must be non-negative."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            setattr(display, field, min(raw, 100))
+            update_fields.append(field)
+
+        if len(update_fields) == 1:
+            # Nothing was sent — surface the current row anyway so the
+            # caller doesn't need to round-trip a separate GET.
+            return Response(EPaperDisplaySerializer(display).data)
+
+        display.save(update_fields=update_fields)
+        return Response(EPaperDisplaySerializer(display).data)

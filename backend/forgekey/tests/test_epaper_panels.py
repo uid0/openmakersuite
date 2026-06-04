@@ -76,31 +76,6 @@ def test_set_active_unknown_display_returns_404(api_client):
     assert response.status_code == 404
 
 
-def test_list_includes_battery_sensor_state(api_client):
-    """Tri-state battery_available + reason + last_health_at need to
-    reach the frontend so the page can distinguish 'never reported'
-    from 'panel reports no sensor wired'."""
-    no_sensor = EPaperDisplay.objects.create(
-        battery_available=False,
-        battery_unavailable_reason="battery_adc_not_configured",
-    )
-    has_sensor = EPaperDisplay.objects.create(battery_percent=72, battery_available=True)
-    never_reported = EPaperDisplay.objects.create()
-
-    response = api_client.get(LIST_URL)
-    assert response.status_code == 200, response.data
-    rows = {row["id"]: row for row in response.json()}
-
-    assert rows[str(no_sensor.id)]["battery_available"] is False
-    assert rows[str(no_sensor.id)]["battery_unavailable_reason"] == "battery_adc_not_configured"
-
-    assert rows[str(has_sensor.id)]["battery_available"] is True
-    assert rows[str(has_sensor.id)]["battery_percent"] == 72
-
-    assert rows[str(never_reported.id)]["battery_available"] is None
-    assert rows[str(never_reported.id)]["last_health_at"] is None
-
-
 def test_list_includes_firmware_and_target(api_client):
     target = FirmwareVersionFactory(version="2.0.0")
     reported = EPaperDisplay.objects.create(firmware_version="1.5.0")

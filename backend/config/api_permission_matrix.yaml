@@ -669,6 +669,9 @@ views:
   forgekey.views.EPaperDisplaySetActiveView:
     permission_classes:
     - IsAuthenticated
+  forgekey.views.EPaperDisplaySetRotationView:
+    permission_classes:
+    - IsAuthenticated
   forgekey.views.EPaperFirmwareCheckView:
     permission_classes:
     - AllowAny

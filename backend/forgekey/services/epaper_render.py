@@ -35,7 +35,7 @@ from django.utils import timezone
 
 from PIL import Image, ImageDraw, ImageFont
 
-from inventory.models import Asset, MaintenanceItem
+from inventory.models import Asset, AssetOutOfService, AssetReservation, MaintenanceItem
 
 EPAPER_WIDTH = 800
 EPAPER_HEIGHT = 480
@@ -348,3 +348,330 @@ def render_pm_image(asset: Asset, *, service_url: str | None = None) -> bytes:
     buffer = io.BytesIO()
     img.save(buffer, format="PNG", optimize=True)
     return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Face selection — PM / reservation / OOS
+# ---------------------------------------------------------------------------
+
+
+FACE_PM = "pm"
+FACE_RESERVATION = "reservation"
+FACE_OOS = "oos"
+
+
+def _current_oos(asset: Asset) -> AssetOutOfService | None:
+    """Open (unrestored) OOS row for this asset, if any."""
+    return (
+        AssetOutOfService.objects.filter(asset=asset, restored_at__isnull=True)
+        .order_by("-placed_out_at")
+        .first()
+    )
+
+
+def _current_reservation(asset: Asset) -> AssetReservation | None:
+    """Reservation whose [starts_at, ends_at) window contains now."""
+    now = timezone.now()
+    return (
+        AssetReservation.objects.filter(
+            asset=asset,
+            cancelled_at__isnull=True,
+            starts_at__lte=now,
+            ends_at__gt=now,
+        )
+        .order_by("starts_at")
+        .first()
+    )
+
+
+def _pick_face(asset: Asset, display) -> tuple[str, AssetOutOfService | AssetReservation | None]:
+    """Choose which face the panel should show on this request.
+
+    Precedence (highest first):
+    1. Open OOS — preempts everything. There is no rotation; the panel
+       belongs to the OOS narrative until the asset is restored.
+    2. Current reservation AND eligible PM task — rotate based on the
+       per-display ``event_face_weight`` / ``pm_face_weight``. The
+       ``rotation_counter`` modulo the weight sum picks this fetch's
+       face; the caller advances the counter after rendering so the
+       next fetch picks the next face in the cycle.
+    3. Current reservation only (or PM-eligibility check fails) — show
+       the reservation face every wake.
+    4. Default — PM face.
+
+    Returns ``(face, source_row)`` where ``source_row`` is the OOS or
+    reservation feeding the chosen face (None for PM).
+    """
+    oos = _current_oos(asset)
+    if oos is not None:
+        return FACE_OOS, oos
+
+    reservation = _current_reservation(asset)
+    pm_eligible = _next_due_item(asset) is not None
+
+    if reservation is not None and pm_eligible:
+        event_w = max(0, getattr(display, "event_face_weight", 2)) if display is not None else 2
+        pm_w = max(0, getattr(display, "pm_face_weight", 1)) if display is not None else 1
+        total = event_w + pm_w
+        if total == 0:
+            # Operator set both weights to zero; treat as "always PM" so the
+            # panel still has something to draw.
+            return FACE_PM, None
+        counter = int(getattr(display, "rotation_counter", 0)) if display is not None else 0
+        if (counter % total) < event_w:
+            return FACE_RESERVATION, reservation
+        return FACE_PM, None
+
+    if reservation is not None:
+        return FACE_RESERVATION, reservation
+
+    return FACE_PM, None
+
+
+# ---------------------------------------------------------------------------
+# OOS + Reservation renderers
+# ---------------------------------------------------------------------------
+
+
+def _draw_eyebrow(draw, eyebrow_text: str, right: int, *, inverted: bool = False) -> int:
+    """Render the eyebrow + rule and return the y-coordinate of the rule.
+
+    When ``inverted`` is True, the eyebrow is drawn as a black bar with
+    white text — used to make the OOS face read across the shop floor
+    without anyone having to walk up.
+    """
+    font = _font("mono_bold", 24)
+    if inverted:
+        bar_top = _MARGIN - 12
+        bar_bottom = _MARGIN + 22
+        draw.rectangle([(_MARGIN - 10, bar_top), (right + 10, bar_bottom)], fill=_FG)
+        draw.text((_MARGIN, _MARGIN - 8), eyebrow_text, font=font, fill=_BG)
+        rule_y = bar_bottom + 6
+    else:
+        draw.text((_MARGIN, _MARGIN - 8), eyebrow_text, font=font, fill=_FG)
+        rule_y = _MARGIN + 26
+    draw.line([(_MARGIN, rule_y), (right, rule_y)], fill=_FG, width=2)
+    return rule_y
+
+
+def _draw_asset_headline(draw, name: str, rule_y: int, right: int) -> int:
+    """Asset name auto-fit + wrapped to 2 lines. Returns the new y cursor."""
+    name = (name or "UNNAMED ASSET").upper()
+    name_font = _fit_font(draw, name, "sans_bold", 52, 30, EPAPER_WIDTH - 2 * _MARGIN)
+    name_lines = _wrap(draw, name, name_font, EPAPER_WIDTH - 2 * _MARGIN, max_lines=2)
+    y = rule_y + 18
+    for line in name_lines:
+        draw.text((_MARGIN, y), line, font=name_font, fill=_FG)
+        y += _text_size(draw, line, name_font)[1] + 8
+    return y
+
+
+def render_oos_image(asset: Asset, oos: AssetOutOfService) -> bytes:
+    """Render the OUT OF SERVICE face for ``asset``.
+
+    Layout reflects the user's spec: when the asset was placed out, who
+    placed it out, and the expected return date when known. Eyebrow is
+    inverted so the alarm reads from across the room.
+    """
+    img = Image.new("L", (EPAPER_WIDTH, EPAPER_HEIGHT), color=_BG)
+    draw = ImageDraw.Draw(img)
+    right = EPAPER_WIDTH - _MARGIN
+
+    # Thicker frame than the PM face — distinct silhouette.
+    draw.rectangle([(5, 5), (EPAPER_WIDTH - 6, EPAPER_HEIGHT - 6)], outline=_FG, width=6)
+
+    rule_y = _draw_eyebrow(draw, "OUT OF SERVICE", right, inverted=True)
+    y = _draw_asset_headline(draw, asset.name, rule_y, right)
+
+    body_font = _font("sans", 26)
+    meta_font = _font("mono_bold", 22)
+    y += 10
+
+    placed_local = timezone.localtime(oos.placed_out_at).strftime("%Y-%m-%d %H:%M")
+    placed_by_name = (
+        oos.placed_by.get_full_name() or oos.placed_by.username
+        if oos.placed_by_id is not None
+        else "—"
+    )
+    rows = [
+        ("PLACED OUT", placed_local),
+        ("BY", placed_by_name),
+    ]
+    if oos.expected_return_at is not None:
+        rows.append(
+            ("EXPECTED BACK", timezone.localtime(oos.expected_return_at).strftime("%Y-%m-%d"))
+        )
+    else:
+        rows.append(("EXPECTED BACK", "TBD"))
+
+    label_w = max(_text_size(draw, label, meta_font)[0] for label, _ in rows)
+    for label, value in rows:
+        draw.text((_MARGIN, y), label, font=meta_font, fill=_FG)
+        draw.text((_MARGIN + label_w + 20, y), value, font=body_font, fill=_FG)
+        y += max(_text_size(draw, label, meta_font)[1], _text_size(draw, value, body_font)[1]) + 12
+
+    # Reason — multi-line, fills remaining vertical room.
+    y += 6
+    draw.line([(_MARGIN, y), (right, y)], fill=_FG, width=1)
+    y += 10
+    reason_font = _font("sans", 24)
+    reason_lines = _wrap(
+        draw,
+        oos.reason or "(no reason recorded)",
+        reason_font,
+        right - _MARGIN,
+        max_lines=6,
+    )
+    for line in reason_lines:
+        draw.text((_MARGIN, y), line, font=reason_font, fill=_FG)
+        y += _text_size(draw, line, reason_font)[1] + 6
+
+    # Footer.
+    foot_y = EPAPER_HEIGHT - _MARGIN - 18
+    draw.line([(_MARGIN, foot_y - 8), (right, foot_y - 8)], fill=_FG, width=1)
+    tag = getattr(asset, "asset_tag", "") or ""
+    footer = "Do not operate"
+    if tag:
+        footer = f"{footer}   ·   {tag}"
+    draw.text((_MARGIN, foot_y), footer, font=_font("sans", 19), fill=_FG)
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def render_reservation_image(asset: Asset, reservation: AssetReservation) -> bytes:
+    """Render the RESERVED face — title, reserver, ends_at, remaining."""
+    img = Image.new("L", (EPAPER_WIDTH, EPAPER_HEIGHT), color=_BG)
+    draw = ImageDraw.Draw(img)
+    right = EPAPER_WIDTH - _MARGIN
+
+    draw.rectangle([(5, 5), (EPAPER_WIDTH - 6, EPAPER_HEIGHT - 6)], outline=_FG, width=4)
+
+    rule_y = _draw_eyebrow(draw, "RESERVED", right)
+    y = _draw_asset_headline(draw, asset.name, rule_y, right)
+
+    title_font = _fit_font(draw, reservation.title, "sans_bold", 38, 22, EPAPER_WIDTH - 2 * _MARGIN)
+    for line in _wrap(draw, reservation.title, title_font, EPAPER_WIDTH - 2 * _MARGIN, max_lines=2):
+        draw.text((_MARGIN, y), line, font=title_font, fill=_FG)
+        y += _text_size(draw, line, title_font)[1] + 6
+
+    meta_font = _font("mono_bold", 22)
+    body_font = _font("sans", 26)
+    y += 14
+
+    reserved_by_name = (
+        reservation.reserved_by.get_full_name() or reservation.reserved_by.username
+        if reservation.reserved_by_id is not None
+        else "—"
+    )
+    ends_local = timezone.localtime(reservation.ends_at)
+    rows = [
+        ("RESERVED BY", reserved_by_name),
+        ("ENDS", ends_local.strftime("%Y-%m-%d %H:%M")),
+    ]
+    label_w = max(_text_size(draw, label, meta_font)[0] for label, _ in rows)
+    for label, value in rows:
+        draw.text((_MARGIN, y), label, font=meta_font, fill=_FG)
+        draw.text((_MARGIN + label_w + 20, y), value, font=body_font, fill=_FG)
+        y += max(_text_size(draw, label, meta_font)[1], _text_size(draw, value, body_font)[1]) + 10
+
+    # Time remaining — big glanceable number, mirror of PM's status box.
+    remaining = ends_local - timezone.localtime()
+    minutes_left = int(remaining.total_seconds() // 60)
+    if minutes_left < 0:
+        time_text = "ENDED"
+    elif minutes_left < 60:
+        time_text = f"{minutes_left}m LEFT"
+    elif minutes_left < 24 * 60:
+        time_text = f"{minutes_left // 60}h {minutes_left % 60:02d}m LEFT"
+    else:
+        time_text = f"{minutes_left // (24 * 60)}d LEFT"
+
+    box_top = max(y + 14, EPAPER_HEIGHT - _MARGIN - 130)
+    box_bottom = EPAPER_HEIGHT - _MARGIN - 36
+    box_left = _MARGIN
+    box_right = right
+    status_font = _fit_font(draw, time_text, "sans_bold", 60, 26, (box_right - box_left) - 36)
+    sw, sh = _text_size(draw, time_text, status_font)
+    cx = box_left + (box_right - box_left) // 2
+    cy = box_top + (box_bottom - box_top) // 2
+    draw.rectangle([(box_left, box_top), (box_right, box_bottom)], outline=_FG, width=3)
+    draw.text((cx - sw // 2, cy - sh // 2 - 6), time_text, font=status_font, fill=_FG)
+
+    foot_y = EPAPER_HEIGHT - _MARGIN - 18
+    draw.line([(_MARGIN, foot_y - 8), (right, foot_y - 8)], fill=_FG, width=1)
+    tag = getattr(asset, "asset_tag", "") or ""
+    footer_left = f"Started {timezone.localtime(reservation.starts_at).strftime('%Y-%m-%d %H:%M')}"
+    if tag:
+        footer_left = f"{footer_left}   ·   {tag}"
+    draw.text((_MARGIN, foot_y), footer_left, font=_font("sans", 19), fill=_FG)
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Top-level entry point + multi-face etag
+# ---------------------------------------------------------------------------
+
+
+def compute_display_etag(asset: Asset, display) -> str:
+    """Etag that covers the chosen face, not just the PM snapshot.
+
+    Includes (face, source-row pk, OOS pk, reservation pk, plus the
+    existing PM fingerprint). The rotation slot is only folded in when
+    rotation actually competes — i.e. both a current reservation AND
+    an eligible PM are present — so single-face panels still 304 on
+    repeat fetches even though the counter advances server-side.
+    """
+    face, source = _pick_face(asset, display)
+
+    pm_part = compute_snapshot_etag(asset)
+    parts: list[str] = [face, pm_part]
+    if source is not None:
+        parts.append(str(source.pk))
+        if face == FACE_OOS:
+            parts.append(source.updated_at.isoformat())
+        elif face == FACE_RESERVATION:
+            parts.append(source.ends_at.isoformat())
+            # Bucket the time remaining to ~5-minute precision so the
+            # "time left" headline updates without thrashing every minute.
+            now = timezone.now()
+            buckets_left = max(0, int((source.ends_at - now).total_seconds() // 300))
+            parts.append(str(buckets_left))
+    if display is not None and _rotation_competes(asset):
+        event_w = max(0, getattr(display, "event_face_weight", 2))
+        pm_w = max(0, getattr(display, "pm_face_weight", 1))
+        counter = int(getattr(display, "rotation_counter", 0))
+        total = event_w + pm_w
+        if total > 0:
+            parts.append(f"rot:{counter % total}/{total}")
+    digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+    return digest[:32]
+
+
+def _rotation_competes(asset: Asset) -> bool:
+    """True iff the panel would alternate faces — both PM and a current
+    reservation are eligible, no OOS preempting."""
+    if _current_oos(asset) is not None:
+        return False
+    return _current_reservation(asset) is not None and _next_due_item(asset) is not None
+
+
+def render_image(
+    asset: Asset, display=None, *, service_url: str | None = None
+) -> tuple[bytes, str]:
+    """Pick the face, render it, and report which face we drew.
+
+    Caller is expected to advance ``display.rotation_counter`` after a
+    successful response when ``display`` is not None and the chosen
+    face was the rotation outcome — see views.EPaperDisplayImageView.
+    """
+    face, source = _pick_face(asset, display)
+    if face == FACE_OOS:
+        return render_oos_image(asset, source), face
+    if face == FACE_RESERVATION:
+        return render_reservation_image(asset, source), face
+    return render_pm_image(asset, service_url=service_url), face

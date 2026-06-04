@@ -6,6 +6,7 @@ import { Badge, Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AssetForgeKeyAccessCard from '../components/AssetForgeKeyAccessCard';
+import AssetReservationsAndOOSSection from '../components/AssetReservationsAndOOSSection';
 import MaintenanceHistorySection from '../components/assets/MaintenanceHistorySection';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
@@ -1001,6 +1002,8 @@ const AssetDetailPage: React.FC = () => {
             </ul>
           )}
         </section>
+
+        {id && <AssetReservationsAndOOSSection assetId={id} />}
 
         {id && (
           <MaintenanceHistorySection

@@ -140,12 +140,24 @@ def _required_cert_names(asset: Asset) -> list[str]:
 
 
 def _snapshot_fingerprint(asset: Asset, items: Iterable[MaintenanceItem]) -> str:
-    """Return a stable hex fingerprint of the inputs to the rendered image."""
+    """Return a stable hex fingerprint of the inputs to the rendered image.
+
+    Includes ``today`` because the rendered PNG carries day-level
+    derivations (``X DAYS REMAINING``, the OVERDUE/WARNING/OK bucket
+    that drives the inverted-box treatment). Without this, a panel
+    whose underlying ``MaintenanceItem.last_completed_at`` hasn't
+    changed since yesterday would keep getting 304s and display a
+    stale day count forever — the firmware wake cycle hits the
+    endpoint hourly, sees the unchanged ETag, and keeps the existing
+    paint. Folding the date in forces at most one fresh render per
+    UTC day, which is the natural granularity of what's displayed.
+    """
     parts: list[str] = [
         str(asset.pk),
         asset.name,
         f"training={int(bool(getattr(asset, 'training_required', False)))}",
         "certs=" + "|".join(_required_cert_names(asset)),
+        f"date={timezone.now().date().isoformat()}",
     ]
     for item in items:
         last = item.last_completed_at.isoformat() if item.last_completed_at else "never"

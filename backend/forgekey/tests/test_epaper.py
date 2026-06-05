@@ -116,6 +116,22 @@ class TestEPaperRender:
         after = compute_snapshot_etag(asset)
         assert before != after
 
+    def test_etag_changes_when_date_changes(self):
+        # The rendered PNG shows "X DAYS REMAINING" which decrements
+        # daily, so the ETag must change at the UTC date boundary —
+        # otherwise a panel that woke yesterday keeps getting 304s
+        # and displays a stale day count. Simulate tomorrow by
+        # advancing timezone.now().
+        from datetime import timedelta as _td
+
+        asset = _make_asset("Bandsaw")
+        _make_item(asset, "Blade tension", interval_days=30, last_done_days=10)
+        before = compute_snapshot_etag(asset)
+        tomorrow = timezone.now() + _td(days=1)
+        with patch("forgekey.services.epaper_render.timezone.now", return_value=tomorrow):
+            after = compute_snapshot_etag(asset)
+        assert before != after
+
     def test_render_returns_png_bytes(self):
         asset = _make_asset()
         _make_item(asset, "Filter swap", interval_days=90)

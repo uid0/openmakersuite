@@ -33,7 +33,15 @@ ACTION_ASSET_CHECKIN = "asset_checkin"
 ACTION_LOCATION_CHECKIN = "location_checkin"
 ACTION_FIXTURE = "fixture"
 ACTION_DONATION_ITEM = "donation_item"
+ACTION_PROJECT_STORAGE_STINT = "project_storage_stint"
 ACTION_UNKNOWN = "unknown"
+
+# stint_id format: "PS-" + 8 chars of the Crockford-base32-ish alphabet
+# (no I/L/O/0/1). Mirrors project_storage.models._generate_stint_id so a
+# scanner-bound payload here matches what the label-printing pipeline
+# encodes into the QR. A regex (rather than a startswith) keeps free-text
+# strings that just happen to begin with "PS-" out of the dispatcher.
+_PROJECT_STORAGE_STINT_RE = re.compile(r"^PS-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$")
 
 # UUID pattern (lowercase or mixed) for matching trailing IDs in QR URLs.
 _UUID_RE = re.compile(
@@ -148,12 +156,20 @@ def resolve(payload: str) -> ResolvedScan:
     if _LOCATION_CODE_RE.match(raw.upper()):
         return _resolve_location_code(raw.upper())
 
-    # 4) Asset tag (exact match — no format constraint).
+    # 4) Project-storage stint (PS-XXXXXXXX). Format-guarded so a
+    # free-text asset tag that just happens to start with "PS-" doesn't
+    # land in the stint table.
+    if _PROJECT_STORAGE_STINT_RE.match(raw.upper()):
+        stint = _resolve_project_storage_stint(raw.upper(), raw)
+        if stint is not None:
+            return stint
+
+    # 5) Asset tag (exact match — no format constraint).
     asset = _resolve_asset_tag(raw)
     if asset is not None:
         return asset
 
-    # 5) Unknown.
+    # 6) Unknown.
     return ResolvedScan(
         action=ACTION_UNKNOWN,
         message=(
@@ -319,6 +335,34 @@ def _resolve_asset_tag(payload: str) -> Optional[ResolvedScan]:
         target_name=asset.name,
         target_url=f"/inventory/assets/{asset.id}",
         raw_payload=payload,
+    )
+
+
+def _resolve_project_storage_stint(stint_id: str, raw: str) -> Optional[ResolvedScan]:
+    """Resolve a PS-XXXXXXXX stint_id scan.
+
+    Returns None when the prefix matches but the stint doesn't exist —
+    the caller falls through to ACTION_UNKNOWN with the generic
+    "couldn't identify" message instead of asserting "PS-FOO123 isn't
+    a stint", which would be misleading if a future operator reused the
+    PS- prefix for something else.
+
+    The frontend route assumes /facilities/project-storage/<stint_id>
+    will exist (PR 3 wires the permalink). Until PR 3 lands the warden
+    page redirects to its lookup form on a missing :stintId param.
+    """
+    from project_storage.models import ProjectStorageStint
+
+    stint = ProjectStorageStint.objects.filter(stint_id=stint_id).first()
+    if stint is None:
+        return None
+    return ResolvedScan(
+        action=ACTION_PROJECT_STORAGE_STINT,
+        target_type="project_storage_stint",
+        target_id=stint.stint_id,
+        target_name=stint.display_name,
+        target_url=f"/facilities/project-storage/{stint.stint_id}",
+        raw_payload=raw,
     )
 
 

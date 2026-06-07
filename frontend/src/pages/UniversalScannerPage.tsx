@@ -136,6 +136,13 @@ const UniversalScannerPage: React.FC = () => {
           case 'donation_item': {
             return { outcome: 'success', message: 'Resolved — open the target.' };
           }
+          case 'project_storage_stint': {
+            // The warden console reads the stint server-side; the
+            // dispatcher just confirms the QR matched a real PS-XXX row.
+            // The scan history surfaces target_url so the user can
+            // click into the warden detail page.
+            return { outcome: 'success', message: 'Stint resolved — open to take warden action.' };
+          }
           case 'unknown':
           default:
             return { outcome: 'error', message: result.message ?? 'Unknown payload.' };

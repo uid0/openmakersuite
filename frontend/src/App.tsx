@@ -30,6 +30,7 @@ import ElectricalCircuitsPage from './pages/ElectricalCircuitsPage';
 import ElectricalOverviewPage from './pages/ElectricalOverviewPage';
 import FacilitiesChecklistsPage from './pages/FacilitiesChecklistsPage';
 import FacilitiesOverviewPage from './pages/FacilitiesOverviewPage';
+import FacilitiesProjectStorageListPage from './pages/FacilitiesProjectStorageListPage';
 import FacilitiesProjectStoragePage from './pages/FacilitiesProjectStoragePage';
 import PowerBreakerFormPage from './pages/PowerBreakerFormPage';
 import PowerCircuitFormPage from './pages/PowerCircuitFormPage';
@@ -336,6 +337,7 @@ function AppContent() {
           <Route path="/maintenance/location-problems/:id" element={<WorkspaceLayout><LocationProblemDetailPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist" element={<WorkspaceLayout><FacilitiesChecklistsPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist/:checklistId/complete/:completionId" element={<WorkspaceLayout><ChecklistCompletionPage /></WorkspaceLayout>} />
+          <Route path="/facilities/project-storage/queue" element={<WorkspaceLayout><FacilitiesProjectStorageListPage /></WorkspaceLayout>} />
           <Route path="/facilities/project-storage" element={<WorkspaceLayout><FacilitiesProjectStoragePage /></WorkspaceLayout>} />
 
           {/* SIGs Workspace */}

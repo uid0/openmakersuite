@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -3505,6 +3505,19 @@ export const pulseAPI = {
 // ---------------------------------------------------------------------------
 
 export const projectStorageAPI = {
+  list: (params?: {
+    status?: ProjectStorageStatus;
+    ordering?: 'expires_at' | '-expires_at' | 'started_at' | '-started_at';
+    page?: number;
+    page_size?: number;
+  }) =>
+    api.get<{
+      count: number;
+      next: string | null;
+      previous: string | null;
+      results: ProjectStorageStint[];
+    }>('/project-storage/stints/', { params }),
+
   get: (stintId: string) =>
     api.get<ProjectStorageStint>(`/project-storage/stints/${stintId}/`),
 

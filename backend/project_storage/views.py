@@ -17,6 +17,7 @@ from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 
 from .models import ProjectStorageEvent, ProjectStorageStint
+from .permissions import IsStorageAdminOrStaff
 from .serializers import (
     ProjectStorageStintSerializer,
     StartStintSerializer,
@@ -29,15 +30,12 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ProjectStorageStint.objects.all().prefetch_related("events")
     serializer_class = ProjectStorageStintSerializer
     lookup_field = "stint_id"
-
-    def get_permissions(self):
-        # AllowAny on the kiosk + Pi-daemon paths; staff for everything
-        # else. The decorators below also set permission_classes so the
-        # routing is obvious at the call site, but this central list is
-        # the safety net for actions reached through self.get_object().
-        if self.action in ("start", "label", "print_queue", "mark_printed"):
-            return [AllowAny()]
-        return [IsAdminUser()]
+    # Class-level default for list + retrieve (the DRF-built-in actions
+    # that have no @action decorator). Each @action overrides this with
+    # its own permission_classes, kept verbatim on the decorator so the
+    # API permission-matrix gate (config/permission_matrix.py) snapshots
+    # them without re-implementing the get_permissions() logic.
+    permission_classes = [IsStorageAdminOrStaff]
 
     # ------------------------------------------------------------------
     # Self-service: member at a kiosk
@@ -103,6 +101,7 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         detail=False,
         methods=["get"],
         url_path=r"by-member/(?P<username>[^/.]+)",
+        permission_classes=[IsStorageAdminOrStaff],
     )
     def by_member(self, request, username: str):
         """All stints (most recent first) for one member."""
@@ -113,11 +112,86 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return Response(ProjectStorageStintSerializer(stints, many=True).data)
 
+    def get_queryset(self):
+        """Apply ?status=… and ?ordering=… to the read-only list endpoint.
+
+        compute_status() is Python-side, so we translate each STATUS_*
+        bucket into the column predicates that compute_status() uses
+        and filter at the DB. Order matters in compute_status (terminal
+        wins) so each filter has to exclude the rows a higher-priority
+        status would claim.
+
+        Supported orderings: ``expires_at``, ``-expires_at``,
+        ``started_at``, ``-started_at``. Anything else falls back to the
+        default (-started_at, newest first) so an operator can't tank
+        the warden queue by passing a junk field.
+        """
+        from datetime import timedelta as _td
+
+        from django.utils import timezone as _tz
+
+        from .models import EXPIRING_SOON_WINDOW_DAYS
+
+        qs = super().get_queryset()
+        status_filter = (
+            self.request.query_params.get("status") if hasattr(self, "request") else None
+        )
+        if status_filter:
+            now = _tz.now()
+            soon = now + _td(days=EXPIRING_SOON_WINDOW_DAYS)
+            if status_filter == ProjectStorageStint.STATUS_REMOVED:
+                qs = qs.filter(removed_at__isnull=False)
+            elif status_filter == ProjectStorageStint.STATUS_PURGATORY:
+                qs = qs.filter(removed_at__isnull=True, moved_to_purgatory_at__isnull=False)
+            elif status_filter == ProjectStorageStint.STATUS_PURGATORY_WARNED:
+                qs = qs.filter(
+                    removed_at__isnull=True,
+                    moved_to_purgatory_at__isnull=True,
+                    notice_sent_at__isnull=False,
+                )
+            elif status_filter == ProjectStorageStint.STATUS_EXPIRED:
+                qs = qs.filter(
+                    removed_at__isnull=True,
+                    moved_to_purgatory_at__isnull=True,
+                    notice_sent_at__isnull=True,
+                    expires_at__lte=now,
+                )
+            elif status_filter == ProjectStorageStint.STATUS_EXPIRING_SOON:
+                qs = qs.filter(
+                    removed_at__isnull=True,
+                    moved_to_purgatory_at__isnull=True,
+                    notice_sent_at__isnull=True,
+                    expires_at__gt=now,
+                    expires_at__lte=soon,
+                )
+            elif status_filter == ProjectStorageStint.STATUS_ACTIVE:
+                qs = qs.filter(
+                    removed_at__isnull=True,
+                    moved_to_purgatory_at__isnull=True,
+                    notice_sent_at__isnull=True,
+                    expires_at__gt=soon,
+                )
+            # Unknown status values fall through unchanged — DRF will
+            # return whatever the queryset has, the frontend's pill
+            # filter only sends known values.
+
+        ordering = self.request.query_params.get("ordering") if hasattr(self, "request") else None
+        if ordering in ("expires_at", "-expires_at", "started_at", "-started_at"):
+            qs = qs.order_by(ordering)
+        else:
+            qs = qs.order_by("-started_at")
+        return qs
+
     # ------------------------------------------------------------------
     # Warden mutating actions
     # ------------------------------------------------------------------
 
-    @action(detail=True, methods=["post"], url_path="send-violation-notice")
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="send-violation-notice",
+        permission_classes=[IsAdminUser],
+    )
     def send_violation_notice(self, request, stint_id: str):
         stint = self.get_object()
         if stint.compute_status() not in (
@@ -156,7 +230,12 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return Response(ProjectStorageStintSerializer(stint).data)
 
-    @action(detail=True, methods=["post"], url_path="move-to-purgatory")
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="move-to-purgatory",
+        permission_classes=[IsAdminUser],
+    )
     def move_to_purgatory(self, request, stint_id: str):
         stint = self.get_object()
         if stint.notice_sent_at is None:
@@ -189,7 +268,9 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return Response(ProjectStorageStintSerializer(stint).data)
 
-    @action(detail=True, methods=["post"], url_path="mark-removed")
+    @action(
+        detail=True, methods=["post"], url_path="mark-removed", permission_classes=[IsAdminUser]
+    )
     def mark_removed(self, request, stint_id: str):
         stint = self.get_object()
         if stint.removed_at is not None:

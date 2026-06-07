@@ -53,6 +53,8 @@ const ENTRIES: RouteEntry[] = [
   { path: 'facilities/checklist', label: 'Checklist' },
   { path: 'facilities/screens', label: 'Screens' },
   { path: 'facilities/maker-boxes', label: 'Maker Boxes' },
+  { path: 'facilities/project-storage', label: 'Project Storage' },
+  { path: 'facilities/project-storage/queue', label: 'Queue' },
   { path: 'facilities/electrical', label: 'Electrical' },
   // Power-topology visualization ([6/7]). Resource leaves are not their
   // own listing pages — they're surfaced via the panel detail view — so

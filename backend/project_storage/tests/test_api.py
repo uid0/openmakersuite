@@ -262,3 +262,146 @@ class TestLabelEndpoint:
     def test_unknown_stint_returns_404(self, client):
         resp = client.get("/api/project-storage/stints/PS-NOPE0000/label/")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# List endpoint + status filter + StorageAdmin permission
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def storage_admin_client():
+    """Member of the 'Storage Admin' group, NOT is_staff."""
+    from django.contrib.auth.models import Group
+
+    User = get_user_model()
+    user = User.objects.create_user(username="storageadmin", password="x")
+    group, _ = Group.objects.get_or_create(name="Storage Admin")
+    user.groups.add(group)
+    api = APIClient()
+    api.force_authenticate(user=user)
+    return api
+
+
+@pytest.fixture
+def member_client():
+    """Plain authenticated member — no staff, no Storage Admin group."""
+    User = get_user_model()
+    user = User.objects.create_user(username="member", password="x")
+    api = APIClient()
+    api.force_authenticate(user=user)
+    return api
+
+
+class TestListEndpoint:
+    def test_anonymous_is_rejected(self, client):
+        ProjectStorageStintFactory()
+        resp = client.get("/api/project-storage/stints/")
+        assert resp.status_code in (401, 403)
+
+    def test_plain_member_is_rejected(self, member_client):
+        ProjectStorageStintFactory()
+        resp = member_client.get("/api/project-storage/stints/")
+        assert resp.status_code == 403
+
+    def test_staff_can_list(self, staff_client):
+        ProjectStorageStintFactory()
+        resp = staff_client.get("/api/project-storage/stints/")
+        assert resp.status_code == 200
+
+    def test_storage_admin_can_list(self, storage_admin_client):
+        # The whole point of the Storage Admin group: a warden volunteer
+        # who isn't is_staff still sees the queue.
+        ProjectStorageStintFactory()
+        resp = storage_admin_client.get("/api/project-storage/stints/")
+        assert resp.status_code == 200
+
+    def test_status_filter_active(self, staff_client):
+        # Active = fresh stint, nothing else set.
+        ProjectStorageStintFactory(
+            username="alice",
+            started_at=timezone.now() - timedelta(days=2),
+            expires_at=timezone.now() + timedelta(days=20),
+        )
+        # Removed stint that should NOT show up under active.
+        ProjectStorageStintFactory(
+            username="bob",
+            removed_at=timezone.now() - timedelta(days=1),
+        )
+        resp = staff_client.get("/api/project-storage/stints/?status=active")
+        assert resp.status_code == 200
+        body = resp.json()
+        rows = body["results"] if isinstance(body, dict) and "results" in body else body
+        usernames = {r["username"] for r in rows}
+        assert usernames == {"alice"}
+
+    def test_status_filter_expiring_soon(self, staff_client):
+        # Inside the 3-day warning window.
+        ProjectStorageStintFactory(
+            username="alice",
+            started_at=timezone.now() - timedelta(days=27),
+            expires_at=timezone.now() + timedelta(days=2),
+        )
+        # Active — outside the window.
+        ProjectStorageStintFactory(
+            username="bob",
+            expires_at=timezone.now() + timedelta(days=20),
+        )
+        resp = staff_client.get("/api/project-storage/stints/?status=expiring_soon")
+        body = resp.json()
+        rows = body["results"] if isinstance(body, dict) and "results" in body else body
+        assert {r["username"] for r in rows} == {"alice"}
+
+    def test_status_filter_purgatory_winner_takes_terminal(self, staff_client):
+        # A stint that's both expired AND in purgatory should land in
+        # the purgatory bucket — terminal states win in compute_status.
+        ProjectStorageStintFactory(
+            username="alice",
+            expires_at=timezone.now() - timedelta(days=10),
+            notice_sent_at=timezone.now() - timedelta(days=8),
+            moved_to_purgatory_at=timezone.now() - timedelta(days=1),
+        )
+        resp = staff_client.get("/api/project-storage/stints/?status=purgatory")
+        body = resp.json()
+        rows = body["results"] if isinstance(body, dict) and "results" in body else body
+        assert {r["username"] for r in rows} == {"alice"}
+        # Same stint should NOT show up under "expired".
+        resp2 = staff_client.get("/api/project-storage/stints/?status=expired")
+        body2 = resp2.json()
+        rows2 = body2["results"] if isinstance(body2, dict) and "results" in body2 else body2
+        assert not any(r["username"] == "alice" for r in rows2)
+
+    def test_ordering_by_expires_at(self, staff_client):
+        # Soonest-to-expire first when ordering=expires_at.
+        ProjectStorageStintFactory(username="late", expires_at=timezone.now() + timedelta(days=20))
+        ProjectStorageStintFactory(username="early", expires_at=timezone.now() + timedelta(days=2))
+        resp = staff_client.get("/api/project-storage/stints/?ordering=expires_at")
+        body = resp.json()
+        rows = body["results"] if isinstance(body, dict) and "results" in body else body
+        assert [r["username"] for r in rows[:2]] == ["early", "late"]
+
+    def test_unknown_ordering_falls_back_to_default(self, staff_client):
+        # Junk ordering value can't tank the warden queue.
+        ProjectStorageStintFactory(username="z")
+        resp = staff_client.get("/api/project-storage/stints/?ordering=drop+table")
+        assert resp.status_code == 200
+
+
+class TestMutatingActionsStayAdmin:
+    """Tightening notes: send-notice / move-to-purgatory / mark-removed
+    were previously matrix-listed as IsAuthenticatedOrReadOnly which the
+    matrix snapshotter inferred from the class default. They're tagged
+    IsAdminUser now; Storage Admin (a read-only group) must not be able
+    to trigger member-facing email or write off stored work."""
+
+    def test_storage_admin_cannot_mark_removed(self, storage_admin_client):
+        stint = ProjectStorageStintFactory()
+        resp = storage_admin_client.post(
+            f"/api/project-storage/stints/{stint.stint_id}/mark-removed/"
+        )
+        assert resp.status_code == 403
+
+    def test_staff_can_mark_removed(self, staff_client):
+        stint = ProjectStorageStintFactory()
+        resp = staff_client.post(f"/api/project-storage/stints/{stint.stint_id}/mark-removed/")
+        assert resp.status_code == 200

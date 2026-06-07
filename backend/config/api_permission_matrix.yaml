@@ -2143,31 +2143,31 @@ views:
     actions:
       by_member:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStorageAdminOrStaff
       label:
         permission_classes:
         - AllowAny
       list:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStorageAdminOrStaff
       mark_printed:
         permission_classes:
         - AllowAny
       mark_removed:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       move_to_purgatory:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       print_queue:
         permission_classes:
         - AllowAny
       retrieve:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsStorageAdminOrStaff
       send_violation_notice:
         permission_classes:
-        - IsAuthenticatedOrReadOnly
+        - IsAdminUser
       start:
         permission_classes:
         - AllowAny

@@ -70,11 +70,16 @@ const fmtDate = (iso: string | null): string => {
   }
 };
 
+// Avery 5371 holds 10 cards per sheet. The backend caps at this anyway,
+// but we surface it in the UI so the warden knows what they'll print.
+const SHEET_CAPACITY = 10;
+
 const FacilitiesProjectStorageListPage: React.FC = () => {
   const [stints, setStints] = useState<ProjectStorageStint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [printing, setPrinting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,6 +102,29 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handlePrintSheet = useCallback(async () => {
+    if (stints.length === 0) return;
+    setPrinting(true);
+    setError(null);
+    try {
+      const ids = stints.slice(0, SHEET_CAPACITY).map((s) => s.stint_id);
+      const res = await projectStorageAPI.printSheet(ids);
+      // Axios with responseType:'arraybuffer' returns the bytes in
+      // res.data; wrap in a Blob and open in a new tab so the warden
+      // can print from the browser print dialog.
+      const blob = new Blob([res.data], { type: 'image/png' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      // Don't revoke immediately — the new tab needs the URL to fetch
+      // the bytes. 60s is plenty for browser pickup.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to render Avery sheet.'));
+    } finally {
+      setPrinting(false);
+    }
+  }, [stints]);
 
   const counts = useMemo(() => {
     const out: Record<ProjectStorageStatus, number> = {
@@ -132,9 +160,22 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
       <Stack gap="md">
         <Paper p="md" withBorder>
           <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              Filter by status
-            </Text>
+            <Group justify="space-between" align="flex-end" wrap="wrap">
+              <Text size="sm" c="dimmed">
+                Filter by status
+              </Text>
+              <Button
+                size="xs"
+                variant="light"
+                onClick={handlePrintSheet}
+                loading={printing}
+                disabled={stints.length === 0}
+                data-testid="print-avery-sheet"
+              >
+                Print Avery sheet (
+                {Math.min(stints.length, SHEET_CAPACITY)}/{SHEET_CAPACITY})
+              </Button>
+            </Group>
             <SegmentedControl
               value={statusFilter}
               onChange={(v) => setStatusFilter(v as StatusFilter)}

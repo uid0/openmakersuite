@@ -2165,6 +2165,9 @@ views:
       print_queue:
         permission_classes:
         - AllowAny
+      print_sheet:
+        permission_classes:
+        - IsStorageAdminOrStaff
       retrieve:
         permission_classes:
         - IsStorageAdminOrStaff

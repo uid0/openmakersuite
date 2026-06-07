@@ -147,3 +147,56 @@ class TestScannerDispatch:
         item = InventoryItemFactory()
         response = _dispatch(api_client, f"/inventory/scan/{item.id}")
         assert response.status_code == status.HTTP_200_OK
+
+    # ------------------------------------------------------------------
+    # Project storage stints (PS-XXXXXXXX)
+    # ------------------------------------------------------------------
+
+    def test_project_storage_stint_resolved(self, api_client):
+        from project_storage.tests.factories import ProjectStorageStintFactory
+
+        stint = ProjectStorageStintFactory(
+            stint_id="PS-AB23CDFG",
+            username="alice",
+            first_name="Alice",
+            last_name="A",
+        )
+        response = _dispatch(api_client, "PS-AB23CDFG")
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["action"] == "project_storage_stint"
+        assert response.data["target_type"] == "project_storage_stint"
+        assert response.data["target_id"] == stint.stint_id
+        assert response.data["target_name"] == "Alice A"
+        assert response.data["target_url"] == f"/facilities/project-storage/{stint.stint_id}"
+
+    def test_project_storage_stint_lowercase_resolved(self, api_client):
+        # The stint_id alphabet is uppercase; the resolver normalizes
+        # before matching so a wedge scanner that down-cases the QR
+        # text still routes correctly.
+        from project_storage.tests.factories import ProjectStorageStintFactory
+
+        ProjectStorageStintFactory(stint_id="PS-AB23CDFG")
+        response = _dispatch(api_client, "ps-ab23cdfg")
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["action"] == "project_storage_stint"
+
+    def test_project_storage_unknown_stint_falls_through(self, api_client):
+        # PS-format string but no row by that id — caller gets the
+        # generic "unknown" so the dispatcher doesn't half-confirm
+        # something that isn't real.
+        response = _dispatch(api_client, "PS-99999999")
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["action"] == "unknown"
+
+    def test_ps_prefixed_asset_tag_still_routes_to_stint_format_first(self, api_client):
+        # An asset_tag that happens to look like "PS-NOTREAL" is NOT a
+        # stint — should fall through to asset-tag matching. The PS-
+        # format regex is strict enough (8 chars from the Crockford
+        # alphabet) that a free-text tag is unlikely to match by accident.
+        asset = AssetFactory(asset_tag="PS-LATHE")
+        response = _dispatch(api_client, "PS-LATHE")
+        # "PS-LATHE" has only 5 chars after the prefix, so the regex
+        # rejects it and we fall through to asset-tag.
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["action"] == "asset_checkin"
+        assert response.data["target_id"] == str(asset.id)

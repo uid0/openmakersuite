@@ -3551,6 +3551,7 @@ export interface ScanDispatchResult {
     | 'location_checkin'
     | 'fixture'
     | 'donation_item'
+    | 'project_storage_stint'
     | 'unknown';
   target_type?: string;
   target_id?: string;

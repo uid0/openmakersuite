@@ -338,6 +338,7 @@ function AppContent() {
           <Route path="/facilities/checklist" element={<WorkspaceLayout><FacilitiesChecklistsPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist/:checklistId/complete/:completionId" element={<WorkspaceLayout><ChecklistCompletionPage /></WorkspaceLayout>} />
           <Route path="/facilities/project-storage/queue" element={<WorkspaceLayout><FacilitiesProjectStorageListPage /></WorkspaceLayout>} />
+          <Route path="/facilities/project-storage/:stintId" element={<WorkspaceLayout><FacilitiesProjectStoragePage /></WorkspaceLayout>} />
           <Route path="/facilities/project-storage" element={<WorkspaceLayout><FacilitiesProjectStoragePage /></WorkspaceLayout>} />
 
           {/* SIGs Workspace */}

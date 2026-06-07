@@ -164,10 +164,10 @@ def test_print_sheet_caps_at_ten(staff_client):
     # single PNG (no error, no pagination header — v1).
     for i in range(12):
         MakerBox.objects.create(
-            bin_id=f"PSB-{200+i:03d}",
+            bin_id=f"PSB-{200 + i:03d}",
             assigned_username=f"u{i}",
             first_name=f"F{i}",
         )
-    resp = _print_sheet(staff_client, [f"PSB-{200+i:03d}" for i in range(12)])
+    resp = _print_sheet(staff_client, [f"PSB-{200 + i:03d}" for i in range(12)])
     assert resp.status_code == 200
     assert resp["Content-Type"] == "image/png"

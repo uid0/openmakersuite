@@ -223,9 +223,7 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
                           ff="monospace"
                           size="sm"
                           component={Link}
-                          to={`/facilities/project-storage?stint=${encodeURIComponent(
-                            s.stint_id,
-                          )}`}
+                          to={`/facilities/project-storage/${encodeURIComponent(s.stint_id)}`}
                           c="blue"
                         >
                           {s.stint_id}

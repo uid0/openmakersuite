@@ -37,6 +37,7 @@ import {
   IconQrcode,
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import QRScanner from '../components/QRScanner';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { useNotifications } from '../hooks/useNotifications';
@@ -79,8 +80,15 @@ const formatDate = (iso: string | null): string => {
 
 const FacilitiesProjectStoragePage: React.FC = () => {
   const notifications = useNotifications();
+  const navigate = useNavigate();
+  // The :stintId param is optional — the page is mounted at both
+  // /facilities/project-storage (lookup form) and
+  // /facilities/project-storage/:stintId (permalink detail). When the
+  // param is present we auto-load it so an emailed link or a row in
+  // the queue list (PR 1) deep-links straight to the warden actions.
+  const { stintId: stintIdParam } = useParams<{ stintId?: string }>();
 
-  const [stintId, setStintId] = useState<string>('');
+  const [stintId, setStintId] = useState<string>(stintIdParam ?? '');
   const [stint, setStint] = useState<ProjectStorageStint | null>(null);
   const [history, setHistory] = useState<ProjectStorageStint[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -91,12 +99,6 @@ const FacilitiesProjectStoragePage: React.FC = () => {
   >(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
-
-  // Autofocus the HID input on mount so a barcode scanner wedge "just
-  // works" the moment the warden lands on the page.
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   const loadStint = useCallback(
     async (rawId: string) => {
@@ -126,15 +128,32 @@ const FacilitiesProjectStoragePage: React.FC = () => {
     [],
   );
 
+  // Auto-load whenever the route param changes (mount, back/forward,
+  // navigating between queue rows). When the param is absent, fall back
+  // to autofocusing the HID input so a barcode scanner wedge "just
+  // works" on the bare lookup form.
+  useEffect(() => {
+    if (stintIdParam) {
+      const upper = stintIdParam.trim().toUpperCase();
+      setStintId(upper);
+      loadStint(upper);
+    } else {
+      inputRef.current?.focus();
+    }
+  }, [stintIdParam, loadStint]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    loadStint(stintId);
+    const id = stintId.trim().toUpperCase();
+    if (!id) return;
+    navigate(`/facilities/project-storage/${encodeURIComponent(id)}`);
   };
 
   const handleScanSuccess = (decoded: string) => {
     setShowScanner(false);
-    setStintId(decoded);
-    loadStint(decoded);
+    const id = decoded.trim().toUpperCase();
+    setStintId(id);
+    navigate(`/facilities/project-storage/${encodeURIComponent(id)}`);
   };
 
   const refresh = () => {

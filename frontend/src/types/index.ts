@@ -1430,6 +1430,7 @@ export interface ProjectStorageStint {
   expiry_week: number;
   expiry_day_of_year: number;
   events: ProjectStorageEvent[];
+  qr_code_url: string | null;
   created_at: string;
   updated_at: string;
 }

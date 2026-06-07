@@ -95,7 +95,7 @@ const FacilitiesProjectStoragePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [actionInFlight, setActionInFlight] = useState<
-    'notice' | 'purgatory' | 'removed' | null
+    'notice' | 'purgatory' | 'removed' | 'qr' | null
   >(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -210,6 +210,20 @@ const FacilitiesProjectStoragePage: React.FC = () => {
       notifications.showSuccess(`Stint ${resp.data.stint_id} marked removed.`);
     } catch (err) {
       notifications.showError(extractErrorMessage(err, 'Could not mark removed.'));
+    } finally {
+      setActionInFlight(null);
+    }
+  };
+
+  const regenerateQr = async () => {
+    if (!stint) return;
+    setActionInFlight('qr');
+    try {
+      const resp = await projectStorageAPI.generateQr(stint.stint_id, true);
+      setStint(resp.data);
+      notifications.showSuccess(`Regenerated QR for ${resp.data.stint_id}.`);
+    } catch (err) {
+      notifications.showError(extractErrorMessage(err, 'Could not regenerate QR.'));
     } finally {
       setActionInFlight(null);
     }
@@ -383,7 +397,35 @@ const FacilitiesProjectStoragePage: React.FC = () => {
               >
                 Mark removed
               </Button>
+              <Button
+                variant="default"
+                leftSection={<IconQrcode size={16} />}
+                loading={actionInFlight === 'qr'}
+                onClick={regenerateQr}
+                data-testid="regenerate-qr-button"
+              >
+                {stint.qr_code_url ? 'Regenerate QR' : 'Generate QR'}
+              </Button>
             </Group>
+
+            {stint.qr_code_url && (
+              <Paper p="md" withBorder>
+                <Stack gap="xs" align="center">
+                  <Text size="sm" c="dimmed">
+                    Persisted QR PNG (logo-embedded, validated). Encodes the
+                    /scan/project-storage/{stint.stint_id} URL.
+                  </Text>
+                  <img
+                    src={stint.qr_code_url}
+                    alt={`QR code for stint ${stint.stint_id}`}
+                    width={180}
+                    height={180}
+                    style={{ imageRendering: 'pixelated' }}
+                    data-testid="qr-code-preview"
+                  />
+                </Stack>
+              </Paper>
+            )}
 
             {/* Audit timeline */}
             <Accordion variant="separated" radius="md" defaultValue="events">

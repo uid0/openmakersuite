@@ -71,19 +71,19 @@ def _fit_font(
     return _try_font(12)
 
 
-def render_box_label(
+def render_box_image(
     maker_box,
     *,
     dpi: int = DEFAULT_DPI,
     username_override: Optional[str] = None,
     first_name_override: Optional[str] = None,
     last_name_override: Optional[str] = None,
-) -> bytes:
-    """Render a personal-storage-bin label PNG and return raw bytes.
+) -> Image.Image:
+    """Render the per-bin label as an in-memory PIL image.
 
-    ``maker_box`` may be a :class:`MakerBox` instance or any object that
-    exposes ``assigned_username`` / ``first_name`` / ``last_name``. Optional
-    overrides let the manual-create flow bypass the model.
+    Same args as :func:`render_box_label`. Split out so the Avery
+    multi-up sheet renderer can composite without round-tripping PNG
+    bytes through PIL.Image.open for every card.
     """
     username = (
         username_override
@@ -139,6 +139,30 @@ def render_box_label(
         draw.text((text_left, cursor_y), line, fill="black", font=font)
         cursor_y += line_h
 
+    return img
+
+
+def render_box_label(
+    maker_box,
+    *,
+    dpi: int = DEFAULT_DPI,
+    username_override: Optional[str] = None,
+    first_name_override: Optional[str] = None,
+    last_name_override: Optional[str] = None,
+) -> bytes:
+    """Render a personal-storage-bin label PNG and return raw bytes.
+
+    ``maker_box`` may be a :class:`MakerBox` instance or any object that
+    exposes ``assigned_username`` / ``first_name`` / ``last_name``. Optional
+    overrides let the manual-create flow bypass the model.
+    """
+    img = render_box_image(
+        maker_box,
+        dpi=dpi,
+        username_override=username_override,
+        first_name_override=first_name_override,
+        last_name_override=last_name_override,
+    )
     buffer = BytesIO()
     img.save(buffer, format="PNG", dpi=(dpi, dpi))
     return buffer.getvalue()
@@ -148,5 +172,6 @@ __all__ = [
     "DEFAULT_DPI",
     "LABEL_WIDTH_INCHES",
     "LABEL_HEIGHT_INCHES",
+    "render_box_image",
     "render_box_label",
 ]

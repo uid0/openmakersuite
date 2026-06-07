@@ -18,12 +18,17 @@ const STATUS_BADGE: Record<MakerBox['status'], { label: string; color: string }>
   unknown: { label: 'Unknown', color: '#c0392b' },
 };
 
+// Avery 5371 holds 10 cards per sheet — surface the cap so the warden
+// knows how many bins will land on a single page.
+const SHEET_CAPACITY = 10;
+
 const MakerBoxAdminPage: React.FC = () => {
   const [boxes, setBoxes] = useState<MakerBox[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [manual, setManual] = useState({ username: '', first_name: '', last_name: '' });
   const [generating, setGenerating] = useState(false);
+  const [sheetPrinting, setSheetPrinting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +71,25 @@ const MakerBoxAdminPage: React.FC = () => {
     [manual.username, manual.first_name, manual.last_name],
   );
 
+  const handlePrintSheet = useCallback(async () => {
+    if (boxes.length === 0) return;
+    setSheetPrinting(true);
+    setError(null);
+    try {
+      const ids = boxes.slice(0, SHEET_CAPACITY).map((b) => b.bin_id);
+      const res = await makerBoxesAPI.printSheet(ids);
+      const blob = new Blob([res.data], { type: 'image/png' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      // 60 s is plenty for the new tab to fetch the bytes.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err: any) {
+      setError(extractErrorMessage(err, 'Failed to render Avery sheet.'));
+    } finally {
+      setSheetPrinting(false);
+    }
+  }, [boxes]);
+
   return (
     <div style={{ padding: '1.5rem' }}>
       <h1>Maker Box Admin</h1>
@@ -102,7 +126,27 @@ const MakerBoxAdminPage: React.FC = () => {
       </section>
 
       <section>
-        <h2>All bins</h2>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '0.5rem',
+            marginBottom: '0.5rem',
+          }}
+        >
+          <h2 style={{ margin: 0 }}>All bins</h2>
+          <button
+            type="button"
+            onClick={handlePrintSheet}
+            disabled={sheetPrinting || boxes.length === 0}
+            data-testid="print-avery-sheet"
+          >
+            {sheetPrinting
+              ? 'Rendering…'
+              : `Print Avery sheet (${Math.min(boxes.length, SHEET_CAPACITY)}/${SHEET_CAPACITY})`}
+          </button>
+        </div>
         {loading && <p>Loading…</p>}
         {error && <p style={{ color: '#c0392b' }}>{error}</p>}
         {!loading && !error && (

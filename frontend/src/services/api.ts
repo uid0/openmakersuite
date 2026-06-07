@@ -2419,6 +2419,12 @@ export const makerBoxesAPI = {
     api.post('/maker-boxes/manual-label/', data, { responseType: 'blob' }),
   emailPickup: (id: number, email?: string) =>
     api.post<{ sent: boolean; to: string }>(`/maker-boxes/${id}/email-pickup/`, email ? { email } : {}),
+  // Avery 5371 (10-up business card) sheet PNG. The endpoint caps at 10
+  // — callers paginate. Response is a binary PNG, so we ask axios for an
+  // arraybuffer and let the caller turn it into a blob URL for download
+  // or a new-tab preview.
+  printSheet: (binIds: string[]) =>
+    api.post<ArrayBuffer>('/maker-boxes/print-sheet/', { bin_ids: binIds }, { responseType: 'arraybuffer' }),
 };
 
 export interface AssetWarrantyDto {
@@ -3554,17 +3560,6 @@ export const projectStorageAPI = {
     api.post<ProjectStorageStint>(
       `/project-storage/stints/${stintId}/generate-qr/`,
       { include_logo: includeLogo },
-    ),
-
-  // Avery 5371 (10-up business card) sheet PNG. The endpoint caps at 10
-  // — callers paginate. Response is a binary PNG, so we ask axios for an
-  // arraybuffer and let the caller turn it into a blob URL for download
-  // or a new-tab preview.
-  printSheet: (stintIds: string[]) =>
-    api.post<ArrayBuffer>(
-      '/project-storage/stints/print-sheet/',
-      { stint_ids: stintIds },
-      { responseType: 'arraybuffer' },
     ),
 };
 

@@ -21,7 +21,6 @@ from .permissions import IsStorageAdminOrStaff
 from .serializers import ProjectStorageStintSerializer, StartStintSerializer
 from .services.email_service import send_violation_notice
 from .services.label_service import PrinterFamily, render_stint_label
-from .services.sheet_service import CARDS_PER_SHEET, render_business_card_sheet
 
 
 class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
@@ -361,48 +360,6 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         png_bytes = render_stint_label(stint, printer=printer)
-        return HttpResponse(png_bytes, content_type="image/png")
-
-    @action(
-        detail=False,
-        methods=["post"],
-        url_path="print-sheet",
-        permission_classes=[IsStorageAdminOrStaff],
-    )
-    def print_sheet(self, request):
-        """Render up to 10 stints into an Avery 5371 (10-up, 2×5) PNG.
-
-        Body: ``{"stint_ids": ["PS-...", "PS-..."]}``. The caller's order
-        is preserved so the warden can lay cards out next to shelves in
-        a predictable sequence. IDs beyond the 10th are dropped (caller
-        paginates); unknown IDs are silently skipped so a typo doesn't
-        block the whole print job. The PNG is 8.5"×11" at 300 DPI —
-        scale-to-fit when printing.
-        """
-        stint_ids = request.data.get("stint_ids") or []
-        if not isinstance(stint_ids, list):
-            return Response(
-                {"detail": "stint_ids must be a list.", "code": "bad_request"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not stint_ids:
-            return Response(
-                {"detail": "stint_ids is required.", "code": "bad_request"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        stints_by_id = {
-            s.stint_id: s
-            for s in ProjectStorageStint.objects.filter(stint_id__in=stint_ids[:CARDS_PER_SHEET])
-        }
-        ordered = [stints_by_id[sid] for sid in stint_ids[:CARDS_PER_SHEET] if sid in stints_by_id]
-        if not ordered:
-            return Response(
-                {"detail": "No matching stints found.", "code": "not_found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        png_bytes = render_business_card_sheet(ordered)
         return HttpResponse(png_bytes, content_type="image/png")
 
     # ------------------------------------------------------------------

@@ -188,6 +188,33 @@ class TestScannerDispatch:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["action"] == "unknown"
 
+    def test_project_storage_url_form_resolves(self, api_client):
+        # PR 4: labels encode /scan/project-storage/<stint_id>. The
+        # dispatcher's URL parser routes this to the same handler as a
+        # bare PS- payload.
+        from project_storage.tests.factories import ProjectStorageStintFactory
+
+        stint = ProjectStorageStintFactory(
+            stint_id="PS-URLZ23CD",
+            first_name="Bob",
+            last_name="Builder",
+        )
+        response = _dispatch(
+            api_client,
+            f"https://oms.example.com/scan/project-storage/{stint.stint_id}",
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["action"] == "project_storage_stint"
+        assert response.data["target_id"] == stint.stint_id
+        assert response.data["target_url"] == f"/facilities/project-storage/{stint.stint_id}"
+
+    def test_project_storage_url_form_unknown_stint(self, api_client):
+        # URL-form scan that doesn't resolve to a real row falls through
+        # to the generic unknown — same behavior as the bare-ID form.
+        response = _dispatch(api_client, "https://oms.example.com/scan/project-storage/PS-99999999")
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["action"] == "unknown"
+
     def test_ps_prefixed_asset_tag_still_routes_to_stint_format_first(self, api_client):
         # An asset_tag that happens to look like "PS-NOTREAL" is NOT a
         # stint — should fall through to asset-tag matching. The PS-

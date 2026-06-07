@@ -98,13 +98,28 @@ def _strip_url(payload: str) -> tuple[str, bool]:
 
 
 def _parse_scan_url(path: str) -> Optional[tuple[str, str]]:
-    """Match `/inventory/scan/<type>/<id>` or `/inventory/scan/<id>`.
+    """Match the project's QR URL conventions.
 
-    Returns `(type, id)` or None. Type defaults to `"inventory_item"`
-    when only an id segment follows `/scan/`.
+    Recognized shapes:
+
+      - ``/inventory/scan/<type>/<id>`` — legacy inventory QR routes
+        (asset / location / fixture / donation-item).
+      - ``/inventory/scan/<id>`` — bare InventoryItem.
+      - ``/scan/project-storage/<stint_id>`` — project storage label
+        encoded URL (PR 4); the dispatcher routes this to the warden
+        detail page.
+
+    Returns ``(target_type, target_id)`` or ``None``.
     """
     # Normalize: strip trailing slash, split on /.
     parts = [seg for seg in path.strip("/").split("/") if seg]
+
+    # /scan/project-storage/<stint_id> — emitted by PR 4's label
+    # encoder. Match BEFORE the /inventory/scan/… arm so the deeper
+    # path takes priority over any future overlap.
+    if len(parts) == 3 and parts[0] == "scan" and parts[1] == "project-storage":
+        return ("project_storage_stint", parts[2])
+
     if len(parts) < 3 or parts[0] != "inventory" or parts[1] != "scan":
         return None
 
@@ -259,6 +274,14 @@ def _resolve_known_target(target_type: str, target_id: str, raw: str) -> Resolve
             target_name=getattr(donation, "name", str(donation.id)),
             target_url=f"/inventory/scan/donation-item/{donation.id}",
             raw_payload=raw,
+        )
+
+    if target_type == "project_storage_stint":
+        # /scan/project-storage/<stint_id> URL form (PR 4). Same shape
+        # as the bare PS- resolver further below — just reached via the
+        # URL parser instead of the prefix regex.
+        return _resolve_project_storage_stint(target_id.upper(), raw) or _not_found(
+            "project-storage stint", target_id, raw
         )
 
     return _not_found(target_type, target_id, raw)

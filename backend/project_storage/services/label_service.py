@@ -24,6 +24,8 @@ from __future__ import annotations
 from io import BytesIO
 from typing import Iterable, Literal
 
+from django.conf import settings
+
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
@@ -117,7 +119,17 @@ def render_stint_label(
 
     margin = 12
     qr_px = height - 2 * margin
-    qr = _build_qr_image(stint.stint_id, qr_px)
+    # Encode a deep-link URL so a phone camera scan opens the warden
+    # detail page directly. The Pi print daemon still pulls the PNG by
+    # bare stint_id via /api/project-storage/stints/<id>/label/ — that's
+    # a different code path. Wedge scanners and the warden console hit
+    # the universal scanner dispatcher (backend/scanner/resolvers.py)
+    # which recognizes both the URL form and the bare PS- prefix, so
+    # this switch is backward-compatible with existing label-prints
+    # sitting on shelves today.
+    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    qr_payload = f"{frontend_url}/scan/project-storage/{stint.stint_id}"
+    qr = _build_qr_image(qr_payload, qr_px)
     canvas.paste(qr, (margin, margin))
 
     text_x = margin + qr_px + 16

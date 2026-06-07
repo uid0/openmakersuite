@@ -181,6 +181,16 @@ const RedirectScanDonationItem = () => {
   return <Navigate to={`/inventory/scan/donation-item/${itemId}`} replace />;
 };
 
+// Phone-camera scan target: a project-storage label QR encodes
+// /scan/project-storage/<stint_id>. The warden detail page lives at
+// /facilities/project-storage/<stint_id>, so this redirect bridges the
+// two so the QR keeps a friendly "/scan/..." shape while the routing
+// matches the rest of the warden surface.
+const RedirectScanProjectStorageStint = () => {
+  const { stintId } = useParams();
+  return <Navigate to={`/facilities/project-storage/${stintId}`} replace />;
+};
+
 const RedirectChecklist = () => {
   const { checklistId, completionId } = useParams();
   return <Navigate to={`/facilities/checklist/${checklistId}/complete/${completionId}`} replace />;
@@ -375,6 +385,7 @@ function AppContent() {
           <Route path="/scan/asset/:assetId" element={<RedirectScanAsset />} />
           <Route path="/scan/location/:locationId" element={<RedirectScanLocation />} />
           <Route path="/scan/donation-item/:itemId" element={<RedirectScanDonationItem />} />
+          <Route path="/scan/project-storage/:stintId" element={<RedirectScanProjectStorageStint />} />
           <Route path="/checklist/:checklistId/complete/:completionId" element={<RedirectChecklist />} />
 
           {/* Other routes */}

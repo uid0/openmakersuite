@@ -22,6 +22,7 @@ from inventory.utils.code_generator import generate_unique_code
 
 if TYPE_CHECKING:
     from inventory.models import Asset, InventoryItem, Location
+    from project_storage.models import ProjectStorageStint
 
 
 class QRCodeService:

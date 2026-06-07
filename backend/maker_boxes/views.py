@@ -22,6 +22,7 @@ from .serializers import (
 )
 from .services.email_service import send_pickup_notification
 from .services.label_service import render_box_label
+from .services.sheet_service import CARDS_PER_SHEET, render_avery_5371_sheet
 from .services.whmcs_client import WhmcsNotConfigured, lookup_member
 
 
@@ -152,6 +153,47 @@ class MakerBoxViewSet(viewsets.ModelViewSet):
         png = render_box_label(box)
         response = HttpResponse(png, content_type="image/png")
         response["Content-Disposition"] = f'inline; filename="maker-box-{box.bin_id}.png"'
+        return response
+
+    @action(detail=False, methods=["post"], url_path="print-sheet")
+    def print_sheet(self, request):
+        """Render up to 10 bins into an Avery 5371 (10-up, 2×5) PNG.
+
+        Body: ``{"bin_ids": ["PSB-007", "PSB-008", ...]}``. The caller's
+        order is preserved so the warden can lay cards out next to a
+        tray of physical bins in a predictable sequence. IDs beyond
+        the 10th are dropped (caller paginates); unknown IDs are
+        silently skipped so a typo doesn't kill the whole print job.
+        The PNG is 8.5"×11" at 300 DPI — scale-to-fit when printing.
+        """
+        denied = self._check_staff(request)
+        if denied is not None:
+            return denied
+
+        bin_ids = request.data.get("bin_ids") or []
+        if not isinstance(bin_ids, list):
+            return Response(
+                {"detail": "bin_ids must be a list.", "code": "bad_request"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not bin_ids:
+            return Response(
+                {"detail": "bin_ids is required.", "code": "bad_request"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        wanted = bin_ids[:CARDS_PER_SHEET]
+        boxes_by_id = {b.bin_id: b for b in MakerBox.objects.filter(bin_id__in=wanted)}
+        ordered = [boxes_by_id[bid] for bid in wanted if bid in boxes_by_id]
+        if not ordered:
+            return Response(
+                {"detail": "No matching maker boxes found.", "code": "not_found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        png_bytes = render_avery_5371_sheet(ordered)
+        response = HttpResponse(png_bytes, content_type="image/png")
+        response["Content-Disposition"] = 'inline; filename="maker-box-sheet.png"'
         return response
 
     @action(detail=False, methods=["post"], url_path="manual-label")

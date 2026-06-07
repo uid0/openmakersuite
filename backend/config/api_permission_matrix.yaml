@@ -1957,6 +1957,9 @@ views:
       partial_update:
         permission_classes:
         - IsAuthenticated
+      print_sheet:
+        permission_classes:
+        - IsAuthenticated
       retrieve:
         permission_classes:
         - IsAuthenticated
@@ -2165,9 +2168,6 @@ views:
       print_queue:
         permission_classes:
         - AllowAny
-      print_sheet:
-        permission_classes:
-        - IsStorageAdminOrStaff
       retrieve:
         permission_classes:
         - IsStorageAdminOrStaff

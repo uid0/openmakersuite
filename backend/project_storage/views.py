@@ -288,6 +288,59 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return Response(ProjectStorageStintSerializer(stint).data)
 
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="generate-qr",
+        permission_classes=[IsStorageAdminOrStaff],
+    )
+    def generate_qr(self, request, stint_id: str):
+        """Regenerate the persisted QR PNG on stint.qr_code.
+
+        Mirrors the inventory regenerate_qr_code endpoints — same
+        QRCodeRateLimiter (item_type="project_storage_stint"), same
+        logo-embed + pyzbar validation through QRCodeService. The
+        rate limit guards against a click-storm dragging Pillow into
+        the request path.
+
+        The Pi label-print pipeline doesn't consume this field —
+        labels are rendered fresh at print time. This is for the
+        warden detail page's "Regenerate QR" affordance and the
+        admin preview surface.
+        """
+        from inventory.services.qr_code_service import QRCodeService
+        from inventory.utils.rate_limiting import QRCodeRateLimiter
+
+        stint = self.get_object()
+
+        x_forwarded_for = request.headers.get("x-forwarded-for")
+        ip_address = (
+            x_forwarded_for.split(",")[0] if x_forwarded_for else request.META.get("REMOTE_ADDR")
+        )
+
+        is_allowed, error_msg = QRCodeRateLimiter.check_rate_limit(
+            user=request.user if request.user.is_authenticated else None,
+            item_id=str(stint.stint_id),
+            item_type="project_storage_stint",
+            ip_address=ip_address,
+        )
+        if not is_allowed:
+            return Response(
+                {"error": error_msg},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        try:
+            include_logo = bool(request.data.get("include_logo", True))
+            QRCodeService(include_logo=include_logo).generate_for_stint(stint)
+        except Exception as exc:  # noqa: BLE001 — surface to the caller
+            return Response(
+                {"detail": f"QR generation failed: {exc}", "code": "qr_generation_failed"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(ProjectStorageStintSerializer(stint).data)
+
     # ------------------------------------------------------------------
     # Label rendering — the Pi print daemon pulls this
     # ------------------------------------------------------------------

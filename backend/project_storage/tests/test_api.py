@@ -373,12 +373,8 @@ class TestListEndpoint:
 
     def test_ordering_by_expires_at(self, staff_client):
         # Soonest-to-expire first when ordering=expires_at.
-        ProjectStorageStintFactory(
-            username="late", expires_at=timezone.now() + timedelta(days=20)
-        )
-        ProjectStorageStintFactory(
-            username="early", expires_at=timezone.now() + timedelta(days=2)
-        )
+        ProjectStorageStintFactory(username="late", expires_at=timezone.now() + timedelta(days=20))
+        ProjectStorageStintFactory(username="early", expires_at=timezone.now() + timedelta(days=2))
         resp = staff_client.get("/api/project-storage/stints/?ordering=expires_at")
         body = resp.json()
         rows = body["results"] if isinstance(body, dict) and "results" in body else body
@@ -407,7 +403,5 @@ class TestMutatingActionsStayAdmin:
 
     def test_staff_can_mark_removed(self, staff_client):
         stint = ProjectStorageStintFactory()
-        resp = staff_client.post(
-            f"/api/project-storage/stints/{stint.stint_id}/mark-removed/"
-        )
+        resp = staff_client.post(f"/api/project-storage/stints/{stint.stint_id}/mark-removed/")
         assert resp.status_code == 200

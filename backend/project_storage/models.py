@@ -112,6 +112,23 @@ class ProjectStorageStint(models.Model):
     ]
     print_target = models.CharField(max_length=16, blank=True, choices=PRINT_TARGET_CHOICES)
 
+    # Persisted QR PNG for the kiosk preview / admin regenerate UI. The
+    # Pi label-print pipeline doesn't read this column — it generates
+    # the full label (QR + text strip) at print time via
+    # project_storage/services/label_service.py. This field is for
+    # surfacing a logo-embedded validated QR via qrcode.react on the
+    # warden detail page without going through the Brother layout.
+    qr_code = models.ImageField(
+        upload_to="project_storage/qrcodes/",
+        null=True,
+        blank=True,
+        help_text=(
+            "Generated QR code image for this stint. Encodes "
+            "{FRONTEND_URL}/scan/project-storage/<stint_id>; regenerate "
+            "from the warden detail page when FRONTEND_URL changes."
+        ),
+    )
+
     notes = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

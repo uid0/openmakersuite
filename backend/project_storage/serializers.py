@@ -28,6 +28,7 @@ class ProjectStorageStintSerializer(serializers.ModelSerializer):
     expiry_week = serializers.SerializerMethodField()
     expiry_day_of_year = serializers.SerializerMethodField()
     events = ProjectStorageEventSerializer(many=True, read_only=True)
+    qr_code_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ProjectStorageStint
@@ -53,6 +54,7 @@ class ProjectStorageStintSerializer(serializers.ModelSerializer):
             "expiry_week",
             "expiry_day_of_year",
             "events",
+            "qr_code_url",
             "created_at",
             "updated_at",
         )
@@ -68,12 +70,22 @@ class ProjectStorageStintSerializer(serializers.ModelSerializer):
             "expiry_week",
             "expiry_day_of_year",
             "events",
+            "qr_code_url",
             "created_at",
             "updated_at",
         )
 
     def get_status(self, obj: ProjectStorageStint) -> str:
         return obj.compute_status()
+
+    def get_qr_code_url(self, obj: ProjectStorageStint) -> str | None:
+        if not obj.qr_code:
+            return None
+        request = self.context.get("request") if hasattr(self, "context") else None
+        url = obj.qr_code.url
+        if request is not None:
+            return request.build_absolute_uri(url)
+        return url
 
     def get_expiry_week(self, obj: ProjectStorageStint) -> int:
         return obj.expiry_week_and_day[0]

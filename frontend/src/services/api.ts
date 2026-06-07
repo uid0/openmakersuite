@@ -3549,6 +3549,12 @@ export const projectStorageAPI = {
 
   labelUrl: (stintId: string, printer: 'brother_ql' | 'epson_tm' = 'brother_ql') =>
     `${API_BASE_URL}/project-storage/stints/${stintId}/label/?printer=${printer}`,
+
+  generateQr: (stintId: string, includeLogo: boolean = true) =>
+    api.post<ProjectStorageStint>(
+      `/project-storage/stints/${stintId}/generate-qr/`,
+      { include_logo: includeLogo },
+    ),
 };
 
 // Universal scanner dispatcher — resolves any barcode/QR payload to an

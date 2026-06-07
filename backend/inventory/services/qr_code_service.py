@@ -240,6 +240,32 @@ class QRCodeService:
 
         return asset
 
+    def generate_for_stint(self, stint) -> "ProjectStorageStint":
+        """Generate and save a QR PNG for a project-storage stint.
+
+        Mirrors generate_for_asset exactly: encodes the same /scan/...
+        URL the inventory convention uses (so a phone-camera scan opens
+        the warden detail page wired in PR 3), goes through the same
+        logo-embed + pyzbar validation, persists the file on the
+        stint.qr_code ImageField, and refreshes from the DB so the
+        serializer sees the new url.
+        """
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        scan_url = f"{frontend_url}/scan/project-storage/{stint.stint_id}"
+
+        qr_img = self.generate_qr_code_image(scan_url)
+
+        buffer = BytesIO()
+        qr_img.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        filename = f"project_storage_qr_{stint.stint_id}.png"
+        if stint.qr_code:
+            stint.qr_code.delete(save=False)
+        stint.qr_code.save(filename, File(buffer), save=True)
+        stint.refresh_from_db()
+        return stint
+
     def generate_for_item(self, item) -> "InventoryItem":
         """
         Generate and save QR code for an inventory item.

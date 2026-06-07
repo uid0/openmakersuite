@@ -405,3 +405,56 @@ class TestMutatingActionsStayAdmin:
         stint = ProjectStorageStintFactory()
         resp = staff_client.post(f"/api/project-storage/stints/{stint.stint_id}/mark-removed/")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Generate-QR endpoint + qr_code_url serializer field
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateQrEndpoint:
+    def test_anonymous_rejected(self, client):
+        stint = ProjectStorageStintFactory()
+        resp = client.post(f"/api/project-storage/stints/{stint.stint_id}/generate-qr/")
+        assert resp.status_code in (401, 403)
+
+    def test_storage_admin_can_generate(self, storage_admin_client):
+        # Storage Admins are trusted with the regenerate affordance —
+        # it's a read-flavored operation (idempotent) and the rate
+        # limiter guards against click-storms.
+        stint = ProjectStorageStintFactory()
+        resp = storage_admin_client.post(
+            f"/api/project-storage/stints/{stint.stint_id}/generate-qr/",
+            data={"include_logo": False},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+        stint.refresh_from_db()
+        assert bool(stint.qr_code) is True
+        assert resp.json()["qr_code_url"]
+
+    def test_member_rejected(self, member_client):
+        stint = ProjectStorageStintFactory()
+        resp = member_client.post(f"/api/project-storage/stints/{stint.stint_id}/generate-qr/")
+        assert resp.status_code == 403
+
+    def test_regenerate_keeps_field_populated(self, staff_client):
+        stint = ProjectStorageStintFactory()
+        staff_client.post(
+            f"/api/project-storage/stints/{stint.stint_id}/generate-qr/",
+            data={"include_logo": False},
+            format="json",
+        )
+        staff_client.post(
+            f"/api/project-storage/stints/{stint.stint_id}/generate-qr/",
+            data={"include_logo": False},
+            format="json",
+        )
+        stint.refresh_from_db()
+        assert bool(stint.qr_code) is True
+
+    def test_qr_code_url_absent_when_not_generated(self, staff_client):
+        stint = ProjectStorageStintFactory()
+        resp = staff_client.get(f"/api/project-storage/stints/{stint.stint_id}/")
+        assert resp.status_code == 200
+        assert resp.json()["qr_code_url"] is None

@@ -23,6 +23,24 @@ from config.validators.django_core import SECRET_KEY_MIN_LEN, DjangoCoreCheck
 _SAFE_SECRET = "a1B2c3D4" * 8
 
 
+# Settings shape that passes every registered category. Each happy-path
+# command-level test layers this in via override_settings; growing the
+# set of categories means appending here once, not editing every test.
+_PROD_GOOD_SETTINGS = dict(
+    DEBUG=False,
+    SECRET_KEY=_SAFE_SECRET,
+    ALLOWED_HOSTS=["oms.example.com"],
+    SESSION_COOKIE_SECURE=True,
+    CSRF_COOKIE_SECURE=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    CSRF_COOKIE_SAMESITE="Lax",
+    SECURE_SSL_REDIRECT=True,
+    SECURE_HSTS_SECONDS=3600,
+    CORS_ALLOWED_ORIGINS=["https://oms.example.com"],
+    CSRF_TRUSTED_ORIGINS=["https://oms.example.com"],
+)
+
+
 # ---------------------------------------------------------------------------
 # DjangoCoreCheck unit tests — each rule in isolation
 # ---------------------------------------------------------------------------
@@ -136,11 +154,7 @@ class TestValidateProductionCommand:
     def test_debug_true_runs_under_strict_and_fails(self):
         out, err = StringIO(), StringIO()
         with pytest.raises(SystemExit) as exc_info:
-            with override_settings(
-                DEBUG=True,
-                SECRET_KEY=_SAFE_SECRET,
-                ALLOWED_HOSTS=["oms.example.com"],
-            ):
+            with override_settings(**{**_PROD_GOOD_SETTINGS, "DEBUG": True}):
                 call_command("validate_production", "--strict", stdout=out, stderr=err)
         assert exc_info.value.code == 1
         # The fatal report goes to stderr.
@@ -149,22 +163,14 @@ class TestValidateProductionCommand:
 
     def test_well_formed_settings_pass(self):
         out, err = StringIO(), StringIO()
-        with override_settings(
-            DEBUG=False,
-            SECRET_KEY=_SAFE_SECRET,
-            ALLOWED_HOSTS=["oms.example.com"],
-        ):
+        with override_settings(**_PROD_GOOD_SETTINGS):
             call_command("validate_production", stdout=out, stderr=err)
         assert "all production safety checks passed" in out.getvalue()
         assert err.getvalue() == ""
 
     def test_quiet_suppresses_success_summary(self):
         out, err = StringIO(), StringIO()
-        with override_settings(
-            DEBUG=False,
-            SECRET_KEY=_SAFE_SECRET,
-            ALLOWED_HOSTS=["oms.example.com"],
-        ):
+        with override_settings(**_PROD_GOOD_SETTINGS):
             call_command("validate_production", "--quiet", stdout=out, stderr=err)
         assert out.getvalue() == ""
 
@@ -194,11 +200,7 @@ class TestValidateProductionCommand:
         # never contains the literal value.
         leaky_value = "django-insecure-" + marker + "padding-padding-padding"
         with pytest.raises(SystemExit):
-            with override_settings(
-                DEBUG=False,
-                SECRET_KEY=leaky_value,
-                ALLOWED_HOSTS=["oms.example.com"],
-            ):
+            with override_settings(**{**_PROD_GOOD_SETTINGS, "SECRET_KEY": leaky_value}):
                 call_command("validate_production", stdout=out, stderr=err)
         combined = out.getvalue() + err.getvalue()
         assert marker not in combined, (

@@ -231,6 +231,11 @@ test.describe('Asset QR Code Scanning', () => {
       // Asset is active, test disabling
       await disableButton.click({ force: true });
 
+      // confirmDelete (utils/dialogs.tsx) opens a Mantine confirm modal
+      // with a 'Delete' button before the disable action runs. Click it
+      // so the actual API call fires.
+      await page.getByRole('button', { name: 'Delete' }).click();
+
       // Wait for success message
       await expect(page.getByText(/Asset disabled successfully/i)).toBeVisible({
         timeout: 5000,
@@ -239,7 +244,8 @@ test.describe('Asset QR Code Scanning', () => {
       // Verify enable button is now visible
       await expect(enableButton).toBeVisible({ timeout: 3000 });
     } else if (await enableButton.isVisible()) {
-      // Asset is inactive, test enabling
+      // Asset is inactive, test enabling — handleEnable has no
+      // confirmDelete prompt, so no modal step here.
       await enableButton.click({ force: true });
 
       // Wait for success message

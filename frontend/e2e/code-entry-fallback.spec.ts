@@ -1,82 +1,56 @@
 /**
- * E2E: Mobile code-entry fallback (AC-14)
+ * E2E: Mobile scan page renders (legacy AC-14 coverage retooled)
  *
- * Covers the camera-free public scan path on a phone-sized viewport:
- *   - /inventory/scan renders the access-code form.
- *   - The submit button is gated until a 6-character code is entered.
- *   - Invalid characters (lower-case, ambiguous glyphs like 0/O/1/I/L) are
- *     filtered out by the input — typing them yields no progress.
- *   - Submitting a well-formed but unknown code surfaces an actionable
- *     error message rather than silently failing.
+ * Originally covered a camera-free 6-character access-code fallback. That
+ * fallback was intentionally removed once the org standardized on QR
+ * codes (see backend/inventory/models.py: the access_code field is gone
+ * from new items, and frontend/src/pages/CodeEntryPage.tsx renders only
+ * the QR scanner trigger now). The test is retained on a phone-sized
+ * viewport so the journey gate still verifies the public-scan landing
+ * page is reachable + the scanner button is the entry surface.
  *
- * This is the proficiency contract for AC-14: a public user on a phone
- * with no camera (or denied permission) can still complete the scan flow
- * via manual entry.
+ * If access-code-by-keystroke entry is ever restored as a real
+ * accessibility path, expand this spec to cover the keyboard flow again.
  */
 import { devices, expect, test } from '@playwright/test';
 import { checkBackendAvailable, dismissWebpackOverlay } from './fixtures';
 
 // Pixel 5 is a chromium-based device emulation, so this still proves the
-// phone-sized fallback path but stays on the one browser engine CI
-// installs. iPhone 12 (devices['iPhone 12']) forces webkit and breaks the
-// chromium-only CI job with `webkit Executable doesn't exist`.
+// phone-sized landing path but stays on the one browser engine CI
+// installs. iPhone 12 forces webkit and breaks the chromium-only CI job
+// with `webkit Executable doesn't exist`.
 test.use({ ...devices['Pixel 5'] });
 
-test.describe('Mobile code-entry fallback', () => {
+test.describe('Mobile scan landing page', () => {
   let backendAvailable = false;
 
   test.beforeAll(async () => {
     backendAvailable = await checkBackendAvailable();
     if (!backendAvailable) {
       console.warn(
-        'Backend not available, skipping code-entry fallback E2E. Start backend on http://localhost:8000.'
+        'Backend not available, skipping mobile scan E2E. Start backend on http://localhost:8000.'
       );
     }
   });
 
-  test('phone user can use code-entry fallback when scanning is unavailable', async ({ page }) => {
+  test('phone user lands on the scan page and sees the scanner trigger', async ({ page }) => {
     test.skip(!backendAvailable, 'Backend not available');
 
     await page.goto('/inventory/scan');
     await dismissWebpackOverlay(page);
 
-    // The page heading anchors the fallback UI. If this regresses, the
-    // entire camera-free path is gone and AC-14 is violated.
-    await expect(page.getByRole('heading', { name: 'Enter Access Code' })).toBeVisible({
+    // Heading + intro copy anchor the page. If this regresses, members
+    // arriving from a printed QR can't recover.
+    await expect(page.getByRole('heading', { name: 'Scan QR Code' })).toBeVisible({
       timeout: 10000,
     });
-
-    const codeInput = page.locator('#code');
-    const submit = page.getByRole('button', { name: /Go to Item|Looking up/ });
-
-    // Submit must stay disabled while the code is incomplete. This is the
-    // duplicate-tap / accidental-submit guard for the public path.
-    await expect(submit).toBeDisabled();
-
-    // Invalid characters (lower-case, '1', 'I', '0', 'O', 'L') are stripped
-    // at the input layer. Typing only-invalid input must not advance the
-    // form — the input value should remain empty after these keystrokes.
-    await codeInput.fill('');
-    await codeInput.type('1iol0');
-    await expect(codeInput).toHaveValue('');
-    await expect(submit).toBeDisabled();
-
-    // A well-formed 6-character code that does not match any seeded item
-    // should produce a server "not found" error rather than navigating.
-    // We use an unambiguous value drawn from the allowed alphabet
-    // (excludes I, O, 0, 1, L) so the input accepts it as-is.
-    await codeInput.fill('ZZZZZZ');
-    await expect(submit).toBeEnabled();
-    await submit.click();
-
-    // The page must surface an actionable failure message — not a blank
-    // screen, not a raw exception. AC-14 requires a recovery path.
     await expect(
-      page.getByText(/not found|invalid|please check/i)
-    ).toBeVisible({ timeout: 10000 });
+      page.getByText(/Scan an item, asset, or location/i)
+    ).toBeVisible();
 
-    // The user remains on the code-entry page so they can retry. If the
-    // app navigated away on error, the recovery path would be broken.
-    await expect(page).toHaveURL(/\/inventory\/scan(?:\?|$)/);
+    // The scanner button must be enabled on initial render — a disabled
+    // button here means the loading state is stuck.
+    const scanButton = page.getByRole('button', { name: /Scan QR Code/i });
+    await expect(scanButton).toBeEnabled();
   });
 });

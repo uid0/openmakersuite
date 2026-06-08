@@ -1457,10 +1457,18 @@ class Asset(models.Model):
         return self.name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate asset tag if not provided."""
+        """Auto-generate asset tag if not provided.
+
+        ``generate_sku()`` returns a UUID7, whose first 12 hex characters
+        are a millisecond timestamp. Slicing ``[:8]`` meant any two assets
+        created in the same ~256 ms window collided on asset_tag and
+        raised IntegrityError — caught by the gh-456 Playwright suite
+        when its setup seeds multiple assets back-to-back. Use the last
+        8 hex chars (from the UUID7 random portion) so collisions only
+        happen at ~10^9 odds.
+        """
         if not self.asset_tag:
-            # Generate asset tag using UUID
-            self.asset_tag = f"DMS-{generate_sku()[:8].upper()}"
+            self.asset_tag = f"DMS-{generate_sku().replace('-', '')[-8:].upper()}"
 
         super().save(*args, **kwargs)
 

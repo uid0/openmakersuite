@@ -83,9 +83,11 @@ test.describe('Inventory browse + search', () => {
     await page.goto('/inventory/items');
     await dismissWebpackOverlay(page);
 
-    // The page title is rendered as a Mantine Text, not a heading. Use a
-    // visible-text assertion that does not depend on heading semantics.
-    await expect(page.getByText('Inventory Items', { exact: true })).toBeVisible({
+    // The page now uses WorkspacePage's split eyebrow/title shape
+    // ("Inventory" eyebrow + "Items" title) instead of a single
+    // "Inventory Items" string. Use the page testid to anchor that
+    // we landed on the right page without depending on copy.
+    await expect(page.getByTestId('inventory-list-page')).toBeVisible({
       timeout: 15000,
     });
 

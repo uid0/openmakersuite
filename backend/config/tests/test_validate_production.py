@@ -38,6 +38,10 @@ _PROD_GOOD_SETTINGS = dict(
     SECURE_HSTS_SECONDS=3600,
     CORS_ALLOWED_ORIGINS=["https://oms.example.com"],
     CSRF_TRUSTED_ORIGINS=["https://oms.example.com"],
+    # gh-712: settings.py ships FORGEKEY_SHARED_SECRET with the
+    # "change-me-in-production" default. The credential check skips
+    # empty values; clear it for the happy-path baseline.
+    FORGEKEY_SHARED_SECRET="",
 )
 
 

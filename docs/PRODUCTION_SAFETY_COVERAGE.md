@@ -61,6 +61,7 @@ they isolate a single rule.
 | `scripts/validate-prod-env.sh` runs against a synthesised good env in CI | Mitigated | `.github/workflows/ci.yml` step "Run prod env validator against happy-path env". |
 | `scripts/validate-prod-env.sh` is asserted to **reject** `.env.prod.example` (so example files cannot accidentally become deployable) | Mitigated | `.github/workflows/ci.yml` step "Validator rejects shipped placeholder env". |
 | Validator is invoked by the deploy script before bringing the stack up | Mitigated | Referenced from `docs/DEPLOYMENT.MD`; called from `scripts/reset-and-deploy.sh`. |
+| Runtime defense-in-depth — `manage.py validate_production` runs against the LIVE Django settings on every container start | Mitigated (gh-710) | `backend/docker-entrypoint.sh`; `backend/config/validators/django_core.py`; `backend/config/tests/test_validate_production.py`. Catches drift between `.env` and the loaded settings (overrides in `settings.py`, env-var clobbers at container start, etc.). |
 
 ### R-01 gaps
 

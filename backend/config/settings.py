@@ -65,6 +65,23 @@ CSRF_TRUSTED_ORIGINS = config(
 # Trust X-Forwarded-Proto header from proxy to determine if request is HTTPS
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# HTTPS hardening defaults — secure-by-default when DEBUG is off, opt-out
+# is explicit via the env var. These two settings are validated by
+# config.validators.cookies (gh-711); shipping safe defaults means an
+# operator who doesn't set them still passes the entrypoint check and
+# gets a hardened deploy by default. The proxy header above means
+# SECURE_SSL_REDIRECT works correctly behind nginx without infinite
+# redirect loops.
+SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=not DEBUG, cast=bool)
+# One year HSTS — same value Django's own deployment-checklist suggests.
+# Disabled (0) when DEBUG=True so local dev with a real domain doesn't
+# get its browser pinned to https.
+SECURE_HSTS_SECONDS = config(
+    "SECURE_HSTS_SECONDS",
+    default=0 if DEBUG else 31536000,
+    cast=int,
+)
+
 # Spool uploaded files larger than this to /tmp instead of holding them in
 # the gunicorn worker heap. Django's default (2.5 MiB) is fine for form posts
 # but lets a 3MP ESP32 device photo (5–10 MB) sit on the heap until the
@@ -591,8 +608,12 @@ EMQX_API_SECRET = config("EMQX_API_SECRET", default="")
 # Device JWTs are signed with ES256 (ECDSA P-256) so EMQX's JWT authenticator
 # can verify them by fetching the matching public key from /api/forgekey/jwks/.
 # The PEM may include literal "\n" newlines (env-friendly). FORGEKEY_SHARED_SECRET
-# is retained for legacy callers but unused by the JWT path.
-FORGEKEY_SHARED_SECRET = config("FORGEKEY_SHARED_SECRET", default="change-me-in-production")
+# is retained for legacy callers but unused by the JWT path. Default empty
+# rather than a "change-me-in-production" placeholder — the placeholder
+# string used to ship as the default but it trips the gh-712 credential
+# check on every prod deploy that doesn't override it. Empty is the right
+# unconfigured state since the JWT path is the active code path now.
+FORGEKEY_SHARED_SECRET = config("FORGEKEY_SHARED_SECRET", default="")
 
 # Low-battery threshold for XIAO ePaper PM-display panels — telemetry
 # reports below this percent emit a Sentry warning so ops can prep a

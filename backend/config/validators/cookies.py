@@ -72,6 +72,15 @@ class CookiesCSRFCORSCheck(SafetyCheck):
             )
 
     def _check_ssl_redirect(self, settings) -> Iterable[Issue]:
+        # Behind a TLS-terminating proxy (the common OMS deploy shape —
+        # nginx in front of gunicorn) Django's SECURE_SSL_REDIRECT is
+        # redundant with the proxy's own http→https redirect, and turning
+        # it on inside the container makes the plain-http internal health
+        # check loop forever. ``SECURE_PROXY_SSL_HEADER`` set signals
+        # "trust X-Forwarded-Proto from a proxy"; treat that as proof that
+        # the operator has TLS termination handled upstream.
+        if getattr(settings, "SECURE_PROXY_SSL_HEADER", None):
+            return
         if not getattr(settings, "SECURE_SSL_REDIRECT", False):
             yield Issue(
                 category=self.category,

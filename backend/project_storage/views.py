@@ -15,12 +15,38 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 
 from .models import ProjectStorageEvent, ProjectStorageStint
 from .permissions import IsStorageAdminOrStaff
 from .serializers import ProjectStorageStintSerializer, StartStintSerializer
 from .services.email_service import send_violation_notice
 from .services.label_service import PrinterFamily, render_stint_label
+
+# gh-713 throttle subclasses. ScopedRateThrottle.allow_request normally
+# reads ``view.throttle_scope`` and returns True (no throttling) when
+# the view doesn't expose one. For per-action throttling we want the
+# scope baked into the throttle CLASS itself, so each subclass below
+# overrides allow_request to use its own ``scope`` attribute and skip
+# the view-attribute lookup. Rates still come from
+# DEFAULT_THROTTLE_RATES so all tuning stays in settings.py.
+
+
+class _BakedScopedThrottle(ScopedRateThrottle):
+    scope: str = ""
+
+    def allow_request(self, request, view):
+        self.rate = self.get_rate()
+        self.num_requests, self.duration = self.parse_rate(self.rate)
+        return super(ScopedRateThrottle, self).allow_request(request, view)
+
+
+class _ProjectStorageStartThrottle(_BakedScopedThrottle):
+    scope = "project_storage_start"
+
+
+class _PiDaemonThrottle(_BakedScopedThrottle):
+    scope = "pi_daemon"
 
 
 class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
@@ -38,9 +64,19 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
     # Self-service: member at a kiosk
     # ------------------------------------------------------------------
 
-    @action(detail=False, methods=["post"], permission_classes=[AllowAny])
+    @action(
+        detail=False,
+        methods=["post"],
+        permission_classes=[AllowAny],
+        throttle_classes=[_ProjectStorageStartThrottle],
+    )
     def start(self, request):
-        """Member-initiated kiosk flow: create a stint + return label payload."""
+        """Member-initiated kiosk flow: create a stint + return label payload.
+
+        Throttled per-IP via the ``project_storage_start`` scope (5/hour).
+        A real member starts one stint per ~month; an abuse loop trying to
+        spam new stints from a single kiosk should top out fast.
+        """
         ser = StartStintSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         username = ser.validated_data["username"]
@@ -347,9 +383,15 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         methods=["get"],
         url_path="label",
         permission_classes=[AllowAny],
+        throttle_classes=[_PiDaemonThrottle],
     )
     def label(self, request, stint_id: str):
-        """Return the label PNG. ?printer=brother_ql (default) or epson_tm."""
+        """Return the label PNG. ?printer=brother_ql (default) or epson_tm.
+
+        Throttled per-IP via the ``pi_daemon`` scope (120/min) — the daemon
+        polls every ~10 s and a single IP may serve multiple printers
+        behind NAT.
+        """
         stint = get_object_or_404(ProjectStorageStint, stint_id=stint_id)
         printer: PrinterFamily = request.query_params.get(
             "printer", stint.print_target or "brother_ql"
@@ -371,6 +413,7 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         methods=["get"],
         url_path="print-queue",
         permission_classes=[AllowAny],
+        throttle_classes=[_PiDaemonThrottle],
     )
     def print_queue(self, request):
         """Return the list of stints that still need their label printed.
@@ -379,6 +422,8 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         the only thing it can do with the queue is print a label (which
         is itself an AllowAny endpoint). If the daemon ever needs to
         mutate something more sensitive, add token auth.
+
+        Throttled per-IP via the ``pi_daemon`` scope (120/min).
         """
         pending = (
             ProjectStorageStint.objects.filter(
@@ -416,9 +461,13 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         methods=["post"],
         url_path="mark-printed",
         permission_classes=[AllowAny],
+        throttle_classes=[_PiDaemonThrottle],
     )
     def mark_printed(self, request, stint_id: str):
-        """Daemon calls this after a successful print so the queue empties."""
+        """Daemon calls this after a successful print so the queue empties.
+
+        Throttled per-IP via the ``pi_daemon`` scope (120/min).
+        """
         stint = self.get_object()
         if stint.printed_at is None:
             stint.printed_at = timezone.now()

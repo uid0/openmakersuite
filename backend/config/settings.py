@@ -225,6 +225,26 @@ REST_FRAMEWORK = {
     # so frontend / integration clients can switch on ``error.code``. See
     # docs/API_ERROR_CONTRACT.md for the documented shape.
     "EXCEPTION_HANDLER": "config.api_errors.standardized_exception_handler",
+    # gh-713 / AC-5, AC-6 — per-IP rate limits on unauthenticated public
+    # write endpoints. No DEFAULT_THROTTLE_CLASSES so AllowAny *read*
+    # paths (scan dispatch resolve, QR resolve, kiosk reads) stay open
+    # as the makerspace expects; views that need throttling opt in by
+    # setting ``throttle_classes = [ScopedRateThrottle]`` + a
+    # ``throttle_scope`` matching a key below. Extend the matrix when
+    # adding a new public-write endpoint and document the rate's
+    # rationale in the view's docstring.
+    "DEFAULT_THROTTLE_RATES": {
+        # Scanner kiosk dispatch — a busy kiosk fires many scans/min,
+        # so the cap is generous, but a single IP shouldn't hammer it.
+        "scan_dispatch": "60/min",
+        # Project-storage self-service kiosk start. A real member
+        # starts one stint per month; an abuse loop should top out fast.
+        "project_storage_start": "5/hour",
+        # Pi-side print daemon (mark-printed, print-queue, label).
+        # Legitimate traffic is once-per-10-seconds; loose cap because
+        # one IP may host multiple printers behind NAT.
+        "pi_daemon": "120/min",
+    },
 }
 
 # JWT Token Configuration

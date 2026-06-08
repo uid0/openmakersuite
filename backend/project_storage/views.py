@@ -17,6 +17,8 @@ from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
+from config.idempotency import find_recent_duplicate
+
 from .models import ProjectStorageEvent, ProjectStorageStint
 from .permissions import IsStorageAdminOrStaff
 from .serializers import ProjectStorageStintSerializer, StartStintSerializer
@@ -76,10 +78,37 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         Throttled per-IP via the ``project_storage_start`` scope (5/hour).
         A real member starts one stint per ~month; an abuse loop trying to
         spam new stints from a single kiosk should top out fast.
+
+        Idempotent against network retries (gh-714): if the same member
+        submitted the same payload within the last 5 minutes, returns the
+        existing stint with HTTP 200 instead of failing with 409. The
+        "you already have an active stint" 409 still fires when the prior
+        stint is older than the window — that's the legitimate "go talk
+        to the warden" case.
         """
         ser = StartStintSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         username = ser.validated_data["username"]
+
+        # gh-714 idempotency: a duplicate submit within 5 minutes
+        # (network blip → kiosk retry) should resolve to the existing
+        # stint, not surface as a 409 error to the member.
+        existing = find_recent_duplicate(
+            ProjectStorageStint,
+            lookup_fields={
+                "username": username,
+                "project_title": ser.validated_data.get("project_title", ""),
+                "storage_location_name": ser.validated_data.get("storage_location_name", ""),
+                "removed_at__isnull": True,
+                "moved_to_purgatory_at__isnull": True,
+            },
+            created_at_field="started_at",
+        )
+        if existing is not None:
+            return Response(
+                ProjectStorageStintSerializer(existing).data,
+                status=status.HTTP_200_OK,
+            )
 
         if ProjectStorageStint.member_has_active_stint(username):
             return Response(

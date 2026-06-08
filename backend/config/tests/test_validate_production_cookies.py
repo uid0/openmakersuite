@@ -77,6 +77,24 @@ class TestSslRedirect:
         issues = _issues(SECURE_SSL_REDIRECT=False)
         assert any(i.key == "SECURE_SSL_REDIRECT" for i in issues)
 
+    def test_proxy_ssl_header_bypasses_redirect_check(self):
+        # The OMS prod shape — nginx terminates TLS and Django sees
+        # plain HTTP from the proxy with X-Forwarded-Proto: https.
+        # SECURE_PROXY_SSL_HEADER set signals this architecture; the
+        # check skips SECURE_SSL_REDIRECT entirely so behind-proxy
+        # deploys aren't forced into an internal-redirect loop.
+        issues = _issues(
+            SECURE_SSL_REDIRECT=False,
+            SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+        )
+        assert not any(i.key == "SECURE_SSL_REDIRECT" for i in issues)
+
+    def test_no_proxy_header_keeps_redirect_check(self):
+        # Belt-and-suspenders: without SECURE_PROXY_SSL_HEADER the
+        # check still enforces SECURE_SSL_REDIRECT.
+        issues = _issues(SECURE_SSL_REDIRECT=False, SECURE_PROXY_SSL_HEADER=None)
+        assert any(i.key == "SECURE_SSL_REDIRECT" for i in issues)
+
 
 class TestHsts:
     @pytest.mark.parametrize("bad", [0, "0", -1, None, "", "not-a-number"])

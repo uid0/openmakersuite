@@ -98,9 +98,7 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
             lookup_fields={
                 "username": username,
                 "project_title": ser.validated_data.get("project_title", ""),
-                "storage_location_name": ser.validated_data.get(
-                    "storage_location_name", ""
-                ),
+                "storage_location_name": ser.validated_data.get("storage_location_name", ""),
                 "removed_at__isnull": True,
                 "moved_to_purgatory_at__isnull": True,
             },

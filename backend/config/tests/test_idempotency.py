@@ -27,9 +27,7 @@ class TestFindRecentDuplicate:
         assert match.id == stint.id
 
     def test_misses_outside_window(self):
-        ProjectStorageStintFactory(
-            username="alice", started_at=timezone.now() - timedelta(hours=1)
-        )
+        ProjectStorageStintFactory(username="alice", started_at=timezone.now() - timedelta(hours=1))
         match = find_recent_duplicate(
             ProjectStorageStint,
             lookup_fields={"username": "alice"},

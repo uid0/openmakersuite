@@ -42,14 +42,10 @@ def _payload(**overrides):
 
 class TestStartIdempotency:
     def test_duplicate_in_window_returns_existing_with_200(self, client):
-        first = client.post(
-            "/api/project-storage/stints/start/", _payload(), format="json"
-        )
+        first = client.post("/api/project-storage/stints/start/", _payload(), format="json")
         assert first.status_code == 201, first.content
 
-        second = client.post(
-            "/api/project-storage/stints/start/", _payload(), format="json"
-        )
+        second = client.post("/api/project-storage/stints/start/", _payload(), format="json")
         # Idempotent: returns the existing stint, not 409 active_stint_exists.
         assert second.status_code == 200, second.content
         assert second.json()["stint_id"] == first.json()["stint_id"]
@@ -125,8 +121,7 @@ class TestStartIdempotency:
             username="clear",
             project_title="Restore Schwinn",
             storage_location_name="Shelf A",
-            removed_at=timezone.now()
-            - timedelta(days=DEFAULT_REENTRY_COOLDOWN_DAYS + 1),
+            removed_at=timezone.now() - timedelta(days=DEFAULT_REENTRY_COOLDOWN_DAYS + 1),
         )
 
         resp = client.post(

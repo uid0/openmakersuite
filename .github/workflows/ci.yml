@@ -792,6 +792,13 @@ jobs:
           # would loop livez to https forever. The validator has its own
           # unit tests; the escape hatch is the right shape here.
           SKIP_PRODUCTION_VALIDATION=1
+          # The new safe-by-default values in settings.py (gh-720 follow-up)
+          # turn SSL_REDIRECT on whenever DEBUG=False. Override to 0/0 for
+          # this smoke since /api/health/livez/ is hit over plain http
+          # inside the backend container — a 301 to https would never
+          # complete.
+          SECURE_SSL_REDIRECT=0
+          SECURE_HSTS_SECONDS=0
           EOF
 
           # bootstrap_users for EMQX is normally rendered by deploy.sh; the

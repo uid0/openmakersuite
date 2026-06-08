@@ -6,8 +6,10 @@ etc. by importing and appending.
 
 from __future__ import annotations
 
+from .cookies import CookiesCSRFCORSCheck
 from .django_core import DjangoCoreCheck
 
 CHECKS = [
     DjangoCoreCheck(),
+    CookiesCSRFCORSCheck(),
 ]

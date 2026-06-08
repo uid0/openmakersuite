@@ -786,6 +786,12 @@ jobs:
           EMQX_DASHBOARD_PASSWORD=Strong1Password
           FORGEKEY_PROVISIONING_TOKEN=ci-provisioning-token-not-for-production-padding
           FORGEKEY_JWT_SIGNING_KEY=${jwt_env}
+          # validate_production runs on container start (gh-710) and would
+          # require SECURE_SSL_REDIRECT=1 + SECURE_HSTS_SECONDS>0, but this
+          # smoke boots the backend without an nginx TLS terminator — both
+          # would loop livez to https forever. The validator has its own
+          # unit tests; the escape hatch is the right shape here.
+          SKIP_PRODUCTION_VALIDATION=1
           EOF
 
           # bootstrap_users for EMQX is normally rendered by deploy.sh; the

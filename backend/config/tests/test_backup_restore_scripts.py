@@ -50,6 +50,7 @@ SCRIPTS = [
     ("scripts/backup-media.sh", "MEDIA_PATH"),
     ("scripts/restore-media.sh", "WORKER_SERVICES"),
     ("scripts/backup-config.sh", "ENV_FILE"),
+    ("scripts/restore-config.sh", "--target-dir"),
     ("scripts/smoke.sh", "--json"),
     ("scripts/restore-drill.sh", "--dry-run"),
 ]

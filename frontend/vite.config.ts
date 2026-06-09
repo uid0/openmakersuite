@@ -98,11 +98,17 @@ const config: UserConfig & { test?: unknown } = {
         'src/reportWebVitals.ts',
         'src/types/**',
       ],
+      // Ratcheted 2026-06-09 (gh-460 follow-up) from
+      //   branches 35 / functions 33 / lines 40 / statements 39
+      // to current-1 of the measured baseline:
+      //   branches 41.57 / functions 37.9 / lines 47.23 / statements 46.18.
+      // The -1 buffer absorbs small per-PR fluctuation so the gate doesn't
+      // trip on a refactor that nudges a single percentage point down.
       thresholds: {
-        branches: 35,
-        functions: 33,
-        lines: 40,
-        statements: 39,
+        branches: 40,
+        functions: 36,
+        lines: 46,
+        statements: 45,
       },
     },
   },

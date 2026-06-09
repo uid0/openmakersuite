@@ -90,19 +90,24 @@ Run unit and integration tests:
 npm run test:ci
 ```
 
-Run coverage with the configured Jest thresholds:
+Run coverage with the configured Vitest thresholds:
 
 ```bash
 npm run test:ci:coverage
 ```
 
-The current global Jest thresholds live in `frontend/package.json` under
-`jest.coverageThreshold.global`. They were set from the measured baseline on
-2026-05-20 (oms-8q38) and the file-level `collectCoverageFrom` exclusions are
-limited to the React bootstrap (`index.tsx`), web-vitals reporting, type
-declaration packages, and `.d.ts` files. Application pages and components are
-not excluded; raise the thresholds incrementally rather than excluding files
-that are merely undertested.
+The current global Vitest thresholds live in `frontend/vite.config.ts` under
+`test.coverage.thresholds` (provider: v8). They were set from the measured
+baseline on 2026-05-20 (oms-8q38) and the file-level `coverage.exclude` list
+is limited to `.d.ts` files, the React bootstrap (`index.tsx`), web-vitals
+reporting, and type declaration packages. Application pages and components
+are not excluded; raise the thresholds incrementally rather than excluding
+files that are merely undertested.
+
+When raising the thresholds, measure first (`npm run test:ci:coverage` shows
+the per-file + global percentages) and ratchet to `current - 1` so day-to-day
+fluctuation doesn't trip the gate. Update this doc + the values in
+`vite.config.ts` in the same PR so the rationale is captured.
 
 Build the production bundle:
 

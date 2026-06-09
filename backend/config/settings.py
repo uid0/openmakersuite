@@ -437,9 +437,7 @@ STORAGE_VISION_ENABLED = config("STORAGE_VISION_ENABLED", default=False, cast=bo
 # outlive the original (AC-26). Set to 0 to keep originals forever
 # (operator opt-in; not the default because hi-res JPEGs balloon the
 # media volume fast).
-STORAGE_VISION_RETENTION_DAYS = config(
-    "STORAGE_VISION_RETENTION_DAYS", default=30, cast=int
-)
+STORAGE_VISION_RETENTION_DAYS = config("STORAGE_VISION_RETENTION_DAYS", default=30, cast=int)
 
 # Cache configuration
 CACHES = {

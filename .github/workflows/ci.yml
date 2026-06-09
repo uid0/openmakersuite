@@ -1047,6 +1047,51 @@ jobs:
             exit 1
           fi
 
+      - name: AC-25 config restore drill (mutate → backup → corrupt → restore → verify)
+        run: |
+          # AC-25 (gh-454) config half: prove backup-config.sh + restore-
+          # config.sh round-trip the .env without losing or corrupting it.
+          # The rendered .env is the canonical artifact for this job; mutate
+          # it, take a backup of the mutated state, then mutate AGAIN to a
+          # 'corrupted' shape and verify restore-config.sh puts the mid
+          # state back. This guards against silent extraction failures
+          # (e.g. tar version drift) and silent path-traversal regressions.
+          ORIG_ENV_HASH=$(sha256sum .env | awk '{print $1}')
+          echo "AC25_CONFIG_DRILL_MARKER=$(date -u +%s)" >> .env
+          MARKED_HASH=$(sha256sum .env | awk '{print $1}')
+          if [ "$ORIG_ENV_HASH" = "$MARKED_HASH" ]; then
+            echo "❌ marker append did not change .env hash — fixture broken"
+            exit 2
+          fi
+
+          # Capture the marked state so we can prove the restore brings
+          # it back. Drop the artifact next to the others.
+          bash scripts/backup-config.sh
+
+          # Corrupt the working .env. Restore should overwrite this with
+          # the marked snapshot and move the corrupt file aside to .bak.
+          echo "CORRUPTED=do-not-want" > .env
+
+          LATEST=$(ls -t config-backups/oms-config-*.tar.gz | head -1)
+          RESTORE_CONFIG_CONFIRM=YES bash scripts/restore-config.sh --force "$LATEST"
+
+          RESTORED_HASH=$(sha256sum .env | awk '{print $1}')
+          if [ "$RESTORED_HASH" = "$MARKED_HASH" ]; then
+            echo "✅ config restore round-trip preserved .env bytes exactly"
+          else
+            echo "❌ config restore round-trip mismatch"
+            echo "expected hash: $MARKED_HASH"
+            echo "got hash:      $RESTORED_HASH"
+            exit 1
+          fi
+
+          # Verify the .bak side-file was created so a real operator can
+          # roll the change back by hand.
+          if ! ls .env.*.bak >/dev/null 2>&1; then
+            echo "❌ expected .env.<utc>.bak to exist after restore"
+            exit 1
+          fi
+
       - name: AC-25 DB restore drill (backup → restore → livez)
         env:
           # Match the rendered .env used by this job so the drill talks to

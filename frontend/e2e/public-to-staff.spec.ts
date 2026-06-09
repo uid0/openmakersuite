@@ -82,14 +82,17 @@ test.describe('Public-to-staff proficiency loop', () => {
     // localStorage (see frontend/src/services/api.ts), and a leftover
     // token from a prior test makes the scan page render in
     // logged-in-but-expired-session mode instead of the public path.
+    //
+    // localStorage is per-origin, so clearing has to happen on a page
+    // that's loaded from the app's origin. about:blank wouldn't work.
     await context.clearCookies();
-    await page.goto('about:blank');
+    await page.goto('/');
     await page.evaluate(() => {
       try {
         localStorage.clear();
         sessionStorage.clear();
       } catch {
-        /* about:blank may not allow storage access; that's fine */
+        /* belt and suspenders */
       }
     });
 

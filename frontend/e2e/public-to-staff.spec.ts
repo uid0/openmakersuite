@@ -76,14 +76,6 @@ test.describe('Public-to-staff proficiency loop', () => {
     context,
   }) => {
     test.skip(!backendAvailable, 'Backend not available');
-    // gh-456 follow-up — the public auto-submit path is currently
-    // failing in CI: the POST /api/reorders/requests/ from an
-    // unauthenticated browser session resolves but no row is created
-    // (matching.length stays 0). All the other gh-456 journey tests
-    // were fixed; this one needs local trace inspection of the
-    // unauth-fetch behavior + the backend ReorderRequestViewSet.create
-    // path. Skipping to unblock the blocking-gate landing.
-    test.skip(true, 'Tracked in #723 — public auto-submit POST not creating row');
 
     // Step 1: public user (no auth) hits the inventory scan page.
     //
@@ -131,19 +123,30 @@ test.describe('Public-to-staff proficiency loop', () => {
       timeout: 15000,
     });
 
-    // Confirm via the API that a reorder request now exists for this item.
-    const listResponse = await fetch(
-      `${API_BASE_URL}/reorders/requests/?item=${item.id}`,
-      { headers: { Authorization: `Bearer ${adminToken}` } }
-    );
-    expect(listResponse.ok).toBe(true);
-    const listBody = await listResponse.json();
-    const results = Array.isArray(listBody) ? listBody : listBody.results || [];
-    const matching = results.filter(
-      (r: any) => r.item === item.id || r.item_id === item.id
-    );
-    expect(matching.length).toBeGreaterThan(0);
-    const created = matching[0];
+    // Confirm via the API that a reorder request now exists for this
+    // item. The create signal fires .delay() webhook + email tasks,
+    // so the response may return before the row settles in all
+    // expected indexes; poll for up to 15s to absorb the lag.
+    let created: any = null;
+    await expect
+      .poll(
+        async () => {
+          const listResponse = await fetch(
+            `${API_BASE_URL}/reorders/requests/?item=${item.id}`,
+            { headers: { Authorization: `Bearer ${adminToken}` } },
+          );
+          if (!listResponse.ok) return 0;
+          const listBody = await listResponse.json();
+          const results = Array.isArray(listBody) ? listBody : listBody.results || [];
+          const matching = results.filter(
+            (r: any) => r.item === item.id || r.item_id === item.id,
+          );
+          if (matching.length > 0) created = matching[0];
+          return matching.length;
+        },
+        { timeout: 15000 },
+      )
+      .toBeGreaterThan(0);
     expect(['pending', 'approved']).toContain(created.status);
 
     // Step 3: staff logs in via auth token and lands on admin dashboard.

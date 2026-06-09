@@ -2444,6 +2444,72 @@ views:
   search.views.save_recent_search:
     permission_classes:
     - IsAuthenticated
+  storage_vision.views.VisionAreaViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      destroy:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      list:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      update:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+  storage_vision.views.VisionCameraViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      destroy:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      list:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      rotate_token:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      update:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+  storage_vision.views.VisionSlotViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      destroy:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      list:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      marker:
+        permission_classes:
+        - IsAuthenticated
+      partial_update:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
+      update:
+        permission_classes:
+        - IsStaffOrLogisticsOrReadOnly
   vendors.views.VendorViewSet:
     actions:
       create:

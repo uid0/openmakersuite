@@ -205,9 +205,13 @@ test.describe('Asset QR Code Scanning', () => {
     await expect(submitButton).toBeVisible();
     await submitButton.click({ force: true });
 
-    // Wait for success message
+    // Wait for success message. The handler awaits both the create and a
+    // photo-upload loop before flipping setActionSuccess, so in CI the
+    // round-trip can comfortably exceed 5s. The previous 5s ceiling fired
+    // while the button still read "Submitting...". 15s matches the
+    // pattern other in-flight assertions in this suite use.
     await expect(page.getByText(/Problem reported successfully/i)).toBeVisible({
-      timeout: 5000,
+      timeout: 15000,
     });
   });
 

@@ -77,21 +77,44 @@ test.describe('Public-to-staff proficiency loop', () => {
   }) => {
     test.skip(!backendAvailable, 'Backend not available');
 
-    // Step 1: public user (no auth) hits the inventory scan page. We clear
-    // any storage from prior tests in this context to mimic a phone with no
-    // session.
+    // Step 1: public user (no auth) hits the inventory scan page. Clear
+    // both cookies AND localStorage — the auth token lives in
+    // localStorage (see frontend/src/services/api.ts), and a leftover
+    // token from a prior test makes the scan page render in
+    // logged-in-but-expired-session mode instead of the public path.
     await context.clearCookies();
-    await page.goto(`/inventory/scan/${item.id}`);
-    await dismissWebpackOverlay(page);
-    await expect(page.getByRole('heading', { name: item.name })).toBeVisible({
-      timeout: 10000,
+    await page.goto('about:blank');
+    await page.evaluate(() => {
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {
+        /* about:blank may not allow storage access; that's fine */
+      }
     });
 
-    // Step 2: ScanPage either auto-submits and redirects to /thanks, or shows
-    // an "already requested" state if a duplicate guard fired. Both prove the
-    // public path completed without login.
+    await page.goto(`/inventory/scan/${item.id}`);
+    await dismissWebpackOverlay(page);
+
+    // The public scan page renders the item heading, then auto-submits
+    // a reorder request. The submit can fire fast enough that the
+    // heading-only assertion races against the post-submit UI. Accept
+    // ANY of three valid post-load states: the item-card heading, the
+    // submit-in-progress notice, or the "submitted" success view.
+    await expect(
+      page.getByText(
+        new RegExp(
+          `${item.name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}|Submitting Reorder Request|Reorder Request Submitted`,
+          'i'
+        )
+      )
+    ).toBeVisible({ timeout: 15000 });
+
+    // Step 2: page either redirects to /thanks (success ack) or stays on
+    // /inventory/scan/<id> (already-requested guard fired). Both prove
+    // the public path completed without login.
     await page.waitForURL((url) => /\/thanks|\/inventory\/scan\//.test(url.pathname), {
-      timeout: 10000,
+      timeout: 15000,
     });
 
     // Confirm via the API that a reorder request now exists for this item.

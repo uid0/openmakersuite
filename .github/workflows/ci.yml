@@ -432,6 +432,13 @@ jobs:
       # hits FATAL: sorry, too many clients already on later specs.
       DJANGO_CONN_MAX_AGE: 0
       REDIS_URL: redis://localhost:6379/0
+      # settings.py defaults CELERY_BROKER_URL to a hardcoded private IP
+      # (192.168.1.36) when neither this env var nor TESTING mode is set.
+      # Without this override, every endpoint that calls `.delay()`
+      # (asset.report_problem → send_asset_problem_webhook etc.) hangs
+      # on the broker connect and the test fires at 15s with the submit
+      # button still reading "Submitting...".
+      CELERY_BROKER_URL: redis://localhost:6379/0
       PLAYWRIGHT_BASE_URL: http://localhost:3000
       PLAYWRIGHT_API_URL: http://localhost:8000/api
       NODE_OPTIONS: "--dns-result-order=ipv4first"

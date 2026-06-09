@@ -1009,6 +1009,44 @@ jobs:
           echo "❌ backend did not serve /api/health/livez/ within 60s"
           exit 1
 
+      - name: AC-25 media restore drill (seed → backup → wipe → restore → verify)
+        run: |
+          # AC-25 (#454) media half: the existing --skip-media flag worked
+          # around an empty media volume. Seed a tiny fixture so backup-
+          # media.sh has something to tar + restore-media.sh has something
+          # to put back, then assert the round-trip preserved the bytes.
+          # This is the documented BACKUP_RESTORE.md §3 path end-to-end,
+          # CI-gated on every deploy-touching PR.
+          backend_id=$(docker compose -f docker-compose.prod.yml ps -q backend)
+          FIXTURE_PATH="ac25-fixture/$(date -u +%s).txt"
+          FIXTURE_CONTENT="ac25-media-drill-$(date -u +%Y%m%dT%H%M%SZ)"
+          docker exec "$backend_id" sh -c \
+              "mkdir -p /app/media/ac25-fixture && \
+               echo '$FIXTURE_CONTENT' > '/app/media/$FIXTURE_PATH'"
+
+          # Take a fresh media archive of the just-seeded volume.
+          bash scripts/backup-media.sh
+
+          # Wipe the seeded file so the restore has something to put back.
+          docker exec "$backend_id" rm -rf /app/media/ac25-fixture
+
+          # Find the most recent archive and restore it.
+          LATEST=$(ls -t media-backups/oms-media-*.tgz | head -1)
+          echo "Restoring from: $LATEST"
+          RESTORE_MEDIA_CONFIRM=YES bash scripts/restore-media.sh --force "$LATEST"
+
+          # Re-read after restart; backend container id may have changed.
+          backend_id=$(docker compose -f docker-compose.prod.yml ps -q backend)
+          RESTORED=$(docker exec "$backend_id" cat "/app/media/$FIXTURE_PATH" 2>&1 | head -1)
+          if [ "$RESTORED" = "$FIXTURE_CONTENT" ]; then
+            echo "✅ media restore round-trip preserved /app/media/$FIXTURE_PATH"
+          else
+            echo "❌ media restore round-trip failed"
+            echo "expected: $FIXTURE_CONTENT"
+            echo "got:      $RESTORED"
+            exit 1
+          fi
+
       - name: AC-25 DB restore drill (backup → restore → livez)
         env:
           # Match the rendered .env used by this job so the drill talks to

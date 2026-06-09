@@ -24,7 +24,7 @@ import {
   dismissWebpackOverlay,
 } from './fixtures';
 
-test.use({ ...devices['iPhone 12'] });
+test.use({ ...devices['Pixel 5'] }); // gh-456: chromium-emulated phone (webkit not installed in the blocking-gate CI job)
 
 test.describe('Public invite redemption mobile (/invite/:code)', () => {
   let backendAvailable = false;

@@ -139,6 +139,7 @@ INSTALLED_APPS = [
     "backups",
     "resilience",
     "bms",
+    "storage_vision",
 ]
 
 MIDDLEWARE = [
@@ -424,6 +425,19 @@ CIRCUIT_BREAKERS_ENABLED = config("CIRCUIT_BREAKERS_ENABLED", default=not _RUNNI
 CIRCUIT_BREAKER_USE_REDIS = config(
     "CIRCUIT_BREAKER_USE_REDIS", default=not _RUNNING_TESTS, cast=bool
 )
+
+# gh-vision (storage_vision app). Feature-flagged from day one so a
+# deploy that doesn't want the camera/marker pipeline can keep the URL
+# routes off entirely (AC-2). The flag gates write paths; reads are
+# governed by the app's permission_classes alone, since reading the
+# (empty) setup tables when the feature is off can't harm anything.
+STORAGE_VISION_ENABLED = config("STORAGE_VISION_ENABLED", default=False, cast=bool)
+# How many days to keep the original capture image on disk. Observation
+# rows, evidence crops, classifications, and the audit trail all
+# outlive the original (AC-26). Set to 0 to keep originals forever
+# (operator opt-in; not the default because hi-res JPEGs balloon the
+# media volume fast).
+STORAGE_VISION_RETENTION_DAYS = config("STORAGE_VISION_RETENTION_DAYS", default=30, cast=int)
 
 # Cache configuration
 CACHES = {

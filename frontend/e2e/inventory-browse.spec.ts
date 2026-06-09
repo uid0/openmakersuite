@@ -41,7 +41,10 @@ test.describe('Inventory browse + search', () => {
 
     const adminUsername = `oms_browse_admin_${Date.now()}`;
     await createTestUser(adminUsername, 'adminpass123', `${adminUsername}@test.com`, true);
-    await createActiveMembershipForUser(adminUsername);
+    // is_staff is required so the seed step below can hit
+    // LocationViewSet.create (IsAdminUser); without it, every spec in
+    // this file fails at setup with HTTP 403.
+    await createActiveMembershipForUser(adminUsername, { isStaff: true });
     adminToken = await loginUser(adminUsername, 'adminpass123');
 
     const stamp = Date.now();
@@ -80,9 +83,11 @@ test.describe('Inventory browse + search', () => {
     await page.goto('/inventory/items');
     await dismissWebpackOverlay(page);
 
-    // The page title is rendered as a Mantine Text, not a heading. Use a
-    // visible-text assertion that does not depend on heading semantics.
-    await expect(page.getByText('Inventory Items', { exact: true })).toBeVisible({
+    // The page now uses WorkspacePage's split eyebrow/title shape
+    // ("Inventory" eyebrow + "Items" title) instead of a single
+    // "Inventory Items" string. Use the page testid to anchor that
+    // we landed on the right page without depending on copy.
+    await expect(page.getByTestId('inventory-list-page')).toBeVisible({
       timeout: 15000,
     });
 

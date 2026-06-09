@@ -24,7 +24,7 @@ import {
   dismissWebpackOverlay,
 } from './fixtures';
 
-test.use({ ...devices['iPhone 12'] });
+test.use({ ...devices['Pixel 5'] }); // gh-456: chromium-emulated phone (webkit not installed in the blocking-gate CI job)
 
 test.describe('Public invite redemption mobile (/invite/:code)', () => {
   let backendAvailable = false;
@@ -78,7 +78,11 @@ test.describe('Public invite redemption mobile (/invite/:code)', () => {
     // A 5-char password should fail the client-side 12-char rule. The
     // failure must surface as field-level text — not a blank submit or
     // an unhandled toast — so the invitee can self-correct.
-    await page.getByLabel('Password', { exact: true }).fill('short');
+    // Mantine renders required-field asterisks inside the label's
+    // accessible name ("Password *"), so {exact: true} against
+    // "Password" misses. Anchored regex matches the "Password"
+    // prefix without overlapping "Confirm password".
+    await page.getByLabel(/^Password\b/).fill('short');
     await page.getByLabel('Confirm password').fill('short');
     await submit.click();
     await expect(
@@ -87,7 +91,7 @@ test.describe('Public invite redemption mobile (/invite/:code)', () => {
 
     // Now use a valid password but mismatched confirm — second
     // client-side guard.
-    await page.getByLabel('Password', { exact: true }).fill('mobile-redeem-pw-123');
+    await page.getByLabel(/^Password\b/).fill('mobile-redeem-pw-123');
     await page.getByLabel('Confirm password').fill('mobile-redeem-pw-XXX');
     await submit.click();
     await expect(page.getByText(/Passwords do not match/i)).toBeVisible();

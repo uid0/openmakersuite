@@ -125,35 +125,60 @@ cd frontend
 npx playwright install --with-deps
 ```
 
-Run E2E tests:
+Quick run against a manually running dev server (no setup automation):
 
 ```bash
 npm run test:e2e
 ```
 
-For the most CI-like local run, build the frontend and serve it with the repo's SPA static server so Playwright reuses an existing server instead of invoking the development server:
+### CI-equivalent local run
 
-```bash
-cd frontend
-npm run build
-python3 ../scripts/serve-spa.py build 3000
-```
+The CI `E2E Tests (Playwright)` job is blocking — Playwright failures fail the PR. To reproduce that environment locally, the e2e specs need a real backend (Postgres + Redis + Django on `:8000` with `DEBUG=1`) and the built SPA served on `:3000`.
 
-Then, in another shell:
+1. Start backend with the test-membership endpoint enabled:
 
-```bash
-cd frontend
-env -u CI npm run test:e2e
-```
+   ```bash
+   cd backend
+   export DEBUG=1
+   export SECRET_KEY=test-secret-key
+   export ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
+   export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
+   export REDIS_URL=redis://localhost:6379/0
+   python manage.py migrate --no-input
+   python manage.py runserver 0.0.0.0:8000 --noreload
+   ```
 
-Backend API availability is still required for flows that call the backend. Configure endpoints with:
+2. Build the frontend and serve the build artifact:
 
-```bash
-PLAYWRIGHT_BASE_URL=http://localhost:3000
-PLAYWRIGHT_API_URL=http://localhost:8000/api
-```
+   ```bash
+   cd frontend
+   npm run build
+   python3 ../scripts/serve-spa.py build 3000
+   ```
 
-Current E2E coverage lives in `frontend/e2e/` and should include public unauthenticated member paths, administrative asset/dashboard paths, and SIG dashboard paths.
+3. In a third shell, run Playwright pointed at both servers. Setting `PLAYWRIGHT_BASE_URL` tells the Playwright config to skip its dev-server launcher and use the static SPA on `:3000`:
+
+   ```bash
+   cd frontend
+   PLAYWRIGHT_BASE_URL=http://localhost:3000 \
+   PLAYWRIGHT_API_URL=http://localhost:8000/api \
+   npx playwright test --project=chromium
+   ```
+
+   Drop `--project=chromium` to exercise the full chromium/firefox/webkit matrix locally. CI runs chromium only for cycle time.
+
+`DEBUG=1` is load-bearing: the e2e fixtures grant active memberships through `/api/auth/test-membership/`, which `auth_views.create_test_membership` only exposes when `DEBUG` is truthy. Without it, login fails for every seeded user and every spec self-skips.
+
+Current E2E coverage lives in `frontend/e2e/` and includes public unauthenticated member paths, administrative asset/dashboard paths, the public-to-staff proficiency loop (AC-21), the code-entry mobile fallback (AC-14), inventory browse/search, and SIG dashboard paths.
+
+### Failure artifacts
+
+`playwright.config.ts` records traces on first retry, videos on failure, and screenshots on failure. When the CI E2E job fails, the workflow uploads two artifacts you can download from the failed run:
+
+- `playwright-report/` — the HTML report (uploaded on every run).
+- `playwright-test-results/` — raw traces, videos, and screenshots (failure only).
+
+Open the HTML report with `npx playwright show-report` after downloading.
 
 ## CI and Codecov
 
@@ -175,13 +200,20 @@ Frontend CI:
 - Verifies key dependencies with `npm ls`.
 - Runs `npm run test:ci:coverage` on every CI run.
 - Builds the production bundle.
-- Installs Playwright browsers and runs advisory `npm run test:e2e` coverage against the built frontend served by `scripts/serve-spa.py`.
 - Verifies `frontend/coverage/clover.xml` and `frontend/coverage/lcov.info`.
 - Uploads frontend coverage to Codecov with `fail_ci_if_error: false`.
 
-Coverage thresholds are enforced by pytest/Jest. Codecov upload is reporting-only and must not be the only gate.
+E2E CI (`E2E Tests (Playwright)`):
 
-The current Playwright CI step is advisory because the specs require a live backend at `PLAYWRIGHT_API_URL`, and the existing frontend dev-server path is incompatible with the current dependency override when run under Node 18. A future frontend/backend implementation pass should make this step blocking by running against a live backend service and the Node 20 frontend runtime.
+- Triggers when backend or frontend changes.
+- Spins up Postgres and Redis as service containers.
+- Installs backend dependencies, runs migrations, starts Django with `DEBUG=1` on `:8000`.
+- Builds the frontend and serves the build with `scripts/serve-spa.py` on `:3000`.
+- Installs Playwright chromium and runs the e2e suite against the live stack.
+- Uploads the Playwright HTML report on every run; uploads raw traces/videos/screenshots on failure.
+- Blocking: there is no `continue-on-error`. A Playwright failure fails the PR.
+
+Coverage thresholds are enforced by pytest/Jest. Codecov upload is reporting-only and must not be the only gate.
 
 ## Writing Tests
 

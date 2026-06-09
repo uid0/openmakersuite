@@ -19,7 +19,7 @@
 import { devices, expect, test } from '@playwright/test';
 import { checkBackendAvailable, dismissWebpackOverlay } from './fixtures';
 
-test.use({ ...devices['iPhone 12'] });
+test.use({ ...devices['Pixel 5'] }); // gh-456: chromium-emulated phone (webkit not installed in the blocking-gate CI job)
 
 test.describe('Universal scanner mobile (/scan)', () => {
   let backendAvailable = false;

@@ -40,17 +40,18 @@ test.describe('Asset QR Code Scanning', () => {
     try {
       // Create test user first
       testUser = await createTestUser('testuser', 'testpass123', 'testuser@test.com');
-      
+
       // Create active membership for test user (uses test helper endpoint)
       const { createActiveMembershipForUser } = await import('./fixtures');
       await createActiveMembershipForUser('testuser');
-      
+
       // Now login to get a fresh token (registration token works, but login verifies membership)
       testUser.token = await loginUser(testUser.username, testUser.password);
 
-      // Create admin user for asset creation
+      // Create admin user for asset creation. is_staff lets us hit admin-only
+      // endpoints during seeding (e.g. patching last_scanned_at) if needed.
       const adminUser = await createTestUser('admin', 'adminpass123', 'admin@test.com', true);
-      await createActiveMembershipForUser('admin');
+      await createActiveMembershipForUser('admin', { isStaff: true });
       adminToken = await loginUser('admin', 'adminpass123');
 
       // Create a test asset (requires authentication)
@@ -135,8 +136,11 @@ test.describe('Asset QR Code Scanning', () => {
     await expect(page.getByText('Actions')).toBeVisible();
     await expect(page.getByText('Report a Problem')).toBeVisible();
 
-    // Verify asset status is displayed (use more specific selector)
-    await expect(page.locator('.info-item .label:has-text("Status")')).toBeVisible();
+    // Verify asset status is displayed. There can be more than one
+    // `.info-item .label` matching "Status" (e.g. asset status + safety
+    // status), so scope to the first match — we're proving the label
+    // renders, not asserting cardinality.
+    await expect(page.locator('.info-item .label:has-text("Status")').first()).toBeVisible();
 
     // Verify operational requirements if set (use more specific selectors)
     if (testAsset.needs_ventilation) {
@@ -201,9 +205,13 @@ test.describe('Asset QR Code Scanning', () => {
     await expect(submitButton).toBeVisible();
     await submitButton.click({ force: true });
 
-    // Wait for success message
+    // Wait for success message. The handler awaits both the create and a
+    // photo-upload loop before flipping setActionSuccess, so in CI the
+    // round-trip can comfortably exceed 5s. The previous 5s ceiling fired
+    // while the button still read "Submitting...". 15s matches the
+    // pattern other in-flight assertions in this suite use.
     await expect(page.getByText(/Problem reported successfully/i)).toBeVisible({
-      timeout: 5000,
+      timeout: 15000,
     });
   });
 
@@ -227,6 +235,11 @@ test.describe('Asset QR Code Scanning', () => {
       // Asset is active, test disabling
       await disableButton.click({ force: true });
 
+      // confirmDelete (utils/dialogs.tsx) opens a Mantine confirm modal
+      // with a 'Delete' button before the disable action runs. Click it
+      // so the actual API call fires.
+      await page.getByRole('button', { name: 'Delete' }).click();
+
       // Wait for success message
       await expect(page.getByText(/Asset disabled successfully/i)).toBeVisible({
         timeout: 5000,
@@ -235,7 +248,8 @@ test.describe('Asset QR Code Scanning', () => {
       // Verify enable button is now visible
       await expect(enableButton).toBeVisible({ timeout: 3000 });
     } else if (await enableButton.isVisible()) {
-      // Asset is inactive, test enabling
+      // Asset is inactive, test enabling — handleEnable has no
+      // confirmDelete prompt, so no modal step here.
       await enableButton.click({ force: true });
 
       // Wait for success message

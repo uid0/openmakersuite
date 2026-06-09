@@ -32,10 +32,11 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
     try {
       // Create admin user
       const adminUser = await createTestUser('admin', 'adminpass123', 'admin@test.com', true);
-      
-      // Create active membership for admin user
+
+      // Create active membership AND promote to staff so the seed below
+      // can patch last_scanned_at via the admin-only update path.
       const { createActiveMembershipForUser } = await import('./fixtures');
-      await createActiveMembershipForUser('admin');
+      await createActiveMembershipForUser('admin', { isStaff: true });
       
       // Login to get admin token
       adminToken = await loginUser('admin', 'adminpass123');
@@ -96,9 +97,14 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
     // Navigate to admin dashboard
     await page.goto('/orderadmin');
 
-    // Wait for page to load
+    // Wait for page to load. Scope to the <h1> page heading because
+    // "Admin Dashboard" also appears in the sidebar nav, recent pages,
+    // and command palette — getByText would resolve to 4 elements and
+    // trigger a strict-mode violation.
     await page.waitForSelector('h1', { timeout: 10000 });
-    await expect(page.getByText('Admin Dashboard')).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: /admin dashboard/i })
+    ).toBeVisible();
 
     // Scroll to assets section
     const assetsSection = page.getByText('Assets Not Checked In (3+ Months)');
@@ -118,17 +124,25 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
     // Wait for assets section
     await page.waitForSelector('text=Assets Not Checked In', { timeout: 10000 });
 
-    // Check if assets table is visible
+    // The section renders ONE of two terminal states once it's done
+    // loading: either the table (when notCheckedInAssets.length > 0)
+    // or the "All assets have been checked in recently" empty-state
+    // paragraph. Wait until ONE of them lands before branching — the
+    // previous isVisible() snapshot was racing the data fetch and
+    // falling to the no-table path before the table had rendered.
     const assetsTable = page.locator('.assets-table table');
-    const tableVisible = await assetsTable.isVisible().catch(() => false);
+    const emptyState = page.getByText('All assets have been checked in recently');
+    await expect(assetsTable.or(emptyState)).toBeVisible({ timeout: 10000 });
 
-    if (tableVisible) {
-      // Verify table headers
-      await expect(page.getByText('Asset Name')).toBeVisible();
-      await expect(page.getByText('Asset Tag')).toBeVisible();
-      await expect(page.getByText('Location')).toBeVisible();
-      await expect(page.getByText('Last Scanned')).toBeVisible();
-      await expect(page.getByText('Status')).toBeVisible();
+    if (await assetsTable.isVisible()) {
+      // Verify table headers. Scope to the table so common words like
+      // "Location" / "Status" don't collide with sidebar / breadcrumb /
+      // filter copy elsewhere on the page (strict-mode violation).
+      await expect(assetsTable.getByText('Asset Name')).toBeVisible();
+      await expect(assetsTable.getByText('Asset Tag')).toBeVisible();
+      await expect(assetsTable.getByText('Location')).toBeVisible();
+      await expect(assetsTable.getByText('Last Scanned')).toBeVisible();
+      await expect(assetsTable.getByText('Status')).toBeVisible();
 
       // Verify at least one of our test assets is in the table
       const asset1Visible = await page.getByText('Old Unscanned Asset').isVisible().catch(() => false);
@@ -136,9 +150,8 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
 
       expect(asset1Visible || asset2Visible).toBeTruthy();
     } else {
-      // If no assets table, should show "All assets have been checked in recently"
-      const noDataMessage = page.getByText('All assets have been checked in recently');
-      await expect(noDataMessage).toBeVisible();
+      // If the table wasn't the winner, the empty-state must be.
+      await expect(emptyState).toBeVisible();
     }
   });
 

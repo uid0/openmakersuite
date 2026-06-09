@@ -562,6 +562,7 @@ const AdminDashboard: React.FC = () => {
                               onClick={() => handleApprove(request.id)}
                               className="btn-approve"
                               title="Approve"
+                              aria-label="Approve"
                               disabled={rowPending}
                             >
                               ✓
@@ -570,6 +571,7 @@ const AdminDashboard: React.FC = () => {
                               onClick={() => handleCancel(request.id)}
                               className="btn-cancel"
                               title="Cancel"
+                              aria-label="Cancel"
                               disabled={rowPending}
                             >
                               ✗

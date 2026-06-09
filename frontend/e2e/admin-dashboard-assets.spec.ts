@@ -124,11 +124,17 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
     // Wait for assets section
     await page.waitForSelector('text=Assets Not Checked In', { timeout: 10000 });
 
-    // Check if assets table is visible
+    // The section renders ONE of two terminal states once it's done
+    // loading: either the table (when notCheckedInAssets.length > 0)
+    // or the "All assets have been checked in recently" empty-state
+    // paragraph. Wait until ONE of them lands before branching — the
+    // previous isVisible() snapshot was racing the data fetch and
+    // falling to the no-table path before the table had rendered.
     const assetsTable = page.locator('.assets-table table');
-    const tableVisible = await assetsTable.isVisible().catch(() => false);
+    const emptyState = page.getByText('All assets have been checked in recently');
+    await expect(assetsTable.or(emptyState)).toBeVisible({ timeout: 10000 });
 
-    if (tableVisible) {
+    if (await assetsTable.isVisible()) {
       // Verify table headers. Scope to the table so common words like
       // "Location" / "Status" don't collide with sidebar / breadcrumb /
       // filter copy elsewhere on the page (strict-mode violation).
@@ -144,9 +150,8 @@ test.describe('Admin Dashboard - Assets Not Checked In', () => {
 
       expect(asset1Visible || asset2Visible).toBeTruthy();
     } else {
-      // If no assets table, should show "All assets have been checked in recently"
-      const noDataMessage = page.getByText('All assets have been checked in recently');
-      await expect(noDataMessage).toBeVisible();
+      // If the table wasn't the winner, the empty-state must be.
+      await expect(emptyState).toBeVisible();
     }
   });
 

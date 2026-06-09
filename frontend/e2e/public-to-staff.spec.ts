@@ -77,22 +77,25 @@ test.describe('Public-to-staff proficiency loop', () => {
   }) => {
     test.skip(!backendAvailable, 'Backend not available');
 
-    // Step 1: public user (no auth) hits the inventory scan page. Clear
-    // both cookies AND localStorage — the auth token lives in
-    // localStorage (see frontend/src/services/api.ts), and a leftover
-    // token from a prior test makes the scan page render in
-    // logged-in-but-expired-session mode instead of the public path.
+    // Step 1: public user (no auth) hits the inventory scan page.
     //
-    // localStorage is per-origin, so clearing has to happen on a page
-    // that's loaded from the app's origin. about:blank wouldn't work.
+    // The auth token lives in localStorage (see
+    // frontend/src/services/api.ts). Playwright's addInitScript-based
+    // setAuthToken is sticky on the context, so even after clearCookies
+    // + a manual localStorage.clear() the token can reappear because
+    // the init script runs on every subsequent navigation. Register a
+    // counter init script that clears all known auth keys BEFORE any
+    // page script runs — init scripts execute in registration order,
+    // so this lands AFTER any prior setAuthToken in the context.
     await context.clearCookies();
-    await page.goto('/');
-    await page.evaluate(() => {
+    await context.addInitScript(() => {
       try {
-        localStorage.clear();
-        sessionStorage.clear();
+        localStorage.removeItem('token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('username');
+        localStorage.removeItem('is_staff');
       } catch {
-        /* belt and suspenders */
+        /* localStorage unavailable; ignore */
       }
     });
 

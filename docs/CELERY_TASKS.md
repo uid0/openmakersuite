@@ -131,6 +131,12 @@ operator surface for inspecting status, args, and tracebacks
 | --- | --- | --- | --- | --- | --- | --- |
 | `config.celery.debug_task` | Manual only | Prints request metadata (`ignore_result=True`) | None | 30 min global | **Yes** | N/A |
 
+### storage_vision
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `storage_vision.process_capture` | Enqueued from `VisionCaptureViewSet.create` after a phone or fixed-camera upload (AC-9, AC-10). | Slice-3 stub: transitions the `VisionCapture` row `queued → processing → processed`, stamps `processing_at`/`processed_at`/`processor_version = "slice3-stub"`, and returns. Slice 4 fills in the real Pillow + OpenCV decode, marker detection (QR), match-to-`VisionSlot`, and `VisionObservation` creation. | None (`@shared_task` defaults) | 30 min global | **Yes** — the no-op early-returns if the row is already past `queued`, so retries / re-enqueues never re-stamp a processed capture. | Failed rows surface in Django admin → `VisionCapture` (status=`failed`, `failure_reason`/`failure_code` populated). Replay by flipping the row back to `queued` and re-enqueueing via the management command planned for slice 4. |
+
 ## Failed task recovery (AC-31)
 
 Failed and retrying tasks are visible to staff and operators through three

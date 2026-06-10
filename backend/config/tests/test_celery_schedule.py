@@ -53,6 +53,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "backups.daily_postgres_backup",
         crontab(minute=0, hour=2),  # 02:00 UTC daily — R-03 mitigation
     ),
+    "storage-vision-prune-originals": (
+        "storage_vision.prune_original_captures",
+        crontab(minute=30, hour=3),  # 03:30 UTC daily — AC-26 retention
+    ),
 }
 
 

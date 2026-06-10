@@ -579,6 +579,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "backups.daily_postgres_backup",
         "schedule": crontab(minute=0, hour=2),
     },
+    # AC-26 — storage_vision retention. Runs daily at 03:30 UTC so it
+    # lands AFTER the backups task at 02:00 (originals deleted by the
+    # prune still live in the latest dump). Idempotent within a window:
+    # a second run inside the same day finds no rows to delete.
+    "storage-vision-prune-originals": {
+        "task": "storage_vision.prune_original_captures",
+        "schedule": crontab(minute=30, hour=3),
+    },
 }
 
 # Backups (R-03). Output volume and retention window for the

@@ -1,8 +1,12 @@
 """Storage Vision Celery tasks.
 
 slice 3 shipped the upload + state-machine stub.
-slice 4 (this file) ships the actual marker detection + classification
-pipeline (AC-13 through AC-19).
+slice 4 ships the actual marker detection + classification pipeline
+(AC-13 through AC-19).
+slice 6 adds the retention task (AC-26, AC-27): originals are pruned
+after STORAGE_VISION_RETENTION_DAYS, but the observation rows,
+review actions, evidence crops, classifications, and audit metadata
+all outlive the original.
 
 The processor is split so the heavy work happens in the worker:
 
@@ -29,6 +33,7 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -325,3 +330,88 @@ def _create_or_dedupe_observation(
             update_fields.append("evidence_crop")
         existing.save(update_fields=update_fields)
         return "bumped"
+
+
+@shared_task(name="storage_vision.prune_original_captures")
+def prune_original_captures() -> dict:
+    """AC-26 — delete original capture images older than the retention window.
+
+    What this DOES delete:
+      - VisionCapture.original_image (the bytes on disk + the FieldFile
+        reference)
+
+    What this preserves (the AC-26 contract):
+      - The VisionCapture row itself (kept for audit + the
+        markers_detected / failure_reason history)
+      - Every derived VisionObservation row
+      - VisionObservation.evidence_crop (the small JPEG thumbnail
+        the operator approved against)
+      - Every VisionReviewAction (the approve/reject audit trail)
+      - Linked StockReconciliation + ReorderRequest rows (untouched)
+
+    A retention window of 0 days means "keep originals forever" — an
+    operator opt-in that skips the prune entirely. Anything else is
+    interpreted as a day count.
+
+    The task is safe to run multiple times per window: captures whose
+    original_image has already been cleared are skipped without
+    touching storage.
+    """
+    days = int(getattr(settings, "STORAGE_VISION_RETENTION_DAYS", 30) or 0)
+    if days <= 0:
+        logger.info("prune_original_captures: STORAGE_VISION_RETENTION_DAYS=0, skipping")
+        return {"status": "disabled", "deleted": 0, "freed_bytes": 0}
+
+    from .models import VisionCapture
+
+    cutoff = timezone.now() - timedelta(days=days)
+    # Pull only rows that still have an original on disk. ImageField
+    # records the relative path even after delete(); checking
+    # `original_image` (truthy) excludes the empty string sentinel.
+    candidates = (
+        VisionCapture.objects.filter(received_at__lt=cutoff)
+        .exclude(original_image="")
+        .only("id", "original_image", "received_at")
+    )
+
+    deleted = 0
+    freed_bytes = 0
+    errors = 0
+    for capture in candidates.iterator(chunk_size=200):
+        field = capture.original_image
+        try:
+            try:
+                freed_bytes += int(field.size or 0)
+            except Exception:  # noqa: BLE001
+                # Underlying file might be already gone (manually
+                # cleared, or a backing store that doesn't expose
+                # size). Don't let a counter glitch block the prune.
+                logger.debug("prune_original_captures: size() failed for capture %s", capture.pk)
+            # delete(save=False) clears bytes AND the FieldFile
+            # reference. We follow up with a single UPDATE so we
+            # don't touch `received_at` or any other columns.
+            field.delete(save=False)
+            VisionCapture.objects.filter(pk=capture.pk).update(original_image="")
+            deleted += 1
+        except Exception:  # noqa: BLE001
+            errors += 1
+            logger.warning(
+                "prune_original_captures: failed to prune capture %s — continuing",
+                capture.pk,
+            )
+
+    logger.info(
+        "prune_original_captures: deleted=%s freed_bytes=%s errors=%s cutoff=%s",
+        deleted,
+        freed_bytes,
+        errors,
+        cutoff.isoformat(),
+    )
+    return {
+        "status": "ok",
+        "deleted": deleted,
+        "freed_bytes": freed_bytes,
+        "errors": errors,
+        "cutoff": cutoff.isoformat(),
+        "retention_days": days,
+    }

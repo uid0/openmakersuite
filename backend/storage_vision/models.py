@@ -362,3 +362,58 @@ class VisionObservation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.slot.marker_code} {self.classification} ({self.status})"
+
+
+class VisionReviewAction(models.Model):
+    """Append-only audit row for a staff approve/reject decision (AC-21, AC-24).
+
+    Each call to the observation approve/reject endpoint writes exactly one
+    of these. The observation itself moves to ``approved`` or ``rejected`` —
+    this row carries the reviewer identity, the reason text, and (for
+    approvals that triggered a reconcile) a back-link to the resulting
+    ``inventory.StockReconciliation`` row so the staff review history can
+    show "Ian approved → stock zeroed → reorder #142 created".
+
+    AC-23 idempotence sits on the observation status, not here: a second
+    approve call short-circuits before this row would be written.
+    """
+
+    ACTION_APPROVE = "approve"
+    ACTION_REJECT = "reject"
+    ACTION_CHOICES = [
+        (ACTION_APPROVE, "Approve"),
+        (ACTION_REJECT, "Reject"),
+    ]
+
+    observation = models.ForeignKey(
+        VisionObservation,
+        on_delete=models.CASCADE,
+        related_name="review_actions",
+    )
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    action = models.CharField(max_length=16, choices=ACTION_CHOICES)
+    reason = models.TextField(blank=True)
+    # Only set for approve-paths that ran reconciliation. Null for
+    # review-only approves (no inventory mutation) and for rejects.
+    stock_reconciliation = models.ForeignKey(
+        "inventory.StockReconciliation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["observation", "-created_at"]),
+            models.Index(fields=["reviewer", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.action} obs={self.observation_id} by={self.reviewer_id}"

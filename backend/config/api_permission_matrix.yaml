@@ -2509,6 +2509,23 @@ views:
       update:
         permission_classes:
         - IsCameraOrStaffOrLogistics
+  storage_vision.views.VisionObservationViewSet:
+    actions:
+      approve:
+        permission_classes:
+        - IsStaffOrLogistics
+      bulk_approve:
+        permission_classes:
+        - IsStaffOrLogistics
+      list:
+        permission_classes:
+        - IsStaffOrLogistics
+      reject:
+        permission_classes:
+        - IsStaffOrLogistics
+      retrieve:
+        permission_classes:
+        - IsStaffOrLogistics
   storage_vision.views.VisionSlotViewSet:
     actions:
       create:

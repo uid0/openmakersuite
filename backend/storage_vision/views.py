@@ -13,23 +13,36 @@ existing rows.
 from __future__ import annotations
 
 from django.conf import settings
+from django.db import transaction
 from django.http import HttpResponse
+from django.utils import timezone
 
 from rest_framework import status, viewsets
+from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from .models import VisionArea, VisionCamera, VisionSlot
-from .permissions import IsStaffOrLogisticsOrReadOnly
+from .authentication import VisionCameraTokenAuthentication
+from .models import VisionArea, VisionCamera, VisionCapture, VisionSlot
+from .permissions import (
+    IsCameraOrStaffOrLogistics,
+    IsStaffOrLogisticsOrReadOnly,
+    _is_staff_or_logistics,
+)
 from .serializers import (
     VisionAreaSerializer,
     VisionCameraSerializer,
     VisionCameraTokenSerializer,
+    VisionCaptureCreateSerializer,
+    VisionCaptureSerializer,
     VisionSlotSerializer,
 )
 from .services.marker_label import render_slot_marker_label
+from .tasks import process_capture
 
 
 def _feature_disabled_response():
@@ -185,3 +198,167 @@ class VisionCameraViewSet(_FeatureFlagGatedWritesMixin, viewsets.ModelViewSet):
 
         serializer = VisionCameraTokenSerializer(cam, context={"request": request})
         return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="heartbeat",
+        authentication_classes=[VisionCameraTokenAuthentication],
+        permission_classes=[],
+    )
+    def heartbeat(self, request, pk=None):
+        """Camera-side liveness ping (AC-8).
+
+        Auth is the scoped camera bearer ONLY — no JWT path, because a
+        human operator pressing "ping" doesn't tell us anything about
+        whether the device is alive. The camera resolved by the bearer
+        must match the URL ``pk`` (otherwise a camera with one bearer
+        could ping another camera's row).
+
+        Body is optional. Accepted shape:
+          ``{"status": "ok" | "degraded" | "error", "note": "..."}``
+        Stamps ``last_seen_at = now()`` regardless of body, plus
+        ``last_seen_status`` if a value was supplied.
+
+        The feature flag is intentionally NOT enforced — turning the
+        feature off shouldn't make the device think the network is
+        broken. Reads stay on too.
+        """
+        camera = request.auth
+        if not isinstance(camera, VisionCamera):
+            # Bearer was missing entirely. The authentication class
+            # already 401s on an invalid bearer; this path catches the
+            # "no header at all" case where authenticate() returned None.
+            return Response(
+                {"detail": "Authentication credentials were not provided."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        target = self.get_object()
+        if camera.pk != target.pk:
+            # Cross-camera ping attempt — refuse silently with 404 so
+            # we don't tell a stolen bearer that the other ID exists.
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        body = request.data if isinstance(request.data, dict) else {}
+        update_fields = ["last_seen_at"]
+        camera.last_seen_at = timezone.now()
+        # last_seen_status is a free-form JSON blob — accept any dict
+        # body the device sends (firmware version, queue depth, last
+        # error string). Strings get wrapped so the column stays a dict.
+        if body:
+            if isinstance(body, dict):
+                camera.last_seen_status = body
+            else:
+                camera.last_seen_status = {"status": str(body)}
+            update_fields.append("last_seen_status")
+        camera.save(update_fields=update_fields)
+
+        serializer = VisionCameraSerializer(camera, context={"request": request})
+        return Response(serializer.data)
+
+
+class VisionCaptureViewSet(_FeatureFlagGatedWritesMixin, viewsets.ModelViewSet):
+    """Capture upload + listing (AC-9, AC-10, AC-11, AC-12).
+
+    Dual auth: a request carrying ``X-Vision-Camera-Token`` is treated
+    as a camera POSTing on its own behalf (source=camera); a request
+    carrying a normal JWT for a staff/Logistics user is treated as a
+    phone upload (source=phone). Anonymous callers are rejected.
+
+    Write surface is POST-only — there's no point in PATCH/PUT/DELETE
+    for an immutable capture row. The mixin still gates the path on
+    the feature flag for symmetry with the other viewsets.
+    """
+
+    queryset = VisionCapture.objects.select_related("area", "camera", "uploaded_by").all()
+    http_method_names = ["get", "head", "options", "post"]
+    authentication_classes = [
+        VisionCameraTokenAuthentication,
+        JWTAuthentication,
+        SessionAuthentication,
+        BasicAuthentication,
+    ]
+    permission_classes = [IsCameraOrStaffOrLogistics]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if hasattr(self, "request"):
+            area_id = self.request.query_params.get("area")
+            if area_id:
+                qs = qs.filter(area_id=area_id)
+            status_value = self.request.query_params.get("status")
+            if status_value:
+                qs = qs.filter(status=status_value)
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return VisionCaptureCreateSerializer
+        return VisionCaptureSerializer
+
+    def list(self, request, *args, **kwargs):
+        # Reads require a logged-in operator — a camera bearer can
+        # write its own captures but shouldn't be able to enumerate
+        # the queue.
+        if not _is_staff_or_logistics(request.user):
+            raise PermissionDenied()
+        return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        if not _is_staff_or_logistics(request.user):
+            raise PermissionDenied()
+        return super().retrieve(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        if getattr(self, "_feature_flag_blocked", False):
+            return _feature_disabled_response()
+
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+
+        # Stamp source / camera / uploaded_by from the authenticated
+        # principal — the request body must NOT be able to influence
+        # these (a camera bearer claiming source=phone would dodge
+        # camera-side audit logs).
+        camera = request.auth if isinstance(request.auth, VisionCamera) else None
+        if camera is not None:
+            source = VisionCapture.SOURCE_CAMERA
+            uploaded_by = None
+            area = write_serializer.validated_data.get("area") or camera.area
+        else:
+            source = VisionCapture.SOURCE_PHONE
+            uploaded_by = request.user
+            area = write_serializer.validated_data.get("area")
+            if area is None:
+                # Phones must spell out the area — there's no implicit
+                # fallback like there is for cameras.
+                return Response(
+                    {"area": ["This field is required for phone uploads."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        with transaction.atomic():
+            capture = VisionCapture.objects.create(
+                area=area,
+                source=source,
+                camera=camera,
+                uploaded_by=uploaded_by,
+                original_image=write_serializer.validated_data["original_image"],
+                captured_at=write_serializer.validated_data.get("captured_at"),
+                received_at=timezone.now(),
+                status=VisionCapture.STATUS_QUEUED,
+                queued_at=timezone.now(),
+            )
+
+        # Enqueued AFTER the inner atomic commits — by the time we
+        # call .delay() the row is durable. We can't use on_commit
+        # because the outer request transaction (test client and ATOMIC
+        # _REQUESTS in prod) wouldn't fire the callback until after the
+        # response is already on its way out, and we'd rather see the
+        # broker error inline than discover it next morning.
+        process_capture.delay(capture.pk)
+
+        read_serializer = VisionCaptureSerializer(capture, context={"request": request})
+        return Response(read_serializer.data, status=status.HTTP_202_ACCEPTED)

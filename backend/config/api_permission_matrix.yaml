@@ -746,32 +746,6 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
-  forgekey.views.FirmwareBuildViewSet:
-    actions:
-      cancel:
-        permission_classes:
-        - IsAdminUser
-      create:
-        permission_classes:
-        - IsAdminUser
-      destroy:
-        permission_classes:
-        - IsAdminUser
-      list:
-        permission_classes:
-        - IsAdminUser
-      partial_update:
-        permission_classes:
-        - IsAdminUser
-      redispatch:
-        permission_classes:
-        - IsAdminUser
-      retrieve:
-        permission_classes:
-        - IsAdminUser
-      update:
-        permission_classes:
-        - IsAdminUser
   forgekey.views.EpaperFirmwareRolloutViewSet:
     actions:
       advance:
@@ -804,6 +778,32 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  forgekey.views.FirmwareBuildViewSet:
+    actions:
+      cancel:
+        permission_classes:
+        - IsAdminUser
+      create:
+        permission_classes:
+        - IsAdminUser
+      destroy:
+        permission_classes:
+        - IsAdminUser
+      list:
+        permission_classes:
+        - IsAdminUser
+      partial_update:
+        permission_classes:
+        - IsAdminUser
+      redispatch:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAdminUser
+      update:
+        permission_classes:
+        - IsAdminUser
   forgekey.views.FirmwareRolloutViewSet:
     actions:
       advance:
@@ -2472,6 +2472,8 @@ views:
       destroy:
         permission_classes:
         - IsStaffOrLogisticsOrReadOnly
+      heartbeat:
+        permission_classes: []
       list:
         permission_classes:
         - IsStaffOrLogisticsOrReadOnly
@@ -2487,6 +2489,26 @@ views:
       update:
         permission_classes:
         - IsStaffOrLogisticsOrReadOnly
+  storage_vision.views.VisionCaptureViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsCameraOrStaffOrLogistics
+      destroy:
+        permission_classes:
+        - IsCameraOrStaffOrLogistics
+      list:
+        permission_classes:
+        - IsCameraOrStaffOrLogistics
+      partial_update:
+        permission_classes:
+        - IsCameraOrStaffOrLogistics
+      retrieve:
+        permission_classes:
+        - IsCameraOrStaffOrLogistics
+      update:
+        permission_classes:
+        - IsCameraOrStaffOrLogistics
   storage_vision.views.VisionSlotViewSet:
     actions:
       create:

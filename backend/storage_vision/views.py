@@ -27,18 +27,29 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .authentication import VisionCameraTokenAuthentication
-from .models import VisionArea, VisionCamera, VisionCapture, VisionSlot
+from .models import (
+    VisionArea,
+    VisionCamera,
+    VisionCapture,
+    VisionObservation,
+    VisionReviewAction,
+    VisionSlot,
+)
 from .permissions import (
     IsCameraOrStaffOrLogistics,
+    IsStaffOrLogistics,
     IsStaffOrLogisticsOrReadOnly,
     _is_staff_or_logistics,
 )
 from .serializers import (
     VisionAreaSerializer,
+    VisionBulkApproveSerializer,
     VisionCameraSerializer,
     VisionCameraTokenSerializer,
     VisionCaptureCreateSerializer,
     VisionCaptureSerializer,
+    VisionObservationSerializer,
+    VisionReviewActionSerializer,
     VisionSlotSerializer,
 )
 from .services.marker_label import render_slot_marker_label
@@ -362,3 +373,228 @@ class VisionCaptureViewSet(_FeatureFlagGatedWritesMixin, viewsets.ModelViewSet):
 
         read_serializer = VisionCaptureSerializer(capture, context={"request": request})
         return Response(read_serializer.data, status=status.HTTP_202_ACCEPTED)
+
+
+class VisionObservationViewSet(viewsets.ReadOnlyModelViewSet):
+    """Review queue + per-observation approve/reject + bulk-approve.
+
+    The list endpoint backs the staff Facilities review screen
+    (AC-20). The approve/reject/bulk-approve actions are the only
+    writes — observations themselves are produced by the Celery
+    processor and are immutable from the API's perspective.
+
+    Feature flag (AC-2): turning the flag off blocks the WRITE
+    actions (approve/reject/bulk-approve) but leaves the list/retrieve
+    readable so an operator who flipped it off can still audit
+    historical findings.
+    """
+
+    queryset = VisionObservation.objects.select_related(
+        "slot__area",
+        "slot__item",
+        "capture",
+    ).all()
+    serializer_class = VisionObservationSerializer
+    permission_classes = [IsStaffOrLogistics]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if not hasattr(self, "request"):
+            return qs
+        params = self.request.query_params
+
+        status_value = params.get("status")
+        if status_value:
+            qs = qs.filter(status=status_value)
+        area_id = params.get("area")
+        if area_id:
+            qs = qs.filter(slot__area_id=area_id)
+        item_id = params.get("item")
+        if item_id:
+            qs = qs.filter(slot__item_id=item_id)
+        suggested = params.get("suggested_action")
+        if suggested:
+            qs = qs.filter(suggested_action=suggested)
+        classification = params.get("classification")
+        if classification:
+            qs = qs.filter(classification=classification)
+        return qs
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, pk=None):
+        """AC-21, AC-22, AC-23.
+
+        Empty-bin pending observation with suggested_action=reconcile_empty:
+          - mark approved, log a VisionReviewAction
+          - call inventory's existing reconciliation helper with
+            actual_count=0, reason=vision_supply_check, notes carrying
+            the observation reference
+          - the helper auto-creates a ReorderRequest if the resulting
+            count is at or below minimum_stock (AC-22)
+
+        Anything else (review_only, or already-resolved status):
+          - review_only approve: mark approved, log review action, no inventory mutation
+          - already-approved / -rejected / -superseded → 409 Conflict (AC-23)
+        """
+        if not getattr(settings, "STORAGE_VISION_ENABLED", False):
+            return _feature_disabled_response()
+
+        obs = self.get_object()
+        if obs.status != VisionObservation.STATUS_PENDING:
+            return Response(
+                {"detail": f"Observation is already {obs.status}.", "code": "already_resolved"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        body_ser = VisionReviewActionSerializer(data=request.data or {})
+        body_ser.is_valid(raise_exception=True)
+        reason_text = body_ser.validated_data.get("reason", "")
+
+        with transaction.atomic():
+            reconciliation, reorder_created = _approve_one(obs, request.user, reason_text)
+
+        out = VisionObservationSerializer(obs, context={"request": request}).data
+        out["reconciliation_id"] = reconciliation.id if reconciliation else None
+        out["reorder_created"] = bool(reorder_created)
+        return Response(out)
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, pk=None):
+        """AC-24 — reject a pending observation. No inventory mutation."""
+        if not getattr(settings, "STORAGE_VISION_ENABLED", False):
+            return _feature_disabled_response()
+
+        obs = self.get_object()
+        if obs.status != VisionObservation.STATUS_PENDING:
+            return Response(
+                {"detail": f"Observation is already {obs.status}.", "code": "already_resolved"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        body_ser = VisionReviewActionSerializer(data=request.data or {})
+        body_ser.is_valid(raise_exception=True)
+        reason_text = body_ser.validated_data.get("reason", "")
+        if not reason_text:
+            return Response(
+                {"reason": ["A rejection reason is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            obs.status = VisionObservation.STATUS_REJECTED
+            obs.save(update_fields=["status", "updated_at"])
+            VisionReviewAction.objects.create(
+                observation=obs,
+                reviewer=request.user,
+                action=VisionReviewAction.ACTION_REJECT,
+                reason=reason_text,
+            )
+
+        return Response(VisionObservationSerializer(obs, context={"request": request}).data)
+
+    @action(detail=False, methods=["post"], url_path="bulk-approve")
+    def bulk_approve(self, request):
+        """AC-25 — approve many observations in one round trip.
+
+        Returns ``{approved: [...], skipped: [{id, reason}, ...], counts: {...}}``.
+        Each ID is processed in its own transaction so a single bad
+        row doesn't roll back the rest.
+        """
+        if not getattr(settings, "STORAGE_VISION_ENABLED", False):
+            return _feature_disabled_response()
+
+        body_ser = VisionBulkApproveSerializer(data=request.data or {})
+        body_ser.is_valid(raise_exception=True)
+        ids = body_ser.validated_data["observation_ids"]
+        reason_text = body_ser.validated_data.get("reason", "")
+
+        # Dedup so duplicates in the payload don't get counted twice.
+        seen = set()
+        ordered = [i for i in ids if i not in seen and not seen.add(i)]
+
+        rows = {
+            o.pk: o
+            for o in VisionObservation.objects.select_related("slot__item", "slot__area").filter(
+                pk__in=ordered
+            )
+        }
+
+        approved: list[dict] = []
+        skipped: list[dict] = []
+        for obs_id in ordered:
+            obs = rows.get(obs_id)
+            if obs is None:
+                skipped.append({"id": obs_id, "reason": "not_found"})
+                continue
+            if obs.status != VisionObservation.STATUS_PENDING:
+                skipped.append({"id": obs_id, "reason": f"already_{obs.status}"})
+                continue
+            try:
+                with transaction.atomic():
+                    reconciliation, reorder_created = _approve_one(obs, request.user, reason_text)
+            except Exception:  # noqa: BLE001
+                # Per-row safety: anything unexpected (FK racing,
+                # constraint violation) skips this row, never the
+                # whole batch.
+                skipped.append({"id": obs_id, "reason": "internal_error"})
+                continue
+            approved.append(
+                {
+                    "id": obs_id,
+                    "reconciliation_id": reconciliation.id if reconciliation else None,
+                    "reorder_created": bool(reorder_created),
+                }
+            )
+
+        return Response(
+            {
+                "approved": approved,
+                "skipped": skipped,
+                "counts": {
+                    "requested": len(ordered),
+                    "approved": len(approved),
+                    "skipped": len(skipped),
+                },
+            }
+        )
+
+
+def _approve_one(obs, reviewer, reason_text: str):
+    """Shared approve path used by single + bulk endpoints.
+
+    Returns (StockReconciliation|None, reorder_created_bool). Caller
+    owns the transaction.
+    """
+    from inventory.models import StockReconciliation
+    from inventory.views import _apply_reconciliation_row
+
+    reconciliation = None
+    reorder_created = False
+
+    if obs.suggested_action == VisionObservation.ACTION_RECONCILE_EMPTY:
+        item = obs.slot.item
+        notes = (
+            f"Auto-reconciled from VisionObservation #{obs.pk} "
+            f"(slot {obs.slot.marker_code}, capture #{obs.capture_id})."
+        )
+        if reason_text:
+            notes = f"{notes}\nReviewer note: {reason_text}"
+        reconciliation, reorder_created = _apply_reconciliation_row(
+            user=reviewer,
+            item=item,
+            actual_count=0,
+            reason=StockReconciliation.REASON_VISION_SUPPLY_CHECK,
+            notes=notes,
+        )
+
+    obs.status = VisionObservation.STATUS_APPROVED
+    obs.save(update_fields=["status", "updated_at"])
+
+    VisionReviewAction.objects.create(
+        observation=obs,
+        reviewer=reviewer,
+        action=VisionReviewAction.ACTION_APPROVE,
+        reason=reason_text or "",
+        stock_reconciliation=reconciliation,
+    )
+    return reconciliation, reorder_created

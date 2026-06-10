@@ -20,7 +20,7 @@ from django.conf import settings
 from PIL import Image, UnidentifiedImageError
 from rest_framework import serializers
 
-from .models import VisionArea, VisionCamera, VisionCapture, VisionSlot
+from .models import VisionArea, VisionCamera, VisionCapture, VisionObservation, VisionSlot
 
 ALLOWED_UPLOAD_CONTENT_TYPES = ("image/jpeg", "image/png")
 
@@ -208,3 +208,88 @@ class VisionCaptureCreateSerializer(serializers.ModelSerializer):
         except Exception:  # noqa: BLE001 — sanitize everything else
             raise serializers.ValidationError("Image could not be decoded.")
         return value
+
+
+class VisionObservationSerializer(serializers.ModelSerializer):
+    """Read shape for the review queue (AC-20).
+
+    Returns everything the Facilities review UI needs in a single
+    page render: area + slot + item denormalized for the row title,
+    thumbnails for capture + evidence crop, the bookkeeping the
+    operator uses to prioritize (age, confidence, duplicate count,
+    suggested action), and a small ``review_actions`` history block
+    so already-reviewed rows can render their disposition.
+    """
+
+    area_id = serializers.IntegerField(source="slot.area_id", read_only=True)
+    area_name = serializers.CharField(source="slot.area.name", read_only=True)
+    slot_marker_code = serializers.CharField(source="slot.marker_code", read_only=True)
+    item_id = serializers.UUIDField(source="slot.item_id", read_only=True)
+    item_name = serializers.CharField(source="slot.item.name", read_only=True)
+    capture_thumbnail = serializers.SerializerMethodField()
+    age_seconds = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VisionObservation
+        fields = [
+            "id",
+            "capture",
+            "capture_thumbnail",
+            "slot",
+            "slot_marker_code",
+            "area_id",
+            "area_name",
+            "item_id",
+            "item_name",
+            "classification",
+            "confidence",
+            "evidence_crop",
+            "model_version",
+            "suggested_action",
+            "status",
+            "duplicate_count",
+            "last_duplicate_at",
+            "age_seconds",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_capture_thumbnail(self, obs):
+        # The full original is on capture.original_image. Slice 5 has
+        # no separate thumbnailing pipeline; the UI is fine rendering
+        # the original (the upload caps at 10 MB).
+        request = self.context.get("request")
+        img = obs.capture.original_image
+        if not img:
+            return None
+        url = img.url
+        return request.build_absolute_uri(url) if request else url
+
+    def get_age_seconds(self, obs):
+        from django.utils import timezone
+
+        return int((timezone.now() - obs.created_at).total_seconds())
+
+
+class VisionReviewActionSerializer(serializers.Serializer):
+    """Body for /observations/{id}/reject/ (and approve, for symmetry).
+
+    Approve accepts an optional ``reason`` so staff can drop a note
+    explaining a hot-take call ("looks empty, double-checked the
+    shelf"). Reject requires a reason — that's the audit-trail
+    requirement in AC-24.
+    """
+
+    reason = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+
+
+class VisionBulkApproveSerializer(serializers.Serializer):
+    """Body for /observations/bulk-approve/ (AC-25)."""
+
+    observation_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        min_length=1,
+        max_length=200,
+    )
+    reason = serializers.CharField(max_length=2000, required=False, allow_blank=True)

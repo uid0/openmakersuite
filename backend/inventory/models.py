@@ -2813,6 +2813,7 @@ class StockReconciliation(models.Model):
     REASON_MISCOUNTED = "miscounted"
     REASON_USED_WITHOUT_SCAN = "used_without_scan"
     REASON_FOUND = "found"
+    REASON_VISION_SUPPLY_CHECK = "vision_supply_check"
     REASON_OTHER = "other"
 
     REASON_CHOICES = [
@@ -2821,6 +2822,7 @@ class StockReconciliation(models.Model):
         (REASON_MISCOUNTED, "Miscounted"),
         (REASON_USED_WITHOUT_SCAN, "Used without scanning"),
         (REASON_FOUND, "Found (positive delta)"),
+        (REASON_VISION_SUPPLY_CHECK, "Vision supply check"),
         (REASON_OTHER, "Other"),
     ]
 

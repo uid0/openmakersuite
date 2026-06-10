@@ -37,3 +37,20 @@ class IsStaffOrLogisticsOrReadOnly(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
         return _is_staff_or_logistics(user)
+
+
+class IsCameraOrStaffOrLogistics(permissions.BasePermission):
+    """Capture upload path (AC-9, AC-10, AC-11).
+
+    Accepts EITHER a valid camera bearer (request.auth is a VisionCamera —
+    set by :class:`VisionCameraTokenAuthentication`) OR a staff/Logistics
+    user. Everything else is rejected. Anonymous callers with no token
+    and no JWT can never write.
+    """
+
+    def has_permission(self, request, view) -> bool:
+        from .models import VisionCamera
+
+        if isinstance(request.auth, VisionCamera):
+            return True
+        return _is_staff_or_logistics(request.user)

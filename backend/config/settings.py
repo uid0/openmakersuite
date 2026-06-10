@@ -438,6 +438,12 @@ STORAGE_VISION_ENABLED = config("STORAGE_VISION_ENABLED", default=False, cast=bo
 # (operator opt-in; not the default because hi-res JPEGs balloon the
 # media volume fast).
 STORAGE_VISION_RETENTION_DAYS = config("STORAGE_VISION_RETENTION_DAYS", default=30, cast=int)
+# Maximum bytes accepted per capture upload (AC-12). Modern phone JPEGs
+# land between 2–6 MB; 10 MB caps a misconfigured phone or a 30 MP
+# camera from flooding /tmp on the worker.
+STORAGE_VISION_MAX_UPLOAD_BYTES = config(
+    "STORAGE_VISION_MAX_UPLOAD_BYTES", default=10 * 1024 * 1024, cast=int
+)
 
 # Cache configuration
 CACHES = {

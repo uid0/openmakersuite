@@ -23,10 +23,16 @@ import {
   SimpleGrid,
   Stack,
   Text,
+  TextInput,
   Title,
 } from '@mantine/core';
-import { IconAlertTriangle, IconBoxSeam, IconPlus } from '@tabler/icons-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import {
+  IconAlertTriangle,
+  IconBoxSeam,
+  IconPlus,
+  IconSearch,
+} from '@tabler/icons-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import WorkspacePage from '../components/landing/WorkspacePage';
@@ -100,6 +106,30 @@ const InventoryOverviewPage: React.FC = () => {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  // "/" focuses the search box from anywhere on the page — same
+  // muscle memory as GitHub/Linear, no ctrl-F dance needed.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,9 +161,25 @@ const InventoryOverviewPage: React.FC = () => {
     };
   }, []);
 
+  // Live filter — case-insensitive substring match across name, SKU,
+  // and category. Empty query → no filter (everything visible).
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const filteredItems = trimmedQuery
+    ? items.filter((item) => {
+        const name = (item.name || '').toLowerCase();
+        const sku = (item.sku || '').toLowerCase();
+        const category = (item.category_name || '').toLowerCase();
+        return (
+          name.includes(trimmedQuery) ||
+          sku.includes(trimmedQuery) ||
+          category.includes(trimmedQuery)
+        );
+      })
+    : items;
+
   const flaggedItems = useMemo(
     () =>
-      items
+      filteredItems
         .filter(flagged)
         .sort((a, b) => {
           // pending reorders first (in flight, watch them), then low-stock by deficit
@@ -144,7 +190,7 @@ const InventoryOverviewPage: React.FC = () => {
           const bDeficit = (b.minimum_stock || 0) - b.current_stock;
           return bDeficit - aDeficit;
         }),
-    [items],
+    [filteredItems],
   );
 
   const categoryGroups = useMemo<CategoryGroup[]>(() => {
@@ -152,7 +198,7 @@ const InventoryOverviewPage: React.FC = () => {
     for (const cat of categories) {
       byName.set(cat.name, []);
     }
-    for (const item of items) {
+    for (const item of filteredItems) {
       const name = item.category_name || UNCATEGORIZED;
       if (!byName.has(name)) byName.set(name, []);
       byName.get(name)!.push(item);
@@ -169,7 +215,7 @@ const InventoryOverviewPage: React.FC = () => {
         if (b.name === UNCATEGORIZED) return -1;
         return a.name.localeCompare(b.name);
       });
-  }, [items, categories]);
+  }, [filteredItems, categories]);
 
   const goItem = (id: string) => navigate(`/inventory/items/${id}`);
 
@@ -200,6 +246,18 @@ const InventoryOverviewPage: React.FC = () => {
         ),
       }}
     >
+      {!loading && items.length > 0 && (
+        <TextInput
+          ref={searchRef}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.currentTarget.value)}
+          placeholder="Search inventory — name, SKU, or category (press / to focus)"
+          leftSection={<IconSearch size={16} />}
+          size="md"
+          data-testid="inventory-overview-search"
+          aria-label="Search inventory"
+        />
+      )}
       {loading ? (
         <Center mih={240}>
           <Loader />
@@ -210,6 +268,17 @@ const InventoryOverviewPage: React.FC = () => {
             <Text c="dimmed">No inventory items yet.</Text>
             <Anchor onClick={() => navigate('/inventory/items/new')} component="button">
               Add the first one
+            </Anchor>
+          </Stack>
+        </Center>
+      ) : filteredItems.length === 0 ? (
+        <Center mih={120} data-testid="inventory-overview-no-matches">
+          <Stack align="center" gap="xs">
+            <Text c="dimmed">
+              No items match &ldquo;{searchQuery}&rdquo;.
+            </Text>
+            <Anchor onClick={() => setSearchQuery('')} component="button">
+              Clear search
             </Anchor>
           </Stack>
         </Center>

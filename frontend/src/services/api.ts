@@ -395,6 +395,7 @@ export interface ReconciliationRow {
     | 'miscounted'
     | 'used_without_scan'
     | 'found'
+    | 'vision_supply_check'
     | 'other';
   notes?: string;
   skip_reorder?: boolean;
@@ -3820,6 +3821,248 @@ export const lockersAPI = {
     api.delete(`/lockers/${id}/devices/${assignmentId}/`),
   listAvailableCertifications: () =>
     api.get<ForgeKeyCertificationOption[]>('/lockers/available-certifications/'),
+};
+
+// ---------------------------------------------------------------------------
+// Storage Vision (AC-28 setup + AC-30 capture + review surfaces)
+// ---------------------------------------------------------------------------
+
+export interface VisionArea {
+  id: number;
+  name: string;
+  location: number;
+  location_name: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VisionSlot {
+  id: number;
+  area: number;
+  area_name: string;
+  item: string;
+  item_name: string;
+  marker_code: string;
+  empty_low_confidence_threshold: string; // Decimal serialized as string
+  notes: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VisionCamera {
+  id: number;
+  name: string;
+  area: number | null;
+  area_name: string | null;
+  token_fingerprint: string;
+  last_seen_at: string | null;
+  last_seen_status: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Returned ONLY from POST /cameras/ and POST /cameras/{id}/rotate-token/.
+ * The raw_token field is the bearer the device will use; it's only
+ * shown once. List/retrieve responses use the VisionCamera shape.
+ */
+export interface VisionCameraWithToken extends VisionCamera {
+  raw_token: string;
+}
+
+export type VisionCaptureSource = 'phone' | 'camera';
+export type VisionCaptureStatus =
+  | 'queued'
+  | 'processing'
+  | 'processed'
+  | 'failed';
+
+export interface VisionCapture {
+  id: number;
+  area: number;
+  area_name: string;
+  source: VisionCaptureSource;
+  camera: number | null;
+  uploaded_by: number | null;
+  original_image: string | null;
+  captured_at: string | null;
+  received_at: string;
+  status: VisionCaptureStatus;
+  processor_version: string;
+  markers_detected: Array<{
+    marker_code: string;
+    bbox: [number, number, number, number];
+    confidence: number;
+    matched_slot_id: number | null;
+  }>;
+  failure_reason: string;
+  failure_code: string;
+  queued_at: string;
+  processing_at: string | null;
+  processed_at: string | null;
+  failed_at: string | null;
+}
+
+export type VisionObservationClass = 'empty' | 'low' | 'full' | 'unknown';
+export type VisionObservationAction = 'review_only' | 'reconcile_empty';
+export type VisionObservationStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'superseded';
+
+export interface VisionObservation {
+  id: number;
+  capture: number;
+  capture_thumbnail: string | null;
+  slot: number;
+  slot_marker_code: string;
+  area_id: number;
+  area_name: string;
+  item_id: string;
+  item_name: string;
+  classification: VisionObservationClass;
+  confidence: string;
+  evidence_crop: string | null;
+  model_version: string;
+  suggested_action: VisionObservationAction;
+  status: VisionObservationStatus;
+  duplicate_count: number;
+  last_duplicate_at: string | null;
+  age_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VisionObservationApproveResponse extends VisionObservation {
+  reconciliation_id: number | null;
+  reorder_created: boolean;
+}
+
+export interface VisionBulkApproveResponse {
+  approved: Array<{
+    id: number;
+    reconciliation_id: number | null;
+    reorder_created: boolean;
+  }>;
+  skipped: Array<{ id: number; reason: string }>;
+  counts: { requested: number; approved: number; skipped: number };
+}
+
+export interface VisionAreaInput {
+  name: string;
+  location: number;
+  description?: string;
+  is_active?: boolean;
+}
+
+export interface VisionSlotInput {
+  area: number;
+  item: string;
+  marker_code: string;
+  empty_low_confidence_threshold?: string;
+  notes?: string;
+  is_active?: boolean;
+}
+
+export interface VisionCameraInput {
+  name: string;
+  area?: number | null;
+  is_active?: boolean;
+}
+
+export const storageVisionAPI = {
+  // Areas (AC-3, AC-4)
+  listAreas: () =>
+    api.get<{ results: VisionArea[] } | VisionArea[]>('/storage-vision/areas/'),
+  createArea: (data: VisionAreaInput) =>
+    api.post<VisionArea>('/storage-vision/areas/', data),
+  updateArea: (id: number, data: Partial<VisionAreaInput>) =>
+    api.patch<VisionArea>(`/storage-vision/areas/${id}/`, data),
+  deleteArea: (id: number) => api.delete(`/storage-vision/areas/${id}/`),
+
+  // Slots (AC-5, AC-6)
+  listSlots: (params?: { area?: number; item?: string }) =>
+    api.get<{ results: VisionSlot[] } | VisionSlot[]>('/storage-vision/slots/', {
+      params,
+    }),
+  createSlot: (data: VisionSlotInput) =>
+    api.post<VisionSlot>('/storage-vision/slots/', data),
+  updateSlot: (id: number, data: Partial<VisionSlotInput>) =>
+    api.patch<VisionSlot>(`/storage-vision/slots/${id}/`, data),
+  deleteSlot: (id: number) => api.delete(`/storage-vision/slots/${id}/`),
+  /**
+   * Returns a printable PNG label as a Blob — the caller turns it
+   * into a download or an inline preview (AC-6).
+   */
+  downloadSlotMarker: (id: number) =>
+    api.get<Blob>(`/storage-vision/slots/${id}/marker/`, {
+      responseType: 'blob',
+    }),
+
+  // Cameras (AC-7, AC-8)
+  listCameras: () =>
+    api.get<{ results: VisionCamera[] } | VisionCamera[]>(
+      '/storage-vision/cameras/',
+    ),
+  createCamera: (data: VisionCameraInput) =>
+    api.post<VisionCameraWithToken>('/storage-vision/cameras/', data),
+  updateCamera: (id: number, data: Partial<VisionCameraInput>) =>
+    api.patch<VisionCamera>(`/storage-vision/cameras/${id}/`, data),
+  deleteCamera: (id: number) => api.delete(`/storage-vision/cameras/${id}/`),
+  rotateCameraToken: (id: number) =>
+    api.post<VisionCameraWithToken>(
+      `/storage-vision/cameras/${id}/rotate-token/`,
+    ),
+
+  // Captures (AC-9 phone path; AC-10 camera path goes from the
+  // device, not the browser)
+  listCaptures: (params?: {
+    area?: number;
+    status?: VisionCaptureStatus;
+  }) =>
+    api.get<{ results: VisionCapture[] } | VisionCapture[]>(
+      '/storage-vision/captures/',
+      { params },
+    ),
+  getCapture: (id: number) =>
+    api.get<VisionCapture>(`/storage-vision/captures/${id}/`),
+  uploadCapture: (formData: FormData) =>
+    api.post<VisionCapture>('/storage-vision/captures/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+
+  // Observations (AC-20+)
+  listObservations: (params?: {
+    status?: VisionObservationStatus;
+    area?: number;
+    item?: string;
+    suggested_action?: VisionObservationAction;
+    classification?: VisionObservationClass;
+  }) =>
+    api.get<{ results: VisionObservation[] } | VisionObservation[]>(
+      '/storage-vision/observations/',
+      { params },
+    ),
+  approveObservation: (id: number, reason?: string) =>
+    api.post<VisionObservationApproveResponse>(
+      `/storage-vision/observations/${id}/approve/`,
+      reason ? { reason } : {},
+    ),
+  rejectObservation: (id: number, reason: string) =>
+    api.post<VisionObservation>(
+      `/storage-vision/observations/${id}/reject/`,
+      { reason },
+    ),
+  bulkApprove: (observation_ids: number[], reason?: string) =>
+    api.post<VisionBulkApproveResponse>(
+      '/storage-vision/observations/bulk-approve/',
+      reason ? { observation_ids, reason } : { observation_ids },
+    ),
 };
 
 export default api;

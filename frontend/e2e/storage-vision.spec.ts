@@ -28,7 +28,7 @@
  * approve writes a StockReconciliation, which (since stock falls to
  * 0 ≤ minimum_stock=5) auto-creates a ReorderRequest.
  */
-import { expect, test } from '@playwright/test';
+import { expect, Page, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +44,51 @@ import {
   setAuthToken,
 } from './fixtures';
 
+/**
+ * setAuthToken only stamps the JWT — the StorageVision pages gate on
+ * localStorage `is_staff`, which the prod login flow writes after
+ * /auth/whoami. E2E skips that, so set the flag here too.
+ */
+async function setStaffAuthToken(page: Page, token: string): Promise<void> {
+  await setAuthToken(page, token);
+  await page.addInitScript(() => {
+    localStorage.setItem('is_staff', 'true');
+  });
+}
+
+/**
+ * Deactivate any existing VisionSlot whose marker_code we're about to
+ * re-seed. The AC-5 partial unique constraint
+ * (`unique_active_marker_code` on storage_vision_visionslot WHERE
+ * is_active) only blocks two ACTIVE rows with the same code, so
+ * flipping the prior one to inactive is enough to let the test create
+ * a fresh one — and keeps the historical row around for audit.
+ */
+async function deactivateExistingSlot(
+  token: string,
+  markerCode: string,
+): Promise<void> {
+  const resp = await fetch(
+    `${API_BASE_URL}/storage-vision/slots/?marker_code=${encodeURIComponent(markerCode)}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!resp.ok) return;
+  const body = await resp.json();
+  const rows = Array.isArray(body) ? body : body.results || [];
+  for (const row of rows) {
+    if (row.marker_code === markerCode && row.is_active) {
+      await fetch(`${API_BASE_URL}/storage-vision/slots/${row.id}/`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ is_active: false }),
+      });
+    }
+  }
+}
+
 const FIXTURE_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
   'fixtures/storage-vision/marker-VIS-E2E-BOLT.jpg',
@@ -58,6 +103,11 @@ interface SeedHandles {
 
 async function seedStorageVision(token: string): Promise<SeedHandles> {
   const suffix = Date.now();
+  // AC-5 partial unique constraint blocks two active slots with the
+  // same marker_code. Deactivate any leftover from prior runs / retries
+  // before re-seeding so the test is rerunnable end-to-end.
+  await deactivateExistingSlot(token, 'VIS-E2E-BOLT');
+
   const category = await createTestCategory(`E2E Vision Cat ${suffix}`, token);
   const inventoryLocation = await createTestLocation(
     `E2E Bin Shelf ${suffix}`,
@@ -223,7 +273,7 @@ test.describe('Storage Vision operating loop (AC-34)', () => {
 
     // --- when: the staff user opens the review queue scoped to this
     // capture and clicks Approve on the pending observation.
-    await setAuthToken(page, staffToken);
+    await setStaffAuthToken(page, staffToken);
     await page.goto(`/facilities/storage-vision/review?capture=${captureId}`);
 
     const approveBtn = page.getByTestId(`approve-${processed.observation_id}`);

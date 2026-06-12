@@ -30,7 +30,8 @@
  */
 import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   API_BASE_URL,
   checkBackendAvailable,
@@ -44,7 +45,7 @@ import {
 } from './fixtures';
 
 const FIXTURE_PATH = resolve(
-  __dirname,
+  dirname(fileURLToPath(import.meta.url)),
   'fixtures/storage-vision/marker-VIS-E2E-BOLT.jpg',
 );
 

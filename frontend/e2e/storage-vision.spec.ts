@@ -289,17 +289,14 @@ test.describe('Storage Vision operating loop (AC-34)', () => {
 
     // --- then: the existing reorder queue (AdminDashboard) shows the
     // auto-created reorder request for the seeded inventory item.
+    // Don't wait for networkidle — the dashboard polls /reorders/
+    // periodically, so the page never truly idles. The locator's own
+    // toBeVisible() retry covers the render delay.
     await page.goto('/inventory/admin');
-    await page.waitForLoadState('networkidle');
 
-    // The dashboard renders one <tr data-testid="reorder-row-{id}">
-    // per pending request. The simplest assertion that proves
-    // AC-34 is satisfied is "at least one row mentions the
-    // seeded item by name".
-    const reorderRows = page.locator('[data-testid^="reorder-row-"]');
-    await expect(reorderRows.first()).toBeVisible({ timeout: 15_000 });
-    await expect(reorderRows.filter({ hasText: 'E2E Vision Bolt' })).toHaveCount(
-      1,
-    );
+    const reorderRow = page
+      .locator('[data-testid^="reorder-row-"]')
+      .filter({ hasText: 'E2E Vision Bolt' });
+    await expect(reorderRow).toHaveCount(1, { timeout: 30_000 });
   });
 });

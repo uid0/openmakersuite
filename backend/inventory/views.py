@@ -3242,9 +3242,60 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             work_order.completed_at = None
             work_order.save(update_fields=["completed_at"])
 
+    @staticmethod
+    def _sync_maintenance_item_completion(work_order, *, actor=None) -> None:
+        """Bubble a WO completion up to its MaintenanceItem.
+
+        When a WO that's linked to a MaintenanceItem becomes ``completed``,
+        we write a MaintenanceLog and bump ``MaintenanceItem.last_completed_at``
+        — same side effects the manual "Log maintenance" button has via
+        ``MaintenanceItemViewSet.complete``. Without this, a maker who
+        only ever closes work orders sees the PM keep nagging because the
+        item's last_completed_at stays null. (Issue surfaced 2026-06-12
+        on the Water Fountain "Replace Water Filter" PM: two completed
+        WOs against the item, zero MaintenanceLog rows, is_overdue still
+        true.)
+
+        Dedupe: the new MaintenanceLog.work_order FK lets us no-op when
+        a log for this WO already exists, so a WO that's bounced
+        completed → reopened → completed doesn't double-log.
+
+        ``last_completed_at`` only advances forward — a reopen + recomplete
+        with an earlier ``wo.completed_at`` doesn't roll the date back.
+        """
+        if work_order.status != WorkOrder.STATUS_COMPLETED:
+            return
+        if work_order.maintenance_item_id is None:
+            return
+        if not work_order.completed_at:
+            return
+
+        existing = MaintenanceLog.objects.filter(work_order=work_order).first()
+        if existing is None:
+            log = MaintenanceLog.objects.create(
+                maintenance_item_id=work_order.maintenance_item_id,
+                work_order=work_order,
+                completed_by=actor if actor and getattr(actor, "is_authenticated", False) else None,
+                notes=(
+                    f"Auto-logged from work order {work_order.short_id}. " f"WO status: completed."
+                ),
+            )
+            # completed_at is auto_now_add; override to match the WO's
+            # completion timestamp via an explicit UPDATE so the log
+            # reflects when the work was actually done, not when the row
+            # was inserted.
+            MaintenanceLog.objects.filter(pk=log.pk).update(completed_at=work_order.completed_at)
+
+        # Only advance last_completed_at; never regress it.
+        item = work_order.maintenance_item
+        if item.last_completed_at is None or work_order.completed_at > item.last_completed_at:
+            item.last_completed_at = work_order.completed_at
+            item.save(update_fields=["last_completed_at"])
+
     def perform_create(self, serializer):
         work_order = serializer.save()
         self._sync_completion_timestamp(work_order, was_completed=False)
+        self._sync_maintenance_item_completion(work_order, actor=self.request.user)
         record_maintenance_audit_event(
             action="wo_create",
             actor=self.request.user,
@@ -3261,6 +3312,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         self._sync_completion_timestamp(
             work_order, was_completed=(old_status == WorkOrder.STATUS_COMPLETED)
         )
+        self._sync_maintenance_item_completion(work_order, actor=self.request.user)
         if (
             work_order.status == WorkOrder.STATUS_COMPLETED
             and old_status != WorkOrder.STATUS_COMPLETED

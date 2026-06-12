@@ -2129,6 +2129,18 @@ class MaintenanceLog(models.Model):
         related_name="logs",
         help_text="The maintenance task that was completed",
     )
+    # When the WO-completion path creates this log, point back at the
+    # WorkOrder so the WO viewset can dedupe and the asset detail page
+    # can hyperlink. Manually-entered logs (from the "Log maintenance"
+    # button) leave this null.
+    work_order = models.ForeignKey(
+        "WorkOrder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="maintenance_logs",
+        help_text="Source work order if this log was auto-written on WO completion.",
+    )
     completed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

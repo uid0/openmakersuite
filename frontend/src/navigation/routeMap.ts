@@ -76,6 +76,7 @@ const ENTRIES: RouteEntry[] = [
   { path: 'facilities/forgekey-rollouts', label: 'Firmware Rollouts' },
   { path: 'facilities/lockers', label: 'Lockers' },
   { path: 'facilities/storage-vision', label: 'Storage Vision' },
+  { path: 'facilities/storage-vision/capture', label: 'Vision capture' },
   { path: 'admin/audit-feed', label: 'Audit Feed' },
   { path: 'forgekey/epaper/bind', label: 'Bind ePaper Panel' },
   { path: 'forgekey/epaper/service', label: 'Log ePaper Service' },

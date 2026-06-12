@@ -90,6 +90,7 @@ import PurchasingReportPage from './pages/PurchasingReportPage';
 import ScanPage from './pages/ScanPage';
 import SIGDashboard from './pages/SIGDashboard';
 import SiteSettingsPage from './pages/SiteSettingsPage';
+import StorageVisionCapturePage from './pages/StorageVisionCapturePage';
 import StorageVisionSetupPage from './pages/StorageVisionSetupPage';
 import SupplierDetailPage from './pages/SupplierDetailPage';
 import SupplierFormPage from './pages/SupplierFormPage';
@@ -244,6 +245,7 @@ function AppContent() {
           <Route path="/facilities/forgekey-devices/:id" element={<WorkspaceLayout><ForgeKeyDeviceDetailPage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-epaper" element={<WorkspaceLayout><ForgeKeyEPaperPanelsPage /></WorkspaceLayout>} />
           <Route path="/facilities/storage-vision" element={<WorkspaceLayout><StorageVisionSetupPage /></WorkspaceLayout>} />
+          <Route path="/facilities/storage-vision/capture" element={<WorkspaceLayout><StorageVisionCapturePage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-rollouts" element={<WorkspaceLayout><ForgeKeyFirmwareRolloutsPage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-certificates" element={<WorkspaceLayout><ForgeKeyCertificatesPage /></WorkspaceLayout>} />
           <Route path="/facilities/forgekey-device-types" element={<WorkspaceLayout><ForgeKeyDeviceTypesPage /></WorkspaceLayout>} />

@@ -123,6 +123,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
         { path: '/facilities/electrical', label: 'Electrical & Network', icon: '⚡', requiresStaff: true },
         { path: '/facilities/project-storage/queue', label: 'Project Storage', icon: '📦', requiresStaff: true },
         { path: '/facilities/storage-vision', label: 'Storage Vision', icon: '📸', requiresStaff: true },
+        { path: '/facilities/storage-vision/capture', label: 'Vision capture', icon: '📷', requiresStaff: true },
       ],
     },
     {

@@ -217,7 +217,7 @@ const StorageVisionCapturePage: React.FC = () => {
       hero={{
         eyebrow: 'Facilities',
         title: 'Upload supply capture',
-        subtitle:
+        description:
           'Pick a monitored area, snap or upload a photo, and the marker detector will queue any empty / low slot reviews for staff approval.',
       }}
       testId="storage-vision-capture-page"

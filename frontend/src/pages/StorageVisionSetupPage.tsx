@@ -268,7 +268,7 @@ const StorageVisionSetupPage: React.FC = () => {
     <WorkspacePage
       hero={{
         title: 'Storage vision setup',
-        subtitle:
+        description:
           'Manage monitored areas, marker-backed slots, and fixed cameras for the supply-reorder workflow.',
         eyebrow: 'Facilities',
         action: (

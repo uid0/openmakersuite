@@ -154,7 +154,16 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ isOpen, onClose
           <Text size="sm" fw={500} mb="xs">
             {filter === 'unread' ? 'Unread Notifications' : 'All Notifications'}
           </Text>
-          <ScrollArea h={400}>
+          {/*
+           * `ScrollArea.Autosize mah` grows the area with the list and
+           * caps it at the viewport so the drawer (taking the right side
+           * of the screen) stays usable on every height. The old fixed
+           * `h={400}` clamped to 400 px even on a 1440 p display — the
+           * inner ScrollArea ran out of room AND the drawer's outer
+           * scroll couldn't reach past it, so on a tall list the bottom
+           * notifications were unreachable.
+           */}
+          <ScrollArea.Autosize mah="calc(100vh - 220px)">
             {allNotifications.length === 0 ? (
               <Text c="dimmed" size="sm" ta="center" py="xl">
                 No notifications
@@ -213,7 +222,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ isOpen, onClose
                 ))}
               </Stack>
             )}
-          </ScrollArea>
+          </ScrollArea.Autosize>
         </div>
       </Stack>
     </Drawer>

@@ -468,6 +468,14 @@ if TESTING:
     CELERY_RESULT_BACKEND = "cache"
     CELERY_CACHE_BACKEND = "memory"
 else:
+    # Allow runserver-backed environments (e2e / staging smoke) to opt
+    # into eager execution so storage_vision.process_capture runs in
+    # the request handler. Defaults to off in prod where a real worker
+    # picks the task up off the broker.
+    CELERY_TASK_ALWAYS_EAGER = config("CELERY_TASK_ALWAYS_EAGER", default=False, cast=bool)
+    CELERY_TASK_EAGER_PROPAGATES = config(
+        "CELERY_TASK_EAGER_PROPAGATES", default=CELERY_TASK_ALWAYS_EAGER, cast=bool
+    )
     CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://192.168.1.36:6379/0")
     # gh #378: route through the redacting backend so traceback + result
     # payloads are scrubbed before they reach TaskResult. Falls back to the

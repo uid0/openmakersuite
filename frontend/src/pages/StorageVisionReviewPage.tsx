@@ -372,7 +372,7 @@ const StorageVisionReviewPage: React.FC = () => {
       hero={{
         eyebrow: 'Facilities',
         title: 'Storage vision review',
-        subtitle:
+        description:
           captureId != null
             ? `Showing observations from capture #${captureId}.`
             : 'Pending findings the marker detector produced. Approve to zero the stock and trigger a reorder; reject to discard.',

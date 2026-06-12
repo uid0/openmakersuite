@@ -439,6 +439,11 @@ jobs:
       # on the broker connect and the test fires at 15s with the submit
       # button still reading "Submitting...".
       CELERY_BROKER_URL: redis://localhost:6379/0
+      # AC-34 storage_vision E2E needs the feature on AND process_capture
+      # running inline (CI has no celery worker). The eager flag is
+      # respected in non-TESTING mode by config/settings.py.
+      STORAGE_VISION_ENABLED: "true"
+      CELERY_TASK_ALWAYS_EAGER: "1"
       PLAYWRIGHT_BASE_URL: http://localhost:3000
       PLAYWRIGHT_API_URL: http://localhost:8000/api
       NODE_OPTIONS: "--dns-result-order=ipv4first"

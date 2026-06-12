@@ -33,7 +33,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   inventoryAPI,
@@ -271,6 +271,15 @@ const StorageVisionSetupPage: React.FC = () => {
         subtitle:
           'Manage monitored areas, marker-backed slots, and fixed cameras for the supply-reorder workflow.',
         eyebrow: 'Facilities',
+        action: (
+          <Button
+            component={Link}
+            to="/facilities/storage-vision/capture"
+            data-testid="setup-page-upload-cta"
+          >
+            Upload capture
+          </Button>
+        ),
       }}
       testId="storage-vision-setup-page"
     >

@@ -63,6 +63,9 @@ class OperationalModeSerializer(serializers.ModelSerializer):
     """Serializer for OperationalMode model."""
 
     asset_name = serializers.CharField(source="asset.name", read_only=True)
+    asset_location_name = serializers.CharField(
+        source="asset.location.name", read_only=True, allow_null=True
+    )
     classroom_mode_enabled_by_username = serializers.CharField(
         source="classroom_mode_enabled_by.username", read_only=True
     )

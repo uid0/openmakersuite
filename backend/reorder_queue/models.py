@@ -444,6 +444,16 @@ class PurchaseOrderItem(models.Model):
         blank=True,
         help_text="Expected shipment date for this line item (useful for items with longer lead times)",
     )
+    actual_shipment_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Actual date the supplier reported this line item shipped. "
+            "Separate from delivery — scantty / the web UI flip this when a "
+            "supplier confirms shipment so the operator can see the gap between "
+            "expected_shipment_date and reality."
+        ),
+    )
 
     # Status
     is_voided = models.BooleanField(

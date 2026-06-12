@@ -1068,6 +1068,25 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
+        # Mark-shipped path: setting actual_shipment_date is how scantty
+        # (and the web UI) record that the supplier confirmed shipment.
+        # Empty string clears it (lets an operator un-mark a typo).
+        actual_shipment_date = request.data.get("actual_shipment_date")
+        if actual_shipment_date is not None:
+            if actual_shipment_date == "":
+                line_item.actual_shipment_date = None
+            else:
+                from django.utils.dateparse import parse_date
+
+                parsed_date = parse_date(actual_shipment_date)
+                if parsed_date:
+                    line_item.actual_shipment_date = parsed_date
+                else:
+                    return Response(
+                        {"error": "Invalid actual_shipment_date format. Use YYYY-MM-DD"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
         if "notes" in request.data:
             line_item.notes = request.data["notes"]
 

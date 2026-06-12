@@ -2398,13 +2398,27 @@ class ForgeKeyCertificateRevocationListView(APIView):
 def epaper_service_url(request, display_pk) -> str:
     """Front-end "log service" page a maintainer lands on from a panel QR.
 
-    This is a React-Router route (mirrors the bind page's
-    ``/forgekey/epaper/...`` path), not a Django view, so it is built as a
-    plain path rather than reversed. Front-end and API share the origin
-    behind nginx in prod, so deriving it from the request host keeps the
-    QR correct across dev/staging/prod without a hardcoded domain.
+    Prefer the configured ``FRONTEND_URL`` over ``request.build_absolute_uri``.
+    The firmware fetches the panel image over plain HTTP from inside the
+    network (the device has no kernel-level cert store), so
+    ``request.scheme`` is ``"http"`` on that GET — which used to leak into
+    the QR target and the operator's phone landed on http://, relying on
+    the prod SECURE_SSL_REDIRECT to bounce to HTTPS. That worked but
+    showed up as "no https://" in QR scanners and decoders.
+
+    ``FRONTEND_URL`` is set per-environment in .env (e.g.
+    https://dms.openmakersuite.net in prod) and is the canonical address
+    the maintainer's phone would visit, so it's what the QR should point
+    at. Falls back to ``request.build_absolute_uri`` when the setting is
+    missing or empty so dev (no .env) still works.
     """
-    return request.build_absolute_uri(f"/forgekey/epaper/service?did={display_pk}")
+    from django.conf import settings
+
+    base = (getattr(settings, "FRONTEND_URL", "") or "").strip().rstrip("/")
+    path = f"/forgekey/epaper/service?did={display_pk}"
+    if base:
+        return f"{base}{path}"
+    return request.build_absolute_uri(path)
 
 
 class EPaperDisplayImageView(APIView):

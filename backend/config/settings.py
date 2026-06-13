@@ -441,6 +441,14 @@ STORAGE_VISION_RETENTION_DAYS = config("STORAGE_VISION_RETENTION_DAYS", default=
 # Maximum bytes accepted per capture upload (AC-12). Modern phone JPEGs
 # land between 2–6 MB; 10 MB caps a misconfigured phone or a 30 MP
 # camera from flooding /tmp on the worker.
+# PM auto-bundling — when a WorkOrder is created against a
+# MaintenanceItem and this is > 0, the WorkOrderViewSet bundles every
+# other active PM on the same asset whose next_due_at falls within the
+# window. Default 0 keeps existing deploys unchanged; flip to e.g. 7
+# (a week) to roll all PMs due that week into one trip. Per-item
+# checkboxes on the WO let the maker tick off each PM independently.
+PM_AUTO_BUNDLE_DUE_WITHIN_DAYS = config("PM_AUTO_BUNDLE_DUE_WITHIN_DAYS", default=0, cast=int)
+
 STORAGE_VISION_MAX_UPLOAD_BYTES = config(
     "STORAGE_VISION_MAX_UPLOAD_BYTES", default=10 * 1024 * 1024, cast=int
 )

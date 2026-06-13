@@ -3265,36 +3265,134 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         """
         if work_order.status != WorkOrder.STATUS_COMPLETED:
             return
-        if work_order.maintenance_item_id is None:
-            return
         if not work_order.completed_at:
             return
 
-        existing = MaintenanceLog.objects.filter(work_order=work_order).first()
-        if existing is None:
-            log = MaintenanceLog.objects.create(
-                maintenance_item_id=work_order.maintenance_item_id,
-                work_order=work_order,
-                completed_by=actor if actor and getattr(actor, "is_authenticated", False) else None,
-                notes=(
-                    f"Auto-logged from work order {work_order.short_id}. " f"WO status: completed."
-                ),
-            )
-            # completed_at is auto_now_add; override to match the WO's
-            # completion timestamp via an explicit UPDATE so the log
-            # reflects when the work was actually done, not when the row
-            # was inserted.
-            MaintenanceLog.objects.filter(pk=log.pk).update(completed_at=work_order.completed_at)
+        actor_to_record = actor if actor and getattr(actor, "is_authenticated", False) else None
 
-        # Only advance last_completed_at; never regress it.
-        item = work_order.maintenance_item
-        if item.last_completed_at is None or work_order.completed_at > item.last_completed_at:
-            item.last_completed_at = work_order.completed_at
-            item.save(update_fields=["last_completed_at"])
+        # Gather every item that should get the side effect: the
+        # primary FK plus any bundled siblings (auto-bundle window
+        # set on perform_create). pk being None means we haven't
+        # saved yet — skip the M2M lookup in that case.
+        item_ids: list = []
+        if work_order.maintenance_item_id is not None:
+            item_ids.append(work_order.maintenance_item_id)
+        if work_order.pk is not None:
+            for bundled_id in work_order.additional_maintenance_items.values_list("id", flat=True):
+                if bundled_id not in item_ids:
+                    item_ids.append(bundled_id)
+
+        for item_id in item_ids:
+            existing = MaintenanceLog.objects.filter(
+                work_order=work_order, maintenance_item_id=item_id
+            ).first()
+            if existing is None:
+                log = MaintenanceLog.objects.create(
+                    maintenance_item_id=item_id,
+                    work_order=work_order,
+                    completed_by=actor_to_record,
+                    notes=(
+                        f"Auto-logged from work order {work_order.short_id}. "
+                        f"WO status: completed."
+                    ),
+                )
+                # completed_at is auto_now_add; override to match the
+                # WO's completion timestamp via an explicit UPDATE so
+                # the log reflects when the work was actually done.
+                MaintenanceLog.objects.filter(pk=log.pk).update(
+                    completed_at=work_order.completed_at
+                )
+
+            item = MaintenanceItem.objects.filter(pk=item_id).first()
+            if item is None:
+                continue
+            if item.last_completed_at is None or work_order.completed_at > item.last_completed_at:
+                item.last_completed_at = work_order.completed_at
+                item.save(update_fields=["last_completed_at"])
+
+    @staticmethod
+    def _bundle_due_siblings(work_order) -> None:
+        """Roll same-asset PMs due within PM_AUTO_BUNDLE_DUE_WITHIN_DAYS
+        into this WO.
+
+        Runs on perform_create only. Skips when:
+          - the setting is 0 or missing (auto-bundle disabled)
+          - the WO has no primary maintenance_item
+          - the primary item has no asset
+
+        Siblings are MaintenanceItems on the same asset, is_active=True,
+        NOT the primary item, whose next_due_at is within window_days
+        of now OR are already overdue. For each sibling we materialize
+        its tasks as WorkOrderTaskCompletion rows so the existing
+        per-step UI renders one combined checklist.
+        """
+        from django.conf import settings as django_settings
+
+        window_days = int(getattr(django_settings, "PM_AUTO_BUNDLE_DUE_WITHIN_DAYS", 0) or 0)
+        if window_days <= 0:
+            return
+        primary = work_order.maintenance_item
+        if primary is None or primary.asset_id is None:
+            return
+
+        cutoff = timezone.now() + timedelta(days=window_days)
+        siblings_qs = MaintenanceItem.objects.filter(
+            asset_id=primary.asset_id, is_active=True
+        ).exclude(pk=primary.pk)
+
+        bundled_ids: list = []
+        for sib in siblings_qs:
+            next_due = sib.next_due_at
+            if next_due is None and not sib.is_overdue:
+                continue
+            if next_due is not None and next_due > cutoff:
+                continue
+            bundled_ids.append(sib.pk)
+
+        if not bundled_ids:
+            return
+
+        work_order.additional_maintenance_items.add(*bundled_ids)
+
+        # Materialize task_completions for the primary item AND every
+        # bundled sibling so the per-step UI renders one combined
+        # checklist. The DRF create path doesn't otherwise materialize
+        # the primary item's tasks (only ``generate_work_order`` does),
+        # so we include it here when bundling fires to keep the
+        # per-item checkbox UX consistent. Each row denormalizes
+        # title / order / required from MaintenanceTask; per-item
+        # grouping in the UI uses task.maintenance_item_id.
+        from .models import MaintenanceTask, WorkOrderTaskCompletion
+
+        existing_task_ids = set(work_order.task_completions.values_list("task_id", flat=True))
+        item_ids_to_materialize = [primary.pk] + bundled_ids
+        new_rows = []
+        for item_id in item_ids_to_materialize:
+            for task in MaintenanceTask.objects.filter(maintenance_item_id=item_id).order_by(
+                "order", "title"
+            ):
+                if task.pk in existing_task_ids:
+                    continue
+                new_rows.append(
+                    WorkOrderTaskCompletion(
+                        work_order=work_order,
+                        task=task,
+                        task_title=task.title,
+                        task_order=task.order,
+                        is_required=task.is_required,
+                    )
+                )
+        if new_rows:
+            WorkOrderTaskCompletion.objects.bulk_create(new_rows)
 
     def perform_create(self, serializer):
         work_order = serializer.save()
         self._sync_completion_timestamp(work_order, was_completed=False)
+        # Roll same-asset PMs due within PM_AUTO_BUNDLE_DUE_WITHIN_DAYS
+        # BEFORE the completion cascade, so a new WO that lands in
+        # status=completed (rare, but possible via paper-form ingest)
+        # also closes every bundled sibling.
+        self._bundle_due_siblings(work_order)
         self._sync_maintenance_item_completion(work_order, actor=self.request.user)
         record_maintenance_audit_event(
             action="wo_create",

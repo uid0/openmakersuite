@@ -132,6 +132,7 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "quantity_pending",
             "is_fully_received",
             "expected_shipment_date",
+            "actual_shipment_date",
             "is_voided",
             "voided_at",
             "voided_by",

@@ -30,6 +30,7 @@ class SiteSettingsSerializer(serializers.ModelSerializer):
             "dashboard_title",
             "dashboard_subtitle",
             "show_logo_on_dashboard",
+            "pm_auto_bundle_due_within_days",
         ]
         read_only_fields = fields
 
@@ -77,6 +78,7 @@ class SiteSettingsUpdateSerializer(serializers.ModelSerializer):
             "dashboard_title",
             "dashboard_subtitle",
             "show_logo_on_dashboard",
+            "pm_auto_bundle_due_within_days",
         ]
         read_only_fields = ["logo_url", "favicon_url"]
 

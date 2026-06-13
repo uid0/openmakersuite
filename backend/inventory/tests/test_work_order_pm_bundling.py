@@ -1,7 +1,8 @@
-"""When PM_AUTO_BUNDLE_DUE_WITHIN_DAYS > 0, creating a WorkOrder against
-one MaintenanceItem should silently roll in every other PM on the same
-asset that is also due (or overdue) within the window. Completing the
-WO then closes every bundled item, not just the primary.
+"""When SiteSettings.pm_auto_bundle_due_within_days > 0, creating a
+WorkOrder against one MaintenanceItem should silently roll in every
+other PM on the same asset that is also due (or overdue) within the
+window. Completing the WO then closes every bundled item, not just
+the primary.
 
 Slice 1 of the cascade-PMs work — the data model + auto-bundle hook
 land here; the UI grouping by item arrives in slice 2.
@@ -15,11 +16,19 @@ from django.utils import timezone
 import pytest
 from rest_framework.test import APIClient
 
+from customization.models import SiteSettings
 from inventory.models import MaintenanceItem, MaintenanceLog, MaintenanceTask, WorkOrder
 from inventory.tests.factories import AssetFactory
 
 User = get_user_model()
 pytestmark = pytest.mark.django_db
+
+
+def _set_bundle_window(days: int) -> None:
+    """Pin SiteSettings.pm_auto_bundle_due_within_days for the test."""
+    s = SiteSettings.get()
+    s.pm_auto_bundle_due_within_days = days
+    s.save()
 
 
 @pytest.fixture
@@ -78,8 +87,8 @@ def _create_wo(api, item):
 
 
 class TestAutoBundleDisabled:
-    def test_setting_zero_does_not_bundle(self, staff_client, asset_with_two_pms, settings):
-        settings.PM_AUTO_BUNDLE_DUE_WITHIN_DAYS = 0
+    def test_setting_zero_does_not_bundle(self, staff_client, asset_with_two_pms):
+        _set_bundle_window(0)
         _, weekly, monthly = asset_with_two_pms
 
         wo = _create_wo(staff_client, weekly)
@@ -94,8 +103,8 @@ class TestAutoBundleDisabled:
 
 
 class TestAutoBundleEnabled:
-    def test_window_7_bundles_overdue_sibling(self, staff_client, asset_with_two_pms, settings):
-        settings.PM_AUTO_BUNDLE_DUE_WITHIN_DAYS = 7
+    def test_window_7_bundles_overdue_sibling(self, staff_client, asset_with_two_pms):
+        _set_bundle_window(7)
         _, weekly, monthly = asset_with_two_pms
         # Neither item has been done — both are overdue from creation,
         # so both should land in the bundle.
@@ -112,8 +121,8 @@ class TestAutoBundleEnabled:
         assert weekly.id in task_items
         assert monthly.id in task_items
 
-    def test_sibling_due_after_window_excluded(self, staff_client, asset_with_two_pms, settings):
-        settings.PM_AUTO_BUNDLE_DUE_WITHIN_DAYS = 7
+    def test_sibling_due_after_window_excluded(self, staff_client, asset_with_two_pms):
+        _set_bundle_window(7)
         asset, weekly, monthly = asset_with_two_pms
         # Push monthly's last_completed_at to now so its next_due_at
         # lands 30 days out — outside the 7-day window.
@@ -126,7 +135,7 @@ class TestAutoBundleEnabled:
     def test_sibling_on_different_asset_not_bundled(
         self, staff_client, asset_with_two_pms, settings
     ):
-        settings.PM_AUTO_BUNDLE_DUE_WITHIN_DAYS = 7
+        _set_bundle_window(7)
         _, weekly, _ = asset_with_two_pms
         # A PM on a DIFFERENT asset (also overdue) must NOT be rolled
         # into the bundle — same-asset is the contract.
@@ -146,7 +155,7 @@ class TestCompletionCascadesToEveryBundledItem:
     def test_close_writes_log_and_advances_last_completed_for_every_item(
         self, staff_client, asset_with_two_pms, settings
     ):
-        settings.PM_AUTO_BUNDLE_DUE_WITHIN_DAYS = 7
+        _set_bundle_window(7)
         _, weekly, monthly = asset_with_two_pms
         wo = _create_wo(staff_client, weekly)
         assert _validate(staff_client, wo).status_code == 201
@@ -175,7 +184,7 @@ class TestCompletionCascadesToEveryBundledItem:
     def test_reopen_recomplete_does_not_double_log_any_item(
         self, staff_client, asset_with_two_pms, settings
     ):
-        settings.PM_AUTO_BUNDLE_DUE_WITHIN_DAYS = 7
+        _set_bundle_window(7)
         _, weekly, monthly = asset_with_two_pms
         wo = _create_wo(staff_client, weekly)
         _validate(staff_client, wo)

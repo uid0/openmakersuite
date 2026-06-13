@@ -3312,11 +3312,11 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _bundle_due_siblings(work_order) -> None:
-        """Roll same-asset PMs due within PM_AUTO_BUNDLE_DUE_WITHIN_DAYS
-        into this WO.
+        """Roll same-asset PMs due within
+        ``SiteSettings.pm_auto_bundle_due_within_days`` into this WO.
 
         Runs on perform_create only. Skips when:
-          - the setting is 0 or missing (auto-bundle disabled)
+          - the SiteSettings value is 0 (auto-bundle disabled — default)
           - the WO has no primary maintenance_item
           - the primary item has no asset
 
@@ -3325,10 +3325,17 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         of now OR are already overdue. For each sibling we materialize
         its tasks as WorkOrderTaskCompletion rows so the existing
         per-step UI renders one combined checklist.
-        """
-        from django.conf import settings as django_settings
 
-        window_days = int(getattr(django_settings, "PM_AUTO_BUNDLE_DUE_WITHIN_DAYS", 0) or 0)
+        The window is a live ``SiteSettings`` value (admin-editable from
+        the site-settings admin page) rather than env config, so an
+        admin can flip the threshold without a redeploy.
+        """
+        from customization.models import SiteSettings
+
+        try:
+            window_days = int(SiteSettings.get().pm_auto_bundle_due_within_days or 0)
+        except Exception:  # noqa: BLE001 — broken row should not crash WO create
+            window_days = 0
         if window_days <= 0:
             return
         primary = work_order.maintenance_item

@@ -15,12 +15,16 @@ from membership.utils import is_logistics_member
 
 from .models import MakerBox
 from .serializers import (
+    LookupRequestSerializer,
+    LookupResponseSerializer,
     MakerBoxSerializer,
     ManualLabelRequestSerializer,
+    PreConvertRequestSerializer,
     ScanRequestSerializer,
     ScanResponseSerializer,
 )
 from .services.email_service import send_pickup_notification
+from .services.identity_resolver import resolve as resolve_identity
 from .services.label_service import render_box_label
 from .services.sheet_service import CARDS_PER_SHEET, render_avery_5371_sheet
 from .services.whmcs_client import WhmcsNotConfigured, lookup_member
@@ -212,6 +216,137 @@ class MakerBoxViewSet(viewsets.ModelViewSet):
         response = HttpResponse(png, content_type="image/png")
         response["Content-Disposition"] = 'inline; filename="maker-box-manual.png"'
         return response
+
+    # ------------------------------------------------------------------
+    # Pre-conversion (PR 2)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _lookup_payload(lookup, source):
+        """Serializer-shaped dict for an identity hit or miss."""
+        if lookup is None:
+            return {
+                "found": False,
+                "identity_source": "",
+                "username": "",
+                "first_name": "",
+                "last_name": "",
+                "email": "",
+                "membership_status": "",
+                "expires_at": None,
+                "days_remaining": None,
+            }
+        return {
+            "found": True,
+            "identity_source": source,
+            "username": lookup.username,
+            "first_name": lookup.first_name,
+            "last_name": lookup.last_name,
+            "email": lookup.email,
+            "membership_status": lookup.status,
+            "expires_at": lookup.expires_at,
+            "days_remaining": lookup.days_remaining,
+        }
+
+    @action(detail=False, methods=["post"], url_path="lookup")
+    def lookup(self, request):
+        """Identity-only lookup: run the cascade, return what we found.
+
+        No DB write. The frontend uses this for live preview as a
+        staffer types or scans a badge/username — the actual queue
+        insert happens in ``pre_convert`` when they hit "Add".
+        """
+        denied = self._check_staff(request)
+        if denied is not None:
+            return denied
+
+        serializer = LookupRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        query = serializer.validated_data["query"]
+
+        lookup, source = resolve_identity(query)
+        payload = self._lookup_payload(lookup, source)
+        return Response(LookupResponseSerializer(payload).data)
+
+    @action(detail=False, methods=["post"], url_path="pre-convert")
+    def pre_convert(self, request):
+        """Resolve identity and put the user on the pre-conversion queue.
+
+        Idempotent on resolved username: if a pre-conversion row
+        already exists, we update its identity fields (in case the
+        member's name/email changed) and return it. If the user has
+        already been converted (status != pre_conversion AND bin_id is
+        set), we return 409 — the queue is for users without a bin
+        yet, and reopening a converted row would silently undo PR3's
+        work.
+        """
+        denied = self._check_staff(request)
+        if denied is not None:
+            return denied
+
+        serializer = PreConvertRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        query = serializer.validated_data["query"]
+        notes = serializer.validated_data.get("notes", "")
+
+        lookup, source = resolve_identity(query)
+        if lookup is None:
+            return Response(
+                {
+                    "detail": (
+                        "No identity matched that badge or username. "
+                        "Check the spelling, or have the member scan their badge."
+                    ),
+                    "code": "not_found",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        existing = MakerBox.objects.filter(assigned_username=lookup.username).first()
+        if existing and existing.bin_id and existing.status != MakerBox.STATUS_PRE_CONVERSION:
+            return Response(
+                {
+                    "detail": (
+                        f"{lookup.username} is already assigned bin {existing.bin_id}. "
+                        "Use the scan screen instead of the pre-conversion queue."
+                    ),
+                    "code": "already_converted",
+                    "bin_id": existing.bin_id,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        box = existing or MakerBox(assigned_username=lookup.username, bin_id=None)
+        box.assigned_username = lookup.username
+        box.first_name = lookup.first_name
+        box.last_name = lookup.last_name
+        box.email = lookup.email
+        box.expires_at = lookup.expires_at
+        box.status = MakerBox.STATUS_PRE_CONVERSION
+        box.identity_source = source
+        box.last_verified_at = timezone.now()
+        if notes:
+            # Append rather than overwrite so an earlier staffer's note
+            # isn't lost when a second staffer re-runs the lookup.
+            existing_notes = box.notes or ""
+            box.notes = (existing_notes + ("\n" if existing_notes else "") + notes).strip()
+        box.save()
+
+        return Response(
+            MakerBoxSerializer(box).data,
+            status=status.HTTP_200_OK if existing else status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["get"], url_path="pre-conversion-queue")
+    def pre_conversion_queue(self, request):
+        """List the rows waiting for bin allocation, newest first."""
+        denied = self._check_staff(request)
+        if denied is not None:
+            return denied
+        queue = MakerBox.objects.filter(status=MakerBox.STATUS_PRE_CONVERSION).order_by(
+            "-created_at"
+        )
+        return Response(MakerBoxSerializer(queue, many=True).data)
 
     @action(detail=True, methods=["post"], url_path="email-pickup")
     def email_pickup(self, request, pk=None):

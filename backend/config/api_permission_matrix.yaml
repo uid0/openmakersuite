@@ -1951,10 +1951,19 @@ views:
       list:
         permission_classes:
         - IsAuthenticated
+      lookup:
+        permission_classes:
+        - IsAuthenticated
       manual_label:
         permission_classes:
         - IsAuthenticated
       partial_update:
+        permission_classes:
+        - IsAuthenticated
+      pre_conversion_queue:
+        permission_classes:
+        - IsAuthenticated
+      pre_convert:
         permission_classes:
         - IsAuthenticated
       print_sheet:

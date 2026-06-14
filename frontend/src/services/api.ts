@@ -1753,7 +1753,7 @@ export const kioskAPI = {
 
 export interface MakerBox {
   id: number;
-  bin_id: string;
+  bin_id: string | null;
   assigned_username: string;
   first_name: string;
   last_name: string;
@@ -1762,7 +1762,15 @@ export interface MakerBox {
   assigned_at: string | null;
   expires_at: string | null;
   last_verified_at: string | null;
-  status: 'valid' | 'grace' | 'expired' | 'unassigned' | 'unknown';
+  status:
+    | 'valid'
+    | 'grace'
+    | 'expired'
+    | 'unassigned'
+    | 'unknown'
+    | 'pre_conversion';
+  identity_source: '' | 'whmcs' | 'common_api' | 'manual';
+  conversion_completed_at: string | null;
   paid_at: string | null;
   notes: string;
   created_at: string;
@@ -1776,6 +1784,18 @@ export interface MakerBoxScanResult {
   first_name: string;
   last_name: string;
   email: string;
+  expires_at: string | null;
+  days_remaining: number | null;
+}
+
+export interface MakerBoxLookupResult {
+  found: boolean;
+  identity_source: '' | 'whmcs' | 'common_api' | 'manual';
+  username: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  membership_status: '' | 'valid' | 'grace' | 'expired' | 'unknown';
   expires_at: string | null;
   days_remaining: number | null;
 }
@@ -2426,6 +2446,17 @@ export const makerBoxesAPI = {
   // or a new-tab preview.
   printSheet: (binIds: string[]) =>
     api.post<ArrayBuffer>('/maker-boxes/print-sheet/', { bin_ids: binIds }, { responseType: 'arraybuffer' }),
+  // PR2 — pre-conversion workflow. ``lookup`` is read-only and used for
+  // live preview as staff types or scans on the pre-conversion screen;
+  // ``preConvert`` puts the user on the queue (idempotent on resolved
+  // username); ``preConversionQueue`` lists the rows waiting for bin
+  // allocation.
+  lookup: (query: string) =>
+    api.post<MakerBoxLookupResult>('/maker-boxes/lookup/', { query }),
+  preConvert: (query: string, notes?: string) =>
+    api.post<MakerBox>('/maker-boxes/pre-convert/', notes ? { query, notes } : { query }),
+  preConversionQueue: () =>
+    api.get<MakerBox[]>('/maker-boxes/pre-conversion-queue/'),
 };
 
 export interface AssetWarrantyDto {

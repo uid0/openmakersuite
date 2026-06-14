@@ -24,6 +24,8 @@ class MakerBoxSerializer(serializers.ModelSerializer):
             "expires_at",
             "last_verified_at",
             "status",
+            "identity_source",
+            "conversion_completed_at",
             "paid_at",
             "notes",
             "created_at",
@@ -52,3 +54,41 @@ class ManualLabelRequestSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=64)
     first_name = serializers.CharField(max_length=64, allow_blank=True, required=False, default="")
     last_name = serializers.CharField(max_length=64, allow_blank=True, required=False, default="")
+
+
+# ---------------------------------------------------------------------------
+# Pre-conversion (PR 2)
+# ---------------------------------------------------------------------------
+
+# The pre-conversion screen accepts either a badge number (digits) or a
+# WHMCS username (alphanumeric). The resolver decides which backend to
+# call — the request shape is the same for both, hence ``query`` rather
+# than ``username`` / ``badge``.
+
+
+class LookupRequestSerializer(serializers.Serializer):
+    query = serializers.CharField(max_length=64)
+
+
+class LookupResponseSerializer(serializers.Serializer):
+    """Result of an identity-only lookup (no DB write).
+
+    ``found`` is false when neither backend matched the query. In that
+    case the other fields are empty / null but still present so the
+    frontend can render a single shape.
+    """
+
+    found = serializers.BooleanField()
+    identity_source = serializers.CharField(allow_blank=True)
+    username = serializers.CharField(allow_blank=True)
+    first_name = serializers.CharField(allow_blank=True)
+    last_name = serializers.CharField(allow_blank=True)
+    email = serializers.EmailField(allow_blank=True)
+    membership_status = serializers.CharField(allow_blank=True)
+    expires_at = serializers.DateTimeField(allow_null=True)
+    days_remaining = serializers.IntegerField(allow_null=True)
+
+
+class PreConvertRequestSerializer(serializers.Serializer):
+    query = serializers.CharField(max_length=64)
+    notes = serializers.CharField(max_length=2000, allow_blank=True, required=False, default="")

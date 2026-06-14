@@ -53,6 +53,7 @@ const ENTRIES: RouteEntry[] = [
   { path: 'facilities/checklist', label: 'Checklist' },
   { path: 'facilities/screens', label: 'Screens' },
   { path: 'facilities/maker-boxes', label: 'Maker Boxes' },
+  { path: 'facilities/maker-boxes/pre-conversion', label: 'Maker Box pre-conversion' },
   { path: 'facilities/maker-boxes/scan', label: 'Maker Box scan' },
   { path: 'facilities/project-storage', label: 'Project Storage' },
   { path: 'facilities/project-storage/queue', label: 'Queue' },

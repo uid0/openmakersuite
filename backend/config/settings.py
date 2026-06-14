@@ -393,6 +393,15 @@ WHMCS_API_IDENTIFIER = config("WHMCS_API_IDENTIFIER", default="")
 WHMCS_API_SECRET = config("WHMCS_API_SECRET", default="")
 WHMCS_API_ACCESSKEY = config("WHMCS_API_ACCESSKEY", default="")
 
+# Common API (Dallas-Makerspace AD-backed badge → identity service). It
+# lives on the LAN, so OMS reaches it via the Raspberry Pi printer's
+# /resolve proxy; the URL points at that proxy, not the kiosk directly.
+# Add-on / sub-account users without WHMCS billing records resolve here.
+# When the URL is empty the maker_boxes resolver silently falls back to
+# WHMCS-only (digit-input scans then get a "not found" response).
+COMMON_API_PROXY_URL = config("COMMON_API_PROXY_URL", default="")
+COMMON_API_PROXY_TOKEN = config("COMMON_API_PROXY_TOKEN", default="")
+
 # Postmark inbound webhook shared secret. The inbound work-order endpoint is
 # unauthenticated (Postmark does not ship a request signature), so this token
 # must match the `?token=` query param or the `X-Postmark-Webhook-Token` header

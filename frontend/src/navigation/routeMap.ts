@@ -55,6 +55,11 @@ const ENTRIES: RouteEntry[] = [
   { path: 'facilities/maker-boxes', label: 'Maker Boxes' },
   { path: 'facilities/maker-boxes/pre-conversion', label: 'Maker Box pre-conversion' },
   { path: 'facilities/maker-boxes/scan', label: 'Maker Box scan' },
+  // The QR-scan landing page is parameterized (/scan/makerbox/:bin/:user)
+  // and not a destination breadcrumb segment — mark non-clickable to keep
+  // the entryPoints test honest without surfacing a placeholder link.
+  { path: 'scan', label: 'Scan', clickable: false },
+  { path: 'scan/makerbox', label: 'Maker Box verify', clickable: false },
   { path: 'facilities/project-storage', label: 'Project Storage' },
   { path: 'facilities/project-storage/queue', label: 'Queue' },
   { path: 'facilities/electrical', label: 'Electrical' },

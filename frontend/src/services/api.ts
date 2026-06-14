@@ -2457,6 +2457,18 @@ export const makerBoxesAPI = {
     api.post<MakerBox>('/maker-boxes/pre-convert/', notes ? { query, notes } : { query }),
   preConversionQueue: () =>
     api.get<MakerBox[]>('/maker-boxes/pre-conversion-queue/'),
+  // PR3 — convert a queued row: allocates MBX-NNN and stamps
+  // conversion_completed_at. Pass either id (queue table) or
+  // assigned_username (scantty).
+  convert: (target: { id?: number; assigned_username?: string }) =>
+    api.post<MakerBox>('/maker-boxes/convert/', target),
+  // Public scan-verification endpoint that the printed QR resolves
+  // to. Distinct from the staff /scan/ action because it's AllowAny
+  // and read-only.
+  verifyScan: (binId: string, username: string) =>
+    api.get<MakerBoxScanResult & { detail?: string }>(
+      `/maker-boxes/verify/${encodeURIComponent(binId)}/${encodeURIComponent(username)}/`,
+    ),
 };
 
 export interface AssetWarrantyDto {

@@ -92,3 +92,25 @@ class LookupResponseSerializer(serializers.Serializer):
 class PreConvertRequestSerializer(serializers.Serializer):
     query = serializers.CharField(max_length=64)
     notes = serializers.CharField(max_length=2000, allow_blank=True, required=False, default="")
+
+
+# ---------------------------------------------------------------------------
+# Conversion (PR 3)
+# ---------------------------------------------------------------------------
+
+
+class ConvertRequestSerializer(serializers.Serializer):
+    """Identify the pre-conversion row to convert.
+
+    Accept either ``id`` (the queue UI calls per-row), or
+    ``assigned_username`` (scantty / batch flows). Exactly one is
+    required.
+    """
+
+    id = serializers.IntegerField(required=False)
+    assigned_username = serializers.CharField(max_length=64, required=False, allow_blank=False)
+
+    def validate(self, attrs):
+        if not attrs.get("id") and not attrs.get("assigned_username"):
+            raise serializers.ValidationError("Either ``id`` or ``assigned_username`` is required.")
+        return attrs

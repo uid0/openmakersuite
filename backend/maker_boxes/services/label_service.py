@@ -1,15 +1,31 @@
 """Label rendering for maker box stickers.
 
 Produces a 3.5"x2" business-card-sized PNG (600 DPI by default) with the
-member's name on the right and a square QR code encoding the WHMCS
-username on the left. Same conventions as :mod:`inventory.services.asset_tag_service`
-so the production print pipeline is familiar.
+member's name on the right and a square QR code on the left. Same
+conventions as :mod:`inventory.services.asset_tag_service` so the
+production print pipeline is familiar.
+
+QR payload semantics
+--------------------
+
+For a converted box (has both ``bin_id`` and ``assigned_username``) we
+encode the full scanner URL so a phone camera resolves directly to
+the post-conversion verification screen::
+
+    {FRONTEND_URL}/scan/makerbox/<bin_id>/<username>/
+
+For manual / pre-conversion / unassigned rows we fall back to the
+plain ``assigned_username`` (or ``"unassigned"``) — those labels can't
+self-route because the bin_id hasn't been allocated yet.
 """
 
 from __future__ import annotations
 
 from io import BytesIO
 from typing import Iterable, Optional
+from urllib.parse import quote
+
+from django.conf import settings
 
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
@@ -36,6 +52,21 @@ def _try_font(size: int) -> ImageFont.ImageFont:
         except OSError:
             continue
     return ImageFont.load_default()
+
+
+def _qr_payload(bin_id: str, username: str) -> str:
+    """Decide what to encode in the QR for this row.
+
+    Fully assigned rows (bin_id + username) get the self-resolving
+    scanner URL. Everything else falls back to the username (or
+    ``"unassigned"`` for blank rows) so the QR still scans to *something*
+    legible — old behavior, preserved for manual labels and the
+    pre-conversion queue's eventual reprint flow.
+    """
+    if bin_id and username:
+        base = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+        return f"{base}/scan/makerbox/{quote(bin_id, safe='')}/{quote(username, safe='')}/"
+    return username or "unassigned"
 
 
 def _build_qr_image(value: str, target_px: int) -> Image.Image:
@@ -112,7 +143,8 @@ def render_box_image(
 
     qr_x = margin_px
     qr_y = (height_px - qr_px) // 2
-    qr_img = _build_qr_image(username or "unassigned", qr_px)
+    bin_id = getattr(maker_box, "bin_id", "") or ""
+    qr_img = _build_qr_image(_qr_payload(bin_id, username), qr_px)
     img.paste(qr_img, (qr_x, qr_y))
 
     text_left = qr_x + qr_px + gap_px

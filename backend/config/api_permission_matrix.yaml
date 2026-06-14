@@ -1936,6 +1936,9 @@ views:
     - IsAuthenticated
   maker_boxes.views.MakerBoxViewSet:
     actions:
+      convert:
+        permission_classes:
+        - IsAuthenticated
       create:
         permission_classes:
         - IsAuthenticated
@@ -1978,6 +1981,9 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  maker_boxes.views.verify_scan:
+    permission_classes:
+    - AllowAny
   membership.views.InviteCodeViewSet:
     actions:
       create:

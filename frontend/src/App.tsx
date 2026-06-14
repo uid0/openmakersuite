@@ -77,6 +77,7 @@ import LogisticsDashboard from './pages/LogisticsDashboard';
 import MakerBoxAdminPage from './pages/MakerBoxAdminPage';
 import MakerBoxPreConversionPage from './pages/MakerBoxPreConversionPage';
 import MakerBoxScanPage from './pages/MakerBoxScanPage';
+import MakerBoxVerifyScanPage from './pages/MakerBoxVerifyScanPage';
 import MaintenanceDashboard from './pages/MaintenanceDashboard';
 import MaintenanceDashboardPage from './pages/MaintenanceDashboardPage';
 import NetworkDropFormPage from './pages/NetworkDropFormPage';
@@ -298,6 +299,8 @@ function AppContent() {
           <Route path="/facilities/maker-boxes/pre-conversion" element={<WorkspaceLayout><MakerBoxPreConversionPage /></WorkspaceLayout>} />
           <Route path="/facilities/maker-boxes/scan" element={<WorkspaceLayout><MakerBoxScanPage /></WorkspaceLayout>} />
           <Route path="/facilities/maker-boxes" element={<WorkspaceLayout><MakerBoxAdminPage /></WorkspaceLayout>} />
+          {/* Public QR-scan route — no WorkspaceLayout so a phone gets a clean page. */}
+          <Route path="/scan/makerbox/:binId/:username" element={<MakerBoxVerifyScanPage />} />
 
           {/* Electrical workspace — overview + power-topology visualization (oms-b25 [6/7]) */}
           <Route path="/facilities/electrical" element={<WorkspaceLayout><ElectricalOverviewPage /></WorkspaceLayout>} />

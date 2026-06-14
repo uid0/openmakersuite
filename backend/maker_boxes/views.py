@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from membership.utils import is_logistics_member
 
-from .models import MakerBox
+from .models import MakerBox, auto_generate_bin_id
 from .serializers import (
+    ConvertRequestSerializer,
     LookupRequestSerializer,
     LookupResponseSerializer,
     MakerBoxSerializer,
@@ -337,6 +339,110 @@ class MakerBoxViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK if existing else status.HTTP_201_CREATED,
         )
 
+    @action(detail=False, methods=["post"], url_path="convert")
+    def convert(self, request):
+        """Allocate ``MBX-NNN`` for a pre-conversion row and finalize it.
+
+        Body: ``{"id": <int>}`` or ``{"assigned_username": <str>}``.
+        On success: stamps ``conversion_completed_at``, flips status
+        from ``pre_conversion`` to whatever the current lookup yields
+        (typically ``valid``), and locks in the next available
+        ``MBX-NNN``. The caller can then download the label via
+        ``/maker-boxes/<id>/label/``.
+
+        Errors:
+
+        * 404 when no pre-conversion row matches.
+        * 409 when the row already has a bin_id (already converted).
+        * 503 if the allocator collides repeatedly (effectively never;
+          the partial unique index pins integrity, and we retry up to
+          ``ALLOCATOR_MAX_RETRIES`` slots above the latest seen).
+        """
+        denied = self._check_staff(request)
+        if denied is not None:
+            return denied
+
+        serializer = ConvertRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        if serializer.validated_data.get("id"):
+            box = MakerBox.objects.filter(pk=serializer.validated_data["id"]).first()
+        else:
+            box = MakerBox.objects.filter(
+                assigned_username=serializer.validated_data["assigned_username"]
+            ).first()
+
+        if box is None:
+            return Response(
+                {
+                    "detail": "No matching pre-conversion row found.",
+                    "code": "not_found",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if box.bin_id:
+            return Response(
+                {
+                    "detail": (
+                        f"{box.assigned_username} is already converted " f"(bin {box.bin_id})."
+                    ),
+                    "code": "already_converted",
+                    "bin_id": box.bin_id,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Allocate with retry: a concurrent convert call could land on
+        # the same slot, the partial unique constraint will reject the
+        # second, and we bump to the next slot. 5 retries is far above
+        # the realistic concurrent load (single warden at a print
+        # station) and bounds the runtime.
+        ALLOCATOR_MAX_RETRIES = 5
+        last_exc = None
+        for _ in range(ALLOCATOR_MAX_RETRIES):
+            candidate = auto_generate_bin_id()
+            try:
+                with transaction.atomic():
+                    box.bin_id = candidate
+                    box.conversion_completed_at = timezone.now()
+                    # Default to ``valid`` if the cascade resolver
+                    # previously said the membership was good; the
+                    # pre-conversion row's status was ``pre_conversion``
+                    # so we promote it. ``expires_at`` already carries
+                    # WHMCS's nextduedate; re-classifying here keeps
+                    # the row consistent with the next scan's verdict.
+                    if box.expires_at and box.expires_at >= timezone.now():
+                        box.status = MakerBox.STATUS_VALID
+                    elif box.expires_at:
+                        box.status = MakerBox.STATUS_EXPIRED
+                    else:
+                        # Common API hit without WHMCS coverage —
+                        # add-on user; keep them ``valid`` and let the
+                        # next scan refresh.
+                        box.status = MakerBox.STATUS_VALID
+                    if not box.assigned_at:
+                        box.assigned_at = timezone.now()
+                    box.save()
+                return Response(
+                    MakerBoxSerializer(box).data,
+                    status=status.HTTP_200_OK,
+                )
+            except IntegrityError as exc:
+                last_exc = exc
+                box.bin_id = None  # Reset for next iteration.
+                continue
+
+        return Response(
+            {
+                "detail": (
+                    "Bin allocator collided repeatedly — try again. " f"Last error: {last_exc}"
+                ),
+                "code": "allocator_collision",
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
     @action(detail=False, methods=["get"], url_path="pre-conversion-queue")
     def pre_conversion_queue(self, request):
         """List the rows waiting for bin allocation, newest first."""
@@ -371,3 +477,73 @@ class MakerBoxViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
         return Response({"sent": True, "to": recipient})
+
+
+# ---------------------------------------------------------------------------
+# Public scan verification (PR 3)
+# ---------------------------------------------------------------------------
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def verify_scan(request, bin_id: str, username: str):
+    """Public GET endpoint that the printed QR resolves to.
+
+    Encoded by the label renderer as
+    ``{FRONTEND_URL}/scan/makerbox/<bin_id>/<username>/`` — a phone
+    scanning the QR lands on the matching frontend route which calls
+    this endpoint for the live verdict. ``AllowAny`` so a kiosk phone
+    without a session can render the result.
+
+    No DB write here — this is a read-only check, distinct from the
+    staff-side ``POST /scan/`` action that records ``last_verified_at``.
+    Returns the same envelope shape so the frontend can render one
+    component for both flows.
+    """
+    box = MakerBox.objects.filter(bin_id=bin_id).first()
+    if box is None:
+        return Response(
+            {
+                "status": "unknown",
+                "bin_id": bin_id,
+                "username": username,
+                "first_name": "",
+                "last_name": "",
+                "email": "",
+                "expires_at": None,
+                "days_remaining": None,
+                "detail": "No such bin.",
+            }
+        )
+
+    if (box.assigned_username or "").lower() != (username or "").lower():
+        # Wrong owner — scanner saw a QR for this bin but the row says
+        # it belongs to someone else (label not yet reprinted, or QR
+        # tampering). Report ``unknown`` rather than leak the real
+        # owner's identity to a passer-by.
+        return Response(
+            {
+                "status": "unknown",
+                "bin_id": bin_id,
+                "username": username,
+                "first_name": "",
+                "last_name": "",
+                "email": "",
+                "expires_at": None,
+                "days_remaining": None,
+                "detail": "Bin assignment mismatch.",
+            }
+        )
+
+    return Response(
+        {
+            "status": box.status,
+            "bin_id": box.bin_id,
+            "username": box.assigned_username,
+            "first_name": box.first_name,
+            "last_name": box.last_name,
+            "email": box.email,
+            "expires_at": box.expires_at,
+            "days_remaining": None,
+        }
+    )

@@ -2291,6 +2291,23 @@ class WorkOrder(models.Model):
         related_name="work_orders",
         help_text="The maintenance task this work order is for",
     )
+    # Bundled sibling PMs on the same asset that were due around the
+    # same time and got rolled into this work order via the auto-bundle
+    # window (PM_AUTO_BUNDLE_DUE_WITHIN_DAYS). The primary
+    # ``maintenance_item`` above is the row the WO was originally
+    # generated for; everything else due on the same asset within the
+    # window gets attached here so a maker can do them all in one
+    # trip and close them with per-item checkboxes.
+    additional_maintenance_items = models.ManyToManyField(
+        MaintenanceItem,
+        blank=True,
+        related_name="bundled_work_orders",
+        help_text=(
+            "Sibling PMs on the same asset bundled into this WO via auto-bundling. "
+            "When the WO is marked completed, every linked item (primary + bundled) "
+            "gets its last_completed_at advanced and a MaintenanceLog row written."
+        ),
+    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,

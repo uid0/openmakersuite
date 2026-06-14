@@ -117,6 +117,22 @@ class SiteSettings(models.Model):
         help_text="Title of authorized signatory for tax receipts",
     )
 
+    # PM auto-bundling — when a WorkOrder is created against a
+    # MaintenanceItem and this is > 0, the WorkOrderViewSet bundles
+    # every other active PM on the same asset whose next_due_at falls
+    # within the window (or is already overdue) into the same WO.
+    # 0 disables the feature (default — back-compat with the
+    # pre-bundling world). Live-editable from the admin site-settings
+    # form so a maintainer can flip the window without redeploying.
+    pm_auto_bundle_due_within_days = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            "When creating a work order against a PM, also roll in every "
+            "other active PM on the same asset that is due (or overdue) "
+            "within this many days. 0 disables auto-bundling."
+        ),
+    )
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

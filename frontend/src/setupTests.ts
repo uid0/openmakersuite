@@ -94,3 +94,19 @@ if (typeof window !== 'undefined') {
 }
 
 Element.prototype.scrollIntoView = vi.fn();
+
+// jsdom has no FontFaceSet — Mantine v9's Textarea/Autosize listens
+// for "loadingdone" on document.fonts so the textarea resizes once
+// custom fonts swap in. Provide an inert event-target shim so the
+// hook can subscribe without crashing.
+if (typeof document !== 'undefined' && !(document as Document & { fonts?: unknown }).fonts) {
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      ready: Promise.resolve(),
+    },
+  });
+}

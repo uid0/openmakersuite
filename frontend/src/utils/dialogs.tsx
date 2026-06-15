@@ -6,7 +6,6 @@
  * without wiring contexts or local state for every usage.
  */
 import { Button, Group, Stack, Text, TextInput } from '@mantine/core';
-import { useForm } from '@mantine/form';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import React from 'react';
@@ -80,12 +79,25 @@ const PromptForm: React.FC<PromptFormProps> = ({
   onSubmit,
   onCancel,
 }) => {
-  const form = useForm({ initialValues: { value: initialValue } });
+  // Use plain React state instead of @mantine/form: v9 defaults useForm
+  // to uncontrolled mode where TextInput holds its value in a ref and
+  // synthetic-event changes (fireEvent.change in tests, programmatic
+  // .value sets in some browser shells) don't always land in the
+  // submitted payload. A single-field prompt doesn't need form
+  // machinery anyway.
+  const [value, setValue] = React.useState(initialValue);
 
-  const handleSubmit = form.onSubmit((values) => {
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Call onSubmit BEFORE closing the modal: Mantine v9 dispatches
+    // the close synchronously and the re-render unmounts this form,
+    // and if `onSubmit` triggers any state changes or microtasks
+    // they race with the close in v9's reducer (the AssetScanPage
+    // anonymous-checklist flow used to drop the resolved value
+    // silently). Resolving first guarantees the caller sees it.
+    onSubmit(value);
     modals.close(modalId);
-    onSubmit(values.value);
-  });
+  };
 
   const handleCancel = () => {
     modals.close(modalId);
@@ -99,7 +111,8 @@ const PromptForm: React.FC<PromptFormProps> = ({
           label={label}
           placeholder={placeholder}
           autoFocus
-          {...form.getInputProps('value')}
+          value={value}
+          onChange={(e) => setValue(e.currentTarget.value)}
         />
         <Group justify="flex-end">
           <Button variant="default" onClick={handleCancel} type="button">

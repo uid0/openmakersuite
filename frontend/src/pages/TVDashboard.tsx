@@ -325,6 +325,9 @@ const TVDashboard: React.FC = () => {
       { name: 'Received', key: 'received', completed: false }
     ];
 
+    // Set in every branch of the switch below; initialized so TS
+    // doesn't need a `| undefined` union for the return.
+    // eslint-disable-next-line no-useless-assignment
     let currentStage = 0;
     const isCancelled = request.status === 'cancelled';
 

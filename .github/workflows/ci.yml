@@ -1159,7 +1159,7 @@ jobs:
     if: needs.changes.outputs.deploy == 'true'
 
     env:
-      HELM_VERSION: v3.16.2
+      HELM_VERSION: v4.2.1
       KUBECONFORM_VERSION: 0.6.7
       KUBE_VERSION: "1.29.0"
 

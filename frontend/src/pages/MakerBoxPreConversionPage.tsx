@@ -39,6 +39,11 @@ const MakerBoxPreConversionPage: React.FC = () => {
   const [queue, setQueue] = useState<MakerBox[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
+  const [convertingId, setConvertingId] = useState<number | null>(null);
+  const [convertedBinId, setConvertedBinId] = useState<{
+    id: number;
+    binId: string;
+  } | null>(null);
 
   const refreshQueue = useCallback(async () => {
     try {
@@ -77,6 +82,31 @@ const MakerBoxPreConversionPage: React.FC = () => {
       runLookup();
     },
     [runLookup],
+  );
+
+  const handleConvert = useCallback(
+    async (row: MakerBox) => {
+      setConvertingId(row.id);
+      setError(null);
+      setConfirmation(null);
+      setConvertedBinId(null);
+      try {
+        const response = await makerBoxesAPI.convert({ id: row.id });
+        const converted = response.data;
+        if (converted.bin_id) {
+          setConvertedBinId({ id: converted.id, binId: converted.bin_id });
+          setConfirmation(
+            `Allocated ${converted.bin_id} to ${converted.assigned_username}.`,
+          );
+        }
+        await refreshQueue();
+      } catch (err) {
+        setError(extractErrorMessage(err, 'Convert failed.'));
+      } finally {
+        setConvertingId(null);
+      }
+    },
+    [refreshQueue],
   );
 
   const handleAddToQueue = useCallback(async () => {
@@ -186,6 +216,19 @@ const MakerBoxPreConversionPage: React.FC = () => {
           }}
         >
           {confirmation}
+          {convertedBinId && (
+            <>
+              {' '}
+              <a
+                href={makerBoxesAPI.labelUrl(convertedBinId.id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ marginLeft: '0.5rem' }}
+              >
+                Download label ({convertedBinId.binId}.png)
+              </a>
+            </>
+          )}
         </div>
       )}
 
@@ -236,6 +279,7 @@ const MakerBoxPreConversionPage: React.FC = () => {
               <th style={{ padding: '0.5rem' }}>Source</th>
               <th style={{ padding: '0.5rem' }}>Notes</th>
               <th style={{ padding: '0.5rem' }}>Queued</th>
+              <th style={{ padding: '0.5rem' }}>Convert</th>
             </tr>
           </thead>
           <tbody>
@@ -249,6 +293,15 @@ const MakerBoxPreConversionPage: React.FC = () => {
                 <td style={{ padding: '0.5rem', whiteSpace: 'pre-wrap' }}>{row.notes}</td>
                 <td style={{ padding: '0.5rem' }}>
                   {row.created_at ? new Date(row.created_at).toLocaleString() : ''}
+                </td>
+                <td style={{ padding: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleConvert(row)}
+                    disabled={convertingId === row.id}
+                  >
+                    {convertingId === row.id ? 'Allocating…' : 'Convert'}
+                  </button>
                 </td>
               </tr>
             ))}

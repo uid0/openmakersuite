@@ -1,6 +1,6 @@
 // jest-dom adds custom matchers for asserting on DOM nodes.
 import '@testing-library/jest-dom/vitest';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
 
 // Shim: existing test files reference `jest.fn` / `jest.mock` etc.
 // Vitest's `vi` is API-compatible for the operations used here, so
@@ -110,3 +110,48 @@ if (typeof document !== 'undefined' && !(document as Document & { fonts?: unknow
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Clear leaked long-lived timers after every test (e.g. @mantine/notifications
+// auto-close timers).
+//
+// Mantine v9's NotificationContainer schedules its auto-close
+// `window.setTimeout(handleHide, …)` from two separate effects that share a
+// single `autoCloseTimeout` ref, so the first timer's id is overwritten and
+// orphaned. On unmount Mantine cancels only the tracked (second) timer; the
+// orphaned one survives, then fires a few seconds later — after vitest has torn
+// down this file's jsdom environment — and runs `window.clearTimeout(...)`,
+// throwing "window is not defined". Under vitest v4's stricter unhandled-error
+// handling that reddens the whole run. It is flaky because it depends on
+// teardown-vs-timer timing: a file passes in isolation but fails in the full
+// suite (observed first on AdminDashboard.test.tsx, gh-660).
+//
+// Fix (test-only, no production impact): track timers with a delay at or above
+// the threshold and clear any still pending after each test, so no notification
+// auto-close timer (autoClose is 3–5s in this app) can outlive the test that
+// scheduled it. The threshold leaves sub-second timers (Testing Library
+// polling, Mantine transitions, React scheduling) untouched to keep the blast
+// radius minimal.
+// ---------------------------------------------------------------------------
+const LEAKED_TIMER_THRESHOLD_MS = 1000;
+const longLivedTimers = new Set<unknown>();
+const nativeSetTimeout = window.setTimeout.bind(window);
+const nativeClearTimeout = window.clearTimeout.bind(window);
+
+window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+  const id = nativeSetTimeout(handler as never, timeout as never, ...(args as never[]));
+  if (typeof timeout === 'number' && timeout >= LEAKED_TIMER_THRESHOLD_MS) {
+    longLivedTimers.add(id);
+  }
+  return id;
+}) as typeof window.setTimeout;
+
+window.clearTimeout = ((id?: unknown) => {
+  longLivedTimers.delete(id);
+  return nativeClearTimeout(id as never);
+}) as typeof window.clearTimeout;
+
+afterEach(() => {
+  longLivedTimers.forEach((id) => nativeClearTimeout(id as never));
+  longLivedTimers.clear();
+});

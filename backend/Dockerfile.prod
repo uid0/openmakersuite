@@ -62,9 +62,20 @@ RUN mkdir -p /app/staticfiles /app/media /app/.beat-state
 # Collect static files
 RUN python manage.py collectstatic --noinput || true
 
-# Create a non-root user
+# Create a non-root user. Also create the backups mountpoint and hand it to
+# appuser *before* `USER appuser`: docker-compose.prod.yml mounts the
+# `backups_volume` named volume at /var/backups/oms on the celery + backend
+# services. Docker seeds a freshly-created named volume from the image
+# mountpoint, copying its contents *and ownership* — so if /var/backups/oms is
+# absent (or root-owned) in the image, the new volume comes up root:root and
+# the uid-1000 worker hits EACCES writing pg_dump archives in
+# backups.daily_postgres_backup. The daily backup then silently never runs
+# (BACKEND-A in Sentry). Creating it appuser-owned here makes a fresh volume
+# appuser-owned by construction. The existing prod volume was chowned in place
+# as the immediate fix; this keeps recreated/other-host volumes correct.
 RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+    mkdir -p /var/backups/oms && \
+    chown -R appuser:appuser /app /var/backups
 USER appuser
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

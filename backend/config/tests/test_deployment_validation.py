@@ -376,6 +376,45 @@ class TestDeploymentArtifactsAC36:
             "90-day donor task can drift indefinitely on weekly redeploys."
         )
 
+    def test_prod_dockerfile_backups_dir_owned_by_appuser(self):
+        """backend/Dockerfile.prod must create /var/backups/oms and chown it to
+        the uid-1000 appuser *before* `USER appuser` (oms-3ap7g).
+
+        docker-compose.prod.yml mounts the `backups_volume` named volume at
+        /var/backups/oms on the celery + backend services. Docker seeds a
+        freshly-created named volume from the image mountpoint, copying its
+        ownership — so if the path is absent or root-owned in the image, a new
+        volume comes up root:root and the non-root worker gets EACCES writing
+        pg_dump archives. The daily backup then silently never runs (the
+        BACKEND-A failure mode behind oms-3ap7g). The chown must precede
+        `USER appuser`, because once dropped to appuser the build can no longer
+        chown a root-owned path.
+        """
+        text = (REPO_ROOT / "backend" / "Dockerfile.prod").read_text()
+
+        # Look only at instruction lines (drop `#` comments) so prose that
+        # mentions `USER appuser` / chown can neither satisfy nor truncate
+        # these structural checks.
+        instructions = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        )
+        user_match = re.search(r"^USER\s+appuser\b", instructions, re.MULTILINE)
+        assert user_match, "Dockerfile.prod must drop privileges with `USER appuser`."
+        before_user = instructions[: user_match.start()]
+
+        assert "mkdir -p /var/backups/oms" in before_user, (
+            "backend/Dockerfile.prod must `mkdir -p /var/backups/oms` before "
+            "`USER appuser` so the backups_volume mountpoint exists in the image "
+            "and a freshly-initialized named volume inherits it. See "
+            "docker-compose.prod.yml `backups_volume` and backups/tasks.py."
+        )
+        assert re.search(r"chown\b[^\n]*appuser[^\n]*/var/backups", before_user), (
+            "backend/Dockerfile.prod must chown /var/backups to appuser before "
+            "`USER appuser`; otherwise the freshly-initialized backups_volume "
+            "comes up root:root and backups.daily_postgres_backup hits EACCES "
+            "writing the daily pg_dump. See oms-3ap7g."
+        )
+
     def test_k8s_backend_uses_livez_readyz_probes(self):
         """AC-11/AC-12/AC-33: the raw k8s manifests must probe livez (live)
         and readyz (ready), not the legacy /api/dashboard/health/ path.
@@ -510,7 +549,8 @@ def test_validator_handles_quoted_values(tmp_path):
     secret stores) must be parsed correctly without leaking the quotes into
     length/comparison checks."""
     env = tmp_path / ".env"
-    body = textwrap.dedent("""\
+    body = textwrap.dedent(
+        """\
         DOMAIN="oms.example.com"
         LETSENCRYPT_EMAIL='admin@oms.example.com'
         LETSENCRYPT_DOMAINS=oms.example.com
@@ -530,7 +570,8 @@ def test_validator_handles_quoted_values(tmp_path):
         DEFAULT_FROM_EMAIL=noreply@oms.example.com
         POSTMARK_INBOUND_TOKEN=tok
         LOCATION_PING_TOKEN=tok
-        """)
+        """
+    )
     env.write_text(body)
     result = _run_validator(env)
     assert result.returncode == 0, result.stdout

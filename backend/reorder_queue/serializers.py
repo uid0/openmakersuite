@@ -642,6 +642,31 @@ class MarkDeliveredSerializer(serializers.Serializer):
     receipt_notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
+class ReceiveItemSerializer(serializers.Serializer):
+    """A single line in a per-item purchase order receive request."""
+
+    purchase_order_item = serializers.IntegerField()
+    quantity_received = serializers.IntegerField(min_value=1)
+
+
+class ReceiveItemsSerializer(serializers.Serializer):
+    """Serializer for receiving specific PO line items with explicit quantities.
+
+    Unlike :class:`MarkDeliveredSerializer` (which receives every pending
+    quantity on the whole PO), this drives a partial receipt from an explicit
+    list of ``{purchase_order_item, quantity_received}`` lines. ``delivery_date``
+    is optional and defaults to now when omitted.
+    """
+
+    items = ReceiveItemSerializer(many=True, allow_empty=False)
+    delivery_date = serializers.DateField(required=False)
+    tracking_number = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, default=""
+    )
+    carrier = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    receipt_notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+
 # Lead Time and Analytics Serializers
 
 

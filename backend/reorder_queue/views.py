@@ -38,6 +38,7 @@ from .serializers import (
     PurchaseOrderAttachmentSerializer,
     PurchaseOrderCreateSerializer,
     PurchaseOrderSerializer,
+    ReceiveItemsSerializer,
     ReorderRequestCreateSerializer,
     ReorderRequestSerializer,
     SupplierPerformanceSerializer,
@@ -78,6 +79,71 @@ def _create_lead_time_log(po_item, delivery_date):
         quantity_ordered=po_item.quantity_ordered,
         quantity_received=po_item.quantity_received,
     )
+
+
+def _apply_po_receipt(
+    purchase_order,
+    line_quantities,
+    *,
+    received_by,
+    delivery_datetime,
+    tracking_number="",
+    carrier="",
+    receipt_notes="",
+):
+    """Record a receipt of specific quantities against PO line items.
+
+    Creates a single :class:`OrderDelivery` plus one :class:`DeliveryItem` per
+    ``(po_item, quantity)`` pair, increments each line's received quantity and
+    the linked inventory stock, advances the PO status, and writes a
+    :class:`LeadTimeLog` for any line that becomes fully received.
+
+    Shared by ``mark_delivered`` (which passes every pending quantity) and the
+    per-item ``receive`` action so receipt side effects stay consistent (DRY).
+    The delivery is flagged ``is_complete`` when this receipt leaves the whole
+    PO fully received — for ``mark_delivered`` that is always the case, matching
+    its previous behaviour.
+
+    Callers are responsible for validating ``line_quantities`` and for wrapping
+    the call in a transaction. Returns the created :class:`OrderDelivery`.
+    """
+    delivery = OrderDelivery.objects.create(
+        purchase_order=purchase_order,
+        delivery_date=delivery_datetime,
+        tracking_number=tracking_number,
+        carrier=carrier,
+        received_by=received_by,
+        receipt_notes=receipt_notes,
+    )
+
+    for po_item, quantity in line_quantities:
+        DeliveryItem.objects.create(
+            delivery=delivery,
+            purchase_order_item=po_item,
+            quantity_received=quantity,
+        )
+
+        po_item.quantity_received += quantity
+        po_item.save()
+
+        inventory_item = po_item.item
+        if inventory_item is not None:
+            inventory_item.current_stock += quantity
+            inventory_item.save()
+
+        if po_item.is_fully_received:
+            _create_lead_time_log(po_item, delivery.delivery_date)
+
+    if purchase_order.is_fully_received:
+        purchase_order.status = PurchaseOrder.RECEIVED
+    else:
+        purchase_order.status = PurchaseOrder.PARTIALLY_RECEIVED
+    purchase_order.save()
+
+    delivery.is_complete = purchase_order.is_fully_received
+    delivery.save(update_fields=["is_complete"])
+
+    return delivery
 
 
 class ReorderRequestViewSet(viewsets.ModelViewSet):
@@ -991,40 +1057,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         )
 
         with transaction.atomic():
-            delivery = OrderDelivery.objects.create(
-                purchase_order=purchase_order,
-                delivery_date=delivery_datetime,
+            _apply_po_receipt(
+                purchase_order,
+                [(po_item, po_item.quantity_pending) for po_item in pending_items],
+                received_by=request.user,
+                delivery_datetime=delivery_datetime,
                 tracking_number=data.get("tracking_number", ""),
                 carrier=data.get("carrier", ""),
-                received_by=request.user,
                 receipt_notes=data.get("receipt_notes", ""),
-                is_complete=True,
             )
-
-            for po_item in pending_items:
-                remaining = po_item.quantity_pending
-                DeliveryItem.objects.create(
-                    delivery=delivery,
-                    purchase_order_item=po_item,
-                    quantity_received=remaining,
-                )
-
-                po_item.quantity_received += remaining
-                po_item.save()
-
-                inventory_item = po_item.item
-                if inventory_item is not None:
-                    inventory_item.current_stock += remaining
-                    inventory_item.save()
-
-                if po_item.is_fully_received:
-                    _create_lead_time_log(po_item, delivery.delivery_date)
-
-            if purchase_order.is_fully_received:
-                purchase_order.status = PurchaseOrder.RECEIVED
-            else:
-                purchase_order.status = PurchaseOrder.PARTIALLY_RECEIVED
-            purchase_order.save()
 
         record_audit_event(
             action="po_mark_delivered",
@@ -1036,6 +1077,115 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "tracking_number": data.get("tracking_number", ""),
                 "carrier": data.get("carrier", ""),
                 "fully_received": purchase_order.status == PurchaseOrder.RECEIVED,
+            },
+        )
+
+        response_serializer = self.get_serializer(purchase_order)
+        return Response(response_serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="receive")
+    def receive(self, request, pk=None):
+        """Receive specific line items with explicit per-item quantities.
+
+        Where ``mark_delivered`` receives every pending quantity on the whole
+        PO, this records a partial receipt of exactly the quantities supplied
+        per line — the flow Scantty and the web UI use to receive a delivery
+        that contains only some of what was ordered. Shares the receipt side
+        effects (delivery, stock, status, lead-time logs) with
+        ``mark_delivered`` via :func:`_apply_po_receipt`.
+        """
+        from datetime import datetime
+
+        purchase_order = self.get_object()
+
+        if purchase_order.status not in [
+            PurchaseOrder.SENT,
+            PurchaseOrder.CONFIRMED,
+            PurchaseOrder.PARTIALLY_RECEIVED,
+        ]:
+            return Response(
+                {
+                    "error": (
+                        "Purchase order must be sent, confirmed, or partially "
+                        "received to receive items"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = ReceiveItemsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        po_items_by_id = {item.id: item for item in purchase_order.items.all()}
+        remaining_by_item = {}
+        resolved_lines = []
+        for line in data["items"]:
+            po_item_id = line["purchase_order_item"]
+            quantity = line["quantity_received"]
+
+            po_item = po_items_by_id.get(po_item_id)
+            if po_item is None:
+                return Response(
+                    {"error": f"Line item {po_item_id} does not belong to this purchase order"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if po_item.is_voided:
+                return Response(
+                    {"error": f"Line item {po_item_id} is voided and cannot be received"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Track remaining allowance per line so repeated references to the
+            # same line in one request can't collectively over-receive.
+            if po_item_id not in remaining_by_item:
+                remaining_by_item[po_item_id] = po_item.quantity_pending
+            if quantity > remaining_by_item[po_item_id]:
+                return Response(
+                    {
+                        "error": (
+                            f"Quantity {quantity} exceeds pending "
+                            f"{remaining_by_item[po_item_id]} for line item {po_item_id}"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            remaining_by_item[po_item_id] -= quantity
+            resolved_lines.append((po_item, quantity))
+
+        delivery_date = data.get("delivery_date")
+        if delivery_date is not None:
+            delivery_datetime = timezone.make_aware(
+                datetime.combine(delivery_date, datetime.min.time())
+            )
+        else:
+            delivery_datetime = timezone.now()
+
+        with transaction.atomic():
+            _apply_po_receipt(
+                purchase_order,
+                resolved_lines,
+                received_by=request.user,
+                delivery_datetime=delivery_datetime,
+                tracking_number=data.get("tracking_number", ""),
+                carrier=data.get("carrier", ""),
+                receipt_notes=data.get("receipt_notes", ""),
+            )
+
+        record_audit_event(
+            action="po_receive_items",
+            actor=request.user,
+            purchase_order=purchase_order,
+            notes=data.get("receipt_notes", ""),
+            metadata={
+                "delivery_date": delivery_datetime.isoformat(),
+                "tracking_number": data.get("tracking_number", ""),
+                "carrier": data.get("carrier", ""),
+                "fully_received": purchase_order.status == PurchaseOrder.RECEIVED,
+                "received_items": [
+                    {"purchase_order_item": po_item.id, "quantity_received": quantity}
+                    for po_item, quantity in resolved_lines
+                ],
             },
         )
 

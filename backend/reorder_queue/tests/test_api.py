@@ -14,7 +14,12 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
-from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+from reorder_queue.models import (
+    LeadTimeLog,
+    PurchaseOrder,
+    PurchaseOrderAuditEvent,
+    PurchaseOrderItem,
+)
 from reorder_queue.tests.factories import ReorderRequestFactory
 
 User = get_user_model()
@@ -1049,6 +1054,382 @@ class TestPurchaseOrderMarkDelivered:
             format="json",
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.integration
+class TestPurchaseOrderReceive:
+    """Tests for the per-line-item PO receive endpoint (POST .../receive/)."""
+
+    def _create_po(self, user, *, lines=None, status_=PurchaseOrder.SENT):
+        """Create a PO in ``status_`` with one item_supplier line per spec.
+
+        ``lines`` is a list of dicts with optional ``quantity_ordered`` (default
+        5), ``quantity_received`` (default 0) and ``current_stock`` (default 0)
+        keys. Defaults to a single 5-unit line. Returns ``(po, [po_items])``.
+        """
+        if lines is None:
+            lines = [{}]
+        supplier = SupplierFactory()
+        purchase_order = PurchaseOrder.objects.create(
+            supplier=supplier,
+            status=status_,
+            created_by=user,
+            sent_by=user,
+            sent_at=timezone.now() - timedelta(days=7),
+            estimated_total=Decimal("50.00"),
+        )
+        po_items = []
+        for spec in lines:
+            quantity_ordered = spec.get("quantity_ordered", 5)
+            item_supplier = ItemSupplierFactory(
+                supplier=supplier,
+                quantity_per_package=1,
+                average_lead_time=10,
+                item=InventoryItemFactory(current_stock=spec.get("current_stock", 0)),
+            )
+            po_item = PurchaseOrderItem.objects.create(
+                purchase_order=purchase_order,
+                item_supplier=item_supplier,
+                quantity_ordered=quantity_ordered,
+                quantity_received=spec.get("quantity_received", 0),
+                unit_cost_ordered=Decimal("10.00"),
+                order_in_packages=quantity_ordered,
+            )
+            po_items.append(po_item)
+        return purchase_order, po_items
+
+    @staticmethod
+    def _url(purchase_order):
+        return reverse("purchaseorder-receive", kwargs={"pk": purchase_order.pk})
+
+    def test_receive_partial_updates_status_stock_and_delivery(self, authenticated_client):
+        """Partial receive advances the PO to PARTIALLY_RECEIVED and bumps stock."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(
+            user, lines=[{"quantity_ordered": 5, "current_stock": 10}]
+        )
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 2}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        purchase_order.refresh_from_db()
+        po_item.refresh_from_db()
+        po_item.item.refresh_from_db()
+
+        assert purchase_order.status == PurchaseOrder.PARTIALLY_RECEIVED
+        assert po_item.quantity_received == 2
+        assert po_item.item.current_stock == 12  # 10 + 2
+
+        assert purchase_order.deliveries.count() == 1
+        delivery = purchase_order.deliveries.first()
+        assert delivery.received_by == user
+        assert delivery.is_complete is False
+        assert delivery.items.count() == 1
+        assert delivery.items.first().quantity_received == 2
+        # Not fully received yet -> no lead-time row.
+        assert LeadTimeLog.objects.filter(purchase_order=purchase_order).count() == 0
+
+    def test_receive_full_marks_received_and_complete(self, authenticated_client):
+        """Receiving the full pending quantity advances the PO to RECEIVED."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(
+            user, lines=[{"quantity_ordered": 5, "current_stock": 10}]
+        )
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 5}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        purchase_order.refresh_from_db()
+        po_item.refresh_from_db()
+        po_item.item.refresh_from_db()
+
+        assert purchase_order.status == PurchaseOrder.RECEIVED
+        assert po_item.quantity_received == 5
+        assert po_item.item.current_stock == 15  # 10 + 5
+
+        delivery = purchase_order.deliveries.first()
+        assert delivery.is_complete is True
+        # Fully received -> a lead-time row is recorded for the analysis report.
+        assert LeadTimeLog.objects.filter(purchase_order=purchase_order).count() == 1
+
+    def test_receive_multiple_lines_single_delivery(self, authenticated_client):
+        """Several lines in one request produce one delivery with one item each."""
+        client, user = authenticated_client
+        purchase_order, (line_a, line_b) = self._create_po(
+            user,
+            lines=[
+                {"quantity_ordered": 5, "current_stock": 1},
+                {"quantity_ordered": 4, "current_stock": 2},
+            ],
+        )
+
+        response = client.post(
+            self._url(purchase_order),
+            {
+                "items": [
+                    {"purchase_order_item": line_a.id, "quantity_received": 3},
+                    {"purchase_order_item": line_b.id, "quantity_received": 4},
+                ]
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        purchase_order.refresh_from_db()
+        line_a.refresh_from_db()
+        line_b.refresh_from_db()
+        line_a.item.refresh_from_db()
+        line_b.item.refresh_from_db()
+
+        # line_a partial (3/5), line_b full (4/4) -> PO is partially received.
+        assert purchase_order.status == PurchaseOrder.PARTIALLY_RECEIVED
+        assert line_a.quantity_received == 3
+        assert line_b.quantity_received == 4
+        assert line_a.item.current_stock == 4  # 1 + 3
+        assert line_b.item.current_stock == 6  # 2 + 4
+
+        assert purchase_order.deliveries.count() == 1
+        assert purchase_order.deliveries.first().items.count() == 2
+
+    def test_receive_from_partially_received_advances_to_received(self, authenticated_client):
+        """A second receipt off a PARTIALLY_RECEIVED PO can complete it."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(
+            user,
+            status_=PurchaseOrder.PARTIALLY_RECEIVED,
+            lines=[{"quantity_ordered": 5, "quantity_received": 2, "current_stock": 7}],
+        )
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 3}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        purchase_order.refresh_from_db()
+        po_item.refresh_from_db()
+        po_item.item.refresh_from_db()
+
+        assert purchase_order.status == PurchaseOrder.RECEIVED
+        assert po_item.quantity_received == 5
+        assert po_item.item.current_stock == 10  # 7 + 3
+
+    def test_receive_defaults_delivery_date_to_now(self, authenticated_client):
+        """Omitting delivery_date dates the delivery to now."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(user)
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 1}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        delivery = purchase_order.deliveries.first()
+        assert delivery.delivery_date.date() == timezone.now().date()
+
+    def test_receive_honors_explicit_delivery_date(self, authenticated_client):
+        """An explicit delivery_date is recorded on the delivery."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(user)
+        delivery_date = (timezone.now() - timedelta(days=1)).date()
+
+        response = client.post(
+            self._url(purchase_order),
+            {
+                "items": [{"purchase_order_item": po_item.id, "quantity_received": 1}],
+                "delivery_date": delivery_date.isoformat(),
+                "tracking_number": "1ZRCV",
+                "carrier": "UPS",
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        delivery = purchase_order.deliveries.first()
+        assert delivery.delivery_date.date() == delivery_date
+        assert delivery.tracking_number == "1ZRCV"
+        assert delivery.carrier == "UPS"
+
+    def test_receive_records_audit_event(self, authenticated_client):
+        """A successful receive writes a po_receive_items audit row."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(user)
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 1}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        event = PurchaseOrderAuditEvent.objects.filter(
+            purchase_order=purchase_order,
+            action=PurchaseOrderAuditEvent.ACTION_PO_RECEIVE_ITEMS,
+        ).first()
+        assert event is not None
+        assert event.actor == user
+        assert event.metadata["received_items"] == [
+            {"purchase_order_item": po_item.id, "quantity_received": 1}
+        ]
+
+    def test_receive_over_pending_returns_400(self, authenticated_client):
+        """Receiving more than pending is rejected with no side effects."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(
+            user, lines=[{"quantity_ordered": 5, "current_stock": 10}]
+        )
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 6}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "exceeds pending" in response.data["error"]
+        purchase_order.refresh_from_db()
+        po_item.refresh_from_db()
+        po_item.item.refresh_from_db()
+        assert po_item.quantity_received == 0
+        assert po_item.item.current_stock == 10
+        assert purchase_order.deliveries.count() == 0
+
+    def test_receive_duplicate_line_cannot_over_receive(self, authenticated_client):
+        """The same line referenced twice cannot collectively exceed pending."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(
+            user, lines=[{"quantity_ordered": 5, "current_stock": 0}]
+        )
+
+        response = client.post(
+            self._url(purchase_order),
+            {
+                "items": [
+                    {"purchase_order_item": po_item.id, "quantity_received": 3},
+                    {"purchase_order_item": po_item.id, "quantity_received": 3},
+                ]
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "exceeds pending" in response.data["error"]
+        po_item.refresh_from_db()
+        assert po_item.quantity_received == 0
+        assert purchase_order.deliveries.count() == 0
+
+    def test_receive_item_from_other_po_returns_400(self, authenticated_client):
+        """A line belonging to another PO is rejected."""
+        client, user = authenticated_client
+        purchase_order, _ = self._create_po(user)
+        other_po, (other_item,) = self._create_po(user)
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": other_item.id, "quantity_received": 1}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "does not belong" in response.data["error"]
+        assert purchase_order.deliveries.count() == 0
+        other_item.refresh_from_db()
+        assert other_item.quantity_received == 0
+
+    def test_receive_voided_item_returns_400(self, authenticated_client):
+        """A voided line cannot be received."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(user)
+        po_item.is_voided = True
+        po_item.save()
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 1}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "voided" in response.data["error"]
+        assert purchase_order.deliveries.count() == 0
+
+    def test_receive_rejects_non_receivable_status(self, authenticated_client):
+        """Draft/received/cancelled orders cannot receive items."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(user, status_=PurchaseOrder.DRAFT)
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 1}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert purchase_order.deliveries.count() == 0
+
+    def test_receive_empty_items_returns_400(self, authenticated_client):
+        """An empty items list is rejected by the serializer."""
+        client, user = authenticated_client
+        purchase_order, _ = self._create_po(user)
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": []},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "items" in str(response.data)
+        assert purchase_order.deliveries.count() == 0
+
+    def test_receive_missing_items_returns_400(self, authenticated_client):
+        """A missing items key is rejected by the serializer."""
+        client, user = authenticated_client
+        purchase_order, _ = self._create_po(user)
+
+        response = client.post(self._url(purchase_order), {}, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "items" in str(response.data)
+
+    def test_receive_zero_quantity_returns_400(self, authenticated_client):
+        """A quantity below 1 is rejected by the serializer."""
+        client, user = authenticated_client
+        purchase_order, (po_item,) = self._create_po(user)
+
+        response = client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 0}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert purchase_order.deliveries.count() == 0
+
+    def test_receive_requires_authentication(self, api_client, db):
+        """Unauthenticated requests are rejected."""
+        user = User.objects.create_user(username="po-rcv-owner", password="pw12345678")
+        purchase_order, (po_item,) = self._create_po(user)
+
+        response = api_client.post(
+            self._url(purchase_order),
+            {"items": [{"purchase_order_item": po_item.id, "quantity_received": 1}]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert purchase_order.deliveries.count() == 0
 
 
 @pytest.mark.integration

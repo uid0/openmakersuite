@@ -10,6 +10,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PurchaseOrderPage from '../../pages/PurchaseOrderPage';
 import * as api from '../../services/api';
+import { showError } from '../../utils/dialogs';
 
 vi.mock('../../services/api');
 
@@ -347,5 +348,214 @@ describe('PurchaseOrderPage line item rendering', () => {
     expect(screen.getByText('Forklift 7')).toBeInTheDocument();
     expect(screen.queryByText('Unknown Item')).not.toBeInTheDocument();
     expect(screen.queryByText('Unknown Asset')).not.toBeInTheDocument();
+  });
+});
+
+describe('PurchaseOrderPage receive items (oms-s0hj4)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  // A partially-received PO mixing receivable, fully-received and voided lines.
+  const makeReceiveOrder = () => ({
+    id: 'po-1',
+    po_number: 'PO-2026-0042',
+    supplier_details: 'Acme Supplies',
+    status: 'partially_received',
+    status_label: 'Partially Received',
+    order_date: '2026-04-01T00:00:00Z',
+    expected_delivery_date: '2026-05-15',
+    supplier_order_number: '',
+    sales_order_number: '',
+    estimated_total: '100.00',
+    voided_at: null,
+    voided_by_username: null,
+    void_reason: '',
+    attachments: [],
+    items: [
+      {
+        id: 101,
+        item_type: 'inventory_item',
+        description: null,
+        item_details: { name: 'Stocked Bolt', sku: 'BOLT-1' },
+        asset_details: null,
+        quantity_ordered: 10,
+        quantity_received: 3,
+        quantity_pending: 7,
+        is_fully_received: false,
+        unit_cost_ordered: '1.00',
+        unit_cost_actual: null,
+        estimated_cost: '10.00',
+        actual_cost: null,
+        expected_shipment_date: null,
+        notes: '',
+        is_voided: false,
+        voided_at: null,
+        void_reason: '',
+      },
+      {
+        id: 102,
+        item_type: 'inventory_item',
+        description: null,
+        item_details: { name: 'Done Widget', sku: 'DONE-1' },
+        asset_details: null,
+        quantity_ordered: 5,
+        quantity_received: 5,
+        quantity_pending: 0,
+        is_fully_received: true,
+        unit_cost_ordered: '2.00',
+        unit_cost_actual: null,
+        estimated_cost: '10.00',
+        actual_cost: null,
+        expected_shipment_date: null,
+        notes: '',
+        is_voided: false,
+        voided_at: null,
+        void_reason: '',
+      },
+      {
+        id: 103,
+        item_type: 'inventory_item',
+        description: null,
+        item_details: { name: 'Voided Thing', sku: 'VOID-1' },
+        asset_details: null,
+        quantity_ordered: 4,
+        quantity_received: 0,
+        quantity_pending: 4,
+        is_fully_received: false,
+        unit_cost_ordered: '3.00',
+        unit_cost_actual: null,
+        estimated_cost: '12.00',
+        actual_cost: null,
+        expected_shipment_date: null,
+        notes: '',
+        is_voided: true,
+        voided_at: '2026-04-10T00:00:00Z',
+        void_reason: 'discontinued',
+      },
+      {
+        id: 104,
+        item_type: 'freeform',
+        description: 'Custom Panel',
+        item_details: null,
+        asset_details: null,
+        quantity_ordered: 6,
+        quantity_received: 0,
+        quantity_pending: 6,
+        is_fully_received: false,
+        unit_cost_ordered: '8.00',
+        unit_cost_actual: null,
+        estimated_cost: '48.00',
+        actual_cost: null,
+        expected_shipment_date: null,
+        notes: '',
+        is_voided: false,
+        voided_at: null,
+        void_reason: '',
+      },
+    ],
+  });
+
+  test('opens a panel with qty inputs only for non-voided, not-fully-received items, defaulted to pending', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeReceiveOrder() });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+
+    // Receivable lines get an input pre-filled with their pending quantity.
+    expect((screen.getByLabelText('Receive quantity for Stocked Bolt') as HTMLInputElement).value).toBe('7');
+    expect((screen.getByLabelText('Receive quantity for Custom Panel') as HTMLInputElement).value).toBe('6');
+
+    // Fully-received and voided lines are excluded from the receive panel.
+    expect(screen.queryByLabelText('Receive quantity for Done Widget')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Receive quantity for Voided Thing')).not.toBeInTheDocument();
+  });
+
+  test('submits entered quantities to receiveItems and patches the page from the response', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeReceiveOrder() });
+    const receivedOrder = {
+      ...makeReceiveOrder(),
+      status: 'received',
+      status_label: 'Received',
+    };
+    (api.purchaseOrderAPI.receiveItems as jest.Mock).mockResolvedValue({ data: receivedOrder });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+
+    // Override the default delivery date so the assertion is deterministic.
+    fireEvent.change(screen.getByLabelText(/delivery date/i), { target: { value: '2026-06-10' } });
+    // Receive a partial quantity for the bolt; leave the panel at its default for the freeform line.
+    fireEvent.change(screen.getByLabelText('Receive quantity for Stocked Bolt'), {
+      target: { value: '2' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.receiveItems).toHaveBeenCalledWith('po-1', {
+        items: [
+          { purchase_order_item: 101, quantity_received: 2 },
+          { purchase_order_item: 104, quantity_received: 6 },
+        ],
+        delivery_date: '2026-06-10',
+        receipt_notes: undefined,
+      });
+    });
+
+    // The page is patched from the response (status flips, panel closes) — no follow-up GET.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /confirm receipt/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Received')).toBeInTheDocument();
+    expect(api.purchaseOrderAPI.getOrder).toHaveBeenCalledTimes(1);
+  });
+
+  test('errors and does not call the API when no quantities are entered', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeReceiveOrder() });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+
+    // Zero out both receivable lines.
+    fireEvent.change(screen.getByLabelText('Receive quantity for Stocked Bolt'), {
+      target: { value: '0' },
+    });
+    fireEvent.change(screen.getByLabelText('Receive quantity for Custom Panel'), {
+      target: { value: '0' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith(expect.stringMatching(/at least one item/i));
+    });
+    expect(api.purchaseOrderAPI.receiveItems).not.toHaveBeenCalled();
+  });
+
+  test('rejects an over-receive that exceeds the pending quantity', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeReceiveOrder() });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+
+    // Bolt only has 7 pending; ask for more.
+    fireEvent.change(screen.getByLabelText('Receive quantity for Stocked Bolt'), {
+      target: { value: '99' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith(expect.stringMatching(/only 7 pending/i));
+    });
+    expect(api.purchaseOrderAPI.receiveItems).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,7 @@
  * successful mark-delivered submit must never flip the page back into
  * that state.
  */
-import { Button, Paper, Text } from '@mantine/core';
+import { Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
@@ -34,6 +34,8 @@ interface PurchaseOrderItem {
   } | null;
   quantity_ordered: number;
   quantity_received: number;
+  quantity_pending: number;
+  is_fully_received: boolean;
   unit_cost_ordered: string;
   unit_cost_actual: string | null;
   estimated_cost: string;
@@ -74,6 +76,22 @@ interface PurchaseOrder {
   void_reason: string;
 }
 
+const getItemNameAndSku = (item: PurchaseOrderItem): { itemName: string; itemSku: string } => {
+  if (item.item_type === 'asset') {
+    return {
+      itemName: item.asset_details?.name || 'Unknown Asset',
+      itemSku: item.asset_details?.asset_tag || '—',
+    };
+  }
+  if (item.item_type === 'freeform') {
+    return { itemName: item.description || 'Unknown Item', itemSku: '—' };
+  }
+  return {
+    itemName: item.item_details?.name || 'Unknown Item',
+    itemSku: item.item_details?.sku || '—',
+  };
+};
+
 const PurchaseOrderPage: React.FC = () => {
   const { orderId } = useParams<{ orderId: string }>();
   const [order, setOrder] = useState<PurchaseOrder | null>(null);
@@ -92,6 +110,10 @@ const PurchaseOrderPage: React.FC = () => {
   const [deliveryDate, setDeliveryDate] = useState<string>('');
   const [deliveryTracking, setDeliveryTracking] = useState<string>('');
   const [deliveryCarrier, setDeliveryCarrier] = useState<string>('');
+  const [receivingItems, setReceivingItems] = useState(false);
+  const [receiveQuantities, setReceiveQuantities] = useState<Record<string, string>>({});
+  const [receiveDeliveryDate, setReceiveDeliveryDate] = useState<string>('');
+  const [receiveNotes, setReceiveNotes] = useState<string>('');
   const [editingMetadata, setEditingMetadata] = useState(false);
   const [metadataSupplierOrderNumber, setMetadataSupplierOrderNumber] = useState('');
   const [metadataSalesOrderNumber, setMetadataSalesOrderNumber] = useState('');
@@ -301,6 +323,79 @@ const PurchaseOrderPage: React.FC = () => {
   const canMarkDelivered = (po: PurchaseOrder) =>
     isAuthenticated && ['sent', 'confirmed', 'partially_received'].includes(po.status);
 
+  const canReceiveItems = (po: PurchaseOrder) =>
+    isAuthenticated && ['sent', 'confirmed', 'partially_received'].includes(po.status);
+
+  const getReceivableItems = (po: PurchaseOrder) =>
+    po.items.filter((item) => !item.is_voided && !item.is_fully_received);
+
+  const handleOpenReceiveItems = () => {
+    if (!order) return;
+    const initialQuantities: Record<string, string> = {};
+    getReceivableItems(order).forEach((item) => {
+      initialQuantities[item.id] = String(item.quantity_pending);
+    });
+    setReceiveQuantities(initialQuantities);
+    setReceiveDeliveryDate(formatYmd(new Date()));
+    setReceiveNotes('');
+    setReceivingItems(true);
+  };
+
+  const handleCancelReceiveItems = () => {
+    setReceivingItems(false);
+    setReceiveQuantities({});
+    setReceiveDeliveryDate('');
+    setReceiveNotes('');
+  };
+
+  const handleReceiveQuantityChange = (itemId: string, value: string) => {
+    setReceiveQuantities((prev) => ({ ...prev, [itemId]: value }));
+  };
+
+  const handleSubmitReceiveItems = async () => {
+    if (!order || saving) return;
+
+    const lines: { purchase_order_item: number; quantity_received: number }[] = [];
+    for (const item of getReceivableItems(order)) {
+      const raw = receiveQuantities[item.id];
+      if (raw === undefined || raw.trim() === '') continue;
+      const quantity = Number.parseInt(raw, 10);
+      if (Number.isNaN(quantity) || quantity <= 0) continue;
+      if (quantity > item.quantity_pending) {
+        showError(
+          `Cannot receive ${quantity} of ${getItemNameAndSku(item).itemName}; ` +
+            `only ${item.quantity_pending} pending`,
+        );
+        return;
+      }
+      lines.push({ purchase_order_item: Number(item.id), quantity_received: quantity });
+    }
+
+    if (lines.length === 0) {
+      showError('Enter a quantity for at least one item to receive');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const response = await purchaseOrderAPI.receiveItems(orderId!, {
+        items: lines,
+        delivery_date: receiveDeliveryDate || undefined,
+        receipt_notes: receiveNotes || undefined,
+      });
+      if (response.data && typeof response.data === 'object' && response.data.id) {
+        setOrder(response.data as PurchaseOrder);
+      }
+      handleCancelReceiveItems();
+      showSuccess('Items received');
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to receive items'));
+      console.error('Error receiving items:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleStartEditMetadata = () => {
     if (!order) return;
     setMetadataSupplierOrderNumber(order.supplier_order_number || '');
@@ -421,6 +516,8 @@ const PurchaseOrderPage: React.FC = () => {
     );
   }
 
+  const receivableItems = getReceivableItems(order);
+
   return (
     <WorkspacePage
       testId="purchase-order-page"
@@ -428,9 +525,15 @@ const PurchaseOrderPage: React.FC = () => {
         eyebrow: `Purchasing · ${order.supplier_details}`,
         title: `PO ${order.po_number}`,
         description: order.status_label,
-        action: canMarkDelivered(order) && !markingDelivered ? (
-          <Button onClick={handleOpenMarkDelivered}>Mark as delivered</Button>
-        ) : undefined,
+        action:
+          canReceiveItems(order) && !markingDelivered && !receivingItems ? (
+            <Group gap="sm">
+              <Button onClick={handleOpenReceiveItems}>Receive items</Button>
+              <Button variant="default" onClick={handleOpenMarkDelivered}>
+                Mark as delivered
+              </Button>
+            </Group>
+          ) : undefined,
       }}
     >
       <div className="purchase-order-page">
@@ -512,6 +615,90 @@ const PurchaseOrderPage: React.FC = () => {
               type="button"
               className="btn-secondary"
               onClick={handleCancelMarkDelivered}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
+      )}
+
+      {receivingItems && (
+        <section className="receive-items-panel" aria-label="Receive purchase order items">
+          <h2>Receive Items</h2>
+          <div className="receive-items-fields">
+            <label htmlFor="receive-delivery-date">
+              Delivery Date (optional)
+              <input
+                id="receive-delivery-date"
+                type="date"
+                value={receiveDeliveryDate}
+                onChange={(e) => setReceiveDeliveryDate(e.target.value)}
+              />
+            </label>
+            <label htmlFor="receive-notes">
+              Receipt Notes (optional)
+              <input
+                id="receive-notes"
+                type="text"
+                value={receiveNotes}
+                onChange={(e) => setReceiveNotes(e.target.value)}
+                placeholder="e.g. Partial shipment, backorder to follow"
+              />
+            </label>
+          </div>
+          {receivableItems.length === 0 ? (
+            <p className="no-data">All line items have already been received.</p>
+          ) : (
+            <table className="items-table receive-items-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>SKU</th>
+                  <th>Pending</th>
+                  <th>Receive Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receivableItems.map((item) => {
+                  const { itemName, itemSku } = getItemNameAndSku(item);
+                  return (
+                    <tr key={item.id}>
+                      <td>{itemName}</td>
+                      <td>{itemSku}</td>
+                      <td>{item.quantity_pending}</td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.quantity_pending}
+                          step="1"
+                          className="receive-items-qty-input"
+                          value={receiveQuantities[item.id] ?? ''}
+                          onChange={(e) => handleReceiveQuantityChange(item.id, e.target.value)}
+                          disabled={saving}
+                          aria-label={`Receive quantity for ${itemName}`}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+          <div className="receive-items-actions">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleSubmitReceiveItems}
+              disabled={saving || receivableItems.length === 0}
+            >
+              {saving ? 'Saving…' : 'Confirm Receipt'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleCancelReceiveItems}
               disabled={saving}
             >
               Cancel
@@ -720,19 +907,8 @@ const PurchaseOrderPage: React.FC = () => {
               </tr>
             ) : (
               order.items.map((item) => {
-                let itemName: string;
-                let itemSku: string;
-                if (item.item_type === 'asset') {
-                  itemName = item.asset_details?.name || 'Unknown Asset';
-                  itemSku = item.asset_details?.asset_tag || '—';
-                } else if (item.item_type === 'freeform') {
-                  itemName = item.description || 'Unknown Item';
-                  itemSku = '—';
-                } else {
-                  itemName = item.item_details?.name || 'Unknown Item';
-                  itemSku = item.item_details?.sku || '—';
-                }
-                
+                const { itemName, itemSku } = getItemNameAndSku(item);
+
                 return (
                 <tr key={item.id} className={item.is_voided ? 'voided-item' : ''}>
                   <td>

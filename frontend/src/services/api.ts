@@ -1191,6 +1191,16 @@ export const purchaseOrderAPI = {
     orderId: string,
     data: { delivery_date: string; tracking_number?: string; carrier?: string; receipt_notes?: string },
   ) => api.post<any>(`/reorders/purchase-orders/${orderId}/mark-delivered/`, data),
+  receiveItems: (
+    orderId: string,
+    data: {
+      items: { purchase_order_item: number; quantity_received: number }[];
+      delivery_date?: string;
+      tracking_number?: string;
+      carrier?: string;
+      receipt_notes?: string;
+    },
+  ) => api.post<any>(`/reorders/purchase-orders/${orderId}/receive/`, data),
   updateOrder: (
     orderId: string,
     data: {

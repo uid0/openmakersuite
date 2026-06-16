@@ -8,6 +8,12 @@ dj-database-url==3.1.2
 # Redis and Celery
 redis==8.0.0
 celery==5.6.3
+# tzlocal is a celery runtime dep (imported in celery.utils.time) that celery
+# declares unpinned, so pip resolves the latest. tzlocal 5.4.2 shipped as a
+# broken/empty wheel (metadata only, no module code) that fails to import
+# under Python 3.14, breaking `import celery` and thus all backend CI. Pin to
+# the last known-good release. (oms-zkr3o)
+tzlocal==5.3.1
 django-redis==7.0.0
 django-celery-results==2.6.0
 flower==2.0.1

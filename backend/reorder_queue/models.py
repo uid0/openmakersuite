@@ -950,6 +950,7 @@ class PurchaseOrderAuditEvent(models.Model):
     ACTION_PO_VOID = "po_void"
     ACTION_PO_LINE_VOID = "po_line_void"
     ACTION_PO_MARK_DELIVERED = "po_mark_delivered"
+    ACTION_PO_RECEIVE_ITEMS = "po_receive_items"
     ACTION_ATTACHMENT_ADD = "attachment_add"
     ACTION_ATTACHMENT_REMOVE = "attachment_remove"
 
@@ -958,6 +959,7 @@ class PurchaseOrderAuditEvent(models.Model):
         (ACTION_PO_VOID, "Purchase order voided"),
         (ACTION_PO_LINE_VOID, "Purchase order line item voided"),
         (ACTION_PO_MARK_DELIVERED, "Purchase order marked delivered"),
+        (ACTION_PO_RECEIVE_ITEMS, "Purchase order line items received"),
         (ACTION_ATTACHMENT_ADD, "Attachment added"),
         (ACTION_ATTACHMENT_REMOVE, "Attachment removed"),
     ]

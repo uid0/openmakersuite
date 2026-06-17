@@ -138,3 +138,76 @@ class NotificationPreference(models.Model):
 
     def __str__(self):
         return f"Notification preferences for {self.user.username}"
+
+
+class KnownDevice(models.Model):
+    """
+    A device/browser previously seen signing in to a user's account.
+
+    Used to detect *new* device sign-ins for staff/privileged accounts so an
+    informational security alert can be raised (oms-bwcdb, FP1 of the
+    new-device-login-alert series). A device is identified by an opaque,
+    server-minted ``device_token`` persisted in a Django-signed, httpOnly
+    cookie on the client; see ``notifications.device_login``.
+
+    App placement: this lives in ``notifications`` rather than a new ``devices``
+    app because the ``devices`` app already models physical network interfaces
+    (``inventory.Asset`` interfaces / network drops) — an unrelated domain. The
+    login-device alert is tightly coupled to the notification it raises, so the
+    bead sanctioned the notifications app as the home. A later phase
+    (FP3 revoke / FP4 device UI) may relocate this to a dedicated
+    account-security app if preferred.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="known_devices",
+        help_text="User this device is known for",
+    )
+    device_token = models.CharField(
+        max_length=128,
+        db_index=True,
+        help_text="Opaque server-minted device id (stored client-side in a signed cookie)",
+    )
+    fingerprint_hash = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="Hash of the client JS fingerprint; populated in FP4, null until then",
+    )
+    user_agent = models.TextField(
+        blank=True,
+        help_text="User-Agent string captured for this device",
+    )
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="Approximate IP address last seen for this device",
+    )
+    label = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Optional user-friendly label for this device",
+    )
+    first_seen = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this device was first seen",
+    )
+    last_seen = models.DateTimeField(
+        auto_now=True,
+        help_text="When this device was most recently seen",
+    )
+
+    class Meta:
+        ordering = ["-last_seen"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "device_token"],
+                name="notifications_knowndevice_unique_user_token",
+            ),
+        ]
+
+    def __str__(self):
+        token_preview = (self.device_token or "")[:8]
+        return f"Known device for {self.user.username} ({token_preview})"

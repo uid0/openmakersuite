@@ -19,6 +19,7 @@ from rest_framework.response import Response
 
 from config.api_errors import ErrorCode, error_response
 from config.tokens import CustomRefreshToken
+from notifications.device_login import set_device_cookie, track_device_login
 
 User = get_user_model()
 
@@ -34,8 +35,16 @@ def _issue_session_and_tokens(request, user):
     Create a Django session for ``user`` and return a login payload that also
     includes JWT tokens. A single call logs the user into the frontend (JWT),
     the DRF browsable API (session), and the Django admin (session).
+
+    This is the single chokepoint both /api/auth/login/ and /api/auth/register/
+    route through, so known-device tracking hooks in here, right after
+    ``django_login``. The device token to persist on the response cookie is
+    stashed on ``request`` for the caller to apply via
+    :func:`_attach_device_cookie` — the cookie must be set on the ``Response``
+    the view builds, not on this payload dict. Tracking never raises.
     """
     django_login(request, user)
+    request._oms_device_token = track_device_login(request, user)
     access, refresh = _tokens_for(user)
     return {
         "access": access,
@@ -45,6 +54,17 @@ def _issue_session_and_tokens(request, user):
         "is_staff": user.is_staff,
         "is_superuser": user.is_superuser,
     }
+
+
+def _attach_device_cookie(request, response):
+    """
+    Persist the device cookie stashed by :func:`_issue_session_and_tokens`
+    onto ``response``, if one was minted. Returns ``response`` for chaining.
+    """
+    token = getattr(request, "_oms_device_token", None)
+    if token:
+        set_device_cookie(response, token)
+    return response
 
 
 @api_view(["POST"])
@@ -89,7 +109,8 @@ def register_user(request):
 
         payload = _issue_session_and_tokens(request, user)
         payload["detail"] = "User created successfully"
-        return Response(payload, status=status.HTTP_201_CREATED)
+        response = Response(payload, status=status.HTTP_201_CREATED)
+        return _attach_device_cookie(request, response)
 
     except Exception as e:
         return error_response(
@@ -139,7 +160,8 @@ def login_user(request):
             status_code=status.HTTP_403_FORBIDDEN,
         )
 
-    return Response(_issue_session_and_tokens(request, user))
+    response = Response(_issue_session_and_tokens(request, user))
+    return _attach_device_cookie(request, response)
 
 
 @api_view(["POST"])

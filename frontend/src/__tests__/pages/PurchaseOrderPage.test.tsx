@@ -132,10 +132,7 @@ describe('PurchaseOrderPage mark-delivered reactive contract (gh-453)', () => {
     localStorage.setItem('is_staff', 'true');
   });
 
-  // TODO(vite-migration): under vitest the optimistic patch doesn't surface
-  // before the assertion timeout; needs an act() wrap around the modal-close
-  // dispatch. Re-enable after PR #565 lands.
-  test.skip('patches the page from the mark-delivered response without a follow-up GET', async () => {
+  test('patches the page from the mark-delivered response without a follow-up GET', async () => {
     const sentOrder = {
       ...baseOrder,
       status: 'sent',
@@ -174,9 +171,11 @@ describe('PurchaseOrderPage mark-delivered reactive contract (gh-453)', () => {
       });
     });
 
-    // Status flips to "Received" from the response — no follow-up GET.
+    // Status flips to "Received" from the response — no follow-up GET. Match the
+    // exact status label so we don't collide with the "Quantity Received" column
+    // header (a loose /Received/ regex matches both and throws on multiple nodes).
     await waitFor(() => {
-      expect(screen.getByText(/Received/)).toBeInTheDocument();
+      expect(screen.getByText('Received')).toBeInTheDocument();
     });
     expect(api.purchaseOrderAPI.getOrder).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/loading purchase order/i)).not.toBeInTheDocument();
@@ -514,6 +513,89 @@ describe('PurchaseOrderPage receive items (oms-s0hj4)', () => {
     });
     expect(screen.getByText('Received')).toBeInTheDocument();
     expect(api.purchaseOrderAPI.getOrder).toHaveBeenCalledTimes(1);
+    // The patch never flips the page back into the initial loading placeholder.
+    expect(screen.queryByText(/loading purchase order/i)).not.toBeInTheDocument();
+  });
+
+  test('disables Confirm Receipt while in-flight and ignores duplicate submits', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeReceiveOrder() });
+    const receivedOrder = {
+      ...makeReceiveOrder(),
+      status: 'received',
+      status_label: 'Received',
+    };
+
+    // Hold the receive request in-flight so we can observe the pending state.
+    let resolveReceive: (value: any) => void = () => undefined;
+    (api.purchaseOrderAPI.receiveItems as jest.Mock).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveReceive = resolve;
+        }),
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+    fireEvent.change(screen.getByLabelText('Receive quantity for Stocked Bolt'), {
+      target: { value: '2' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    // While the request is pending the submit button reflects the saving state
+    // and is disabled — and the page does not fall back to the loading placeholder.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /saving/i })).toBeDisabled();
+    });
+    expect(screen.queryByText(/loading purchase order/i)).not.toBeInTheDocument();
+
+    // A second click while pending must not dispatch another receiveItems call.
+    fireEvent.click(screen.getByRole('button', { name: /saving/i }));
+    expect(api.purchaseOrderAPI.receiveItems).toHaveBeenCalledTimes(1);
+
+    // Let the in-flight request settle so the success path patches and closes.
+    resolveReceive({ data: receivedOrder });
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /confirm receipt/i })).not.toBeInTheDocument();
+    });
+  });
+
+  test('keeps the panel and entered quantities on failure, re-enabling Confirm Receipt', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeReceiveOrder() });
+
+    let rejectReceive: (err: any) => void = () => undefined;
+    (api.purchaseOrderAPI.receiveItems as jest.Mock).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectReceive = reject;
+        }),
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+    fireEvent.change(screen.getByLabelText('Receive quantity for Stocked Bolt'), {
+      target: { value: '2' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /saving/i })).toBeDisabled();
+    });
+
+    // Reject — the panel stays mounted with the entered quantity intact so the
+    // user can retry without re-typing, and Confirm Receipt re-enables.
+    rejectReceive(new Error('boom'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /confirm receipt/i })).not.toBeDisabled();
+    });
+    expect(
+      (screen.getByLabelText('Receive quantity for Stocked Bolt') as HTMLInputElement).value,
+    ).toBe('2');
+    expect(screen.queryByText(/loading purchase order/i)).not.toBeInTheDocument();
   });
 
   test('errors and does not call the API when no quantities are entered', async () => {

@@ -25,6 +25,7 @@ from .models import (
     OrderDelivery,
     PurchaseOrder,
     PurchaseOrderAttachment,
+    PurchaseOrderAuditEvent,
     PurchaseOrderItem,
     ReorderRequest,
     WebHook,
@@ -539,7 +540,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         purchase_order = serializer.save()
         record_audit_event(
-            action="po_create",
+            action=PurchaseOrderAuditEvent.ACTION_PO_CREATE,
             actor=self.request.user,
             purchase_order=purchase_order,
             metadata={
@@ -547,6 +548,69 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "po_number": purchase_order.po_number,
             },
         )
+        # A PO created with a sales order number is treated as already
+        # submitted to the supplier (oms-qdxss). A fresh PO is always DRAFT, so
+        # a non-empty sales_order_number is the empty -> non-empty trigger.
+        if self._has_sales_order_number(purchase_order):
+            self._auto_transition_to_sent(purchase_order)
+
+    def perform_update(self, serializer):
+        # Capture the pre-update value so we only auto-send on the empty ->
+        # non-empty edge. Editing other fields, or clearing the number, must
+        # never change status (oms-qdxss).
+        had_sales_order_number = self._has_sales_order_number(serializer.instance)
+        purchase_order = serializer.save()
+        if not had_sales_order_number and self._has_sales_order_number(purchase_order):
+            self._auto_transition_to_sent(purchase_order)
+
+    @staticmethod
+    def _has_sales_order_number(purchase_order):
+        """True when the PO carries a non-blank sales order number.
+
+        Whitespace-only values are treated as empty so they never trigger the
+        auto-send transition (oms-qdxss).
+        """
+        return bool((purchase_order.sales_order_number or "").strip())
+
+    def _auto_transition_to_sent(self, purchase_order):
+        """Auto-move a DRAFT PO to SENT when a sales order number is attached.
+
+        Idempotent: a no-op unless the PO is currently DRAFT, so attaching a
+        number to an already-SENT/confirmed/received PO never re-stamps or
+        downgrades it. Wrapped defensively so a failure in the transition never
+        breaks the create/update that triggered it (oms-qdxss).
+        """
+        if purchase_order.status != PurchaseOrder.DRAFT:
+            return
+        try:
+            self._mark_sent(purchase_order, self.request.user)
+        except Exception:  # pragma: no cover - defensive: never break the write
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Auto-transition to SENT failed for PO %s", purchase_order.pk
+            )
+
+    def _mark_sent(self, purchase_order, user):
+        """Stamp a purchase order as SENT and record the transition.
+
+        Shared by the manual ``send_to_supplier`` action and the automatic
+        sales-order-number trigger so both paths stay consistent: status -> SENT,
+        ``sent_by``/``sent_at`` stamped, a ``po_send`` audit event recorded, and
+        the linked reorder requests synced. Callers own the DRAFT precondition.
+        """
+        purchase_order.status = PurchaseOrder.SENT
+        purchase_order.sent_by = user
+        purchase_order.sent_at = timezone.now()
+        purchase_order.save()
+        record_audit_event(
+            action=PurchaseOrderAuditEvent.ACTION_PO_SEND,
+            actor=user,
+            purchase_order=purchase_order,
+            metadata={"po_number": purchase_order.po_number},
+        )
+        # Keep linked reorder requests in step with the PO going out.
+        self._update_reorder_requests_from_po(purchase_order)
 
     @action(detail=False, methods=["post"])
     def create_optimized_order(self, request):
@@ -984,13 +1048,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        purchase_order.status = PurchaseOrder.SENT
-        purchase_order.sent_by = request.user
-        purchase_order.sent_at = timezone.now()
-        purchase_order.save()
-
-        # Update associated ReorderRequest objects
-        self._update_reorder_requests_from_po(purchase_order)
+        self._mark_sent(purchase_order, request.user)
 
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)

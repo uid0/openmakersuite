@@ -947,6 +947,7 @@ class PurchaseOrderAuditEvent(models.Model):
     """
 
     ACTION_PO_CREATE = "po_create"
+    ACTION_PO_SEND = "po_send"
     ACTION_PO_VOID = "po_void"
     ACTION_PO_LINE_VOID = "po_line_void"
     ACTION_PO_MARK_DELIVERED = "po_mark_delivered"
@@ -956,6 +957,7 @@ class PurchaseOrderAuditEvent(models.Model):
 
     ACTION_CHOICES = [
         (ACTION_PO_CREATE, "Purchase order created"),
+        (ACTION_PO_SEND, "Purchase order sent to supplier"),
         (ACTION_PO_VOID, "Purchase order voided"),
         (ACTION_PO_LINE_VOID, "Purchase order line item voided"),
         (ACTION_PO_MARK_DELIVERED, "Purchase order marked delivered"),

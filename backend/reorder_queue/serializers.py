@@ -298,6 +298,7 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
             "po_number",
             "supplier",
             "expected_delivery_date",
+            "sales_order_number",
             "notes",
             "items",
         ]

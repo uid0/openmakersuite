@@ -2,13 +2,21 @@
  * Tests for InventoryItemDetailPage component
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import SessionExpiredBanner, {
+  consumePendingReturnTo,
+} from '../../components/SessionExpiredBanner';
 import InventoryItemDetailPage from '../../pages/InventoryItemDetailPage';
 import * as api from '../../services/api';
+import { showError } from '../../utils/dialogs';
 
 // Mock the API
 vi.mock('../../services/api');
+
+vi.mock('../../utils/dialogs', async () => ({
+  showError: vi.fn(),
+}));
 
 // Mock qrcode.react
 vi.mock('qrcode.react', async () => ({
@@ -307,5 +315,95 @@ describe('InventoryItemDetailPage', () => {
     await waitFor(() => {
       expect(api.inventoryAPI.generateQR).toHaveBeenCalledWith('test-id');
     });
+  });
+
+  // ---- #457 R3 resilience ----
+
+  it('renders empty-state copy for each history tab when there is no activity', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    // Each history tab shows its own empty-state copy once activated.
+    fireEvent.click(screen.getByRole('tab', { name: /Reorder History/i }));
+    expect(
+      await screen.findByText('No reorder history available.')
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Usage Logs/i }));
+    expect(await screen.findByText('No usage logs available.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Linked Assets/i }));
+    expect(
+      await screen.findByText('No assets linked to this inventory item.')
+    ).toBeInTheDocument();
+  });
+
+  it('renders the not-found state when the item load is forbidden (403)', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockRejectedValue({
+      response: { status: 403, data: { detail: 'You do not have permission.' } },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Item not found/)).toBeInTheDocument();
+    });
+  });
+
+  it('shows an error when QR generation fails and keeps the item view intact', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.inventoryAPI.generateQR as jest.Mock).mockRejectedValue(new Error('boom'));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Generate QR/i));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith(
+        'Failed to generate QR code. Please try again.'
+      );
+    });
+    // The page still shows the item — a failed action is not a crash.
+    expect(screen.getByText('Test Item')).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('shows the re-login banner with a return path on session expiry, keeping the item', async () => {
+    sessionStorage.clear();
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/inventory/items/test-id']}>
+          <SessionExpiredBanner />
+          <Routes>
+            <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    // The API client raises this on a 401 once token refresh fails.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('oms:session-expired', {
+          detail: { pathname: '/inventory/items/test-id' },
+        })
+      );
+    });
+
+    expect(screen.getByTestId('session-expired-banner')).toBeInTheDocument();
+    expect(screen.getByText(/where you left off/i)).toBeInTheDocument();
+    expect(consumePendingReturnTo()).toBe('/inventory/items/test-id');
+    expect(screen.getByText('Test Item')).toBeInTheDocument();
   });
 });

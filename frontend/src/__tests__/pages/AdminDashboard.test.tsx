@@ -20,6 +20,7 @@ import React from 'react';
 import AdminDashboard from '../../pages/AdminDashboard';
 import { assetsAPI, inventoryAPI, reorderAPI } from '../../services/api';
 import { ReorderRequest } from '../../types';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api', () => ({
   assetsAPI: {
@@ -409,5 +410,52 @@ describe('AdminDashboard — update tracking flow', () => {
     });
 
     expect(await screen.findByText('Tracking information updated')).toBeInTheDocument();
+  });
+});
+
+describe('AdminDashboard — reorder-triage resilience (#457 R3)', () => {
+  it('shows the empty state when there are no pending requests', async () => {
+    mockReorderAPI.getPendingRequests.mockResolvedValue({ data: [] } as any);
+
+    renderDashboard();
+
+    // The triage table renders its empty-state row once the load settles.
+    expect(await screen.findByText('No requests found')).toBeInTheDocument();
+    expect(screen.queryByText(/loading requests/i)).not.toBeInTheDocument();
+  });
+
+  it('surfaces an error notification and does not hang when the load is forbidden (403)', async () => {
+    mockReorderAPI.getPendingRequests.mockRejectedValue({
+      response: { status: 403, data: { detail: 'You do not have permission.' } },
+    } as any);
+
+    renderDashboard();
+
+    // No per-403 messaging exists; the page degrades to its generic load error
+    // toast and never gets stuck on the loading placeholder.
+    expect(
+      await screen.findByText('Failed to load requests. Please log in.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/loading requests/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the row and re-enables the action when a mutation hits a network error (offline)', async () => {
+    const pending = buildRequest({ id: 77, status: 'pending' });
+    mockReorderAPI.getPendingRequests.mockResolvedValue({ data: [pending] } as any);
+    // Offline signature: code ERR_NETWORK, request set, no response.
+    mockReorderAPI.approveRequest.mockRejectedValue(networkError('Network Error'));
+
+    renderDashboard();
+
+    const approveBtn = await screen.findByTitle('Approve');
+    fireEvent.click(approveBtn);
+
+    expect(await screen.findByText('Failed to approve request')).toBeInTheDocument();
+    // The row survives the failed mutation and the action re-enables for retry.
+    expect(screen.getByText(pending.item_details.name)).toBeInTheDocument();
+    expect(screen.getByText('pending')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(approveBtn).not.toBeDisabled();
+    });
   });
 });

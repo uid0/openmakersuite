@@ -6,8 +6,11 @@
  *    flipping back into the initial "Loading purchase order…" placeholder.
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import SessionExpiredBanner, {
+  consumePendingReturnTo,
+} from '../../components/SessionExpiredBanner';
 import PurchaseOrderPage from '../../pages/PurchaseOrderPage';
 import * as api from '../../services/api';
 import { showError } from '../../utils/dialogs';
@@ -221,6 +224,29 @@ describe('PurchaseOrderPage mark-delivered reactive contract (gh-453)', () => {
     });
     expect((screen.getByLabelText(/delivery date/i) as HTMLInputElement).value).toBe('2026-05-10');
     expect((screen.getByLabelText(/tracking number/i) as HTMLInputElement).value).toBe('TRK-99');
+  });
+
+  test('surfaces the error and keeps the panel when the mark-delivered save fails (#457 R3)', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: { ...baseOrder, status: 'sent', items: [], attachments: [] },
+    });
+    // No detail on the error → the page falls back to its generic save message.
+    (api.purchaseOrderAPI.markDelivered as jest.Mock).mockRejectedValue({
+      response: { status: 500, data: {} },
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^mark as delivered$/i }));
+    fireEvent.change(screen.getByLabelText(/delivery date/i), { target: { value: '2026-05-10' } });
+    fireEvent.click(screen.getByRole('button', { name: /confirm delivery/i }));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith('Failed to mark purchase order as delivered');
+    });
+    // The panel stays mounted with the typed date so the user can retry.
+    expect(screen.getByRole('button', { name: /confirm delivery/i })).toBeInTheDocument();
+    expect((screen.getByLabelText(/delivery date/i) as HTMLInputElement).value).toBe('2026-05-10');
   });
 });
 
@@ -639,5 +665,82 @@ describe('PurchaseOrderPage receive items (oms-s0hj4)', () => {
       expect(showError).toHaveBeenCalledWith(expect.stringMatching(/only 7 pending/i));
     });
     expect(api.purchaseOrderAPI.receiveItems).not.toHaveBeenCalled();
+  });
+
+  test('surfaces a permission error and keeps the panel when receiving is forbidden (403) (#457 R3)', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeReceiveOrder() });
+    // The receive permission is enforced by the backend (403); the page has no
+    // client-side gate, so it must surface the message and let the user recover.
+    (api.purchaseOrderAPI.receiveItems as jest.Mock).mockRejectedValue({
+      response: {
+        status: 403,
+        data: { detail: 'You do not have permission to receive items.' },
+      },
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+    fireEvent.change(screen.getByLabelText('Receive quantity for Stocked Bolt'), {
+      target: { value: '2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith('You do not have permission to receive items.');
+    });
+    // The panel stays open with the entered quantity so a permitted user can retry.
+    expect(
+      (screen.getByLabelText('Receive quantity for Stocked Bolt') as HTMLInputElement).value,
+    ).toBe('2');
+    expect(screen.getByRole('button', { name: /confirm receipt/i })).toBeInTheDocument();
+  });
+});
+
+describe('PurchaseOrderPage session-expiry return-to (#457 R3)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+    sessionStorage.clear();
+  });
+
+  // Mounts the global re-login banner (normally in WorkspaceLayout) next to the page.
+  const renderWithBanner = () =>
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/purchase-orders/po-1']}>
+          <SessionExpiredBanner />
+          <Routes>
+            <Route path="/purchase-orders/:orderId" element={<PurchaseOrderPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+  test('shows the re-login banner with a return path and keeps the order on screen', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: baseOrder });
+
+    renderWithBanner();
+    await waitFor(() => {
+      expect(screen.getByText('PO-2026-0001', { exact: false })).toBeInTheDocument();
+    });
+
+    // The API client raises this on a 401; in production the detail page lives
+    // under the recoverable /purchasing/orders/:id route.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('oms:session-expired', {
+          detail: { pathname: '/purchasing/orders/po-1' },
+        }),
+      );
+    });
+
+    expect(screen.getByTestId('session-expired-banner')).toBeInTheDocument();
+    expect(screen.getByText(/where you left off/i)).toBeInTheDocument();
+    expect(consumePendingReturnTo()).toBe('/purchasing/orders/po-1');
+    // The page itself is untouched — the order is still rendered behind the banner.
+    expect(screen.getByText('PO-2026-0001', { exact: false })).toBeInTheDocument();
   });
 });

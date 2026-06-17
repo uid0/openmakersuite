@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import ElectricalCircuitsPage from '../../pages/ElectricalCircuitsPage';
 import * as api from '../../services/api';
 import { confirmDelete, showError } from '../../utils/dialogs';
+import { expectNoA11yViolations } from '../helpers/axe';
 
 vi.mock('../../services/api');
 
@@ -116,5 +117,27 @@ describe('ElectricalCircuitsPage', () => {
     await waitFor(() => {
       expect(showError).toHaveBeenCalledWith('Outlets still depend on it');
     });
+  });
+
+  // AC-19: while the active tab is fetching, the table renders a consistent
+  // loading row rather than a premature "No breakers found" empty state.
+  it('shows a loading state in the breakers table before data resolves (AC-19)', async () => {
+    (api.electricalCircuitsAPI.listBreakers as jest.Mock).mockReturnValue(
+      new Promise(() => {}),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('Loading…')).toBeInTheDocument();
+    expect(screen.queryByText('No breakers found')).not.toBeInTheDocument();
+  });
+
+  // AC-20: the loaded circuits table (tabs, filter select, action controls)
+  // must be free of WCAG A/AA violations.
+  it('has no accessibility violations once loaded (AC-20)', async () => {
+    const { container } = renderPage();
+
+    expect(await screen.findByText('A / 12')).toBeInTheDocument();
+    await expectNoA11yViolations(container);
   });
 });

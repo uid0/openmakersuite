@@ -160,7 +160,7 @@ const ElectricalCircuitsPage: React.FC = () => {
   };
 
   const filterBar = (
-    <Paper p="md" withBorder>
+    <Paper p="md" withBorder mt="md">
       <Group>
         <Select
           label="Location"
@@ -541,14 +541,30 @@ const ElectricalCircuitsPage: React.FC = () => {
             Network drops
           </Tabs.Tab>
         </Tabs.List>
+
+        {filterBar}
+
+        {/*
+          Render every tab's panel (keepMounted) so each Tabs.Tab's
+          `aria-controls` resolves to a real tabpanel element — without
+          panels the generated ids dangle and axe flags
+          `aria-valid-attr-value`. Only the active tab's table actually
+          mounts (the `activeTab === …` guard), matching the prior behavior
+          and the single shared `loading` flag.
+        */}
+        <Tabs.Panel value="breakers" keepMounted pt="md">
+          {activeTab === 'breakers' && breakersTable}
+        </Tabs.Panel>
+        <Tabs.Panel value="outlets" keepMounted pt="md">
+          {activeTab === 'outlets' && outletsTable}
+        </Tabs.Panel>
+        <Tabs.Panel value="switches" keepMounted pt="md">
+          {activeTab === 'switches' && switchesTable}
+        </Tabs.Panel>
+        <Tabs.Panel value="drops" keepMounted pt="md">
+          {activeTab === 'drops' && dropsTable}
+        </Tabs.Panel>
       </Tabs>
-
-      {filterBar}
-
-      {activeTab === 'breakers' && breakersTable}
-      {activeTab === 'outlets' && outletsTable}
-      {activeTab === 'switches' && switchesTable}
-      {activeTab === 'drops' && dropsTable}
     </Stack>
   );
 };

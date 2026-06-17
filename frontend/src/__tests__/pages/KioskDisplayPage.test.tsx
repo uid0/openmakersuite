@@ -1,10 +1,11 @@
 /**
  * Tests for KioskDisplayPage
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import KioskDisplayPage from '../../pages/KioskDisplayPage';
 import * as api from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
 
@@ -146,5 +147,50 @@ describe('KioskDisplayPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('kiosk-error')).toBeInTheDocument();
     });
+  });
+
+  it('shows a readable offline fallback when the network is unavailable', async () => {
+    // AC-16: a dropped connection surfaces a readable state, not a blank screen.
+    (api.kioskAPI.fetchPayload as jest.Mock).mockRejectedValue(networkError());
+    renderKiosk('lobby', 'secret');
+    const errorEl = await screen.findByTestId('kiosk-error');
+    expect(errorEl).toHaveTextContent('Unable to load screen payload.');
+  });
+
+  it('auto-refreshes on its interval and picks up updated content', async () => {
+    // AC-16/19: the unattended kiosk re-polls and recovers fresh content
+    // without manual intervention. refresh_interval_seconds defaults to 60.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      (api.kioskAPI.fetchPayload as jest.Mock)
+        .mockResolvedValueOnce({
+          data: makePayload({
+            content_blocks: [
+              { id: 'b1', block_type: 'custom_text', title: 'Welcome', body: 'First', config: {}, order: 0 },
+            ],
+          }),
+        })
+        .mockResolvedValue({
+          data: makePayload({
+            content_blocks: [
+              { id: 'b1', block_type: 'custom_text', title: 'Welcome', body: 'Second', config: {}, order: 0 },
+            ],
+          }),
+        });
+      renderKiosk('lobby', 'secret');
+
+      expect(await screen.findByText('First')).toBeInTheDocument();
+      expect(api.kioskAPI.fetchPayload).toHaveBeenCalledTimes(1);
+
+      // Fire the 60s refresh interval.
+      await act(async () => {
+        vi.advanceTimersByTime(60000);
+      });
+
+      expect(await screen.findByText('Second')).toBeInTheDocument();
+      expect((api.kioskAPI.fetchPayload as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

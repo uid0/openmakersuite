@@ -2,11 +2,16 @@
  * Tests for InventoryReconciliationPage (oms-90k)
  */
 import { MantineProvider } from '@mantine/core';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Notifications } from '@mantine/notifications';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import SessionExpiredBanner, {
+  consumePendingReturnTo,
+} from '../../components/SessionExpiredBanner';
 import { NotificationProvider } from '../../contexts/NotificationContext';
 import InventoryReconciliationPage from '../../pages/InventoryReconciliationPage';
 import * as api from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
 
@@ -36,6 +41,52 @@ const renderPage = () =>
       </NotificationProvider>
     </MantineProvider>,
   );
+
+// Variant that also mounts the global re-login banner (normally in the layout)
+// so a session-expiry can be exercised against the live page.
+const renderWithBanner = () =>
+  render(
+    <MantineProvider>
+      <NotificationProvider>
+        <MemoryRouter initialEntries={['/inventory/locations/1/reconcile']}>
+          <SessionExpiredBanner />
+          <Routes>
+            <Route
+              path="/inventory/locations/:id/reconcile"
+              element={<InventoryReconciliationPage />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </NotificationProvider>
+    </MantineProvider>,
+  );
+
+// Variant that mounts the Mantine notifications outlet so toast text is asserted.
+const renderWithToasts = () =>
+  render(
+    <MantineProvider>
+      <Notifications />
+      <NotificationProvider>
+        <MemoryRouter initialEntries={['/inventory/locations/1/reconcile']}>
+          <Routes>
+            <Route
+              path="/inventory/locations/:id/reconcile"
+              element={<InventoryReconciliationPage />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </NotificationProvider>
+    </MantineProvider>,
+  );
+
+// The API client dispatches this event on a 401 once token refresh fails.
+const dispatchSessionExpired = (pathname: string) => {
+  act(() => {
+    window.dispatchEvent(
+      new CustomEvent('oms:session-expired', { detail: { pathname } }),
+    );
+  });
+};
 
 const gridItems = [
   {
@@ -150,5 +201,58 @@ describe('InventoryReconciliationPage', () => {
     const payload = (api.inventoryAPI.submitReconciliationBatch as jest.Mock).mock
       .calls[0][0];
     expect(payload[0].skip_reorder).toBe(true);
+  });
+
+  it('preserves in-progress counts and shows the re-login banner when the session expires', async () => {
+    sessionStorage.clear();
+    renderWithBanner();
+    expect(await screen.findByText('Widget A')).toBeInTheDocument();
+
+    // Operator is mid-count when their session lapses.
+    fireEvent.change(screen.getByLabelText('Actual count for Widget A'), {
+      target: { value: '18' },
+    });
+    fireEvent.change(screen.getByLabelText('Actual count for Widget B'), {
+      target: { value: '5' },
+    });
+
+    dispatchSessionExpired('/inventory/locations/1/reconcile');
+
+    // The recovery banner appears and offers to return here after re-login.
+    expect(screen.getByTestId('session-expired-banner')).toBeInTheDocument();
+    expect(screen.getByText(/your session expired/i)).toBeInTheDocument();
+    expect(screen.getByText(/where you left off/i)).toBeInTheDocument();
+    expect(consumePendingReturnTo()).toBe('/inventory/locations/1/reconcile');
+
+    // Crucially, the half-finished counts are not lost.
+    expect(
+      (screen.getByLabelText('Actual count for Widget A') as HTMLInputElement).value,
+    ).toBe('18');
+    expect(
+      (screen.getByLabelText('Actual count for Widget B') as HTMLInputElement).value,
+    ).toBe('5');
+  });
+
+  it('surfaces an error and keeps counts when the submit fails offline', async () => {
+    (api.inventoryAPI.submitReconciliationBatch as jest.Mock).mockRejectedValue(
+      networkError('Network Error'),
+    );
+
+    renderWithToasts();
+    expect(await screen.findByText('Widget A')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Actual count for Widget A'), {
+      target: { value: '18' },
+    });
+    fireEvent.click(screen.getByTestId('submit-reconciliation'));
+
+    // A network failure has no response.data.detail, so the generic copy shows.
+    expect(await screen.findByText('Failed to submit reconciliation')).toBeInTheDocument();
+
+    // The entered count survives so the operator can retry once back online.
+    expect(
+      (screen.getByLabelText('Actual count for Widget A') as HTMLInputElement).value,
+    ).toBe('18');
+    expect(screen.getByTestId('submit-reconciliation')).not.toBeDisabled();
   });
 });

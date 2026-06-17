@@ -4,6 +4,9 @@
 import { MantineProvider } from '@mantine/core';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import SessionExpiredBanner, {
+  consumePendingReturnTo,
+} from '../../components/SessionExpiredBanner';
 import InventoryListPage from '../../pages/InventoryListPage';
 import * as api from '../../services/api';
 import { showError, showInfo, showSuccess } from '../../utils/dialogs';
@@ -432,5 +435,89 @@ describe('InventoryListPage', () => {
     await waitFor(() => {
       expect(screen.getByText('15')).toBeInTheDocument();
     });
+  });
+
+  // ---- #457 R3 resilience ----
+
+  it('shows the empty state when no items match the filters', async () => {
+    (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue(fullPage([]));
+
+    renderPage();
+
+    expect(
+      await screen.findByText('No items found matching your filters.')
+    ).toBeInTheDocument();
+  });
+
+  it('degrades to the empty state without crashing when the load is forbidden (403)', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.inventoryAPI.listItems as jest.Mock).mockRejectedValue({
+      response: { status: 403, data: { detail: 'You do not have permission.' } },
+    });
+
+    renderPage();
+
+    // The list has no error banner; a forbidden load logs and leaves it empty.
+    expect(
+      await screen.findByText('No items found matching your filters.')
+    ).toBeInTheDocument();
+    // The page chrome is still interactive — this is graceful, not a crash.
+    expect(screen.getByPlaceholderText(/Search by name/)).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('surfaces an error and keeps the inline editor open when a stock save fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.inventoryAPI.updateStock as jest.Mock).mockRejectedValue(new Error('boom'));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('10'));
+    await screen.findByText('Save');
+    fireEvent.change(screen.getByDisplayValue('10'), { target: { value: '15' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith('Failed to update stock. Please try again.');
+    });
+    // The editor stays open with the entered value so the user can retry.
+    expect(screen.getByText('Save')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('15')).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('shows the re-login banner with a return path on session expiry, keeping the list', async () => {
+    sessionStorage.clear();
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <SessionExpiredBanner />
+          <InventoryListPage />
+        </MemoryRouter>
+      </MantineProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
+    });
+
+    // The API client raises this on a 401 once token refresh fails.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('oms:session-expired', {
+          detail: { pathname: '/inventory/items' },
+        })
+      );
+    });
+
+    expect(screen.getByTestId('session-expired-banner')).toBeInTheDocument();
+    expect(screen.getByText(/where you left off/i)).toBeInTheDocument();
+    expect(consumePendingReturnTo()).toBe('/inventory/items');
+    // The list survived the interruption.
+    expect(screen.getByText('Test Item 1')).toBeInTheDocument();
   });
 });

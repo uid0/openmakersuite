@@ -2,8 +2,11 @@
  * Tests for InventoryItemFormPage component
  */
 import { MantineProvider } from '@mantine/core';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import SessionExpiredBanner, {
+  consumePendingReturnTo,
+} from '../../components/SessionExpiredBanner';
 import InventoryItemFormPage from '../../pages/InventoryItemFormPage';
 import * as api from '../../services/api';
 import { showError } from '../../utils/dialogs';
@@ -369,5 +372,133 @@ describe('InventoryItemFormPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/Validation error/)).toBeInTheDocument();
     }, { timeout: 3000 });
+  });
+
+  // ---- #457 R3 resilience ----
+
+  // Fill the minimum required fields so onSubmit reaches the API call.
+  const fillRequiredFields = () => {
+    const nameInputs = screen.getAllByLabelText(/Name/i);
+    fireEvent.change(nameInputs[0], { target: { value: 'New Item' } });
+    const currentStockInputs = screen.getAllByLabelText(/Current Stock/i);
+    if (currentStockInputs.length > 0) {
+      fireEvent.change(currentStockInputs[0], { target: { value: '10' } });
+    }
+    const minStockInputs = screen.getAllByLabelText(/Minimum Stock/i);
+    if (minStockInputs.length > 0) {
+      fireEvent.change(minStockInputs[0], { target: { value: '5' } });
+    }
+    const reorderInputs = screen.getAllByLabelText(/Reorder Quantity/i);
+    if (reorderInputs.length > 0) {
+      fireEvent.change(reorderInputs[0], { target: { value: '20' } });
+    }
+  };
+
+  it('shows an error alert when the item fails to load in edit mode', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.inventoryAPI.getItem as jest.Mock).mockRejectedValue({
+      response: { status: 404, data: { detail: 'Not found' } },
+    });
+
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/inventory/items/test-id/edit']}>
+          <Routes>
+            <Route
+              path="/inventory/items/:id/edit"
+              element={<InventoryItemFormPage />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>
+    );
+
+    expect(
+      await screen.findByText('Failed to load item. Please try again.')
+    ).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('falls back to a generic save error when the create has no detail', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.inventoryAPI.createItem as jest.Mock).mockRejectedValue({
+      response: { status: 500, data: {} },
+    });
+
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/Name/i).length).toBeGreaterThan(0);
+    });
+    fillRequiredFields();
+    fireEvent.click(screen.getByText('Create Item'));
+
+    expect(
+      await screen.findByText('Failed to save item. Please try again.')
+    ).toBeInTheDocument();
+    // The form stays open so the user can retry without re-entering everything.
+    expect(screen.getByText('Create Item')).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('surfaces the permission message when the create is forbidden (403)', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.inventoryAPI.createItem as jest.Mock).mockRejectedValue({
+      response: {
+        status: 403,
+        data: { detail: 'You do not have permission to create inventory items.' },
+      },
+    });
+
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/Name/i).length).toBeGreaterThan(0);
+    });
+    fillRequiredFields();
+    fireEvent.click(screen.getByText('Create Item'));
+
+    expect(
+      await screen.findByText('You do not have permission to create inventory items.')
+    ).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('shows the re-login banner with a return path on session expiry, keeping the form', async () => {
+    sessionStorage.clear();
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: mockItem });
+
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/inventory/items/test-id/edit']}>
+          <SessionExpiredBanner />
+          <Routes>
+            <Route
+              path="/inventory/items/:id/edit"
+              element={<InventoryItemFormPage />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Test Item')).toBeInTheDocument();
+    });
+
+    // The API client raises this on a 401 once token refresh fails.
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('oms:session-expired', {
+          detail: { pathname: '/inventory/items/test-id/edit' },
+        })
+      );
+    });
+
+    expect(screen.getByTestId('session-expired-banner')).toBeInTheDocument();
+    expect(screen.getByText(/where you left off/i)).toBeInTheDocument();
+    expect(consumePendingReturnTo()).toBe('/inventory/items/test-id/edit');
+    // The in-progress form is untouched behind the banner.
+    expect(screen.getByDisplayValue('Test Item')).toBeInTheDocument();
   });
 });

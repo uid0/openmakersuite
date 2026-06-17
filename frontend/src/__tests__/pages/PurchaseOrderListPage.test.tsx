@@ -9,7 +9,8 @@
  *  - plus an a11y audit of the populated table (AC-20).
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import PurchaseOrderListPage from '../../pages/PurchaseOrderListPage';
 import * as api from '../../services/api';
@@ -128,5 +129,125 @@ describe('PurchaseOrderListPage', () => {
       expect(screen.getByText('PO-2026-001')).toBeInTheDocument();
     });
     await expectNoA11yViolations(container);
+  });
+});
+
+describe('PurchaseOrderListPage sorting', () => {
+  const baseOrder = {
+    id: 'po-1',
+    po_number: 'PO-2026-001',
+    supplier_details: 'Acme Supplies',
+    status: 'sent',
+    status_label: 'Sent to Supplier',
+    order_date: '2026-01-15',
+    expected_delivery_date: '2026-01-25',
+    estimated_total: '1250.00',
+    actual_total: '1000.00',
+    total_items: 3,
+    total_quantity: 12,
+    is_fully_received: false,
+  };
+
+  // Three orders chosen so each sortable column yields a distinct ordering.
+  const orders = [
+    {
+      ...baseOrder,
+      id: 'po-1',
+      po_number: 'PO-2026-001',
+      order_date: '2026-01-15',
+      estimated_total: '1250.00',
+      actual_total: '1000.00',
+    },
+    {
+      ...baseOrder,
+      id: 'po-2',
+      po_number: 'PO-2026-002',
+      order_date: '2026-03-10',
+      estimated_total: '300.00',
+      actual_total: null,
+    },
+    {
+      ...baseOrder,
+      id: 'po-3',
+      po_number: 'PO-2026-003',
+      order_date: '2026-02-01',
+      estimated_total: '9999.00',
+      actual_total: '50.00',
+    },
+  ];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.purchaseOrderAPI.listOrders as jest.Mock).mockResolvedValue({
+      data: { results: orders },
+    });
+  });
+
+  // PO numbers in render order (the first body cell of each non-header row).
+  const renderedPoNumbers = () =>
+    screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[0].textContent);
+
+  const loadPage = async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('PO-2026-001')).toBeInTheDocument();
+    });
+  };
+
+  it('defaults to Order Date descending (newest first)', async () => {
+    await loadPage();
+
+    expect(renderedPoNumbers()).toEqual(['PO-2026-002', 'PO-2026-003', 'PO-2026-001']);
+    expect(screen.getByRole('columnheader', { name: 'Order Date' })).toHaveAttribute(
+      'aria-sort',
+      'descending'
+    );
+    // Inactive sortable columns advertise themselves via aria-sort="none".
+    expect(screen.getByRole('columnheader', { name: 'PO Number' })).toHaveAttribute(
+      'aria-sort',
+      'none'
+    );
+  });
+
+  it('sorts by PO Number ascending on click, then toggles to descending', async () => {
+    await loadPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'PO Number' }));
+    expect(renderedPoNumbers()).toEqual(['PO-2026-001', 'PO-2026-002', 'PO-2026-003']);
+    expect(screen.getByRole('columnheader', { name: 'PO Number' })).toHaveAttribute(
+      'aria-sort',
+      'ascending'
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'PO Number' }));
+    expect(renderedPoNumbers()).toEqual(['PO-2026-003', 'PO-2026-002', 'PO-2026-001']);
+    expect(screen.getByRole('columnheader', { name: 'PO Number' })).toHaveAttribute(
+      'aria-sort',
+      'descending'
+    );
+  });
+
+  it('sorts Estimated Total numerically rather than lexically', async () => {
+    await loadPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Estimated Total' }));
+    // 300 < 1250 < 9999 — a string sort would place '1250' before '300'.
+    expect(renderedPoNumbers()).toEqual(['PO-2026-002', 'PO-2026-001', 'PO-2026-003']);
+  });
+
+  it('keeps blank Actual Total rows last in both sort directions', async () => {
+    await loadPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Actual Total' }));
+    // asc: 50, 1000, then the null (po-2) sorted last.
+    expect(renderedPoNumbers()).toEqual(['PO-2026-003', 'PO-2026-001', 'PO-2026-002']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Actual Total' }));
+    // desc: 1000, 50, with the null (po-2) still last.
+    expect(renderedPoNumbers()).toEqual(['PO-2026-001', 'PO-2026-003', 'PO-2026-002']);
   });
 });

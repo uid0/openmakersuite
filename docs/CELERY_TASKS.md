@@ -83,6 +83,12 @@ operator surface for inspecting status, args, and tracebacks
 | `reorder_queue.tasks.send_asset_problem_webhook` | `.delay()` from `AssetProblem` create | Builds payload, hands off to `send_webhook_notification` | None at this layer; downstream task retries | 30 min global | **Duplicate-safe** | Re-call with the same `problem_id`. |
 | `reorder_queue.tasks.send_location_problem_webhook` | `.delay()` from `Location.report_problem` action | Builds payload, hands off to `send_webhook_notification` | None at this layer; downstream task retries | 30 min global | **Duplicate-safe** | Re-call with the same `problem_id`. |
 
+### notifications
+
+| Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |
+| --- | --- | --- | --- | --- | --- | --- |
+| `notifications.tasks.send_new_device_alert_email` | `transaction.on_commit` from the new-device branch of `notifications.device_login.track_device_login` — fires when a staff/privileged account signs in from an unrecognized device (oms-1crmp, FP2; email companion to FP1's in-app alert) | Sends one templated email (Postmark via django-anymail in prod) to the signing-in user with the new device's User-Agent, approximate IP, time, and a link to `/account/devices`. Honors `NotificationPreference.email_enabled` only when the module constant `NEW_DEVICE_ALERT_BYPASS_EMAIL_OPT_OUT=False`; by default this security alert is sent regardless of the email opt-out. | None (`@shared_task` defaults) | 30 min global | **Duplicate-safe** — re-running for the same `(user_id, device_id)` re-sends the same alert; a deleted user/device returns `{"sent": 0, "reason": ...}` rather than raising | Re-call `send_new_device_alert_email.delay(user_id, device_id)` from a shell. |
+
 ### location_checkins
 
 | Task | Trigger | Side effects | Retries | Timeout | Idempotency | Recovery |

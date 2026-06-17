@@ -1,0 +1,19 @@
+New device sign-in to your account
+===================================
+
+Hi {{ username }},
+
+We noticed a new sign-in to your account from a device we have not seen before:
+
+Device:    {{ user_agent }}
+Location:  {{ ip_address }}
+When:      {{ seen_at }}
+
+If this was you, no action is needed.
+
+If you do not recognize this sign-in, secure your account by changing your
+password and reviewing the devices on your account:
+{{ devices_url }}
+
+{# FP3 (revoke / "this wasn't me") will add a one-click revoke link here. #}
+— OpenMakerSuite

@@ -1,10 +1,59 @@
 """
 Custom JWT token classes with user-based expiration times.
+
+In addition to per-user-type lifetimes, every token validated through these
+classes is checked against ``User.tokens_valid_after`` (notifications FP3,
+oms-ltqs3). The "this wasn't me" / revoke-all action advances that timestamp,
+and any access *or* refresh token whose ``iat`` (issued-at) predates it is
+rejected here. This is the single chokepoint every JWT auth flow passes
+through — ``SIMPLE_JWT["AUTH_TOKEN_CLASSES"]`` points at
+:class:`CustomAccessToken`, and the refresh endpoint instantiates
+:class:`CustomRefreshToken` — so a revoke forces a full re-auth across the REST
+API, the DRF browsable API, and the admin.
+
+We deliberately enforce revocation here rather than via the simple-JWT
+blacklist app: that app only invalidates *refresh* tokens (leaving stateless
+access tokens valid for up to their 7-day lifetime), and our custom
+``for_user`` below never records ``OutstandingToken`` rows for it to blacklist.
+The ``tokens_valid_after`` cutoff invalidates both token types at once.
 """
 
 from datetime import timedelta
 
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+from rest_framework_simplejwt.utils import datetime_from_epoch
+
+
+def _reject_if_revoked(token):
+    """Raise :class:`TokenError` when ``token`` predates its owner's revoke.
+
+    No-op when the user has never revoked (``tokens_valid_after`` is null) or
+    the token is missing the claims we need. The lookup is a single indexed
+    primary-key read; it runs on every token validation (i.e. every
+    authenticated request), an acceptable cost for making revoke-all effective
+    against otherwise-stateless access tokens.
+    """
+    payload = getattr(token, "payload", None) or {}
+    user_id = payload.get("user_id")
+    issued_at = payload.get("iat")
+    if user_id is None or issued_at is None:
+        return
+
+    # Imported lazily: this module is imported very early via settings
+    # (AUTH_TOKEN_CLASSES), before the app registry is necessarily ready.
+    from django.contrib.auth import get_user_model
+
+    cutoff = (
+        get_user_model()
+        .objects.filter(pk=user_id)
+        .values_list("tokens_valid_after", flat=True)
+        .first()
+    )
+    # `iat` is whole-second epoch; comparing strictly (`<`) means a token minted
+    # in the same second as the revoke is invalidated too — the safe direction.
+    if cutoff is not None and datetime_from_epoch(issued_at) < cutoff:
+        raise TokenError("Token has been revoked (issued before tokens_valid_after).")
 
 
 class CustomAccessToken(AccessToken):
@@ -12,7 +61,9 @@ class CustomAccessToken(AccessToken):
     Custom access token with user-based expiration.
     """
 
-    pass  # Expiration will be set dynamically
+    def verify(self, *args, **kwargs):
+        super().verify(*args, **kwargs)
+        _reject_if_revoked(self)
 
 
 class CustomRefreshToken(RefreshToken):
@@ -38,6 +89,10 @@ class CustomRefreshToken(RefreshToken):
             else:
                 # Regular users: 30 days refresh token
                 self.lifetime = timedelta(days=30)
+
+    def verify(self, *args, **kwargs):
+        super().verify(*args, **kwargs)
+        _reject_if_revoked(self)
 
     @property
     def access_token(self):

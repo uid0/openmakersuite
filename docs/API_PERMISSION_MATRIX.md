@@ -236,6 +236,17 @@ below are public.
 | any | `notifications/notifications/...` (CRUD) | member | `IsAuthenticated` on `NotificationViewSet`; the queryset filters to the current user's notifications. |
 | GET, PATCH | `notifications/preferences/` | member | `IsAuthenticated` on `NotificationPreferenceView`. |
 
+## Account device management (`/api/account/`)
+
+Known-device list + "this wasn't me" revoke-all (notifications FP3, oms-ltqs3).
+The view class lives in `notifications.account_views`.
+
+| Method | Path | Class | Notes |
+| --- | --- | --- | --- |
+| GET | `account/devices/` (list, retrieve) | member | `IsAuthenticated` on `KnownDeviceViewSet`; `get_queryset` filters to the requesting user's own devices — owner-scoped, no cross-user access. |
+| DELETE | `account/devices/<id>/` (forget) | member | Owner-scoped; removing a device is audited (`AccountSecurityAuditEvent`). |
+| POST | `account/devices/revoke-all/` | member | "This wasn't me": deletes the user's Django sessions and advances `User.tokens_valid_after`, forcing re-auth across REST, the browsable API, and admin. Audited. |
+
 ## Screens / kiosks (`/api/screens/`)
 
 | Method | Path | Class | Notes |

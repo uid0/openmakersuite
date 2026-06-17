@@ -13,6 +13,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import TaxReceiptLookupPage from '../../pages/TaxReceiptLookupPage';
 import * as api from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
 
@@ -142,5 +143,22 @@ describe('TaxReceiptLookupPage', () => {
     });
     expect(createObjectURL).toHaveBeenCalled();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:fake-url');
+  });
+
+  // R2 resilience (oms-sr1l4): AC-16 — a lookup that fails offline (bare
+  // network error, no response body) still shows the actionable not-found
+  // state and re-enables the form so the donor can retry once back online.
+  test('AC-16: a lookup made offline shows an actionable state and re-enables retry', async () => {
+    (api.donationsAPI.lookupTaxReceipt as jest.Mock).mockRejectedValue(networkError());
+
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText(/serial number/i), {
+      target: { value: 'RCP-OFFLINE' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /lookup receipt/i }));
+
+    await screen.findByText(/tax receipt not found/i);
+    expect(screen.getByRole('button', { name: /lookup receipt/i })).not.toBeDisabled();
   });
 });

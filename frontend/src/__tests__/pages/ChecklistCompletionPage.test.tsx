@@ -9,9 +9,41 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { NotificationProvider } from '../../contexts/NotificationContext';
 import ChecklistCompletionPage from '../../pages/ChecklistCompletionPage';
 import * as api from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 // Mock the API
 vi.mock('../../services/api');
+
+// Stub the QR scanner: html5-qrcode needs a real camera/WASM (covered by
+// QRScanner.test.tsx). Here we only need to drive the page's onScanError /
+// onScanSuccess handlers to assert how the page reacts (AC-14).
+vi.mock('../../components/QRScanner', () => ({
+  default: (props: {
+    onScanSuccess: (text: string) => void;
+    onScanError: (error: { kind: string; message: string }) => void;
+    onClose: () => void;
+  }) => (
+    <div data-testid="qr-scanner-stub">
+      <button
+        type="button"
+        onClick={() =>
+          props.onScanError({
+            kind: 'permission-denied',
+            message: 'Enable camera access or enter the code manually.',
+          })
+        }
+      >
+        simulate camera denied
+      </button>
+      <button type="button" onClick={() => props.onScanSuccess('SCAN-CODE')}>
+        simulate scan
+      </button>
+      <button type="button" onClick={props.onClose}>
+        close scanner
+      </button>
+    </div>
+  ),
+}));
 
 const mockNavigate = jest.fn();
 vi.mock('react-router-dom', async () => ({
@@ -290,6 +322,59 @@ describe('ChecklistCompletionPage', () => {
     const pageHeading = headings.find(h => h.tagName === 'H3');
     expect(pageHeading).toBeInTheDocument();
     expect(pageHeading).toHaveTextContent(/✓ checklist completed/i);
+  });
+
+  // --- R2 resilience (oms-sr1l4): long-form checklist journey -------------
+  // This is the one public scan page with a live camera (QRScanner), so it
+  // anchors AC-14 camera-denied handling; plus AC-16 offline survival and the
+  // AC-15 duplicate-submit guard on completion.
+
+  test('AC-14: a camera-permission denial surfaces an actionable, code-entry hint', async () => {
+    (api.checklistsAPI.getChecklist as jest.Mock).mockResolvedValue({ data: mockChecklist });
+    (api.checklistsAPI.getCompletion as jest.Mock).mockResolvedValue({ data: mockCompletion });
+
+    await renderWithRouter();
+    await screen.findByText('Monthly Safety Walk');
+
+    fireEvent.click(screen.getByRole('button', { name: /scan qr code/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /simulate camera denied/i }));
+
+    expect(await screen.findByText(/camera access denied/i)).toBeInTheDocument();
+    expect(screen.getByText(/enter the code manually/i)).toBeInTheDocument();
+  });
+
+  test('AC-16: an offline checklist load shows an actionable error with a way home', async () => {
+    (api.checklistsAPI.getChecklist as jest.Mock).mockRejectedValue(networkError());
+    (api.checklistsAPI.getCompletion as jest.Mock).mockResolvedValue({ data: mockCompletion });
+
+    await renderWithRouter();
+
+    expect(await screen.findByText(/failed to load checklist/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /go home/i })).toBeInTheDocument();
+  });
+
+  test('AC-15: a completed checklist disables Complete so it cannot be submitted twice', async () => {
+    const completed = {
+      ...mockCompletion,
+      status: 'completed',
+      completed_at: '2024-01-02T00:00:00Z',
+      completed_steps_count: 2,
+      required_steps_completed: 2,
+      required_steps_total: 2,
+      step_completions: [
+        { id: 'sc-1', step: 'step-1', scanned_at: '2024-01-01T00:00:00Z' },
+        { id: 'sc-2', step: 'step-2', scanned_at: '2024-01-01T00:00:00Z' },
+      ],
+    };
+    (api.checklistsAPI.getChecklist as jest.Mock).mockResolvedValue({ data: mockChecklist });
+    (api.checklistsAPI.getCompletion as jest.Mock).mockResolvedValue({ data: completed });
+
+    await renderWithRouter();
+    await screen.findByText('Monthly Safety Walk');
+
+    const completeButton = await screen.findByRole('button', { name: /^completed$/i });
+    expect(completeButton).toBeDisabled();
+    expect(api.checklistsAPI.completeChecklist).not.toHaveBeenCalled();
   });
 });
 

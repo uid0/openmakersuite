@@ -5,6 +5,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ScanPage from '../../pages/ScanPage';
 import * as api from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 // Mock the API
 vi.mock('../../services/api');
@@ -209,5 +210,70 @@ describe('ScanPage', () => {
     await renderWithRouter();
 
     await screen.findByText(/item not found/i);
+  });
+
+  // --- R2 resilience (oms-sr1l4): public scan journey ---------------------
+  // ScanPage is reached via the QR's encoded URL (/scan/:itemId); there is no
+  // in-page camera, so AC-14 "mobile resilience" here means the journey
+  // completes from the URL alone, AC-15 prevents duplicate auto-submits, and
+  // AC-16 surfaces an actionable state when the network drops.
+
+  test('AC-16: an offline item load shows an actionable error, not a blank screen', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockRejectedValue(networkError());
+
+    await renderWithRouter();
+
+    await screen.findByText(/failed to load item/i);
+    expect(screen.getByRole('button', { name: /go home/i })).toBeInTheDocument();
+    // A lost network must never silently fire an auto-submitted reorder.
+    expect(api.reorderAPI.createRequest).not.toHaveBeenCalled();
+  });
+
+  test('AC-15: the anonymous auto-submit fires exactly once (no duplicate reorder)', async () => {
+    const itemWithoutPending = { ...mockItem, has_pending_reorder: false };
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: itemWithoutPending });
+    (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({ data: { id: 1 } });
+
+    await renderWithRouter();
+
+    // The (!submitting && !submitted) guard keeps the effect's re-runs from
+    // re-submitting, so the request lands exactly once.
+    await waitFor(() => {
+      expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
+    });
+    expect(api.reorderAPI.createRequest).toHaveBeenCalledTimes(1);
+  });
+
+  test('AC-14: completes the reorder from the scanned URL with no camera step', async () => {
+    const itemWithoutPending = { ...mockItem, has_pending_reorder: false };
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: itemWithoutPending });
+    (api.reorderAPI.createRequest as jest.Mock).mockResolvedValue({ data: { id: 1 } });
+
+    await renderWithRouter();
+
+    // Reaching /thanks proves the journey is driven entirely by the
+    // QR-encoded :itemId — the camera-free, code-entry-by-URL path.
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/thanks');
+    });
+  });
+
+  test('AC-15: an existing pending reorder is not duplicated and shows a clear final state', async () => {
+    const pendingItem = {
+      ...mockItem,
+      has_pending_reorder: true,
+      active_reorder_request: {
+        status: 'pending',
+        quantity: 25,
+        requested_at: '2024-01-01T00:00:00Z',
+        requested_by: 'Anonymous',
+      },
+    };
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: pendingItem });
+
+    await renderWithRouter();
+
+    await screen.findByText(/reorder already requested/i);
+    expect(api.reorderAPI.createRequest).not.toHaveBeenCalled();
   });
 });

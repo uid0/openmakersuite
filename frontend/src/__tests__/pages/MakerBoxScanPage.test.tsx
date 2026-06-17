@@ -13,6 +13,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import MakerBoxScanPage from '../../pages/MakerBoxScanPage';
 import * as api from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
 
@@ -142,5 +143,19 @@ describe('MakerBoxScanPage', () => {
     expect(screen.queryByTestId('scan-result')).not.toBeInTheDocument();
     expect(screen.getByLabelText(/bin id/i)).toHaveValue('');
     expect(screen.getByLabelText(/username/i)).toHaveValue('');
+  });
+
+  // R2 resilience (oms-sr1l4): AC-16 — when the scan request fails with a bare
+  // network error (offline, no response body), the page still shows the
+  // fallback "Scan failed." alert rather than crashing or going blank.
+  test('AC-16: a scan made offline shows the fallback "Scan failed." alert', async () => {
+    (api.makerBoxesAPI.scan as jest.Mock).mockRejectedValue(networkError());
+
+    render(<MakerBoxScanPage />);
+    fillAndSubmit();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/scan failed/i);
+    expect(screen.queryByTestId('scan-result')).not.toBeInTheDocument();
   });
 });

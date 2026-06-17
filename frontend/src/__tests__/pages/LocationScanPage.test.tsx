@@ -9,6 +9,7 @@ import { NotificationProvider } from '../../contexts/NotificationContext';
 import LocationScanPage from '../../pages/LocationScanPage';
 import * as api from '../../services/api';
 import { promptInput, showError } from '../../utils/dialogs';
+import { networkError } from '../helpers/offline';
 
 // Mock the API
 vi.mock('../../services/api');
@@ -308,6 +309,76 @@ describe('LocationScanPage', () => {
         })
       );
     });
+  });
+
+  // --- R2 resilience (oms-sr1l4): public location scan journey -------------
+  // AC-16 offline actionable error, AC-15 duplicate-submit guard + clear
+  // final state, and anonymous-vs-member gating.
+
+  test('AC-16: an offline location load shows an actionable error with a way home', async () => {
+    (api.inventoryAPI.getLocation as jest.Mock).mockRejectedValue(networkError());
+
+    await renderWithRouter();
+
+    await screen.findByText(/failed to load location/i);
+    expect(screen.getByRole('button', { name: /go home/i })).toBeInTheDocument();
+  });
+
+  test('AC-15: a rapid double-tap on Submit Report only files one report', async () => {
+    (api.inventoryAPI.getLocation as jest.Mock).mockResolvedValue({ data: mockLocation });
+    // Never resolves: keeps the page in its submitting state so the disabled
+    // guard is observable and a second tap is a no-op.
+    (api.locationCheckinAPI.reportSecurity as jest.Mock).mockReturnValue(new Promise(() => {}));
+
+    await renderWithRouter();
+    await screen.findByText('Test Location');
+
+    fireEvent.click(screen.getByRole('button', { name: /report issue/i }));
+    fireEvent.click(await screen.findByText(/needs cleaning/i));
+    fireEvent.click(await screen.findByRole('button', { name: /submit report/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /submitting/i })).toBeDisabled()
+    );
+    fireEvent.click(screen.getByRole('button', { name: /submitting/i }));
+
+    expect(api.locationCheckinAPI.reportSecurity).toHaveBeenCalledTimes(1);
+  });
+
+  test('AC-15: a successful check-in shows a clear final-state confirmation', async () => {
+    (api.inventoryAPI.getLocation as jest.Mock).mockResolvedValue({ data: mockLocation });
+    (api.locationCheckinAPI.checkin as jest.Mock).mockResolvedValue({ data: { id: 'c-1' } });
+
+    await renderWithRouter();
+    await screen.findByText('Test Location');
+
+    const notes = screen.getByPlaceholderText(/any notes about your check-in/i);
+    fireEvent.change(notes, { target: { value: 'Here for the laser class' } });
+    fireEvent.submit(notes.closest('form')!);
+
+    await screen.findByText(/thank you! your submission has been recorded/i);
+  });
+
+  test('anonymous visitor does not see member-only check-in type or Tasks tab', async () => {
+    (api.inventoryAPI.getLocation as jest.Mock).mockResolvedValue({ data: mockLocation });
+
+    await renderWithRouter();
+    await screen.findByText('Test Location');
+
+    expect(screen.queryByText(/check-in type/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^tasks$/i })).not.toBeInTheDocument();
+  });
+
+  test('authenticated member sees the check-in type selector and the Tasks tab', async () => {
+    localStorage.setItem('token', 'member-token');
+    (api.inventoryAPI.getLocation as jest.Mock).mockResolvedValue({ data: mockLocation });
+    (api.locationCheckinAPI.getTasks as jest.Mock).mockResolvedValue({ data: { results: [] } });
+
+    await renderWithRouter();
+    await screen.findByText('Test Location');
+
+    expect(screen.getByText(/check-in type/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^tasks$/i })).toBeInTheDocument();
   });
 });
 

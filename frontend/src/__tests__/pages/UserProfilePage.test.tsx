@@ -253,5 +253,90 @@ describe('UserProfilePage', () => {
       expect(notificationsAPI.updatePreferences).toHaveBeenCalledWith({ email_enabled: false });
     });
   });
+
+  // AC-17/AC-19 (#457 R7): an expired session (401 on profile load) surfaces a
+  // recovery message instead of leaving the page stuck on the loading state.
+  // The global token-refresh interceptor lives in services/api and is mocked
+  // away here, so this asserts the page-level fallback behavior.
+  it('surfaces an error and is not stuck loading when the session has expired', async () => {
+    (notificationsAPI.getPreferences as jest.Mock).mockResolvedValue({ data: mockPreferences });
+    (userAPI.getProfile as jest.Mock).mockRejectedValueOnce({
+      response: { status: 401, data: { detail: 'Authentication credentials were not provided.' } },
+    });
+
+    render(
+      <MantineProvider>
+        <BrowserRouter>
+          <UserProfilePage />
+        </BrowserRouter>
+      </MantineProvider>
+    );
+
+    expect(
+      await screen.findByText('Authentication credentials were not provided.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Loading profile/)).not.toBeInTheDocument();
+  });
+
+  // AC-19 (#457 R7): a missing profile (404 with no error body) falls back to a
+  // consistent message rather than a blank screen or a raw exception.
+  it('surfaces a fallback error when the profile is missing', async () => {
+    (notificationsAPI.getPreferences as jest.Mock).mockResolvedValue({ data: mockPreferences });
+    (userAPI.getProfile as jest.Mock).mockRejectedValueOnce({
+      response: { status: 404, data: {} },
+    });
+
+    render(
+      <MantineProvider>
+        <BrowserRouter>
+          <UserProfilePage />
+        </BrowserRouter>
+      </MantineProvider>
+    );
+
+    expect(await screen.findByText('Failed to load profile')).toBeInTheDocument();
+    expect(screen.queryByText(/Loading profile/)).not.toBeInTheDocument();
+  });
+
+  // AC-15/AC-19 (#457 R7): the profile save button disables while a save is in
+  // flight, preventing a duplicate submission, then re-enables on completion.
+  it('disables the profile save button while a save is in flight', async () => {
+    (notificationsAPI.getPreferences as jest.Mock).mockResolvedValue({ data: mockPreferences });
+    let resolveUpdate: (value: unknown) => void = () => {};
+    (userAPI.updateProfile as jest.Mock).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdate = resolve;
+        })
+    );
+
+    render(
+      <MantineProvider>
+        <BrowserRouter>
+          <UserProfilePage />
+        </BrowserRouter>
+      </MantineProvider>
+    );
+
+    // The profile tab is active by default; its save button appears once the
+    // profile finishes loading and the form is populated with valid values.
+    const saveButton = await screen.findByRole('button', { name: /save changes/i });
+    expect(saveButton).not.toBeDisabled();
+
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(saveButton).toBeDisabled();
+    });
+    // A second click on the disabled button cannot fire another request.
+    fireEvent.click(saveButton);
+    expect(userAPI.updateProfile).toHaveBeenCalledTimes(1);
+
+    // Resolve the pending save so nothing leaks past the test.
+    resolveUpdate({ data: mockProfile });
+    await waitFor(() => {
+      expect(saveButton).not.toBeDisabled();
+    });
+  });
 });
 

@@ -99,13 +99,18 @@ test.describe('Maintenance work order review', () => {
     await page.goto(`/maintenance/work-orders/${workOrderId}`);
 
     // The review page resolves to the work order (showing the PM task it
-    // covers) — not a blank screen and not the "not found" fallback.
-    await expect(page.getByText(new RegExp(MAINTENANCE_TITLE, 'i'))).toBeVisible({
+    // covers) — not a blank screen and not the "not found" fallback. Scope to
+    // the page-hero <h1> heading: the PM title also renders in the body card,
+    // so an unscoped getByText matches 2 elements (Playwright strict mode).
+    await expect(
+      page.getByRole('heading', { name: new RegExp(MAINTENANCE_TITLE, 'i') }),
+    ).toBeVisible({
       timeout: 15000,
     });
     await expect(page.getByText(/work order not found/i)).toHaveCount(0);
 
     // The status control is present so a reviewer can advance the work order.
-    await expect(page.getByText('Status')).toBeVisible();
+    // Exact match targets the lone "Status" form label, not a substring match.
+    await expect(page.getByText('Status', { exact: true })).toBeVisible();
   });
 });

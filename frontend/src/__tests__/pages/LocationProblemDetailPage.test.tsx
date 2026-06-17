@@ -7,11 +7,13 @@
  */
 import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { AxiosError } from 'axios';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import LocationProblemDetailPage from '../../pages/LocationProblemDetailPage';
 import api, { locationProblemsAPI, maintenanceAPI } from '../../services/api';
 import { LocationProblem } from '../../types';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api', () => {
   const apiMock = { get: jest.fn() };
@@ -165,5 +167,60 @@ describe('LocationProblemDetailPage reactive contract (gh-453)', () => {
     ).not.toBeDisabled();
     // Problem still rendered, no loader.
     expect(screen.getByText('Door handle is broken')).toBeInTheDocument();
+  });
+});
+
+/** A 401 shaped like the backend's "session expired" rejection. */
+const sessionExpiredError = (): AxiosError =>
+  new AxiosError('Request failed with status code 401', 'ERR_BAD_REQUEST', undefined, {}, {
+    status: 401,
+    statusText: 'Unauthorized',
+    data: { detail: 'Authentication credentials were not provided.' },
+    headers: {},
+    config: {} as never,
+  } as never);
+
+describe('LocationProblemDetailPage resilience (#457 R4)', () => {
+  test('renders an actionable error state (not a blank screen) when the load fails offline (AC-19)', async () => {
+    mockLP.get.mockRejectedValue(networkError());
+
+    renderPage();
+
+    // A recovery path back to locations is offered, and the failure is shown
+    // rather than a blank page or "Loading problem…" stuck forever.
+    expect(
+      await screen.findByRole('link', { name: /back to locations/i }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/failed to load/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/loading problem/i)).not.toBeInTheDocument();
+  });
+
+  test('preserves typed notes and re-enables actions on a session expiry (401) (AC-17)', async () => {
+    mockLP.get.mockResolvedValue({ data: buildProblem() } as any);
+    mockLP.resolve.mockRejectedValue(sessionExpiredError());
+
+    renderPage();
+
+    await screen.findByText('Door handle is broken');
+
+    const notes = screen.getByLabelText(/resolution notes/i) as HTMLTextAreaElement;
+    fireEvent.change(notes, { target: { value: 'Tightened the bolts' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /mark resolved/i }));
+
+    await waitFor(() => {
+      expect(mockLP.resolve).toHaveBeenCalledTimes(1);
+    });
+
+    // The session expired mid-resolve: the action re-enables so the user can
+    // retry after re-login, and the resolution notes they typed survive.
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /mark resolved/i }),
+      ).not.toBeDisabled();
+    });
+    expect(
+      (screen.getByLabelText(/resolution notes/i) as HTMLTextAreaElement).value,
+    ).toBe('Tightened the bolts');
   });
 });

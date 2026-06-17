@@ -6,6 +6,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import BreakerTracePage from '../../pages/BreakerTracePage';
 import * as api from '../../services/api';
+import { expectNoA11yViolations } from '../helpers/axe';
 
 vi.mock('../../services/api');
 
@@ -107,5 +108,25 @@ describe('BreakerTracePage', () => {
     });
     renderAt('/facilities/electrical/breakers/999/trace');
     expect(await screen.findByText('Not found')).toBeInTheDocument();
+  });
+
+  // AC-19: the trace renders a consistent loading state while the breaker and
+  // its fed loads resolve, rather than a blank screen.
+  it('shows a loading state while the trace loads (AC-19)', async () => {
+    (api.electricalCircuitsAPI.getBreaker as jest.Mock).mockReturnValue(
+      new Promise(() => {}),
+    );
+
+    renderAt('/facilities/electrical/breakers/5/trace');
+
+    expect(await screen.findByText(/loading breaker trace/i)).toBeInTheDocument();
+  });
+
+  // AC-20: the loaded trace view must be free of WCAG A/AA violations.
+  it('has no accessibility violations once loaded (AC-20)', async () => {
+    const { container } = renderAt('/facilities/electrical/breakers/5/trace');
+
+    expect(await screen.findByText(/Trace: A \/ 12/)).toBeInTheDocument();
+    await expectNoA11yViolations(container);
   });
 });

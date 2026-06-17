@@ -13,6 +13,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ForgeKeyDevicesPage from '../../pages/ForgeKeyDevicesPage';
 import { forgekeyAPI, inventoryAPI } from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api', async () => {
   const actual = await vi.importActual('../../services/api');
@@ -126,5 +127,38 @@ describe('ForgeKeyDevicesPage', () => {
     });
 
     expect((screen.getByLabelText(/Location for Front door counter/i) as HTMLSelectElement).value).toBe('10');
+  });
+
+  // AC-18: the page authorizes on `is_staff` OR `is_superuser`. The existing
+  // "non-staff users are redirected" test covers the revoke/denial half (both
+  // flags false); this covers the authorize half via a superuser who is not
+  // staff, so neither branch of the gate can silently regress.
+  test('authorizes a superuser who is not staff (AC-18)', async () => {
+    localStorage.setItem('is_staff', 'false');
+    localStorage.setItem('is_superuser', 'true');
+
+    const device = buildDevice();
+    mockForgekey.listDevices.mockResolvedValue({ data: { results: [device] } } as any);
+    mockInventory.listLocations.mockResolvedValue({ data: { results: [] } } as any);
+
+    renderPage();
+
+    expect(await screen.findByText('Front door counter')).toBeInTheDocument();
+    expect(mockForgekey.listDevices).toHaveBeenCalled();
+  });
+
+  // AC-16: a dependency/network failure must surface an actionable state, not
+  // a blank table or an unhandled rejection.
+  test('shows an actionable error when the device list fails offline (AC-16)', async () => {
+    localStorage.setItem('is_staff', 'true');
+
+    mockForgekey.listDevices.mockRejectedValue(networkError());
+    mockInventory.listLocations.mockResolvedValue({ data: { results: [] } } as any);
+
+    renderPage();
+
+    expect(
+      await screen.findByText('Failed to load ForgeKey devices.'),
+    ).toBeInTheDocument();
   });
 });

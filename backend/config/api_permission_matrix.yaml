@@ -2082,6 +2082,20 @@ views:
     permission_classes: []
   membership.views.validate_registration_token:
     permission_classes: []
+  notifications.account_views.KnownDeviceViewSet:
+    actions:
+      destroy:
+        permission_classes:
+        - IsAuthenticated
+      list:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+      revoke_all:
+        permission_classes:
+        - IsAuthenticated
   notifications.views.NotificationPreferenceView:
     permission_classes:
     - IsAuthenticated

@@ -155,6 +155,17 @@ class User(AbstractUser):
         default=0,
         help_text="Y-axis offset for signature line position in PDFs",
     )
+    tokens_valid_after = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "JWT cutoff for the 'this wasn't me' revoke-all action "
+            "(notifications FP3, oms-ltqs3). Any access or refresh token whose "
+            "issued-at (iat) predates this moment is rejected during validation, "
+            "forcing a full re-auth across the REST API, the DRF browsable API, "
+            "and the admin. Null means no tokens have ever been revoked."
+        ),
+    )
 
     class Meta:
         db_table = "auth_user"  # Keep using the same table name for compatibility

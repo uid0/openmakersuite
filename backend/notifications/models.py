@@ -4,6 +4,8 @@ Models for notification management.
 
 from __future__ import annotations
 
+import uuid
+
 from django.contrib.auth import get_user_model
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -211,3 +213,61 @@ class KnownDevice(models.Model):
     def __str__(self):
         token_preview = (self.device_token or "")[:8]
         return f"Known device for {self.user.username} ({token_preview})"
+
+
+class AccountSecurityAuditEvent(models.Model):
+    """
+    Append-only audit trail for account-security actions a user takes on their
+    own devices/sessions (notifications FP3, oms-ltqs3).
+
+    Two actions are recorded:
+
+    * ``revoke_all`` — the "this wasn't me" action: every Django session for the
+      user is deleted and ``User.tokens_valid_after`` is advanced so all
+      outstanding JWTs are rejected, forcing a full re-auth everywhere.
+    * ``forget_device`` — a single :class:`KnownDevice` row was removed.
+
+    ``actor`` is the account owner performing the action; it is ``SET_NULL`` so
+    the audit row survives user deletion. Mirrors the per-domain audit-event
+    pattern used elsewhere (e.g. ``customization.SiteSettingsAuditEvent``).
+    """
+
+    ACTION_REVOKE_ALL = "revoke_all"
+    ACTION_FORGET_DEVICE = "forget_device"
+    ACTION_CHOICES = [
+        (ACTION_REVOKE_ALL, "Revoked all sessions and tokens"),
+        (ACTION_FORGET_DEVICE, "Forgot a known device"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="account_security_events",
+        help_text="User who performed the action on their own account.",
+    )
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="Approximate IP address the action originated from.",
+    )
+    user_agent = models.TextField(
+        blank=True,
+        help_text="User-Agent string of the request that performed the action.",
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Structured detail, e.g. sessions_deleted count or device id.",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        actor = self.actor.username if self.actor else "(deleted user)"
+        return f"{self.get_action_display()} by {actor}"

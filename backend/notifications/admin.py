@@ -4,7 +4,7 @@ Admin configuration for notifications app.
 
 from django.contrib import admin
 
-from .models import KnownDevice, Notification
+from .models import AccountSecurityAuditEvent, KnownDevice, Notification
 
 
 @admin.register(Notification)
@@ -33,3 +33,28 @@ class KnownDeviceAdmin(admin.ModelAdmin):
     search_fields = ["user__username", "user__email", "device_token", "ip_address"]
     readonly_fields = ["device_token", "fingerprint_hash", "first_seen", "last_seen"]
     date_hierarchy = "last_seen"
+
+
+@admin.register(AccountSecurityAuditEvent)
+class AccountSecurityAuditEventAdmin(admin.ModelAdmin):
+    """Read-only view of the append-only account-security audit trail."""
+
+    list_display = ["id", "action", "actor", "ip_address", "created_at"]
+    list_filter = ["action", "created_at"]
+    search_fields = ["actor__username", "actor__email", "ip_address"]
+    readonly_fields = [
+        "id",
+        "action",
+        "actor",
+        "ip_address",
+        "user_agent",
+        "metadata",
+        "created_at",
+    ]
+    date_hierarchy = "created_at"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

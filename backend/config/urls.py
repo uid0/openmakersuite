@@ -60,6 +60,8 @@ urlpatterns = [
     path("api/donations/", include("donations.urls")),
     path("api/search/", include("search.urls")),
     path("api/notifications/", include("notifications.urls")),
+    # Account device-management + "this wasn't me" revoke-all (notifications FP3).
+    path("api/account/", include("notifications.account_urls")),
     path("api/screens/", include("screens.urls")),
     path("api/maker-boxes/", include("maker_boxes.urls")),
     path("api/vendors/", include("vendors.urls")),

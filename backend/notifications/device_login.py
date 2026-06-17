@@ -27,10 +27,12 @@ import secrets
 
 from django.conf import settings
 from django.core import signing
+from django.db import transaction
 from django.utils import timezone
 
 from .models import KnownDevice
 from .services import create_notification
+from .tasks import send_new_device_alert_email
 
 logger = logging.getLogger(__name__)
 
@@ -138,13 +140,17 @@ def track_device_login(request, user):
         # treat as a NEW device. Reuse the presented token when available so a
         # shared browser is not issued a fresh cookie on every account.
         device_token = token or _mint_device_token()
-        KnownDevice.objects.create(
+        device = KnownDevice.objects.create(
             user=user,
             device_token=device_token,
             ip_address=ip_address,
             user_agent=user_agent,
         )
         _notify_new_device(user, ip_address, user_agent, device_token)
+        # Email companion to the in-app alert (oms-1crmp, FP2). Defer the
+        # dispatch to on_commit so the worker never races the device row it
+        # looks up; in request autocommit (no ATOMIC_REQUESTS) it fires at once.
+        transaction.on_commit(lambda: send_new_device_alert_email.delay(user.id, device.id))
         return device_token
     except Exception:  # never let device tracking break a login
         logger.exception(

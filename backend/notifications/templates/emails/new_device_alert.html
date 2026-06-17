@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>New device sign-in</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; color: #222; line-height: 1.5;">
+  <h2 style="margin-bottom: 0.25em;">New device sign-in to your account</h2>
+  <p style="margin-top: 0; color: #555;">
+    Hi {{ username }}, we noticed a new sign-in to your account from a device we have not seen before.
+  </p>
+
+  <table cellpadding="6" cellspacing="0" style="border-collapse: collapse; margin: 1em 0;">
+    <tr><td style="color:#666;">Device</td><td><strong>{{ user_agent }}</strong></td></tr>
+    <tr><td style="color:#666;">Location</td><td>{{ ip_address }}</td></tr>
+    <tr><td style="color:#666;">When</td><td>{{ seen_at }}</td></tr>
+  </table>
+
+  <p>If this was you, no action is needed.</p>
+  <p style="color:#555;">
+    If you do not recognize this sign-in, secure your account by changing your
+    password and reviewing the devices on your account.
+  </p>
+
+  <p>
+    <a href="{{ devices_url }}" style="background:#2563eb; color:#fff; padding:10px 16px; text-decoration:none; border-radius:4px; display:inline-block;">
+      Review your devices
+    </a>
+  </p>
+  <p style="color:#888; font-size: 12px;">Or paste this URL into your browser: {{ devices_url }}</p>
+
+  {# FP3 (revoke / "this wasn't me") will add a one-click revoke link here. #}
+
+  <hr style="border: none; border-top: 1px solid #eee; margin-top: 2em;">
+  <p style="color:#888; font-size: 12px;">Sent by OpenMakerSuite. You are receiving this security alert because a new device signed in to your account.</p>
+</body>
+</html>

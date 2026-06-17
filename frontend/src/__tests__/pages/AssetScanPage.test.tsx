@@ -11,6 +11,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import AssetScanPage from '../../pages/AssetScanPage';
 import * as api from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
 
@@ -237,5 +238,107 @@ describe('AssetScanPage — modal flows', () => {
 
     expect(api.checklistsAPI.startChecklist).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  // --- R2 resilience (oms-sr1l4): asset scan journey ----------------------
+  // The asset page is reached via the QR-encoded URL (/scan/asset/:assetId),
+  // so it needs no in-page camera. These pin AC-19 loading/empty surfaces,
+  // AC-16 offline/dependency-failure actionable states, and the AC-15
+  // duplicate-submit guard on the report-problem form.
+
+  test('AC-19: shows a loading state while the asset is fetched', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockReturnValue(new Promise(() => {}));
+
+    renderPage();
+
+    expect(await screen.findByText(/loading asset details/i)).toBeInTheDocument();
+  });
+
+  test('AC-16: an offline asset load shows an actionable error with a way home', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockRejectedValue(networkError());
+
+    renderPage();
+
+    expect(await screen.findByText(/failed to load asset/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /go home/i })).toBeInTheDocument();
+  });
+
+  test('AC-19: renders an empty "asset not found" state when the scan returns no asset', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({ data: null });
+
+    renderPage();
+
+    expect(await screen.findByText(/asset not found/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /go home/i })).toBeInTheDocument();
+  });
+
+  test('AC-16: a report-problem submitted offline surfaces an actionable error', async () => {
+    localStorage.setItem('token', 'fake-token');
+    (api.assetsAPI.reportProblem as jest.Mock).mockRejectedValue(networkError());
+
+    renderPage();
+
+    const textarea = await screen.findByPlaceholderText(/describe the problem/i);
+    fireEvent.change(textarea, { target: { value: 'Belt is frayed' } });
+    fireEvent.click(screen.getByRole('button', { name: /^report problem$/i }));
+
+    expect(await screen.findByText(/failed to report problem/i)).toBeInTheDocument();
+  });
+
+  test('AC-15: a rapid double-tap on Report Problem only files one report', async () => {
+    localStorage.setItem('token', 'fake-token');
+    // Never resolves: holds the submitting state so the disabled guard shows.
+    (api.assetsAPI.reportProblem as jest.Mock).mockReturnValue(new Promise(() => {}));
+
+    renderPage();
+
+    const textarea = await screen.findByPlaceholderText(/describe the problem/i);
+    fireEvent.change(textarea, { target: { value: 'Belt is frayed' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /^report problem$/i }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /submitting/i })).toBeDisabled()
+    );
+    fireEvent.click(screen.getByRole('button', { name: /submitting/i }));
+
+    expect(api.assetsAPI.reportProblem).toHaveBeenCalledTimes(1);
+  });
+
+  test('AC-16: an offline photo upload still saves the report and flags the photo', async () => {
+    localStorage.setItem('token', 'fake-token');
+    const createObjectURL = jest.fn().mockReturnValue('blob:preview');
+    const revokeObjectURL = jest.fn();
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      value: createObjectURL,
+      configurable: true,
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      value: revokeObjectURL,
+      configurable: true,
+    });
+
+    (api.assetsAPI.reportProblem as jest.Mock).mockResolvedValue({ data: { id: 'prob-1' } });
+    (api.assetProblemsAPI.uploadPhoto as jest.Mock).mockRejectedValue(networkError());
+
+    const { container } = renderPage();
+
+    const textarea = await screen.findByPlaceholderText(/describe the problem/i);
+    fireEvent.change(textarea, { target: { value: 'Cracked housing' } });
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['img'], 'broken.png', { type: 'image/png' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    // The preview registers (Remove control appears) before we submit.
+    await screen.findByRole('button', { name: /^remove$/i });
+    fireEvent.click(screen.getByRole('button', { name: /^report problem$/i }));
+
+    // The problem report is created even though the photo upload is offline…
+    await waitFor(() =>
+      expect(api.assetsAPI.reportProblem).toHaveBeenCalledWith('asset-1', 'Cracked housing')
+    );
+    await waitFor(() => expect(api.assetProblemsAPI.uploadPhoto).toHaveBeenCalled());
+    // …and the offline photo is surfaced as a non-fatal, actionable failure.
+    expect(await screen.findByText(/photo 1 failed to upload/i)).toBeInTheDocument();
   });
 });

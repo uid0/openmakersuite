@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import TransparencyPage from '../../pages/TransparencyPage';
 import { analyticsAPI } from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api', () => ({
   analyticsAPI: {
@@ -89,5 +90,23 @@ describe('TransparencyPage', () => {
     expect(screen.getAllByText(/\$200\.00/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Order #ORD-2024-001/)).toBeInTheDocument();
     expect(screen.getByText(/Invoice #INV-2024-001/)).toBeInTheDocument();
+  });
+
+  // R2 resilience (oms-sr1l4): AC-16 — when the public ledger can't load
+  // (offline / dependency failure), the page shows an actionable error with a
+  // retry action instead of a blank screen.
+  it('AC-16: shows an actionable error with a retry action when the report fails to load offline', async () => {
+    const getTransparencyLedgerMock = analyticsAPI.getTransparencyLedger as jest.Mock;
+    getTransparencyLedgerMock.mockRejectedValue(networkError());
+
+    render(
+      <MantineProvider><MemoryRouter>
+        <TransparencyPage />
+      </MemoryRouter></MantineProvider>
+    );
+
+    const messages = await screen.findAllByText(/unable to load transparency data/i);
+    expect(messages.length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
   });
 });

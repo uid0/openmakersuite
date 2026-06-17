@@ -13,6 +13,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import DonationItemScanPage from '../../pages/DonationItemScanPage';
 import * as api from '../../services/api';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
 
@@ -142,5 +143,16 @@ describe('DonationItemScanPage', () => {
       );
     });
     await screen.findByText(/disposition recorded successfully/i);
+  });
+
+  // R2 resilience (oms-sr1l4): AC-16 — a true network failure (offline) must
+  // degrade to the same actionable error surface, not a blank screen.
+  test('AC-16: an offline item load shows an actionable error with a recovery action', async () => {
+    (api.donationsAPI.getDonationItem as jest.Mock).mockRejectedValue(networkError());
+
+    renderPage();
+
+    await screen.findByText(/failed to load donation item/i);
+    expect(screen.getByRole('button', { name: /go home/i })).toBeInTheDocument();
   });
 });

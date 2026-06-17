@@ -113,6 +113,16 @@ Behavior:
 - The "Mark as Delivered" submit button is disabled while in flight.
 - On failure the delivery panel stays open with its inputs intact so the
   operator can correct and retry.
+- `receive` (per-line-item receipt) patches the order from the API
+  response via `setOrder`, so the status and per-line received / pending
+  quantities update without a follow-up GET. The page does not flip back
+  to its initial "Loading purchase order…" state, and the receive panel
+  closes once the receipt succeeds.
+- Both the "Confirm Receipt" submit button and the per-line quantity
+  inputs are disabled while in flight, so a double click cannot resubmit
+  the same receipt.
+- On failure the receive panel stays open with the entered quantities
+  intact so the operator can correct and retry.
 
 ---
 
@@ -144,7 +154,7 @@ Each row lists the file, the mutation, and the loader being called.
 | Status | File | Mutation | Currently calls |
 | --- | --- | --- | --- |
 | ✅ migrated | `pages/AdminDashboard.tsx` | reorder approve / mark ordered / mark received / cancel / update tracking | (now patches row from response) |
-| ✅ migrated | `pages/PurchaseOrderPage.tsx` | `mark-delivered` | (now patches order from response) |
+| ✅ migrated | `pages/PurchaseOrderPage.tsx` | `mark-delivered` / `receive` (per-line-item) | (now patches order from response) |
 | ✅ migrated | `pages/LocationProblemDetailPage.tsx` | resolve / promote-standard / promote-third-party | (now patches problem from response) |
 | refresh-y | `pages/WorkOrderPage.tsx` | work-order status transition + save | `loadWorkOrder()` |
 | refresh-y | `pages/ChecklistCompletionPage.tsx` | submit checklist item | `loadData()` |

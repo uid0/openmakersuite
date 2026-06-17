@@ -92,7 +92,7 @@ Staff create purchase orders, receive deliveries, and track supplier relationshi
 | --- | --- | --- | --- |
 | Browse purchase orders | `/purchasing/orders` (`PurchaseOrderListPage.tsx`) | staff | Filter by status; loading + empty states |
 | Create purchase order | `/purchasing/orders/new` (`PurchaseOrderFormPage.tsx`) | staff | Multi-supplier; line-item duplicate guard |
-| View / approve / receive purchase order | `/purchasing/orders/:orderId` (`PurchaseOrderPage.tsx`) | staff/admin | Receipt action gated by permission; auth expiration returns to PO |
+| View / approve / receive purchase order | `/purchasing/orders/:orderId` (`PurchaseOrderPage.tsx`) | staff/admin | `mark-delivered` and `receive` (per-line-item) patch the page from the response (no reload through the loading placeholder); receipt action gated by permission; auth expiration returns to PO |
 | Purchasing report (CSV / charts) | `/reports/purchasing` (`PurchasingReportPage.tsx`) | staff | Empty-state when no data |
 | Browse / edit suppliers | `/inventory/suppliers`, `/inventory/suppliers/:id`, `/inventory/suppliers/:id/edit` (`SupplierListPage.tsx`, `SupplierDetailPage.tsx`, `SupplierFormPage.tsx`) | staff | Lead-time and price-trend charts have empty-state |
 
@@ -251,7 +251,7 @@ state, scope failures, non-disruptive reconciliation) and the inventory
 of refresh-y workflows still to migrate live in
 [`REACTIVE_MUTATIONS.md`](REACTIVE_MUTATIONS.md). Reference implementations:
 purchase receiving (`AdminDashboard.tsx`, `PurchaseOrderPage.tsx`
-`mark-delivered`) and location problem resolution
+`mark-delivered` and `receive`) and location problem resolution
 (`LocationProblemDetailPage.tsx`).
 
 ---

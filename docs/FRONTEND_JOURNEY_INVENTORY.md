@@ -98,12 +98,14 @@ Staff create purchase orders, receive deliveries, and track supplier relationshi
 
 Tests: `__tests__/pages/PurchaseOrderFormPage.test.tsx`,
 `__tests__/pages/PurchaseOrderPage.test.tsx`,
+`__tests__/pages/PurchaseOrderListPage.test.tsx`,
+`__tests__/pages/PurchasingReportPage.test.tsx`,
 `__tests__/pages/SupplierListPage.test.tsx`,
 `__tests__/pages/SupplierDetailPage.test.tsx`,
 `__tests__/pages/SupplierFormPage.test.tsx`.
 
-Coverage gaps: `PurchaseOrderListPage` and `PurchasingReportPage` have no
-dedicated unit test today.
+Coverage: every page in this table now has a dedicated unit test
+(`PurchaseOrderListPage` and `PurchasingReportPage` added by #457 R3).
 
 ---
 
@@ -126,15 +128,23 @@ Staff manage assets, preventive maintenance, and work orders for facility safety
 
 Tests: `__tests__/pages/AssetDetailPage.test.tsx`,
 `__tests__/pages/AssetFormPage.test.tsx`,
+`__tests__/pages/AssetsPage.test.tsx`,
+`__tests__/pages/AssetReportPage.test.tsx`,
 `__tests__/pages/MaintenanceDashboard.test.tsx`,
 `__tests__/pages/MaintenanceDashboardPage.test.tsx`,
+`__tests__/pages/MaintenanceItemFormPage.test.tsx`,
+`__tests__/pages/WorkOrderPage.test.tsx`,
 `__tests__/pages/ThirdPartyWorkOrderPage.test.tsx`,
+`__tests__/pages/LocationProblemDetailPage.test.tsx`,
 `__tests__/pages/ChecklistCompletionPage.test.tsx`,
-`e2e/admin-dashboard-assets.spec.ts`.
+`e2e/admin-dashboard-assets.spec.ts`,
+`e2e/maintenance-work-order.spec.ts`.
 
-Coverage gaps: `AssetsPage`, `MaintenanceItemFormPage`, `AssetReportPage`,
-`WorkOrderPage`, and `LocationProblemDetailPage` have no dedicated unit test
-today.
+Coverage: every page in this table now has a dedicated unit test (`AssetsPage`,
+`MaintenanceItemFormPage`, `AssetReportPage`, `WorkOrderPage`, and
+`LocationProblemDetailPage` added by #457 R4, which also added the
+`maintenance-work-order.spec.ts` e2e covering the safety-critical work-order
+completion loop).
 
 ---
 
@@ -148,10 +158,12 @@ Staff manage day-to-day operational triage from a single landing dashboard.
 | TV dashboard (read-only display) | `/facilities/tv-dashboard`, `/facilities/tv-dashboard/:location` (`TVDashboard.tsx`) | public/staff | Auto-refresh; readable kiosk state on dependency failure |
 
 Tests: `__tests__/pages/LogisticsDashboard.test.tsx`,
-`__tests__/pages/DashboardPage.test.tsx`.
+`__tests__/pages/DashboardPage.test.tsx`,
+`__tests__/pages/TVDashboard.test.tsx`.
 
-Coverage gap: `TVDashboard` has no dedicated unit test today (kiosk-style
-display, primarily verified manually).
+Coverage: every page in this table now has a dedicated unit test (`TVDashboard`
+added by #457 R5; the physical display is still spot-checked manually on the
+kiosk hardware).
 
 ---
 
@@ -166,10 +178,12 @@ Public displays (kiosks, screens, TV dashboards) must run unattended.
 | Public kiosk display | `/kiosk/:slug` (`KioskDisplayPage.tsx`) | public | Auto-refresh; offline shows fallback content; no auth required |
 
 Tests: `__tests__/pages/ScreensListPage.test.tsx`,
+`__tests__/pages/ScreenEditPage.test.tsx`,
 `__tests__/pages/KioskDisplayPage.test.tsx`,
 `__tests__/components/screens/SharedWeatherBlock.test.tsx`.
 
-Coverage gap: `ScreenEditPage` has no dedicated unit test today.
+Coverage: every page in this table now has a dedicated unit test (`ScreenEditPage`
+added by #457 R5).
 
 ---
 
@@ -185,10 +199,15 @@ Staff and admins manage networked door / equipment lockout devices.
 Tests: `__tests__/pages/ForgeKeyDevicesPage.test.tsx`,
 `__tests__/pages/ForgeKeyDeviceDetailPage.test.tsx`,
 `__tests__/pages/ElectricalCircuitsPage.test.tsx`,
-`__tests__/pages/BreakerTracePage.test.tsx`.
+`__tests__/pages/BreakerTracePage.test.tsx`,
+`__tests__/pages/BreakerFormPage.test.tsx`,
+`__tests__/pages/OutletFormPage.test.tsx`,
+`__tests__/pages/LightSwitchFormPage.test.tsx`,
+`__tests__/pages/NetworkDropFormPage.test.tsx`.
 
-Coverage gap: `BreakerFormPage`, `OutletFormPage`, `LightSwitchFormPage`, and
-`NetworkDropFormPage` have no dedicated unit test today.
+Coverage: every page in this table now has a dedicated unit test (`BreakerFormPage`,
+`OutletFormPage`, `LightSwitchFormPage`, and `NetworkDropFormPage` added by
+#457 R6).
 
 ---
 
@@ -205,10 +224,13 @@ Authenticated users manage their account, site configuration, and integrations.
 | View webhook history | `/settings/webhooks/:id` (`WebhookDetailPage.tsx`) | admin | Recent deliveries with retry count |
 
 Tests: `__tests__/pages/UserProfilePage.test.tsx`,
-`__tests__/pages/WebhookListPage.test.tsx`.
+`__tests__/pages/SiteSettingsPage.test.tsx`,
+`__tests__/pages/WebhookListPage.test.tsx`,
+`__tests__/pages/WebhookFormPage.test.tsx`,
+`__tests__/pages/WebhookDetailPage.test.tsx`.
 
-Coverage gap: `SiteSettingsPage`, `WebhookFormPage`, and `WebhookDetailPage`
-have no dedicated unit test today.
+Coverage: every page in this table now has a dedicated unit test (`SiteSettingsPage`,
+`WebhookFormPage`, and `WebhookDetailPage` added by #457 R7).
 
 ---
 
@@ -234,10 +256,13 @@ Tests: `__tests__/components/Sidebar.test.tsx`,
 `__tests__/components/NotificationBadge.test.tsx`,
 `__tests__/components/AuthSection.test.tsx`,
 `__tests__/components/SessionExpiredBanner.test.tsx`,
-`__tests__/components/StatusState.test.tsx`.
+`__tests__/components/StatusState.test.tsx`,
+`__tests__/components/CommandPalette.test.tsx`,
+`__tests__/components/OfflineIndicator.test.tsx`,
+`__tests__/components/ErrorFallback.test.tsx`.
 
-Coverage gap: `CommandPalette`, `OfflineIndicator`, `InstallPrompt`, and
-`ErrorFallback` have no dedicated unit test today.
+Coverage gap: `InstallPrompt` has no dedicated unit test today (`CommandPalette`,
+`OfflineIndicator`, and `ErrorFallback` were covered by #457 R1).
 
 ---
 

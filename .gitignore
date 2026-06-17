@@ -99,7 +99,6 @@ Thumbs.db
 .runtime/
 .claude/
 .beads/*
-!.beads/redirect
 !.beads/routes.jsonl
 
 # Per-developer overrides (CLAUDE.md itself is committed — project conventions)

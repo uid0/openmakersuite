@@ -16,7 +16,7 @@ services:
     # Setting PGDATA to a subdirectory of the mount keeps the existing volume
     # path valid AND gives the image a clean directory it can initialize
     # under the new layout.
-    image: postgres:18.4-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88
+    image: postgres:18.4-alpine@sha256:d3e64d36360a9f40c30fbbc5dd2dde799fe35f8537500c8b067551a6497f50f4
     logging: *default-logging
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -51,7 +51,7 @@ services:
   emqx:
     # Digest pinned from `docker pull emqx/emqx-enterprise:6.2.0` on 2026-04-28.
     # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
-    image: emqx/emqx-enterprise:6.2.0@sha256:da01e1b51c2b60fa735a32922c697bcaa5bcf45c4c76b6ca8214111da752ff25
+    image: emqx/emqx-enterprise:6.2.1@sha256:01cd0f37fe258998bea07ed25fafbbdb00eb35daf59fd1491f6f1b4881d49961
     container_name: oms-emqx
     logging: *default-logging
     ports:

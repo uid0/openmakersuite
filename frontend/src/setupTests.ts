@@ -1,6 +1,12 @@
 // jest-dom adds custom matchers for asserting on DOM nodes.
 import '@testing-library/jest-dom/vitest';
-import { afterEach, vi } from 'vitest';
+import { toHaveNoViolations } from 'jest-axe';
+import { afterEach, expect, vi } from 'vitest';
+
+// Register the jest-axe accessibility matcher globally so `toHaveNoViolations`
+// (and the `expectNoA11yViolations` helper that wraps it) is available in every
+// test without per-file setup. See src/__tests__/helpers/axe.ts.
+expect.extend(toHaveNoViolations);
 
 // Shim: existing test files reference `jest.fn` / `jest.mock` etc.
 // Vitest's `vi` is API-compatible for the operations used here, so

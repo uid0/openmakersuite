@@ -90,3 +90,50 @@ describe('WebhookListPage delete flow', () => {
     });
   });
 });
+
+/**
+ * Resilience states (#457 R7, AC-18/AC-19): the list must render a consistent
+ * loading state and degrade gracefully when the backend denies the request
+ * (e.g. a non-admin viewer) instead of showing a blank screen or throwing.
+ */
+describe('WebhookListPage resilience states', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  const renderPage = () =>
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <WebhookListPage />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+  // AC-19: a consistent loading state renders while webhooks load.
+  it('shows a loading state while webhooks load', () => {
+    (api.webhooksAPI.listWebhooks as jest.Mock).mockImplementation(
+      () => new Promise(() => {}), // never resolves: hold the loading state
+    );
+
+    renderPage();
+
+    expect(screen.getByText(/loading webhooks/i)).toBeInTheDocument();
+  });
+
+  // AC-18/AC-19: a denied list request degrades to the consistent empty state
+  // rather than a blank screen or an unhandled exception.
+  it('renders a consistent empty state when the list request is denied', async () => {
+    (api.webhooksAPI.listWebhooks as jest.Mock).mockRejectedValue({
+      response: {
+        status: 403,
+        data: { detail: 'You do not have permission to perform this action.' },
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('No webhooks found')).toBeInTheDocument();
+    expect(screen.queryByText(/loading webhooks/i)).not.toBeInTheDocument();
+  });
+});

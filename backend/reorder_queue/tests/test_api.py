@@ -1804,3 +1804,206 @@ class TestPurchaseOrderListVoidHandling:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["total_items"] == 2
         assert response.data["total_quantity"] == 10  # 2 lines × 5 qty
+
+
+@pytest.mark.integration
+class TestPurchaseOrderAutoTransitionToSent:
+    """DRAFT -> SENT auto-transition when a sales order number is attached (oms-qdxss).
+
+    A draft PO that receives a non-blank sales_order_number is treated as
+    submitted to the supplier: status flips to SENT, sent_by/sent_at are
+    stamped, and a ``po_send`` audit event is recorded — the same effect as the
+    explicit ``send_to_supplier`` action. The trigger is one-way and fires only
+    on the empty -> non-empty edge.
+    """
+
+    def _draft_po(self, user, **kwargs):
+        return PurchaseOrder.objects.create(
+            supplier=SupplierFactory(),
+            status=PurchaseOrder.DRAFT,
+            created_by=user,
+            **kwargs,
+        )
+
+    def _detail_url(self, po):
+        return reverse("purchaseorder-detail", kwargs={"pk": po.pk})
+
+    def _po_send_events(self, po=None):
+        qs = PurchaseOrderAuditEvent.objects.filter(action=PurchaseOrderAuditEvent.ACTION_PO_SEND)
+        return qs.filter(purchase_order=po) if po is not None else qs
+
+    def test_attach_sales_order_number_to_draft_transitions_to_sent(self, authenticated_client):
+        """Attaching a sales order number to a DRAFT PO sends it to the supplier."""
+        client, user = authenticated_client
+        po = self._draft_po(user)
+
+        response = client.patch(
+            self._detail_url(po), {"sales_order_number": "SO-123"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        po.refresh_from_db()
+        assert po.status == PurchaseOrder.SENT
+        assert po.sales_order_number == "SO-123"
+        assert po.sent_at is not None
+        assert po.sent_by == user
+
+    def test_attach_sales_order_number_records_po_send_audit_event(self, authenticated_client):
+        """The auto-transition records the same po_send audit event as send_to_supplier."""
+        client, user = authenticated_client
+        po = self._draft_po(user)
+
+        client.patch(self._detail_url(po), {"sales_order_number": "SO-123"}, format="json")
+
+        event = self._po_send_events(po).get()
+        assert event.actor == user
+        assert event.purchase_order == po
+        assert event.metadata["po_number"] == po.po_number
+
+    def test_already_sent_po_edit_does_not_restamp(self, authenticated_client):
+        """Editing the sales order number on an already-SENT PO must not re-stamp it."""
+        client, user = authenticated_client
+        sender = User.objects.create_user(username="sender", email="s@example.com", password="x")
+        original_sent_at = timezone.now() - timedelta(days=3)
+        po = PurchaseOrder.objects.create(
+            supplier=SupplierFactory(),
+            status=PurchaseOrder.SENT,
+            created_by=user,
+            sent_by=sender,
+            sent_at=original_sent_at,
+            sales_order_number="SO-OLD",
+        )
+
+        response = client.patch(
+            self._detail_url(po), {"sales_order_number": "SO-NEW"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        po.refresh_from_db()
+        assert po.status == PurchaseOrder.SENT
+        assert po.sales_order_number == "SO-NEW"
+        # sent_by / sent_at untouched, and no new po_send event recorded.
+        assert po.sent_by == sender
+        assert po.sent_at == original_sent_at
+        assert not self._po_send_events(po).exists()
+
+    @pytest.mark.parametrize("blank_value", ["", "   ", "\t"])
+    def test_attach_blank_sales_order_number_does_not_transition(
+        self, authenticated_client, blank_value
+    ):
+        """Empty or whitespace-only sales order numbers are not a trigger."""
+        client, user = authenticated_client
+        po = self._draft_po(user)
+
+        response = client.patch(
+            self._detail_url(po), {"sales_order_number": blank_value}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        po.refresh_from_db()
+        assert po.status == PurchaseOrder.DRAFT
+        assert po.sent_at is None
+        assert not self._po_send_events(po).exists()
+
+    def test_editing_other_fields_on_draft_does_not_transition(self, authenticated_client):
+        """Editing unrelated fields on a DRAFT PO must not change its status."""
+        client, user = authenticated_client
+        po = self._draft_po(user)
+
+        response = client.patch(self._detail_url(po), {"notes": "rush order"}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        po.refresh_from_db()
+        assert po.status == PurchaseOrder.DRAFT
+        assert po.notes == "rush order"
+        assert po.sent_at is None
+        assert not self._po_send_events(po).exists()
+
+    def test_clearing_sales_order_number_on_sent_po_stays_sent(self, authenticated_client):
+        """Clearing the sales order number is one-way: a SENT PO is not un-sent."""
+        client, user = authenticated_client
+        po = PurchaseOrder.objects.create(
+            supplier=SupplierFactory(),
+            status=PurchaseOrder.SENT,
+            created_by=user,
+            sent_by=user,
+            sent_at=timezone.now(),
+            sales_order_number="SO-123",
+        )
+
+        response = client.patch(self._detail_url(po), {"sales_order_number": ""}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        po.refresh_from_db()
+        assert po.status == PurchaseOrder.SENT
+        assert po.sales_order_number == ""
+
+    def test_create_with_sales_order_number_transitions_to_sent(self, authenticated_client):
+        """Creating a PO with a sales order number sends it to the supplier immediately."""
+        client, user = authenticated_client
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(supplier=supplier, quantity_per_package=1)
+
+        response = client.post(
+            reverse("purchaseorder-list"),
+            {
+                "supplier": supplier.id,
+                "sales_order_number": "SO-555",
+                "items": [
+                    {"item_supplier_id": item_supplier.id, "quantity": 2, "unit_cost": "4.00"}
+                ],
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        assert response.data["status"] == PurchaseOrder.SENT
+        assert response.data["sales_order_number"] == "SO-555"
+
+        po = PurchaseOrder.objects.get(id=response.data["id"])
+        assert po.status == PurchaseOrder.SENT
+        assert po.sent_at is not None
+        assert po.sent_by == user
+        # Both the create and the auto-send are audited.
+        assert self._po_send_events(po).count() == 1
+
+    def test_create_without_sales_order_number_stays_draft(self, authenticated_client):
+        """A normal create (no sales order number) stays DRAFT and is not auto-sent."""
+        client, user = authenticated_client
+        supplier = SupplierFactory()
+        item_supplier = ItemSupplierFactory(supplier=supplier, quantity_per_package=1)
+
+        response = client.post(
+            reverse("purchaseorder-list"),
+            {
+                "supplier": supplier.id,
+                "items": [
+                    {"item_supplier_id": item_supplier.id, "quantity": 2, "unit_cost": "4.00"}
+                ],
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        assert response.data["status"] == PurchaseOrder.DRAFT
+        po = PurchaseOrder.objects.get(id=response.data["id"])
+        assert po.sent_at is None
+        assert not self._po_send_events(po).exists()
+
+    def test_send_to_supplier_action_records_po_send_audit_event(self, authenticated_client):
+        """The explicit send_to_supplier action shares the SENT transition + audit event."""
+        client, user = authenticated_client
+        po = self._draft_po(user)
+
+        response = client.post(
+            reverse("purchaseorder-send-to-supplier", kwargs={"pk": po.pk}), {}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        po.refresh_from_db()
+        assert po.status == PurchaseOrder.SENT
+        assert po.sent_by == user
+        assert po.sent_at is not None
+        event = self._po_send_events(po).get()
+        assert event.purchase_order == po
+        assert event.actor == user

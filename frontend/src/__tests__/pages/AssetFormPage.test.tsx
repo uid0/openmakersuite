@@ -3,11 +3,13 @@
  */
 import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { AxiosError } from 'axios';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import AssetFormPage from '../../pages/AssetFormPage';
 import { assetsAPI, inventoryAPI, sigAPI } from '../../services/api';
 import { Asset, Category, InventoryItem, Location, SIG } from '../../types';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
 
@@ -30,6 +32,16 @@ const renderWithMantine = (component: React.ReactElement) => {
 const mockAssetsAPI = assetsAPI as jest.Mocked<typeof assetsAPI>;
 const mockInventoryAPI = inventoryAPI as jest.Mocked<typeof inventoryAPI>;
 const mockSigAPI = sigAPI as jest.Mocked<typeof sigAPI>;
+
+/** A 401 shaped like the backend's "session expired" rejection. */
+const sessionExpiredError = (): AxiosError =>
+  new AxiosError('Request failed with status code 401', 'ERR_BAD_REQUEST', undefined, {}, {
+    status: 401,
+    statusText: 'Unauthorized',
+    data: { detail: 'Authentication credentials were not provided.' },
+    headers: {},
+    config: {} as never,
+  } as never);
 
 describe('AssetFormPage', () => {
   const mockCategories: Category[] = [
@@ -551,5 +563,112 @@ describe('AssetFormPage', () => {
 
     // No error message should be shown since API calls succeeded (just missing results)
     expect(screen.queryByText(/Failed to load form data/i)).not.toBeInTheDocument();
+  });
+
+  describe('resilience (#457 R4)', () => {
+    it('does not double-submit while a create is in flight (AC-15)', async () => {
+      mockUseParams.mockReturnValue({});
+      let resolveCreate: (value: unknown) => void = () => undefined;
+      mockAssetsAPI.createAsset.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveCreate = resolve;
+          }) as never,
+      );
+
+      renderWithMantine(
+        <MemoryRouter>
+          <AssetFormPage />
+        </MemoryRouter>,
+      );
+
+      const name = (await screen.findAllByLabelText(/Name/i))[0];
+      fireEvent.change(name, { target: { value: 'Drill press' } });
+
+      const submit = screen.getByRole('button', { name: /create asset/i });
+      fireEvent.click(submit);
+
+      await waitFor(() => {
+        expect(submit).toHaveAttribute('data-loading', 'true');
+      });
+
+      // A second click while the create is pending is ignored.
+      fireEvent.click(submit);
+      expect(mockAssetsAPI.createAsset).toHaveBeenCalledTimes(1);
+
+      resolveCreate({
+        data: { id: 'new-id' },
+        status: 201,
+        statusText: 'Created',
+        headers: {},
+        config: {} as never,
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalled();
+      });
+    });
+
+    it('keeps the form and re-enables Save when the create fails offline (AC-19)', async () => {
+      mockUseParams.mockReturnValue({});
+      mockAssetsAPI.createAsset.mockRejectedValue(networkError());
+
+      renderWithMantine(
+        <MemoryRouter>
+          <AssetFormPage />
+        </MemoryRouter>,
+      );
+
+      const name = (await screen.findAllByLabelText(/Name/i))[0] as HTMLInputElement;
+      fireEvent.change(name, { target: { value: 'Drill press' } });
+
+      fireEvent.click(screen.getByRole('button', { name: /create asset/i }));
+
+      await waitFor(() => {
+        expect(mockAssetsAPI.createAsset).toHaveBeenCalledTimes(1);
+      });
+
+      // The form (which carries the photo upload) is preserved, an actionable
+      // error is shown, and the button re-enables so the user can retry.
+      expect(await screen.findByText(/failed to save asset/i)).toBeInTheDocument();
+      expect((screen.getAllByLabelText(/Name/i)[0] as HTMLInputElement).value).toBe(
+        'Drill press',
+      );
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /create asset/i }),
+        ).not.toBeDisabled();
+      });
+    });
+
+    it('preserves the form across a session expiry (401) on save (AC-17)', async () => {
+      mockUseParams.mockReturnValue({});
+      mockAssetsAPI.createAsset.mockRejectedValue(sessionExpiredError());
+
+      renderWithMantine(
+        <MemoryRouter>
+          <AssetFormPage />
+        </MemoryRouter>,
+      );
+
+      const name = (await screen.findAllByLabelText(/Name/i))[0] as HTMLInputElement;
+      fireEvent.change(name, { target: { value: 'Lathe' } });
+
+      fireEvent.click(screen.getByRole('button', { name: /create asset/i }));
+
+      await waitFor(() => {
+        expect(mockAssetsAPI.createAsset).toHaveBeenCalledTimes(1);
+      });
+
+      // After a session expiry the entered asset details are not lost and the
+      // user can retry the save once they sign back in.
+      expect((screen.getAllByLabelText(/Name/i)[0] as HTMLInputElement).value).toBe(
+        'Lathe',
+      );
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /create asset/i }),
+        ).not.toBeDisabled();
+      });
+    });
   });
 });

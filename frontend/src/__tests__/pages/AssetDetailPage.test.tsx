@@ -2,8 +2,9 @@
  * Tests for AssetDetailPage component
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { AxiosError } from 'axios';
 import { MemoryRouter } from 'react-router-dom';
 import AssetDetailPage from '../../pages/AssetDetailPage';
 import {
@@ -15,6 +16,7 @@ import {
   workOrderAPI,
 } from '../../services/api';
 import { Asset, AssetProblem, MaintenanceItem, WorkOrder } from '../../types';
+import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
 vi.mock('react-router-dom', async () => ({
@@ -28,6 +30,16 @@ const mockAssetPartsAPI = assetPartsAPI as jest.Mocked<typeof assetPartsAPI>;
 const mockMaintenanceAPI = maintenanceAPI as jest.Mocked<typeof maintenanceAPI>;
 const mockWorkOrderAPI = workOrderAPI as jest.Mocked<typeof workOrderAPI>;
 const mockLotoAPI = lotoAPI as jest.Mocked<typeof lotoAPI>;
+
+/** A 401 shaped like the backend's "session expired" rejection. */
+const sessionExpiredError = (): AxiosError =>
+  new AxiosError('Request failed with status code 401', 'ERR_BAD_REQUEST', undefined, {}, {
+    status: 401,
+    statusText: 'Unauthorized',
+    data: { detail: 'Authentication credentials were not provided.' },
+    headers: {},
+    config: {} as never,
+  } as never);
 
 describe('AssetDetailPage', () => {
   const mockAsset: Asset = {
@@ -721,6 +733,119 @@ describe('AssetDetailPage', () => {
       expect(screen.getByText('Electrical')).toBeInTheDocument();
       expect(screen.getByText('Panel A / 12')).toBeInTheDocument();
       expect(screen.getByText('Padlock PAD-001')).toBeInTheDocument();
+    });
+  });
+
+  describe('resilience (#457 R4)', () => {
+    const renderDetail = () =>
+      render(
+        <MantineProvider>
+          <MemoryRouter>
+            <AssetDetailPage />
+          </MemoryRouter>
+        </MantineProvider>,
+      );
+
+    it('hides the Report Problem action when logged out (AC-18)', async () => {
+      localStorage.removeItem('token');
+
+      renderDetail();
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Asset')).toBeInTheDocument();
+      });
+      // Without an auth token the staff-only report action is not offered.
+      expect(
+        screen.queryByRole('button', { name: /report problem/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('guards against a duplicate "Mark Replaced" submit (AC-15)', async () => {
+      let resolveMark: (value: unknown) => void = () => undefined;
+      mockAssetPartsAPI.markReplaced.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveMark = resolve;
+          }) as never,
+      );
+
+      renderDetail();
+
+      const markButton = (await screen.findAllByText('Mark Replaced'))[0].closest(
+        'button',
+      ) as HTMLButtonElement;
+      fireEvent.click(markButton);
+
+      // Button enters its pending state; a second click while pending is ignored.
+      await screen.findByText('Updating...');
+      fireEvent.click(markButton);
+      expect(mockAssetPartsAPI.markReplaced).toHaveBeenCalledTimes(1);
+
+      resolveMark({
+        data: (mockAsset.parts ?? [])[0],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as never,
+      });
+      await waitFor(() => {
+        expect(screen.getAllByText('Mark Replaced').length).toBeGreaterThan(0);
+      });
+    });
+
+    it('re-enables "Mark Replaced" after an offline failure, asset intact (AC-19)', async () => {
+      mockAssetPartsAPI.markReplaced.mockRejectedValue(networkError());
+
+      renderDetail();
+
+      const markButton = (await screen.findAllByText('Mark Replaced'))[0].closest(
+        'button',
+      ) as HTMLButtonElement;
+      fireEvent.click(markButton);
+
+      await waitFor(() => {
+        expect(mockAssetPartsAPI.markReplaced).toHaveBeenCalledTimes(1);
+      });
+      // The action recovers and the asset stays rendered (no blank screen).
+      await waitFor(() => {
+        expect(screen.getAllByText('Mark Replaced').length).toBeGreaterThan(0);
+      });
+      expect(screen.getByText('Test Asset')).toBeInTheDocument();
+    });
+
+    it('preserves a typed problem report across a session expiry (401) (AC-17)', async () => {
+      localStorage.setItem('token', 'fake-token');
+      mockAssetsAPI.reportProblem.mockRejectedValue(sessionExpiredError());
+
+      try {
+        renderDetail();
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Asset')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /report problem/i }));
+
+        const description = (await screen.findByPlaceholderText(
+          /describe the problem/i,
+        )) as HTMLTextAreaElement;
+        fireEvent.change(description, { target: { value: 'Belt is frayed' } });
+
+        fireEvent.click(screen.getByRole('button', { name: /submit problem/i }));
+
+        await waitFor(() => {
+          expect(mockAssetsAPI.reportProblem).toHaveBeenCalledTimes(1);
+        });
+
+        // Session expired mid-submit: the description the user wrote is kept so
+        // they can resubmit after re-login.
+        expect(
+          (screen.getByPlaceholderText(/describe the problem/i) as HTMLTextAreaElement)
+            .value,
+        ).toBe('Belt is frayed');
+      } finally {
+        localStorage.removeItem('token');
+      }
     });
   });
 });

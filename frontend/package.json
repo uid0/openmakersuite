@@ -57,6 +57,7 @@
     "husky": "^9.0.0",
     "iconv-lite": "^0.7.0",
     "identity-obj-proxy": "^3.0.0",
+    "jest-axe": "^10.0.0",
     "jsdom": "^29.0.0",
     "patch-package": "^8.0.1",
     "playwright": "^1.56.1",

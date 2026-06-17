@@ -21,7 +21,7 @@ export default [
       'src/__tests__/**',
       'src/__mocks__/**',
       'src/setupTests.ts',
-      'src/vite-env.d.ts',
+      '**/*.d.ts',
     ],
   },
   js.configs.recommended,

@@ -299,6 +299,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         <Box p="md">
           <TextInput
             ref={inputRef}
+            type="search"
+            aria-label="Search inventory, assets, POs, suppliers, locations"
             placeholder="Search inventory, assets, POs, suppliers, locations..."
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}

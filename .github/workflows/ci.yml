@@ -25,7 +25,7 @@ jobs:
       deploy: ${{ steps.filter.outputs.deploy }}
       security: ${{ steps.filter.outputs.security }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -69,7 +69,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v6
@@ -126,7 +126,7 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v6
@@ -233,7 +233,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js 24
         uses: actions/setup-node@v6
@@ -261,7 +261,7 @@ jobs:
     if: needs.changes.outputs.frontend == 'true'
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js 24
         uses: actions/setup-node@v6
@@ -449,7 +449,7 @@ jobs:
       NODE_OPTIONS: "--dns-result-order=ipv4first"
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python 3.14
         uses: actions/setup-python@v6
@@ -590,7 +590,7 @@ jobs:
     if: needs.changes.outputs.docker == 'true'
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -645,7 +645,7 @@ jobs:
     if: needs.changes.outputs.security == 'true'
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # Fetch all history for gitleaks
 
@@ -735,7 +735,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Lint shell scripts (bash -n)
         run: |
@@ -934,7 +934,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -1164,7 +1164,7 @@ jobs:
       KUBE_VERSION: "1.29.0"
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Helm
         uses: azure/setup-helm@v5

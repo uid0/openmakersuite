@@ -380,7 +380,10 @@ class UserRegistrationToken(models.Model):
         """Check if token is valid (not used and not expired)."""
         if self.used:
             return False
-        if timezone.now() > self.expires_at:
+        # A token with no expiry set (e.g. an unsaved instance rendered by the
+        # admin add page) is not valid. Guards against comparing a datetime to
+        # None, which raised TypeError on /admin/.../userregistrationtoken/add/.
+        if self.expires_at is None or timezone.now() > self.expires_at:
             return False
         return True
 

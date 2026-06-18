@@ -86,6 +86,18 @@ class TestUserRegistrationToken:
 
         assert token.is_valid() is False
 
+    def test_token_is_invalid_when_no_expiry(self):
+        """Regression (BACKEND-P): an unsaved token has expires_at=None.
+
+        The Django admin add page renders the is_valid()-based readonly
+        display methods (qr_code_preview, is_valid_display, qr_code_link)
+        against an empty instance. is_valid() must return False, not raise
+        TypeError comparing timezone.now() to None.
+        """
+        token = UserRegistrationToken()
+
+        assert token.is_valid() is False
+
     def test_token_registration_url(self):
         """Test registration URL generation."""
         user = User.objects.create_user(

@@ -20,7 +20,7 @@ flower==2.0.1
 
 # QR Code and PDF generation
 qrcode[pil]==8.2
-reportlab==4.5.1
+reportlab==5.0.0
 Pillow==12.2.0
 # Server-side PNG charts for the monthly analytics pulse email (analytics app).
 # Forced to the headless Agg backend in code so this does not pull GUI deps.

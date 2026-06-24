@@ -1553,13 +1553,18 @@ class AssetAuthorizationViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        """Support ``?asset=<id>`` and ``?is_active=<bool>`` so the asset
-        detail page can list just that asset's authorizations (typically the
-        active ones)."""
+        """Support ``?asset=<id>``, ``?user=<id>`` and ``?is_active=<bool>``.
+
+        ``?asset=`` backs the asset detail page's authorized-users list;
+        ``?user=`` backs the per-member "assets I'm authorized for" view (op-tup);
+        ``?is_active=`` narrows either to the currently-active grants."""
         qs = super().get_queryset()
         asset_id = self.request.query_params.get("asset")
         if asset_id:
             qs = qs.filter(asset_id=asset_id)
+        user_id = self.request.query_params.get("user")
+        if user_id:
+            qs = qs.filter(user_id=user_id)
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() in ("1", "true", "yes"))

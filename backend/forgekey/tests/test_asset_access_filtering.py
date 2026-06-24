@@ -68,6 +68,28 @@ class TestAuthorizationAssetFilter:
         assert results[0]["is_active"] is True
 
 
+class TestAuthorizationUserFilter:
+    def test_filters_by_user(self, client):
+        """``?user=<id>`` backs the per-member "assets I'm authorized for" view."""
+        target = AssetAuthorizationFactory(asset=AssetFactory(), is_active=True)
+        AssetAuthorizationFactory(asset=AssetFactory(), is_active=True)  # different user
+
+        resp = client.get(f"/api/forgekey/authorizations/?user={target.user_id}")
+        assert resp.status_code == 200, resp.data
+        results = _results(resp)
+        assert len(results) == 1
+        assert results[0]["user"] == target.user_id
+
+    def test_user_and_active_combine(self, client):
+        target_user = AssetAuthorizationFactory(asset=AssetFactory(), is_active=True).user
+        AssetAuthorizationFactory(asset=AssetFactory(), user=target_user, is_active=False)
+
+        resp = client.get(f"/api/forgekey/authorizations/?user={target_user.id}&is_active=true")
+        results = _results(resp)
+        assert len(results) == 1
+        assert results[0]["is_active"] is True
+
+
 class TestLockoutAssetFilter:
     def test_filters_by_asset_and_is_active(self, client):
         asset = AssetFactory()

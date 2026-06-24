@@ -1,0 +1,21 @@
+.indicator-swatch {
+  display: inline-block;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  box-sizing: border-box;
+  flex: none;
+}
+
+.indicator-swatch--blink {
+  animation: indicator-swatch-blink 1.5s ease-in-out infinite;
+}
+
+@keyframes indicator-swatch-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}

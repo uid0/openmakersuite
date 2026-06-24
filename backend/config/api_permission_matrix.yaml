@@ -2107,6 +2107,14 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  membership.views.UserDirectoryViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAdminUser
   membership.views.UserProfileViewSet:
     actions:
       me:

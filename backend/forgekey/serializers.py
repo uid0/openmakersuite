@@ -20,9 +20,11 @@ from .models import (
     FirmwareBuild,
     FirmwareRollout,
     FirmwareVersion,
+    IndicatorBinding,
     OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
+    RoomOperationalMode,
     TemperatureReading,
 )
 
@@ -74,6 +76,59 @@ class OperationalModeSerializer(serializers.ModelSerializer):
         model = OperationalMode
         fields = "__all__"
         read_only_fields = ["updated_at"]
+
+
+class RoomOperationalModeSerializer(serializers.ModelSerializer):
+    """Serializer for RoomOperationalMode — admin-set room status."""
+
+    location_name = serializers.CharField(source="location.name", read_only=True)
+    updated_by_username = serializers.CharField(
+        source="updated_by.username", read_only=True, default=None
+    )
+
+    class Meta:
+        model = RoomOperationalMode
+        fields = "__all__"
+        read_only_fields = ["updated_at", "updated_by"]
+
+
+class IndicatorBindingSerializer(serializers.ModelSerializer):
+    """Serializer for IndicatorBinding — indicator device ↔ asset XOR room.
+
+    Validates the asset-XOR-room invariant and indicator device type at the API
+    layer so clients get a 400 with a clear message rather than a DB
+    IntegrityError. ``last_*`` fields are read-only state set by the sync path.
+    """
+
+    device_mac_address = serializers.CharField(source="device.mac_address", read_only=True)
+    device_name = serializers.CharField(source="device.name", read_only=True)
+    asset_name = serializers.CharField(source="asset.name", read_only=True, default=None)
+    location_name = serializers.CharField(source="location.name", read_only=True, default=None)
+
+    class Meta:
+        model = IndicatorBinding
+        fields = "__all__"
+        read_only_fields = [
+            "id",
+            "last_status",
+            "last_presentation",
+            "last_synced_at",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        instance = self.instance
+        asset = attrs.get("asset", instance.asset if instance else None)
+        location = attrs.get("location", instance.location if instance else None)
+        if bool(asset) == bool(location):
+            raise serializers.ValidationError("Exactly one of asset or location must be set.")
+        device = attrs.get("device", instance.device if instance else None)
+        if device is not None and device.device_type.code != DeviceType.TYPE_INDICATOR:
+            raise serializers.ValidationError(
+                {"device": "Bound device must be an indicator-type device."}
+            )
+        return attrs
 
 
 class AssetAuthorizationSerializer(serializers.ModelSerializer):

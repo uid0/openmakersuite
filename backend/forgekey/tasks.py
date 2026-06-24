@@ -282,6 +282,7 @@ def process_mqtt_status_message(mac_address: str, message_data: Dict[str, Any]) 
         device = ESP32Device.objects.get(mac_address=normalized_mac)
 
         # Update device online status and last seen
+        was_online = device.is_online
         device.is_online = message_data.get("online", True)
         device.last_seen = timezone.now()
 
@@ -291,6 +292,16 @@ def process_mqtt_status_message(mac_address: str, message_data: Dict[str, Any]) 
         device.save(update_fields=["is_online", "last_seen", "firmware_version"])
 
         logger.info(f"Updated status for device {mac_address}")
+
+        # Indicator reactive update (ga-72l): mirror the consumer — an
+        # online/offline transition can flip a bound asset's availability.
+        if was_online != device.is_online:
+            try:
+                from .services.indicator import sync_bindings_for_device
+
+                sync_bindings_for_device(device)
+            except Exception:  # pragma: no cover - never break status ingest
+                logger.exception("Indicator sync after status transition failed")
 
         # Mirror mqtt_consumer.handle_status_message: the EMQX webhook delivers
         # the same status payloads as the long-running consumer, so it must

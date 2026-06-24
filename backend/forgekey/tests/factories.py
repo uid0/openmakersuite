@@ -17,12 +17,15 @@ from forgekey.models import (
     DeviceUsage,
     ESP32Device,
     FirmwareVersion,
+    IndicatorBinding,
+    IndicatorStatus,
     LockoutLevel,
     OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
+    RoomOperationalMode,
 )
-from inventory.tests.factories import AssetFactory
+from inventory.tests.factories import AssetFactory, LocationFactory
 
 User = get_user_model()
 
@@ -186,3 +189,38 @@ class DeviceFirmwareUpdateFactory(DjangoModelFactory):
     firmware_version = SubFactory(FirmwareVersionFactory)
     status = DeviceFirmwareUpdate.STATUS_PENDING
     requested_by = SubFactory(UserFactory)
+
+
+class IndicatorDeviceTypeFactory(DeviceTypeFactory):
+    """DeviceType pinned to the indicator code."""
+
+    code = DeviceType.TYPE_INDICATOR
+    name = "Indicator/Status Light"
+
+
+class IndicatorDeviceFactory(ESP32DeviceFactory):
+    """An indicator-type ESP32 device (online by default)."""
+
+    device_type = SubFactory(IndicatorDeviceTypeFactory)
+    is_online = True
+
+
+class RoomOperationalModeFactory(DjangoModelFactory):
+    """Factory for creating RoomOperationalMode instances."""
+
+    class Meta:
+        model = RoomOperationalMode
+
+    location = SubFactory(LocationFactory)
+    mode = IndicatorStatus.AVAILABLE
+
+
+class IndicatorBindingFactory(DjangoModelFactory):
+    """Factory for creating IndicatorBinding instances (asset-bound by default)."""
+
+    class Meta:
+        model = IndicatorBinding
+
+    device = SubFactory(IndicatorDeviceFactory)
+    asset = SubFactory(AssetFactory)
+    location = None

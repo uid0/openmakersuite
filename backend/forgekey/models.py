@@ -11,6 +11,7 @@ from typing import Optional
 
 from django.conf import settings
 from django.contrib.auth.models import Group
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
@@ -310,6 +311,153 @@ class OperationalMode(models.Model):
 
     def __str__(self) -> str:
         return f"{self.asset.name} - {self.get_mode_display()}"
+
+
+class IndicatorStatus:
+    """Canonical operational statuses an indicator light can reflect.
+
+    Shared by :class:`RoomOperationalMode` (admin-set room status), by
+    :class:`IndicatorBinding.last_status`, and by the
+    ``forgekey.services.indicator`` policy layer that maps each status to a
+    concrete ``(color, brightness, pattern)`` presentation. Kept on the model
+    layer (not the service) so the service can depend on it without a circular
+    import and so DB choices stay co-located with the rows that store them.
+    """
+
+    AVAILABLE = "available"
+    IN_USE = "in_use"
+    UNAVAILABLE = "unavailable"
+    LOCKED_OUT = "locked_out"
+    CLASSROOM = "classroom"
+
+    CHOICES = [
+        (AVAILABLE, "Available"),
+        (IN_USE, "In use"),
+        (UNAVAILABLE, "Unavailable"),
+        (LOCKED_OUT, "Locked out"),
+        (CLASSROOM, "In use for a class"),
+    ]
+
+
+class RoomOperationalMode(models.Model):
+    """Admin-set operational status for a room (``inventory.Location``).
+
+    Rooms have no derived status today, so an admin sets it directly. The value
+    maps straight through the indicator presentation table — the mode choices
+    are exactly :class:`IndicatorStatus` so ``derive_room_status`` is a direct
+    lookup with no translation.
+    """
+
+    location = models.OneToOneField(
+        Location,
+        on_delete=models.CASCADE,
+        related_name="operational_mode",
+        help_text="Room this operational mode applies to",
+    )
+    mode = models.CharField(
+        max_length=20,
+        choices=IndicatorStatus.CHOICES,
+        default=IndicatorStatus.AVAILABLE,
+        help_text="Admin-set operational status for the room",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="room_operational_modes_set",
+        help_text="User who last set this room mode",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["location"]
+
+    def __str__(self) -> str:
+        return f"{self.location.name} - {self.get_mode_display()}"
+
+
+class IndicatorBinding(models.Model):
+    """Binds a ForgeKey indicator device to an asset XOR a room.
+
+    The bound indicator's WS2812 light reflects the operational status of its
+    target. Exactly one of ``asset`` / ``location`` is set — enforced at three
+    layers: :meth:`clean` (admin/forms), the serializer (API), and a DB
+    ``CheckConstraint`` (last line of defence).
+
+    ``last_status`` / ``last_presentation`` cache the most recently pushed state
+    so reactive re-syncs can no-op (debounce) when the derived presentation has
+    not changed.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.OneToOneField(
+        ESP32Device,
+        on_delete=models.CASCADE,
+        related_name="indicator_binding",
+        limit_choices_to={"device_type__code": DeviceType.TYPE_INDICATOR},
+        help_text="Indicator-type device whose light reflects the target status",
+    )
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="indicator_bindings",
+        help_text="Asset whose derived status drives the light (XOR location)",
+    )
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="indicator_bindings",
+        help_text="Room whose manual status drives the light (XOR asset)",
+    )
+    last_status = models.CharField(
+        max_length=20,
+        blank=True,
+        choices=IndicatorStatus.CHOICES,
+        help_text="Most recently pushed status (debounce / UI display)",
+    )
+    last_presentation = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Most recently pushed set_indicator payload (debounce / UI display)",
+    )
+    last_synced_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the indicator was last pushed an update",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                name="indicatorbinding_asset_xor_location",
+                condition=(
+                    models.Q(asset__isnull=False, location__isnull=True)
+                    | models.Q(asset__isnull=True, location__isnull=False)
+                ),
+            ),
+        ]
+
+    def __str__(self) -> str:
+        target = (
+            self.asset.name if self.asset_id else (self.location.name if self.location_id else "?")
+        )
+        return f"{self.device.name or self.device.mac_address} → {target}"
+
+    def clean(self) -> None:
+        """Validate the asset-XOR-room invariant and indicator device type."""
+        if bool(self.asset_id) == bool(self.location_id):
+            raise ValidationError("Exactly one of asset or location must be set.")
+        device_type = getattr(self.device, "device_type", None)
+        if device_type is not None and device_type.code != DeviceType.TYPE_INDICATOR:
+            raise ValidationError({"device": "Bound device must be an indicator-type device."})
 
 
 class AssetAuthorization(models.Model):
@@ -1439,6 +1587,10 @@ class ForgeKeyAuditEvent(models.Model):
     ACTION_LOCKOUT_CREATE = "lockout_create"
     ACTION_LOCKOUT_UNLOCK = "lockout_unlock"
     ACTION_FIRMWARE_REQUEST = "firmware_request"
+    ACTION_INDICATOR_BIND = "indicator_bind"
+    ACTION_INDICATOR_UNBIND = "indicator_unbind"
+    ACTION_INDICATOR_SYNC = "indicator_sync"
+    ACTION_INDICATOR_TEST = "indicator_test"
 
     ACTION_CHOICES = [
         (ACTION_AUTHORIZATION_GRANT, "Authorization granted"),
@@ -1446,6 +1598,10 @@ class ForgeKeyAuditEvent(models.Model):
         (ACTION_LOCKOUT_CREATE, "Device locked out"),
         (ACTION_LOCKOUT_UNLOCK, "Device unlocked"),
         (ACTION_FIRMWARE_REQUEST, "Firmware update requested"),
+        (ACTION_INDICATOR_BIND, "Indicator bound"),
+        (ACTION_INDICATOR_UNBIND, "Indicator unbound"),
+        (ACTION_INDICATOR_SYNC, "Indicator synced"),
+        (ACTION_INDICATOR_TEST, "Indicator test sent"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

@@ -11,6 +11,7 @@ from .views import (
     SIGAdminViewSet,
     SIGMemberViewSet,
     SIGViewSet,
+    UserDirectoryViewSet,
     UserProfileViewSet,
     change_password,
     invite_code_preview,
@@ -24,6 +25,7 @@ router.register(r"sigs", SIGViewSet, basename="sig")
 router.register(r"sigs/(?P<sig_pk>\d+)/members", SIGMemberViewSet, basename="sig-member")
 router.register(r"sig-admins", SIGAdminViewSet, basename="sig-admin")
 router.register(r"profile", UserProfileViewSet, basename="profile")
+router.register(r"users", UserDirectoryViewSet, basename="user-directory")
 router.register(r"invite-codes", InviteCodeViewSet, basename="invite-code")
 
 urlpatterns = [

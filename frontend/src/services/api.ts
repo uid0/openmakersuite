@@ -1292,10 +1292,35 @@ export const authAPI = {
     api.post('/auth/logout/'),
 };
 
+// A member as returned by the staff-only user directory (op-tup). Backs the
+// access-control grant user-picker and the badge-enrollment admin: enough to
+// identify a member and show their current badge.
+export interface DirectoryUser {
+  id: number;
+  username: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  email: string;
+  badge_number: string | null;
+  is_active: boolean;
+}
+
 // User Profile API
 export const userAPI = {
   getProfile: () =>
     api.get<UserProfile>('/membership/profile/me/'),
+
+  // Staff-only directory for access-control pickers. ``search`` matches
+  // username / name / email; ``hasBadge`` narrows to members with (or without)
+  // a badge for the enrollment admin.
+  listUsers: (opts: { search?: string; hasBadge?: boolean } = {}) =>
+    api.get<{ results?: DirectoryUser[] } | DirectoryUser[]>('/membership/users/', {
+      params: {
+        ...(opts.search ? { search: opts.search } : {}),
+        ...(opts.hasBadge != null ? { has_badge: String(opts.hasBadge) } : {}),
+      },
+    }),
 
   updateProfile: (data: Partial<UserProfile>) =>
     api.put<UserProfile>('/membership/profile/update_me/', data),
@@ -2194,6 +2219,53 @@ export interface ForgeKeyIndicatorTestResponse {
   payload: ForgeKeyIndicatorPresentation;
 }
 
+// A row in the ForgeKey access/denial log (access-control interlock, op-vj9).
+// ``metadata.reason`` carries the deny reason for ``access_denied`` rows.
+export interface ForgeKeyAuditEvent {
+  id: string;
+  created_at: string;
+  action: string;
+  action_display: string;
+  actor: number | null;
+  actor_username: string | null;
+  asset: string | null;
+  asset_name: string | null;
+  device: string | null;
+  device_mac: string | null;
+  notes: string;
+  metadata: Record<string, unknown> | null;
+}
+
+// The access-control actions the access-log view filters on, mapped to their
+// human labels (must match the backend ``ForgeKeyAuditEvent`` action choices).
+export const FORGEKEY_ACCESS_ACTIONS: Record<string, string> = {
+  access_granted: 'Access granted',
+  access_denied: 'Access denied',
+  session_ended: 'Usage session ended',
+  badge_enrolled: 'Badge enrolled',
+};
+
+// Armed/captured state for the "enroll next scan" badge handshake. ``captured``
+// is non-null once the member has tapped and the interlock bound the UID.
+export interface ForgeKeyBadgeEnrollmentState {
+  armed: boolean;
+  armed_user_id: number | null;
+  reader_id: string | null;
+  captured: { user_id: number; badge_number: string } | null;
+}
+
+export interface ForgeKeyBadgeArmResponse {
+  armed: boolean;
+  user_id: number;
+  reader_id: string | null;
+  ttl_seconds: number;
+}
+
+export interface ForgeKeyBadgeSetResponse {
+  user_id: number;
+  badge_number: string | null;
+}
+
 export const forgekeyAPI = {
   listDevices: (opts: { capability?: string } = {}) =>
     api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
@@ -2244,6 +2316,66 @@ export const forgekeyAPI = {
     ),
   unlockLockout: (id: string) =>
     api.post<ForgeKeyDeviceLockout>(`/forgekey/lockouts/${id}/unlock/`),
+  // Grant a user access to an asset. ``authorized_by`` is set server-side to the
+  // caller; an optional ``expires_at`` makes the grant lapse automatically.
+  grantAuthorization: (body: {
+    asset: string;
+    user: number;
+    notes?: string;
+    expires_at?: string | null;
+  }) => api.post<ForgeKeyAssetAuthorization>('/forgekey/authorizations/', body),
+  // The grants for one member — backs the per-member "assets I'm authorized for"
+  // view. Pass ``activeOnly`` to drop revoked/expired rows.
+  listAuthorizationsForUser: (userId: number, opts: { activeOnly?: boolean } = {}) =>
+    api.get<{ results?: ForgeKeyAssetAuthorization[] } | ForgeKeyAssetAuthorization[]>(
+      '/forgekey/authorizations/',
+      { params: { user: userId, ...(opts.activeOnly ? { is_active: 'true' } : {}) } },
+    ),
+  // Access/denial log (op-vj9). Defaults to the access-control actions only
+  // (grant / deny / session-ended / badge-enrolled); pass filters to narrow.
+  listAccessLog: (
+    opts: {
+      accessOnly?: boolean;
+      action?: string;
+      asset?: string;
+      actor?: number;
+      device?: string;
+    } = {},
+  ) =>
+    api.get<{ results?: ForgeKeyAuditEvent[] } | ForgeKeyAuditEvent[]>('/forgekey/access-log/', {
+      params: {
+        ...(opts.accessOnly !== false ? { access_only: 'true' } : {}),
+        ...(opts.action ? { action: opts.action } : {}),
+        ...(opts.asset ? { asset: opts.asset } : {}),
+        ...(opts.actor != null ? { actor: opts.actor } : {}),
+        ...(opts.device ? { device: opts.device } : {}),
+      },
+    }),
+  // Badge enrollment (op-vj9). ``getBadgeEnrollmentState`` is the poll target for
+  // the arm flow; reading it with a ``userId`` consumes a captured result.
+  getBadgeEnrollmentState: (opts: { userId?: number; readerId?: string } = {}) =>
+    api.get<ForgeKeyBadgeEnrollmentState>('/forgekey/badge-enrollment/', {
+      params: {
+        ...(opts.userId != null ? { user_id: opts.userId } : {}),
+        ...(opts.readerId ? { reader_id: opts.readerId } : {}),
+      },
+    }),
+  armBadgeEnrollment: (body: { userId: number; readerId?: string }) =>
+    api.post<ForgeKeyBadgeArmResponse>('/forgekey/badge-enrollment/arm/', {
+      user_id: body.userId,
+      ...(body.readerId ? { reader_id: body.readerId } : {}),
+    }),
+  cancelBadgeEnrollment: (body: { readerId?: string } = {}) =>
+    api.post<{ armed: boolean }>('/forgekey/badge-enrollment/cancel/', {
+      ...(body.readerId ? { reader_id: body.readerId } : {}),
+    }),
+  // Set or clear a member's badge directly (manual-entry fallback). Pass
+  // ``badgeNumber: null`` to clear.
+  setBadge: (body: { userId: number; badgeNumber: string | null }) =>
+    api.post<ForgeKeyBadgeSetResponse>('/forgekey/badge-enrollment/set-badge/', {
+      user_id: body.userId,
+      badge_number: body.badgeNumber,
+    }),
   getOccupancy: (id: string, since: string = '24h') =>
     api.get<ForgeKeyOccupancyResponse>(`/forgekey/devices/${id}/occupancy/`, {
       params: { since },

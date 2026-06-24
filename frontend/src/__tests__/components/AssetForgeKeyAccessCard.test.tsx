@@ -6,7 +6,7 @@
 import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AssetForgeKeyAccessCard from '../../components/AssetForgeKeyAccessCard';
-import { forgekeyAPI } from '../../services/api';
+import { forgekeyAPI, userAPI } from '../../services/api';
 
 vi.mock('../../utils/dialogs', async () => ({
   showError: jest.fn(),
@@ -28,11 +28,17 @@ vi.mock('../../services/api', async () => {
       disableClassroomMode: jest.fn(),
       revokeAuthorization: jest.fn(),
       unlockLockout: jest.fn(),
+      grantAuthorization: jest.fn(),
+    },
+    userAPI: {
+      ...(actual as any).userAPI,
+      listUsers: jest.fn(),
     },
   };
 });
 
 const mockApi = forgekeyAPI as jest.Mocked<typeof forgekeyAPI>;
+const mockUserApi = userAPI as jest.Mocked<typeof userAPI>;
 
 const buildMode = (overrides: Partial<any> = {}) => ({
   id: 1,
@@ -84,8 +90,23 @@ const renderCard = (assetId = 'a1') =>
     </MantineProvider>,
   );
 
+const buildUser = (overrides: Partial<any> = {}) => ({
+  id: 7,
+  username: 'dora',
+  first_name: 'Dora',
+  last_name: 'Diaz',
+  full_name: 'Dora Diaz',
+  email: 'dora@example.com',
+  badge_number: null,
+  is_active: true,
+  ...overrides,
+});
+
 describe('AssetForgeKeyAccessCard', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+  });
 
   it('renders nothing for an asset with no ForgeKey data', async () => {
     mockApi.listOperationalModes.mockResolvedValue({ data: [] } as any);
@@ -132,5 +153,39 @@ describe('AssetForgeKeyAccessCard', () => {
     renderCard();
     fireEvent.click(await screen.findByText('Revoke'));
     await waitFor(() => expect(mockApi.revokeAuthorization).toHaveBeenCalledWith(10));
+  });
+
+  it('hides the grant control from non-staff', async () => {
+    mockApi.listOperationalModes.mockResolvedValue({ data: [buildMode()] } as any);
+    mockApi.listAuthorizations.mockResolvedValue({ data: [] } as any);
+    mockApi.listLockouts.mockResolvedValue({ data: [] } as any);
+
+    renderCard();
+    await screen.findByTestId('asset-forgekey-access');
+    expect(screen.queryByTestId('grant-open')).not.toBeInTheDocument();
+  });
+
+  it('grants access to a picked member (staff)', async () => {
+    localStorage.setItem('is_staff', 'true');
+    mockApi.listOperationalModes.mockResolvedValue({ data: [buildMode()] } as any);
+    mockApi.listAuthorizations.mockResolvedValue({ data: [] } as any);
+    mockApi.listLockouts.mockResolvedValue({ data: [] } as any);
+    mockApi.grantAuthorization.mockResolvedValue({ data: {} } as any);
+    mockUserApi.listUsers.mockResolvedValue({ data: [buildUser()] } as any);
+
+    renderCard();
+    fireEvent.click(await screen.findByTestId('grant-open'));
+    // Picker loads members, then we pick one and submit.
+    fireEvent.click(await screen.findByPlaceholderText('Search members…'));
+    fireEvent.click(await screen.findByRole('option', { name: 'Dora Diaz (dora)' }));
+    fireEvent.click(screen.getByTestId('grant-submit'));
+
+    await waitFor(() =>
+      expect(mockApi.grantAuthorization).toHaveBeenCalledWith({
+        asset: 'a1',
+        user: 7,
+        notes: undefined,
+      }),
+    );
   });
 });

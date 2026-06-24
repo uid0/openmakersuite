@@ -106,6 +106,7 @@ below are public.
 | --- | --- | --- | --- |
 | any | `membership/profile/...` | member | `IsAuthenticated` — every authed user can hit the endpoint; the queryset filters to records the caller can see and writes go through `perform_*` checks. |
 | any | `membership/sigs/...`, `membership/sig-admins/...` | member | `IsAuthenticated` on `SIGViewSet`/`SIGAdminViewSet`/`SIGMemberViewSet`; staff-only writes are guarded inside `perform_*`. |
+| GET | `membership/users/...` | admin | `IsAdminUser` on `UserDirectoryViewSet` (read-only list/retrieve) — staff user lookup for the access-control badge-enrollment UI. |
 | POST | `membership/register/validate-token/` | public | Token validation for the registration QR flow (no `permission_classes` set; falls back to the per-environment default — `AllowAny` in dev, `IsAuthenticatedOrReadOnly` in prod, which still answers GET-style POSTs). |
 | POST | `membership/register/complete/` | public | Token-gated user registration; the token (carried in the body) gates access. |
 | POST | `membership/change-password/` | member | Password change for the authenticated user. |

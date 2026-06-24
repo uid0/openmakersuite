@@ -10,6 +10,7 @@ import re
 from datetime import timedelta
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import F
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
@@ -76,6 +77,7 @@ from .serializers import (
     FirmwareBuildSerializer,
     FirmwareRolloutSerializer,
     FirmwareVersionSerializer,
+    ForgeKeyAuditEventSerializer,
     IndicatorBindingSerializer,
     OccupancyEventSerializer,
     OperationalModeSerializer,
@@ -83,6 +85,7 @@ from .serializers import (
     RoomOperationalModeSerializer,
     TemperatureReadingSerializer,
 )
+from .services import badge_enrollment
 from .services.ca_key_storage import CaKeyStorageError, decrypt_ca_key
 from .services.csr_signing import CsrSigningError, CsrValidationError, sign_csr
 from .services.device_commands import DeviceCommandError, publish_command
@@ -122,6 +125,8 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+User = get_user_model()
 
 
 JPEG_MAGIC = b"\xff\xd8\xff"
@@ -805,17 +810,64 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
             return [IsAdminUser()]
         return super().get_permissions()
 
+    def _authorize_relay(self, request, device, verb):
+        """Gate the relay power endpoints on the access-control interlock.
+
+        Closes the long-standing bypass where any authenticated user could
+        power any tool's relay. Staff/superusers keep an override (maintenance,
+        bench testing); everyone else must hold an active authorization for the
+        asset bound to this device — the same :func:`is_authorized` the badge
+        interlock uses. Returns a 403 ``Response`` on refusal (audited), or
+        ``None`` to proceed.
+        """
+        from .services.access_control import asset_for_device, is_authorized
+
+        user = request.user
+        if user.is_authenticated and (user.is_staff or user.is_superuser):
+            return None
+
+        asset = asset_for_device(device)
+        if asset is not None and is_authorized(user, asset):
+            return None
+
+        record_audit_event(
+            action=ForgeKeyAuditEvent.ACTION_ACCESS_DENIED,
+            actor=user if user.is_authenticated else None,
+            asset=asset,
+            device=device,
+            notes=f"relay {verb} denied via API: caller not authorized for asset",
+            metadata={"reason": "not_authorized", "endpoint": verb},
+        )
+        return Response(
+            {"detail": "You are not authorized to control this device."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     @action(detail=True, methods=["post"])
     def enable(self, request, pk=None):
-        """Enable a device (turn on power, etc.)."""
+        """Enable a device (turn on power, etc.).
+
+        Requires authorization for the bound asset (or staff override) — see
+        :meth:`_authorize_relay`.
+        """
         device = self.get_object()
+        denied = self._authorize_relay(request, device, "enable")
+        if denied is not None:
+            return denied
         enable_device.delay(device.mac_address)
         return Response({"status": "enable command sent", "device": device.mac_address})
 
     @action(detail=True, methods=["post"])
     def disable(self, request, pk=None):
-        """Disable a device (turn off power, etc.)."""
+        """Disable a device (turn off power, etc.).
+
+        Requires authorization for the bound asset (or staff override) — see
+        :meth:`_authorize_relay`.
+        """
         device = self.get_object()
+        denied = self._authorize_relay(request, device, "disable")
+        if denied is not None:
+            return denied
         delay_seconds = int(request.data.get("delay_seconds", 0))
         disable_device.delay(device.mac_address, delay_seconds=delay_seconds)
         return Response(
@@ -1663,6 +1715,141 @@ class AssetAuthorizationViewSet(viewsets.ModelViewSet):
             serializer.data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+
+class BadgeEnrollmentViewSet(viewsets.ViewSet):
+    """Badge enrollment: set/clear a user's badge + arm "enroll next scan" (op-vj9).
+
+    Staff-only. ``set-badge`` writes a UID directly (manual-entry fallback);
+    ``arm`` + the access-control interlock capture the next physical scan and
+    bind it to a chosen user; ``list`` (GET) reports armed/captured state for the
+    polling enrollment UI. State for the armed/captured handshake lives in the
+    cache so the web process and the MQTT consumer share it (see
+    ``forgekey.services.badge_enrollment``).
+    """
+
+    permission_classes = [IsAdminUser]
+
+    def list(self, request):
+        """Report enrollment state: is a scope armed, and has a UID been captured?"""
+        reader_id = request.query_params.get("reader_id")
+        user_id = request.query_params.get("user_id")
+        armed = badge_enrollment.is_armed(reader_id=reader_id)
+        captured = badge_enrollment.poll_result(user_id) if user_id else None
+        return Response(
+            {
+                "armed": armed is not None,
+                "armed_user_id": armed.get("user_id") if armed else None,
+                "reader_id": armed.get("reader_id") if armed else None,
+                "captured": captured,
+            }
+        )
+
+    @action(detail=False, methods=["post"])
+    def arm(self, request):
+        """Arm "enroll next scan" for a user (optionally scoped to one reader)."""
+        user_id = request.data.get("user_id")
+        reader_id = request.data.get("reader_id")
+        if not user_id:
+            return Response({"detail": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        user = User.objects.filter(pk=user_id).first()
+        if user is None:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        badge_enrollment.arm(user.pk, reader_id=reader_id)
+        return Response(
+            {
+                "armed": True,
+                "user_id": user.pk,
+                "reader_id": reader_id,
+                "ttl_seconds": badge_enrollment.ENROLL_TTL_SECONDS,
+            }
+        )
+
+    @action(detail=False, methods=["post"])
+    def cancel(self, request):
+        """Disarm a pending enrollment for a scope (or the global one)."""
+        reader_id = request.data.get("reader_id")
+        badge_enrollment.cancel(reader_id=reader_id)
+        return Response({"armed": False})
+
+    @action(detail=False, methods=["post"], url_path="set-badge")
+    def set_badge(self, request):
+        """Set or clear a user's ``badge_number`` directly (manual-entry path)."""
+        user_id = request.data.get("user_id")
+        badge_number = request.data.get("badge_number")
+        if not user_id:
+            return Response({"detail": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        user = User.objects.filter(pk=user_id).first()
+        if user is None:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if badge_number in (None, ""):
+            user.badge_number = None
+            user.save(update_fields=["badge_number"])
+            record_audit_event(
+                action=ForgeKeyAuditEvent.ACTION_BADGE_ENROLLED,
+                actor=request.user,
+                notes="badge cleared via admin",
+                metadata={"user_id": user.pk, "badge_number": None},
+            )
+            return Response({"user_id": user.pk, "badge_number": None})
+
+        badge = str(badge_number).strip()
+        existing = User.from_badge(badge)
+        if existing is not None and existing.pk != user.pk:
+            return Response(
+                {"detail": "Badge already assigned to another user."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        user.badge_number = badge
+        user.save(update_fields=["badge_number"])
+        record_audit_event(
+            action=ForgeKeyAuditEvent.ACTION_BADGE_ENROLLED,
+            actor=request.user,
+            notes="badge set via admin",
+            metadata={"user_id": user.pk, "badge_number": badge},
+        )
+        return Response({"user_id": user.pk, "badge_number": badge})
+
+
+class ForgeKeyAuditEventViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only access/denial log over :class:`ForgeKeyAuditEvent` (op-vj9).
+
+    Backs the access-log view in the access-control frontend (op-tup). Supports
+    ``?action=``, ``?asset=``, ``?actor=``, ``?device=`` filters and an
+    ``?access_only=true`` shortcut that narrows to the access-control actions
+    (grant / deny / session-ended / badge-enrolled).
+    """
+
+    queryset = ForgeKeyAuditEvent.objects.select_related("actor", "asset", "device").all()
+    serializer_class = ForgeKeyAuditEventSerializer
+    permission_classes = [IsAuthenticated]
+
+    ACCESS_ACTIONS = [
+        ForgeKeyAuditEvent.ACTION_ACCESS_GRANTED,
+        ForgeKeyAuditEvent.ACTION_ACCESS_DENIED,
+        ForgeKeyAuditEvent.ACTION_SESSION_ENDED,
+        ForgeKeyAuditEvent.ACTION_BADGE_ENROLLED,
+    ]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        if params.get("access_only", "").lower() in ("1", "true", "yes"):
+            qs = qs.filter(action__in=self.ACCESS_ACTIONS)
+        action_filter = params.get("action")
+        if action_filter:
+            qs = qs.filter(action=action_filter)
+        asset_id = params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        actor_id = params.get("actor")
+        if actor_id:
+            qs = qs.filter(actor_id=actor_id)
+        device_id = params.get("device")
+        if device_id:
+            qs = qs.filter(device_id=device_id)
+        return qs
 
 
 class DeviceLockoutViewSet(viewsets.ModelViewSet):

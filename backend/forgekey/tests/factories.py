@@ -61,8 +61,17 @@ class ESP32DeviceFactory(DjangoModelFactory):
     class Meta:
         model = ESP32Device
 
+    # Encode the factory sequence into the low four octets under a fixed
+    # locally-administered ``DE:AD`` prefix. The previous form left the first
+    # octet as ``{n:02X}`` (no ``% 256``), so once a test run created 256+
+    # devices the octet overflowed to three hex digits and produced an invalid
+    # MAC that no longer round-tripped through ``normalize_mac_address`` (a
+    # cross-test-ordering flake). Big-endian packing stays valid + unique for
+    # any sequence value a suite will realistically reach.
     mac_address = factory.Sequence(
-        lambda n: f"{n:02X}:{(n + 1) % 256:02X}:{(n + 2) % 256:02X}:{(n + 3) % 256:02X}:{(n + 4) % 256:02X}:{(n + 5) % 256:02X}"
+        lambda n: "DE:AD:{:02X}:{:02X}:{:02X}:{:02X}".format(
+            (n >> 24) & 0xFF, (n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF
+        )
     )
     device_type = SubFactory(DeviceTypeFactory)
     name = factory.Sequence(lambda n: f"ESP32 Device {n}")

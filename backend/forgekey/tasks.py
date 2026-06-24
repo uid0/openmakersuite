@@ -783,6 +783,43 @@ def mark_stale_devices_offline(threshold_hours: int = 5) -> Dict[str, Any]:
 
 
 @shared_task
+@sentry_sdk.crons.monitor(
+    monitor_slug="forgekey-end-idle-device-sessions",
+    monitor_config={
+        # Every-5-min sweep that closes idle / runaway usage sessions and cuts
+        # their relay power (op-vj9). Three misses (15 min) before alerting.
+        "schedule": {"type": "interval", "value": 5, "unit": "minute"},
+        "timezone": "America/Chicago",
+        "checkin_margin": 2,
+        "max_runtime": 5,
+        "failure_issue_threshold": 3,
+        "recovery_threshold": 1,
+    },
+)
+def end_idle_device_sessions(
+    idle_after_minutes: Optional[int] = None,
+    max_session_hours: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Beat task: auto-end idle/runaway usage sessions and power down their tools.
+
+    Thin wrapper over :func:`forgekey.services.access_control.end_idle_sessions`
+    so the interlock policy lives in the service layer (single source of truth)
+    and the task only handles scheduling + kwargs plumbing. ``None`` kwargs fall
+    back to the service defaults (idle window / wall-clock cap).
+    """
+    from .services.access_control import (
+        IDLE_AFTER_MINUTES_DEFAULT,
+        MAX_SESSION_HOURS_DEFAULT,
+        end_idle_sessions,
+    )
+
+    idle = idle_after_minutes if idle_after_minutes is not None else IDLE_AFTER_MINUTES_DEFAULT
+    cap = max_session_hours if max_session_hours is not None else MAX_SESSION_HOURS_DEFAULT
+    ended = end_idle_sessions(idle_after_minutes=idle, max_session_hours=cap)
+    return {"ended": ended, "idle_after_minutes": idle, "max_session_hours": cap}
+
+
+@shared_task
 def advance_firmware_rollouts() -> None:
     """Beat task: advance each active firmware rollout whose interval has elapsed.
 

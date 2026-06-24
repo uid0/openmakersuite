@@ -20,6 +20,7 @@ from .models import (
     FirmwareBuild,
     FirmwareRollout,
     FirmwareVersion,
+    ForgeKeyAuditEvent,
     IndicatorBinding,
     OccupancyEvent,
     OperationalMode,
@@ -571,3 +572,35 @@ class DeviceCertificateSerializer(serializers.ModelSerializer):
         if obj.not_after is not None and obj.not_after < timezone.now():
             return "expired"
         return "active"
+
+
+class ForgeKeyAuditEventSerializer(serializers.ModelSerializer):
+    """Read-only serializer for the ForgeKey audit log (access-control surface).
+
+    Backs the access/denial log the access-control frontend (op-tup) consumes.
+    Exposes the human-readable action label plus actor/asset/device names so the
+    UI can render rows without a second round-trip.
+    """
+
+    action_display = serializers.CharField(source="get_action_display", read_only=True)
+    actor_username = serializers.CharField(source="actor.username", read_only=True, default=None)
+    asset_name = serializers.CharField(source="asset.name", read_only=True, default=None)
+    device_mac = serializers.CharField(source="device.mac_address", read_only=True, default=None)
+
+    class Meta:
+        model = ForgeKeyAuditEvent
+        fields = [
+            "id",
+            "created_at",
+            "action",
+            "action_display",
+            "actor",
+            "actor_username",
+            "asset",
+            "asset_name",
+            "device",
+            "device_mac",
+            "notes",
+            "metadata",
+        ]
+        read_only_fields = fields

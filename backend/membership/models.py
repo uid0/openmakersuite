@@ -185,6 +185,23 @@ class User(AbstractUser):
         active_memberships = self.memberships.filter(status=Membership.STATUS_ACTIVE)
         return active_memberships.exists()
 
+    @classmethod
+    def from_badge(cls, badge_number):
+        """Resolve a physical-access badge UID to its owning user.
+
+        The ForgeKey access-control interlock keys badge scans through here.
+        Whitespace is trimmed (readers occasionally pad the UID) and an empty
+        or unmatched value resolves to ``None`` rather than raising, so the
+        interlock can fail safe (deny an unknown card) without a try/except at
+        every call site. ``badge_number`` is unique, so at most one row matches.
+        """
+        if badge_number is None:
+            return None
+        normalized = str(badge_number).strip()
+        if not normalized:
+            return None
+        return cls.objects.filter(badge_number=normalized).first()
+
 
 class SIGAdmin(models.Model):
     """

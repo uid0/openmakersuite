@@ -11,6 +11,7 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import DeviceControlsCard from '../components/DeviceControlsCard';
 import DeviceLifecycleCard from '../components/DeviceLifecycleCard';
+import IndicatorManagementCard from '../components/IndicatorManagementCard';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   ForgeKeyCommandResponse,
@@ -268,6 +269,8 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
           )}
 
           <DeviceControlsCard device={device} />
+
+          <IndicatorManagementCard device={device} onChanged={loadAll} />
 
           <DeviceLifecycleCard
             device={device}

@@ -2132,6 +2132,68 @@ export interface ForgeKeyDeviceLockout {
   is_active: boolean;
 }
 
+// Indicator-light status management (epic ga-72l). The canonical operational
+// statuses an indicator can reflect — must match backend ``IndicatorStatus``.
+export type IndicatorStatusValue =
+  | 'available'
+  | 'in_use'
+  | 'unavailable'
+  | 'locked_out'
+  | 'classroom';
+
+// The ``set_indicator`` payload the backend derives/pushes. Colors may be a
+// named string, a hex string, or an [r, g, b] triple; brightness may be a
+// 'low'/'high' word or a 0-255 int. Fields are omitted when not applicable
+// (e.g. an off pattern carries no color/brightness).
+export interface ForgeKeyIndicatorPresentation {
+  cmd?: string;
+  color?: string | number[] | null;
+  brightness?: string | number | null;
+  pattern?: string;
+  period_ms?: number;
+  duration_s?: number;
+}
+
+export interface ForgeKeyIndicatorBinding {
+  id: string;
+  device: string;
+  device_mac_address: string;
+  device_name: string;
+  asset: string | null;
+  asset_name: string | null;
+  location: number | null;
+  location_name: string | null;
+  // '' before the first sync; otherwise the last pushed status.
+  last_status: IndicatorStatusValue | '';
+  last_presentation: ForgeKeyIndicatorPresentation | null;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ForgeKeyRoomOperationalMode {
+  id: number;
+  location: number;
+  location_name: string;
+  mode: IndicatorStatusValue;
+  updated_by: number | null;
+  updated_by_username: string | null;
+  updated_at: string;
+}
+
+export interface ForgeKeyIndicatorSyncResponse {
+  status: IndicatorStatusValue | '';
+  presentation: ForgeKeyIndicatorPresentation | null;
+  command_id: string | null;
+}
+
+export interface ForgeKeyIndicatorTestResponse {
+  status: string;
+  device: string;
+  command_id: string;
+  payload: ForgeKeyIndicatorPresentation;
+}
+
 export const forgekeyAPI = {
   listDevices: (opts: { capability?: string } = {}) =>
     api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
@@ -2220,6 +2282,59 @@ export const forgekeyAPI = {
     api.get<ForgeKeyRecentCommandsResponse>(
       `/forgekey/devices/${id}/recent-commands/`,
       { params: { limit } },
+    ),
+  // Indicator lights (epic ga-72l): bind an indicator device to an asset XOR a
+  // room, drive a room's manual mode, and preview/sync the light.
+  listIndicatorBindings: (
+    opts: { device?: string; asset?: string; location?: number } = {},
+  ) =>
+    api.get<{ results?: ForgeKeyIndicatorBinding[] } | ForgeKeyIndicatorBinding[]>(
+      '/forgekey/indicator-bindings/',
+      {
+        params: {
+          ...(opts.device ? { device: opts.device } : {}),
+          ...(opts.asset ? { asset: opts.asset } : {}),
+          ...(opts.location != null ? { location: opts.location } : {}),
+        },
+      },
+    ),
+  createIndicatorBinding: (
+    body: { device: string; asset: string } | { device: string; location: number },
+  ) => api.post<ForgeKeyIndicatorBinding>('/forgekey/indicator-bindings/', body),
+  deleteIndicatorBinding: (id: string) =>
+    api.delete(`/forgekey/indicator-bindings/${id}/`),
+  // Recompute the bound target's status and push it to the device now.
+  indicatorSync: (bindingId: string) =>
+    api.post<ForgeKeyIndicatorSyncResponse>(
+      `/forgekey/indicator-bindings/${bindingId}/sync/`,
+    ),
+  listRoomOperationalModes: (opts: { location?: number } = {}) =>
+    api.get<{ results?: ForgeKeyRoomOperationalMode[] } | ForgeKeyRoomOperationalMode[]>(
+      '/forgekey/room-operational-modes/',
+      { params: opts.location != null ? { location: opts.location } : undefined },
+    ),
+  createRoomOperationalMode: (body: { location: number; mode: IndicatorStatusValue }) =>
+    api.post<ForgeKeyRoomOperationalMode>('/forgekey/room-operational-modes/', body),
+  setRoomOperationalMode: (id: number, mode: IndicatorStatusValue) =>
+    api.patch<ForgeKeyRoomOperationalMode>(
+      `/forgekey/room-operational-modes/${id}/`,
+      { mode },
+    ),
+  // Explicit color/brightness/pattern preview to an indicator device — bypasses
+  // status derivation for a live hardware check.
+  indicatorTest: (
+    deviceId: string,
+    body: {
+      color?: string | number[];
+      brightness?: string | number;
+      pattern?: string;
+      period_ms?: number;
+      duration_s?: number;
+    },
+  ) =>
+    api.post<ForgeKeyIndicatorTestResponse>(
+      `/forgekey/devices/${deviceId}/indicator/test/`,
+      body,
     ),
   bindEPaper: (displayId: string, assetId: string) =>
     api.post<{ display_id: string; asset_id: string; asset_name: string }>(

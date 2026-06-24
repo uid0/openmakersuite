@@ -28,6 +28,10 @@ vi.mock('../../services/api', async () => {
       ping: jest.fn(),
       identify: jest.fn(),
       recentCommands: jest.fn(),
+      // IndicatorManagementCard (mounted for indicator devices) probes these on
+      // load; the test device is a people_counter, so it renders nothing.
+      listDeviceTypes: jest.fn(),
+      listIndicatorBindings: jest.fn(),
     },
   };
 });
@@ -111,6 +115,9 @@ describe('ForgeKeyDeviceDetailPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorage.setItem('is_staff', 'true');
+    // Default: no indicator device type, so IndicatorManagementCard is inert.
+    mockApi.listDeviceTypes.mockResolvedValue({ data: [] } as any);
+    mockApi.listIndicatorBindings.mockResolvedValue({ data: [] } as any);
   });
 
   afterEach(() => {

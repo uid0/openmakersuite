@@ -11,6 +11,7 @@ import LocationFixturesList from '../components/LocationFixturesList';
 import LocationProblemsPanel from '../components/LocationProblemsPanel';
 import LocationTrafficPanel from '../components/LocationTrafficPanel';
 import ReportLocationProblemModal from '../components/ReportLocationProblemModal';
+import RoomOperationalModeControl from '../components/RoomOperationalModeControl';
 import { climateAPI, inventoryAPI, Thermostat } from '../services/api';
 import '../styles/LocationDetailPage.css';
 import { Location } from '../types';
@@ -256,6 +257,11 @@ const LocationDetailPage: React.FC = () => {
         <div className="detail-section">
           <h2>Traffic</h2>
           <LocationTrafficPanel locationId={location.id} />
+        </div>
+
+        <div className="detail-section" data-testid="location-indicator-mode-section">
+          <h2>Indicator light status</h2>
+          <RoomOperationalModeControl locationId={location.id} locationName={location.name} />
         </div>
 
         <div className="detail-section" data-testid="location-thermostats-section">

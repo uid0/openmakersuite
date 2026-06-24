@@ -41,6 +41,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "forgekey.tasks.advance_epaper_firmware_rollouts",
         300.0,  # every 5 min — promotes active ePaper rollouts past their interval
     ),
+    "forgekey-end-idle-device-sessions": (
+        "forgekey.tasks.end_idle_device_sessions",
+        300.0,  # every 5 min — auto-ends idle/runaway access-control sessions
+    ),
     "analytics-send-monthly-pulse": (
         "analytics.send_monthly_pulse_email",
         crontab(minute=0, hour=9, day_of_month=1),  # 09:00 on the 1st

@@ -77,6 +77,19 @@ PRESENTATIONS: Dict[str, Dict[str, Any]] = {
 VALID_PATTERNS = {"solid", "blink", "slow_blink", "breathe", "off"}
 VALID_BRIGHTNESS_WORDS = {"low", "high"}
 
+# Transient "access denied" feedback (op-vj9): a short red blink the firmware
+# renders for ``duration_s`` then drops back to its steady status. Unlike a
+# status sync this is deliberately ephemeral — it never updates ``last_status``,
+# so the bound light returns to whatever the asset's derived status is.
+DENY_FLASH_PAYLOAD: Dict[str, Any] = {
+    "cmd": INDICATOR_COMMAND,
+    "color": "red",
+    "brightness": "high",
+    "pattern": "blink",
+    "period_ms": 250,
+    "duration_s": 3,
+}
+
 
 # ---------------------------------------------------------------------------
 # Presentation mapping
@@ -287,6 +300,32 @@ def sync_bindings_for_location(location_id, *, actor=None) -> int:
     return len(bindings)
 
 
+def flash_deny_for_asset(asset_id, *, actor=None) -> int:
+    """Blink every indicator bound to an asset red as access-denied feedback.
+
+    Transient and best-effort: each dispatch is wrapped so a broker outage (or
+    an asset with no bound indicator) never propagates into the access-control
+    decision path. Does not touch ``last_status`` — the firmware reverts to the
+    asset's steady status after the blink. Returns the indicator count.
+    """
+    if not asset_id:
+        return 0
+    bindings = list(_bindings_qs().filter(asset_id=asset_id))
+    for binding in bindings:
+        try:
+            dispatch_command(
+                binding.device,
+                dict(DENY_FLASH_PAYLOAD),
+                actor=actor,
+                audit_action=INDICATOR_COMMAND,
+            )
+        except DeviceCommandError:
+            logger.warning("Indicator deny-flash skipped (broker error) for binding %s", binding.pk)
+        except Exception:  # pragma: no cover - defensive; never break the caller
+            logger.exception("Unexpected error flashing deny on indicator binding %s", binding.pk)
+    return len(bindings)
+
+
 def sync_bindings_for_device(device: ESP32Device, *, actor=None) -> int:
     """Re-sync indicators affected by a device's online/offline transition.
 
@@ -397,5 +436,6 @@ __all__ = [
     "sync_bindings_for_asset",
     "sync_bindings_for_location",
     "sync_bindings_for_device",
+    "flash_deny_for_asset",
     "build_test_payload",
 ]

@@ -9,6 +9,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AssetAuthorizationViewSet,
     AssetDeviceViewSet,
+    BadgeEnrollmentViewSet,
     CertificateAuthorityViewSet,
     DeviceCertificateViewSet,
     DeviceFirmwareUpdateViewSet,
@@ -33,6 +34,7 @@ from .views import (
     FirmwareBuildViewSet,
     FirmwareRolloutViewSet,
     FirmwareVersionViewSet,
+    ForgeKeyAuditEventViewSet,
     ForgeKeyCertificateRevocationListView,
     ForgeKeyDeviceEnrollView,
     ForgeKeyDevicePhotoUploadView,
@@ -57,6 +59,8 @@ router.register(
 )
 router.register(r"indicator-bindings", IndicatorBindingViewSet, basename="indicator-binding")
 router.register(r"authorizations", AssetAuthorizationViewSet, basename="asset-authorization")
+router.register(r"badge-enrollment", BadgeEnrollmentViewSet, basename="badge-enrollment")
+router.register(r"access-log", ForgeKeyAuditEventViewSet, basename="access-log")
 router.register(r"lockouts", DeviceLockoutViewSet, basename="device-lockout")
 router.register(r"usage", DeviceUsageViewSet, basename="device-usage")
 router.register(r"power-readings", PowerMeterReadingViewSet, basename="power-reading")

@@ -571,6 +571,13 @@ CELERY_BEAT_SCHEDULE = {
         # self-limits to its own interval_minutes.
         "schedule": 300.0,
     },
+    "forgekey-end-idle-device-sessions": {
+        "task": "forgekey.tasks.end_idle_device_sessions",
+        # Every 5 min — closes idle/runaway access-control sessions (op-vj9)
+        # and cuts their relay power. The service layer decides idleness from
+        # metered current with a wall-clock fallback.
+        "schedule": 300.0,
+    },
     # Monthly board / staff pulse email — covers the prior calendar month.
     # Uses crontab so we land at 09:00 on the 1st regardless of how the
     # worker scheduler restarted during the month.

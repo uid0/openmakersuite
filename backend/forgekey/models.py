@@ -487,6 +487,11 @@ class AssetAuthorization(models.Model):
     )
     authorized_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True, help_text="Is this authorization active?")
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Optional expiry; a past value makes the authorization inactive.",
+    )
     notes = models.TextField(blank=True, help_text="Notes about this authorization")
 
     class Meta:
@@ -498,6 +503,18 @@ class AssetAuthorization(models.Model):
 
     def __str__(self) -> str:
         return f"{self.asset.name} - {self.user.username}"
+
+    def is_currently_valid(self) -> bool:
+        """True when active and not past its optional expiry.
+
+        The access-control interlock treats an expired grant exactly like an
+        inactive one — power is never enabled on an expired authorization.
+        """
+        if not self.is_active:
+            return False
+        if self.expires_at is not None and self.expires_at <= timezone.now():
+            return False
+        return True
 
 
 class LockoutLevel(models.TextChoices):
@@ -1591,6 +1608,14 @@ class ForgeKeyAuditEvent(models.Model):
     ACTION_INDICATOR_UNBIND = "indicator_unbind"
     ACTION_INDICATOR_SYNC = "indicator_sync"
     ACTION_INDICATOR_TEST = "indicator_test"
+    # Access-control interlock (op-vj9): a badge/credential scan resolved to a
+    # power grant, a refusal, or a session end. ``actor`` is the resolved user
+    # (null for an unknown card); ``metadata`` carries the deny reason and the
+    # presented credential id.
+    ACTION_ACCESS_GRANTED = "access_granted"
+    ACTION_ACCESS_DENIED = "access_denied"
+    ACTION_SESSION_ENDED = "session_ended"
+    ACTION_BADGE_ENROLLED = "badge_enrolled"
 
     ACTION_CHOICES = [
         (ACTION_AUTHORIZATION_GRANT, "Authorization granted"),
@@ -1602,6 +1627,10 @@ class ForgeKeyAuditEvent(models.Model):
         (ACTION_INDICATOR_UNBIND, "Indicator unbound"),
         (ACTION_INDICATOR_SYNC, "Indicator synced"),
         (ACTION_INDICATOR_TEST, "Indicator test sent"),
+        (ACTION_ACCESS_GRANTED, "Access granted"),
+        (ACTION_ACCESS_DENIED, "Access denied"),
+        (ACTION_SESSION_ENDED, "Usage session ended"),
+        (ACTION_BADGE_ENROLLED, "Badge enrolled"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

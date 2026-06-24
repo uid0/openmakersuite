@@ -537,6 +537,20 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  forgekey.views.BadgeEnrollmentViewSet:
+    actions:
+      arm:
+        permission_classes:
+        - IsAdminUser
+      cancel:
+        permission_classes:
+        - IsAdminUser
+      list:
+        permission_classes:
+        - IsAdminUser
+      set_badge:
+        permission_classes:
+        - IsAdminUser
   forgekey.views.CertificateAuthorityViewSet:
     actions:
       list:
@@ -857,6 +871,14 @@ views:
         permission_classes:
         - IsAuthenticated
       update:
+        permission_classes:
+        - IsAuthenticated
+  forgekey.views.ForgeKeyAuditEventViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
         permission_classes:
         - IsAuthenticated
   forgekey.views.ForgeKeyCertificateRevocationListView:

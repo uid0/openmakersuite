@@ -51,10 +51,13 @@ from .models import (
     FirmwareBuild,
     FirmwareRollout,
     FirmwareVersion,
+    ForgeKeyAuditEvent,
+    IndicatorBinding,
     LockoutLevel,
     OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
+    RoomOperationalMode,
     TemperatureReading,
 )
 from .serializers import (
@@ -73,9 +76,11 @@ from .serializers import (
     FirmwareBuildSerializer,
     FirmwareRolloutSerializer,
     FirmwareVersionSerializer,
+    IndicatorBindingSerializer,
     OccupancyEventSerializer,
     OperationalModeSerializer,
     PowerMeterReadingSerializer,
+    RoomOperationalModeSerializer,
     TemperatureReadingSerializer,
 )
 from .services.ca_key_storage import CaKeyStorageError, decrypt_ca_key
@@ -87,6 +92,7 @@ from .services.firmware_signing import (
     get_public_key_pem,
     is_signing_configured,
 )
+from .services.indicator import send_indicator_test, sync_indicator
 from .services.jwt_signing import (
     JwtSigningError,
     get_jwt_jwks,
@@ -972,6 +978,43 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
     @action(
         detail=True,
         methods=["post"],
+        url_path="indicator/test",
+        permission_classes=[IsAdminUser],
+    )
+    def indicator_test(self, request, pk=None):
+        """Send an explicit color/brightness/pattern preview to an indicator.
+
+        Bypasses status derivation — the admin picks the presentation directly
+        for a live preview / hardware check. Validation + payload shaping live
+        in the indicator service so they stay aligned with the sync path.
+        """
+        device = self.get_object()
+        try:
+            record, payload = send_indicator_test(
+                device,
+                color=request.data.get("color"),
+                brightness=request.data.get("brightness"),
+                pattern=request.data.get("pattern"),
+                period_ms=request.data.get("period_ms"),
+                duration_s=request.data.get("duration_s"),
+                actor=request.user,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except DeviceCommandError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(
+            {
+                "status": "indicator_test command sent",
+                "device": device.mac_address,
+                "command_id": str(record.id),
+                "payload": payload,
+            }
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
         url_path="command/firmware-update",
         permission_classes=[IsAdminUser],
     )
@@ -1397,6 +1440,109 @@ class OperationalModeViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(mode)
         return Response(serializer.data)
+
+
+class RoomOperationalModeViewSet(viewsets.ModelViewSet):
+    """Get/set a room's admin-set operational mode (drives bound indicators)."""
+
+    queryset = RoomOperationalMode.objects.select_related("location", "updated_by").all()
+    serializer_class = RoomOperationalModeSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        """Allow ``?location=<id>`` so a room panel can fetch just its mode."""
+        qs = super().get_queryset()
+        location_id = self.request.query_params.get("location")
+        if location_id:
+            qs = qs.filter(location_id=location_id)
+        return qs
+
+    def _actor(self):
+        user = self.request.user
+        return user if user.is_authenticated else None
+
+    def perform_create(self, serializer):
+        serializer.save(updated_by=self._actor())
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self._actor())
+
+
+class IndicatorBindingViewSet(viewsets.ModelViewSet):
+    """CRUD for indicator device ↔ asset|room bindings, plus a sync action.
+
+    Creating a binding pushes the target's current status to the device so the
+    light is correct immediately; ``RoomOperationalMode`` / status-source
+    changes keep it current via signals.
+    """
+
+    queryset = IndicatorBinding.objects.select_related(
+        "device", "device__device_type", "asset", "location"
+    ).all()
+    serializer_class = IndicatorBindingSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        """Filter by ``?device=`` / ``?asset=`` / ``?location=`` for detail pages."""
+        qs = super().get_queryset()
+        params = self.request.query_params
+        device_id = params.get("device")
+        asset_id = params.get("asset")
+        location_id = params.get("location")
+        if device_id:
+            qs = qs.filter(device_id=device_id)
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        if location_id:
+            qs = qs.filter(location_id=location_id)
+        return qs
+
+    def _actor(self):
+        user = self.request.user
+        return user if user.is_authenticated else None
+
+    def perform_create(self, serializer):
+        binding = serializer.save()
+        record_audit_event(
+            action=ForgeKeyAuditEvent.ACTION_INDICATOR_BIND,
+            actor=self._actor(),
+            device=binding.device,
+            notes=f"bound to {'asset' if binding.asset_id else 'room'}",
+            metadata={
+                "asset_id": str(binding.asset_id) if binding.asset_id else None,
+                "location_id": binding.location_id,
+            },
+        )
+        # Best-effort initial push; a broker outage must not fail the bind.
+        try:
+            sync_indicator(binding, actor=self._actor(), force=True)
+        except DeviceCommandError:
+            logger.warning("Initial indicator sync failed for binding %s", binding.pk)
+
+    def perform_destroy(self, instance):
+        record_audit_event(
+            action=ForgeKeyAuditEvent.ACTION_INDICATOR_UNBIND,
+            actor=self._actor(),
+            device=instance.device,
+            notes="indicator unbound",
+        )
+        instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def sync(self, request, pk=None):
+        """Recompute the bound target's status and push it to the device."""
+        binding = self.get_object()
+        try:
+            record = sync_indicator(binding, actor=self._actor(), force=True)
+        except DeviceCommandError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(
+            {
+                "status": binding.last_status,
+                "presentation": binding.last_presentation,
+                "command_id": str(record.id) if record is not None else None,
+            }
+        )
 
 
 class AssetAuthorizationViewSet(viewsets.ModelViewSet):

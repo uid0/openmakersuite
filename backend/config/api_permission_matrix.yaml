@@ -716,6 +716,9 @@ views:
       fleet_summary:
         permission_classes:
         - IsAuthenticated
+      indicator_test:
+        permission_classes:
+        - IsAdminUser
       list:
         permission_classes:
         - IsAuthenticatedOrReadOnly
@@ -877,6 +880,29 @@ views:
   forgekey.views.ForgeKeyOmsCommandPublicKeyView:
     permission_classes:
     - AllowAny
+  forgekey.views.IndicatorBindingViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      sync:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
   forgekey.views.MqttWebhookView:
     permission_classes:
     - AllowAny
@@ -912,6 +938,26 @@ views:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  forgekey.views.RoomOperationalModeViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
   index_cards.views.IndexCardBatchGenerateView:

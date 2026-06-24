@@ -40,9 +40,11 @@ from .views import (
     ForgeKeyFirmwarePublicKeyView,
     ForgeKeyJWKSView,
     ForgeKeyOmsCommandPublicKeyView,
+    IndicatorBindingViewSet,
     MqttWebhookView,
     OperationalModeViewSet,
     PowerMeterReadingViewSet,
+    RoomOperationalModeViewSet,
 )
 
 router = DefaultRouter()
@@ -50,6 +52,10 @@ router.register(r"device-types", DeviceTypeViewSet, basename="device-type")
 router.register(r"devices", ESP32DeviceViewSet, basename="esp32-device")
 router.register(r"asset-devices", AssetDeviceViewSet, basename="asset-device")
 router.register(r"operational-modes", OperationalModeViewSet, basename="operational-mode")
+router.register(
+    r"room-operational-modes", RoomOperationalModeViewSet, basename="room-operational-mode"
+)
+router.register(r"indicator-bindings", IndicatorBindingViewSet, basename="indicator-binding")
 router.register(r"authorizations", AssetAuthorizationViewSet, basename="asset-authorization")
 router.register(r"lockouts", DeviceLockoutViewSet, basename="device-lockout")
 router.register(r"usage", DeviceUsageViewSet, basename="device-usage")

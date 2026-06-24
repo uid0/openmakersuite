@@ -32,8 +32,10 @@ from .models import (
     FirmwareBuild,
     FirmwareSigningKey,
     FirmwareVersion,
+    IndicatorBinding,
     OperationalMode,
     PowerMeterReading,
+    RoomOperationalMode,
 )
 from .services.ca_key_storage import CaKeyStorageError, encrypt_ca_key
 from .services.csr_signing import (
@@ -185,6 +187,33 @@ class OperationalModeAdmin(admin.ModelAdmin):
     list_filter = ["mode", "classroom_mode_enabled"]
     search_fields = ["asset__name"]
     raw_id_fields = ["asset", "classroom_mode_enabled_by"]
+
+
+@admin.register(RoomOperationalMode)
+class RoomOperationalModeAdmin(admin.ModelAdmin):
+    """Admin interface for room operational modes."""
+
+    list_display = ["location", "mode", "updated_by", "updated_at"]
+    list_filter = ["mode"]
+    search_fields = ["location__name"]
+    raw_id_fields = ["location", "updated_by"]
+
+
+@admin.register(IndicatorBinding)
+class IndicatorBindingAdmin(admin.ModelAdmin):
+    """Admin interface for indicator device ↔ asset|room bindings."""
+
+    list_display = ["device", "asset", "location", "last_status", "last_synced_at"]
+    list_filter = ["last_status"]
+    search_fields = ["device__mac_address", "device__name", "asset__name", "location__name"]
+    raw_id_fields = ["device", "asset", "location"]
+    readonly_fields = [
+        "last_status",
+        "last_presentation",
+        "last_synced_at",
+        "created_at",
+        "updated_at",
+    ]
 
 
 @admin.register(AssetAuthorization)

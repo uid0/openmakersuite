@@ -19,8 +19,9 @@ class ForgekeyConfig(AppConfig):
     verbose_name = "ForgeKey - ESP32 Device Management"
 
     def ready(self) -> None:
-        # Import for side-effect: registers system checks.
+        # Imported for side effects: system checks + indicator-sync signals.
         from . import checks  # noqa: F401
+        from . import signals  # noqa: F401
 
         token = (getattr(settings, "FORGEKEY_PROVISIONING_TOKEN", "") or "").strip()
         if token:

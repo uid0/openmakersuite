@@ -312,10 +312,24 @@ def handle_status_message(topic: str, payload: bytes) -> bool:
     if isinstance(body.get("ip"), str):
         updates["ip"] = body["ip"]
 
+    # Capture prior online state before the bulk update so we can detect a
+    # transition (the bulk .update() below emits no post_save signal).
+    prior = ESP32Device.objects.filter(mac_address=mac).values_list("pk", "is_online").first()
+
     rows = ESP32Device.objects.filter(mac_address=mac).update(**updates)
     if rows == 0:
         logger.info("Dropping status message: unknown MAC %s on topic %s", mac, topic)
         return False
+
+    # Indicator reactive update (ga-72l): an online/offline transition can flip
+    # a bound asset's derived availability, so re-push affected indicators.
+    if prior is not None and prior[1] != updates["is_online"]:
+        try:
+            from forgekey.services.indicator import sync_bindings_for_device
+
+            sync_bindings_for_device(ESP32Device.objects.get(pk=prior[0]))
+        except Exception:  # pragma: no cover - never let sync break ingest
+            logger.exception("Indicator sync after status transition failed for %s", mac)
 
     # Firmware ack channel: a status payload may include ``cmd_ack`` to
     # mark a :class:`DeviceCommand` row as acked. Two shapes are accepted

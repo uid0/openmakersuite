@@ -877,10 +877,10 @@ views:
     actions:
       list:
         permission_classes:
-        - IsAuthenticated
+        - IsAdminUser
       retrieve:
         permission_classes:
-        - IsAuthenticated
+        - IsAdminUser
   forgekey.views.ForgeKeyCertificateRevocationListView:
     permission_classes:
     - AllowAny

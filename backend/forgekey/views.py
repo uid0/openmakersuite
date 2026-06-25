@@ -1828,7 +1828,7 @@ class ForgeKeyAuditEventViewSet(viewsets.ReadOnlyModelViewSet):
 
     queryset = ForgeKeyAuditEvent.objects.select_related("actor", "asset", "device").all()
     serializer_class = ForgeKeyAuditEventSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminUser]
 
     ACCESS_ACTIONS = [
         ForgeKeyAuditEvent.ACTION_ACCESS_GRANTED,

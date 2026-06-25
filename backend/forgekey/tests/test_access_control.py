@@ -593,8 +593,11 @@ class TestAccessLogApi:
         AssetAuthorizationFactory(asset=asset, user=member, is_active=True)
         ac.handle_access_request(device.mac_address, _badge_payload())  # ACCESS_GRANTED
 
+        # The access log is staff-only (op-2se), so the reader is an admin even
+        # though the access event was logged against a plain member.
+        staff = UserFactory(is_staff=True)
         client = APIClient()
-        client.force_authenticate(user=member)
+        client.force_authenticate(user=staff)
         resp = client.get("/api/forgekey/access-log/?access_only=true")
         assert resp.status_code == 200
         actions = {row["action"] for row in resp.data["results"]}
@@ -607,3 +610,14 @@ class TestAccessLogApi:
             ]
         )
         assert ForgeKeyAuditEvent.ACTION_ACCESS_GRANTED in actions
+
+    def test_non_staff_member_cannot_read_access_log(self, asset, device, member):
+        # A plain authenticated member is forbidden from the access log (op-2se):
+        # IsAdminUser on ForgeKeyAuditEventViewSet returns 403, not the rows.
+        AssetAuthorizationFactory(asset=asset, user=member, is_active=True)
+        ac.handle_access_request(device.mac_address, _badge_payload())  # ACCESS_GRANTED
+
+        client = APIClient()
+        client.force_authenticate(user=member)
+        resp = client.get("/api/forgekey/access-log/?access_only=true")
+        assert resp.status_code == 403

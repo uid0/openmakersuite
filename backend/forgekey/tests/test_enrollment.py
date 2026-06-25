@@ -98,6 +98,8 @@ def _post_enroll(
     meta_overrides=None,
     photo=None,
     token=PROVISIONING_TOKEN,
+    token_header="HTTP_X_FORGEKEY_PROVISIONING_TOKEN",
+    extra_headers=None,
 ):
     mac = (meta_overrides or {}).get("mac_address", "AA:BB:CC:DD:EE:FF")
     chip = (meta_overrides or {}).get("unique_chip_id", "chip-aabbccddeeff")
@@ -121,7 +123,9 @@ def _post_enroll(
         data["photo"] = photo
     kwargs = {"format": "multipart"}
     if token is not None:
-        kwargs["HTTP_X_FORGEKEY_PROVISIONING_TOKEN"] = token
+        kwargs[token_header] = token
+    if extra_headers:
+        kwargs.update(extra_headers)
     return api_client.post(url, data=data, **kwargs)
 
 
@@ -236,6 +240,37 @@ def test_enroll_wrong_token_returns_401_with_diagnostics(
     assert "expected_token_fingerprint" in body
     # The full secret must NEVER appear in the response.
     assert PROVISIONING_TOKEN not in resp.content.decode("utf-8")
+
+
+def test_enroll_accepts_bootstrap_token_alias(
+    api_client, enroll_url, active_ca, people_counter_type
+):
+    # Already-flashed devices send the enrollment token in the legacy
+    # X-ForgeKey-Bootstrap-Token header; it is accepted as a back-compat alias
+    # so they enroll without reflashing.
+    resp = _post_enroll(
+        api_client,
+        enroll_url,
+        photo=_jpeg(),
+        token_header="HTTP_X_FORGEKEY_BOOTSTRAP_TOKEN",
+    )
+    assert resp.status_code == 201, resp.content
+    assert resp.json()["device_id"] == "chip-aabbccddeeff"
+
+
+def test_enroll_canonical_token_header_takes_precedence_over_alias(
+    api_client, enroll_url, active_ca, people_counter_type
+):
+    # The canonical header is primary: when it carries a (wrong) value, the
+    # legacy alias is NOT consulted as a fallback.
+    resp = _post_enroll(
+        api_client,
+        enroll_url,
+        token="not-the-token",
+        extra_headers={"HTTP_X_FORGEKEY_BOOTSTRAP_TOKEN": PROVISIONING_TOKEN},
+    )
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "token_mismatch"
 
 
 def test_enroll_malformed_csr_returns_400(api_client, enroll_url, active_ca, people_counter_type):

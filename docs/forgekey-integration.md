@@ -57,7 +57,10 @@ ESP32 (boot)              OMS backend
 Headers:
 
 * `X-ForgeKey-Provisioning-Token` — must equal `FORGEKEY_PROVISIONING_TOKEN`.
-  Empty server config returns 401 unconditionally.
+  Empty server config returns 401 unconditionally. `X-ForgeKey-Bootstrap-Token`
+  is accepted as a backward-compatible legacy alias for this header (used by
+  devices flashed with older firmware); the canonical header takes precedence
+  when both are present.
 
 Body (`multipart/form-data`):
 
@@ -110,7 +113,8 @@ token — re-registering rotates the JWT.
 Headers:
 
 * `Authorization: Bearer <jwt>` (preferred), or
-* `X-ForgeKey-Provisioning-Token` (fallback).
+* `X-ForgeKey-Provisioning-Token` (fallback; the legacy
+  `X-ForgeKey-Bootstrap-Token` alias is also accepted).
 
 Body (`multipart/form-data`):
 

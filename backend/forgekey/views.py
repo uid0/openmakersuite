@@ -154,6 +154,29 @@ def _token_fingerprint(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]
 
 
+# Header carrying the shared provisioning token. ``X-ForgeKey-Provisioning-Token``
+# is canonical; ``X-ForgeKey-Bootstrap-Token`` is a backward-compatible alias for
+# devices already flashed with the older firmware, so they enroll without being
+# reflashed. The canonical header is primary; the alias is consulted only as a
+# fallback.
+PROVISIONING_TOKEN_HEADER = "x-forgekey-provisioning-token"
+PROVISIONING_TOKEN_HEADER_ALIAS = "x-forgekey-bootstrap-token"
+
+
+def _provisioning_token_from_request(request) -> str:
+    """Resolve the provisioning token from either accepted request header.
+
+    Prefers the canonical ``X-ForgeKey-Provisioning-Token`` header and falls
+    back to the legacy ``X-ForgeKey-Bootstrap-Token`` alias only when the
+    canonical header is absent or empty. Returns the raw (unstripped) header
+    value, or ``""`` when neither header carries a value.
+    """
+    primary = request.headers.get(PROVISIONING_TOKEN_HEADER, "") or ""
+    if primary:
+        return primary
+    return request.headers.get(PROVISIONING_TOKEN_HEADER_ALIAS, "") or ""
+
+
 def _classify_provisioning_token(request) -> tuple[bool, str | None, dict]:
     """Validate the provisioning token and classify any failure.
 
@@ -163,7 +186,7 @@ def _classify_provisioning_token(request) -> tuple[bool, str | None, dict]:
     """
     raw_expected = getattr(settings, "FORGEKEY_PROVISIONING_TOKEN", "") or ""
     expected = raw_expected.strip()
-    raw_supplied = request.headers.get("x-forgekey-provisioning-token", "") or ""
+    raw_supplied = _provisioning_token_from_request(request)
     supplied = raw_supplied.strip()
 
     diagnostics = {
@@ -191,7 +214,10 @@ _AUTH_ERR_DETAILS = {
         "Server has no provisioning token configured. "
         "Set FORGEKEY_PROVISIONING_TOKEN on the backend."
     ),
-    AUTH_ERR_TOKEN_MISSING: ("Request is missing the X-ForgeKey-Provisioning-Token header."),
+    AUTH_ERR_TOKEN_MISSING: (
+        "Request is missing the X-ForgeKey-Provisioning-Token header "
+        "(or its legacy alias X-ForgeKey-Bootstrap-Token)."
+    ),
     AUTH_ERR_TOKEN_PLACEHOLDER: (
         "Device sent the placeholder provisioning token; "
         "publish the real token via rotate_provisioning_token."
@@ -243,7 +269,9 @@ class ForgeKeyDeviceEnrollView(APIView):
 
     Auth: shared ``FORGEKEY_PROVISIONING_TOKEN`` supplied in the
     ``X-ForgeKey-Provisioning-Token`` header (same bootstrap secret used by
-    the legacy ``/register/`` endpoint).
+    the legacy ``/register/`` endpoint). The legacy
+    ``X-ForgeKey-Bootstrap-Token`` header is accepted as a backward-compatible
+    alias for devices flashed with older firmware.
     """
 
     authentication_classes: list = []
@@ -317,12 +345,9 @@ class ForgeKeyDeviceEnrollView(APIView):
         raw_sensor_kind = meta.get("sensor_kind") or meta.get("device_type") or ""
         sensor_kind_code = normalize_sensor_kind(raw_sensor_kind) if raw_sensor_kind else ""
 
+        supplied_token = _provisioning_token_from_request(request)
         token_fp_full = (
-            hashlib.sha256(
-                (request.headers.get("x-forgekey-provisioning-token", "") or "").encode("utf-8")
-            ).hexdigest()
-            if request.headers.get("x-forgekey-provisioning-token")
-            else ""
+            hashlib.sha256(supplied_token.encode("utf-8")).hexdigest() if supplied_token else ""
         )
 
         identity, _ = DeviceIdentity.objects.get_or_create(device_id=unique_chip_id)

@@ -18,8 +18,8 @@ from django.urls import reverse
 
 import pytest
 
-from forgekey.models import OccupancyEvent
-from forgekey.tests.factories import ESP32DeviceFactory
+from forgekey.models import DeviceIdentity, OccupancyEvent
+from forgekey.tests.factories import DeviceTypeFactory, ESP32DeviceFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -311,3 +311,101 @@ class TestWebhookOccupancyEndToEnd:
         )
         assert response.status_code == 204
         assert OccupancyEvent.objects.count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Legacy compat: chip-id-keyed topics from already-deployed devices (op-bej)
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookLegacyChipIdTopics:
+    """Pre-MAC firmware was provisioned with forgekey/devices/<chip-id>/...
+
+    topics and still publishes there. The webhook must keep accepting them by
+    resolving the chip id back to the device MAC before routing.
+    """
+
+    def _enrolled_people_counter(self, chip_id="00000ca48eeabf8c", mac="8C:BF:EA:8E:A4:0C"):
+        identity = DeviceIdentity.objects.create(device_id=chip_id)
+        pc_type = DeviceTypeFactory(code="people_counter")
+        return ESP32DeviceFactory(mac_address=mac, device_type=pc_type, identity=identity)
+
+    def test_legacy_ping_routes_to_occupancy_with_device_mac(self, api_client):
+        device = self._enrolled_people_counter()
+        with patch("forgekey.views.process_mqtt_occupancy.delay") as mock_delay:
+            response = _post(
+                api_client,
+                {
+                    "topic": "forgekey/devices/00000ca48eeabf8c/ping",
+                    "payload": json.dumps({"in": 2, "out": 1}),
+                },
+            )
+        assert response.status_code == 204
+        mock_delay.assert_called_once_with(
+            device.mac_address,
+            "people_counter",
+            {"in": 2, "out": 1},
+        )
+
+    def test_legacy_status_routes_to_status_with_device_mac(self, api_client):
+        device = self._enrolled_people_counter()
+        with patch("forgekey.views.process_mqtt_status_message.delay") as mock_delay:
+            response = _post(
+                api_client,
+                {
+                    "topic": "forgekey/devices/00000ca48eeabf8c/status",
+                    "payload": json.dumps({"online": True}),
+                },
+            )
+        assert response.status_code == 204
+        mock_delay.assert_called_once_with(device.mac_address, {"online": True})
+
+    def test_legacy_ping_derives_mac_when_device_not_enrolled(self, api_client):
+        # No ESP32Device row: fall back to deriving the MAC from the chip id
+        # (00000ca48eeabf8c -> 8cbfea8ea40c -> 8C:BF:EA:8E:A4:0C). Kind defaults
+        # to people_counter, the only class the legacy ping topic was used for.
+        with patch("forgekey.views.process_mqtt_occupancy.delay") as mock_delay:
+            response = _post(
+                api_client,
+                {
+                    "topic": "forgekey/devices/00000ca48eeabf8c/ping",
+                    "payload": json.dumps({"in": 1, "out": 0}),
+                },
+            )
+        assert response.status_code == 204
+        mock_delay.assert_called_once_with(
+            "8C:BF:EA:8E:A4:0C",
+            "people_counter",
+            {"in": 1, "out": 0},
+        )
+
+    def test_legacy_unresolvable_chip_is_dropped(self, api_client):
+        # Non-hex chip id and no device row → cannot resolve a MAC → dropped
+        # (204, no dispatch) rather than erroring or guessing.
+        with patch("forgekey.views.process_mqtt_occupancy.delay") as mock_delay:
+            response = _post(
+                api_client,
+                {
+                    "topic": "forgekey/devices/not-a-hex-chip/ping",
+                    "payload": json.dumps({"in": 1, "out": 0}),
+                },
+            )
+        assert response.status_code == 204
+        assert not mock_delay.called
+
+    def test_canonical_mac_topic_still_routes(self, api_client):
+        # Regression: the new forgekey/<mac>/<kind>/occupancy form is unaffected.
+        with patch("forgekey.views.process_mqtt_occupancy.delay") as mock_delay:
+            response = _post(
+                api_client,
+                {
+                    "topic": "forgekey/8cbfea8ea40c/people_counter/occupancy",
+                    "payload": json.dumps({"in": 1, "out": 0}),
+                },
+            )
+        assert response.status_code == 204
+        mock_delay.assert_called_once_with(
+            "8C:BF:EA:8E:A4:0C",
+            "people_counter",
+            {"in": 1, "out": 0},
+        )

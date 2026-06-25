@@ -248,6 +248,31 @@ def normalize_sensor_kind(sensor_kind: str) -> str:
     return (sensor_kind or "").strip().replace("-", "_").lower()
 
 
+def mac_from_chip_id(chip_id: str) -> str:
+    """Derive the device's base WiFi MAC from its eFuse ``unique_chip_id``.
+
+    ESP32 reports an 8-byte eFuse chip id; the factory base MAC is the lower
+    six bytes of that value in reversed byte order — e.g. chip id
+    ``00000ca48eeabf8c`` → MAC ``8cbfea8ea40c``. The firmware keys its MQTT
+    topics on this MAC, so when a device enrolls without sending ``mac_address``
+    we reconstruct it here rather than fall back to a chip-id-keyed topic the
+    firmware would reject.
+
+    Returns the bare lowercase 12-hex MAC, or ``""`` when ``chip_id`` is not a
+    parseable hex value of at least six bytes.
+    """
+    digits = (chip_id or "").strip().replace(":", "").replace("-", "").lower()
+    if len(digits) < 12:
+        return ""
+    low_six = digits[-12:]
+    try:
+        int(low_six, 16)
+    except ValueError:
+        return ""
+    octets = [low_six[i : i + 2] for i in range(0, 12, 2)]
+    return "".join(reversed(octets))
+
+
 def get_mqtt_firmware_topic(mac_address: str) -> str:
     """MQTT topic the firmware subscribes to for OTA advertisements.
 
@@ -263,6 +288,39 @@ def get_mqtt_ping_topic(mac_address: str, sensor_kind: str) -> str:
     """
     kind = normalize_sensor_kind(sensor_kind)
     return f"{settings.MQTT_TOPIC_PREFIX}/{_firmware_contract_mac(mac_address)}/{kind}/occupancy"
+
+
+# Sensor kinds whose enroll-time ``mqtt_topic_for_pings`` the firmware accepts,
+# mapped to the leaf segment it requires. This mirrors ``isValidPingsTopic()``
+# in the ForgeKey firmware (``src/main.cpp``): the device validates the topic we
+# hand back against exactly these shapes and WIPES its credentials on any
+# mismatch. For every other class (indicator, lock, …) we emit no pings topic so
+# the firmware keeps its own MAC-derived default instead of clearing creds.
+_PINGS_CONTRACT_LEAF = {
+    "people_counter": "occupancy",
+    "door_counter": "occupancy",
+    "temperature_sensor": "reading",
+}
+
+
+def get_mqtt_pings_topic(mac_address: str, sensor_kind: str) -> str:
+    """Enroll-response ``mqtt_topic_for_pings`` for ``sensor_kind``.
+
+    Returns the firmware-contract topic
+    ``forgekey/<mac>/<kind>/<occupancy|reading>`` for the people-counter,
+    door-counter, and temperature-sensor classes the firmware validates, or
+    ``""`` for any other class (e.g. indicator) so the device keeps its built-in
+    default and does not clear its credentials. Also returns ``""`` when no MAC
+    is known.
+    """
+    contract_mac = _firmware_contract_mac(mac_address)
+    if not contract_mac:
+        return ""
+    kind = normalize_sensor_kind(sensor_kind)
+    leaf = _PINGS_CONTRACT_LEAF.get(kind)
+    if not leaf:
+        return ""
+    return f"{settings.MQTT_TOPIC_PREFIX}/{contract_mac}/{kind}/{leaf}"
 
 
 def get_mqtt_ota_trigger_topic(mac_address: str) -> str:

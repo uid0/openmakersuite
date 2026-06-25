@@ -115,10 +115,11 @@ from .tasks import (
     request_device_status,
 )
 from .utils import (
-    device_command_topic_for,
-    device_firmware_topic_for,
-    device_ping_topic_for,
-    device_status_topic_for,
+    get_mqtt_command_topic,
+    get_mqtt_firmware_topic,
+    get_mqtt_pings_topic,
+    get_mqtt_status_topic,
+    mac_from_chip_id,
     normalize_mac_address,
     normalize_sensor_kind,
     verify_device_jwt,
@@ -345,6 +346,17 @@ class ForgeKeyDeviceEnrollView(APIView):
         raw_sensor_kind = meta.get("sensor_kind") or meta.get("device_type") or ""
         sensor_kind_code = normalize_sensor_kind(raw_sensor_kind) if raw_sensor_kind else ""
 
+        # The whole MQTT topic + ACL contract is MAC-keyed. Prefer the MAC the
+        # device reported; if it enrolled without one, derive it from the eFuse
+        # chip id (ESP32 base MAC = lower 6 bytes of unique_chip_id, byte-
+        # reversed) so the topics we hand back still match what the firmware
+        # subscribes / publishes on. Empty only when neither source yields a MAC.
+        device_mac = mac_normalized
+        if not device_mac:
+            derived_mac = mac_from_chip_id(unique_chip_id)
+            if derived_mac:
+                device_mac = normalize_mac_address(derived_mac)
+
         supplied_token = _provisioning_token_from_request(request)
         token_fp_full = (
             hashlib.sha256(supplied_token.encode("utf-8")).hexdigest() if supplied_token else ""
@@ -404,7 +416,7 @@ class ForgeKeyDeviceEnrollView(APIView):
                 device=identity,
                 csr_pem=csr_pem,
                 unique_chip_id=unique_chip_id,
-                mac_address=mac_normalized,
+                mac_address=device_mac,
                 sensor_kind=sensor_kind_code,
                 firmware_version=meta.get("firmware_version", "") or "",
                 chip_info=meta.get("chip_info") or {},
@@ -441,15 +453,15 @@ class ForgeKeyDeviceEnrollView(APIView):
             enrollment.save()
 
             esp_device = None
-            if mac_normalized:
-                esp_device = ESP32Device.objects.filter(mac_address=mac_normalized).first()
+            if device_mac:
+                esp_device = ESP32Device.objects.filter(mac_address=device_mac).first()
                 if esp_device is None:
                     device_type_obj = None
                     if sensor_kind_code:
                         device_type_obj = DeviceType.objects.filter(code=sensor_kind_code).first()
                     if device_type_obj is not None:
                         esp_device = ESP32Device.objects.create(
-                            mac_address=mac_normalized,
+                            mac_address=device_mac,
                             device_type=device_type_obj,
                             firmware_version=meta.get("firmware_version", "") or "",
                             boot_count=meta.get("boot_count"),
@@ -488,10 +500,18 @@ class ForgeKeyDeviceEnrollView(APIView):
         broker_host = settings.PUBLIC_MQTT_BROKER_HOST or settings.MQTT_BROKER_HOST
         broker_port = settings.PUBLIC_MQTT_BROKER_PORT
         broker_tls = settings.PUBLIC_MQTT_BROKER_USE_TLS
-        firmware_topic = device_firmware_topic_for(unique_chip_id)
-        ping_topic = device_ping_topic_for(unique_chip_id)
-        command_topic = device_command_topic_for(unique_chip_id)
-        status_topic = device_status_topic_for(unique_chip_id)
+        # Hand back the canonical MAC-keyed topics the firmware (and the OMS MQTT
+        # consumer) expect. The pings topic is class-aware: it is only emitted
+        # for the sensor kinds the firmware's contract check accepts, and is
+        # left empty otherwise (e.g. indicator) so the device does not wipe its
+        # credentials. command/status/firmware are derived from the device MAC.
+        if device_mac:
+            firmware_topic = get_mqtt_firmware_topic(device_mac)
+            ping_topic = get_mqtt_pings_topic(device_mac, sensor_kind_code)
+            command_topic = get_mqtt_command_topic(device_mac)
+            status_topic = get_mqtt_status_topic(device_mac)
+        else:
+            firmware_topic = ping_topic = command_topic = status_topic = ""
 
         policy = {
             "mqtt_broker_host": broker_host,
@@ -695,6 +715,21 @@ class MqttWebhookView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Legacy compat: pre-MAC firmware was provisioned with chip-id-keyed
+        # topics (forgekey/devices/<chip-id>/...). Already-deployed devices
+        # still publish there, so rewrite those into the canonical
+        # forgekey/<mac>/... shape before routing instead of dropping them.
+        if len(parts) >= 4 and parts[1] == "devices":
+            canonical = self._canonicalize_legacy_parts(parts)
+            if canonical is None:
+                logger.info(
+                    "ForgeKey webhook: ignoring legacy topic for unresolved chip %s",
+                    parts[2],
+                )
+                # 204, not an error: EMQX should not retry a topic we drop.
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            parts = canonical
+
         try:
             mac = normalize_mac_address(parts[1])
         except Exception:
@@ -708,6 +743,52 @@ class MqttWebhookView(APIView):
             logger.info("ForgeKey webhook: ignoring unrouted topic %s", topic)
             # Still 204 — EMQX should not retry topics we deliberately drop.
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _canonicalize_legacy_parts(self, parts: list[str]) -> list[str] | None:
+        """Rewrite a legacy ``forgekey/devices/<chip-id>/<suffix...>`` topic into
+        its canonical ``forgekey/<mac>/...`` equivalent so the normal dispatcher
+        routes it.
+
+        Returns the rewritten parts, or ``None`` when the chip id cannot be
+        resolved to a device MAC (the message is then dropped). ``parts`` is
+        ``[<prefix>, "devices", <chip-id>, <suffix...>]`` with at least four
+        elements.
+        """
+        chip_id = parts[2]
+        mac, kind = self._resolve_legacy_chip(chip_id)
+        if not mac:
+            return None
+        suffix = parts[3:]
+        # The legacy occupancy ping had no <kind> segment; the canonical form
+        # carries one. Re-insert it (from the device's type, defaulting to a
+        # people counter — the only class the chip-id ping topic was emitted
+        # for) so the occupancy route matches.
+        if suffix == ["ping"]:
+            return [parts[0], mac, kind or DeviceType.TYPE_PEOPLE_COUNTER, self.OCCUPANCY_SUFFIX]
+        # Every other legacy suffix already has the canonical shape once the
+        # devices/<chip-id> prefix is replaced by the bare MAC.
+        return [parts[0], mac, *suffix]
+
+    @staticmethod
+    def _resolve_legacy_chip(chip_id: str) -> tuple[str, str]:
+        """Resolve a legacy chip id to ``(mac, sensor_kind)`` for routing.
+
+        Prefers the enrolled ``ESP32Device`` (authoritative MAC + type); falls
+        back to deriving the MAC from the chip id when no device row is linked
+        yet. Returns ``("", "")`` when neither yields a MAC.
+        """
+        device = (
+            ESP32Device.objects.select_related("device_type")
+            .filter(identity__device_id=chip_id)
+            .first()
+        )
+        if device is not None:
+            kind = device.device_type.code if device.device_type_id else ""
+            return device.mac_address, kind
+        derived = mac_from_chip_id(chip_id)
+        if derived:
+            return normalize_mac_address(derived), ""
+        return "", ""
 
     @staticmethod
     def _ip_allowed(request) -> bool:

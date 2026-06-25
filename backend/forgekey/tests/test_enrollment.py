@@ -144,8 +144,13 @@ def test_enroll_returns_documented_fields(api_client, enroll_url, active_ca, peo
     assert body["command_public_key_pem"].startswith("-----BEGIN PUBLIC KEY-----")
 
     policy = body["policy"]
-    assert policy["mqtt_topic_for_firmware"].endswith("/devices/chip-aabbccddeeff/firmware")
-    assert policy["mqtt_topic_for_pings"].endswith("/devices/chip-aabbccddeeff/ping")
+    # Canonical MAC-keyed topics (forgekey/<mac>/...) — the chip-id-keyed
+    # legacy form made the firmware contract check fail and wipe its creds.
+    assert policy["mqtt_topic_for_firmware"] == "forgekey/aabbccddeeff/firmware"
+    assert policy["mqtt_topic_for_commands"] == "forgekey/aabbccddeeff/command"
+    assert policy["mqtt_topic_for_status"] == "forgekey/aabbccddeeff/status"
+    # People counters carry a contract-valid pings topic (kind/occupancy).
+    assert policy["mqtt_topic_for_pings"] == "forgekey/aabbccddeeff/people_counter/occupancy"
     assert isinstance(policy["mqtt_broker_use_tls"], bool)
 
     # Top-level mirror still present so older firmware can read either form.
@@ -185,6 +190,118 @@ def test_enroll_issues_cert_that_verifies_against_active_ca(
         issued.tbs_certificate_bytes,
         ec.ECDSA(issued.signature_hash_algorithm),
     )
+
+
+# ---------------------------------------------------------------------------
+# Canonical <mac> topics + non-people-counter attribution (op-bej)
+# ---------------------------------------------------------------------------
+
+
+def _firmware_accepts_pings_topic(topic: str) -> bool:
+    """Mirror ``isValidPingsTopic()`` in the ForgeKey firmware (src/main.cpp).
+
+    The device clears its credentials when a stored, non-empty
+    ``mqtt_topic_for_pings`` fails this check, so an enroll response must hand
+    back either a topic this accepts or an empty string.
+    """
+    if not topic:
+        # Empty is fine: the firmware keeps its own MAC-derived default.
+        return True
+    if not topic.startswith("forgekey/"):
+        return False
+    segs = topic.split("/")
+    if len(segs) != 4:
+        return False
+    _prefix, mac, kind, leaf = segs
+    if len(mac) != 12 or any(c not in "0123456789abcdef" for c in mac):
+        return False
+    if kind in ("people_counter", "door_counter"):
+        return leaf == "occupancy"
+    if kind == "temperature_sensor":
+        return leaf == "reading"
+    return False
+
+
+def test_enroll_indicator_gets_canonical_topics_and_no_cred_wipe(api_client, enroll_url, active_ca):
+    # The indicator DeviceType is seeded by migration 0004; create it
+    # explicitly too (get-or-create) so the test holds under --no-migrations.
+    DeviceTypeFactory(code=DeviceType.TYPE_INDICATOR)
+    resp = _post_enroll(
+        api_client,
+        enroll_url,
+        meta_overrides={
+            "mac_address": "8C:BF:EA:8E:A4:0C",
+            "unique_chip_id": "00000ca48eeabf8c",
+            "sensor_kind": DeviceType.TYPE_INDICATOR,
+        },
+    )
+    assert resp.status_code == 201, resp.content
+    policy = resp.json()["policy"]
+
+    # Command/status/firmware are the canonical MAC-keyed topics.
+    assert policy["mqtt_topic_for_commands"] == "forgekey/8cbfea8ea40c/command"
+    assert policy["mqtt_topic_for_status"] == "forgekey/8cbfea8ea40c/status"
+    assert policy["mqtt_topic_for_firmware"] == "forgekey/8cbfea8ea40c/firmware"
+
+    # Indicator is not a pings class: emit nothing so the firmware keeps its
+    # default instead of wiping creds. The firmware contract check passes.
+    assert policy["mqtt_topic_for_pings"] == ""
+    assert _firmware_accepts_pings_topic(policy["mqtt_topic_for_pings"])
+
+    # Attributes to the indicator DeviceType, not people-counter.
+    device = ESP32Device.objects.get(mac_address="8C:BF:EA:8E:A4:0C")
+    assert device.device_type.code == DeviceType.TYPE_INDICATOR
+
+
+def test_enroll_people_counter_pings_topic_passes_firmware_contract(
+    api_client, enroll_url, active_ca, people_counter_type
+):
+    resp = _post_enroll(api_client, enroll_url)
+    assert resp.status_code == 201, resp.content
+    policy = resp.json()["policy"]
+    assert policy["mqtt_topic_for_pings"] == "forgekey/aabbccddeeff/people_counter/occupancy"
+    assert _firmware_accepts_pings_topic(policy["mqtt_topic_for_pings"])
+
+
+def test_enroll_temperature_sensor_pings_uses_reading_leaf(api_client, enroll_url, active_ca):
+    DeviceTypeFactory(code=DeviceType.TYPE_TEMPERATURE_SENSOR)
+    resp = _post_enroll(
+        api_client,
+        enroll_url,
+        meta_overrides={"sensor_kind": DeviceType.TYPE_TEMPERATURE_SENSOR},
+    )
+    assert resp.status_code == 201, resp.content
+    policy = resp.json()["policy"]
+    # Temperature sensors publish to .../reading, not .../occupancy — the
+    # firmware contract rejects the wrong leaf.
+    assert policy["mqtt_topic_for_pings"] == "forgekey/aabbccddeeff/temperature_sensor/reading"
+    assert _firmware_accepts_pings_topic(policy["mqtt_topic_for_pings"])
+
+
+def test_enroll_derives_mac_from_chip_id_when_mac_absent(api_client, enroll_url, active_ca):
+    DeviceTypeFactory(code=DeviceType.TYPE_INDICATOR)
+    # No mac_address sent: the MAC is reconstructed from the eFuse chip id
+    # (lower 6 bytes, byte-reversed) — 00000ca48eeabf8c -> 8cbfea8ea40c.
+    _key, csr_pem = _build_csr("8cbfea8ea40c")
+    meta = {
+        "unique_chip_id": "00000ca48eeabf8c",
+        "csr_pem": csr_pem,
+        "firmware_version": "1.0.0",
+        "sensor_kind": DeviceType.TYPE_INDICATOR,
+    }
+    resp = api_client.post(
+        enroll_url,
+        data={"metadata": json.dumps(meta)},
+        HTTP_X_FORGEKEY_PROVISIONING_TOKEN=PROVISIONING_TOKEN,
+        format="multipart",
+    )
+    assert resp.status_code == 201, resp.content
+    policy = resp.json()["policy"]
+    assert policy["mqtt_topic_for_commands"] == "forgekey/8cbfea8ea40c/command"
+    assert policy["mqtt_topic_for_firmware"] == "forgekey/8cbfea8ea40c/firmware"
+    # Derived MAC is persisted normalized so the device attributes correctly.
+    device = ESP32Device.objects.get(mac_address="8C:BF:EA:8E:A4:0C")
+    assert device.device_type.code == DeviceType.TYPE_INDICATOR
 
 
 # ---------------------------------------------------------------------------

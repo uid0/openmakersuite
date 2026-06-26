@@ -301,6 +301,15 @@ services:
     image: oms-backend:local
     logging: *default-logging
     command: python manage.py mqtt_consumer
+    # mqtt_consumer reuses oms-backend:local, whose Dockerfile.prod bakes an
+    # HTTP liveness HEALTHCHECK (urlopen http://localhost:8000/api/health/livez/).
+    # This service runs no web server, so that probe can never succeed and the
+    # container is reported perpetually "unhealthy" (op-cz8). Disable the
+    # inherited probe; the consumer self-heals via paho's reconnect loop and the
+    # restart: unless-stopped policy below. (A real liveness check would need a
+    # heartbeat file written by the mgmt command — tracked separately.)
+    healthcheck:
+      disable: true
     deploy:
       resources:
         limits:

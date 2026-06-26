@@ -12,7 +12,7 @@ black==26.5.1
 isort==8.0.1
 
 # Django Tools
-django-upgrade==1.30.0
+django-upgrade==1.31.1
 
 # Security Scanning
 bandit==1.9.4

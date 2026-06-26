@@ -4,7 +4,7 @@
  * API calls, and the live-preview legend.
  */
 import { MantineProvider } from '@mantine/core';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import IndicatorManagementCard from '../../components/IndicatorManagementCard';
 import { assetsAPI, forgekeyAPI, inventoryAPI } from '../../services/api';
 
@@ -108,11 +108,16 @@ describe('IndicatorManagementCard', () => {
     } as any);
   });
 
-  it('renders nothing for a non-indicator device', async () => {
+  it('renders a greyed not-applicable stub for a non-indicator device', async () => {
     const device = buildDevice({ device_type: 1, device_type_name: 'people_counter' });
     renderCard(device);
     await waitFor(() => expect(mockApi.listDeviceTypes).toHaveBeenCalled());
+    // The full management card is absent...
     expect(screen.queryByTestId('indicator-management')).not.toBeInTheDocument();
+    // ...replaced by a dimmed "not applicable" stub (op-3u4).
+    const stub = await screen.findByTestId('indicator-not-applicable');
+    expect(stub).toHaveAttribute('aria-disabled', 'true');
+    expect(within(stub).getByText(/not applicable for this device type/i)).toBeInTheDocument();
   });
 
   it('renders the current binding with its derived light state', async () => {

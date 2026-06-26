@@ -8,8 +8,9 @@
  *   - send an explicit color/brightness/pattern preview ("Test light"),
  *   - read the color/pattern legend.
  *
- * Renders nothing for non-indicator devices, so the device-detail page can
- * mount it unconditionally.
+ * For non-indicator devices it renders a greyed "not applicable" stub (op-3u4)
+ * rather than nothing, so the device-detail page can mount it unconditionally
+ * and staff can see the section exists but does not apply to this device.
  */
 import {
   Badge,
@@ -23,6 +24,7 @@ import {
   Text,
 } from '@mantine/core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import DeviceSectionGate from './DeviceSectionGate';
 import IndicatorStatusLegend from './IndicatorStatusLegend';
 import IndicatorSwatch from './IndicatorSwatch';
 import {
@@ -226,7 +228,19 @@ export default function IndicatorManagementCard({ device, onChanged }: Props) {
     }
   };
 
-  if (loading || !isIndicator) return null;
+  if (loading) return null;
+  if (!isIndicator) {
+    return (
+      <DeviceSectionGate relevant="no" testId="indicator-not-applicable">
+        <Card withBorder radius="md" p="md">
+          <Text fw={600}>Indicator light</Text>
+          <Text size="xs" c="dimmed">
+            Bind a status light to an asset or room, preview it, and re-sync its state.
+          </Text>
+        </Card>
+      </DeviceSectionGate>
+    );
+  }
 
   const previewPresentation = {
     color: testPattern === 'off' ? null : testColor,

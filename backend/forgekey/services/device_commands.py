@@ -24,6 +24,7 @@ from resilience.circuit import CircuitBreakerOpen, get_breaker
 from ..models import DeviceCommand, ESP32Device
 from ..tasks import get_mqtt_client
 from ..utils import get_mqtt_command_topic
+from .jwt_signing import is_jwt_signing_configured, make_command_jwt
 
 logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("forgekey.audit")
@@ -36,6 +37,36 @@ class DeviceCommandError(RuntimeError):
 PUBACK_WAIT_SECONDS = 2.0
 
 
+def _sign_command_payload(device: ESP32Device, payload: Dict[str, Any]) -> None:
+    """Add the signed ``jwt`` envelope field the firmware requires, in place.
+
+    Devices receive the command-signing public key as ``command_public_key_pem``
+    at enroll (``ForgeKeyEnrollView`` -> ``jwt_signing.get_jwt_public_key_pem``)
+    and refuse to act on any command lacking a verifiable top-level ``jwt``,
+    rejecting it as ``missing_envelope_field`` (op-8pn). We mint a short-TTL
+    ES256 JWT over ``{mac, cmd, exp}`` — mirroring the locker command pipeline
+    (``backend/lockers/services/commands.py``), which already passes its own
+    ``jwt`` — so every server -> device command goes out signed.
+
+    No-ops when:
+
+    * the payload has no ``cmd`` verb (nothing to bind the JWT to),
+    * a caller already supplied a ``jwt`` (e.g. the locker publishers, which
+      mint their own with a bespoke TTL — never double-sign), or
+    * no signing key is configured (dev/test rigs), matching the consumer's own
+      ``is_jwt_signing_configured()`` gate so unsigned dev flows still work.
+
+    Note: the JWT binds only ``cmd`` (plus ``mac``/``exp``); command parameters
+    (e.g. ``set_indicator``'s color/brightness/pattern) ride as unsigned
+    siblings, same as the locker pipeline today. Binding the parameters needs a
+    coordinated firmware change and is tracked as a follow-up.
+    """
+    cmd = payload.get("cmd")
+    if not cmd or "jwt" in payload or not is_jwt_signing_configured():
+        return
+    payload["jwt"] = make_command_jwt(mac=device.mac_address, cmd=str(cmd))
+
+
 def publish_command(
     device: ESP32Device,
     command_payload: Dict[str, Any],
@@ -45,6 +76,11 @@ def publish_command(
     client: Optional[mqtt.Client] = None,
 ) -> str:
     """Publish a JSON command payload to a device's MQTT command topic.
+
+    The command is signed into the envelope the firmware requires (a top-level
+    ``jwt``) via :func:`_sign_command_payload` before it goes on the wire, so
+    callers don't have to — see that helper for the no-op cases (pre-signed
+    locker commands, dev rigs without a signing key).
 
     Waits up to ``PUBACK_WAIT_SECONDS`` for the broker PUBACK before
     returning so callers get "broker has the message" rather than just
@@ -62,6 +98,7 @@ def publish_command(
     topic = get_mqtt_command_topic(device.mac_address)
     payload = dict(command_payload)
     payload.setdefault("timestamp", timezone.now().isoformat())
+    _sign_command_payload(device, payload)
 
     body = json.dumps(payload)
     broker = client or get_mqtt_client()

@@ -12,9 +12,11 @@ Covers:
 from __future__ import annotations
 
 import json
+import time
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
+from django.test import override_settings
 from django.utils import timezone
 
 import pytest
@@ -491,3 +493,103 @@ class TestWebhookTaskProcessesCmdAck:
         rec.refresh_from_db()
         assert rec.ack_status == DeviceCommand.ACK_OK
         assert rec.ack_at == first_ack_at
+
+
+def _verify_command_jwt(token: str) -> dict:
+    """Verify an ES256 command JWT against the configured public key and return
+    its claims, raising on signature failure.
+
+    Mirrors how the firmware verifies a command against the
+    ``command_public_key_pem`` it received at enroll — the public half of the
+    same key ``make_command_jwt`` signs with.
+    """
+    import base64
+
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+
+    from forgekey.services.jwt_signing import get_jwt_public_key_pem
+
+    def _b64url_decode(seg: str) -> bytes:
+        return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
+
+    header_b64, payload_b64, signature_b64 = token.split(".")
+    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+    signature = _b64url_decode(signature_b64)
+    assert len(signature) == 64, "ES256 signature must be 64 bytes (r || s)"
+    r = int.from_bytes(signature[:32], "big")
+    s = int.from_bytes(signature[32:], "big")
+    public_key = serialization.load_pem_public_key(get_jwt_public_key_pem().encode("ascii"))
+    # Raises cryptography.exceptions.InvalidSignature on a bad signature.
+    public_key.verify(encode_dss_signature(r, s), signing_input, ec.ECDSA(hashes.SHA256()))
+    return json.loads(_b64url_decode(payload_b64))
+
+
+def _published_body(client: MagicMock) -> dict:
+    """The JSON body ``publish_command`` handed to the broker's ``publish``."""
+    args, _kwargs = client.publish.call_args
+    return json.loads(args[1])
+
+
+class TestPublishCommandSignsEnvelope:
+    """op-8pn: ``publish_command`` must wrap every server -> device command in
+    the signed ``jwt`` envelope the firmware verifies (against
+    ``command_public_key_pem``); an unsigned payload is rejected on-device as
+    ``missing_envelope_field``. The session-wide ``FORGEKEY_JWT_SIGNING_KEY``
+    fixture (``conftest.configure_forgekey_jwt_signing_key``) makes signing
+    active here, so these exercise the real signing path (publish_command is
+    NOT mocked).
+    """
+
+    def test_unsigned_command_gets_a_verifiable_jwt(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0E:01")
+        client = MagicMock()
+        client.publish.return_value = MagicMock(rc=0)
+
+        before = int(time.time())
+        publish_command(
+            device,
+            {
+                "cmd": "set_indicator",
+                "color": "green",
+                "brightness": "low",
+                "pattern": "solid",
+            },
+            client=client,
+        )
+        after = int(time.time())
+
+        body = _published_body(client)
+        assert "jwt" in body, "command envelope must carry a top-level jwt"
+        # Params still ride alongside as (unsigned) siblings, as today.
+        assert body["color"] == "green"
+        assert body["pattern"] == "solid"
+
+        claims = _verify_command_jwt(body["jwt"])
+        assert claims["mac"] == device.mac_address
+        assert claims["cmd"] == "set_indicator"
+        assert before + 60 <= claims["exp"] <= after + 60
+
+    def test_existing_jwt_is_not_overwritten(self):
+        """Locker publishers mint their own jwt (bespoke TTL) before calling
+        publish_command — those must never be double-signed."""
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0E:02")
+        client = MagicMock()
+        client.publish.return_value = MagicMock(rc=0)
+
+        publish_command(device, {"cmd": "unlock", "jwt": "caller-supplied"}, client=client)
+
+        assert _published_body(client)["jwt"] == "caller-supplied"
+
+    def test_no_jwt_when_signing_key_unconfigured(self):
+        """Dev/test rigs without a signing key keep publishing raw, matching the
+        consumer's own ``is_jwt_signing_configured()`` gate."""
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0E:03")
+        client = MagicMock()
+        client.publish.return_value = MagicMock(rc=0)
+
+        with override_settings(FORGEKEY_JWT_SIGNING_KEY=""):
+            publish_command(device, {"cmd": "restart"}, client=client)
+
+        assert "jwt" not in _published_body(client)

@@ -111,6 +111,9 @@ INSTALLED_APPS = [
     "anymail",
     # Local apps
     "config.apps.ConfigConfig",
+    # Shared AprilTag/fiducial registry — project_storage and maker_boxes
+    # allocate from its global ID pool, so it must load before them.
+    "fiducials",
     "membership",
     "inventory",
     "reorder_queue",

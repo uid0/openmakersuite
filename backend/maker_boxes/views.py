@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -12,6 +14,12 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from fiducials.services.allocator import (
+    AprilTagPoolExhausted,
+    active_tag_id_subquery,
+    allocate_tag,
+    release_tag,
+)
 from membership.utils import is_logistics_member
 
 from .models import MakerBox, auto_generate_bin_id
@@ -31,6 +39,26 @@ from .services.label_service import render_box_label
 from .services.sheet_service import CARDS_PER_SHEET, render_avery_5371_sheet
 from .services.whmcs_client import WhmcsNotConfigured, lookup_member
 
+logger = logging.getLogger(__name__)
+
+
+def _allocate_where_fiducial(box) -> None:
+    """Allocate the box's AprilTag (WHERE fiducial), degrading rather than
+    failing the conversion if the global tag pool is exhausted.
+
+    Maker boxes are long-lived, so their tags dominate the finite pool; if
+    it's full we still finish the conversion and print the QR (WHO link) and
+    log loud so an operator can recycle IDs or bump to a larger family.
+    allocate_tag is idempotent, so re-converting is a no-op.
+    """
+    try:
+        allocate_tag(box)
+    except AprilTagPoolExhausted:
+        logger.error(
+            "AprilTag pool exhausted; maker box %s converted without a WHERE fiducial.",
+            box.bin_id,
+        )
+
 
 def _is_staff(user) -> bool:
     if not user or not user.is_authenticated:
@@ -44,6 +72,11 @@ class MakerBoxViewSet(viewsets.ModelViewSet):
     queryset = MakerBox.objects.all()
     serializer_class = MakerBoxSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Annotate the active WHERE-fiducial tag id so the serializer's
+        # april_tag_id doesn't fire a query per row on list/retrieve.
+        return MakerBox.objects.all().annotate(active_april_tag_id=active_tag_id_subquery(MakerBox))
 
     def _check_staff(self, request):
         if not _is_staff(request.user):
@@ -87,6 +120,12 @@ class MakerBoxViewSet(viewsets.ModelViewSet):
         denied = self._check_staff(request)
         if denied is not None:
             return denied
+        # Free the WHERE fiducial before the row goes away. The
+        # GenericForeignKey has no DB-level cascade, so a hard delete would
+        # otherwise orphan an active allocation and leak its tag ID. The
+        # tag stays put across reassignment (same physical bin) — only a
+        # destroy (bin retired) returns the ID to the pool.
+        release_tag(self.get_object())
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=["post"], url_path="scan")
@@ -424,6 +463,10 @@ class MakerBoxViewSet(viewsets.ModelViewSet):
                     if not box.assigned_at:
                         box.assigned_at = timezone.now()
                     box.save()
+                # Conversion is committed; now allocate the WHERE fiducial.
+                # Kept out of the bin_id transaction so a tag-pool problem
+                # can't undo a successful bin allocation.
+                _allocate_where_fiducial(box)
                 return Response(
                     MakerBoxSerializer(box).data,
                     status=status.HTTP_200_OK,
@@ -449,8 +492,10 @@ class MakerBoxViewSet(viewsets.ModelViewSet):
         denied = self._check_staff(request)
         if denied is not None:
             return denied
-        queue = MakerBox.objects.filter(status=MakerBox.STATUS_PRE_CONVERSION).order_by(
-            "-created_at"
+        queue = (
+            MakerBox.objects.filter(status=MakerBox.STATUS_PRE_CONVERSION)
+            .annotate(active_april_tag_id=active_tag_id_subquery(MakerBox))
+            .order_by("-created_at")
         )
         return Response(MakerBoxSerializer(queue, many=True).data)
 

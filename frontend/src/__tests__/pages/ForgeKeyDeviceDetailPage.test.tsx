@@ -8,7 +8,7 @@
  *   - OTA disabled state
  */
 import { MantineProvider } from '@mantine/core';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ForgeKeyDeviceDetailPage from '../../pages/ForgeKeyDeviceDetailPage';
 import { forgekeyAPI } from '../../services/api';
@@ -288,5 +288,74 @@ describe('ForgeKeyDeviceDetailPage', () => {
         url: 'https://example.test/fw.bin',
       }),
     );
+  });
+
+  describe('device-type-aware sections (op-3u4)', () => {
+    it('greys out the occupancy section for an indicator device', async () => {
+      seedHappyPath();
+      mockApi.getDevice.mockResolvedValue({
+        data: buildDevice({
+          device_type: 9,
+          device_type_name: 'Indicator/Status Light',
+          capabilities: ['status_led', 'status_matrix'],
+        }),
+      } as any);
+      mockApi.listDeviceTypes.mockResolvedValue({
+        data: [{ id: 9, name: 'Indicator/Status Light', code: 'indicator' }],
+      } as any);
+      // An existing binding keeps IndicatorManagementCard from fetching assets/locations.
+      mockApi.listIndicatorBindings.mockResolvedValue({
+        data: [
+          {
+            id: 'b1',
+            device: 'dev-1',
+            asset: null,
+            asset_name: null,
+            location: 5,
+            location_name: 'Lab',
+            last_status: null,
+            last_synced_at: null,
+          },
+        ],
+      } as any);
+
+      renderAt('/facilities/forgekey-devices/dev-1');
+
+      const gate = await screen.findByTestId('section-gate-occupancy');
+      expect(gate).toHaveAttribute('aria-disabled', 'true');
+      expect(
+        within(gate).getByText(/not applicable for this device type/i),
+      ).toBeInTheDocument();
+      // Greyed, not hidden: the section content is still in the DOM.
+      expect(within(gate).getByText('Occupancy (last 24h)')).toBeInTheDocument();
+    });
+
+    it('renders the occupancy section normally for a people-counter device', async () => {
+      seedHappyPath();
+      mockApi.listDeviceTypes.mockResolvedValue({
+        data: [{ id: 1, name: 'People Counter', code: 'people_counter' }],
+      } as any);
+
+      renderAt('/facilities/forgekey-devices/dev-1');
+
+      const gate = await screen.findByTestId('section-gate-occupancy');
+      expect(gate).not.toHaveAttribute('aria-disabled');
+      expect(
+        within(gate).queryByText(/not applicable for this device type/i),
+      ).not.toBeInTheDocument();
+      expect(within(gate).getByText('Occupancy (last 24h)')).toBeInTheDocument();
+    });
+
+    it('renders the occupancy section normally when type and capabilities are unknown', async () => {
+      // Fresh device: no announced capabilities, device-types list empty (beforeEach
+      // default) so the type cannot be resolved -> relevance unknown -> render.
+      seedHappyPath();
+
+      renderAt('/facilities/forgekey-devices/dev-1');
+
+      const gate = await screen.findByTestId('section-gate-occupancy');
+      expect(gate).not.toHaveAttribute('aria-disabled');
+      expect(within(gate).getByText('Occupancy (last 24h)')).toBeInTheDocument();
+    });
   });
 });

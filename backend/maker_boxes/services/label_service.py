@@ -1,9 +1,15 @@
 """Label rendering for maker box stickers.
 
 Produces a 3.5"x2" business-card-sized PNG (600 DPI by default) with the
-member's name on the right and a square QR code on the left. Same
-conventions as :mod:`inventory.services.asset_tag_service` so the
-production print pipeline is familiar.
+member's name on the right and a left column carrying a QR code (WHO/owner
+link) and, when the box has an active AprilTag allocation, a stacked
+AprilTag (WHERE fiducial) beneath it. Same conventions as
+:mod:`inventory.services.asset_tag_service` so the production print pipeline
+is familiar.
+
+The AprilTag is the per-box location fiducial a future vision system reads
+to auto-track where each bin sits; boxes without an allocation (manual
+labels, pre-conversion rows) render QR-only and unchanged.
 
 QR payload semantics
 --------------------
@@ -30,11 +36,20 @@ from django.conf import settings
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
+from fiducials.services.allocator import get_active_assignment
+from fiducials.services.apriltag_render import build_apriltag_image
+
 LABEL_WIDTH_INCHES = 3.5
 LABEL_HEIGHT_INCHES = 2.0
 DEFAULT_DPI = 600
 INNER_MARGIN_INCHES = 0.1
-QR_SIZE_INCHES = 1.6
+# QR (WHO/owner link) shrank from 1.6" to make room for the AprilTag
+# (WHERE fiducial) stacked beneath it in the left column. Both fiducials
+# plus the stack gap fit the card's ~1.8" usable height:
+# 0.95 + 0.05 + 0.8 = 1.8".
+QR_SIZE_INCHES = 0.95
+TAG_SIZE_INCHES = 0.8
+TAG_STACK_GAP_INCHES = 0.05
 NAME_GAP_INCHES = 0.15
 
 
@@ -141,11 +156,29 @@ def render_box_image(
     img = Image.new("RGB", (width_px, height_px), "white")
     draw = ImageDraw.Draw(img)
 
-    qr_x = margin_px
-    qr_y = (height_px - qr_px) // 2
+    # Left column: QR (WHO/owner link) on top, optional AprilTag (WHERE
+    # fiducial) beneath, the pair vertically centered. tag_id is None for
+    # manual / unsaved rows or rows without an allocation -> QR-only,
+    # vertically centered exactly as before.
     bin_id = getattr(maker_box, "bin_id", "") or ""
+    tag = get_active_assignment(maker_box) if maker_box is not None else None
+
+    qr_x = margin_px
     qr_img = _build_qr_image(_qr_payload(bin_id, username), qr_px)
-    img.paste(qr_img, (qr_x, qr_y))
+    if tag is not None:
+        tag_px = int(round(TAG_SIZE_INCHES * dpi))
+        stack_gap_px = int(round(TAG_STACK_GAP_INCHES * dpi))
+        stack_h = qr_px + stack_gap_px + tag_px
+        qr_y = (height_px - stack_h) // 2
+        img.paste(qr_img, (qr_x, qr_y))
+        # Center the (narrower) tag under the QR within the column width.
+        tag_img = build_apriltag_image(tag.tag_id, tag_px, family=tag.family)
+        tag_x = qr_x + (qr_px - tag_px) // 2
+        tag_y = qr_y + qr_px + stack_gap_px
+        img.paste(tag_img, (tag_x, tag_y))
+    else:
+        qr_y = (height_px - qr_px) // 2
+        img.paste(qr_img, (qr_x, qr_y))
 
     text_left = qr_x + qr_px + gap_px
     text_right = width_px - margin_px

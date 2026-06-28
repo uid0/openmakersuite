@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from fiducials.services.allocator import get_active_tag_id
+
 from .models import ProjectStorageEvent, ProjectStorageStint
 
 
@@ -29,6 +31,7 @@ class ProjectStorageStintSerializer(serializers.ModelSerializer):
     expiry_day_of_year = serializers.SerializerMethodField()
     events = ProjectStorageEventSerializer(many=True, read_only=True)
     qr_code_url = serializers.SerializerMethodField()
+    april_tag_id = serializers.SerializerMethodField()
 
     class Meta:
         model = ProjectStorageStint
@@ -55,6 +58,7 @@ class ProjectStorageStintSerializer(serializers.ModelSerializer):
             "expiry_day_of_year",
             "events",
             "qr_code_url",
+            "april_tag_id",
             "created_at",
             "updated_at",
         )
@@ -71,6 +75,7 @@ class ProjectStorageStintSerializer(serializers.ModelSerializer):
             "expiry_day_of_year",
             "events",
             "qr_code_url",
+            "april_tag_id",
             "created_at",
             "updated_at",
         )
@@ -86,6 +91,14 @@ class ProjectStorageStintSerializer(serializers.ModelSerializer):
         if request is not None:
             return request.build_absolute_uri(url)
         return url
+
+    def get_april_tag_id(self, obj: ProjectStorageStint) -> int | None:
+        # Prefer the annotation (set by the viewset to avoid an N+1 on
+        # list endpoints); fall back to a direct lookup for single objects
+        # returned from write actions.
+        if hasattr(obj, "active_april_tag_id"):
+            return obj.active_april_tag_id
+        return get_active_tag_id(obj)
 
     def get_expiry_week(self, obj: ProjectStorageStint) -> int:
         return obj.expiry_week_and_day[0]

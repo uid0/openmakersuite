@@ -50,11 +50,18 @@ class TestUserDirectoryListing:
         assert "id" in alice
 
     def test_search_matches_username_name_email(self, staff_client):
-        UserFactory(username="zoe_smith", first_name="Zoe", last_name="Smith", email="zoe@x.io")
+        UserFactory(username="zoe_smith", first_name="Zoe", last_name="Qzwxsmith", email="zoe@x.io")
         UserFactory(username="other", first_name="Pat", last_name="Jones", email="pat@x.io")
 
-        by_name = _results(staff_client.get("/api/membership/users/?search=smith"))
+        # Search a *unique* surname token, never a real word like "smith": the
+        # shared test DB also holds the ``staff_client`` auth user, whose
+        # ``last_name`` is a random Faker surname and is "Smith" ~2% of the time,
+        # which used to pollute a bare ``search=smith`` result (op-rvf).
+        by_name = _results(staff_client.get("/api/membership/users/?search=qzwxsmith"))
         assert {r["username"] for r in by_name} == {"zoe_smith"}
+
+        by_username = _results(staff_client.get("/api/membership/users/?search=zoe_smith"))
+        assert {r["username"] for r in by_username} == {"zoe_smith"}
 
         by_email = _results(staff_client.get("/api/membership/users/?search=pat@x.io"))
         assert {r["username"] for r in by_email} == {"other"}

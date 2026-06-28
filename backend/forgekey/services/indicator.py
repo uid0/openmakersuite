@@ -67,6 +67,7 @@ def firmware_indicator(color: Optional[str], pattern: Optional[str]) -> Optional
         return "off"
     return None
 
+
 # status → explicit presentation. ``None`` color/brightness are omitted from the
 # payload (e.g. locked-out sends just ``pattern: off``). period_ms is only sent
 # for patterns that animate. This is the authoritative ga-72l mapping.

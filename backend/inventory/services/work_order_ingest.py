@@ -131,22 +131,41 @@ def _decode_qr_payloads(image_bytes: bytes) -> List[str]:
 
         pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         arr = np.array(pil)
-        detector = cv2.QRCodeDetector()
-        # Try multi-detect first (PDFs may carry multiple QRs); fall back to
-        # single-detect since multi can return False for clean single-QR pages.
-        try:
-            ok, decoded, _, _ = detector.detectAndDecodeMulti(arr)
-            if ok and decoded:
-                payloads.extend([d for d in decoded if d])
-        except Exception:  # noqa: BLE001  # nosec B110 - cv2 raises generic errors on bad images
-            pass
-        if not payloads:
+
+        # OpenCV ships two independent QR backends. The legacy QRCodeDetector
+        # silently mis-decodes ~1% of otherwise-clean QR images (the outcome is
+        # bit-pattern dependent, not a quality/resolution issue). Because the
+        # work-order QR carries a *random* UUID, that ~1% turned into a random
+        # CI flake — extraction returned None for the unlucky ids and the QR
+        # fallback test failed with "assert None == <uuid>" (op-6t2). The
+        # newer ArUco-based detector finds the finder pattern differently and
+        # decodes the cases the legacy detector drops (0 misses over 1500
+        # samples vs the legacy detector's ~17). So try the legacy detector
+        # first (fast, succeeds ~99% of the time) and fall back to the ArUco
+        # detector before giving up. getattr-guarded for OpenCV < 4.7.
+        detectors = [cv2.QRCodeDetector()]
+        aruco_qr_cls = getattr(cv2, "QRCodeDetectorAruco", None)
+        if aruco_qr_cls is not None:
+            detectors.append(aruco_qr_cls())
+
+        for detector in detectors:
+            # Try multi-detect first (PDFs may carry multiple QRs); fall back to
+            # single-detect since multi can return False for clean single-QR pages.
             try:
-                data, _, _ = detector.detectAndDecode(arr)
-                if data:
-                    payloads.append(data)
-            except Exception:  # noqa: BLE001  # nosec B110
+                ok, decoded, _, _ = detector.detectAndDecodeMulti(arr)
+                if ok and decoded:
+                    payloads.extend([d for d in decoded if d])
+            except Exception:  # noqa: BLE001  # nosec B110 - cv2 errors on bad images
                 pass
+            if not payloads:
+                try:
+                    data, _, _ = detector.detectAndDecode(arr)
+                    if data:
+                        payloads.append(data)
+                except Exception:  # noqa: BLE001  # nosec B110
+                    pass
+            if payloads:
+                break
     except Exception as exc:  # noqa: BLE001 - cv2 missing or image unreadable
         logger.debug("cv2 QR decode skipped: %s", exc)
 

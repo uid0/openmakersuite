@@ -55,15 +55,18 @@ _FIRMWARE_INDICATOR_FOR_COLOR: Dict[str, str] = {
 }
 
 
-def firmware_indicator(color: Optional[str], pattern: Optional[str]) -> Optional[str]:
+def firmware_indicator(color: Any, pattern: Optional[str]) -> Optional[str]:
     """Map a ga-72l ``(color, pattern)`` to a name current firmware renders.
 
     Returns the ``indicator`` word to add for firmware-compat, or ``None`` when
     there is nothing to add (the device then uses its own ``pattern`` fallback).
+    Only named string colours in the firmware vocabulary map; RGB tuples/lists
+    and unknown names return ``None`` — the current firmware can't render those
+    (that's Phase 2).
     """
-    if color:
-        return _FIRMWARE_INDICATOR_FOR_COLOR.get(color, color)
-    if pattern == "off":
+    if isinstance(color, str) and color:
+        return _FIRMWARE_INDICATOR_FOR_COLOR.get(color)
+    if not color and pattern == "off":
         return "off"
     return None
 

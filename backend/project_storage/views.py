@@ -7,6 +7,8 @@ notice, move to purgatory, mark removed) require staff auth.
 
 from __future__ import annotations
 
+import logging
+
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -18,12 +20,39 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
 from config.idempotency import find_recent_duplicate
+from fiducials.services.allocator import (
+    AprilTagPoolExhausted,
+    active_tag_id_subquery,
+    allocate_tag,
+    release_tag,
+)
 
 from .models import ProjectStorageEvent, ProjectStorageStint
 from .permissions import IsStorageAdminOrStaff
 from .serializers import ProjectStorageStintSerializer, StartStintSerializer
 from .services.email_service import send_violation_notice
 from .services.label_service import PrinterFamily, render_stint_label
+
+logger = logging.getLogger(__name__)
+
+
+def _allocate_where_fiducial(stint) -> None:
+    """Allocate the stint's AprilTag (WHERE fiducial), degrading rather than
+    blocking the kiosk flow if the global tag pool is exhausted.
+
+    The tag36h11 pool is finite (587 IDs); if it's full we still create the
+    stint and print its QR (WHO link) — we just log loud so an operator can
+    recycle IDs or bump to a larger family. allocate_tag is idempotent, so
+    the duplicate-submit path that returns an existing stint is a no-op.
+    """
+    try:
+        allocate_tag(stint)
+    except AprilTagPoolExhausted:
+        logger.error(
+            "AprilTag pool exhausted; stint %s created without a WHERE fiducial.",
+            stint.stint_id,
+        )
+
 
 # gh-713 throttle subclasses. ScopedRateThrottle.allow_request normally
 # reads ``view.throttle_scope`` and returns True (no throttling) when
@@ -150,6 +179,8 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
             event_type=ProjectStorageEvent.EVENT_CREATED,
             actor_label="kiosk: member self-issue",
         )
+        # Allocate the per-item WHERE fiducial so the label prints with it.
+        _allocate_where_fiducial(stint)
         return Response(
             ProjectStorageStintSerializer(stint).data,
             status=status.HTTP_201_CREATED,
@@ -170,6 +201,7 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         stints = (
             ProjectStorageStint.objects.filter(username=username)
             .prefetch_related("events")
+            .annotate(active_april_tag_id=active_tag_id_subquery(ProjectStorageStint))
             .order_by("-started_at")
         )
         return Response(ProjectStorageStintSerializer(stints, many=True).data)
@@ -242,7 +274,9 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.order_by(ordering)
         else:
             qs = qs.order_by("-started_at")
-        return qs
+        # Annotate the active WHERE-fiducial tag id so the serializer's
+        # april_tag_id doesn't fire a query per row on the list endpoint.
+        return qs.annotate(active_april_tag_id=active_tag_id_subquery(ProjectStorageStint))
 
     # ------------------------------------------------------------------
     # Warden mutating actions
@@ -342,6 +376,14 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
             )
         stint.removed_at = timezone.now()
         stint.save(update_fields=["removed_at", "updated_at"])
+        # Terminal state: free the AprilTag ID back to the pool. We do NOT
+        # release on expiry/purgatory — detecting unmoved/expired items is
+        # the whole point, so the tag stays live while the item is present.
+        release_tag(stint)
+        # get_object() fetched this row via the annotated get_queryset(), so
+        # its active_april_tag_id is now stale; reflect the freed tag so the
+        # serialized response reports april_tag_id = null.
+        stint.active_april_tag_id = None
         ProjectStorageEvent.objects.create(
             stint=stint,
             event_type=ProjectStorageEvent.EVENT_REMOVED,

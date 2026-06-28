@@ -33,7 +33,11 @@ class DeviceType(models.Model):
     TYPE_TEMPERATURE_SENSOR = "temperature_sensor"
     TYPE_GENERIC_INPUT = "generic_input"
     TYPE_GENERIC_OUTPUT = "generic_output"
-    TYPE_AC_RELAY = "ac_relay"
+    # Firmware sensor_kind + MQTT topic kind both use ``power_relay`` (see
+    # ForgeKey FORGEKEY_SENSOR_KIND / MQTT_TOPIC_KIND), so the DeviceType code
+    # matches them. The human-readable name stays "AC Relay". Renamed from the
+    # historical ``ac_relay`` by migration 0025 (op-3he).
+    TYPE_AC_RELAY = "power_relay"
     TYPE_POWER_MEASUREMENT = "power_measurement"
     TYPE_PEOPLE_COUNTER = "people_counter"
     TYPE_ENV_SENSOR = "env_sensor"
@@ -107,8 +111,14 @@ class ESP32Device(models.Model):
     device_type = models.ForeignKey(
         DeviceType,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="devices",
-        help_text="Type of device",
+        help_text=(
+            "Type of device. Nullable: a device whose enroll-time sensor_kind has "
+            "no matching DeviceType is still created (with no type) so it appears "
+            "in the device list rather than being silently dropped (op-3he)."
+        ),
     )
     name = models.CharField(
         max_length=200,

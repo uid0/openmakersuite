@@ -42,7 +42,7 @@ const CODE_OPTIONS = [
   { value: 'temperature_sensor', label: 'Temperature Sensor' },
   { value: 'generic_input', label: 'Generic Input' },
   { value: 'generic_output', label: 'Generic Output' },
-  { value: 'ac_relay', label: 'AC Relay' },
+  { value: 'power_relay', label: 'AC Relay' },
   { value: 'power_measurement', label: 'Power Measurement' },
   { value: 'people_counter', label: 'People Counter' },
   { value: 'env_sensor', label: 'Environmental Sensor' },

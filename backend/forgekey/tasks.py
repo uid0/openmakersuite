@@ -196,16 +196,41 @@ def send_mqtt_command(
         # ``command``. The older ``"command"`` key was silently dropped by
         # firmware so /enable, /disable, and /status were no-ops on the
         # device side even after the topic was correct.
-        message = {
-            "cmd": command,
-            "timestamp": timezone.now().isoformat(),
-        }
-
+        command_payload: Dict[str, Any] = {"cmd": command}
         if payload:
-            message.update(payload)
+            command_payload.update(payload)
 
-        message_json = json.dumps(message)
-        result = client.publish(topic, message_json, qos=1)
+        # op-8pn: the firmware now rejects any command lacking the signed
+        # envelope (missing_envelope_field) — the relay enable/disable/status
+        # path runs through here, so route enrolled devices through
+        # publish_command, which stamps the command_id/issued_at/expires_at/
+        # nonce/actor envelope + JWT (same chokepoint as the DRF / indicator /
+        # relay-access paths). Imported lazily to avoid the tasks <-> device_
+        # commands circular import (device_commands imports get_mqtt_client
+        # from this module). A device we have no row for can't be signed for;
+        # fall back to the legacy raw publish (firmware will reject it, but the
+        # relay endpoints always pass an enrolled device's MAC).
+        device = ESP32Device.objects.filter(mac_address=mac_address).first()
+        if device is not None:
+            from .services.device_commands import publish_command
+
+            topic = publish_command(device, command_payload, audit_action=command, client=client)
+            logger.info(f"Sent command '{command}' to device {mac_address}")
+            return {
+                "success": True,
+                "mac_address": mac_address,
+                "command": command,
+                "topic": topic,
+            }
+
+        logger.warning(
+            "send_mqtt_command: no ESP32Device row for %s; publishing UNSIGNED "
+            "(command=%s) — firmware will reject without the op-8pn envelope",
+            mac_address,
+            command,
+        )
+        command_payload["timestamp"] = timezone.now().isoformat()
+        result = client.publish(topic, json.dumps(command_payload), qos=1)
 
         if result.rc == mqtt.MQTT_ERR_SUCCESS:
             logger.info(f"Sent command '{command}' to device {mac_address}")

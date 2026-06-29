@@ -4,6 +4,8 @@ Tests for ForgeKey Celery tasks (with mocked MQTT).
 
 from unittest.mock import MagicMock, patch
 
+from django.test import override_settings
+
 import pytest
 
 from forgekey.models import ESP32Device
@@ -56,6 +58,32 @@ class TestMQTTTasks:
         body_obj = json.loads(body)
         assert body_obj["cmd"] == "enable"
         assert "command" not in body_obj
+
+    @patch("forgekey.tasks.get_mqtt_client")
+    def test_send_mqtt_command_signs_for_enrolled_device(self, mock_get_client):
+        """op-8pn: relay enable/disable/status (which run through
+        send_mqtt_command) must go out in the firmware's signed envelope for an
+        enrolled device — a raw payload is rejected on-device as
+        ``missing_envelope_field``."""
+        import json
+
+        from forgekey.services.jwt_signing import generate_jwt_signing_keypair
+
+        mock_client = MagicMock()
+        mock_client.publish.return_value = MagicMock(rc=0)
+        mock_get_client.return_value = mock_client
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0F:01")
+        private_pem, _ = generate_jwt_signing_keypair()
+
+        with override_settings(FORGEKEY_JWT_SIGNING_KEY=private_pem):
+            result = send_mqtt_command(device.mac_address, "disable", {"delay_seconds": 5})
+
+        assert result["success"] is True
+        body = json.loads(mock_client.publish.call_args[0][1])
+        assert body["cmd"] == "disable"
+        assert body["delay_seconds"] == 5  # params still ride alongside
+        for field in ("command_id", "issued_at", "expires_at", "nonce", "actor", "jwt"):
+            assert body.get(field), f"signed envelope missing {field!r}"
 
     @patch("forgekey.tasks.send_mqtt_command")
     def test_enable_device(self, mock_send_command):

@@ -37,6 +37,40 @@ logger = logging.getLogger(__name__)
 # The MQTT command verb the firmware renders (alias of the legacy set_pattern).
 INDICATOR_COMMAND = "set_indicator"
 
+# Firmware-compat shim (op-8ph) — Phase 1, no reflash required.
+# Current firmware reads the colour NAME from the ``indicator`` field (falling
+# back to ``pattern``) and NEVER from ``color``; it also only knows a small fixed
+# vocabulary. So a ga-72l payload like {color: green, pattern: solid} renders
+# nothing (the device falls back to pattern "solid", which isn't a colour word).
+# Until the firmware learns the full contract (Phase 2 / fk-lrd reflash), we ALSO
+# emit an ``indicator`` field carrying a firmware-recognised name. ``color`` /
+# ``brightness`` / ``pattern`` / ``period_ms`` are kept unchanged for the
+# canonical contract and forward firmware.
+_FIRMWARE_INDICATOR_FOR_COLOR: Dict[str, str] = {
+    "green": "green",
+    "red": "red",
+    "blue": "blue",
+    "yellow": "yellow",
+    "purple": "blue",  # firmware has no purple yet — temporary stand-in (Phase 2 adds it)
+}
+
+
+def firmware_indicator(color: Any, pattern: Optional[str]) -> Optional[str]:
+    """Map a ga-72l ``(color, pattern)`` to a name current firmware renders.
+
+    Returns the ``indicator`` word to add for firmware-compat, or ``None`` when
+    there is nothing to add (the device then uses its own ``pattern`` fallback).
+    Only named string colours in the firmware vocabulary map; RGB tuples/lists
+    and unknown names return ``None`` — the current firmware can't render those
+    (that's Phase 2).
+    """
+    if isinstance(color, str) and color:
+        return _FIRMWARE_INDICATOR_FOR_COLOR.get(color)
+    if not color and pattern == "off":
+        return "off"
+    return None
+
+
 # status → explicit presentation. ``None`` color/brightness are omitted from the
 # payload (e.g. locked-out sends just ``pattern: off``). period_ms is only sent
 # for patterns that animate. This is the authoritative ga-72l mapping.
@@ -84,6 +118,7 @@ VALID_BRIGHTNESS_WORDS = {"low", "high"}
 DENY_FLASH_PAYLOAD: Dict[str, Any] = {
     "cmd": INDICATOR_COMMAND,
     "color": "red",
+    "indicator": "red",  # firmware-compat (op-8ph): device reads `indicator`, not `color`
     "brightness": "high",
     "pattern": "blink",
     "period_ms": 250,
@@ -121,6 +156,9 @@ def build_payload(status: str) -> Dict[str, Any]:
     payload["pattern"] = presentation["pattern"]
     if presentation["period_ms"] is not None:
         payload["period_ms"] = presentation["period_ms"]
+    indicator = firmware_indicator(presentation["color"], presentation["pattern"])
+    if indicator is not None:
+        payload["indicator"] = indicator
     return payload
 
 
@@ -420,6 +458,9 @@ def build_test_payload(
         payload["duration_s"] = _validate_int(duration_s, "duration_s", 0, 86400)
     if len(payload) == 1:
         raise ValueError("At least one of color, brightness, or pattern is required.")
+    indicator = firmware_indicator(payload.get("color"), payload.get("pattern"))
+    if indicator is not None:
+        payload["indicator"] = indicator
     return payload
 
 

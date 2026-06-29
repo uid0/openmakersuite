@@ -65,22 +65,26 @@ EXPECTED_PAYLOADS = {
         "color": "green",
         "brightness": "low",
         "pattern": "solid",
+        "indicator": "green",
     },
     IndicatorStatus.IN_USE: {
         "cmd": "set_indicator",
         "color": "green",
         "brightness": "high",
         "pattern": "solid",
+        "indicator": "green",
     },
     IndicatorStatus.UNAVAILABLE: {
         "cmd": "set_indicator",
         "color": "red",
         "brightness": "low",
         "pattern": "solid",
+        "indicator": "red",
     },
     IndicatorStatus.LOCKED_OUT: {
         "cmd": "set_indicator",
         "pattern": "off",
+        "indicator": "off",
     },
     IndicatorStatus.CLASSROOM: {
         "cmd": "set_indicator",
@@ -88,6 +92,7 @@ EXPECTED_PAYLOADS = {
         "brightness": "high",
         "pattern": "slow_blink",
         "period_ms": 1500,
+        "indicator": "blue",
     },
 }
 

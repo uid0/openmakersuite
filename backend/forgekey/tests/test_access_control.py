@@ -621,3 +621,57 @@ class TestAccessLogApi:
         client.force_authenticate(user=member)
         resp = client.get("/api/forgekey/access-log/?access_only=true")
         assert resp.status_code == 403
+
+
+class TestRelayChannelControl:
+    """ga-40w: per-channel power-relay enable/disable via a signed
+    ``power_set`` command (not the legacy ``enable``/``disable`` verbs, which
+    the firmware's power_relay capability doesn't handle)."""
+
+    def _url(self, device):
+        return f"/api/forgekey/devices/{device.id}/relay-channel/"
+
+    def test_staff_can_enable_a_channel(self, asset, device, admin_user):
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        with patch("forgekey.views.publish_command", return_value="forgekey/x/command") as pub:
+            resp = client.post(self._url(device), {"channel": 2, "on": True}, format="json")
+        assert resp.status_code == 200, resp.data
+        sent = pub.call_args[0][1]  # full_payload handed to publish_command
+        assert sent["cmd"] == "power_set"
+        assert sent["channel"] == 2
+        assert sent["action"] == "enable"
+        rec = DeviceCommand.objects.get(device=device)
+        assert rec.command == "power_set"
+
+    def test_disable_sends_disable_action(self, asset, device, admin_user):
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        with patch("forgekey.views.publish_command", return_value="forgekey/x/command") as pub:
+            resp = client.post(self._url(device), {"channel": 1, "on": False}, format="json")
+        assert resp.status_code == 200, resp.data
+        assert pub.call_args[0][1]["action"] == "disable"
+
+    def test_unauthorized_member_cannot_control_channel(self, asset, device, member):
+        client = APIClient()
+        client.force_authenticate(user=member)
+        with patch("forgekey.views.publish_command") as pub:
+            resp = client.post(self._url(device), {"channel": 1, "on": True}, format="json")
+        assert resp.status_code == 403
+        pub.assert_not_called()
+
+    def test_invalid_channel_is_rejected(self, asset, device, admin_user):
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        with patch("forgekey.views.publish_command") as pub:
+            resp = client.post(self._url(device), {"channel": 3, "on": True}, format="json")
+        assert resp.status_code == 400
+        pub.assert_not_called()
+
+    def test_missing_on_field_is_rejected(self, asset, device, admin_user):
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        with patch("forgekey.views.publish_command") as pub:
+            resp = client.post(self._url(device), {"channel": 1}, format="json")
+        assert resp.status_code == 400
+        pub.assert_not_called()

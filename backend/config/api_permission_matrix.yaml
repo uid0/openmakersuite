@@ -748,6 +748,9 @@ views:
       recent_commands:
         permission_classes:
         - IsAdminUser
+      relay_channel:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       retire:
         permission_classes:
         - IsAdminUser

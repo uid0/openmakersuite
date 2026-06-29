@@ -369,6 +369,7 @@ const KNOWN_CAPABILITIES: Record<string, { icon: string; label: string }> = {
   mmwave_presence: { icon: '📡', label: 'mmWave presence' },
   button: { icon: '🔘', label: 'Button' },
   status_led: { icon: '💡', label: 'Status LED' },
+  power_relay: { icon: '🔌', label: 'Power relay' },
 };
 
 interface CapabilitiesSectionProps {
@@ -476,6 +477,8 @@ const CapabilityRow: React.FC<CapabilityRowProps> = ({
         )}
       </div>
     );
+  } else if (capability === 'power_relay') {
+    body = <PowerRelayWidget device={device} />;
   }
 
   return (
@@ -498,6 +501,67 @@ const MmwavePresenceWidget: React.FC<{ device: ForgeKeyDevice }> = () => (
 const ButtonEventWidget: React.FC<{ device: ForgeKeyDevice }> = () => (
   <small style={{ color: '#777' }}>No recent button events.</small>
 );
+
+const RELAY_CHANNELS = [1, 2];
+
+// Per-channel control of the 2-channel power relay (ga-40w). Each click emits a
+// signed `power_set` command for that channel; the device has no live
+// channel-state feed to this page yet, so we surface controls + errors rather
+// than the current on/off.
+const PowerRelayWidget: React.FC<{ device: ForgeKeyDevice }> = ({ device }) => {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = async (channel: number, on: boolean) => {
+    setBusy(`${channel}:${on}`);
+    setError(null);
+    try {
+      await forgekeyAPI.setRelayChannel(device.id, channel, on);
+    } catch (err) {
+      setError(
+        extractErrorMessage(err, `Failed to ${on ? 'enable' : 'disable'} channel ${channel}.`),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+      {RELAY_CHANNELS.map((ch) => (
+        <div
+          key={ch}
+          data-testid={`relay-channel-${ch}`}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+        >
+          <span style={{ color: '#555', minWidth: '5.5rem' }}>Channel {ch}</span>
+          <button
+            type="button"
+            onClick={() => send(ch, true)}
+            disabled={busy !== null}
+            data-testid={`relay-channel-${ch}-enable`}
+          >
+            {busy === `${ch}:true` ? 'Enabling…' : 'Enable'}
+          </button>
+          <button
+            type="button"
+            onClick={() => send(ch, false)}
+            disabled={busy !== null}
+            data-testid={`relay-channel-${ch}-disable`}
+          >
+            {busy === `${ch}:false` ? 'Disabling…' : 'Disable'}
+          </button>
+        </div>
+      ))}
+      {error && (
+        <small style={{ color: '#c0392b' }} data-testid="relay-channel-error">
+          {error}
+        </small>
+      )}
+      <small style={{ color: '#777' }}>Live on/off state isn’t reported to this page yet.</small>
+    </div>
+  );
+};
 
 interface ControlButtonProps {
   label: string;

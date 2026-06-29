@@ -139,6 +139,7 @@ class TestWebhookPayloadIsDeduplicatable:
         mock_post.assert_not_called()
 
 
+@pytest.mark.django_db
 class TestMQTTCommandIsLevelTriggered:
     """ForgeKey commands are level-triggered: replay publishes the same
     state-changing message, which the device idempotently applies.

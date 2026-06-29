@@ -214,9 +214,7 @@ def send_mqtt_command(
         if device is not None:
             from .services.device_commands import publish_command
 
-            topic = publish_command(
-                device, command_payload, audit_action=command, client=client
-            )
+            topic = publish_command(device, command_payload, audit_action=command, client=client)
             logger.info(f"Sent command '{command}' to device {mac_address}")
             return {
                 "success": True,

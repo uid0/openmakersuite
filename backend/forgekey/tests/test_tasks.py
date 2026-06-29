@@ -4,8 +4,9 @@ Tests for ForgeKey Celery tasks (with mocked MQTT).
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from django.test import override_settings
+
+import pytest
 
 from forgekey.models import ESP32Device
 from forgekey.tasks import (

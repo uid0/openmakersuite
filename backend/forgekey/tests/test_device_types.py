@@ -59,20 +59,22 @@ class TestDeviceTypeManagement:
         assert resp.status_code == 403
 
     def test_member_cannot_create(self, member_api_client):
-        DeviceType.objects.filter(code="ac_relay").delete()  # free the code; member still blocked
+        DeviceType.objects.filter(
+            code="power_relay"
+        ).delete()  # free the code; member still blocked
         resp = member_api_client.post(
             reverse("forgekey:device-type-list"),
-            {"name": "Member Relay", "code": "ac_relay"},
+            {"name": "Member Relay", "code": "power_relay"},
             format="json",
         )
         assert resp.status_code == 403
 
     def test_staff_can_create_a_freed_code(self, admin_api_client):
-        DeviceType.objects.filter(code="ac_relay").delete()
+        DeviceType.objects.filter(code="power_relay").delete()
         resp = admin_api_client.post(
             reverse("forgekey:device-type-list"),
-            {"name": "Bench Relay", "code": "ac_relay", "description": "", "is_active": True},
+            {"name": "Bench Relay", "code": "power_relay", "description": "", "is_active": True},
             format="json",
         )
         assert resp.status_code == 201, resp.data
-        assert DeviceType.objects.filter(code="ac_relay", name="Bench Relay").exists()
+        assert DeviceType.objects.filter(code="power_relay", name="Bench Relay").exists()

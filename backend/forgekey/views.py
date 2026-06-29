@@ -459,17 +459,29 @@ class ForgeKeyDeviceEnrollView(APIView):
                     device_type_obj = None
                     if sensor_kind_code:
                         device_type_obj = DeviceType.objects.filter(code=sensor_kind_code).first()
-                    if device_type_obj is not None:
-                        esp_device = ESP32Device.objects.create(
-                            mac_address=device_mac,
-                            device_type=device_type_obj,
-                            firmware_version=meta.get("firmware_version", "") or "",
-                            boot_count=meta.get("boot_count"),
-                            free_heap=meta.get("free_heap"),
-                            ip=meta.get("ip") or meta.get("ip_address"),
-                            last_seen=now,
-                            identity=identity,
+                    if device_type_obj is None:
+                        # No DeviceType matches this sensor_kind. Create the
+                        # device anyway (device_type is nullable) so a device
+                        # that enrolled + got a cert always appears in the list
+                        # instead of being silently dropped (op-3he). Warn so the
+                        # missing/mismatched DeviceType code gets noticed.
+                        logger.warning(
+                            "ForgeKey enroll: no DeviceType matches sensor_kind %r "
+                            "(mac %s, identity %s) — creating ESP32Device with no type.",
+                            sensor_kind_code or "",
+                            device_mac,
+                            identity.device_id if identity else "?",
                         )
+                    esp_device = ESP32Device.objects.create(
+                        mac_address=device_mac,
+                        device_type=device_type_obj,
+                        firmware_version=meta.get("firmware_version", "") or "",
+                        boot_count=meta.get("boot_count"),
+                        free_heap=meta.get("free_heap"),
+                        ip=meta.get("ip") or meta.get("ip_address"),
+                        last_seen=now,
+                        identity=identity,
+                    )
                 else:
                     update_fields = []
                     if esp_device.identity_id != identity.id:

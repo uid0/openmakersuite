@@ -604,3 +604,16 @@ class ForgeKeyAuditEventSerializer(serializers.ModelSerializer):
             "metadata",
         ]
         read_only_fields = fields
+
+
+class RelayChannelCommandSerializer(serializers.Serializer):
+    """Validate a per-channel power-relay command (ga-40w).
+
+    Targets one channel of the power relay. ``channel`` is 1-indexed to match
+    the firmware ``power_relay`` capability (``kChannelCount == 2``); ``on``
+    selects enable vs disable. Mapped to a signed ``power_set`` command by
+    ``ESP32DeviceViewSet.relay_channel``.
+    """
+
+    channel = serializers.IntegerField(min_value=1, max_value=2)
+    on = serializers.BooleanField()

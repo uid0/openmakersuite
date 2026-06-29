@@ -82,6 +82,7 @@ from .serializers import (
     OccupancyEventSerializer,
     OperationalModeSerializer,
     PowerMeterReadingSerializer,
+    RelayChannelCommandSerializer,
     RoomOperationalModeSerializer,
     TemperatureReadingSerializer,
 )
@@ -994,6 +995,31 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
                 "device": device.mac_address,
                 "delay": delay_seconds,
             }
+        )
+
+    @action(detail=True, methods=["post"], url_path="relay-channel")
+    def relay_channel(self, request, pk=None):
+        """Enable/disable a single power-relay channel (ga-40w).
+
+        Body: ``{"channel": 1|2, "on": true|false}``. Emits a signed
+        ``power_set`` command — the verb the firmware's ``power_relay``
+        capability handles (it reads ``channel`` + ``action``); the legacy
+        ``enable``/``disable`` verbs don't route to that capability. Same
+        per-asset authorization as :meth:`enable` / :meth:`disable`.
+        """
+        device = self.get_object()
+        denied = self._authorize_relay(request, device, "relay-channel")
+        if denied is not None:
+            return denied
+        serializer = RelayChannelCommandSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        channel = serializer.validated_data["channel"]
+        on = serializer.validated_data["on"]
+        return self._dispatch_command(
+            device,
+            request.user,
+            {"cmd": "power_set", "channel": channel, "action": "enable" if on else "disable"},
+            "power_set",
         )
 
     @action(detail=True, methods=["post"])

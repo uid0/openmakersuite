@@ -2281,6 +2281,10 @@ export const forgekeyAPI = {
   enableDevice: (id: string) => api.post(`/forgekey/devices/${id}/enable/`),
   disableDevice: (id: string, delaySeconds?: number) =>
     api.post(`/forgekey/devices/${id}/disable/`, delaySeconds ? { delay_seconds: delaySeconds } : {}),
+  // Per-channel power-relay control (ga-40w): emits a signed `power_set`
+  // command targeting one channel of the 2-channel relay.
+  setRelayChannel: (id: string, channel: number, on: boolean) =>
+    api.post<ForgeKeyCommandResponse>(`/forgekey/devices/${id}/relay-channel/`, { channel, on }),
   retireDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/retire/`),
   reactivateDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/reactivate/`),
   deleteDevice: (id: string) => api.delete(`/forgekey/devices/${id}/`),

@@ -28,6 +28,7 @@ vi.mock('../../services/api', async () => {
       ping: jest.fn(),
       identify: jest.fn(),
       recentCommands: jest.fn(),
+      setRelayChannel: jest.fn(),
       // IndicatorManagementCard (mounted for indicator devices) probes these on
       // load; the test device is a people_counter, so it renders nothing.
       listDeviceTypes: jest.fn(),
@@ -123,6 +124,48 @@ describe('ForgeKeyDeviceDetailPage', () => {
   afterEach(() => {
     localStorage.removeItem('is_staff');
     localStorage.removeItem('is_superuser');
+  });
+
+  it('enables a power-relay channel from the capability card (ga-40w)', async () => {
+    seedHappyPath();
+    mockApi.getDevice.mockResolvedValue({
+      data: buildDevice({
+        capabilities: ['power_relay'],
+        capabilities_announced_at: '2026-05-01T03:00:00Z',
+      }),
+    } as any);
+    mockApi.setRelayChannel.mockResolvedValue({ data: { command_id: 'c1' } } as any);
+
+    renderAt('/facilities/forgekey-devices/dev-1');
+
+    fireEvent.click(await screen.findByTestId('relay-channel-1-enable'));
+    await waitFor(() => expect(mockApi.setRelayChannel).toHaveBeenCalledWith('dev-1', 1, true));
+  });
+
+  it('disables a power-relay channel from the capability card (ga-40w)', async () => {
+    seedHappyPath();
+    mockApi.getDevice.mockResolvedValue({
+      data: buildDevice({ capabilities: ['power_relay'] }),
+    } as any);
+    mockApi.setRelayChannel.mockResolvedValue({ data: {} } as any);
+
+    renderAt('/facilities/forgekey-devices/dev-1');
+
+    fireEvent.click(await screen.findByTestId('relay-channel-2-disable'));
+    await waitFor(() => expect(mockApi.setRelayChannel).toHaveBeenCalledWith('dev-1', 2, false));
+  });
+
+  it('surfaces an error when a relay-channel command fails (ga-40w)', async () => {
+    seedHappyPath();
+    mockApi.getDevice.mockResolvedValue({
+      data: buildDevice({ capabilities: ['power_relay'] }),
+    } as any);
+    mockApi.setRelayChannel.mockRejectedValue(new Error('broker down'));
+
+    renderAt('/facilities/forgekey-devices/dev-1');
+
+    fireEvent.click(await screen.findByTestId('relay-channel-1-enable'));
+    expect(await screen.findByTestId('relay-channel-error')).toBeInTheDocument();
   });
 
   it('renders the temperature chart when the device reports readings', async () => {

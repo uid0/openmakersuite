@@ -48,6 +48,7 @@ from forgekey.models import (
 )
 from forgekey.services import access_control
 from forgekey.services.jwt_signing import JwtSigningError, is_jwt_signing_configured
+from forgekey.tasks import process_mqtt_device_capabilities
 from forgekey.utils import (
     SERVER_JWT_SUBJECT,
     generate_server_jwt,
@@ -501,6 +502,39 @@ def _topic_matches_status(topic: str) -> bool:
     return len(parts) == 3 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[2] == "status"
 
 
+def _topic_matches_capabilities(topic: str) -> bool:
+    parts = topic.split("/")
+    return len(parts) == 3 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[2] == "capabilities"
+
+
+def handle_capabilities_message(topic: str, payload: bytes) -> bool:
+    """Ingest a retained capability announcement (``<prefix>/<mac>/capabilities``).
+
+    Devices publish their capability set at boot. Without ingesting it the
+    device-detail page never learns a relay device supports ``power_relay``, so
+    the per-channel relay controls — and the device-level lock→``power_set``
+    translation (ga-40w) — never appear. Delegates to
+    :func:`forgekey.tasks.process_mqtt_device_capabilities`.
+    """
+    parts = topic.split("/")
+    if len(parts) != 3:
+        logger.warning("Dropping capabilities: malformed topic %r", topic)
+        return False
+    if _mac_from_topic_segment(parts[1]) is None:
+        logger.warning("Dropping capabilities: bad MAC %r in %r", parts[1], topic)
+        return False
+    try:
+        body = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning("Dropping capabilities on %s: invalid JSON (%s)", topic, exc)
+        return False
+    if not isinstance(body, dict):
+        logger.warning("Dropping capabilities on %s: payload not an object", topic)
+        return False
+    process_mqtt_device_capabilities(parts[1], body)
+    return True
+
+
 def _topic_matches_ota_status(topic: str) -> bool:
     parts = topic.split("/")
     return (
@@ -732,6 +766,8 @@ def dispatch_message(topic: str, payload: bytes) -> None:
             handle_log_message(topic, payload)
         elif _topic_matches_status(topic):
             handle_status_message(topic, payload)
+        elif _topic_matches_capabilities(topic):
+            handle_capabilities_message(topic, payload)
         else:
             logger.debug("Ignoring message on unsubscribed topic %s", topic)
     except Exception:
@@ -790,6 +826,7 @@ class Command(BaseCommand):
         ota_status_filter = f"{prefix}/+/ota/status"
         log_filter = f"{prefix}/+/logs"
         access_request_filter = f"{prefix}/+/access/request"
+        capabilities_filter = f"{prefix}/+/capabilities"
 
         # Startup grace window for CONNACK failures. EMQX's JWT authenticator
         # populates its JWKS cache asynchronously after a (re)start; in that
@@ -820,7 +857,7 @@ class Command(BaseCommand):
                 return
             connect_state["first_connect_done"] = True
             logger.info(
-                "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s, %s, %s, %s",
+                "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s, %s, %s, %s, %s",
                 host,
                 port,
                 occupancy_filter,
@@ -829,6 +866,7 @@ class Command(BaseCommand):
                 ota_status_filter,
                 log_filter,
                 access_request_filter,
+                capabilities_filter,
             )
             c.subscribe(
                 [
@@ -838,6 +876,7 @@ class Command(BaseCommand):
                     (ota_status_filter, 1),
                     (log_filter, 1),
                     (access_request_filter, 1),
+                    (capabilities_filter, 1),
                 ]
             )
 

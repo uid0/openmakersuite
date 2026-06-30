@@ -13,7 +13,7 @@ celery==5.6.3
 # broken/empty wheel (metadata only, no module code) that fails to import
 # under Python 3.14, breaking `import celery` and thus all backend CI. Pin to
 # the last known-good release. (oms-zkr3o)
-tzlocal==5.4.3
+tzlocal==5.4.4
 django-redis==7.0.0
 django-celery-results==2.6.0
 flower==2.0.1

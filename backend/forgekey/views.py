@@ -894,6 +894,14 @@ class DeviceTypeViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
 
 
+# Hardware fact: every ForgeKey power-relay board in the field is 2-channel
+# (matches the firmware's kChannelCount). A device-level lock/unlock fans out
+# one signed power_set per channel (see ESP32DeviceViewSet._dispatch_relay_power).
+# When OMS starts caching per-device channel state (ga-40w live-state follow-up)
+# this should become per-device instead of a constant.
+POWER_RELAY_CHANNEL_COUNT = 2
+
+
 class ESP32DeviceViewSet(viewsets.ModelViewSet):
     """API endpoint for ESP32 devices."""
 
@@ -962,17 +970,65 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
             status=status.HTTP_403_FORBIDDEN,
         )
 
+    def _is_power_relay(self, device):
+        """True if the device announced the ``power_relay`` capability.
+
+        Mirrors the frontend's capability gate: only relay devices fan a
+        device-level enable/disable out to per-channel ``power_set`` — lockers
+        keep the bare ``enable``/``disable`` verb their firmware understands.
+        """
+        return "power_relay" in (device.capabilities or [])
+
+    def _dispatch_relay_power(self, device, actor, *, on):
+        """Translate a device-level enable/disable into per-channel ``power_set``.
+
+        The firmware's ``power_relay`` capability only handles ``power_set``
+        (per channel); the bare ``enable``/``disable`` verbs route to locker
+        firmware, not the relay (``main.cpp`` dispatch), so the web
+        "Power-off (lock)" button and ScanTTY ``d``/``e`` keys were no-ops on
+        relay hardware. There is no all-channels verb, so emit one signed
+        ``power_set`` per channel. Each channel gets its own audit row +
+        command_id (same chokepoint as :meth:`relay_channel`).
+        """
+        action = "enable" if on else "disable"
+        command_ids = []
+        topic = None
+        for channel in range(1, POWER_RELAY_CHANNEL_COUNT + 1):
+            try:
+                record, topic = self._emit_command(
+                    device,
+                    actor,
+                    {"cmd": "power_set", "channel": channel, "action": action},
+                    "power_set",
+                )
+            except DeviceCommandError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+            command_ids.append(str(record.id))
+        return Response(
+            {
+                "status": f"power {'on' if on else 'off'} command sent",
+                "device": device.mac_address,
+                "topic": topic,
+                "command_ids": command_ids,
+                "channels": list(range(1, POWER_RELAY_CHANNEL_COUNT + 1)),
+            }
+        )
+
     @action(detail=True, methods=["post"])
     def enable(self, request, pk=None):
         """Enable a device (turn on power, etc.).
 
         Requires authorization for the bound asset (or staff override) — see
-        :meth:`_authorize_relay`.
+        :meth:`_authorize_relay`. For ``power_relay`` devices the device-level
+        on maps to a signed ``power_set`` per channel (see
+        :meth:`_dispatch_relay_power`); lockers keep the legacy verb path.
         """
         device = self.get_object()
         denied = self._authorize_relay(request, device, "enable")
         if denied is not None:
             return denied
+        if self._is_power_relay(device):
+            return self._dispatch_relay_power(device, request.user, on=True)
         enable_device.delay(device.mac_address)
         return Response({"status": "enable command sent", "device": device.mac_address})
 
@@ -981,12 +1037,18 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
         """Disable a device (turn off power, etc.).
 
         Requires authorization for the bound asset (or staff override) — see
-        :meth:`_authorize_relay`.
+        :meth:`_authorize_relay`. For ``power_relay`` devices the device-level
+        off maps to a signed ``power_set`` per channel (see
+        :meth:`_dispatch_relay_power`); ``delay_seconds`` is not supported on
+        that path (the firmware ``power_set`` has no delay) and is ignored.
+        Lockers keep the legacy verb path (with delay).
         """
         device = self.get_object()
         denied = self._authorize_relay(request, device, "disable")
         if denied is not None:
             return denied
+        if self._is_power_relay(device):
+            return self._dispatch_relay_power(device, request.user, on=False)
         delay_seconds = int(request.data.get("delay_seconds", 0))
         disable_device.delay(device.mac_address, delay_seconds=delay_seconds)
         return Response(
@@ -1506,10 +1568,14 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
             }
         )
 
-    def _dispatch_command(self, device, actor, payload, audit_action):
-        # Persist an audit row first so the firmware can echo its UUID back
-        # on the status topic and the UI can render live ack feedback. The
-        # row is dropped on broker failure to avoid orphan history entries.
+    def _emit_command(self, device, actor, payload, audit_action):
+        """Persist an audit row + publish one signed command.
+
+        Returns ``(record, topic)``; raises :class:`DeviceCommandError` on
+        broker failure (the audit row is dropped first so no orphan history
+        entry survives). Shared by :meth:`_dispatch_command` (single command)
+        and :meth:`_dispatch_relay_power` (one per relay channel).
+        """
         actor_user = (
             actor if (actor is not None and getattr(actor, "is_authenticated", False)) else None
         )
@@ -1521,22 +1587,30 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
         )
         full_payload = dict(payload)
         full_payload["command_id"] = str(record.id)
-
         try:
             topic = publish_command(device, full_payload, actor=actor, audit_action=audit_action)
-        except DeviceCommandError as exc:
+        except DeviceCommandError:
             record.delete()
-            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
-
+            raise
         record.payload = full_payload
         record.save(update_fields=["payload"])
+        return record, topic
+
+    def _dispatch_command(self, device, actor, payload, audit_action):
+        # Persist an audit row first so the firmware can echo its UUID back
+        # on the status topic and the UI can render live ack feedback. The
+        # row is dropped on broker failure to avoid orphan history entries.
+        try:
+            record, topic = self._emit_command(device, actor, payload, audit_action)
+        except DeviceCommandError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(
             {
                 "status": f"{audit_action} command sent",
                 "device": device.mac_address,
                 "topic": topic,
                 "command_id": str(record.id),
-                "dispatched_at": full_payload.get("timestamp", timezone.now().isoformat()),
+                "dispatched_at": record.payload.get("timestamp", timezone.now().isoformat()),
             }
         )
 

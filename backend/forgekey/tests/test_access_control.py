@@ -675,3 +675,70 @@ class TestRelayChannelControl:
             resp = client.post(self._url(device), {"channel": 1}, format="json")
         assert resp.status_code == 400
         pub.assert_not_called()
+
+
+class TestRelayDevicePowerTranslation:
+    """ga-40w 'A': a device-level enable/disable on a ``power_relay`` device
+    fans out to one signed ``power_set`` per channel, so the web
+    'Power-off (lock)' button and ScanTTY ``d``/``e`` keys actually drive the
+    relay. Non-relay devices (lockers) keep the legacy ``enable``/``disable``
+    verb their firmware understands."""
+
+    def _enable_url(self, device):
+        return f"/api/forgekey/devices/{device.id}/enable/"
+
+    def _disable_url(self, device):
+        return f"/api/forgekey/devices/{device.id}/disable/"
+
+    def _make_relay(self, device):
+        device.capabilities = ["status_led", "power_relay"]
+        device.save(update_fields=["capabilities"])
+        return device
+
+    def test_enable_fans_out_power_set_on_per_channel(self, asset, device, admin_user):
+        self._make_relay(device)
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        with patch("forgekey.views.publish_command", return_value="forgekey/x/command") as pub:
+            with patch("forgekey.views.enable_device") as task:
+                resp = client.post(self._enable_url(device))
+        assert resp.status_code == 200, resp.data
+        task.delay.assert_not_called()
+        sent = [c[0][1] for c in pub.call_args_list]
+        assert sorted(p["channel"] for p in sent) == [1, 2]
+        assert {p["cmd"] for p in sent} == {"power_set"}
+        assert {p["action"] for p in sent} == {"enable"}
+        assert DeviceCommand.objects.filter(device=device, command="power_set").count() == 2
+
+    def test_disable_powers_off_all_channels(self, asset, device, admin_user):
+        self._make_relay(device)
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        with patch("forgekey.views.publish_command", return_value="forgekey/x/command") as pub:
+            with patch("forgekey.views.disable_device") as task:
+                resp = client.post(self._disable_url(device))
+        assert resp.status_code == 200, resp.data
+        task.delay.assert_not_called()
+        sent = [c[0][1] for c in pub.call_args_list]
+        assert sorted(p["channel"] for p in sent) == [1, 2]
+        assert {p["action"] for p in sent} == {"disable"}
+
+    def test_non_relay_device_keeps_legacy_verb(self, asset, device, admin_user):
+        # Default device fixture announces no power_relay capability.
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        with patch("forgekey.views.publish_command") as pub:
+            with patch("forgekey.views.disable_device") as task:
+                resp = client.post(self._disable_url(device))
+        assert resp.status_code == 200, resp.data
+        task.delay.assert_called_once_with(device.mac_address, delay_seconds=0)
+        pub.assert_not_called()
+
+    def test_unauthorized_member_cannot_power_relay(self, asset, device, member):
+        self._make_relay(device)
+        client = APIClient()
+        client.force_authenticate(user=member)
+        with patch("forgekey.views.publish_command") as pub:
+            resp = client.post(self._disable_url(device))
+        assert resp.status_code == 403
+        pub.assert_not_called()

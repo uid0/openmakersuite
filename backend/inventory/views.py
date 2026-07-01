@@ -3012,6 +3012,44 @@ class InventoryReportViewSet(viewsets.ViewSet):
         return Response(data)
 
     @action(detail=False, methods=["get"])
+    def serialized_forecast(self, request):
+        """Consumption forecast + low-stock report for serialized components.
+
+        Mode-aware: consumable units deplete on ``consume`` while reusable units
+        deplete only on ``retire``/``dispose`` (the install/remove reuse cycle
+        does not reduce stock). Returns one row per active serialized item with
+        ``avg_daily_use``, ``days_until_stockout`` and ``reorder_point`` so the
+        inventory + purchasing overview dashboards can surface what is running
+        low and what to reorder.
+
+        Query params:
+            ``window_days`` — trailing window for the depletion rate (default
+            90). ``low_stock_only`` — when truthy, only items at/below their
+            reorder point are returned.
+        """
+        from inventory.services.component_forecast import (
+            DEFAULT_WINDOW_DAYS,
+            build_component_forecast,
+        )
+
+        try:
+            window_days = int(request.query_params.get("window_days", DEFAULT_WINDOW_DAYS))
+        except (TypeError, ValueError):
+            window_days = DEFAULT_WINDOW_DAYS
+
+        low_stock_only = str(request.query_params.get("low_stock_only", "")).lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+        data = build_component_forecast(
+            window_days=window_days,
+            low_stock_only=low_stock_only,
+        )
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
     def export(self, request):
         """Export inventory report data as CSV."""
         import csv

@@ -1330,6 +1330,9 @@ views:
       reorder_frequency:
         permission_classes:
         - IsAuthenticated
+      serialized_forecast:
+        permission_classes:
+        - IsAuthenticated
       stock_by_category:
         permission_classes:
         - IsAuthenticated

@@ -496,6 +496,11 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "has_complete_nfpa_data",
             "is_active",
             "is_requestable",
+            # Serialized-component tracking (#818) — exposed read-only so the
+            # frontend can detect serialized items and branch the lifecycle UI
+            # on the tracking mode.
+            "is_serialized",
+            "serial_tracking_mode",
             "last_scanned_at",
             "notes",
             "needs_reorder",
@@ -507,7 +512,15 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["qr_code", "created_at", "updated_at"]
+        read_only_fields = [
+            "qr_code",
+            "created_at",
+            "updated_at",
+            # Serialization config is managed via the model/admin and the
+            # SerializedComponent lifecycle, not edited through this serializer.
+            "is_serialized",
+            "serial_tracking_mode",
+        ]
 
     def get_thumbnail(self, obj):
         """Return the thumbnail URL when available."""
@@ -1961,12 +1974,18 @@ class ComponentUsageEventSerializer(serializers.ModelSerializer):
     action_display = serializers.CharField(source="get_action_display", read_only=True)
     asset_name = serializers.CharField(source="asset.name", read_only=True, default=None)
     actor_username = serializers.CharField(source="actor.username", read_only=True, default=None)
+    # Denormalized so a log filtered by ?asset= (the serials a machine has used)
+    # is self-describing without a follow-up fetch per component.
+    component_serial = serializers.CharField(source="component.serial_number", read_only=True)
+    component_item_name = serializers.CharField(source="component.item.name", read_only=True)
 
     class Meta:
         model = ComponentUsageEvent
         fields = [
             "id",
             "component",
+            "component_serial",
+            "component_item_name",
             "asset",
             "asset_name",
             "action",

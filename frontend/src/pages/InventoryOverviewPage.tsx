@@ -35,6 +35,7 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import SerializedForecastPanel from '../components/inventory/SerializedForecastPanel';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { inventoryAPI } from '../services/api';
 import { Category, InventoryItem } from '../types';
@@ -219,6 +220,8 @@ const InventoryOverviewPage: React.FC = () => {
 
   const goItem = (id: string) => navigate(`/inventory/items/${id}`);
 
+  const hasSerialized = useMemo(() => items.some((i) => i.is_serialized), [items]);
+
   return (
     <WorkspacePage
       testId="inventory-overview-page"
@@ -256,6 +259,12 @@ const InventoryOverviewPage: React.FC = () => {
           size="md"
           data-testid="inventory-overview-search"
           aria-label="Search inventory"
+        />
+      )}
+      {hasSerialized && (
+        <SerializedForecastPanel
+          title="Serialized-component forecast"
+          onSelectItem={goItem}
         />
       )}
       {loading ? (

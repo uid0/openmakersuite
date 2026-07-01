@@ -12,19 +12,27 @@ import { Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { purchaseOrderAPI } from '../services/api';
+import {
+  purchaseOrderAPI,
+  serializedComponentsAPI,
+  SerializedTrackingMode,
+} from '../services/api';
 import '../styles/PurchaseOrderPage.css';
 import { formatDateOnly, formatYmd } from '../utils/dates';
 import { confirmAction, promptInput, showError, showSuccess } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import { parseSerialNumbers } from '../utils/serializedComponents';
 
 interface PurchaseOrderItem {
   id: string;
   item_type: 'inventory_item' | 'asset' | 'freeform' | null;
   description: string | null;
   item_details: {
+    id: string;
     name: string;
     sku: string;
+    is_serialized?: boolean;
+    serial_tracking_mode?: SerializedTrackingMode;
   } | null;
   asset_details: {
     id: string;
@@ -112,6 +120,9 @@ const PurchaseOrderPage: React.FC = () => {
   const [deliveryCarrier, setDeliveryCarrier] = useState<string>('');
   const [receivingItems, setReceivingItems] = useState(false);
   const [receiveQuantities, setReceiveQuantities] = useState<Record<string, string>>({});
+  // Per-serialized-line captured serial numbers (one per line / comma-separated),
+  // keyed by purchase-order line id.
+  const [serialInputs, setSerialInputs] = useState<Record<string, string>>({});
   const [receiveDeliveryDate, setReceiveDeliveryDate] = useState<string>('');
   const [receiveNotes, setReceiveNotes] = useState<string>('');
   const [editingMetadata, setEditingMetadata] = useState(false);
@@ -344,6 +355,7 @@ const PurchaseOrderPage: React.FC = () => {
   const handleCancelReceiveItems = () => {
     setReceivingItems(false);
     setReceiveQuantities({});
+    setSerialInputs({});
     setReceiveDeliveryDate('');
     setReceiveNotes('');
   };
@@ -352,10 +364,28 @@ const PurchaseOrderPage: React.FC = () => {
     setReceiveQuantities((prev) => ({ ...prev, [itemId]: value }));
   };
 
+  const handleSerialInputChange = (itemId: string, value: string) => {
+    setSerialInputs((prev) => ({ ...prev, [itemId]: value }));
+  };
+
+  // Serialized line + the qty being received on it, for the serial-capture UI.
+  const isSerializedLine = (item: PurchaseOrderItem): boolean =>
+    Boolean(item.item_details?.is_serialized && item.item_details?.id);
+
+  const receiveQtyFor = (item: PurchaseOrderItem): number => {
+    const raw = receiveQuantities[item.id];
+    if (raw === undefined || raw.trim() === '') return 0;
+    const n = Number.parseInt(raw, 10);
+    return Number.isNaN(n) || n <= 0 ? 0 : n;
+  };
+
   const handleSubmitReceiveItems = async () => {
     if (!order || saving) return;
 
     const lines: { purchase_order_item: number; quantity_received: number }[] = [];
+    // Serialized lines: one SerializedComponent per captured serial, created
+    // against this PO line (provenance) once the receipt is recorded.
+    const serialPlan: { item: PurchaseOrderItem; serials: string[] }[] = [];
     for (const item of getReceivableItems(order)) {
       const raw = receiveQuantities[item.id];
       if (raw === undefined || raw.trim() === '') continue;
@@ -367,6 +397,17 @@ const PurchaseOrderPage: React.FC = () => {
             `only ${item.quantity_pending} pending`,
         );
         return;
+      }
+      if (isSerializedLine(item)) {
+        const serials = parseSerialNumbers(serialInputs[item.id] ?? '');
+        if (serials.length !== quantity) {
+          showError(
+            `Enter ${quantity} unique serial number${quantity === 1 ? '' : 's'} for ` +
+              `${getItemNameAndSku(item).itemName} (got ${serials.length}).`,
+          );
+          return;
+        }
+        serialPlan.push({ item, serials });
       }
       lines.push({ purchase_order_item: Number(item.id), quantity_received: quantity });
     }
@@ -386,8 +427,43 @@ const PurchaseOrderPage: React.FC = () => {
       if (response.data && typeof response.data === 'object' && response.data.id) {
         setOrder(response.data as PurchaseOrder);
       }
+
+      // Record the individual serialized units against their PO line.
+      let serialsCreated = 0;
+      let serialsFailed = 0;
+      for (const { item, serials } of serialPlan) {
+        const itemId = item.item_details?.id;
+        if (!itemId) continue;
+        const results = await Promise.allSettled(
+          serials.map((serial_number) =>
+            serializedComponentsAPI.create({
+              item: itemId,
+              serial_number,
+              provenance_purchase_order_item: Number(item.id),
+            }),
+          ),
+        );
+        for (const r of results) {
+          if (r.status === 'fulfilled') serialsCreated += 1;
+          else serialsFailed += 1;
+        }
+      }
+
       handleCancelReceiveItems();
-      showSuccess('Items received');
+      if (serialsFailed > 0) {
+        showError(
+          `Items received, but ${serialsFailed} serialized unit` +
+            `${serialsFailed === 1 ? '' : 's'} could not be recorded ` +
+            '(duplicate serial or permission). Add them from the item page.',
+        );
+      } else if (serialsCreated > 0) {
+        showSuccess(
+          `Items received; recorded ${serialsCreated} serialized unit` +
+            `${serialsCreated === 1 ? '' : 's'}.`,
+        );
+      } else {
+        showSuccess('Items received');
+      }
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to receive items'));
       console.error('Error receiving items:', err);
@@ -662,25 +738,56 @@ const PurchaseOrderPage: React.FC = () => {
               <tbody>
                 {receivableItems.map((item) => {
                   const { itemName, itemSku } = getItemNameAndSku(item);
+                  const serialized = isSerializedLine(item);
+                  const qty = receiveQtyFor(item);
+                  const serialCount = serialized
+                    ? parseSerialNumbers(serialInputs[item.id] ?? '').length
+                    : 0;
                   return (
-                    <tr key={item.id}>
-                      <td>{itemName}</td>
-                      <td>{itemSku}</td>
-                      <td>{item.quantity_pending}</td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          max={item.quantity_pending}
-                          step="1"
-                          className="receive-items-qty-input"
-                          value={receiveQuantities[item.id] ?? ''}
-                          onChange={(e) => handleReceiveQuantityChange(item.id, e.target.value)}
-                          disabled={saving}
-                          aria-label={`Receive quantity for ${itemName}`}
-                        />
-                      </td>
-                    </tr>
+                    <React.Fragment key={item.id}>
+                      <tr>
+                        <td>
+                          {itemName}
+                          {serialized && (
+                            <span className="receive-serial-tag"> · serialized</span>
+                          )}
+                        </td>
+                        <td>{itemSku}</td>
+                        <td>{item.quantity_pending}</td>
+                        <td>
+                          <input
+                            type="number"
+                            min="0"
+                            max={item.quantity_pending}
+                            step="1"
+                            className="receive-items-qty-input"
+                            value={receiveQuantities[item.id] ?? ''}
+                            onChange={(e) => handleReceiveQuantityChange(item.id, e.target.value)}
+                            disabled={saving}
+                            aria-label={`Receive quantity for ${itemName}`}
+                          />
+                        </td>
+                      </tr>
+                      {serialized && qty > 0 && (
+                        <tr className="receive-serial-row">
+                          <td colSpan={4}>
+                            <label htmlFor={`serials-${item.id}`}>
+                              Serial numbers for {itemName} — one per line ({serialCount}/{qty})
+                            </label>
+                            <textarea
+                              id={`serials-${item.id}`}
+                              className="receive-serials-input"
+                              rows={Math.min(Math.max(qty, 2), 8)}
+                              value={serialInputs[item.id] ?? ''}
+                              onChange={(e) => handleSerialInputChange(item.id, e.target.value)}
+                              disabled={saving}
+                              placeholder={'SN-0001\nSN-0002'}
+                              aria-label={`Serial numbers for ${itemName}`}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

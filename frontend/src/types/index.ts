@@ -154,6 +154,13 @@ export interface InventoryItem {
   ownership_type: 'user' | 'group' | 'space';
   owning_user: number | null;
   owning_group: number | null;
+  // Serialized-component tracking (#818). Exposed read-only; when
+  // `is_serialized` is true the item tracks individual units by serial
+  // number and `serial_tracking_mode` selects the lifecycle branch.
+  // (Union kept inline to avoid a types <-> services/api import cycle; it
+  // matches `SerializedTrackingMode` in services/api.ts.)
+  is_serialized?: boolean;
+  serial_tracking_mode?: 'consumable' | 'reusable';
   // Reorder status and tracking
   reorder_status: string;
   has_pending_reorder: boolean;

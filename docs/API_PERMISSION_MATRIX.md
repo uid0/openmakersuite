@@ -101,6 +101,7 @@ below are public.
 | any  | `inventory/asset-out-of-service/...` (CRUD + `restore/`) | member | `IsAuthenticated` on `AssetOutOfServiceViewSet`. Mutations and `restore/` enforce staff-or-SIG-admin inside the view; only one open row per asset (single-open invariant). |
 | any  | `inventory/serialized-components/...` (CRUD + `receive/install/remove/consume/retire/dispose`) | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` on `SerializedComponentViewSet` — any authenticated user can read; staff and SIG leaders create/update/delete and drive lifecycle transitions. Transitions are validated against the item's `serial_tracking_mode` and each writes a `ComponentUsageEvent`. |
 | GET  | `inventory/component-usage-events/...` | member | `IsAuthenticatedOrStaffSigAdminWrite` on the read-only `ComponentUsageEventViewSet` — authenticated read of the per-unit usage/audit log (written as a side effect of lifecycle actions). |
+| GET  | `inventory/reports/inventory/...` (`stock_by_category`, `reorder_frequency`, `value_by_location`, `serialized_forecast`, `export`) | member | `IsAuthenticated` on `InventoryReportViewSet` — read-only analytics. `serialized_forecast` is the mode-aware consumption forecast + low-stock report for serialized components (consumables deplete on `consume`; reusables only on `retire`/`dispose`), exposing `avg_daily_use`, `days_until_stockout`, and `reorder_point` (lead time from `LeadTimeLog`) for the inventory + purchasing overview dashboards. |
 
 ## Membership (`/api/membership/`)
 

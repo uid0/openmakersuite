@@ -5,11 +5,15 @@
  */
 import { IconClipboardList, IconPlus, IconReceipt } from '@tabler/icons-react';
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
+import SerializedForecastPanel from '../components/inventory/SerializedForecastPanel';
 import CapabilityCard from '../components/landing/CapabilityCard';
 import WorkspaceLanding from '../components/landing/WorkspaceLanding';
 
-const PurchasingOverviewPage: React.FC = () => (
+const PurchasingOverviewPage: React.FC = () => {
+  const navigate = useNavigate();
+  return (
   <WorkspaceLanding
     testId="purchasing-overview"
     hero={{
@@ -18,6 +22,13 @@ const PurchasingOverviewPage: React.FC = () => (
       description:
         'Manage purchase orders, reorder requests, and the public transparency ledger.',
     }}
+    footer={
+      <SerializedForecastPanel
+        title="Serialized components to reorder"
+        defaultLowStockOnly
+        onSelectItem={(itemId) => navigate(`/inventory/items/${itemId}`)}
+      />
+    }
   >
     <CapabilityCard
       to="/purchasing/orders"
@@ -44,6 +55,7 @@ const PurchasingOverviewPage: React.FC = () => (
       testId="purchasing-overview-card-/inventory/transparency"
     />
   </WorkspaceLanding>
-);
+  );
+};
 
 export default PurchasingOverviewPage;

@@ -744,3 +744,122 @@ describe('PurchaseOrderPage session-expiry return-to (#457 R3)', () => {
     expect(screen.getByText('PO-2026-0001', { exact: false })).toBeInTheDocument();
   });
 });
+
+describe('PurchaseOrderPage receive-with-serial (op-y45)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  // A PO with one serialized inventory line (2 pending) plus a plain line.
+  const makeSerialOrder = () => ({
+    id: 'po-1',
+    po_number: 'PO-2026-0099',
+    supplier_details: 'Acme Supplies',
+    status: 'sent',
+    status_label: 'Sent',
+    order_date: '2026-04-01T00:00:00Z',
+    expected_delivery_date: '2026-05-15',
+    supplier_order_number: '',
+    sales_order_number: '',
+    estimated_total: '50.00',
+    voided_at: null,
+    voided_by_username: null,
+    void_reason: '',
+    attachments: [],
+    items: [
+      {
+        id: 201,
+        item_type: 'inventory_item',
+        description: null,
+        item_details: {
+          id: 'inv-1',
+          name: 'Serial Blade',
+          sku: 'SB-1',
+          is_serialized: true,
+          serial_tracking_mode: 'consumable',
+        },
+        asset_details: null,
+        quantity_ordered: 2,
+        quantity_received: 0,
+        quantity_pending: 2,
+        is_fully_received: false,
+        unit_cost_ordered: '5.00',
+        unit_cost_actual: null,
+        estimated_cost: '10.00',
+        actual_cost: null,
+        expected_shipment_date: null,
+        notes: '',
+        is_voided: false,
+        voided_at: null,
+        void_reason: '',
+      },
+    ],
+  });
+
+  test('captures serials and creates one SerializedComponent per unit against the PO line', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeSerialOrder() });
+    (api.purchaseOrderAPI.receiveItems as jest.Mock).mockResolvedValue({
+      data: { ...makeSerialOrder(), status: 'received', status_label: 'Received' },
+    });
+    (api.serializedComponentsAPI.create as jest.Mock).mockResolvedValue({ data: { id: 'u' } });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+
+    // The serial-capture textarea appears for the serialized line at its default qty.
+    fireEvent.change(screen.getByLabelText('Serial numbers for Serial Blade'), {
+      target: { value: 'SN-1\nSN-2' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.receiveItems).toHaveBeenCalledWith('po-1', {
+        items: [{ purchase_order_item: 201, quantity_received: 2 }],
+        delivery_date: expect.any(String),
+        receipt_notes: undefined,
+      });
+    });
+
+    await waitFor(() => {
+      expect(api.serializedComponentsAPI.create).toHaveBeenCalledTimes(2);
+    });
+    expect(api.serializedComponentsAPI.create).toHaveBeenCalledWith({
+      item: 'inv-1',
+      serial_number: 'SN-1',
+      provenance_purchase_order_item: 201,
+    });
+    expect(api.serializedComponentsAPI.create).toHaveBeenCalledWith({
+      item: 'inv-1',
+      serial_number: 'SN-2',
+      provenance_purchase_order_item: 201,
+    });
+  });
+
+  test('blocks receipt when the serial count does not match the received quantity', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: makeSerialOrder() });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^receive items$/i }));
+
+    // Only one serial for a qty of 2.
+    fireEvent.change(screen.getByLabelText('Serial numbers for Serial Blade'), {
+      target: { value: 'SN-1' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm receipt/i }));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith(
+        expect.stringContaining('Enter 2 unique serial numbers for Serial Blade'),
+      );
+    });
+    expect(api.purchaseOrderAPI.receiveItems).not.toHaveBeenCalled();
+    expect(api.serializedComponentsAPI.create).not.toHaveBeenCalled();
+  });
+});

@@ -634,6 +634,163 @@ export const assetOutOfServiceAPI = {
     api.post<AssetOutOfService>(`/inventory/asset-out-of-service/${id}/restore/`),
 };
 
+// ── Serialized components (#818/#819) ──────────────────────────────────────
+// Individual serial-numbered units of a serialized InventoryItem, tracked
+// through a lifecycle branched on the item's tracking mode. See
+// SerializedComponentViewSet + ComponentUsageEventViewSet + serialized_forecast.
+
+export type SerializedTrackingMode = 'consumable' | 'reusable';
+
+export type SerializedComponentStatus =
+  | 'received'
+  | 'in_stock'
+  | 'installed'
+  | 'removed'
+  | 'consumed'
+  | 'retired'
+  | 'disposed';
+
+export type SerializedComponentAction =
+  | 'receive'
+  | 'install'
+  | 'remove'
+  | 'consume'
+  | 'retire'
+  | 'dispose';
+
+export interface ComponentUsageEvent {
+  id: string;
+  component: string;
+  component_serial: string;
+  component_item_name: string;
+  asset: string | null;
+  asset_name: string | null;
+  action: SerializedComponentAction;
+  action_display: string;
+  at: string;
+  actor: number | null;
+  actor_username: string | null;
+  notes: string;
+  created_at: string;
+}
+
+export interface SerializedComponent {
+  id: string;
+  item: string;
+  item_name: string;
+  item_sku: string;
+  serial_number: string;
+  lot: string;
+  status: SerializedComponentStatus;
+  status_display: string;
+  tracking_mode: SerializedTrackingMode;
+  available_actions: SerializedComponentAction[];
+  installed_in_asset: string | null;
+  installed_in_asset_name: string | null;
+  received_at: string | null;
+  installed_at: string | null;
+  disposed_at: string | null;
+  provenance_delivery_item: number | null;
+  provenance_purchase_order_item: number | null;
+  disposal_reason: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// A lifecycle action returns the updated unit plus the event it logged.
+export interface SerializedComponentActionResult extends SerializedComponent {
+  event: ComponentUsageEvent;
+}
+
+interface Paginated<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+export const serializedComponentsAPI = {
+  list: (params?: {
+    item?: string;
+    status?: SerializedComponentStatus;
+    installed_in_asset?: string;
+  }) =>
+    api.get<Paginated<SerializedComponent>>('/inventory/serialized-components/', {
+      params,
+    }),
+
+  get: (id: string) =>
+    api.get<SerializedComponent>(`/inventory/serialized-components/${id}/`),
+
+  create: (data: {
+    item: string;
+    serial_number: string;
+    lot?: string;
+    provenance_delivery_item?: number | null;
+    provenance_purchase_order_item?: number | null;
+  }) => api.post<SerializedComponent>('/inventory/serialized-components/', data),
+
+  // Lifecycle actions — each returns the updated unit plus the logged event.
+  receive: (id: string, data?: { notes?: string }) =>
+    api.post<SerializedComponentActionResult>(
+      `/inventory/serialized-components/${id}/receive/`,
+      data ?? {},
+    ),
+  install: (id: string, data: { asset: string; notes?: string }) =>
+    api.post<SerializedComponentActionResult>(
+      `/inventory/serialized-components/${id}/install/`,
+      data,
+    ),
+  remove: (id: string, data?: { notes?: string }) =>
+    api.post<SerializedComponentActionResult>(
+      `/inventory/serialized-components/${id}/remove/`,
+      data ?? {},
+    ),
+  consume: (id: string, data?: { notes?: string }) =>
+    api.post<SerializedComponentActionResult>(
+      `/inventory/serialized-components/${id}/consume/`,
+      data ?? {},
+    ),
+  retire: (id: string, data?: { notes?: string }) =>
+    api.post<SerializedComponentActionResult>(
+      `/inventory/serialized-components/${id}/retire/`,
+      data ?? {},
+    ),
+  dispose: (id: string, data: { disposal_reason: string; notes?: string }) =>
+    api.post<SerializedComponentActionResult>(
+      `/inventory/serialized-components/${id}/dispose/`,
+      data,
+    ),
+
+  // Usage/audit log — filter by component (a unit's history) or asset (every
+  // serial a given machine has used).
+  listUsageEvents: (params: { component?: string; asset?: string }) =>
+    api.get<Paginated<ComponentUsageEvent>>('/inventory/component-usage-events/', {
+      params,
+    }),
+};
+
+// One row per active serialized item from the consumption forecast /
+// low-stock report (InventoryReportViewSet.serialized_forecast).
+export interface SerializedForecastRow {
+  item_id: string;
+  item_name: string;
+  sku: string;
+  category_name: string | null;
+  serial_tracking_mode: SerializedTrackingMode;
+  available_stock: number;
+  current_stock: number;
+  window_days: number;
+  units_depleted_in_window: number;
+  avg_daily_use: number;
+  days_until_stockout: number | null;
+  projected_stockout_date: string | null;
+  lead_time_days: number | null;
+  safety_stock: number;
+  reorder_point: number;
+  needs_reorder: boolean;
+}
+
 // Asset Maintenance History (oms-0xxlp2)
 export interface MaintenanceHistoryRow {
   id: string;
@@ -1599,6 +1756,13 @@ export const reportsAPI = {
 
   getInventoryValueByLocation: () =>
     api.get('/inventory/reports/inventory/value_by_location/'),
+
+  // Serialized-component consumption forecast + low-stock report (#819).
+  getSerializedForecast: (params?: { window_days?: number; low_stock_only?: boolean }) =>
+    api.get<SerializedForecastRow[]>(
+      '/inventory/reports/inventory/serialized_forecast/',
+      { params },
+    ),
 
   exportInventoryReport: (type: 'stock_by_category' | 'reorder_frequency' | 'value_by_location', params?: DateRangeParams) =>
     api.get('/inventory/reports/inventory/export/', {

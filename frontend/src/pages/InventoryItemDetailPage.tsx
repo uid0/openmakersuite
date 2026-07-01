@@ -20,6 +20,7 @@ import { IconEdit, IconQrcode } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import SerializedComponentsPanel from '../components/inventory/SerializedComponentsPanel';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
@@ -169,6 +170,9 @@ const InventoryItemDetailPage: React.FC = () => {
           <Tabs.Tab value="reorder-history">Reorder History</Tabs.Tab>
           <Tabs.Tab value="usage-logs">Usage Logs</Tabs.Tab>
           <Tabs.Tab value="linked-assets">Linked Assets</Tabs.Tab>
+          {item.is_serialized && (
+            <Tabs.Tab value="serialized-units">Serialized Units</Tabs.Tab>
+          )}
         </Tabs.List>
 
         {/* Overview Tab */}
@@ -448,6 +452,16 @@ const InventoryItemDetailPage: React.FC = () => {
             )}
           </Card>
         </Tabs.Panel>
+
+        {/* Serialized Units Tab — per-unit lifecycle for serialized items */}
+        {item.is_serialized && (
+          <Tabs.Panel value="serialized-units" pt="md">
+            <SerializedComponentsPanel
+              itemId={item.id}
+              trackingMode={item.serial_tracking_mode}
+            />
+          </Tabs.Panel>
+        )}
       </Tabs>
     </WorkspacePage>
   );

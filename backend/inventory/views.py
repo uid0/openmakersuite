@@ -5588,10 +5588,12 @@ class ComponentUsageEventViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only access to the serialized-component usage/audit log.
 
     Entries are written as a side effect of ``SerializedComponentViewSet``
-    lifecycle actions. Supports a ``?component=`` filter.
+    lifecycle actions. Supports a ``?component=`` filter and an ``?asset=``
+    filter (every serial this machine has used across install/remove/consume/
+    retire/dispose).
     """
 
-    queryset = ComponentUsageEvent.objects.select_related("component", "asset", "actor").all()
+    queryset = ComponentUsageEvent.objects.select_related("component__item", "asset", "actor").all()
     serializer_class = ComponentUsageEventSerializer
     permission_classes = [IsAuthenticatedOrStaffSigAdminWrite]
 
@@ -5600,4 +5602,7 @@ class ComponentUsageEventViewSet(viewsets.ReadOnlyModelViewSet):
         component_id = self.request.query_params.get("component")
         if component_id:
             qs = qs.filter(component_id=component_id)
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
         return qs

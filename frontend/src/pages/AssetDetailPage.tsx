@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import AssetForgeKeyAccessCard from '../components/AssetForgeKeyAccessCard';
 import AssetReservationsAndOOSSection from '../components/AssetReservationsAndOOSSection';
 import MaintenanceHistorySection from '../components/assets/MaintenanceHistorySection';
+import AssetSerializedComponentsSection from '../components/inventory/AssetSerializedComponentsSection';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   AssetLOTORequirements,
@@ -1015,6 +1016,8 @@ const AssetDetailPage: React.FC = () => {
         </section>
 
         {id && <AssetReservationsAndOOSSection assetId={id} />}
+
+        {id && <AssetSerializedComponentsSection assetId={id} />}
 
         {id && (
           <MaintenanceHistorySection

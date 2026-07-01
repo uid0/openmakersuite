@@ -264,6 +264,38 @@ class TestSerializedComponentFilters:
 
 
 @pytest.mark.integration
+class TestInventoryItemSerializesSerialConfig:
+    """The item endpoint exposes the serialization config the UI branches on."""
+
+    def test_item_detail_exposes_serial_fields(self):
+        item = InventoryItemFactory(
+            is_serialized=True,
+            serial_tracking_mode=InventoryItem.SERIAL_TRACKING_REUSABLE,
+        )
+        url = reverse("inventoryitem-detail", kwargs={"pk": item.pk})
+        resp = _client(_user("member7")).get(url)
+        assert resp.status_code == 200
+        assert resp.data["is_serialized"] is True
+        assert resp.data["serial_tracking_mode"] == InventoryItem.SERIAL_TRACKING_REUSABLE
+
+    def test_serial_fields_are_read_only(self):
+        """Serialization config is not editable through the item serializer."""
+        item = InventoryItemFactory(is_serialized=False)
+        url = reverse("inventoryitem-detail", kwargs={"pk": item.pk})
+        resp = _client(_user("staff7", is_staff=True)).patch(
+            url,
+            data={
+                "is_serialized": True,
+                "serial_tracking_mode": InventoryItem.SERIAL_TRACKING_REUSABLE,
+            },
+            format="json",
+        )
+        assert resp.status_code == 200
+        item.refresh_from_db()
+        assert item.is_serialized is False
+
+
+@pytest.mark.integration
 class TestComponentUsageEventApi:
     def test_events_are_listed_and_filterable(self, consumable_item):
         component = SerializedComponentFactory(item=consumable_item)
@@ -282,6 +314,28 @@ class TestComponentUsageEventApi:
         resp = _client(_user("member5")).get(url)
         assert resp.status_code == 200
         assert resp.data["count"] >= 1
+
+    def test_filter_events_by_asset(self, consumable_item):
+        """?asset= surfaces every serial a given machine has used."""
+        asset = AssetFactory()
+        other_asset = AssetFactory()
+
+        used_here = SerializedComponentFactory(item=consumable_item)
+        used_here.apply_action(SerializedComponent.ACTION_RECEIVE)
+        used_here.apply_action(SerializedComponent.ACTION_INSTALL, asset=asset)
+
+        used_elsewhere = SerializedComponentFactory(item=consumable_item)
+        used_elsewhere.apply_action(SerializedComponent.ACTION_RECEIVE)
+        used_elsewhere.apply_action(SerializedComponent.ACTION_INSTALL, asset=other_asset)
+
+        url = reverse("component-usage-event-list")
+        resp = _client(_user("member6")).get(url, {"asset": str(asset.id)})
+        assert resp.status_code == 200
+        # Only the install event that targeted this asset is returned; the
+        # receive events (asset=None) and the other machine's event are excluded.
+        assert resp.data["count"] == 1
+        assert str(resp.data["results"][0]["component"]) == str(used_here.id)
+        assert resp.data["results"][0]["action"] == SerializedComponent.ACTION_INSTALL
 
     def test_events_are_read_only(self, consumable_item):
         component = SerializedComponentFactory(item=consumable_item)

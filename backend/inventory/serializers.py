@@ -12,6 +12,7 @@ from .models import (
     AssetProblemPhoto,
     AssetReservation,
     Category,
+    ComponentUsageEvent,
     Fixture,
     FixtureRefillRequest,
     InventoryItem,
@@ -24,6 +25,7 @@ from .models import (
     MaintenanceRecord,
     MaintenanceTask,
     PriceHistory,
+    SerializedComponent,
     StockReconciliation,
     Supplier,
     UsageLog,
@@ -1951,3 +1953,89 @@ class AssetOutOfServiceSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+
+class ComponentUsageEventSerializer(serializers.ModelSerializer):
+    """Read-only serializer for a serialized component's usage/audit log."""
+
+    action_display = serializers.CharField(source="get_action_display", read_only=True)
+    asset_name = serializers.CharField(source="asset.name", read_only=True, default=None)
+    actor_username = serializers.CharField(source="actor.username", read_only=True, default=None)
+
+    class Meta:
+        model = ComponentUsageEvent
+        fields = [
+            "id",
+            "component",
+            "asset",
+            "asset_name",
+            "action",
+            "action_display",
+            "at",
+            "actor",
+            "actor_username",
+            "notes",
+            "created_at",
+        ]
+        # Events are created as a side effect of SerializedComponent lifecycle
+        # actions; the API surface is read-only.
+        read_only_fields = fields
+
+
+class SerializedComponentSerializer(serializers.ModelSerializer):
+    """Serializer for individual serial-numbered component units."""
+
+    item_name = serializers.CharField(source="item.name", read_only=True)
+    item_sku = serializers.CharField(source="item.sku", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    tracking_mode = serializers.CharField(read_only=True)
+    available_actions = serializers.ListField(child=serializers.CharField(), read_only=True)
+    installed_in_asset_name = serializers.CharField(
+        source="installed_in_asset.name", read_only=True, default=None
+    )
+
+    class Meta:
+        model = SerializedComponent
+        fields = [
+            "id",
+            "item",
+            "item_name",
+            "item_sku",
+            "serial_number",
+            "lot",
+            "status",
+            "status_display",
+            "tracking_mode",
+            "available_actions",
+            "installed_in_asset",
+            "installed_in_asset_name",
+            "received_at",
+            "installed_at",
+            "disposed_at",
+            "provenance_delivery_item",
+            "provenance_purchase_order_item",
+            "disposal_reason",
+            "created_at",
+            "updated_at",
+        ]
+        # status and lifecycle timestamps/reason are driven by the lifecycle
+        # action endpoints, not by direct writes; installed_in_asset is set via
+        # the install/remove actions.
+        read_only_fields = [
+            "id",
+            "status",
+            "installed_in_asset",
+            "received_at",
+            "installed_at",
+            "disposed_at",
+            "disposal_reason",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_item(self, value: InventoryItem) -> InventoryItem:
+        if not value.is_serialized:
+            raise serializers.ValidationError(
+                "Inventory item must have is_serialized=True to track serialized components."
+            )
+        return value

@@ -15,6 +15,7 @@ from .views import (
     AssetReservationViewSet,
     AssetViewSet,
     CategoryViewSet,
+    ComponentUsageEventViewSet,
     FixtureRefillRequestViewSet,
     FixtureViewSet,
     InventoryItemViewSet,
@@ -30,6 +31,7 @@ from .views import (
     MaintenanceRecordViewSet,
     MaintenanceTaskViewSet,
     PriceHistoryViewSet,
+    SerializedComponentViewSet,
     SupplierViewSet,
     UsageLogViewSet,
     WorkOrderViewSet,
@@ -59,6 +61,12 @@ router.register(r"maintenance-logs", MaintenanceLogViewSet)
 router.register(r"maintenance-records", MaintenanceRecordViewSet, basename="maintenance-record")
 router.register(r"maintenance-tasks", MaintenanceTaskViewSet)
 router.register(r"work-orders", WorkOrderViewSet)
+router.register(
+    r"serialized-components", SerializedComponentViewSet, basename="serialized-component"
+)
+router.register(
+    r"component-usage-events", ComponentUsageEventViewSet, basename="component-usage-event"
+)
 router.register(r"reports/inventory", InventoryReportViewSet, basename="inventory-reports")
 router.register(r"reports/assets", AssetReportViewSet, basename="asset-reports")
 router.register(

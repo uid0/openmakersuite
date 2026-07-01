@@ -99,6 +99,8 @@ below are public.
 | GET  | `inventory/locations/<id>/safety-sheet/` | staff | `LocationSafetySheetView` — printable Safety Sign payload (lights / outlets / thermostats + deduped kill-breaker list for the room). |
 | any  | `inventory/asset-reservations/...` (CRUD) | member | `IsAuthenticated` on `AssetReservationViewSet`. Mutations enforce staff-or-SIG-admin inside the view via `asset.is_user_group_admin(user)`; destroy soft-cancels via `cancelled_at`. |
 | any  | `inventory/asset-out-of-service/...` (CRUD + `restore/`) | member | `IsAuthenticated` on `AssetOutOfServiceViewSet`. Mutations and `restore/` enforce staff-or-SIG-admin inside the view; only one open row per asset (single-open invariant). |
+| any  | `inventory/serialized-components/...` (CRUD + `receive/install/remove/consume/retire/dispose`) | staff-or-sig-admin | `IsAuthenticatedOrStaffSigAdminWrite` on `SerializedComponentViewSet` — any authenticated user can read; staff and SIG leaders create/update/delete and drive lifecycle transitions. Transitions are validated against the item's `serial_tracking_mode` and each writes a `ComponentUsageEvent`. |
+| GET  | `inventory/component-usage-events/...` | member | `IsAuthenticatedOrStaffSigAdminWrite` on the read-only `ComponentUsageEventViewSet` — authenticated read of the per-unit usage/audit log (written as a side effect of lifecycle actions). |
 
 ## Membership (`/api/membership/`)
 

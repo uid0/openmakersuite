@@ -22,6 +22,7 @@ from inventory.models import (
     InventoryItem,
     ItemSupplier,
     Location,
+    SerializedComponent,
     Supplier,
     UsageLog,
 )
@@ -266,3 +267,23 @@ class AssetProblemFactory(DjangoModelFactory):
     description = Faker("text", max_nb_chars=200)
     status = AssetProblem.REPORTED
     resolution_notes = ""
+
+
+class SerializedComponentFactory(DjangoModelFactory):
+    """Factory for SerializedComponent instances (consumable-mode by default).
+
+    Pass ``item__serial_tracking_mode=InventoryItem.SERIAL_TRACKING_REUSABLE``
+    to build a reusable-mode component.
+    """
+
+    class Meta:
+        model = SerializedComponent
+
+    item = SubFactory(
+        InventoryItemFactory,
+        is_serialized=True,
+        serial_tracking_mode=InventoryItem.SERIAL_TRACKING_CONSUMABLE,
+    )
+    serial_number = factory.Sequence(lambda n: f"SN-{n:06d}")
+    lot = ""
+    status = SerializedComponent.RECEIVED

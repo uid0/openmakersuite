@@ -122,14 +122,30 @@ def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
-def make_command_jwt(*, mac: str, cmd: str, exp_seconds: int = 60) -> str:
+def make_command_jwt(
+    *,
+    mac: str,
+    cmd: str,
+    command_id: str | None = None,
+    nonce: str | None = None,
+    actor: str | None = None,
+    exp_seconds: int = 60,
+) -> str:
     """Sign a short-TTL command JWT for a ForgeKey device.
 
     The JWT is the credential the firmware verifies before acting on a
     `forgekey/<mac>/command` MQTT message — used by the locker / door /
     electronic-device pipeline (gh ForgeKey expansion, Phase 1).
 
-    Payload shape: ``{"mac": ..., "cmd": ..., "exp": <unix-seconds>}``.
+    Payload shape: ``{"mac": ..., "cmd": ..., "exp": <unix-seconds>}`` plus,
+    when supplied, ``command_id``/``nonce``/``actor``. Those extra claims bind
+    the JWT to the surrounding command *envelope*: the firmware's
+    ``validateJwt()`` (command_validation.cpp) rejects a command as
+    ``jwt_claim_mismatch`` unless the JWT's ``cmd``/``command_id``/``nonce``
+    equal the envelope's top-level fields (``actor``/``mac`` are matched only
+    when present). Callers that drive the full ``validate()`` envelope path
+    (``device_commands._sign_command_payload``) pass all three; the jwt-only
+    paths (lockers' ``unlock``) omit them and keep the minimal claim set.
     Signed with ES256 using the same key that backs EMQX device-auth
     JWTs, so firmware only carries one public-key trust root.
 
@@ -150,6 +166,13 @@ def make_command_jwt(*, mac: str, cmd: str, exp_seconds: int = 60) -> str:
         "cmd": cmd,
         "exp": int(time.time()) + exp_seconds,
     }
+    # Bind the JWT to the command envelope so validateJwt()'s claim checks pass.
+    if command_id:
+        payload["command_id"] = command_id
+    if nonce:
+        payload["nonce"] = nonce
+    if actor:
+        payload["actor"] = actor
 
     header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))

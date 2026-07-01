@@ -284,6 +284,45 @@ class TestExtractWorkOrderId:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Regression for op-6t2: the legacy cv2.QRCodeDetector silently mis-decodes
+# ~1% of otherwise-clean QR images. Because the WO id is a random UUID, that
+# turned into a random CI flake (extraction returned None → "assert None ==
+# <uuid>"). _decode_qr_payloads must fall back to the more robust ArUco-based
+# detector so a legacy miss still resolves.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+class TestQrDecoderFallback:
+    @qr_decoder_required
+    def test_aruco_detector_rescues_legacy_qr_miss(self, monkeypatch):
+        import cv2
+
+        if not hasattr(cv2, "QRCodeDetectorAruco"):
+            pytest.skip("cv2.QRCodeDetectorAruco unavailable (OpenCV < 4.7)")
+
+        wo_id = str(uuid.uuid4())
+        qr_png = _qr_png_bytes(f"http://example.com/maintenance/work-orders/{wo_id}")
+
+        class _AlwaysMissDetector:
+            """Stand-in for the legacy detector's ~1% silent-miss behaviour."""
+
+            def detectAndDecodeMulti(self, _img):
+                return False, [], None, None
+
+            def detectAndDecode(self, _img):
+                return "", None, None
+
+        # Force the legacy backend to miss; the ArUco fallback must still decode.
+        monkeypatch.setattr(cv2, "QRCodeDetector", _AlwaysMissDetector)
+
+        payloads = _decode_qr_payloads(qr_png)
+        assert any(
+            wo_id in p for p in payloads
+        ), "ArUco fallback should decode a QR the legacy detector missed"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # AC 5: failure path returns a structured error listing what was tried
 # ─────────────────────────────────────────────────────────────────────────────
 

@@ -111,6 +111,9 @@ INSTALLED_APPS = [
     "anymail",
     # Local apps
     "config.apps.ConfigConfig",
+    # Shared AprilTag/fiducial registry — project_storage and maker_boxes
+    # allocate from its global ID pool, so it must load before them.
+    "fiducials",
     "membership",
     "inventory",
     "reorder_queue",
@@ -569,6 +572,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "forgekey.tasks.advance_epaper_firmware_rollouts",
         # Same cadence as the MQTT rollout advance task — each rollout
         # self-limits to its own interval_minutes.
+        "schedule": 300.0,
+    },
+    "forgekey-end-idle-device-sessions": {
+        "task": "forgekey.tasks.end_idle_device_sessions",
+        # Every 5 min — closes idle/runaway access-control sessions (op-vj9)
+        # and cuts their relay power. The service layer decides idleness from
+        # metered current with a wall-clock fallback.
         "schedule": 300.0,
     },
     # Monthly board / staff pulse email — covers the prior calendar month.

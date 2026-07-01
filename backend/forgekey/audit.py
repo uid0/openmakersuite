@@ -30,26 +30,28 @@ def record_event(
     lockout: Optional[DeviceLockout] = None,
     firmware_update: Optional[DeviceFirmwareUpdate] = None,
     device: Optional[ESP32Device] = None,
+    asset: Optional[Any] = None,
     notes: str = "",
     metadata: Optional[Dict[str, Any]] = None,
 ) -> ForgeKeyAuditEvent:
     """Record a ForgeKey audit event.
 
-    At least one of ``authorization``, ``lockout``, ``firmware_update``, or
-    ``device`` must be supplied so the row is queryable by entity. The asset
-    FK is auto-derived from the supplied entity when possible (authorizations
-    and lockouts both have ``asset`` references; firmware updates carry a
-    ``device`` whose authorizations live on its assets).
+    At least one of ``authorization``, ``lockout``, ``firmware_update``,
+    ``device``, or ``asset`` must be supplied so the row is queryable by
+    entity. When ``asset`` is not passed explicitly it is auto-derived from the
+    supplied entity when possible (authorizations and lockouts both have
+    ``asset`` references). Access-control events (a DENY for an unauthorized or
+    unknown card) carry no authorization row, so they pass ``asset`` directly.
 
     Anonymous / system-initiated actions are allowed (``actor=None``); the
     audit row simply records "no known user." Caller is expected to pass the
     request user when one exists.
     """
-    asset = None
-    if authorization is not None:
-        asset = authorization.asset
-    elif lockout is not None:
-        asset = lockout.asset
+    if asset is None:
+        if authorization is not None:
+            asset = authorization.asset
+        elif lockout is not None:
+            asset = lockout.asset
 
     return ForgeKeyAuditEvent.objects.create(
         action=action,

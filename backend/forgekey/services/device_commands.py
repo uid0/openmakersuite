@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+import uuid
 from typing import Any, Dict, Optional, Tuple
 
 from django.utils import timezone
@@ -24,6 +26,7 @@ from resilience.circuit import CircuitBreakerOpen, get_breaker
 from ..models import DeviceCommand, ESP32Device
 from ..tasks import get_mqtt_client
 from ..utils import get_mqtt_command_topic
+from .jwt_signing import is_jwt_signing_configured, make_command_jwt
 
 logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("forgekey.audit")
@@ -35,6 +38,87 @@ class DeviceCommandError(RuntimeError):
 
 PUBACK_WAIT_SECONDS = 2.0
 
+# TTL (seconds) stamped onto every signed command envelope. The firmware
+# rejects a command whose ``expires_at`` has passed, so this bounds how long a
+# captured command stays replayable; it also matches the minted JWT's ``exp``.
+# Kept at the locker pipeline's default — short, but comfortably above device
+# NTP skew (an unsynced clock fails distinctly as ``clock_invalid``, not here).
+COMMAND_TTL_SECONDS = 60
+
+
+def _command_actor_label(actor: Optional[Any]) -> str:
+    """A non-empty, stable string naming who issued a command.
+
+    The firmware envelope requires a non-empty ``actor``; when no authenticated
+    user is attached (system/automation-driven commands), fall back to
+    ``"system"`` so those commands still validate.
+    """
+    if actor is not None:
+        username = getattr(actor, "username", None)
+        if username:
+            return str(username)
+        actor_id = getattr(actor, "id", None) or getattr(actor, "pk", None)
+        if actor_id is not None:
+            return str(actor_id)
+    return "system"
+
+
+def _sign_command_payload(
+    device: ESP32Device, payload: Dict[str, Any], *, actor: Optional[Any] = None
+) -> None:
+    """Stamp the full signed envelope the firmware requires, in place (op-8pn).
+
+    Devices receive the command-signing public key as ``command_public_key_pem``
+    at enroll (``ForgeKeyEnrollView`` -> ``jwt_signing.get_jwt_public_key_pem``).
+    The firmware's ``CommandValidation::validate()`` (command_validation.cpp)
+    then rejects any command that is missing a non-empty
+    ``cmd``/``command_id``/``issued_at``/``expires_at``/``nonce``/``actor``
+    (``missing_envelope_field``) and demands a verifiable authenticator — a
+    top-level ``jwt`` (or detached ``signature``) — else
+    ``missing_authenticator``. We stamp the envelope and mint a short-TTL ES256
+    JWT whose claims bind ``cmd``/``command_id``/``nonce``/``actor`` to it, so
+    ``validateJwt()`` accepts it.
+
+    Every envelope field goes out as a JSON **string**: the firmware reads them
+    with ``doc["x"] | ""``, which yields ``""`` for a JSON *number* and would
+    fail the non-empty check — so epoch timestamps are stringified. ``nonce``
+    and ``command_id`` stay well under the firmware's 72-char replay-cache bound.
+
+    No-ops when:
+
+    * the payload has no ``cmd`` verb (nothing to sign),
+    * a caller already supplied a ``jwt`` (the locker publishers mint their own
+      over the jwt-only ``unlock`` path — never double-sign / re-stamp), or
+    * no signing key is configured (dev/test rigs), matching the consumer's own
+      ``is_jwt_signing_configured()`` gate so unsigned dev flows still work.
+
+    Note: command *parameters* (e.g. ``set_indicator``'s color/brightness/
+    pattern) ride as unsigned siblings; binding them needs a coordinated
+    firmware change and is tracked as a follow-up.
+    """
+    cmd = payload.get("cmd")
+    if not cmd or "jwt" in payload or not is_jwt_signing_configured():
+        return
+
+    now = int(time.time())
+    command_id = str(payload.get("command_id") or uuid.uuid4())
+    nonce = uuid.uuid4().hex  # 32 chars, < firmware kReplayValueMax (72)
+    actor_label = _command_actor_label(actor)
+
+    payload["command_id"] = command_id
+    payload["issued_at"] = str(now)
+    payload["expires_at"] = str(now + COMMAND_TTL_SECONDS)
+    payload["nonce"] = nonce
+    payload["actor"] = actor_label
+    payload["jwt"] = make_command_jwt(
+        mac=device.mac_address,
+        cmd=str(cmd),
+        command_id=command_id,
+        nonce=nonce,
+        actor=actor_label,
+        exp_seconds=COMMAND_TTL_SECONDS,
+    )
+
 
 def publish_command(
     device: ESP32Device,
@@ -45,6 +129,11 @@ def publish_command(
     client: Optional[mqtt.Client] = None,
 ) -> str:
     """Publish a JSON command payload to a device's MQTT command topic.
+
+    The command is signed into the envelope the firmware requires (a top-level
+    ``jwt``) via :func:`_sign_command_payload` before it goes on the wire, so
+    callers don't have to — see that helper for the no-op cases (pre-signed
+    locker commands, dev rigs without a signing key).
 
     Waits up to ``PUBACK_WAIT_SECONDS`` for the broker PUBACK before
     returning so callers get "broker has the message" rather than just
@@ -62,6 +151,7 @@ def publish_command(
     topic = get_mqtt_command_topic(device.mac_address)
     payload = dict(command_payload)
     payload.setdefault("timestamp", timezone.now().isoformat())
+    _sign_command_payload(device, payload, actor=actor)
 
     body = json.dumps(payload)
     broker = client or get_mqtt_client()

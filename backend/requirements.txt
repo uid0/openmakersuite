@@ -6,14 +6,14 @@ python-decouple==3.8
 dj-database-url==3.1.2
 
 # Redis and Celery
-redis==8.0.0
+redis==8.0.1
 celery==5.6.3
 # tzlocal is a celery runtime dep (imported in celery.utils.time) that celery
 # declares unpinned, so pip resolves the latest. tzlocal 5.4.2 shipped as a
 # broken/empty wheel (metadata only, no module code) that fails to import
 # under Python 3.14, breaking `import celery` and thus all backend CI. Pin to
 # the last known-good release. (oms-zkr3o)
-tzlocal==5.4.3
+tzlocal==5.4.4
 django-redis==7.0.0
 django-celery-results==2.6.0
 flower==2.0.1
@@ -26,7 +26,7 @@ Pillow==12.2.0
 # Forced to the headless Agg backend in code so this does not pull GUI deps.
 matplotlib==3.11.0
 pyzbar==0.1.9  # Optional: for QR code validation (requires system zbar library)
-pypdf==6.13.3   # PDF text/form extraction for inbound work-order ingestion
+pypdf==6.14.2   # PDF text/form extraction for inbound work-order ingestion
 opencv-python-headless==4.13.0.92  # cv2.QRCodeDetector for image-based PDF ingestion
 
 # Authentication
@@ -60,7 +60,7 @@ django-anymail[postmark]==15.0
 sentry-sdk[django,celery]==2.63.0
 
 # Testing and Code Coverage
-coverage==7.14.2
+coverage==7.14.3
 pytest==9.1.1
 pytest-django==4.12.0
 pytest-cov==7.1.0

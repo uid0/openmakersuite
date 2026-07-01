@@ -26,7 +26,7 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
@@ -68,6 +68,27 @@ const DEFAULT_PIO_ENV = 'seeed_xiao_esp32s3';
 
 /** Default PlatformIO env for a device-type code (overridable in the form). */
 export const defaultPioEnv = (code: string): string => PIO_ENV_BY_CODE[code] ?? DEFAULT_PIO_ENV;
+
+/**
+ * Pick the firmware-version id to auto-select in the New Rollout form when a
+ * build *newly* succeeds. Returns the `firmware_version` of the most recently
+ * completed not-yet-seen succeeded build (mutating `seen` to mark the fresh
+ * ones handled), or `null` when nothing new succeeded. Seeding `seen` with the
+ * builds present on first load keeps page reloads / pre-existing successes from
+ * hijacking the form — only a success observed live updates the version.
+ */
+export const pickFreshlySucceededVersion = (
+  builds: ForgeKeyFirmwareBuild[],
+  seen: Set<string>,
+): string | null => {
+  const fresh = builds.filter(
+    (b) => b.status === 'succeeded' && b.firmware_version && !seen.has(b.id),
+  );
+  fresh.forEach((b) => seen.add(b.id));
+  if (fresh.length === 0) return null;
+  const newest = fresh.reduce((a, b) => ((a.completed_at ?? '') >= (b.completed_at ?? '') ? a : b));
+  return newest.firmware_version ?? null;
+};
 
 const fmtBuildElapsed = (build: ForgeKeyFirmwareBuild): string | null => {
   if (!build.started_at) return null;
@@ -117,6 +138,10 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
   const [logBuildId, setLogBuildId] = useState<string | null>(null);
   const [redispatchingBuildId, setRedispatchingBuildId] = useState<string | null>(null);
 
+  // Succeeded builds we've already reacted to — seeded on first load so only a
+  // build that succeeds while the page is open auto-updates the rollout version.
+  const seenSucceededBuilds = useRef<Set<string> | null>(null);
+
   useEffect(() => {
     if (!isStaff && !isSuperuser) return undefined;
     let cancelled = false;
@@ -141,20 +166,40 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
         /* ePaper rollouts are secondary on this page; ignore transient errors */
       }
     };
+    const loadVersions = async () => {
+      try {
+        const res = await forgekeyAPI.listFirmwareVersions();
+        if (!cancelled) setVersions(asList(res.data).filter((v) => v.is_active !== false));
+      } catch {
+        /* versions refresh is best-effort; keep the last good list */
+      }
+    };
     const loadBuilds = async () => {
       try {
         const res = await forgekeyAPI.listFirmwareBuilds();
-        if (!cancelled) setBuilds(asList(res.data));
+        if (cancelled) return;
+        const list = asList(res.data);
+        setBuilds(list);
+        // Auto-update the New Rollout version when a build *newly* succeeds, so a
+        // fresh build is one click from a rollout instead of a manual re-pick.
+        if (seenSucceededBuilds.current === null) {
+          // First load: remember existing successes so reloads don't hijack the form.
+          seenSucceededBuilds.current = new Set(
+            list.filter((b) => b.status === 'succeeded' && b.firmware_version).map((b) => b.id),
+          );
+        } else {
+          const picked = pickFreshlySucceededVersion(list, seenSucceededBuilds.current);
+          if (picked) {
+            // Refresh the dropdown first so the just-built version is selectable.
+            await loadVersions();
+            if (!cancelled) setFormVersion(picked);
+          }
+        }
       } catch {
         /* builds are secondary; ignore transient errors */
       }
     };
-    forgekeyAPI
-      .listFirmwareVersions()
-      .then((res) => {
-        if (!cancelled) setVersions(asList(res.data).filter((v) => v.is_active !== false));
-      })
-      .catch(() => undefined);
+    loadVersions();
     forgekeyAPI
       .listDeviceTypes()
       .then((res) => {
@@ -167,6 +212,7 @@ const ForgeKeyFirmwareRolloutsPage: React.FC = () => {
     const handle = window.setInterval(() => {
       loadRollouts();
       loadEpaperRollouts();
+      loadVersions();
       loadBuilds();
     }, POLL_INTERVAL_MS);
     return () => {

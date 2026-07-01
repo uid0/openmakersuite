@@ -211,3 +211,59 @@ class TestFirmwareAuditEvents:
         assert event.actor == actor
         assert event.authorization == authorization
         assert event.asset == authorization.asset
+
+
+class TestAccessLogPermissions:
+    """The access log is staff-only (op-2se): ``IsAdminUser`` on
+    ``ForgeKeyAuditEventViewSet``. A plain authenticated member must not be able
+    to read who was granted or denied access — only staff/admins can."""
+
+    def _event(self, actor=None):
+        return record_event(
+            action=ForgeKeyAuditEvent.ACTION_ACCESS_GRANTED,
+            actor=actor,
+            asset=AssetFactory(),
+        )
+
+    def test_non_staff_member_forbidden_from_list(self, api_client):
+        member = UserFactory(is_staff=False)
+        self._event(actor=member)
+        api_client.force_authenticate(user=member)
+
+        response = api_client.get(reverse("forgekey:access-log-list"))
+
+        assert response.status_code == 403, response.content
+
+    def test_non_staff_member_forbidden_from_retrieve(self, api_client):
+        member = UserFactory(is_staff=False)
+        event = self._event(actor=member)
+        api_client.force_authenticate(user=member)
+
+        response = api_client.get(reverse("forgekey:access-log-detail", kwargs={"pk": event.pk}))
+
+        assert response.status_code == 403, response.content
+
+    def test_staff_user_can_list(self, api_client):
+        staff = UserFactory(is_staff=True)
+        self._event(actor=staff)
+        api_client.force_authenticate(user=staff)
+
+        response = api_client.get(reverse("forgekey:access-log-list"))
+
+        assert response.status_code == 200, response.content
+
+    def test_staff_user_can_retrieve(self, api_client):
+        staff = UserFactory(is_staff=True)
+        event = self._event(actor=staff)
+        api_client.force_authenticate(user=staff)
+
+        response = api_client.get(reverse("forgekey:access-log-detail", kwargs={"pk": event.pk}))
+
+        assert response.status_code == 200, response.content
+
+    def test_unauthenticated_request_denied(self, api_client):
+        self._event()
+
+        response = api_client.get(reverse("forgekey:access-log-list"))
+
+        assert response.status_code in {401, 403}, response.content

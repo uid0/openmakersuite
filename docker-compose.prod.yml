@@ -37,7 +37,7 @@ services:
   redis:
     # Digest pinned from `docker pull redis:7-alpine` on 2026-04-21 (resolved to Redis 7.4.8).
     # To bump: pull the new tag, copy the Digest line, update the exact version in the tag for readability.
-    image: redis:8.8.0-alpine@sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0
+    image: redis:8.8.0-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
     logging: *default-logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -301,6 +301,15 @@ services:
     image: oms-backend:local
     logging: *default-logging
     command: python manage.py mqtt_consumer
+    # mqtt_consumer reuses oms-backend:local, whose Dockerfile.prod bakes an
+    # HTTP liveness HEALTHCHECK (urlopen http://localhost:8000/api/health/livez/).
+    # This service runs no web server, so that probe can never succeed and the
+    # container is reported perpetually "unhealthy" (op-cz8). Disable the
+    # inherited probe; the consumer self-heals via paho's reconnect loop and the
+    # restart: unless-stopped policy below. (A real liveness check would need a
+    # heartbeat file written by the mgmt command — tracked separately.)
+    healthcheck:
+      disable: true
     deploy:
       resources:
         limits:

@@ -160,9 +160,17 @@ const ForgeKeyDashboardPage: React.FC = () => {
         description:
           'Health across every ForgeKey device — connectivity, firmware, e-paper panels, and recent activity.',
         action: (
-          <Button component={Link} to="/facilities/forgekey-devices" variant="default">
-            Manage devices
-          </Button>
+          <Group gap="xs">
+            <Button component={Link} to="/facilities/forgekey-devices" variant="default">
+              Manage devices
+            </Button>
+            <Button component={Link} to="/facilities/forgekey-badges" variant="default">
+              Badge enrollment
+            </Button>
+            <Button component={Link} to="/facilities/forgekey-access-log" variant="default">
+              Access log
+            </Button>
+          </Group>
         ),
       }}
     >

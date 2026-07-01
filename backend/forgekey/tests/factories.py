@@ -17,12 +17,15 @@ from forgekey.models import (
     DeviceUsage,
     ESP32Device,
     FirmwareVersion,
+    IndicatorBinding,
+    IndicatorStatus,
     LockoutLevel,
     OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
+    RoomOperationalMode,
 )
-from inventory.tests.factories import AssetFactory
+from inventory.tests.factories import AssetFactory, LocationFactory
 
 User = get_user_model()
 
@@ -58,8 +61,17 @@ class ESP32DeviceFactory(DjangoModelFactory):
     class Meta:
         model = ESP32Device
 
+    # Encode the factory sequence into the low four octets under a fixed
+    # locally-administered ``DE:AD`` prefix. The previous form left the first
+    # octet as ``{n:02X}`` (no ``% 256``), so once a test run created 256+
+    # devices the octet overflowed to three hex digits and produced an invalid
+    # MAC that no longer round-tripped through ``normalize_mac_address`` (a
+    # cross-test-ordering flake). Big-endian packing stays valid + unique for
+    # any sequence value a suite will realistically reach.
     mac_address = factory.Sequence(
-        lambda n: f"{n:02X}:{(n + 1) % 256:02X}:{(n + 2) % 256:02X}:{(n + 3) % 256:02X}:{(n + 4) % 256:02X}:{(n + 5) % 256:02X}"
+        lambda n: "DE:AD:{:02X}:{:02X}:{:02X}:{:02X}".format(
+            (n >> 24) & 0xFF, (n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF
+        )
     )
     device_type = SubFactory(DeviceTypeFactory)
     name = factory.Sequence(lambda n: f"ESP32 Device {n}")
@@ -186,3 +198,38 @@ class DeviceFirmwareUpdateFactory(DjangoModelFactory):
     firmware_version = SubFactory(FirmwareVersionFactory)
     status = DeviceFirmwareUpdate.STATUS_PENDING
     requested_by = SubFactory(UserFactory)
+
+
+class IndicatorDeviceTypeFactory(DeviceTypeFactory):
+    """DeviceType pinned to the indicator code."""
+
+    code = DeviceType.TYPE_INDICATOR
+    name = "Indicator/Status Light"
+
+
+class IndicatorDeviceFactory(ESP32DeviceFactory):
+    """An indicator-type ESP32 device (online by default)."""
+
+    device_type = SubFactory(IndicatorDeviceTypeFactory)
+    is_online = True
+
+
+class RoomOperationalModeFactory(DjangoModelFactory):
+    """Factory for creating RoomOperationalMode instances."""
+
+    class Meta:
+        model = RoomOperationalMode
+
+    location = SubFactory(LocationFactory)
+    mode = IndicatorStatus.AVAILABLE
+
+
+class IndicatorBindingFactory(DjangoModelFactory):
+    """Factory for creating IndicatorBinding instances (asset-bound by default)."""
+
+    class Meta:
+        model = IndicatorBinding
+
+    device = SubFactory(IndicatorDeviceFactory)
+    asset = SubFactory(AssetFactory)
+    location = None

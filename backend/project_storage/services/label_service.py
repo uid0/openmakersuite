@@ -10,13 +10,19 @@ The same renderer drives both — caller picks the layout via the
 ``printer`` kwarg. Layout:
 
     ┌───────────────────────────┐
-    │  [QR ~140px]   Wk 47      │   ← QR encodes stint_id; right
-    │                Day 327    │     side: expiry week / DoY in big bold
+    │  [QR ~140px]   Wk 47      │   ← QR encodes stint_id (WHO/owner link);
+    │                Day 327    │     right side: expiry week / DoY in big bold
     │                           │
     │  PS-AB23CDFG              │   ← eye-readable stint id
     │  Member Name              │
     │  Project: <title>         │
+    ├───────────────────────────┤
+    │  [AprilTag]  Location tag │   ← WHERE fiducial: unique per-item tag a
+    │              tag36h11 #42 │     vision system reads to track location
     └───────────────────────────┘
+
+The AprilTag strip only appears when the stint has an active tag allocation
+(see the ``fiducials`` app); legacy stints render QR-only.
 """
 
 from __future__ import annotations
@@ -28,6 +34,9 @@ from django.conf import settings
 
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
+
+from fiducials.services.allocator import get_active_assignment
+from fiducials.services.apriltag_render import build_apriltag_image
 
 PrinterFamily = Literal["brother_ql", "epson_tm"]
 
@@ -105,20 +114,66 @@ def _draw_right_column_bigtext(
     draw.text((x, y_top + h1 + 6), line2, fill="black", font=font)
 
 
+def _draw_apriltag_strip(
+    canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    *,
+    tag_id: int,
+    family: str,
+    top_y: int,
+    margin: int,
+    tag_px: int,
+) -> None:
+    """Paste the WHERE fiducial + an eye-readable caption into a bottom strip.
+
+    The AprilTag is the per-item location fiducial a future vision system
+    reads to auto-track where the item sits. The QR above it stays the
+    owner/WHO link; this is the WHERE link.
+    """
+    tag_img = build_apriltag_image(tag_id, tag_px, family=family)
+    canvas.paste(tag_img, (margin, top_y))
+
+    caption_x = margin + tag_px + 16
+    cap_font = _try_font(max(16, tag_px // 7))
+    draw.text((caption_x, top_y + 4), "Location tag", fill="black", font=cap_font)
+    line_h = draw.textbbox((0, 0), "Location tag", font=cap_font)[3] + 6
+    draw.text(
+        (caption_x, top_y + 4 + line_h),
+        f"{family} #{tag_id}",
+        fill="black",
+        font=cap_font,
+    )
+
+
 def render_stint_label(
     stint,
     *,
     printer: PrinterFamily = "brother_ql",
 ) -> bytes:
-    """Return PNG bytes for the stint's label, ready to feed to the printer."""
+    """Return PNG bytes for the stint's label, ready to feed to the printer.
+
+    When the stint has an active AprilTag allocation (see the ``fiducials``
+    app) the canvas grows along the continuous-media length to add a WHERE
+    fiducial strip below the existing QR/text block. Stints created before
+    this feature — or whose tag has been released — render exactly as before
+    (QR only), so existing labels and the print path stay backward compatible.
+    """
 
     size = BROTHER_SIZE_PX if printer == "brother_ql" else EPSON_SIZE_PX
-    width, height = size
-    canvas = Image.new("RGB", size, "white")
+    width, base_height = size
+    margin = 12
+
+    # WHERE fiducial: a unique per-item AprilTag, looked up from the global
+    # registry. None for legacy/released stints -> QR-only label.
+    tag = get_active_assignment(stint)
+    tag_px = (base_height - 2 * margin) if tag is not None else 0
+    extra_h = (tag_px + margin) if tag is not None else 0
+
+    height = base_height + extra_h
+    canvas = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(canvas)
 
-    margin = 12
-    qr_px = height - 2 * margin
+    qr_px = base_height - 2 * margin
     # Encode a deep-link URL so a phone camera scan opens the warden
     # detail page directly. The Pi print daemon still pulls the PNG by
     # bare stint_id via /api/project-storage/stints/<id>/label/ — that's
@@ -136,8 +191,9 @@ def render_stint_label(
     available_w = width - text_x - margin
 
     # Right column: big bold expiry — split the column so the top 60% is
-    # the date stack, bottom 40% is the eye-readable id + member.
-    top_h = int(height * 0.55)
+    # the date stack, bottom 40% is the eye-readable id + member. Anchored
+    # to base_height so the WHERE-fiducial strip below doesn't stretch it.
+    top_h = int(base_height * 0.55)
     week, doy = stint.expiry_week_and_day
     _draw_right_column_bigtext(
         canvas,
@@ -150,9 +206,9 @@ def render_stint_label(
         day_of_year=doy,
     )
 
-    # Bottom strip: stint_id, member name, project title.
+    # Right column lower half: stint_id, member name, project title.
     bottom_y = margin + top_h + 8
-    bottom_h = height - bottom_y - margin
+    bottom_h = base_height - bottom_y - margin
     small_font = _try_font(max(14, bottom_h // 4))
     lines = [
         stint.stint_id,
@@ -165,6 +221,18 @@ def render_stint_label(
         draw.text((text_x, y), line, fill="black", font=small_font)
         bbox = draw.textbbox((0, 0), line, font=small_font)
         y += (bbox[3] - bbox[1]) + 4
+
+    # WHERE fiducial strip — grows the label length only when a tag exists.
+    if tag is not None:
+        _draw_apriltag_strip(
+            canvas,
+            draw,
+            tag_id=tag.tag_id,
+            family=tag.family,
+            top_y=base_height,
+            margin=margin,
+            tag_px=tag_px,
+        )
 
     out = BytesIO()
     canvas.save(out, format="PNG")

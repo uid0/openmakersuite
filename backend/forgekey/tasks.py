@@ -196,16 +196,41 @@ def send_mqtt_command(
         # ``command``. The older ``"command"`` key was silently dropped by
         # firmware so /enable, /disable, and /status were no-ops on the
         # device side even after the topic was correct.
-        message = {
-            "cmd": command,
-            "timestamp": timezone.now().isoformat(),
-        }
-
+        command_payload: Dict[str, Any] = {"cmd": command}
         if payload:
-            message.update(payload)
+            command_payload.update(payload)
 
-        message_json = json.dumps(message)
-        result = client.publish(topic, message_json, qos=1)
+        # op-8pn: the firmware now rejects any command lacking the signed
+        # envelope (missing_envelope_field) — the relay enable/disable/status
+        # path runs through here, so route enrolled devices through
+        # publish_command, which stamps the command_id/issued_at/expires_at/
+        # nonce/actor envelope + JWT (same chokepoint as the DRF / indicator /
+        # relay-access paths). Imported lazily to avoid the tasks <-> device_
+        # commands circular import (device_commands imports get_mqtt_client
+        # from this module). A device we have no row for can't be signed for;
+        # fall back to the legacy raw publish (firmware will reject it, but the
+        # relay endpoints always pass an enrolled device's MAC).
+        device = ESP32Device.objects.filter(mac_address=mac_address).first()
+        if device is not None:
+            from .services.device_commands import publish_command
+
+            topic = publish_command(device, command_payload, audit_action=command, client=client)
+            logger.info(f"Sent command '{command}' to device {mac_address}")
+            return {
+                "success": True,
+                "mac_address": mac_address,
+                "command": command,
+                "topic": topic,
+            }
+
+        logger.warning(
+            "send_mqtt_command: no ESP32Device row for %s; publishing UNSIGNED "
+            "(command=%s) — firmware will reject without the op-8pn envelope",
+            mac_address,
+            command,
+        )
+        command_payload["timestamp"] = timezone.now().isoformat()
+        result = client.publish(topic, json.dumps(command_payload), qos=1)
 
         if result.rc == mqtt.MQTT_ERR_SUCCESS:
             logger.info(f"Sent command '{command}' to device {mac_address}")
@@ -282,6 +307,7 @@ def process_mqtt_status_message(mac_address: str, message_data: Dict[str, Any]) 
         device = ESP32Device.objects.get(mac_address=normalized_mac)
 
         # Update device online status and last seen
+        was_online = device.is_online
         device.is_online = message_data.get("online", True)
         device.last_seen = timezone.now()
 
@@ -291,6 +317,16 @@ def process_mqtt_status_message(mac_address: str, message_data: Dict[str, Any]) 
         device.save(update_fields=["is_online", "last_seen", "firmware_version"])
 
         logger.info(f"Updated status for device {mac_address}")
+
+        # Indicator reactive update (ga-72l): mirror the consumer — an
+        # online/offline transition can flip a bound asset's availability.
+        if was_online != device.is_online:
+            try:
+                from .services.indicator import sync_bindings_for_device
+
+                sync_bindings_for_device(device)
+            except Exception:  # pragma: no cover - never break status ingest
+                logger.exception("Indicator sync after status transition failed")
 
         # Mirror mqtt_consumer.handle_status_message: the EMQX webhook delivers
         # the same status payloads as the long-running consumer, so it must
@@ -769,6 +805,43 @@ def mark_stale_devices_offline(threshold_hours: int = 5) -> Dict[str, Any]:
         cutoff.isoformat(),
     )
     return {"updated": updated, "threshold_hours": threshold_hours}
+
+
+@shared_task
+@sentry_sdk.crons.monitor(
+    monitor_slug="forgekey-end-idle-device-sessions",
+    monitor_config={
+        # Every-5-min sweep that closes idle / runaway usage sessions and cuts
+        # their relay power (op-vj9). Three misses (15 min) before alerting.
+        "schedule": {"type": "interval", "value": 5, "unit": "minute"},
+        "timezone": "America/Chicago",
+        "checkin_margin": 2,
+        "max_runtime": 5,
+        "failure_issue_threshold": 3,
+        "recovery_threshold": 1,
+    },
+)
+def end_idle_device_sessions(
+    idle_after_minutes: Optional[int] = None,
+    max_session_hours: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Beat task: auto-end idle/runaway usage sessions and power down their tools.
+
+    Thin wrapper over :func:`forgekey.services.access_control.end_idle_sessions`
+    so the interlock policy lives in the service layer (single source of truth)
+    and the task only handles scheduling + kwargs plumbing. ``None`` kwargs fall
+    back to the service defaults (idle window / wall-clock cap).
+    """
+    from .services.access_control import (
+        IDLE_AFTER_MINUTES_DEFAULT,
+        MAX_SESSION_HOURS_DEFAULT,
+        end_idle_sessions,
+    )
+
+    idle = idle_after_minutes if idle_after_minutes is not None else IDLE_AFTER_MINUTES_DEFAULT
+    cap = max_session_hours if max_session_hours is not None else MAX_SESSION_HOURS_DEFAULT
+    ended = end_idle_sessions(idle_after_minutes=idle, max_session_hours=cap)
+    return {"ended": ended, "idle_after_minutes": idle, "max_session_hours": cap}
 
 
 @shared_task

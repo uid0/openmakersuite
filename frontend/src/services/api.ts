@@ -1292,10 +1292,35 @@ export const authAPI = {
     api.post('/auth/logout/'),
 };
 
+// A member as returned by the staff-only user directory (op-tup). Backs the
+// access-control grant user-picker and the badge-enrollment admin: enough to
+// identify a member and show their current badge.
+export interface DirectoryUser {
+  id: number;
+  username: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  email: string;
+  badge_number: string | null;
+  is_active: boolean;
+}
+
 // User Profile API
 export const userAPI = {
   getProfile: () =>
     api.get<UserProfile>('/membership/profile/me/'),
+
+  // Staff-only directory for access-control pickers. ``search`` matches
+  // username / name / email; ``hasBadge`` narrows to members with (or without)
+  // a badge for the enrollment admin.
+  listUsers: (opts: { search?: string; hasBadge?: boolean } = {}) =>
+    api.get<{ results?: DirectoryUser[] } | DirectoryUser[]>('/membership/users/', {
+      params: {
+        ...(opts.search ? { search: opts.search } : {}),
+        ...(opts.hasBadge != null ? { has_badge: String(opts.hasBadge) } : {}),
+      },
+    }),
 
   updateProfile: (data: Partial<UserProfile>) =>
     api.put<UserProfile>('/membership/profile/update_me/', data),
@@ -2132,6 +2157,115 @@ export interface ForgeKeyDeviceLockout {
   is_active: boolean;
 }
 
+// Indicator-light status management (epic ga-72l). The canonical operational
+// statuses an indicator can reflect — must match backend ``IndicatorStatus``.
+export type IndicatorStatusValue =
+  | 'available'
+  | 'in_use'
+  | 'unavailable'
+  | 'locked_out'
+  | 'classroom';
+
+// The ``set_indicator`` payload the backend derives/pushes. Colors may be a
+// named string, a hex string, or an [r, g, b] triple; brightness may be a
+// 'low'/'high' word or a 0-255 int. Fields are omitted when not applicable
+// (e.g. an off pattern carries no color/brightness).
+export interface ForgeKeyIndicatorPresentation {
+  cmd?: string;
+  color?: string | number[] | null;
+  brightness?: string | number | null;
+  pattern?: string;
+  period_ms?: number;
+  duration_s?: number;
+}
+
+export interface ForgeKeyIndicatorBinding {
+  id: string;
+  device: string;
+  device_mac_address: string;
+  device_name: string;
+  asset: string | null;
+  asset_name: string | null;
+  location: number | null;
+  location_name: string | null;
+  // '' before the first sync; otherwise the last pushed status.
+  last_status: IndicatorStatusValue | '';
+  last_presentation: ForgeKeyIndicatorPresentation | null;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ForgeKeyRoomOperationalMode {
+  id: number;
+  location: number;
+  location_name: string;
+  mode: IndicatorStatusValue;
+  updated_by: number | null;
+  updated_by_username: string | null;
+  updated_at: string;
+}
+
+export interface ForgeKeyIndicatorSyncResponse {
+  status: IndicatorStatusValue | '';
+  presentation: ForgeKeyIndicatorPresentation | null;
+  command_id: string | null;
+}
+
+export interface ForgeKeyIndicatorTestResponse {
+  status: string;
+  device: string;
+  command_id: string;
+  payload: ForgeKeyIndicatorPresentation;
+}
+
+// A row in the ForgeKey access/denial log (access-control interlock, op-vj9).
+// ``metadata.reason`` carries the deny reason for ``access_denied`` rows.
+export interface ForgeKeyAuditEvent {
+  id: string;
+  created_at: string;
+  action: string;
+  action_display: string;
+  actor: number | null;
+  actor_username: string | null;
+  asset: string | null;
+  asset_name: string | null;
+  device: string | null;
+  device_mac: string | null;
+  notes: string;
+  metadata: Record<string, unknown> | null;
+}
+
+// The access-control actions the access-log view filters on, mapped to their
+// human labels (must match the backend ``ForgeKeyAuditEvent`` action choices).
+export const FORGEKEY_ACCESS_ACTIONS: Record<string, string> = {
+  access_granted: 'Access granted',
+  access_denied: 'Access denied',
+  session_ended: 'Usage session ended',
+  badge_enrolled: 'Badge enrolled',
+};
+
+// Armed/captured state for the "enroll next scan" badge handshake. ``captured``
+// is non-null once the member has tapped and the interlock bound the UID.
+export interface ForgeKeyBadgeEnrollmentState {
+  armed: boolean;
+  armed_user_id: number | null;
+  reader_id: string | null;
+  captured: { user_id: number; badge_number: string } | null;
+}
+
+export interface ForgeKeyBadgeArmResponse {
+  armed: boolean;
+  user_id: number;
+  reader_id: string | null;
+  ttl_seconds: number;
+}
+
+export interface ForgeKeyBadgeSetResponse {
+  user_id: number;
+  badge_number: string | null;
+}
+
 export const forgekeyAPI = {
   listDevices: (opts: { capability?: string } = {}) =>
     api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
@@ -2147,6 +2281,10 @@ export const forgekeyAPI = {
   enableDevice: (id: string) => api.post(`/forgekey/devices/${id}/enable/`),
   disableDevice: (id: string, delaySeconds?: number) =>
     api.post(`/forgekey/devices/${id}/disable/`, delaySeconds ? { delay_seconds: delaySeconds } : {}),
+  // Per-channel power-relay control (ga-40w): emits a signed `power_set`
+  // command targeting one channel of the 2-channel relay.
+  setRelayChannel: (id: string, channel: number, on: boolean) =>
+    api.post<ForgeKeyCommandResponse>(`/forgekey/devices/${id}/relay-channel/`, { channel, on }),
   retireDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/retire/`),
   reactivateDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/reactivate/`),
   deleteDevice: (id: string) => api.delete(`/forgekey/devices/${id}/`),
@@ -2182,6 +2320,66 @@ export const forgekeyAPI = {
     ),
   unlockLockout: (id: string) =>
     api.post<ForgeKeyDeviceLockout>(`/forgekey/lockouts/${id}/unlock/`),
+  // Grant a user access to an asset. ``authorized_by`` is set server-side to the
+  // caller; an optional ``expires_at`` makes the grant lapse automatically.
+  grantAuthorization: (body: {
+    asset: string;
+    user: number;
+    notes?: string;
+    expires_at?: string | null;
+  }) => api.post<ForgeKeyAssetAuthorization>('/forgekey/authorizations/', body),
+  // The grants for one member — backs the per-member "assets I'm authorized for"
+  // view. Pass ``activeOnly`` to drop revoked/expired rows.
+  listAuthorizationsForUser: (userId: number, opts: { activeOnly?: boolean } = {}) =>
+    api.get<{ results?: ForgeKeyAssetAuthorization[] } | ForgeKeyAssetAuthorization[]>(
+      '/forgekey/authorizations/',
+      { params: { user: userId, ...(opts.activeOnly ? { is_active: 'true' } : {}) } },
+    ),
+  // Access/denial log (op-vj9). Defaults to the access-control actions only
+  // (grant / deny / session-ended / badge-enrolled); pass filters to narrow.
+  listAccessLog: (
+    opts: {
+      accessOnly?: boolean;
+      action?: string;
+      asset?: string;
+      actor?: number;
+      device?: string;
+    } = {},
+  ) =>
+    api.get<{ results?: ForgeKeyAuditEvent[] } | ForgeKeyAuditEvent[]>('/forgekey/access-log/', {
+      params: {
+        ...(opts.accessOnly !== false ? { access_only: 'true' } : {}),
+        ...(opts.action ? { action: opts.action } : {}),
+        ...(opts.asset ? { asset: opts.asset } : {}),
+        ...(opts.actor != null ? { actor: opts.actor } : {}),
+        ...(opts.device ? { device: opts.device } : {}),
+      },
+    }),
+  // Badge enrollment (op-vj9). ``getBadgeEnrollmentState`` is the poll target for
+  // the arm flow; reading it with a ``userId`` consumes a captured result.
+  getBadgeEnrollmentState: (opts: { userId?: number; readerId?: string } = {}) =>
+    api.get<ForgeKeyBadgeEnrollmentState>('/forgekey/badge-enrollment/', {
+      params: {
+        ...(opts.userId != null ? { user_id: opts.userId } : {}),
+        ...(opts.readerId ? { reader_id: opts.readerId } : {}),
+      },
+    }),
+  armBadgeEnrollment: (body: { userId: number; readerId?: string }) =>
+    api.post<ForgeKeyBadgeArmResponse>('/forgekey/badge-enrollment/arm/', {
+      user_id: body.userId,
+      ...(body.readerId ? { reader_id: body.readerId } : {}),
+    }),
+  cancelBadgeEnrollment: (body: { readerId?: string } = {}) =>
+    api.post<{ armed: boolean }>('/forgekey/badge-enrollment/cancel/', {
+      ...(body.readerId ? { reader_id: body.readerId } : {}),
+    }),
+  // Set or clear a member's badge directly (manual-entry fallback). Pass
+  // ``badgeNumber: null`` to clear.
+  setBadge: (body: { userId: number; badgeNumber: string | null }) =>
+    api.post<ForgeKeyBadgeSetResponse>('/forgekey/badge-enrollment/set-badge/', {
+      user_id: body.userId,
+      badge_number: body.badgeNumber,
+    }),
   getOccupancy: (id: string, since: string = '24h') =>
     api.get<ForgeKeyOccupancyResponse>(`/forgekey/devices/${id}/occupancy/`, {
       params: { since },
@@ -2220,6 +2418,59 @@ export const forgekeyAPI = {
     api.get<ForgeKeyRecentCommandsResponse>(
       `/forgekey/devices/${id}/recent-commands/`,
       { params: { limit } },
+    ),
+  // Indicator lights (epic ga-72l): bind an indicator device to an asset XOR a
+  // room, drive a room's manual mode, and preview/sync the light.
+  listIndicatorBindings: (
+    opts: { device?: string; asset?: string; location?: number } = {},
+  ) =>
+    api.get<{ results?: ForgeKeyIndicatorBinding[] } | ForgeKeyIndicatorBinding[]>(
+      '/forgekey/indicator-bindings/',
+      {
+        params: {
+          ...(opts.device ? { device: opts.device } : {}),
+          ...(opts.asset ? { asset: opts.asset } : {}),
+          ...(opts.location != null ? { location: opts.location } : {}),
+        },
+      },
+    ),
+  createIndicatorBinding: (
+    body: { device: string; asset: string } | { device: string; location: number },
+  ) => api.post<ForgeKeyIndicatorBinding>('/forgekey/indicator-bindings/', body),
+  deleteIndicatorBinding: (id: string) =>
+    api.delete(`/forgekey/indicator-bindings/${id}/`),
+  // Recompute the bound target's status and push it to the device now.
+  indicatorSync: (bindingId: string) =>
+    api.post<ForgeKeyIndicatorSyncResponse>(
+      `/forgekey/indicator-bindings/${bindingId}/sync/`,
+    ),
+  listRoomOperationalModes: (opts: { location?: number } = {}) =>
+    api.get<{ results?: ForgeKeyRoomOperationalMode[] } | ForgeKeyRoomOperationalMode[]>(
+      '/forgekey/room-operational-modes/',
+      { params: opts.location != null ? { location: opts.location } : undefined },
+    ),
+  createRoomOperationalMode: (body: { location: number; mode: IndicatorStatusValue }) =>
+    api.post<ForgeKeyRoomOperationalMode>('/forgekey/room-operational-modes/', body),
+  setRoomOperationalMode: (id: number, mode: IndicatorStatusValue) =>
+    api.patch<ForgeKeyRoomOperationalMode>(
+      `/forgekey/room-operational-modes/${id}/`,
+      { mode },
+    ),
+  // Explicit color/brightness/pattern preview to an indicator device — bypasses
+  // status derivation for a live hardware check.
+  indicatorTest: (
+    deviceId: string,
+    body: {
+      color?: string | number[];
+      brightness?: string | number;
+      pattern?: string;
+      period_ms?: number;
+      duration_s?: number;
+    },
+  ) =>
+    api.post<ForgeKeyIndicatorTestResponse>(
+      `/forgekey/devices/${deviceId}/indicator/test/`,
+      body,
     ),
   bindEPaper: (displayId: string, assetId: string) =>
     api.post<{ display_id: string; asset_id: string; asset_name: string }>(

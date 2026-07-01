@@ -10,6 +10,7 @@ import re
 from datetime import timedelta
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import F
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
@@ -51,10 +52,13 @@ from .models import (
     FirmwareBuild,
     FirmwareRollout,
     FirmwareVersion,
+    ForgeKeyAuditEvent,
+    IndicatorBinding,
     LockoutLevel,
     OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
+    RoomOperationalMode,
     TemperatureReading,
 )
 from .serializers import (
@@ -73,11 +77,16 @@ from .serializers import (
     FirmwareBuildSerializer,
     FirmwareRolloutSerializer,
     FirmwareVersionSerializer,
+    ForgeKeyAuditEventSerializer,
+    IndicatorBindingSerializer,
     OccupancyEventSerializer,
     OperationalModeSerializer,
     PowerMeterReadingSerializer,
+    RelayChannelCommandSerializer,
+    RoomOperationalModeSerializer,
     TemperatureReadingSerializer,
 )
+from .services import badge_enrollment
 from .services.ca_key_storage import CaKeyStorageError, decrypt_ca_key
 from .services.csr_signing import CsrSigningError, CsrValidationError, sign_csr
 from .services.device_commands import DeviceCommandError, publish_command
@@ -87,6 +96,7 @@ from .services.firmware_signing import (
     get_public_key_pem,
     is_signing_configured,
 )
+from .services.indicator import send_indicator_test, sync_indicator
 from .services.jwt_signing import (
     JwtSigningError,
     get_jwt_jwks,
@@ -106,16 +116,19 @@ from .tasks import (
     request_device_status,
 )
 from .utils import (
-    device_command_topic_for,
-    device_firmware_topic_for,
-    device_ping_topic_for,
-    device_status_topic_for,
+    get_mqtt_command_topic,
+    get_mqtt_firmware_topic,
+    get_mqtt_pings_topic,
+    get_mqtt_status_topic,
+    mac_from_chip_id,
     normalize_mac_address,
     normalize_sensor_kind,
     verify_device_jwt,
 )
 
 logger = logging.getLogger(__name__)
+
+User = get_user_model()
 
 
 JPEG_MAGIC = b"\xff\xd8\xff"
@@ -143,6 +156,29 @@ def _token_fingerprint(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]
 
 
+# Header carrying the shared provisioning token. ``X-ForgeKey-Provisioning-Token``
+# is canonical; ``X-ForgeKey-Bootstrap-Token`` is a backward-compatible alias for
+# devices already flashed with the older firmware, so they enroll without being
+# reflashed. The canonical header is primary; the alias is consulted only as a
+# fallback.
+PROVISIONING_TOKEN_HEADER = "x-forgekey-provisioning-token"
+PROVISIONING_TOKEN_HEADER_ALIAS = "x-forgekey-bootstrap-token"
+
+
+def _provisioning_token_from_request(request) -> str:
+    """Resolve the provisioning token from either accepted request header.
+
+    Prefers the canonical ``X-ForgeKey-Provisioning-Token`` header and falls
+    back to the legacy ``X-ForgeKey-Bootstrap-Token`` alias only when the
+    canonical header is absent or empty. Returns the raw (unstripped) header
+    value, or ``""`` when neither header carries a value.
+    """
+    primary = request.headers.get(PROVISIONING_TOKEN_HEADER, "") or ""
+    if primary:
+        return primary
+    return request.headers.get(PROVISIONING_TOKEN_HEADER_ALIAS, "") or ""
+
+
 def _classify_provisioning_token(request) -> tuple[bool, str | None, dict]:
     """Validate the provisioning token and classify any failure.
 
@@ -152,7 +188,7 @@ def _classify_provisioning_token(request) -> tuple[bool, str | None, dict]:
     """
     raw_expected = getattr(settings, "FORGEKEY_PROVISIONING_TOKEN", "") or ""
     expected = raw_expected.strip()
-    raw_supplied = request.headers.get("x-forgekey-provisioning-token", "") or ""
+    raw_supplied = _provisioning_token_from_request(request)
     supplied = raw_supplied.strip()
 
     diagnostics = {
@@ -180,7 +216,10 @@ _AUTH_ERR_DETAILS = {
         "Server has no provisioning token configured. "
         "Set FORGEKEY_PROVISIONING_TOKEN on the backend."
     ),
-    AUTH_ERR_TOKEN_MISSING: ("Request is missing the X-ForgeKey-Provisioning-Token header."),
+    AUTH_ERR_TOKEN_MISSING: (
+        "Request is missing the X-ForgeKey-Provisioning-Token header "
+        "(or its legacy alias X-ForgeKey-Bootstrap-Token)."
+    ),
     AUTH_ERR_TOKEN_PLACEHOLDER: (
         "Device sent the placeholder provisioning token; "
         "publish the real token via rotate_provisioning_token."
@@ -232,7 +271,9 @@ class ForgeKeyDeviceEnrollView(APIView):
 
     Auth: shared ``FORGEKEY_PROVISIONING_TOKEN`` supplied in the
     ``X-ForgeKey-Provisioning-Token`` header (same bootstrap secret used by
-    the legacy ``/register/`` endpoint).
+    the legacy ``/register/`` endpoint). The legacy
+    ``X-ForgeKey-Bootstrap-Token`` header is accepted as a backward-compatible
+    alias for devices flashed with older firmware.
     """
 
     authentication_classes: list = []
@@ -306,12 +347,20 @@ class ForgeKeyDeviceEnrollView(APIView):
         raw_sensor_kind = meta.get("sensor_kind") or meta.get("device_type") or ""
         sensor_kind_code = normalize_sensor_kind(raw_sensor_kind) if raw_sensor_kind else ""
 
+        # The whole MQTT topic + ACL contract is MAC-keyed. Prefer the MAC the
+        # device reported; if it enrolled without one, derive it from the eFuse
+        # chip id (ESP32 base MAC = lower 6 bytes of unique_chip_id, byte-
+        # reversed) so the topics we hand back still match what the firmware
+        # subscribes / publishes on. Empty only when neither source yields a MAC.
+        device_mac = mac_normalized
+        if not device_mac:
+            derived_mac = mac_from_chip_id(unique_chip_id)
+            if derived_mac:
+                device_mac = normalize_mac_address(derived_mac)
+
+        supplied_token = _provisioning_token_from_request(request)
         token_fp_full = (
-            hashlib.sha256(
-                (request.headers.get("x-forgekey-provisioning-token", "") or "").encode("utf-8")
-            ).hexdigest()
-            if request.headers.get("x-forgekey-provisioning-token")
-            else ""
+            hashlib.sha256(supplied_token.encode("utf-8")).hexdigest() if supplied_token else ""
         )
 
         identity, _ = DeviceIdentity.objects.get_or_create(device_id=unique_chip_id)
@@ -368,7 +417,7 @@ class ForgeKeyDeviceEnrollView(APIView):
                 device=identity,
                 csr_pem=csr_pem,
                 unique_chip_id=unique_chip_id,
-                mac_address=mac_normalized,
+                mac_address=device_mac,
                 sensor_kind=sensor_kind_code,
                 firmware_version=meta.get("firmware_version", "") or "",
                 chip_info=meta.get("chip_info") or {},
@@ -405,23 +454,35 @@ class ForgeKeyDeviceEnrollView(APIView):
             enrollment.save()
 
             esp_device = None
-            if mac_normalized:
-                esp_device = ESP32Device.objects.filter(mac_address=mac_normalized).first()
+            if device_mac:
+                esp_device = ESP32Device.objects.filter(mac_address=device_mac).first()
                 if esp_device is None:
                     device_type_obj = None
                     if sensor_kind_code:
                         device_type_obj = DeviceType.objects.filter(code=sensor_kind_code).first()
-                    if device_type_obj is not None:
-                        esp_device = ESP32Device.objects.create(
-                            mac_address=mac_normalized,
-                            device_type=device_type_obj,
-                            firmware_version=meta.get("firmware_version", "") or "",
-                            boot_count=meta.get("boot_count"),
-                            free_heap=meta.get("free_heap"),
-                            ip=meta.get("ip") or meta.get("ip_address"),
-                            last_seen=now,
-                            identity=identity,
+                    if device_type_obj is None:
+                        # No DeviceType matches this sensor_kind. Create the
+                        # device anyway (device_type is nullable) so a device
+                        # that enrolled + got a cert always appears in the list
+                        # instead of being silently dropped (op-3he). Warn so the
+                        # missing/mismatched DeviceType code gets noticed.
+                        logger.warning(
+                            "ForgeKey enroll: no DeviceType matches sensor_kind %r "
+                            "(mac %s, identity %s) — creating ESP32Device with no type.",
+                            sensor_kind_code or "",
+                            device_mac,
+                            identity.device_id if identity else "?",
                         )
+                    esp_device = ESP32Device.objects.create(
+                        mac_address=device_mac,
+                        device_type=device_type_obj,
+                        firmware_version=meta.get("firmware_version", "") or "",
+                        boot_count=meta.get("boot_count"),
+                        free_heap=meta.get("free_heap"),
+                        ip=meta.get("ip") or meta.get("ip_address"),
+                        last_seen=now,
+                        identity=identity,
+                    )
                 else:
                     update_fields = []
                     if esp_device.identity_id != identity.id:
@@ -452,10 +513,18 @@ class ForgeKeyDeviceEnrollView(APIView):
         broker_host = settings.PUBLIC_MQTT_BROKER_HOST or settings.MQTT_BROKER_HOST
         broker_port = settings.PUBLIC_MQTT_BROKER_PORT
         broker_tls = settings.PUBLIC_MQTT_BROKER_USE_TLS
-        firmware_topic = device_firmware_topic_for(unique_chip_id)
-        ping_topic = device_ping_topic_for(unique_chip_id)
-        command_topic = device_command_topic_for(unique_chip_id)
-        status_topic = device_status_topic_for(unique_chip_id)
+        # Hand back the canonical MAC-keyed topics the firmware (and the OMS MQTT
+        # consumer) expect. The pings topic is class-aware: it is only emitted
+        # for the sensor kinds the firmware's contract check accepts, and is
+        # left empty otherwise (e.g. indicator) so the device does not wipe its
+        # credentials. command/status/firmware are derived from the device MAC.
+        if device_mac:
+            firmware_topic = get_mqtt_firmware_topic(device_mac)
+            ping_topic = get_mqtt_pings_topic(device_mac, sensor_kind_code)
+            command_topic = get_mqtt_command_topic(device_mac)
+            status_topic = get_mqtt_status_topic(device_mac)
+        else:
+            firmware_topic = ping_topic = command_topic = status_topic = ""
 
         policy = {
             "mqtt_broker_host": broker_host,
@@ -659,6 +728,21 @@ class MqttWebhookView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Legacy compat: pre-MAC firmware was provisioned with chip-id-keyed
+        # topics (forgekey/devices/<chip-id>/...). Already-deployed devices
+        # still publish there, so rewrite those into the canonical
+        # forgekey/<mac>/... shape before routing instead of dropping them.
+        if len(parts) >= 4 and parts[1] == "devices":
+            canonical = self._canonicalize_legacy_parts(parts)
+            if canonical is None:
+                logger.info(
+                    "ForgeKey webhook: ignoring legacy topic for unresolved chip %s",
+                    parts[2],
+                )
+                # 204, not an error: EMQX should not retry a topic we drop.
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            parts = canonical
+
         try:
             mac = normalize_mac_address(parts[1])
         except Exception:
@@ -672,6 +756,52 @@ class MqttWebhookView(APIView):
             logger.info("ForgeKey webhook: ignoring unrouted topic %s", topic)
             # Still 204 — EMQX should not retry topics we deliberately drop.
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _canonicalize_legacy_parts(self, parts: list[str]) -> list[str] | None:
+        """Rewrite a legacy ``forgekey/devices/<chip-id>/<suffix...>`` topic into
+        its canonical ``forgekey/<mac>/...`` equivalent so the normal dispatcher
+        routes it.
+
+        Returns the rewritten parts, or ``None`` when the chip id cannot be
+        resolved to a device MAC (the message is then dropped). ``parts`` is
+        ``[<prefix>, "devices", <chip-id>, <suffix...>]`` with at least four
+        elements.
+        """
+        chip_id = parts[2]
+        mac, kind = self._resolve_legacy_chip(chip_id)
+        if not mac:
+            return None
+        suffix = parts[3:]
+        # The legacy occupancy ping had no <kind> segment; the canonical form
+        # carries one. Re-insert it (from the device's type, defaulting to a
+        # people counter — the only class the chip-id ping topic was emitted
+        # for) so the occupancy route matches.
+        if suffix == ["ping"]:
+            return [parts[0], mac, kind or DeviceType.TYPE_PEOPLE_COUNTER, self.OCCUPANCY_SUFFIX]
+        # Every other legacy suffix already has the canonical shape once the
+        # devices/<chip-id> prefix is replaced by the bare MAC.
+        return [parts[0], mac, *suffix]
+
+    @staticmethod
+    def _resolve_legacy_chip(chip_id: str) -> tuple[str, str]:
+        """Resolve a legacy chip id to ``(mac, sensor_kind)`` for routing.
+
+        Prefers the enrolled ``ESP32Device`` (authoritative MAC + type); falls
+        back to deriving the MAC from the chip id when no device row is linked
+        yet. Returns ``("", "")`` when neither yields a MAC.
+        """
+        device = (
+            ESP32Device.objects.select_related("device_type")
+            .filter(identity__device_id=chip_id)
+            .first()
+        )
+        if device is not None:
+            kind = device.device_type.code if device.device_type_id else ""
+            return device.mac_address, kind
+        derived = mac_from_chip_id(chip_id)
+        if derived:
+            return normalize_mac_address(derived), ""
+        return "", ""
 
     @staticmethod
     def _ip_allowed(request) -> bool:
@@ -764,6 +894,14 @@ class DeviceTypeViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
 
 
+# Hardware fact: every ForgeKey power-relay board in the field is 2-channel
+# (matches the firmware's kChannelCount). A device-level lock/unlock fans out
+# one signed power_set per channel (see ESP32DeviceViewSet._dispatch_relay_power).
+# When OMS starts caching per-device channel state (ga-40w live-state follow-up)
+# this should become per-device instead of a constant.
+POWER_RELAY_CHANNEL_COUNT = 2
+
+
 class ESP32DeviceViewSet(viewsets.ModelViewSet):
     """API endpoint for ESP32 devices."""
 
@@ -799,17 +937,118 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
             return [IsAdminUser()]
         return super().get_permissions()
 
+    def _authorize_relay(self, request, device, verb):
+        """Gate the relay power endpoints on the access-control interlock.
+
+        Closes the long-standing bypass where any authenticated user could
+        power any tool's relay. Staff/superusers keep an override (maintenance,
+        bench testing); everyone else must hold an active authorization for the
+        asset bound to this device — the same :func:`is_authorized` the badge
+        interlock uses. Returns a 403 ``Response`` on refusal (audited), or
+        ``None`` to proceed.
+        """
+        from .services.access_control import asset_for_device, is_authorized
+
+        user = request.user
+        if user.is_authenticated and (user.is_staff or user.is_superuser):
+            return None
+
+        asset = asset_for_device(device)
+        if asset is not None and is_authorized(user, asset):
+            return None
+
+        record_audit_event(
+            action=ForgeKeyAuditEvent.ACTION_ACCESS_DENIED,
+            actor=user if user.is_authenticated else None,
+            asset=asset,
+            device=device,
+            notes=f"relay {verb} denied via API: caller not authorized for asset",
+            metadata={"reason": "not_authorized", "endpoint": verb},
+        )
+        return Response(
+            {"detail": "You are not authorized to control this device."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    def _is_power_relay(self, device):
+        """True if the device announced the ``power_relay`` capability.
+
+        Mirrors the frontend's capability gate: only relay devices fan a
+        device-level enable/disable out to per-channel ``power_set`` — lockers
+        keep the bare ``enable``/``disable`` verb their firmware understands.
+        """
+        return "power_relay" in (device.capabilities or [])
+
+    def _dispatch_relay_power(self, device, actor, *, on):
+        """Translate a device-level enable/disable into per-channel ``power_set``.
+
+        The firmware's ``power_relay`` capability only handles ``power_set``
+        (per channel); the bare ``enable``/``disable`` verbs route to locker
+        firmware, not the relay (``main.cpp`` dispatch), so the web
+        "Power-off (lock)" button and ScanTTY ``d``/``e`` keys were no-ops on
+        relay hardware. There is no all-channels verb, so emit one signed
+        ``power_set`` per channel. Each channel gets its own audit row +
+        command_id (same chokepoint as :meth:`relay_channel`).
+        """
+        action = "enable" if on else "disable"
+        command_ids = []
+        topic = None
+        for channel in range(1, POWER_RELAY_CHANNEL_COUNT + 1):
+            try:
+                record, topic = self._emit_command(
+                    device,
+                    actor,
+                    {"cmd": "power_set", "channel": channel, "action": action},
+                    "power_set",
+                )
+            except DeviceCommandError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+            command_ids.append(str(record.id))
+        return Response(
+            {
+                "status": f"power {'on' if on else 'off'} command sent",
+                "device": device.mac_address,
+                "topic": topic,
+                "command_ids": command_ids,
+                "channels": list(range(1, POWER_RELAY_CHANNEL_COUNT + 1)),
+            }
+        )
+
     @action(detail=True, methods=["post"])
     def enable(self, request, pk=None):
-        """Enable a device (turn on power, etc.)."""
+        """Enable a device (turn on power, etc.).
+
+        Requires authorization for the bound asset (or staff override) — see
+        :meth:`_authorize_relay`. For ``power_relay`` devices the device-level
+        on maps to a signed ``power_set`` per channel (see
+        :meth:`_dispatch_relay_power`); lockers keep the legacy verb path.
+        """
         device = self.get_object()
+        denied = self._authorize_relay(request, device, "enable")
+        if denied is not None:
+            return denied
+        if self._is_power_relay(device):
+            return self._dispatch_relay_power(device, request.user, on=True)
         enable_device.delay(device.mac_address)
         return Response({"status": "enable command sent", "device": device.mac_address})
 
     @action(detail=True, methods=["post"])
     def disable(self, request, pk=None):
-        """Disable a device (turn off power, etc.)."""
+        """Disable a device (turn off power, etc.).
+
+        Requires authorization for the bound asset (or staff override) — see
+        :meth:`_authorize_relay`. For ``power_relay`` devices the device-level
+        off maps to a signed ``power_set`` per channel (see
+        :meth:`_dispatch_relay_power`); ``delay_seconds`` is not supported on
+        that path (the firmware ``power_set`` has no delay) and is ignored.
+        Lockers keep the legacy verb path (with delay).
+        """
         device = self.get_object()
+        denied = self._authorize_relay(request, device, "disable")
+        if denied is not None:
+            return denied
+        if self._is_power_relay(device):
+            return self._dispatch_relay_power(device, request.user, on=False)
         delay_seconds = int(request.data.get("delay_seconds", 0))
         disable_device.delay(device.mac_address, delay_seconds=delay_seconds)
         return Response(
@@ -818,6 +1057,31 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
                 "device": device.mac_address,
                 "delay": delay_seconds,
             }
+        )
+
+    @action(detail=True, methods=["post"], url_path="relay-channel")
+    def relay_channel(self, request, pk=None):
+        """Enable/disable a single power-relay channel (ga-40w).
+
+        Body: ``{"channel": 1|2, "on": true|false}``. Emits a signed
+        ``power_set`` command — the verb the firmware's ``power_relay``
+        capability handles (it reads ``channel`` + ``action``); the legacy
+        ``enable``/``disable`` verbs don't route to that capability. Same
+        per-asset authorization as :meth:`enable` / :meth:`disable`.
+        """
+        device = self.get_object()
+        denied = self._authorize_relay(request, device, "relay-channel")
+        if denied is not None:
+            return denied
+        serializer = RelayChannelCommandSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        channel = serializer.validated_data["channel"]
+        on = serializer.validated_data["on"]
+        return self._dispatch_command(
+            device,
+            request.user,
+            {"cmd": "power_set", "channel": channel, "action": "enable" if on else "disable"},
+            "power_set",
         )
 
     @action(detail=True, methods=["post"])
@@ -968,6 +1232,43 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return self._dispatch_command(device, request.user, payload, "blink")
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="indicator/test",
+        permission_classes=[IsAdminUser],
+    )
+    def indicator_test(self, request, pk=None):
+        """Send an explicit color/brightness/pattern preview to an indicator.
+
+        Bypasses status derivation — the admin picks the presentation directly
+        for a live preview / hardware check. Validation + payload shaping live
+        in the indicator service so they stay aligned with the sync path.
+        """
+        device = self.get_object()
+        try:
+            record, payload = send_indicator_test(
+                device,
+                color=request.data.get("color"),
+                brightness=request.data.get("brightness"),
+                pattern=request.data.get("pattern"),
+                period_ms=request.data.get("period_ms"),
+                duration_s=request.data.get("duration_s"),
+                actor=request.user,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except DeviceCommandError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(
+            {
+                "status": "indicator_test command sent",
+                "device": device.mac_address,
+                "command_id": str(record.id),
+                "payload": payload,
+            }
+        )
 
     @action(
         detail=True,
@@ -1267,10 +1568,14 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
             }
         )
 
-    def _dispatch_command(self, device, actor, payload, audit_action):
-        # Persist an audit row first so the firmware can echo its UUID back
-        # on the status topic and the UI can render live ack feedback. The
-        # row is dropped on broker failure to avoid orphan history entries.
+    def _emit_command(self, device, actor, payload, audit_action):
+        """Persist an audit row + publish one signed command.
+
+        Returns ``(record, topic)``; raises :class:`DeviceCommandError` on
+        broker failure (the audit row is dropped first so no orphan history
+        entry survives). Shared by :meth:`_dispatch_command` (single command)
+        and :meth:`_dispatch_relay_power` (one per relay channel).
+        """
         actor_user = (
             actor if (actor is not None and getattr(actor, "is_authenticated", False)) else None
         )
@@ -1282,22 +1587,30 @@ class ESP32DeviceViewSet(viewsets.ModelViewSet):
         )
         full_payload = dict(payload)
         full_payload["command_id"] = str(record.id)
-
         try:
             topic = publish_command(device, full_payload, actor=actor, audit_action=audit_action)
-        except DeviceCommandError as exc:
+        except DeviceCommandError:
             record.delete()
-            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
-
+            raise
         record.payload = full_payload
         record.save(update_fields=["payload"])
+        return record, topic
+
+    def _dispatch_command(self, device, actor, payload, audit_action):
+        # Persist an audit row first so the firmware can echo its UUID back
+        # on the status topic and the UI can render live ack feedback. The
+        # row is dropped on broker failure to avoid orphan history entries.
+        try:
+            record, topic = self._emit_command(device, actor, payload, audit_action)
+        except DeviceCommandError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(
             {
                 "status": f"{audit_action} command sent",
                 "device": device.mac_address,
                 "topic": topic,
                 "command_id": str(record.id),
-                "dispatched_at": full_payload.get("timestamp", timezone.now().isoformat()),
+                "dispatched_at": record.payload.get("timestamp", timezone.now().isoformat()),
             }
         )
 
@@ -1399,6 +1712,109 @@ class OperationalModeViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+class RoomOperationalModeViewSet(viewsets.ModelViewSet):
+    """Get/set a room's admin-set operational mode (drives bound indicators)."""
+
+    queryset = RoomOperationalMode.objects.select_related("location", "updated_by").all()
+    serializer_class = RoomOperationalModeSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        """Allow ``?location=<id>`` so a room panel can fetch just its mode."""
+        qs = super().get_queryset()
+        location_id = self.request.query_params.get("location")
+        if location_id:
+            qs = qs.filter(location_id=location_id)
+        return qs
+
+    def _actor(self):
+        user = self.request.user
+        return user if user.is_authenticated else None
+
+    def perform_create(self, serializer):
+        serializer.save(updated_by=self._actor())
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self._actor())
+
+
+class IndicatorBindingViewSet(viewsets.ModelViewSet):
+    """CRUD for indicator device ↔ asset|room bindings, plus a sync action.
+
+    Creating a binding pushes the target's current status to the device so the
+    light is correct immediately; ``RoomOperationalMode`` / status-source
+    changes keep it current via signals.
+    """
+
+    queryset = IndicatorBinding.objects.select_related(
+        "device", "device__device_type", "asset", "location"
+    ).all()
+    serializer_class = IndicatorBindingSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        """Filter by ``?device=`` / ``?asset=`` / ``?location=`` for detail pages."""
+        qs = super().get_queryset()
+        params = self.request.query_params
+        device_id = params.get("device")
+        asset_id = params.get("asset")
+        location_id = params.get("location")
+        if device_id:
+            qs = qs.filter(device_id=device_id)
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        if location_id:
+            qs = qs.filter(location_id=location_id)
+        return qs
+
+    def _actor(self):
+        user = self.request.user
+        return user if user.is_authenticated else None
+
+    def perform_create(self, serializer):
+        binding = serializer.save()
+        record_audit_event(
+            action=ForgeKeyAuditEvent.ACTION_INDICATOR_BIND,
+            actor=self._actor(),
+            device=binding.device,
+            notes=f"bound to {'asset' if binding.asset_id else 'room'}",
+            metadata={
+                "asset_id": str(binding.asset_id) if binding.asset_id else None,
+                "location_id": binding.location_id,
+            },
+        )
+        # Best-effort initial push; a broker outage must not fail the bind.
+        try:
+            sync_indicator(binding, actor=self._actor(), force=True)
+        except DeviceCommandError:
+            logger.warning("Initial indicator sync failed for binding %s", binding.pk)
+
+    def perform_destroy(self, instance):
+        record_audit_event(
+            action=ForgeKeyAuditEvent.ACTION_INDICATOR_UNBIND,
+            actor=self._actor(),
+            device=instance.device,
+            notes="indicator unbound",
+        )
+        instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def sync(self, request, pk=None):
+        """Recompute the bound target's status and push it to the device."""
+        binding = self.get_object()
+        try:
+            record = sync_indicator(binding, actor=self._actor(), force=True)
+        except DeviceCommandError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(
+            {
+                "status": binding.last_status,
+                "presentation": binding.last_presentation,
+                "command_id": str(record.id) if record is not None else None,
+            }
+        )
+
+
 class AssetAuthorizationViewSet(viewsets.ModelViewSet):
     """API endpoint for asset authorizations."""
 
@@ -1407,13 +1823,18 @@ class AssetAuthorizationViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        """Support ``?asset=<id>`` and ``?is_active=<bool>`` so the asset
-        detail page can list just that asset's authorizations (typically the
-        active ones)."""
+        """Support ``?asset=<id>``, ``?user=<id>`` and ``?is_active=<bool>``.
+
+        ``?asset=`` backs the asset detail page's authorized-users list;
+        ``?user=`` backs the per-member "assets I'm authorized for" view (op-tup);
+        ``?is_active=`` narrows either to the currently-active grants."""
         qs = super().get_queryset()
         asset_id = self.request.query_params.get("asset")
         if asset_id:
             qs = qs.filter(asset_id=asset_id)
+        user_id = self.request.query_params.get("user")
+        if user_id:
+            qs = qs.filter(user_id=user_id)
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() in ("1", "true", "yes"))
@@ -1517,6 +1938,141 @@ class AssetAuthorizationViewSet(viewsets.ModelViewSet):
             serializer.data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+
+class BadgeEnrollmentViewSet(viewsets.ViewSet):
+    """Badge enrollment: set/clear a user's badge + arm "enroll next scan" (op-vj9).
+
+    Staff-only. ``set-badge`` writes a UID directly (manual-entry fallback);
+    ``arm`` + the access-control interlock capture the next physical scan and
+    bind it to a chosen user; ``list`` (GET) reports armed/captured state for the
+    polling enrollment UI. State for the armed/captured handshake lives in the
+    cache so the web process and the MQTT consumer share it (see
+    ``forgekey.services.badge_enrollment``).
+    """
+
+    permission_classes = [IsAdminUser]
+
+    def list(self, request):
+        """Report enrollment state: is a scope armed, and has a UID been captured?"""
+        reader_id = request.query_params.get("reader_id")
+        user_id = request.query_params.get("user_id")
+        armed = badge_enrollment.is_armed(reader_id=reader_id)
+        captured = badge_enrollment.poll_result(user_id) if user_id else None
+        return Response(
+            {
+                "armed": armed is not None,
+                "armed_user_id": armed.get("user_id") if armed else None,
+                "reader_id": armed.get("reader_id") if armed else None,
+                "captured": captured,
+            }
+        )
+
+    @action(detail=False, methods=["post"])
+    def arm(self, request):
+        """Arm "enroll next scan" for a user (optionally scoped to one reader)."""
+        user_id = request.data.get("user_id")
+        reader_id = request.data.get("reader_id")
+        if not user_id:
+            return Response({"detail": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        user = User.objects.filter(pk=user_id).first()
+        if user is None:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        badge_enrollment.arm(user.pk, reader_id=reader_id)
+        return Response(
+            {
+                "armed": True,
+                "user_id": user.pk,
+                "reader_id": reader_id,
+                "ttl_seconds": badge_enrollment.ENROLL_TTL_SECONDS,
+            }
+        )
+
+    @action(detail=False, methods=["post"])
+    def cancel(self, request):
+        """Disarm a pending enrollment for a scope (or the global one)."""
+        reader_id = request.data.get("reader_id")
+        badge_enrollment.cancel(reader_id=reader_id)
+        return Response({"armed": False})
+
+    @action(detail=False, methods=["post"], url_path="set-badge")
+    def set_badge(self, request):
+        """Set or clear a user's ``badge_number`` directly (manual-entry path)."""
+        user_id = request.data.get("user_id")
+        badge_number = request.data.get("badge_number")
+        if not user_id:
+            return Response({"detail": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        user = User.objects.filter(pk=user_id).first()
+        if user is None:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if badge_number in (None, ""):
+            user.badge_number = None
+            user.save(update_fields=["badge_number"])
+            record_audit_event(
+                action=ForgeKeyAuditEvent.ACTION_BADGE_ENROLLED,
+                actor=request.user,
+                notes="badge cleared via admin",
+                metadata={"user_id": user.pk, "badge_number": None},
+            )
+            return Response({"user_id": user.pk, "badge_number": None})
+
+        badge = str(badge_number).strip()
+        existing = User.from_badge(badge)
+        if existing is not None and existing.pk != user.pk:
+            return Response(
+                {"detail": "Badge already assigned to another user."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        user.badge_number = badge
+        user.save(update_fields=["badge_number"])
+        record_audit_event(
+            action=ForgeKeyAuditEvent.ACTION_BADGE_ENROLLED,
+            actor=request.user,
+            notes="badge set via admin",
+            metadata={"user_id": user.pk, "badge_number": badge},
+        )
+        return Response({"user_id": user.pk, "badge_number": badge})
+
+
+class ForgeKeyAuditEventViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only access/denial log over :class:`ForgeKeyAuditEvent` (op-vj9).
+
+    Backs the access-log view in the access-control frontend (op-tup). Supports
+    ``?action=``, ``?asset=``, ``?actor=``, ``?device=`` filters and an
+    ``?access_only=true`` shortcut that narrows to the access-control actions
+    (grant / deny / session-ended / badge-enrolled).
+    """
+
+    queryset = ForgeKeyAuditEvent.objects.select_related("actor", "asset", "device").all()
+    serializer_class = ForgeKeyAuditEventSerializer
+    permission_classes = [IsAdminUser]
+
+    ACCESS_ACTIONS = [
+        ForgeKeyAuditEvent.ACTION_ACCESS_GRANTED,
+        ForgeKeyAuditEvent.ACTION_ACCESS_DENIED,
+        ForgeKeyAuditEvent.ACTION_SESSION_ENDED,
+        ForgeKeyAuditEvent.ACTION_BADGE_ENROLLED,
+    ]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        if params.get("access_only", "").lower() in ("1", "true", "yes"):
+            qs = qs.filter(action__in=self.ACCESS_ACTIONS)
+        action_filter = params.get("action")
+        if action_filter:
+            qs = qs.filter(action=action_filter)
+        asset_id = params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        actor_id = params.get("actor")
+        if actor_id:
+            qs = qs.filter(actor_id=actor_id)
+        device_id = params.get("device")
+        if device_id:
+            qs = qs.filter(device_id=device_id)
+        return qs
 
 
 class DeviceLockoutViewSet(viewsets.ModelViewSet):

@@ -192,6 +192,36 @@ class UserSerializer(serializers.ModelSerializer):
         ]
 
 
+class UserDirectorySerializer(serializers.ModelSerializer):
+    """Lightweight, read-only user listing for staff access-control pickers (op-tup).
+
+    The access-control frontend needs to resolve a member when granting an asset
+    authorization or enrolling a badge, but no general user listing existed. This
+    exposes just enough to identify a member and show their current badge —
+    nothing sensitive — and is staff-gated at the view layer.
+    """
+
+    full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "full_name",
+            "email",
+            "badge_number",
+            "is_active",
+        ]
+        read_only_fields = fields
+
+    def get_full_name(self, obj):
+        """Display name for the picker, falling back to the username."""
+        return obj.get_full_name() or obj.username
+
+
 class UserProfileSerializer(serializers.ModelSerializer):
     """Serializer for user profile editing."""
 

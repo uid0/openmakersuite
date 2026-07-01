@@ -537,6 +537,20 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  forgekey.views.BadgeEnrollmentViewSet:
+    actions:
+      arm:
+        permission_classes:
+        - IsAdminUser
+      cancel:
+        permission_classes:
+        - IsAdminUser
+      list:
+        permission_classes:
+        - IsAdminUser
+      set_badge:
+        permission_classes:
+        - IsAdminUser
   forgekey.views.CertificateAuthorityViewSet:
     actions:
       list:
@@ -716,6 +730,9 @@ views:
       fleet_summary:
         permission_classes:
         - IsAuthenticated
+      indicator_test:
+        permission_classes:
+        - IsAdminUser
       list:
         permission_classes:
         - IsAuthenticatedOrReadOnly
@@ -731,6 +748,9 @@ views:
       recent_commands:
         permission_classes:
         - IsAdminUser
+      relay_channel:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       retire:
         permission_classes:
         - IsAdminUser
@@ -856,6 +876,14 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  forgekey.views.ForgeKeyAuditEventViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAdminUser
   forgekey.views.ForgeKeyCertificateRevocationListView:
     permission_classes:
     - AllowAny
@@ -877,6 +905,29 @@ views:
   forgekey.views.ForgeKeyOmsCommandPublicKeyView:
     permission_classes:
     - AllowAny
+  forgekey.views.IndicatorBindingViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      sync:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
   forgekey.views.MqttWebhookView:
     permission_classes:
     - AllowAny
@@ -912,6 +963,26 @@ views:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  forgekey.views.RoomOperationalModeViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
   index_cards.views.IndexCardBatchGenerateView:
@@ -2107,6 +2178,14 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  membership.views.UserDirectoryViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAdminUser
   membership.views.UserProfileViewSet:
     actions:
       me:

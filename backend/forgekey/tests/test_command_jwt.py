@@ -127,3 +127,35 @@ def test_command_jwt_raises_when_signing_key_missing():
     with override_settings(FORGEKEY_JWT_SIGNING_KEY=""):
         with pytest.raises(JwtSigningError):
             make_command_jwt(mac="AA:BB:CC:11:22:33", cmd="unlock")
+
+
+def test_command_jwt_binds_envelope_claims_when_provided(keypair):
+    """The full ``validate()`` envelope path (set_indicator, relay, …) passes
+    command_id/nonce/actor so the firmware's validateJwt() claim checks match
+    the top-level envelope fields."""
+    private_pem, public_pem = keypair
+    with _settings_with(private_pem):
+        token = make_command_jwt(
+            mac="AA:BB:CC:11:22:33",
+            cmd="set_indicator",
+            command_id="cmd-123",
+            nonce="nonce-abc",
+            actor="alice",
+        )
+    payload = _verify_es256(token, public_pem)
+    assert payload["cmd"] == "set_indicator"
+    assert payload["command_id"] == "cmd-123"
+    assert payload["nonce"] == "nonce-abc"
+    assert payload["actor"] == "alice"
+
+
+def test_command_jwt_omits_envelope_claims_when_absent(keypair):
+    """Locker / unlock callers pass only mac+cmd; the JWT stays minimal so the
+    jwt-only path keeps validating (no spurious claim binding)."""
+    private_pem, public_pem = keypair
+    with _settings_with(private_pem):
+        token = make_command_jwt(mac="AA:BB:CC:11:22:33", cmd="unlock")
+    payload = _verify_es256(token, public_pem)
+    assert "command_id" not in payload
+    assert "nonce" not in payload
+    assert "actor" not in payload

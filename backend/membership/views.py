@@ -4,11 +4,12 @@ Views for membership and SIG management API.
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import Group
+from django.db.models import Q
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import SIGAdmin, User, UserRegistrationToken
@@ -19,6 +20,7 @@ from .serializers import (
     SIGMemberSerializer,
     SIGSerializer,
     TokenValidationSerializer,
+    UserDirectorySerializer,
     UserProfileSerializer,
     UserRegistrationSerializer,
     UserSerializer,
@@ -300,6 +302,44 @@ class UserProfileViewSet(viewsets.ViewSet):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserDirectoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only, staff-only directory of users for access-control pickers (op-tup).
+
+    The access-control frontend (asset authorization grant, badge enrollment)
+    needs to resolve a member to a user id and show their current badge, but no
+    general user listing existed. This provides a minimal one:
+
+    - ``?search=`` matches username / first / last name / email (case-insensitive);
+    - ``?has_badge=true`` (or ``false``) narrows to members with (or without) a
+      badge, for the badge-enrollment admin.
+
+    Results are ordered by username; the global PageNumberPagination bounds the
+    response so a large roster never returns unbounded.
+    """
+
+    serializer_class = UserDirectorySerializer
+    permission_classes = [IsAdminUser]
+
+    def get_queryset(self):
+        qs = User.objects.all().order_by("username")
+        params = self.request.query_params
+        search = (params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(username__icontains=search)
+                | Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+                | Q(email__icontains=search)
+            )
+        has_badge = params.get("has_badge")
+        if has_badge is not None:
+            if has_badge.lower() in ("1", "true", "yes"):
+                qs = qs.exclude(badge_number__isnull=True).exclude(badge_number="")
+            elif has_badge.lower() in ("0", "false", "no"):
+                qs = qs.filter(Q(badge_number__isnull=True) | Q(badge_number=""))
+        return qs
 
 
 @api_view(["POST"])

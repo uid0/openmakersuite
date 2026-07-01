@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
+from fiducials.services.allocator import get_active_tag_id
+
 from .models import MakerBox
 
 
 class MakerBoxSerializer(serializers.ModelSerializer):
     display_name = serializers.CharField(read_only=True)
+    april_tag_id = serializers.SerializerMethodField()
 
     class Meta:
         model = MakerBox
@@ -20,6 +23,7 @@ class MakerBoxSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "display_name",
+            "april_tag_id",
             "assigned_at",
             "expires_at",
             "last_verified_at",
@@ -31,7 +35,14 @@ class MakerBoxSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["last_verified_at", "created_at", "updated_at"]
+        read_only_fields = ["last_verified_at", "april_tag_id", "created_at", "updated_at"]
+
+    def get_april_tag_id(self, obj: MakerBox) -> int | None:
+        # Prefer the annotation (set by the viewset to avoid an N+1 on list
+        # endpoints); fall back to a direct lookup for single objects.
+        if hasattr(obj, "active_april_tag_id"):
+            return obj.active_april_tag_id
+        return get_active_tag_id(obj)
 
 
 class ScanRequestSerializer(serializers.Serializer):

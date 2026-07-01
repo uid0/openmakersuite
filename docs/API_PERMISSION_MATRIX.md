@@ -108,6 +108,7 @@ below are public.
 | --- | --- | --- | --- |
 | any | `membership/profile/...` | member | `IsAuthenticated` — every authed user can hit the endpoint; the queryset filters to records the caller can see and writes go through `perform_*` checks. |
 | any | `membership/sigs/...`, `membership/sig-admins/...` | member | `IsAuthenticated` on `SIGViewSet`/`SIGAdminViewSet`/`SIGMemberViewSet`; staff-only writes are guarded inside `perform_*`. |
+| GET | `membership/users/...` | admin | `IsAdminUser` on `UserDirectoryViewSet` (read-only list/retrieve) — staff user lookup for the access-control badge-enrollment UI. |
 | POST | `membership/register/validate-token/` | public | Token validation for the registration QR flow (no `permission_classes` set; falls back to the per-environment default — `AllowAny` in dev, `IsAuthenticatedOrReadOnly` in prod, which still answers GET-style POSTs). |
 | POST | `membership/register/complete/` | public | Token-gated user registration; the token (carried in the body) gates access. |
 | POST | `membership/change-password/` | member | Password change for the authenticated user. |
@@ -154,6 +155,8 @@ below are public.
 | --- | --- | --- | --- |
 | any | `forgekey/devices/...` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly` on `ESP32DeviceViewSet`/`AssetDeviceViewSet`/`DeviceTypeViewSet`/`DeviceLockoutViewSet`/`DeviceUsageViewSet`. Custom write `@action`s elevate to `IsAdminUser`. |
 | any | `forgekey/firmware/...` | member | `IsAuthenticated` on `FirmwareVersionViewSet` and `DeviceFirmwareUpdateViewSet`. |
+| any | `forgekey/badge-enrollment/...` | admin | `IsAdminUser` on `BadgeEnrollmentViewSet` (list/arm/cancel/set_badge) — staff-only badge↔member enrollment for the access-control interlock. |
+| GET | `forgekey/access-log/` | admin | `IsAdminUser` on `ForgeKeyAuditEventViewSet` (list/retrieve) — staff-only access grant/deny/session audit events. |
 | POST | `forgekey/devices/enroll/` | device-token | `AllowAny` at DRF; the view validates the provisioning token (`X-ForgeKey-Provisioning-Token` → `FORGEKEY_PROVISIONING_TOKEN`), validates the CSR, signs it, and links the resulting cert to a `DeviceIdentity`. Replaces the prior `/devices/register/` endpoint. |
 | POST | `forgekey/devices/<id>/photo/` | device-token | `AllowAny` at DRF; signed device payload is validated in the view body. |
 | GET | `forgekey/firmware/<id>/download/` | device-token | `AllowAny` + signed download URL. |
@@ -165,7 +168,7 @@ below are public.
 | GET | `forgekey/epaper/<display_id>/image.png` | public | XIAO 7.5" ePaper panel fetches the latest PM-status PNG. AllowAny because the device has no persistent JWT; the image contains nothing not already visible on the panel mounted on the asset. Supports `If-None-Match` → 304. |
 | POST | `forgekey/epaper/<display_id>/battery/` | public | Panel reports its battery percent (0..100). AllowAny for the same reason as the image endpoint. Below `FORGEKEY_EPAPER_LOW_BATTERY_PERCENT` emits a Sentry warning so ops can prep a charged swap. |
 | POST | `forgekey/epaper/<display_id>/set-rotation/` | member | `IsAuthenticated` on `EPaperDisplaySetRotationView` — staff tunes the per-panel event-face / pm-face weighting from the e-paper panels admin. Values clamped to `[0, 100]`. |
-| any | `forgekey/asset-authorizations/...`, `forgekey/operational-modes/...`, `forgekey/power-meter-readings/...` | member-rw | `IsAuthenticatedOrReadOnly` ViewSets feeding the device control panel. |
+| any | `forgekey/asset-authorizations/...`, `forgekey/operational-modes/...`, `forgekey/room-operational-modes/...`, `forgekey/indicator-bindings/...`, `forgekey/power-meter-readings/...` | member-rw | `IsAuthenticatedOrReadOnly` ViewSets feeding the device control panel. `IndicatorBindingViewSet` (incl. its `sync` `@action`) binds an indicator device to an asset/room; `RoomOperationalModeViewSet` sets a room's manual status. The `devices/<id>/indicator/test/` preview `@action` elevates to `IsAdminUser`. |
 
 ## Customization (`/api/customization/`)
 

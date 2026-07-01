@@ -20,9 +20,12 @@ from .models import (
     FirmwareBuild,
     FirmwareRollout,
     FirmwareVersion,
+    ForgeKeyAuditEvent,
+    IndicatorBinding,
     OccupancyEvent,
     OperationalMode,
     PowerMeterReading,
+    RoomOperationalMode,
     TemperatureReading,
 )
 
@@ -74,6 +77,59 @@ class OperationalModeSerializer(serializers.ModelSerializer):
         model = OperationalMode
         fields = "__all__"
         read_only_fields = ["updated_at"]
+
+
+class RoomOperationalModeSerializer(serializers.ModelSerializer):
+    """Serializer for RoomOperationalMode — admin-set room status."""
+
+    location_name = serializers.CharField(source="location.name", read_only=True)
+    updated_by_username = serializers.CharField(
+        source="updated_by.username", read_only=True, default=None
+    )
+
+    class Meta:
+        model = RoomOperationalMode
+        fields = "__all__"
+        read_only_fields = ["updated_at", "updated_by"]
+
+
+class IndicatorBindingSerializer(serializers.ModelSerializer):
+    """Serializer for IndicatorBinding — indicator device ↔ asset XOR room.
+
+    Validates the asset-XOR-room invariant and indicator device type at the API
+    layer so clients get a 400 with a clear message rather than a DB
+    IntegrityError. ``last_*`` fields are read-only state set by the sync path.
+    """
+
+    device_mac_address = serializers.CharField(source="device.mac_address", read_only=True)
+    device_name = serializers.CharField(source="device.name", read_only=True)
+    asset_name = serializers.CharField(source="asset.name", read_only=True, default=None)
+    location_name = serializers.CharField(source="location.name", read_only=True, default=None)
+
+    class Meta:
+        model = IndicatorBinding
+        fields = "__all__"
+        read_only_fields = [
+            "id",
+            "last_status",
+            "last_presentation",
+            "last_synced_at",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        instance = self.instance
+        asset = attrs.get("asset", instance.asset if instance else None)
+        location = attrs.get("location", instance.location if instance else None)
+        if bool(asset) == bool(location):
+            raise serializers.ValidationError("Exactly one of asset or location must be set.")
+        device = attrs.get("device", instance.device if instance else None)
+        if device is not None and device.device_type.code != DeviceType.TYPE_INDICATOR:
+            raise serializers.ValidationError(
+                {"device": "Bound device must be an indicator-type device."}
+            )
+        return attrs
 
 
 class AssetAuthorizationSerializer(serializers.ModelSerializer):
@@ -516,3 +572,48 @@ class DeviceCertificateSerializer(serializers.ModelSerializer):
         if obj.not_after is not None and obj.not_after < timezone.now():
             return "expired"
         return "active"
+
+
+class ForgeKeyAuditEventSerializer(serializers.ModelSerializer):
+    """Read-only serializer for the ForgeKey audit log (access-control surface).
+
+    Backs the access/denial log the access-control frontend (op-tup) consumes.
+    Exposes the human-readable action label plus actor/asset/device names so the
+    UI can render rows without a second round-trip.
+    """
+
+    action_display = serializers.CharField(source="get_action_display", read_only=True)
+    actor_username = serializers.CharField(source="actor.username", read_only=True, default=None)
+    asset_name = serializers.CharField(source="asset.name", read_only=True, default=None)
+    device_mac = serializers.CharField(source="device.mac_address", read_only=True, default=None)
+
+    class Meta:
+        model = ForgeKeyAuditEvent
+        fields = [
+            "id",
+            "created_at",
+            "action",
+            "action_display",
+            "actor",
+            "actor_username",
+            "asset",
+            "asset_name",
+            "device",
+            "device_mac",
+            "notes",
+            "metadata",
+        ]
+        read_only_fields = fields
+
+
+class RelayChannelCommandSerializer(serializers.Serializer):
+    """Validate a per-channel power-relay command (ga-40w).
+
+    Targets one channel of the power relay. ``channel`` is 1-indexed to match
+    the firmware ``power_relay`` capability (``kChannelCount == 2``); ``on``
+    selects enable vs disable. Mapped to a signed ``power_set`` command by
+    ``ESP32DeviceViewSet.relay_channel``.
+    """
+
+    channel = serializers.IntegerField(min_value=1, max_value=2)
+    on = serializers.BooleanField()

@@ -1,7 +1,7 @@
 """
 Long-running MQTT subscriber for ForgeKey devices.
 
-Subscribes to four wildcard topics:
+Subscribes to these wildcard topics:
 
 * ``forgekey/+/+/occupancy`` — per-event occupancy messages from people
   counters and door counters. Persisted as :class:`OccupancyEvent` rows.
@@ -12,6 +12,9 @@ Subscribes to four wildcard topics:
 * ``forgekey/+/logs`` — structured log lines from device firmware
   (``MqttClient::publishLog``). Level ≥ WARNING forwards to Sentry with
   device tags; lower levels are recorded as Django log breadcrumbs only.
+* ``forgekey/+/access/request`` — badge/credential access-requests (op-vj9).
+  Validated and handed to the access-control interlock, which decides
+  grant / deny / session-end / enrollment and drives the relay + indicator.
 
 The command is intended to be run under a process supervisor (systemd unit
 or docker-compose service). It handles broker disconnects, malformed
@@ -43,7 +46,9 @@ from forgekey.models import (
     OccupancyEvent,
     TemperatureReading,
 )
+from forgekey.services import access_control
 from forgekey.services.jwt_signing import JwtSigningError, is_jwt_signing_configured
+from forgekey.tasks import process_mqtt_device_capabilities
 from forgekey.utils import (
     SERVER_JWT_SUBJECT,
     generate_server_jwt,
@@ -312,10 +317,24 @@ def handle_status_message(topic: str, payload: bytes) -> bool:
     if isinstance(body.get("ip"), str):
         updates["ip"] = body["ip"]
 
+    # Capture prior online state before the bulk update so we can detect a
+    # transition (the bulk .update() below emits no post_save signal).
+    prior = ESP32Device.objects.filter(mac_address=mac).values_list("pk", "is_online").first()
+
     rows = ESP32Device.objects.filter(mac_address=mac).update(**updates)
     if rows == 0:
         logger.info("Dropping status message: unknown MAC %s on topic %s", mac, topic)
         return False
+
+    # Indicator reactive update (ga-72l): an online/offline transition can flip
+    # a bound asset's derived availability, so re-push affected indicators.
+    if prior is not None and prior[1] != updates["is_online"]:
+        try:
+            from forgekey.services.indicator import sync_bindings_for_device
+
+            sync_bindings_for_device(ESP32Device.objects.get(pk=prior[0]))
+        except Exception:  # pragma: no cover - never let sync break ingest
+            logger.exception("Indicator sync after status transition failed for %s", mac)
 
     # Firmware ack channel: a status payload may include ``cmd_ack`` to
     # mark a :class:`DeviceCommand` row as acked. Two shapes are accepted
@@ -483,6 +502,39 @@ def _topic_matches_status(topic: str) -> bool:
     return len(parts) == 3 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[2] == "status"
 
 
+def _topic_matches_capabilities(topic: str) -> bool:
+    parts = topic.split("/")
+    return len(parts) == 3 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[2] == "capabilities"
+
+
+def handle_capabilities_message(topic: str, payload: bytes) -> bool:
+    """Ingest a retained capability announcement (``<prefix>/<mac>/capabilities``).
+
+    Devices publish their capability set at boot. Without ingesting it the
+    device-detail page never learns a relay device supports ``power_relay``, so
+    the per-channel relay controls — and the device-level lock→``power_set``
+    translation (ga-40w) — never appear. Delegates to
+    :func:`forgekey.tasks.process_mqtt_device_capabilities`.
+    """
+    parts = topic.split("/")
+    if len(parts) != 3:
+        logger.warning("Dropping capabilities: malformed topic %r", topic)
+        return False
+    if _mac_from_topic_segment(parts[1]) is None:
+        logger.warning("Dropping capabilities: bad MAC %r in %r", parts[1], topic)
+        return False
+    try:
+        body = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning("Dropping capabilities on %s: invalid JSON (%s)", topic, exc)
+        return False
+    if not isinstance(body, dict):
+        logger.warning("Dropping capabilities on %s: payload not an object", topic)
+        return False
+    process_mqtt_device_capabilities(parts[1], body)
+    return True
+
+
 def _topic_matches_ota_status(topic: str) -> bool:
     parts = topic.split("/")
     return (
@@ -496,6 +548,16 @@ def _topic_matches_ota_status(topic: str) -> bool:
 def _topic_matches_log(topic: str) -> bool:
     parts = topic.split("/")
     return len(parts) == 3 and parts[0] == settings.MQTT_TOPIC_PREFIX and parts[2] == "logs"
+
+
+def _topic_matches_access_request(topic: str) -> bool:
+    parts = topic.split("/")
+    return (
+        len(parts) == 4
+        and parts[0] == settings.MQTT_TOPIC_PREFIX
+        and parts[2] == "access"
+        and parts[3] == "request"
+    )
 
 
 def _device_log_allowed(mac: str) -> bool:
@@ -622,6 +684,69 @@ def handle_log_message(topic: str, payload: bytes) -> bool:
     return True
 
 
+def handle_access_request_message(topic: str, payload: bytes):
+    """Process a badge/credential access-request (op-vj9).
+
+    Firmware contract (``forgekey.access_request.v1``): the reader publishes
+    ``{"schema_version", "credential_type": "badge"|"otp", "credential_id",
+    "reader_id"?, "timestamp", "nonce"?}`` to ``forgekey/<mac>/access/request``.
+    We validate the envelope, drop anything malformed (fail safe — never power
+    a relay off a garbage frame), and hand a well-formed request to the
+    access-control interlock, which decides grant / deny / end / enrollment and
+    drives the relay + indicator. Returns the :class:`AccessDecision`, or
+    ``None`` when the message was dropped before a decision could be made.
+    """
+    parts = topic.split("/")
+    if len(parts) != 4:
+        logger.warning("Dropping access request: malformed topic %r", topic)
+        return None
+    mac = _mac_from_topic_segment(parts[1])
+    if mac is None:
+        logger.warning("Dropping access request: bad MAC segment %r in %r", parts[1], topic)
+        return None
+
+    try:
+        body = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning("Dropping access request on %s: invalid JSON (%s)", topic, exc)
+        return None
+    if not isinstance(body, dict):
+        logger.warning("Dropping access request on %s: payload is not an object", topic)
+        return None
+
+    schema_version = body.get("schema_version")
+    if schema_version and schema_version != access_control.SCHEMA_VERSION:
+        # Forward-compatible: log the drift but still attempt to process the
+        # known fields rather than dropping a (possibly newer) firmware frame.
+        logger.warning(
+            "Access request on %s has schema_version %r (expected %r); processing known fields.",
+            topic,
+            schema_version,
+            access_control.SCHEMA_VERSION,
+        )
+
+    credential_type = body.get("credential_type")
+    credential_id = body.get("credential_id")
+    if credential_type not in (access_control.CREDENTIAL_BADGE, access_control.CREDENTIAL_OTP):
+        logger.warning(
+            "Dropping access request on %s: bad credential_type %r", topic, credential_type
+        )
+        return None
+    if not credential_id or not isinstance(credential_id, (str, int)):
+        logger.warning("Dropping access request on %s: missing/invalid credential_id", topic)
+        return None
+
+    decision = access_control.handle_access_request(mac, body)
+    logger.info(
+        "Access request %s/%s → %s%s",
+        mac,
+        credential_type,
+        decision.decision,
+        f" ({decision.reason})" if decision.reason else "",
+    )
+    return decision
+
+
 def dispatch_message(topic: str, payload: bytes) -> None:
     """Route an inbound MQTT message to the appropriate handler.
 
@@ -635,10 +760,14 @@ def dispatch_message(topic: str, payload: bytes) -> None:
             handle_occupancy_message(topic, payload)
         elif _topic_matches_reading(topic):
             handle_reading_message(topic, payload)
+        elif _topic_matches_access_request(topic):
+            handle_access_request_message(topic, payload)
         elif _topic_matches_log(topic):
             handle_log_message(topic, payload)
         elif _topic_matches_status(topic):
             handle_status_message(topic, payload)
+        elif _topic_matches_capabilities(topic):
+            handle_capabilities_message(topic, payload)
         else:
             logger.debug("Ignoring message on unsubscribed topic %s", topic)
     except Exception:
@@ -696,6 +825,8 @@ class Command(BaseCommand):
         status_filter = f"{prefix}/+/status"
         ota_status_filter = f"{prefix}/+/ota/status"
         log_filter = f"{prefix}/+/logs"
+        access_request_filter = f"{prefix}/+/access/request"
+        capabilities_filter = f"{prefix}/+/capabilities"
 
         # Startup grace window for CONNACK failures. EMQX's JWT authenticator
         # populates its JWKS cache asynchronously after a (re)start; in that
@@ -726,7 +857,7 @@ class Command(BaseCommand):
                 return
             connect_state["first_connect_done"] = True
             logger.info(
-                "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s, %s, %s",
+                "MQTT consumer connected to %s:%s; subscribing to %s, %s, %s, %s, %s, %s, %s",
                 host,
                 port,
                 occupancy_filter,
@@ -734,6 +865,8 @@ class Command(BaseCommand):
                 status_filter,
                 ota_status_filter,
                 log_filter,
+                access_request_filter,
+                capabilities_filter,
             )
             c.subscribe(
                 [
@@ -742,6 +875,8 @@ class Command(BaseCommand):
                     (status_filter, 1),
                     (ota_status_filter, 1),
                     (log_filter, 1),
+                    (access_request_filter, 1),
+                    (capabilities_filter, 1),
                 ]
             )
 

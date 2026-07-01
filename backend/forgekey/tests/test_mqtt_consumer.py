@@ -28,6 +28,7 @@ from forgekey.management.commands.mqtt_consumer import (
     LOG_RATE_LIMIT_MAX_EVENTS,
     _connack_log_level,
     dispatch_message,
+    handle_capabilities_message,
     handle_log_message,
     handle_occupancy_message,
     handle_status_message,
@@ -144,6 +145,33 @@ class TestMqttConsumer:
     def test_handle_status_message_unknown_mac_returns_false(self):
         topic = "forgekey/aabbccddeeff/status"
         assert handle_status_message(topic, b"{}") is False
+
+    def test_handle_capabilities_message_ingests_capability_set(self):
+        # ga-c6m: the consumer must ingest the retained capabilities announce
+        # so the device-detail page can render the power_relay (and other)
+        # capability cards. The consumer previously dropped this topic.
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:CA:9A:01", capabilities=[])
+        topic = f"forgekey/{_topic_segment(device.mac_address)}/capabilities"
+        payload = json.dumps(
+            {"capabilities": ["status_led", "power_relay"], "firmware_version": "1.2.3"}
+        ).encode("utf-8")
+
+        assert handle_capabilities_message(topic, payload) is True
+        device.refresh_from_db()
+        assert "power_relay" in device.capabilities
+        assert device.capabilities_announced_at is not None
+
+    def test_dispatch_routes_capabilities_topic(self):
+        # The dispatch table + subscription must actually wire /capabilities
+        # through to the handler — the bug was a missing route, not a missing
+        # handler.
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:CA:9A:02", capabilities=[])
+        topic = f"forgekey/{_topic_segment(device.mac_address)}/capabilities"
+        payload = json.dumps({"capabilities": ["status_led", "power_relay"]}).encode("utf-8")
+
+        dispatch_message(topic, payload)
+        device.refresh_from_db()
+        assert "power_relay" in device.capabilities
 
     def test_dispatch_message_swallows_handler_exceptions(self, caplog):
         # Even an internal explosion in a handler must not propagate — the

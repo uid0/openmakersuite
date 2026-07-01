@@ -12,9 +12,11 @@ Covers:
 from __future__ import annotations
 
 import json
+import time
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
+from django.test import override_settings
 from django.utils import timezone
 
 import pytest
@@ -22,7 +24,11 @@ from rest_framework.test import APIClient
 
 from forgekey.management.commands.mqtt_consumer import handle_status_message
 from forgekey.models import DeviceCommand
-from forgekey.services.device_commands import apply_command_ack, publish_command
+from forgekey.services.device_commands import (
+    apply_command_ack,
+    dispatch_command,
+    publish_command,
+)
 from forgekey.tasks import process_mqtt_status_message
 from forgekey.tests.factories import ESP32DeviceFactory
 
@@ -491,3 +497,229 @@ class TestWebhookTaskProcessesCmdAck:
         rec.refresh_from_db()
         assert rec.ack_status == DeviceCommand.ACK_OK
         assert rec.ack_at == first_ack_at
+
+
+def _verify_command_jwt(token: str) -> dict:
+    """Verify an ES256 command JWT against the configured public key and return
+    its claims, raising on signature failure.
+
+    Mirrors how the firmware verifies a command against the
+    ``command_public_key_pem`` it received at enroll — the public half of the
+    same key ``make_command_jwt`` signs with.
+    """
+    import base64
+
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+
+    from forgekey.services.jwt_signing import get_jwt_public_key_pem
+
+    def _b64url_decode(seg: str) -> bytes:
+        return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
+
+    header_b64, payload_b64, signature_b64 = token.split(".")
+    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+    signature = _b64url_decode(signature_b64)
+    assert len(signature) == 64, "ES256 signature must be 64 bytes (r || s)"
+    r = int.from_bytes(signature[:32], "big")
+    s = int.from_bytes(signature[32:], "big")
+    public_key = serialization.load_pem_public_key(get_jwt_public_key_pem().encode("ascii"))
+    # Raises cryptography.exceptions.InvalidSignature on a bad signature.
+    public_key.verify(encode_dss_signature(r, s), signing_input, ec.ECDSA(hashes.SHA256()))
+    return json.loads(_b64url_decode(payload_b64))
+
+
+def _published_body(client: MagicMock) -> dict:
+    """The JSON body ``publish_command`` handed to the broker's ``publish``."""
+    args, _kwargs = client.publish.call_args
+    return json.loads(args[1])
+
+
+def _norm_mac(mac: str) -> str:
+    return mac.replace(":", "").replace("-", "").lower()
+
+
+def _firmware_validate(body: dict, device_mac: str) -> "str | None":
+    """Python mirror of the firmware's ``CommandValidation::validate()`` +
+    ``validateJwt()`` (ForgeKey ``src/security/command_validation.cpp``), enough
+    to prove the server's envelope would be *accepted on-device* (op-8pn
+    round-trip). Returns the firmware error code, or ``None`` if it validates.
+
+    Mirrors the contract exactly: every envelope field is read as a string
+    (a JSON number reads back as ``""`` on-device), the authenticator is a
+    top-level ``jwt``/``signature``, and the JWT claims must bind to the
+    envelope.
+    """
+
+    def _nonempty_str(value) -> bool:
+        return isinstance(value, str) and value != ""
+
+    for field in ("cmd", "command_id", "issued_at", "expires_at", "nonce", "actor"):
+        if not _nonempty_str(body.get(field)):
+            return "missing_envelope_field"
+    if not _nonempty_str(body.get("jwt")) and not _nonempty_str(body.get("signature")):
+        return "missing_authenticator"
+    if len(body["command_id"]) >= 72 or len(body["nonce"]) >= 72:
+        return "envelope_field_too_long"
+    try:
+        issued_at = int(body["issued_at"])
+        expires_at = int(body["expires_at"])
+    except (TypeError, ValueError):
+        return "invalid_timestamp"
+    now = int(time.time())
+    if expires_at <= issued_at:
+        return "expired"
+    if now > expires_at:
+        return "expired"
+    if issued_at > now + 300:  # kIssuedAtFutureSkewS
+        return "issued_in_future"
+
+    # Authenticator: JWT path. _verify_command_jwt raises on a bad signature.
+    claims = _verify_command_jwt(body["jwt"])
+    claim_command_id = claims.get("command_id") or claims.get("jti") or ""
+    claim_actor = claims.get("actor") or claims.get("sub") or ""
+    claim_mac = claims.get("mac") or claims.get("device") or ""
+    if (
+        claims.get("cmd", "") != body["cmd"]
+        or claim_command_id != body["command_id"]
+        or claims.get("nonce", "") != body["nonce"]
+        or (claim_actor and claim_actor != body["actor"])
+    ):
+        return "jwt_claim_mismatch"
+    if claim_mac and _norm_mac(claim_mac) != _norm_mac(device_mac):
+        return "wrong_device"
+    if int(claims["exp"]) < now:
+        return "expired"
+    return None
+
+
+class TestPublishCommandSignsEnvelope:
+    """op-8pn: ``publish_command`` must wrap every server -> device command in
+    the signed ``jwt`` envelope the firmware verifies (against
+    ``command_public_key_pem``); an unsigned payload is rejected on-device as
+    ``missing_envelope_field``. The session-wide ``FORGEKEY_JWT_SIGNING_KEY``
+    fixture (``conftest.configure_forgekey_jwt_signing_key``) makes signing
+    active here, so these exercise the real signing path (publish_command is
+    NOT mocked).
+    """
+
+    def test_unsigned_command_gets_a_verifiable_jwt(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0E:01")
+        client = MagicMock()
+        client.publish.return_value = MagicMock(rc=0)
+
+        before = int(time.time())
+        publish_command(
+            device,
+            {
+                "cmd": "set_indicator",
+                "color": "green",
+                "brightness": "low",
+                "pattern": "solid",
+            },
+            client=client,
+        )
+        after = int(time.time())
+
+        body = _published_body(client)
+        assert "jwt" in body, "command envelope must carry a top-level jwt"
+        # Params still ride alongside as (unsigned) siblings, as today.
+        assert body["color"] == "green"
+        assert body["pattern"] == "solid"
+
+        # All six envelope fields must be present, non-empty, and STRING-typed
+        # (the firmware reads them with `doc[x] | ""`, which yields "" for a
+        # JSON number -> missing_envelope_field).
+        for field in ("cmd", "command_id", "issued_at", "expires_at", "nonce", "actor"):
+            assert field in body, f"envelope missing required field {field!r}"
+            assert (
+                isinstance(body[field], str) and body[field]
+            ), f"envelope field {field!r} must be a non-empty string, got {body[field]!r}"
+        # command_id / nonce stay under the firmware's 72-char replay bound.
+        assert len(body["command_id"]) < 72
+        assert len(body["nonce"]) < 72
+        # issued_at/expires_at are epoch-second strings; expires_at is TTL later.
+        assert before <= int(body["issued_at"]) <= after
+        assert int(body["expires_at"]) == int(body["issued_at"]) + 60
+        # No authenticated actor -> the system fallback.
+        assert body["actor"] == "system"
+
+        # The JWT claims must bind to the envelope or validateJwt() rejects it
+        # as jwt_claim_mismatch.
+        claims = _verify_command_jwt(body["jwt"])
+        assert claims["mac"] == device.mac_address
+        assert claims["cmd"] == "set_indicator"
+        assert claims["command_id"] == body["command_id"]
+        assert claims["nonce"] == body["nonce"]
+        assert claims["actor"] == body["actor"]
+        assert before + 60 <= claims["exp"] <= after + 60
+
+    def test_envelope_passes_firmware_validate_contract(self):
+        """The published envelope + JWT pass the same checks the firmware's
+        ``validate()``/``validateJwt()`` run, so a real device accepts it
+        (op-8pn round-trip) — the regression that proves we cleared
+        ``missing_envelope_field`` *and* ``missing_authenticator``."""
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0E:07")
+        client = MagicMock()
+        client.publish.return_value = MagicMock(rc=0)
+
+        dispatch_command(
+            device,
+            {"cmd": "set_indicator", "color": "red", "pattern": "solid"},
+            audit_action="set_indicator",
+            client=client,
+        )
+
+        body = _published_body(client)
+        assert _firmware_validate(body, device.mac_address) is None
+        # command_id is the DeviceCommand row id (ack correlation) and is what
+        # the JWT binds to — not a throwaway.
+        assert body["command_id"] == str(DeviceCommand.objects.get().id)
+
+    def test_actor_username_flows_into_envelope_and_jwt(self):
+        """An authenticated actor's username lands in the envelope + bound JWT
+        claim; the firmware matches them (jwt_claim_mismatch otherwise)."""
+
+        class _Actor:
+            username = "alice"
+            is_authenticated = True
+
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0E:08")
+        client = MagicMock()
+        client.publish.return_value = MagicMock(rc=0)
+
+        publish_command(device, {"cmd": "restart"}, actor=_Actor(), client=client)
+
+        body = _published_body(client)
+        assert body["actor"] == "alice"
+        assert _verify_command_jwt(body["jwt"])["actor"] == "alice"
+        assert _firmware_validate(body, device.mac_address) is None
+
+    def test_existing_jwt_is_not_overwritten(self):
+        """Locker publishers mint their own jwt (bespoke TTL) before calling
+        publish_command over the jwt-only ``unlock`` path — those must never be
+        double-signed nor re-stamped with the full envelope."""
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0E:02")
+        client = MagicMock()
+        client.publish.return_value = MagicMock(rc=0)
+
+        publish_command(device, {"cmd": "unlock", "jwt": "caller-supplied"}, client=client)
+
+        body = _published_body(client)
+        assert body["jwt"] == "caller-supplied"
+        # Pre-signed commands take the jwt-only path: we must not re-stamp them.
+        assert "command_id" not in body
+        assert "nonce" not in body
+
+    def test_no_jwt_when_signing_key_unconfigured(self):
+        """Dev/test rigs without a signing key keep publishing raw, matching the
+        consumer's own ``is_jwt_signing_configured()`` gate."""
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:00:0E:03")
+        client = MagicMock()
+        client.publish.return_value = MagicMock(rc=0)
+
+        with override_settings(FORGEKEY_JWT_SIGNING_KEY=""):
+            publish_command(device, {"cmd": "restart"}, client=client)
+
+        assert "jwt" not in _published_body(client)

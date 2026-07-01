@@ -9,6 +9,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ForgeKeyFirmwareRolloutsPage, {
   defaultPioEnv,
+  pickFreshlySucceededVersion,
 } from '../../pages/ForgeKeyFirmwareRolloutsPage';
 import { forgekeyAPI } from '../../services/api';
 
@@ -280,4 +281,54 @@ describe('ForgeKeyFirmwareRolloutsPage', () => {
   // other → createFirmwareRollout) is exercised in the backend serializer
   // tests via the `device_type_code` field; driving the Mantine Select to
   // verify it E2E here adds brittle DOM coupling without catching more bugs.
+});
+
+describe('pickFreshlySucceededVersion', () => {
+  // The helper only reads id/status/firmware_version/completed_at; cast minimal
+  // fixtures to the full build type.
+  const mkBuild = (over: Record<string, unknown>) =>
+    ({
+      id: 'b1',
+      status: 'succeeded',
+      firmware_version: 'fw1',
+      completed_at: '2026-06-29T00:00:00Z',
+      ...over,
+    }) as any;
+
+  test('returns a newly succeeded build’s firmware_version and marks it seen', () => {
+    const seen = new Set<string>();
+    expect(pickFreshlySucceededVersion([mkBuild({ id: 'x', firmware_version: 'fwX' })], seen)).toBe(
+      'fwX',
+    );
+    expect(seen.has('x')).toBe(true);
+    // Same build on the next poll is no longer "fresh" → no re-trigger.
+    expect(
+      pickFreshlySucceededVersion([mkBuild({ id: 'x', firmware_version: 'fwX' })], seen),
+    ).toBeNull();
+  });
+
+  test('ignores non-succeeded builds and successes without a firmware_version', () => {
+    const seen = new Set<string>();
+    expect(pickFreshlySucceededVersion([mkBuild({ id: 'q', status: 'building' })], seen)).toBeNull();
+    expect(pickFreshlySucceededVersion([mkBuild({ id: 'n', firmware_version: null })], seen)).toBeNull();
+  });
+
+  test('picks the most recently completed among several fresh successes', () => {
+    const seen = new Set<string>();
+    expect(
+      pickFreshlySucceededVersion(
+        [
+          mkBuild({ id: 'old', firmware_version: 'fwOld', completed_at: '2026-06-29T00:00:00Z' }),
+          mkBuild({ id: 'new', firmware_version: 'fwNew', completed_at: '2026-06-29T02:00:00Z' }),
+        ],
+        seen,
+      ),
+    ).toBe('fwNew');
+  });
+
+  test('seeding seen with existing successes prevents auto-select on reload', () => {
+    const existing = [mkBuild({ id: 'e1', firmware_version: 'fwE' })];
+    const seen = new Set(existing.map((b) => b.id));
+    expect(pickFreshlySucceededVersion(existing, seen)).toBeNull();
+  });
 });

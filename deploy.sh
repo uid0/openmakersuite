@@ -234,14 +234,16 @@ else
     echo "❌ Django static files NOT found!"
 fi
 
-# Finalize the Sentry release. The CI release-tagging step in
-# .github/workflows/ci.yml already creates `${GIT_HASH}` against the
-# backend + frontend projects on push to main, but the release stays in
-# the `created` state until something marks it deployed. Calling
-# `sentry-cli releases finalize` here flips it to `released` once the
-# stack is actually serving traffic, so the Sentry UI shows accurate
-# crash-free-by-release windows and the deploy timestamp lines up with
-# the rolling event stream.
+# Create + finalize the Sentry release. The CI step in
+# .github/workflows/ci.yml registers `${GIT_HASH}` (and uploads frontend
+# source maps), but it lives in a frontend job that is path-gated: on a
+# backend-only deploy that job never runs, so the release does not exist
+# and a bare `finalize` 404s with "Release not found" (ga-8yl). So we
+# `releases new` first — it is idempotent, a no-op when CI already created
+# the release on a frontend deploy — then `finalize` to flip it to
+# `released` once the stack is actually serving traffic, so the Sentry UI
+# shows accurate crash-free-by-release windows and the deploy timestamp
+# lines up with the rolling event stream.
 #
 # Soft-fails: never block a deploy on Sentry's REST API being reachable.
 # Requires SENTRY_AUTH_TOKEN (from .env) and the npx-shipped sentry-cli;
@@ -249,6 +251,14 @@ fi
 if [ -n "${SENTRY_AUTH_TOKEN:-}" ] && [ -n "${GIT_HASH:-}" ] && [ "${GIT_HASH}" != "dev" ]; then
     echo "📡 Finalizing Sentry release ${GIT_HASH}..."
     if command -v npx >/dev/null 2>&1; then
+        # Ensure the release exists before finalizing (idempotent) — a
+        # backend-only deploy skips the CI job that runs `releases new`.
+        SENTRY_URL="${SENTRY_URL:-https://highlighter.openmakersuite.net}" \
+        SENTRY_ORG="${SENTRY_ORG:-sentry}" \
+        SENTRY_AUTH_TOKEN="${SENTRY_AUTH_TOKEN}" \
+            npx --yes @sentry/cli@2.39.1 releases new "${GIT_HASH}" \
+                --project backend --project frontend \
+            || echo "⚠️  Sentry release create failed (non-fatal) — check token / network."
         SENTRY_URL="${SENTRY_URL:-https://highlighter.openmakersuite.net}" \
         SENTRY_ORG="${SENTRY_ORG:-sentry}" \
         SENTRY_AUTH_TOKEN="${SENTRY_AUTH_TOKEN}" \

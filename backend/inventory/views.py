@@ -36,6 +36,7 @@ from .models import (
     AssetProblem,
     AssetReservation,
     Category,
+    ComponentUsageEvent,
     Fixture,
     FixtureRefillRequest,
     InventoryItem,
@@ -48,6 +49,7 @@ from .models import (
     MaintenanceRecord,
     MaintenanceTask,
     PriceHistory,
+    SerializedComponent,
     StockReconciliation,
     Supplier,
     UsageLog,
@@ -65,6 +67,7 @@ from .serializers import (
     AssetReservationSerializer,
     AssetSerializer,
     CategorySerializer,
+    ComponentUsageEventSerializer,
     FixtureDetailSerializer,
     FixtureRefillRequestSerializer,
     FixtureSerializer,
@@ -80,6 +83,7 @@ from .serializers import (
     MaintenanceRecordSerializer,
     MaintenanceTaskSerializer,
     PriceHistorySerializer,
+    SerializedComponentSerializer,
     StockReconciliationBatchSerializer,
     StockReconciliationSerializer,
     SupplierDetailSerializer,
@@ -5442,3 +5446,120 @@ def _django_to_drf_errors(exc):
     if hasattr(exc, "message_dict") and exc.message_dict:
         return {k: list(v) for k, v in exc.message_dict.items()}
     return {"detail": list(getattr(exc, "messages", [str(exc)]))}
+
+
+class SerializedComponentViewSet(viewsets.ModelViewSet):
+    """CRUD plus lifecycle actions for individual serial-numbered component units.
+
+    Read is available to any authenticated user; create/update/delete and the
+    lifecycle actions (``receive``/``install``/``remove``/``consume``/
+    ``retire``/``dispose``) are gated to staff or SIG admins. Each lifecycle
+    action validates the transition against the owning item's tracking mode and
+    records a ``ComponentUsageEvent``.
+
+    List supports ``?item=``, ``?status=`` and ``?installed_in_asset=`` filters.
+    """
+
+    queryset = SerializedComponent.objects.select_related("item", "installed_in_asset").all()
+    serializer_class = SerializedComponentSerializer
+    permission_classes = [IsAuthenticatedOrStaffSigAdminWrite]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        item_id = params.get("item")
+        if item_id:
+            qs = qs.filter(item_id=item_id)
+        status_param = params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        asset_id = params.get("installed_in_asset")
+        if asset_id:
+            qs = qs.filter(installed_in_asset_id=asset_id)
+        return qs
+
+    def _run_lifecycle_action(self, request, action_name):
+        """Resolve inputs, apply the transition, and return the updated unit."""
+        component = self.get_object()
+
+        asset = None
+        asset_id = request.data.get("asset") or request.data.get("installed_in_asset")
+        if asset_id:
+            try:
+                asset = Asset.objects.filter(pk=asset_id).first()
+            except (DjangoValidationError, ValueError, TypeError):
+                asset = None
+            if asset is None:
+                return Response(
+                    {"asset": ["No asset found with the given id."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        disposal_reason = (request.data.get("disposal_reason") or "").strip()
+        notes = (request.data.get("notes") or "").strip()
+        actor = request.user if request.user.is_authenticated else None
+
+        try:
+            event = component.apply_action(
+                action_name,
+                asset=asset,
+                disposal_reason=disposal_reason,
+                actor=actor,
+                notes=notes,
+            )
+        except DjangoValidationError as exc:
+            return Response(_django_to_drf_errors(exc), status=status.HTTP_400_BAD_REQUEST)
+
+        component.refresh_from_db()
+        data = self.get_serializer(component).data
+        data["event"] = ComponentUsageEventSerializer(event).data
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def receive(self, request, pk=None):
+        """Accession a received unit into stock (``received`` -> ``in_stock``)."""
+        return self._run_lifecycle_action(request, SerializedComponent.ACTION_RECEIVE)
+
+    @action(detail=True, methods=["post"])
+    def install(self, request, pk=None):
+        """Install the unit into an asset (requires ``asset``)."""
+        return self._run_lifecycle_action(request, SerializedComponent.ACTION_INSTALL)
+
+    @action(detail=True, methods=["post"])
+    def remove(self, request, pk=None):
+        """Remove a reusable unit from its asset (``installed`` -> ``removed``)."""
+        return self._run_lifecycle_action(request, SerializedComponent.ACTION_REMOVE)
+
+    @action(detail=True, methods=["post"])
+    def consume(self, request, pk=None):
+        """Mark a consumable unit as used up (``installed`` -> ``consumed``)."""
+        return self._run_lifecycle_action(request, SerializedComponent.ACTION_CONSUME)
+
+    @action(detail=True, methods=["post"])
+    def retire(self, request, pk=None):
+        """Retire a reusable unit from service (-> ``retired``)."""
+        return self._run_lifecycle_action(request, SerializedComponent.ACTION_RETIRE)
+
+    @action(detail=True, methods=["post"])
+    def dispose(self, request, pk=None):
+        """Dispose the unit (requires ``disposal_reason``; -> ``disposed``)."""
+        return self._run_lifecycle_action(request, SerializedComponent.ACTION_DISPOSE)
+
+
+class ComponentUsageEventViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only access to the serialized-component usage/audit log.
+
+    Entries are written as a side effect of ``SerializedComponentViewSet``
+    lifecycle actions. Supports a ``?component=`` filter.
+    """
+
+    queryset = ComponentUsageEvent.objects.select_related("component", "asset", "actor").all()
+    serializer_class = ComponentUsageEventSerializer
+    permission_classes = [IsAuthenticatedOrStaffSigAdminWrite]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        component_id = self.request.query_params.get("component")
+        if component_id:
+            qs = qs.filter(component_id=component_id)
+        return qs

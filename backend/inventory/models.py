@@ -12,7 +12,7 @@ from django.conf import settings
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -340,6 +340,33 @@ class InventoryItem(models.Model):
         blank=True,
         related_name="owned_inventory_items",
         help_text="Group (SIG) that owns this inventory item (if applicable)",
+    )
+
+    # Serialized-component tracking (EufyMake serial/lot tracking).
+    # Aggregate stock (current_stock) still applies; when is_serialized is set,
+    # individual physical units are additionally tracked as SerializedComponent
+    # records that move through a lifecycle branched on serial_tracking_mode.
+    SERIAL_TRACKING_CONSUMABLE = "consumable"
+    SERIAL_TRACKING_REUSABLE = "reusable"
+
+    SERIAL_TRACKING_MODE_CHOICES = [
+        (SERIAL_TRACKING_CONSUMABLE, "Consumable"),
+        (SERIAL_TRACKING_REUSABLE, "Reusable"),
+    ]
+
+    is_serialized = models.BooleanField(
+        default=False,
+        help_text="Track individual units of this item by serial number as SerializedComponents",
+    )
+    serial_tracking_mode = models.CharField(
+        max_length=20,
+        choices=SERIAL_TRACKING_MODE_CHOICES,
+        default=SERIAL_TRACKING_CONSUMABLE,
+        help_text=(
+            "Consumable components are used up "
+            "(received -> in_stock -> installed -> consumed -> disposed); "
+            "reusable components can be installed/removed repeatedly and eventually retired"
+        ),
     )
 
     # Metadata
@@ -3238,3 +3265,298 @@ class AssetOutOfService(models.Model):
             raise ValidationError(
                 "Asset already has an open out-of-service event; restore it before opening another."
             )
+
+
+class SerializedComponent(models.Model):
+    """
+    An individual, serial-numbered physical unit of a serialized InventoryItem.
+
+    ``InventoryItem`` tracks aggregate stock counts; a ``SerializedComponent``
+    tracks one physical unit by serial number as it moves through its lifecycle.
+    The set of legal transitions branches on the owning item's
+    ``serial_tracking_mode``:
+
+    * consumable: ``received -> in_stock -> installed -> consumed -> disposed``
+    * reusable:   adds a repeatable ``installed <-> removed`` cycle plus a
+      ``retired`` terminal state before disposal.
+
+    Every transition is recorded as a :class:`ComponentUsageEvent` so the full
+    provenance and usage history of a unit is auditable.
+    """
+
+    # Lifecycle status choices
+    RECEIVED = "received"
+    IN_STOCK = "in_stock"
+    INSTALLED = "installed"
+    REMOVED = "removed"
+    CONSUMED = "consumed"
+    RETIRED = "retired"
+    DISPOSED = "disposed"
+
+    STATUS_CHOICES = [
+        (RECEIVED, "Received"),
+        (IN_STOCK, "In Stock"),
+        (INSTALLED, "Installed"),
+        (REMOVED, "Removed"),
+        (CONSUMED, "Consumed"),
+        (RETIRED, "Retired"),
+        (DISPOSED, "Disposed"),
+    ]
+
+    # Lifecycle action choices (also used by ComponentUsageEvent.action)
+    ACTION_RECEIVE = "receive"
+    ACTION_INSTALL = "install"
+    ACTION_REMOVE = "remove"
+    ACTION_CONSUME = "consume"
+    ACTION_RETIRE = "retire"
+    ACTION_DISPOSE = "dispose"
+
+    ACTION_CHOICES = [
+        (ACTION_RECEIVE, "Receive"),
+        (ACTION_INSTALL, "Install"),
+        (ACTION_REMOVE, "Remove"),
+        (ACTION_CONSUME, "Consume"),
+        (ACTION_RETIRE, "Retire"),
+        (ACTION_DISPOSE, "Dispose"),
+    ]
+
+    # (current_status, action) -> resulting_status, keyed by tracking mode.
+    _TRANSITIONS = {
+        InventoryItem.SERIAL_TRACKING_CONSUMABLE: {
+            (RECEIVED, ACTION_RECEIVE): IN_STOCK,
+            (IN_STOCK, ACTION_INSTALL): INSTALLED,
+            (INSTALLED, ACTION_CONSUME): CONSUMED,
+            (CONSUMED, ACTION_DISPOSE): DISPOSED,
+        },
+        InventoryItem.SERIAL_TRACKING_REUSABLE: {
+            (RECEIVED, ACTION_RECEIVE): IN_STOCK,
+            (IN_STOCK, ACTION_INSTALL): INSTALLED,
+            (INSTALLED, ACTION_REMOVE): REMOVED,
+            (REMOVED, ACTION_INSTALL): INSTALLED,
+            (IN_STOCK, ACTION_RETIRE): RETIRED,
+            (INSTALLED, ACTION_RETIRE): RETIRED,
+            (REMOVED, ACTION_RETIRE): RETIRED,
+            (RETIRED, ACTION_DISPOSE): DISPOSED,
+        },
+    }
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    item = models.ForeignKey(
+        InventoryItem,
+        on_delete=models.CASCADE,
+        related_name="serialized_components",
+        help_text="The serialized inventory item this physical unit is an instance of",
+    )
+    serial_number = models.CharField(
+        max_length=200,
+        help_text="Manufacturer or internal serial number uniquely identifying this unit",
+    )
+    lot = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Optional batch/lot number for grouped provenance",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=RECEIVED,
+        help_text="Current lifecycle status of this unit",
+    )
+    installed_in_asset = models.ForeignKey(
+        Asset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="installed_components",
+        help_text="Asset this component is currently installed in (if installed)",
+    )
+
+    # Lifecycle timestamps
+    received_at = models.DateTimeField(
+        null=True, blank=True, help_text="When this unit was received into stock"
+    )
+    installed_at = models.DateTimeField(
+        null=True, blank=True, help_text="When this unit was most recently installed"
+    )
+    disposed_at = models.DateTimeField(
+        null=True, blank=True, help_text="When this unit was disposed"
+    )
+
+    # Provenance — where this unit came from (a scanned delivery line and/or PO line)
+    provenance_delivery_item = models.ForeignKey(
+        "reorder_queue.DeliveryItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="serialized_components",
+        help_text="Delivery line item this unit was received against (provenance)",
+    )
+    provenance_purchase_order_item = models.ForeignKey(
+        "reorder_queue.PurchaseOrderItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="serialized_components",
+        help_text="Purchase-order line item this unit was ordered against (provenance)",
+    )
+
+    disposal_reason = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Reason recorded when the unit was disposed",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["item", "serial_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "serial_number"],
+                name="uniq_serialized_component_item_serial",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["item", "status"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["installed_in_asset"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.serial_number} ({self.get_status_display()})"
+
+    @property
+    def tracking_mode(self) -> str:
+        """The lifecycle mode inherited from the owning item."""
+        return self.item.serial_tracking_mode
+
+    @property
+    def available_actions(self) -> list[str]:
+        """Actions currently legal from this unit's status, given its mode."""
+        table = self._TRANSITIONS.get(self.tracking_mode, {})
+        return [action for (status_, action) in table if status_ == self.status]
+
+    def can_apply(self, action: str) -> bool:
+        """Whether ``action`` is a legal transition from the current status."""
+        table = self._TRANSITIONS.get(self.tracking_mode, {})
+        return (self.status, action) in table
+
+    def apply_action(
+        self,
+        action: str,
+        *,
+        asset: Optional["Asset"] = None,
+        disposal_reason: str = "",
+        actor: Any = None,
+        notes: str = "",
+        at: Any = None,
+    ) -> "ComponentUsageEvent":
+        """Apply a lifecycle ``action``, mutating state and logging an event.
+
+        Validates the transition against the mode-specific table, applies the
+        relevant side effects (asset install/remove, timestamp stamping,
+        disposal reason), persists the unit, and records a
+        :class:`ComponentUsageEvent`. Raises :class:`ValidationError` if the
+        transition is illegal or a required argument is missing.
+        """
+        table = self._TRANSITIONS.get(self.tracking_mode, {})
+        to_status = table.get((self.status, action))
+        if to_status is None:
+            raise ValidationError(
+                f"Cannot '{action}' a {self.tracking_mode} component that is "
+                f"{self.get_status_display()} (serial {self.serial_number})."
+            )
+
+        now = at or timezone.now()
+        event_asset = None
+
+        if action == self.ACTION_RECEIVE:
+            if not self.received_at:
+                self.received_at = now
+        elif action == self.ACTION_INSTALL:
+            if asset is None:
+                raise ValidationError("An asset is required to install a component.")
+            self.installed_in_asset = asset
+            self.installed_at = now
+            event_asset = asset
+        elif action == self.ACTION_REMOVE:
+            event_asset = self.installed_in_asset
+            self.installed_in_asset = None
+        elif action == self.ACTION_CONSUME:
+            event_asset = self.installed_in_asset
+        elif action == self.ACTION_RETIRE:
+            event_asset = self.installed_in_asset
+        elif action == self.ACTION_DISPOSE:
+            if not disposal_reason:
+                raise ValidationError("A disposal reason is required to dispose a component.")
+            self.disposal_reason = disposal_reason
+            self.disposed_at = now
+            event_asset = self.installed_in_asset
+
+        self.status = to_status
+        with transaction.atomic():
+            self.save()
+            return ComponentUsageEvent.objects.create(
+                component=self,
+                asset=event_asset,
+                action=action,
+                at=now,
+                actor=actor,
+                notes=notes,
+            )
+
+
+class ComponentUsageEvent(models.Model):
+    """
+    Immutable audit-log entry recording one lifecycle action on a component.
+
+    Written automatically by :meth:`SerializedComponent.apply_action` for every
+    receive/install/remove/consume/retire/dispose transition, capturing the
+    asset involved (when relevant), the actor, and free-text notes.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    component = models.ForeignKey(
+        SerializedComponent,
+        on_delete=models.CASCADE,
+        related_name="usage_events",
+        help_text="The serialized component this event applies to",
+    )
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="component_usage_events",
+        help_text="Asset involved in the action (for install/remove and later transitions)",
+    )
+    action = models.CharField(
+        max_length=20,
+        choices=SerializedComponent.ACTION_CHOICES,
+        help_text="The lifecycle action performed",
+    )
+    at = models.DateTimeField(
+        default=timezone.now,
+        help_text="When the action occurred",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="component_usage_events",
+        help_text="User who performed the action (if known)",
+    )
+    notes = models.TextField(blank=True, help_text="Optional free-text notes about the action")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-at", "-created_at"]
+        indexes = [
+            models.Index(fields=["component", "at"]),
+            models.Index(fields=["action"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_action_display()} — {self.component.serial_number} @ {self.at:%Y-%m-%d}"

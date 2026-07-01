@@ -1124,6 +1124,14 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  inventory.views.ComponentUsageEventViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
   inventory.views.FixtureRefillRequestViewSet:
     actions:
       create:
@@ -1466,6 +1474,44 @@ views:
       retrieve:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  inventory.views.SerializedComponentViewSet:
+    actions:
+      consume:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      create:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      dispose:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      install:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      list:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      receive:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      remove:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      retire:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      update:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
   inventory.views.SupplierViewSet:
     actions:
       analytics:

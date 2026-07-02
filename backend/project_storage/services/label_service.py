@@ -45,8 +45,9 @@ PrinterFamily = Literal["brother_ql", "epson_tm"]
 BROTHER_SIZE_PX = (696, 271)
 
 # Epson TM-T: 80mm paper = 576 px-wide print area at 203 DPI.
-# Height chosen to keep the layout square-ish at this width.
-EPSON_SIZE_PX = (576, 280)
+# Taller than square so the big expiry stack + id/name get vertical room
+# for larger type — height is effectively free on the continuous roll.
+EPSON_SIZE_PX = (576, 340)
 
 
 def _try_font(size: int) -> ImageFont.ImageFont:
@@ -97,7 +98,7 @@ def _draw_right_column_bigtext(
     """Draw the expiry week / day-of-year stack in the largest bold font
     that fits the right-hand column."""
 
-    big_size = max(40, available_h // 3)
+    big_size = max(40, available_h // 2)
     line1 = f"Wk {week:02d}"
     line2 = f"Day {day_of_year:03d}"
     font = _try_font(big_size)
@@ -173,7 +174,10 @@ def render_stint_label(
     canvas = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(canvas)
 
-    qr_px = base_height - 2 * margin
+    # Cap the QR so a taller canvas doesn't inflate it and starve the text
+    # column — ~200 px scans fine at 203/300 DPI, and the freed width lets
+    # the expiry render larger and keeps long project titles on-label.
+    qr_px = min(base_height - 2 * margin, 200)
     # Encode a deep-link URL so a phone camera scan opens the warden
     # detail page directly. The Pi print daemon still pulls the PNG by
     # bare stint_id via /api/project-storage/stints/<id>/label/ — that's
@@ -193,7 +197,7 @@ def render_stint_label(
     # Right column: big bold expiry — split the column so the top 60% is
     # the date stack, bottom 40% is the eye-readable id + member. Anchored
     # to base_height so the WHERE-fiducial strip below doesn't stretch it.
-    top_h = int(base_height * 0.55)
+    top_h = int(base_height * 0.60)
     week, doy = stint.expiry_week_and_day
     _draw_right_column_bigtext(
         canvas,
@@ -209,7 +213,7 @@ def render_stint_label(
     # Right column lower half: stint_id, member name, project title.
     bottom_y = margin + top_h + 8
     bottom_h = base_height - bottom_y - margin
-    small_font = _try_font(max(14, bottom_h // 4))
+    small_font = _try_font(max(18, bottom_h // 4))
     lines = [
         stint.stint_id,
         stint.display_name,

@@ -19,6 +19,10 @@ vi.mock('../../services/api', async () => {
     ...actual,
     projectStorageAPI: {
       list: jest.fn(),
+      labelUrl: jest.fn(
+        (_stintId: string, printer = 'brother_ql') =>
+          `https://labels.example/${printer}.png`,
+      ),
     },
   };
 });
@@ -159,5 +163,22 @@ describe('FacilitiesProjectStorageListPage', () => {
     renderPage();
     expect(await screen.findByText('Back room')).toBeInTheDocument();
     expect(screen.queryByText('Shelf A')).not.toBeInTheDocument();
+  });
+
+  test('per-row Preview opens a label modal for that stint', async () => {
+    mockAPI.list.mockResolvedValue(
+      ok({ count: 1, next: null, previous: null, results: [buildStint()] }),
+    );
+    renderPage();
+
+    // No modal / label request until the warden clicks Preview.
+    expect(await screen.findByTestId('stint-row-PS-AB23CDFG')).toBeInTheDocument();
+    expect(screen.queryByTestId('row-label-preview')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('preview-label-PS-AB23CDFG'));
+
+    const img = await screen.findByTestId('row-label-preview');
+    expect(img.getAttribute('src')).toBe('https://labels.example/brother_ql.png');
+    expect(mockAPI.labelUrl).toHaveBeenCalledWith('PS-AB23CDFG', 'brother_ql');
   });
 });

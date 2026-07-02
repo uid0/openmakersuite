@@ -160,6 +160,7 @@ const InventoryItemDetailPage: React.FC = () => {
         {item.has_pending_reorder && <Badge color="blue">Reorder Pending</Badge>}
         {!item.is_active && <Badge color="gray">Inactive</Badge>}
         {item.is_hazardous && <Badge color="orange">Hazardous Material</Badge>}
+        {item.is_serialized && <Badge color="grape">Serialized</Badge>}
       </Group>
 
       {/* Tabs */}

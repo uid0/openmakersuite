@@ -501,4 +501,117 @@ describe('InventoryItemFormPage', () => {
     // The in-progress form is untouched behind the banner.
     expect(screen.getByDisplayValue('Test Item')).toBeInTheDocument();
   });
+
+  // ---- op-5tc: serialized-component toggle ----
+
+  it('renders the serial tracking toggle, hiding the mode select until enabled', async () => {
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByLabelText(/Track individual serial numbers/i).length
+      ).toBeGreaterThan(0);
+    });
+
+    // The tracking-mode select stays hidden until serialization is switched on.
+    expect(
+      screen.queryByPlaceholderText('Select how these units are used')
+    ).not.toBeInTheDocument();
+  });
+
+  it('reveals the tracking-mode select when serialization is enabled', async () => {
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByLabelText(/Track individual serial numbers/i).length
+      ).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getAllByLabelText(/Track individual serial numbers/i)[0]);
+
+    expect(
+      await screen.findByPlaceholderText('Select how these units are used')
+    ).toBeInTheDocument();
+  });
+
+  it('includes is_serialized + serial_tracking_mode in the create payload', async () => {
+    (api.inventoryAPI.createItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, id: 'new-id' },
+    });
+
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/Name/i).length).toBeGreaterThan(0);
+    });
+    fillRequiredFields();
+
+    fireEvent.click(screen.getAllByLabelText(/Track individual serial numbers/i)[0]);
+    fireEvent.click(await screen.findByPlaceholderText('Select how these units are used'));
+    fireEvent.click(await screen.findByRole('option', { name: /Reusable/i }));
+
+    fireEvent.click(screen.getByText('Create Item'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.createItem).toHaveBeenCalled();
+    });
+
+    const formData = (api.inventoryAPI.createItem as jest.Mock).mock.calls[0][0] as FormData;
+    expect(formData.get('is_serialized')).toBe('true');
+    expect(formData.get('serial_tracking_mode')).toBe('reusable');
+  });
+
+  it('sends is_serialized=false by default when serialization is off', async () => {
+    (api.inventoryAPI.createItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, id: 'new-id' },
+    });
+
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/Name/i).length).toBeGreaterThan(0);
+    });
+    fillRequiredFields();
+    fireEvent.click(screen.getByText('Create Item'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.createItem).toHaveBeenCalled();
+    });
+
+    const formData = (api.inventoryAPI.createItem as jest.Mock).mock.calls[0][0] as FormData;
+    expect(formData.get('is_serialized')).toBe('false');
+    expect(formData.get('serial_tracking_mode')).toBeNull();
+  });
+
+  it('hydrates serial config in edit mode and includes both fields on update', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, is_serialized: true, serial_tracking_mode: 'reusable' },
+    });
+    (api.inventoryAPI.updateItem as jest.Mock).mockResolvedValue({ data: mockItem });
+
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/inventory/items/test-id/edit']}>
+          <Routes>
+            <Route path="/inventory/items/:id/edit" element={<InventoryItemFormPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>
+    );
+
+    // The toggle hydrates on, so the mode select is populated with the fetched value.
+    expect((await screen.findAllByDisplayValue(/Reusable/i)).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByText('Save Changes'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.updateItem).toHaveBeenCalled();
+    });
+
+    // updateItem(id, formData) — the FormData is the second argument.
+    const formData = (api.inventoryAPI.updateItem as jest.Mock).mock.calls[0][1] as FormData;
+    expect(formData.get('is_serialized')).toBe('true');
+    expect(formData.get('serial_tracking_mode')).toBe('reusable');
+  });
 });

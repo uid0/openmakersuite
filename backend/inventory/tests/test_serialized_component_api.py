@@ -278,8 +278,12 @@ class TestInventoryItemSerializesSerialConfig:
         assert resp.data["is_serialized"] is True
         assert resp.data["serial_tracking_mode"] == InventoryItem.SERIAL_TRACKING_REUSABLE
 
-    def test_serial_fields_are_read_only(self):
-        """Serialization config is not editable through the item serializer."""
+    def test_serial_fields_are_writable(self):
+        """Serialization config is editable through the item serializer (op-5tc).
+
+        The create/edit form flips these on; making them writable is what makes
+        the serialized-component feature reachable end-to-end.
+        """
         item = InventoryItemFactory(is_serialized=False)
         url = reverse("inventoryitem-detail", kwargs={"pk": item.pk})
         resp = _client(_user("staff7", is_staff=True)).patch(
@@ -292,7 +296,8 @@ class TestInventoryItemSerializesSerialConfig:
         )
         assert resp.status_code == 200
         item.refresh_from_db()
-        assert item.is_serialized is False
+        assert item.is_serialized is True
+        assert item.serial_tracking_mode == InventoryItem.SERIAL_TRACKING_REUSABLE
 
 
 @pytest.mark.integration

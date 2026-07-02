@@ -526,6 +526,7 @@ const InventoryListPage: React.FC = () => {
                       {item.needs_reorder && <Badge color="red" size="sm">Low Stock</Badge>}
                       {item.has_pending_reorder && <Badge color="blue" size="sm">Reorder Pending</Badge>}
                       {!item.is_active && <Badge color="gray" size="sm">Inactive</Badge>}
+                      {item.is_serialized && <Badge color="grape" size="sm">Serialized</Badge>}
                     </Group>
                   </Table.Td>
                   <Table.Td onClick={(e) => e.stopPropagation()}>

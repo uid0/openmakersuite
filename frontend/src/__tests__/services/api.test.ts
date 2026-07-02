@@ -2,7 +2,7 @@
  * Tests for API service
  */
 import MockAdapter from 'axios-mock-adapter';
-import api, { assetPartsAPI, assetsAPI, authAPI, checklistsAPI, inventoryAPI, reorderAPI, resolveApiBaseUrl, workOrderAPI } from '../../services/api';
+import api, { assetPartsAPI, assetsAPI, authAPI, checklistsAPI, inventoryAPI, purchaseOrderAPI, reorderAPI, resolveApiBaseUrl, workOrderAPI } from '../../services/api';
 
 describe('API Service', () => {
   let mock: MockAdapter;
@@ -354,6 +354,50 @@ describe('API Service', () => {
       const response = await reorderAPI.getBySupplier();
 
       expect(response.data).toEqual(mockResponse);
+    });
+  });
+
+  describe('Purchase Order API', () => {
+    test('sendToSupplier posts to the send_to_supplier action without a body', async () => {
+      const mockResponse = { id: 'po-1', status: 'sent', status_label: 'Sent' };
+
+      mock.onPost('/reorders/purchase-orders/po-1/send_to_supplier/').reply((config) => {
+        expect(config.data).toBeUndefined();
+        return [200, mockResponse];
+      });
+
+      const response = await purchaseOrderAPI.sendToSupplier('po-1');
+
+      expect(response.status).toBe(200);
+      expect(response.data.status).toBe('sent');
+    });
+
+    test('confirmOrder posts to the confirm_order action with no body by default', async () => {
+      const mockResponse = { id: 'po-1', status: 'confirmed', status_label: 'Confirmed' };
+
+      mock.onPost('/reorders/purchase-orders/po-1/confirm_order/').reply((config) => {
+        expect(config.data).toBeUndefined();
+        return [200, mockResponse];
+      });
+
+      const response = await purchaseOrderAPI.confirmOrder('po-1');
+
+      expect(response.data.status).toBe('confirmed');
+    });
+
+    test('confirmOrder forwards an expected_delivery_date when supplied', async () => {
+      const mockResponse = { id: 'po-1', status: 'confirmed' };
+
+      mock.onPost('/reorders/purchase-orders/po-1/confirm_order/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({ expected_delivery_date: '2026-06-01' });
+        return [200, mockResponse];
+      });
+
+      const response = await purchaseOrderAPI.confirmOrder('po-1', {
+        expected_delivery_date: '2026-06-01',
+      });
+
+      expect(response.data.status).toBe('confirmed');
     });
   });
 

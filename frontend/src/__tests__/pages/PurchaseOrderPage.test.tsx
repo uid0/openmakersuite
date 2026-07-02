@@ -13,7 +13,7 @@ import SessionExpiredBanner, {
 } from '../../components/SessionExpiredBanner';
 import PurchaseOrderPage from '../../pages/PurchaseOrderPage';
 import * as api from '../../services/api';
-import { showError } from '../../utils/dialogs';
+import { showError, showSuccess } from '../../utils/dialogs';
 
 vi.mock('../../services/api');
 
@@ -861,5 +861,184 @@ describe('PurchaseOrderPage receive-with-serial (op-y45)', () => {
     });
     expect(api.purchaseOrderAPI.receiveItems).not.toHaveBeenCalled();
     expect(api.serializedComponentsAPI.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('PurchaseOrderPage send-to-supplier + confirm (op-alh)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  const makeOrder = (status: string, status_label: string) => ({
+    ...baseOrder,
+    status,
+    status_label,
+    items: [],
+    attachments: [],
+  });
+
+  test('a draft PO shows only the Send to Supplier lifecycle action', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('draft', 'Draft'),
+    });
+
+    renderPage();
+
+    expect(
+      await screen.findByRole('button', { name: /^send to supplier$/i }),
+    ).toBeInTheDocument();
+    // Confirm and the receive/mark affordances are gated out on a draft PO.
+    expect(screen.queryByRole('button', { name: /^confirm$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^receive items$/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /^mark as delivered$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  test('a sent PO shows Confirm alongside receive/mark, but not Send', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('sent', 'Sent'),
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /^confirm$/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /^send to supplier$/i }),
+    ).not.toBeInTheDocument();
+    // The existing receive/mark affordances remain available on a sent PO.
+    expect(screen.getByRole('button', { name: /^receive items$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^mark as delivered$/i })).toBeInTheDocument();
+  });
+
+  test('a received PO shows neither Send nor Confirm', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('received', 'Received'),
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('PO-2026-0001', { exact: false })).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole('button', { name: /^send to supplier$/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^confirm$/i })).not.toBeInTheDocument();
+  });
+
+  test('clicking Send to Supplier calls the API and reloads; Confirm then appears', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock)
+      .mockResolvedValueOnce({ data: makeOrder('draft', 'Draft') })
+      .mockResolvedValueOnce({ data: makeOrder('sent', 'Sent') });
+    (api.purchaseOrderAPI.sendToSupplier as jest.Mock).mockResolvedValue({
+      data: makeOrder('sent', 'Sent'),
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^send to supplier$/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.sendToSupplier).toHaveBeenCalledWith('po-1');
+    });
+    // Refetch flips the PO to sent, so the Confirm action replaces Send.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^confirm$/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /^send to supplier$/i })).not.toBeInTheDocument();
+    expect(api.purchaseOrderAPI.getOrder).toHaveBeenCalledTimes(2);
+    expect(showSuccess).toHaveBeenCalledWith('Purchase order sent to supplier');
+  });
+
+  test('clicking Confirm calls the API with no body and reloads', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock)
+      .mockResolvedValueOnce({ data: makeOrder('sent', 'Sent') })
+      .mockResolvedValueOnce({ data: makeOrder('confirmed', 'Confirmed') });
+    (api.purchaseOrderAPI.confirmOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('confirmed', 'Confirmed'),
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.confirmOrder).toHaveBeenCalledWith('po-1');
+    });
+    // Confirmed POs drop the Confirm action (they can still be received).
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /^confirm$/i })).not.toBeInTheDocument();
+    });
+    expect(api.purchaseOrderAPI.getOrder).toHaveBeenCalledTimes(2);
+    expect(showSuccess).toHaveBeenCalledWith('Purchase order confirmed');
+  });
+
+  test('disables Send while in flight and ignores duplicate clicks', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('draft', 'Draft'),
+    });
+    let resolveSend: (value: any) => void = () => undefined;
+    (api.purchaseOrderAPI.sendToSupplier as jest.Mock).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^send to supplier$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^send to supplier$/i })).toBeDisabled();
+    });
+    // A second click while pending must not dispatch another transition call.
+    fireEvent.click(screen.getByRole('button', { name: /^send to supplier$/i }));
+    expect(api.purchaseOrderAPI.sendToSupplier).toHaveBeenCalledTimes(1);
+
+    resolveSend({ data: makeOrder('sent', 'Sent') });
+  });
+
+  test('surfaces the backend error when Send fails and keeps the action enabled', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('draft', 'Draft'),
+    });
+    (api.purchaseOrderAPI.sendToSupplier as jest.Mock).mockRejectedValue({
+      response: { status: 400, data: { error: 'Only draft orders can be sent to suppliers' } },
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^send to supplier$/i }));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith('Only draft orders can be sent to suppliers');
+    });
+    // A failed transition does not reload the PO; the action re-enables for retry.
+    expect(api.purchaseOrderAPI.getOrder).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: /^send to supplier$/i })).not.toBeDisabled();
+  });
+
+  test('surfaces the backend error when Confirm fails and keeps the action enabled', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeOrder('sent', 'Sent'),
+    });
+    (api.purchaseOrderAPI.confirmOrder as jest.Mock).mockRejectedValue({
+      response: { status: 400, data: { error: 'Only sent orders can be confirmed' } },
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() => {
+      expect(showError).toHaveBeenCalledWith('Only sent orders can be confirmed');
+    });
+    expect(api.purchaseOrderAPI.getOrder).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: /^confirm$/i })).not.toBeDisabled();
   });
 });

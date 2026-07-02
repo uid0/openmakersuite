@@ -994,6 +994,41 @@ views:
   index_cards.views.TestSheetGenerateView:
     permission_classes:
     - IsAuthenticatedOrReadOnly
+  interlocks.views.InterlockViewSet:
+    actions:
+      command_queue:
+        permission_classes:
+        - IsInterlockDaemon
+      create:
+        permission_classes:
+        - IsStaffUser
+      destroy:
+        permission_classes:
+        - IsStaffUser
+      disable:
+        permission_classes:
+        - IsStaffUser
+      enable:
+        permission_classes:
+        - IsStaffUser
+      list:
+        permission_classes:
+        - IsStaffUser
+      partial_update:
+        permission_classes:
+        - IsStaffUser
+      poll_status:
+        permission_classes:
+        - IsStaffUser
+      report:
+        permission_classes:
+        - IsInterlockDaemon
+      retrieve:
+        permission_classes:
+        - IsStaffUser
+      update:
+        permission_classes:
+        - IsStaffUser
   inventory.safety_sheet.LocationSafetySheetView:
     permission_classes:
     - IsAuthenticated

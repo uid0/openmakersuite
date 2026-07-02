@@ -143,6 +143,7 @@ INSTALLED_APPS = [
     "resilience",
     "bms",
     "storage_vision",
+    "interlocks",
 ]
 
 MIDDLEWARE = [
@@ -529,6 +530,21 @@ FORGEKEY_FIRMWARE_REPO_URL = config(
 # is empty, the worker falls back to whatever ssh key the container has
 # at /root/.ssh/id_ed25519 (the legacy FORGEKEY_DEPLOY_KEY mount).
 FORGEKEY_BUILDER_GITHUB_TOKEN = config("FORGEKEY_BUILDER_GITHUB_TOKEN", default="")
+
+# ---------------------------------------------------------------------------
+# RFID-KeyMaster interlock integration (interlocks app)
+# ---------------------------------------------------------------------------
+# Shared token the claim-printer Pi presents (X-Interlock-Token header) to
+# poll the command-queue and report results. The queue returns DECRYPTED SSH
+# credentials, so those endpoints require this token — never AllowAny. Leave
+# empty to keep the integration fail-closed (every daemon request rejected).
+INTERLOCK_DAEMON_TOKEN = config("INTERLOCK_DAEMON_TOKEN", default="")
+
+# Optional dedicated secret for encrypting interlock SSH passwords at rest.
+# Any high-entropy string works (it is hashed into a Fernet key, not used
+# raw). Prefer setting this so rotating SECRET_KEY does not orphan stored SSH
+# credentials; when empty, the key is derived from SECRET_KEY. Never commit it.
+INTERLOCK_SECRET_KEY = config("INTERLOCK_SECRET_KEY", default="")
 
 # Celery Beat Schedule for periodic tasks
 CELERY_BEAT_SCHEDULE = {

@@ -69,6 +69,8 @@ const InventoryItemFormPage: React.FC = () => {
       nfpa_instability_hazard: null,
       nfpa_special_hazards: '',
       ownership_type: 'space',
+      is_serialized: false,
+      serial_tracking_mode: null,
       is_active: true,
       notes: '',
     },
@@ -76,6 +78,7 @@ const InventoryItemFormPage: React.FC = () => {
 
   const isHazardous = watch('is_hazardous');
   const useCaseBasedReorder = watch('use_case_based_reorder');
+  const isSerialized = watch('is_serialized');
 
   useEffect(() => {
     loadInitialData();
@@ -136,6 +139,8 @@ const InventoryItemFormPage: React.FC = () => {
         ownership_type: item.ownership_type,
         owning_user: item.owning_user,
         owning_group: item.owning_group,
+        is_serialized: item.is_serialized ?? false,
+        serial_tracking_mode: item.serial_tracking_mode ?? null,
         is_active: item.is_active,
         notes: item.notes || '',
         image_url: item.image ? (item.image.startsWith('http') ? item.image : '') : '',
@@ -512,6 +517,40 @@ const InventoryItemFormPage: React.FC = () => {
                           />
                         </div>
                       </>
+                    )}
+                  </>
+                ),
+              },
+              {
+                title: 'Serial Tracking',
+                children: (
+                  <>
+                    <div>
+                      <Switch
+                        label="Track individual serial numbers"
+                        description="Track each physical unit of this item by serial number through a lifecycle."
+                        checked={isSerialized}
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked;
+                          setValue('is_serialized', checked);
+                          if (!checked) {
+                            setValue('serial_tracking_mode', null);
+                          }
+                        }}
+                      />
+                    </div>
+                    {isSerialized && (
+                      <FormSelect
+                        name="serial_tracking_mode"
+                        control={control}
+                        label="Tracking mode"
+                        required
+                        placeholder="Select how these units are used"
+                        data={[
+                          { value: 'consumable', label: 'Consumable (used up)' },
+                          { value: 'reusable', label: 'Reusable (installed / removed)' },
+                        ]}
+                      />
                     )}
                   </>
                 ),

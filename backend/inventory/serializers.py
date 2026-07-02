@@ -496,9 +496,10 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "has_complete_nfpa_data",
             "is_active",
             "is_requestable",
-            # Serialized-component tracking (#818) — exposed read-only so the
-            # frontend can detect serialized items and branch the lifecycle UI
-            # on the tracking mode.
+            # Serialized-component tracking (#818). Writable so the item
+            # create/edit form can flag an item as serialized and pick the
+            # lifecycle tracking mode (op-5tc) — this is the switch that makes
+            # the whole serialized-component feature reachable.
             "is_serialized",
             "serial_tracking_mode",
             "last_scanned_at",
@@ -516,10 +517,6 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "qr_code",
             "created_at",
             "updated_at",
-            # Serialization config is managed via the model/admin and the
-            # SerializedComponent lifecycle, not edited through this serializer.
-            "is_serialized",
-            "serial_tracking_mode",
         ]
 
     def get_thumbnail(self, obj):

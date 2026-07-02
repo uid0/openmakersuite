@@ -120,6 +120,11 @@ export const inventoryItemSchema = z
     owning_user: z.number().int().positive().optional().nullable(),
     owning_group: z.number().int().positive().optional().nullable(),
 
+    // Serialized-component tracking — when enabled, individual units are
+    // tracked by serial number and the mode selects the lifecycle branch.
+    is_serialized: z.boolean().optional().default(false),
+    serial_tracking_mode: z.enum(['consumable', 'reusable']).nullable().optional(),
+
     // Other
     is_active: z.boolean().default(true),
     notes: z.string().optional(),

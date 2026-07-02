@@ -57,7 +57,7 @@ django-anymail[postmark]==15.0
 # Error reporting / observability (Sentry). Replaces Highlight (oms-fjs)
 # after that integration was ripped out; backend init is in
 # `config/settings.py` and is a no-op unless SENTRY_DSN is set.
-sentry-sdk[django,celery]==2.63.0
+sentry-sdk[django,celery]==2.64.0
 
 # Testing and Code Coverage
 coverage==7.14.3
@@ -66,5 +66,5 @@ pytest-django==4.12.0
 pytest-cov==7.1.0
 pytest-mock==3.15.1
 factory-boy==3.3.3
-faker==40.23.0
+faker==40.27.0
 freezegun==1.5.5

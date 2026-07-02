@@ -33,11 +33,13 @@ import {
   IconCamera,
   IconCheck,
   IconKeyboard,
+  IconList,
   IconMail,
   IconQrcode,
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import ProjectStorageLabelPreview from '../components/ProjectStorageLabelPreview';
 import QRScanner from '../components/QRScanner';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { useNotifications } from '../hooks/useNotifications';
@@ -254,11 +256,24 @@ const FacilitiesProjectStoragePage: React.FC = () => {
         description:
           'Look up a project-storage stint by QR scan or by typing the stint ID. ' +
           'Send violation notices, move items to purgatory, and mark stints removed.',
-        action: stint ? (
-          <Button variant="default" onClick={refresh}>
-            Refresh
-          </Button>
-        ) : undefined,
+        action: (
+          <Group gap="xs">
+            {stint && (
+              <Button variant="default" onClick={refresh}>
+                Refresh
+              </Button>
+            )}
+            <Button
+              component={Link}
+              to="/facilities/project-storage/queue"
+              variant="light"
+              leftSection={<IconList size={16} />}
+              data-testid="view-queue-link"
+            >
+              View queue
+            </Button>
+          </Group>
+        ),
       }}
     >
       {/* Input row: HID/text on the left, camera scan on the right. */}
@@ -407,6 +422,12 @@ const FacilitiesProjectStoragePage: React.FC = () => {
                 {stint.qr_code_url ? 'Regenerate QR' : 'Generate QR'}
               </Button>
             </Group>
+
+            {/*
+              Claim-label preview. Only mounted here (inside the loaded-stint
+              block) so the label PNG is fetched lazily once a stint resolves.
+            */}
+            <ProjectStorageLabelPreview stintId={stint.stint_id} />
 
             {stint.qr_code_url && (
               <Paper p="md" withBorder>

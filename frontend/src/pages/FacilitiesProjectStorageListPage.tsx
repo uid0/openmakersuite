@@ -20,15 +20,18 @@ import {
   Button,
   Group,
   Loader,
+  Modal,
   Paper,
   SegmentedControl,
   Stack,
   Table,
   Text,
 } from '@mantine/core';
+import { IconEye } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import ProjectStorageLabelPreview from '../components/ProjectStorageLabelPreview';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { projectStorageAPI } from '../services/api';
 import { ProjectStorageStatus, ProjectStorageStint } from '../types';
@@ -75,6 +78,10 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  // Row-level label preview: the stint whose label modal is open, or null.
+  const [previewStint, setPreviewStint] = useState<ProjectStorageStint | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -190,6 +197,7 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
                     <Table.Th>Location</Table.Th>
                     <Table.Th>Expires</Table.Th>
                     <Table.Th>Stint</Table.Th>
+                    <Table.Th>Label</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -229,6 +237,17 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
                           {s.stint_id}
                         </Text>
                       </Table.Td>
+                      <Table.Td>
+                        <Button
+                          variant="subtle"
+                          size="compact-xs"
+                          leftSection={<IconEye size={14} />}
+                          onClick={() => setPreviewStint(s)}
+                          data-testid={`preview-label-${s.stint_id}`}
+                        >
+                          Preview
+                        </Button>
+                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -237,6 +256,24 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
           </Paper>
         )}
       </Stack>
+
+      <Modal
+        opened={previewStint !== null}
+        onClose={() => setPreviewStint(null)}
+        title={
+          previewStint
+            ? `Label — ${previewStint.stint_id}`
+            : 'Label preview'
+        }
+        centered
+      >
+        {previewStint && (
+          <ProjectStorageLabelPreview
+            stintId={previewStint.stint_id}
+            testId="row-label-preview"
+          />
+        )}
+      </Modal>
     </WorkspacePage>
   );
 };

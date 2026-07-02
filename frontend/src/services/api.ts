@@ -1344,6 +1344,10 @@ export const purchaseOrderAPI = {
     api.post(`/reorders/purchase-orders/${orderId}/items/${itemId}/void/`, { reason }),
   voidOrder: (orderId: string, reason: string) =>
     api.post<any>(`/reorders/purchase-orders/${orderId}/void/`, { reason }),
+  sendToSupplier: (id: string) =>
+    api.post<any>(`/reorders/purchase-orders/${id}/send_to_supplier/`),
+  confirmOrder: (id: string, body?: { expected_delivery_date?: string }) =>
+    api.post<any>(`/reorders/purchase-orders/${id}/confirm_order/`, body),
   markDelivered: (
     orderId: string,
     data: { delivery_date: string; tracking_number?: string; carrier?: string; receipt_notes?: string },

@@ -110,6 +110,10 @@ const PurchaseOrderPage: React.FC = () => {
   const [editingCostItemId, setEditingCostItemId] = useState<string | null>(null);
   const [lineCost, setLineCost] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  // Dedicated in-flight flag for the draft→sent / sent→confirmed hero
+  // transitions so their disabled state is independent of the line-item
+  // `saving` flag used elsewhere on the page.
+  const [transitioning, setTransitioning] = useState(false);
   const [voidingItemId, setVoidingItemId] = useState<string | null>(null);
   const [voidReason, setVoidReason] = useState<string>('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -288,6 +292,40 @@ const PurchaseOrderPage: React.FC = () => {
 
   const canVoidOrder = (po: PurchaseOrder) =>
     isStaff && po.status !== 'voided' && po.status !== 'received';
+
+  const canSendToSupplier = (po: PurchaseOrder) => isAuthenticated && po.status === 'draft';
+
+  const canConfirmOrder = (po: PurchaseOrder) => isAuthenticated && po.status === 'sent';
+
+  const handleSendToSupplier = async () => {
+    if (transitioning) return;
+    try {
+      setTransitioning(true);
+      await purchaseOrderAPI.sendToSupplier(orderId!);
+      await loadOrder();
+      showSuccess('Purchase order sent to supplier');
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to send purchase order to supplier'));
+      console.error('Error sending purchase order to supplier:', err);
+    } finally {
+      setTransitioning(false);
+    }
+  };
+
+  const handleConfirmOrder = async () => {
+    if (transitioning) return;
+    try {
+      setTransitioning(true);
+      await purchaseOrderAPI.confirmOrder(orderId!);
+      await loadOrder();
+      showSuccess('Purchase order confirmed');
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to confirm purchase order'));
+      console.error('Error confirming purchase order:', err);
+    } finally {
+      setTransitioning(false);
+    }
+  };
 
   const handleOpenMarkDelivered = () => {
     const today = formatYmd(new Date());
@@ -594,6 +632,34 @@ const PurchaseOrderPage: React.FC = () => {
 
   const receivableItems = getReceivableItems(order);
 
+  // Status-gated hero affordances: Send (draft→sent) and Confirm (sent→confirmed)
+  // surface the existing PO lifecycle transitions alongside receive/mark-delivered.
+  const heroActions: React.ReactNode[] = [];
+  if (canSendToSupplier(order)) {
+    heroActions.push(
+      <Button key="send-to-supplier" onClick={handleSendToSupplier} disabled={transitioning}>
+        Send to Supplier
+      </Button>,
+    );
+  }
+  if (canConfirmOrder(order)) {
+    heroActions.push(
+      <Button key="confirm-order" onClick={handleConfirmOrder} disabled={transitioning}>
+        Confirm
+      </Button>,
+    );
+  }
+  if (canReceiveItems(order) && !markingDelivered && !receivingItems) {
+    heroActions.push(
+      <Button key="receive-items" onClick={handleOpenReceiveItems}>
+        Receive items
+      </Button>,
+      <Button key="mark-delivered" variant="default" onClick={handleOpenMarkDelivered}>
+        Mark as delivered
+      </Button>,
+    );
+  }
+
   return (
     <WorkspacePage
       testId="purchase-order-page"
@@ -601,15 +667,7 @@ const PurchaseOrderPage: React.FC = () => {
         eyebrow: `Purchasing · ${order.supplier_details}`,
         title: `PO ${order.po_number}`,
         description: order.status_label,
-        action:
-          canReceiveItems(order) && !markingDelivered && !receivingItems ? (
-            <Group gap="sm">
-              <Button onClick={handleOpenReceiveItems}>Receive items</Button>
-              <Button variant="default" onClick={handleOpenMarkDelivered}>
-                Mark as delivered
-              </Button>
-            </Group>
-          ) : undefined,
+        action: heroActions.length > 0 ? <Group gap="sm">{heroActions}</Group> : undefined,
       }}
     >
       <div className="purchase-order-page">

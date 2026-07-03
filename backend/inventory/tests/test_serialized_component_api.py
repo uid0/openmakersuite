@@ -135,6 +135,7 @@ class TestSerializedComponentLifecycleApi:
         r3 = client.post(_action_url(component, "consume"), data={}, format="json")
         assert r3.status_code == 200
         assert r3.data["status"] == SerializedComponent.CONSUMED
+        assert r3.data["installed_in_asset"] is None
 
         r4 = client.post(
             _action_url(component, "dispose"),
@@ -232,6 +233,23 @@ class TestSerializedComponentLifecycleApi:
         )
         assert r_reinstall.status_code == 200
         assert r_reinstall.data["status"] == SerializedComponent.INSTALLED
+
+    def test_reusable_retire_from_installed_clears_current_asset(self, reusable_item):
+        client = _client(_user("staff8b", is_staff=True))
+        component = SerializedComponentFactory(item=reusable_item)
+        asset = AssetFactory()
+
+        client.post(_action_url(component, "receive"), data={}, format="json")
+        client.post(
+            _action_url(component, "install"),
+            data={"asset": str(asset.id)},
+            format="json",
+        )
+        resp = client.post(_action_url(component, "retire"), data={}, format="json")
+
+        assert resp.status_code == 200
+        assert resp.data["status"] == SerializedComponent.RETIRED
+        assert resp.data["installed_in_asset"] is None
 
 
 @pytest.mark.integration

@@ -3485,14 +3485,17 @@ class SerializedComponent(models.Model):
             self.installed_in_asset = None
         elif action == self.ACTION_CONSUME:
             event_asset = self.installed_in_asset
+            self.installed_in_asset = None
         elif action == self.ACTION_RETIRE:
             event_asset = self.installed_in_asset
+            self.installed_in_asset = None
         elif action == self.ACTION_DISPOSE:
             if not disposal_reason:
                 raise ValidationError("A disposal reason is required to dispose a component.")
             self.disposal_reason = disposal_reason
             self.disposed_at = now
             event_asset = self.installed_in_asset
+            self.installed_in_asset = None
 
         self.status = to_status
         with transaction.atomic():

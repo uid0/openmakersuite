@@ -84,8 +84,10 @@ class TestConsumableLifecycle:
         assert component.installed_in_asset_id == asset.id
         assert component.installed_at is not None
 
-        component.apply_action(SerializedComponent.ACTION_CONSUME)
+        consume_event = component.apply_action(SerializedComponent.ACTION_CONSUME)
         assert component.status == SerializedComponent.CONSUMED
+        assert component.installed_in_asset is None
+        assert consume_event.asset_id == asset.id
 
         component.apply_action(SerializedComponent.ACTION_DISPOSE, disposal_reason="used up")
         assert component.status == SerializedComponent.DISPOSED
@@ -132,6 +134,22 @@ class TestConsumableLifecycle:
             component.apply_action(SerializedComponent.ACTION_DISPOSE)
         assert component.status == SerializedComponent.CONSUMED
 
+    def test_dispose_clears_stale_current_asset_link_but_logs_it(self):
+        asset = AssetFactory()
+        component = SerializedComponentFactory(
+            status=SerializedComponent.CONSUMED,
+            installed_in_asset=asset,
+        )
+
+        event = component.apply_action(
+            SerializedComponent.ACTION_DISPOSE,
+            disposal_reason="already spent",
+        )
+
+        assert component.status == SerializedComponent.DISPOSED
+        assert component.installed_in_asset is None
+        assert event.asset_id == asset.id
+
 
 @pytest.mark.unit
 class TestReusableLifecycle:
@@ -176,6 +194,20 @@ class TestReusableLifecycle:
         component.apply_action(SerializedComponent.ACTION_RECEIVE)
         component.apply_action(SerializedComponent.ACTION_RETIRE)
         assert component.status == SerializedComponent.RETIRED
+
+    def test_retire_from_installed_clears_asset_but_logs_it(self):
+        asset = AssetFactory()
+        component = SerializedComponentFactory(
+            item__serial_tracking_mode=InventoryItem.SERIAL_TRACKING_REUSABLE
+        )
+        component.apply_action(SerializedComponent.ACTION_RECEIVE)
+        component.apply_action(SerializedComponent.ACTION_INSTALL, asset=asset)
+
+        event = component.apply_action(SerializedComponent.ACTION_RETIRE)
+
+        assert component.status == SerializedComponent.RETIRED
+        assert component.installed_in_asset is None
+        assert event.asset_id == asset.id
 
     def test_cannot_consume_reusable(self):
         component = SerializedComponentFactory(

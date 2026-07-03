@@ -27,7 +27,7 @@ Pillow==12.2.0
 matplotlib==3.11.0
 pyzbar==0.1.9  # Optional: for QR code validation (requires system zbar library)
 pypdf==6.14.2   # PDF text/form extraction for inbound work-order ingestion
-opencv-python-headless==4.13.0.92  # cv2.QRCodeDetector for image-based PDF ingestion
+opencv-python-headless==5.0.0.93  # cv2.QRCodeDetector for image-based PDF ingestion
 
 # Authentication
 djangorestframework-simplejwt==5.5.1

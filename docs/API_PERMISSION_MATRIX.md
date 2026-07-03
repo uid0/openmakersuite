@@ -19,6 +19,7 @@ expected payload, and abuse-control expectation).
 | **admin** | Requires `is_staff=True` or `is_superuser=True` and is intended for administrative state changes. |
 | **device-token** | Authentication via a device-specific token or signed payload (ForgeKey devices, MQTT bridge). |
 | **webhook-secret** | Authentication via a shared secret carried in the request (typically a header or signed body). |
+| **daemon-token** | Authentication via a dedicated shared token for a headless on-prem daemon (e.g. the claim-printer Pi interlock executor). Distinct from **public**: the token is mandatory and the endpoint is fail-closed when it is unconfigured. |
 
 ## Maintenance rules
 
@@ -339,6 +340,22 @@ opening a panel. All staff-gated (oms-b25 AC-5).
 | Method | Path | Class | Notes |
 | --- | --- | --- | --- |
 | any | `climate/thermostats/...` | member | `IsAuthenticated` on `ThermostatViewSet` — CRUD on per-room Thermostat records. Supports `?location=` and `?controls_location=` filters on list. |
+
+## Interlocks (`/api/interlocks/`)
+
+Control plane + credential vault for remotely enabling/disabling DMS
+RFID-KeyMaster tool interlocks. OMS never reaches the interlocks directly;
+the claim-printer Pi polls the command-queue and SSH-executes on the target.
+SSH passwords are encrypted at rest (Fernet) and are **write-only** in the
+operator API (`has_credentials` boolean is exposed instead of the secret).
+
+| Method | Path | Class | Notes |
+| --- | --- | --- | --- |
+| any | `interlocks/`, `interlocks/{id}/` | staff | `IsStaffUser` on `InterlockViewSet` CRUD. `ssh_password` is write-only; never returned. |
+| POST | `interlocks/{id}/enable/`, `interlocks/{id}/disable/` | staff | Sets `desired_state` and enqueues an `InterlockCommand`. |
+| POST | `interlocks/{id}/status/` | staff | Enqueues a status poll (does not change `desired_state`). |
+| GET | `interlocks/command-queue/` | daemon-token | `IsInterlockDaemon` — returns pending commands **with decrypted SSH creds** for the Pi executor and marks them claimed. **NOT public** (unlike the project-storage print-queue) because it exposes plaintext credentials; requires the `X-Interlock-Token` header matching `INTERLOCK_DAEMON_TOKEN`, fail-closed when unset. |
+| POST | `interlocks/commands/{id}/report/` | daemon-token | `IsInterlockDaemon` — ingests the executor's result and refreshes device telemetry (`last_reported_state`, `in_use`, `online`, `last_seen_at`). |
 
 ## Analytics (`/api/analytics/`)
 

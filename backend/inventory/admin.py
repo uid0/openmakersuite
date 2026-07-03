@@ -18,6 +18,7 @@ from .models import (
     AssetPart,
     AssetProblem,
     Category,
+    ComponentUsageEvent,
     InventoryItem,
     ItemSupplier,
     Location,
@@ -30,6 +31,7 @@ from .models import (
     MaintenanceTask,
     MaintenanceTool,
     PriceHistory,
+    SerializedComponent,
     StockReconciliation,
     Supplier,
     UsageLog,
@@ -347,6 +349,16 @@ class AssetPartInline(admin.TabularInline):
         return "—"
 
 
+class SerializedComponentInline(admin.TabularInline):
+    """Serial-numbered units of a serialized item, editable from the item page."""
+
+    model = SerializedComponent
+    extra = 0
+    fields = ["serial_number", "lot", "status", "installed_in_asset"]
+    autocomplete_fields = ["installed_in_asset"]
+    show_change_link = True
+
+
 @admin.register(InventoryItem)
 class InventoryItemAdmin(admin.ModelAdmin):
     list_display = [
@@ -360,6 +372,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "use_case_based_reorder",
         "is_active",
         "is_requestable",
+        "is_serialized",
         "hazmat_status_icon",
         "api_link",
         "reorder_link",
@@ -369,6 +382,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "location",
         "is_active",
         "is_requestable",
+        "is_serialized",
         "is_hazardous",
         "use_case_based_reorder",
     ]
@@ -386,7 +400,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "hazmat_compliance_status",
         "index_card_preview",
     ]
-    inlines = [ItemSupplierInline]
+    inlines = [ItemSupplierInline, SerializedComponentInline]
     fieldsets = (
         (
             "Basic Information",
@@ -407,6 +421,19 @@ class InventoryItemAdmin(admin.ModelAdmin):
         (
             "Stock Information",
             {"fields": ("current_stock", "minimum_stock", "reorder_quantity")},
+        ),
+        (
+            "Serial Tracking",
+            {
+                "fields": ("is_serialized", "serial_tracking_mode"),
+                "classes": ("collapse",),
+                "description": (
+                    "When enabled, individual physical units of this item are tracked "
+                    "by serial number as SerializedComponents that move through a "
+                    "lifecycle. Consumable units are used up; reusable units can be "
+                    "installed and removed repeatedly before retirement."
+                ),
+            },
         ),
         (
             "Case-Based Reordering",
@@ -671,6 +698,93 @@ class InventoryItemAdmin(admin.ModelAdmin):
                 f"Successfully regenerated QR codes for {count} item(s).",
                 level=messages.SUCCESS,
             )
+
+
+@admin.register(SerializedComponent)
+class SerializedComponentAdmin(admin.ModelAdmin):
+    """Admin for individual serial-numbered units of a serialized item."""
+
+    list_display = [
+        "serial_number",
+        "item",
+        "lot",
+        "status",
+        "installed_in_asset",
+        "received_at",
+        "installed_at",
+        "disposed_at",
+    ]
+    list_filter = ["status", "item"]
+    search_fields = ["serial_number", "lot", "item__name", "item__sku"]
+    autocomplete_fields = ["item", "installed_in_asset"]
+    raw_id_fields = ["provenance_delivery_item", "provenance_purchase_order_item"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    date_hierarchy = "received_at"
+    fieldsets = (
+        (None, {"fields": ("id", "item", "serial_number", "lot", "status")}),
+        (
+            "Installation",
+            {"fields": ("installed_in_asset", "received_at", "installed_at")},
+        ),
+        (
+            "Disposal",
+            {
+                "fields": ("disposed_at", "disposal_reason"),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Provenance",
+            {
+                "fields": (
+                    "provenance_delivery_item",
+                    "provenance_purchase_order_item",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Audit",
+            {"fields": ("created_at", "updated_at"), "classes": ("collapse",)},
+        ),
+    )
+
+
+@admin.register(ComponentUsageEvent)
+class ComponentUsageEventAdmin(admin.ModelAdmin):
+    """Read-only audit log of serialized-component lifecycle actions."""
+
+    list_display = ["at", "component", "action", "asset", "actor", "created_at"]
+    list_filter = ["action", "at"]
+    search_fields = [
+        "component__serial_number",
+        "component__item__name",
+        "asset__name",
+        "actor__username",
+        "notes",
+    ]
+    readonly_fields = [
+        "id",
+        "component",
+        "asset",
+        "action",
+        "at",
+        "actor",
+        "notes",
+        "created_at",
+    ]
+    date_hierarchy = "at"
+
+    def has_add_permission(self, request):
+        # Events are written by SerializedComponent.apply_action(), never by hand.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # Audit log is view-only.
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(PriceHistory)

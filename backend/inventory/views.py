@@ -1995,7 +1995,44 @@ class AssetViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from .models import AssetProblem
+        from .models import AssetPart, AssetProblem
+
+        # Optional multi-select: which of the asset's parts need replace/fix.
+        # Every id must be an AssetPart belonging to THIS asset; anything else
+        # (unknown id, or a part on a different asset) is a client error.
+        if hasattr(request.data, "getlist"):
+            # QueryDict (form/multipart) — collect repeated part_ids keys.
+            part_ids = request.data.getlist("part_ids") or None
+        else:
+            part_ids = request.data.get("part_ids")
+
+        valid_parts = []
+        if part_ids:
+            if not isinstance(part_ids, (list, tuple)):
+                return Response(
+                    {"error": "part_ids must be a list of AssetPart ids"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                requested_ids = [int(pid) for pid in part_ids]
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "part_ids must be a list of integer AssetPart ids"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            valid_parts = list(AssetPart.objects.filter(asset=asset, id__in=requested_ids))
+            found_ids = {p.id for p in valid_parts}
+            invalid = sorted({pid for pid in requested_ids if pid not in found_ids})
+            if invalid:
+                return Response(
+                    {
+                        "error": (
+                            "part_ids must reference AssetParts belonging to this "
+                            f"asset; invalid: {invalid}"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         reported_by = ""
         if request.user and request.user.is_authenticated:
@@ -2006,6 +2043,8 @@ class AssetViewSet(viewsets.ModelViewSet):
             reported_by=reported_by,
             description=description,
         )
+        if valid_parts:
+            problem.affected_parts.set(valid_parts)
 
         # Send webhook notification if configured
         try:

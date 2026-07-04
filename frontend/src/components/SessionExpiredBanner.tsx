@@ -114,6 +114,23 @@ const SessionExpiredBanner: React.FC = () => {
 };
 
 /**
+ * Persist an attempted route so a login surface can return the user to it
+ * after a fresh sign-in. Shared by the auth guard (RequireAuth) so a
+ * logged-out visitor bounced off a protected page (e.g. /dashboard) lands
+ * back there once they authenticate — the same channel the session-expired
+ * flow uses. Best-effort: a `/` path or unavailable sessionStorage is a no-op.
+ */
+export const persistPendingReturnTo = (pathname: string): void => {
+  if (!pathname || pathname === '/') return;
+  try {
+    sessionStorage.setItem(STORAGE_KEY, pathname);
+  } catch {
+    // sessionStorage is best-effort (private mode, quota). Losing the
+    // return-to only means the user isn't auto-forwarded after login.
+  }
+};
+
+/**
  * Hook for pages that want to honor a stored return-to after a fresh login.
  * AuthSection (or any login surface) should call this on a successful login
  * to navigate the user back to where they were when their session expired.

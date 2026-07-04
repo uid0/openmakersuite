@@ -5,6 +5,7 @@ import * as Sentry from '@sentry/react';
 import React from 'react';
 import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from 'react-router-dom';
 import ErrorFallback from './components/ErrorFallback';
+import RequireAuth from './components/RequireAuth';
 import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AuditFeedPage from './pages/AuditFeedPage';
@@ -234,7 +235,9 @@ function AppContent() {
 
           {/* Inventory Workspace */}
           <Route path="/inventory" element={<WorkspaceLayout><InventoryOverviewPage /></WorkspaceLayout>} />
-          <Route path="/dashboard" element={<WorkspaceLayout><DashboardPage /></WorkspaceLayout>} />
+          {/* Auth-guarded: a logged-out visitor is redirected to the login
+              surface before the dashboard mounts + fetches (op-3er). */}
+          <Route path="/dashboard" element={<RequireAuth><WorkspaceLayout><DashboardPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/inventory/items" element={<WorkspaceLayout><InventoryListPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/new" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/:id" element={<WorkspaceLayout><InventoryItemDetailPage /></WorkspaceLayout>} />

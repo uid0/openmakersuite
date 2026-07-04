@@ -1745,6 +1745,15 @@ class AssetProblem(models.Model):
         related_name="part_problems",
         help_text="Optional: The specific part associated with this problem (if applicable)",
     )
+    affected_parts = models.ManyToManyField(
+        AssetPart,
+        blank=True,
+        related_name="problems",
+        help_text=(
+            "Which of the asset's parts/components the reporter flagged as "
+            "needing replacement or repair, so maintenance knows what to fix."
+        ),
+    )
     reported_by = models.CharField(
         max_length=200,
         blank=True,

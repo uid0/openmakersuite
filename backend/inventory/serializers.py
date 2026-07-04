@@ -1100,12 +1100,34 @@ class AssetProblemPhotoSerializer(serializers.ModelSerializer):
         return None
 
 
+class AffectedAssetPartSerializer(serializers.ModelSerializer):
+    """Compact read-only view of an AssetPart, surfaced on problem reports so
+    maintenance can see WHICH components the reporter flagged for replace/fix."""
+
+    part_name = serializers.CharField(source="part.name", read_only=True)
+    part_sku = serializers.CharField(source="part.sku", read_only=True)
+
+    class Meta:
+        model = AssetPart
+        fields = ["id", "part_name", "part_sku", "quantity_needed", "is_required"]
+        read_only_fields = fields
+
+
 class AssetProblemSerializer(serializers.ModelSerializer):
     """Serializer for asset problem reports."""
 
     asset_name = serializers.CharField(source="asset.name", read_only=True)
     asset_tag = serializers.CharField(source="asset.asset_tag", read_only=True)
     photos = AssetProblemPhotoSerializer(many=True, read_only=True)
+    affected_parts = AffectedAssetPartSerializer(many=True, read_only=True)
+    part_ids = serializers.PrimaryKeyRelatedField(
+        many=True,
+        write_only=True,
+        required=False,
+        queryset=AssetPart.objects.all(),
+        source="affected_parts",
+        help_text="AssetPart ids the reporter flagged as needing replace/fix.",
+    )
 
     class Meta:
         model = AssetProblem
@@ -1123,6 +1145,8 @@ class AssetProblemSerializer(serializers.ModelSerializer):
             "resolved_at",
             "resolved_by",
             "photos",
+            "affected_parts",
+            "part_ids",
         ]
         read_only_fields = ["created_at", "updated_at", "resolved_at"]
 

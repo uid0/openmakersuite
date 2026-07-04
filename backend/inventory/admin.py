@@ -1403,6 +1403,7 @@ class AssetProblemAdmin(admin.ModelAdmin):
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["part"]
+    filter_horizontal = ("affected_parts",)
     date_hierarchy = "created_at"
 
     fieldsets = (
@@ -1412,6 +1413,7 @@ class AssetProblemAdmin(admin.ModelAdmin):
                 "fields": (
                     "asset",
                     "part",
+                    "affected_parts",
                     "reported_by",
                     "description",
                     "status",

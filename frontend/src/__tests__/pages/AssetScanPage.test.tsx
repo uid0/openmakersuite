@@ -341,4 +341,86 @@ describe('AssetScanPage — modal flows', () => {
     // …and the offline photo is surfaced as a non-fatal, actionable failure.
     expect(await screen.findByText(/photo 1 failed to upload/i)).toBeInTheDocument();
   });
+
+  // --- op-3ak: which-components-need-replace/fix multi-select ---------------
+
+  const assetPart = {
+    id: 'part-1',
+    asset: 'asset-1',
+    asset_name: 'Test Asset',
+    asset_tag: '',
+    part: 'p1',
+    part_name: 'Drive Belt',
+    part_sku: 'SKU1',
+    quantity_needed: 2,
+    is_required: true,
+    maintenance_interval_days: null,
+    last_replaced_at: null,
+    days_since_replacement: null,
+    needs_replacement: false,
+    notes: '',
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+  };
+
+  test('renders an optional component multi-select from the asset parts', async () => {
+    localStorage.setItem('token', 'fake-token');
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: { ...mockAsset, parts: [assetPart] },
+    });
+
+    renderPage();
+
+    expect(
+      await screen.findByText(/which components need attention/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('checkbox', { name: /drive belt/i }),
+    ).toBeInTheDocument();
+  });
+
+  test('sends checked part ids as part_ids when reporting a problem', async () => {
+    localStorage.setItem('token', 'fake-token');
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: { ...mockAsset, parts: [assetPart] },
+    });
+    (api.assetsAPI.reportProblem as jest.Mock).mockResolvedValue({
+      data: { id: 'prob-1', affected_parts: [] },
+    });
+
+    renderPage();
+
+    const textarea = await screen.findByPlaceholderText(/describe the problem/i);
+    fireEvent.change(textarea, { target: { value: 'Belt is frayed' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /drive belt/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^report problem$/i }));
+
+    await waitFor(() =>
+      expect(api.assetsAPI.reportProblem).toHaveBeenCalledWith(
+        'asset-1',
+        'Belt is frayed',
+        ['part-1'],
+      ),
+    );
+  });
+
+  test('reports description-only (no part_ids) when no component is checked', async () => {
+    localStorage.setItem('token', 'fake-token');
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: { ...mockAsset, parts: [assetPart] },
+    });
+    (api.assetsAPI.reportProblem as jest.Mock).mockResolvedValue({
+      data: { id: 'prob-1', affected_parts: [] },
+    });
+
+    renderPage();
+
+    const textarea = await screen.findByPlaceholderText(/describe the problem/i);
+    fireEvent.change(textarea, { target: { value: 'Belt is frayed' } });
+    fireEvent.click(screen.getByRole('button', { name: /^report problem$/i }));
+
+    await waitFor(() =>
+      expect(api.assetsAPI.reportProblem).toHaveBeenCalledWith('asset-1', 'Belt is frayed'),
+    );
+  });
 });

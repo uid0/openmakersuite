@@ -38,6 +38,8 @@ const AssetDetailPage: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [showReportForm, setShowReportForm] = useState<boolean>(false);
   const [problemDescription, setProblemDescription] = useState<string>('');
+  // AssetPart ids the reporter flags as needing replace/fix (optional).
+  const [affectedPartIds, setAffectedPartIds] = useState<string[]>([]);
   const [submittingProblem, setSubmittingProblem] = useState<boolean>(false);
   const [resolvingProblemId, setResolvingProblemId] = useState<string | null>(null);
   const [resolutionNotes, setResolutionNotes] = useState<string>('');
@@ -277,6 +279,14 @@ const AssetDetailPage: React.FC = () => {
     }
   };
 
+  const toggleAffectedPart = (partId: string) => {
+    setAffectedPartIds((existing) =>
+      existing.includes(partId)
+        ? existing.filter((pid) => pid !== partId)
+        : [...existing, partId],
+    );
+  };
+
   const handleReportProblem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id || !problemDescription.trim()) {
@@ -286,8 +296,15 @@ const AssetDetailPage: React.FC = () => {
 
     try {
       setSubmittingProblem(true);
-      await assetsAPI.reportProblem(id, problemDescription);
+      // Only pass part ids when some are checked so a description-only report
+      // sends the exact same 2-argument call as before.
+      if (affectedPartIds.length > 0) {
+        await assetsAPI.reportProblem(id, problemDescription, affectedPartIds);
+      } else {
+        await assetsAPI.reportProblem(id, problemDescription);
+      }
       setProblemDescription('');
+      setAffectedPartIds([]);
       setShowReportForm(false);
       await loadAssetDetails();
     } catch (err: any) {
@@ -728,6 +745,32 @@ const AssetDetailPage: React.FC = () => {
                   disabled={submittingProblem}
                   style={{ width: '100%', padding: '0.5rem', marginBottom: '0.5rem', fontFamily: 'inherit' }}
                 />
+                {asset.parts && asset.parts.length > 0 && (
+                  <fieldset
+                    className="affected-parts"
+                    style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '0.5rem', marginBottom: '0.5rem' }}
+                  >
+                    <legend>Which components need attention? (optional)</legend>
+                    {asset.parts.map((part) => (
+                      <label
+                        key={part.id}
+                        className="affected-part-option"
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.25rem' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={affectedPartIds.includes(String(part.id))}
+                          onChange={() => toggleAffectedPart(String(part.id))}
+                          disabled={submittingProblem}
+                        />
+                        <span>
+                          {part.part_name}
+                          {part.quantity_needed ? ` (qty ${part.quantity_needed})` : ''}
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button
                     type="submit"
@@ -741,6 +784,7 @@ const AssetDetailPage: React.FC = () => {
                     onClick={() => {
                       setShowReportForm(false);
                       setProblemDescription('');
+                      setAffectedPartIds([]);
                     }}
                     disabled={submittingProblem}
                     style={{ padding: '0.5rem 1rem', background: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
@@ -783,6 +827,19 @@ const AssetDetailPage: React.FC = () => {
                     <p className="problem-description">{problem.description}</p>
                     {problem.reported_by && (
                       <p className="problem-reported-by">Reported by: {problem.reported_by}</p>
+                    )}
+                    {problem.affected_parts && problem.affected_parts.length > 0 && (
+                      <div className="problem-affected-parts">
+                        <strong>Components flagged:</strong>
+                        <ul>
+                          {problem.affected_parts.map((part) => (
+                            <li key={part.id}>
+                              {part.part_name}
+                              {part.quantity_needed ? ` (qty ${part.quantity_needed})` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     )}
                     {problem.resolution_notes && (
                       <div className="problem-resolution">

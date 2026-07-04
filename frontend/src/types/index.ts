@@ -391,6 +391,10 @@ export interface AssetProblem {
   resolved_at: string | null;
   resolved_by: string;
   photos: AssetProblemPhoto[];
+  // Components (AssetParts) the reporter flagged as needing replace/fix.
+  // The API returns a compact shape (id, part_name, part_sku, quantity_needed,
+  // is_required) via AffectedAssetPartSerializer.
+  affected_parts?: AssetPart[];
 }
 
 export type LocationProblemStatus = 'reported' | 'in_progress' | 'resolved' | 'closed';

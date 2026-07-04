@@ -719,6 +719,41 @@ describe('API Service', () => {
       expect(response.data.description).toBe('Broken part');
     });
 
+    test('reportProblem sends part_ids when components are flagged', async () => {
+      const mockResponse = {
+        id: '1',
+        asset: 'test-id',
+        description: 'Broken part',
+        status: 'reported',
+        affected_parts: [
+          { id: '5', part_name: 'Belt', part_sku: 'B-1', quantity_needed: 1, is_required: true },
+        ],
+      };
+
+      mock.onPost('/inventory/assets/test-id/report_problem/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({
+          description: 'Broken part',
+          part_ids: ['5', '7'],
+        });
+        return [201, mockResponse];
+      });
+
+      const response = await assetsAPI.reportProblem('test-id', 'Broken part', ['5', '7']);
+
+      expect(response.data.affected_parts[0].part_name).toBe('Belt');
+    });
+
+    test('reportProblem omits part_ids when the flagged list is empty', async () => {
+      mock.onPost('/inventory/assets/test-id/report_problem/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({ description: 'Broken part' });
+        return [201, { id: '1', description: 'Broken part' }];
+      });
+
+      const response = await assetsAPI.reportProblem('test-id', 'Broken part', []);
+
+      expect(response.data.description).toBe('Broken part');
+    });
+
     test('generateQR generates QR code', async () => {
       mock.onPost('/inventory/assets/test-id/generate_qr/').reply(200, {});
 

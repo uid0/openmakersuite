@@ -33,6 +33,8 @@ const AssetScanPage: React.FC = () => {
 
   // Form state (authenticated users)
   const [problemDescription, setProblemDescription] = useState('');
+  // AssetPart ids the reporter flags as needing replace/fix (optional).
+  const [affectedPartIds, setAffectedPartIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [problemPhotos, setProblemPhotos] = useState<File[]>([]);
@@ -54,6 +56,14 @@ const AssetScanPage: React.FC = () => {
       if (url) URL.revokeObjectURL(url);
       return existing.filter((_, i) => i !== index);
     });
+  };
+
+  const toggleAffectedPart = (partId: string) => {
+    setAffectedPartIds((existing) =>
+      existing.includes(partId)
+        ? existing.filter((id) => id !== partId)
+        : [...existing, partId],
+    );
   };
 
   useEffect(() => {
@@ -233,8 +243,14 @@ const AssetScanPage: React.FC = () => {
 
     try {
       setSubmitting(true);
-      const reportResp = await assetsAPI.reportProblem(asset.id, problemDescription);
+      // Only pass part ids when some are checked so a description-only report
+      // sends the exact same 2-argument call as before.
+      const reportResp =
+        affectedPartIds.length > 0
+          ? await assetsAPI.reportProblem(asset.id, problemDescription, affectedPartIds)
+          : await assetsAPI.reportProblem(asset.id, problemDescription);
       const problemId = reportResp.data?.id;
+      const flaggedParts = reportResp.data?.affected_parts ?? [];
 
       if (problemId && problemPhotos.length > 0) {
         for (let i = 0; i < problemPhotos.length; i += 1) {
@@ -255,9 +271,19 @@ const AssetScanPage: React.FC = () => {
       setProblemPhotos([]);
       setPhotoPreviews([]);
       setProblemDescription('');
+      setAffectedPartIds([]);
+      const parts: string[] = [];
+      if (problemPhotos.length > 0) {
+        parts.push(`${problemPhotos.length} photo(s)`);
+      }
+      if (flaggedParts.length > 0) {
+        parts.push(
+          `flagged: ${flaggedParts.map((p) => p.part_name).join(', ')}`,
+        );
+      }
       setActionSuccess(
-        problemPhotos.length > 0
-          ? `Problem reported with ${problemPhotos.length} photo(s)`
+        parts.length > 0
+          ? `Problem reported (${parts.join('; ')})`
           : 'Problem reported successfully',
       );
       setTimeout(() => setActionSuccess(null), 3000);
@@ -673,6 +699,27 @@ const AssetScanPage: React.FC = () => {
                       required
                       disabled={submitting}
                     />
+                    {asset.parts && asset.parts.length > 0 && (
+                      <fieldset className="affected-parts">
+                        <legend>Which components need attention? (optional)</legend>
+                        {asset.parts.map((part) => (
+                          <label key={part.id} className="affected-part-option">
+                            <input
+                              type="checkbox"
+                              checked={affectedPartIds.includes(String(part.id))}
+                              onChange={() => toggleAffectedPart(String(part.id))}
+                              disabled={submitting}
+                            />
+                            <span>
+                              {part.part_name}
+                              {part.quantity_needed
+                                ? ` (qty ${part.quantity_needed})`
+                                : ''}
+                            </span>
+                          </label>
+                        ))}
+                      </fieldset>
+                    )}
                     <Stack gap="xs" mt="sm" mb="sm">
                       <Text size="sm" fw={500}>
                         Add photos (optional)

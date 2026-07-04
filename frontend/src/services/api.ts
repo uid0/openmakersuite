@@ -510,8 +510,13 @@ export const assetsAPI = {
   unlockAsset: (id: string) =>
     api.post<Asset>(`/inventory/assets/${id}/unlock/`),
 
-  reportProblem: (id: string, description: string) =>
-    api.post<AssetProblem>(`/inventory/assets/${id}/report_problem/`, { description }),
+  // `partIds` are AssetPart ids the reporter flagged as needing replace/fix.
+  // Only sent when non-empty so description-only reports keep the same payload.
+  reportProblem: (id: string, description: string, partIds?: string[]) =>
+    api.post<AssetProblem>(`/inventory/assets/${id}/report_problem/`, {
+      description,
+      ...(partIds && partIds.length > 0 ? { part_ids: partIds } : {}),
+    }),
 
   resolveProblem: (id: string, problemId: string, resolutionNotes?: string, status?: string) =>
     api.post(`/inventory/assets/${id}/resolve_problem/`, {

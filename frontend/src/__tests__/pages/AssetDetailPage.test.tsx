@@ -847,5 +847,92 @@ describe('AssetDetailPage', () => {
         localStorage.removeItem('token');
       }
     });
+
+    // --- op-3ak: which-components-need-replace/fix multi-select -------------
+
+    it('renders a component multi-select in the report form (op-3ak)', async () => {
+      localStorage.setItem('token', 'fake-token');
+      try {
+        renderDetail();
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Asset')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /report problem/i }));
+
+        expect(
+          await screen.findByText(/which components need attention/i),
+        ).toBeInTheDocument();
+        // The asset's part (from mockAsset.parts) is offered as a checkbox.
+        expect(
+          screen.getByRole('checkbox', { name: /test part/i }),
+        ).toBeInTheDocument();
+      } finally {
+        localStorage.removeItem('token');
+      }
+    });
+
+    it('sends checked part ids as part_ids when submitting (op-3ak)', async () => {
+      localStorage.setItem('token', 'fake-token');
+      try {
+        mockAssetsAPI.reportProblem.mockResolvedValue({
+          data: { id: 'prob-2', affected_parts: [] },
+          status: 201,
+          statusText: 'Created',
+          headers: {},
+          config: {} as any,
+        });
+
+        renderDetail();
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Asset')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /report problem/i }));
+
+        const description = await screen.findByPlaceholderText(/describe the problem/i);
+        fireEvent.change(description, { target: { value: 'Belt worn' } });
+        fireEvent.click(screen.getByRole('checkbox', { name: /test part/i }));
+        fireEvent.click(screen.getByRole('button', { name: /submit problem/i }));
+
+        await waitFor(() =>
+          expect(mockAssetsAPI.reportProblem).toHaveBeenCalledWith('test-id', 'Belt worn', [
+            'part-1',
+          ]),
+        );
+      } finally {
+        localStorage.removeItem('token');
+      }
+    });
+
+    it('shows the flagged components on a reported problem (op-3ak)', async () => {
+      mockAssetsAPI.getAssetProblems.mockResolvedValue({
+        data: [
+          {
+            ...mockProblems[0],
+            affected_parts: [
+              {
+                id: '9',
+                part_name: 'Flagged Belt',
+                part_sku: 'FB-1',
+                quantity_needed: 3,
+                is_required: true,
+              },
+            ],
+          },
+        ],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      } as any);
+
+      renderDetail();
+
+      expect(await screen.findByText(/components flagged/i)).toBeInTheDocument();
+      expect(screen.getByText(/flagged belt/i)).toBeInTheDocument();
+    });
   });
 });

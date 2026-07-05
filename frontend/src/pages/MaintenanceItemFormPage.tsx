@@ -16,7 +16,7 @@ import {
 } from '@mantine/core';
 import { IconAlertCircle, IconPlus, IconTrash } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
-import { useForm, useWatch } from 'react-hook-form';
+import { Resolver, useForm, useWatch } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FormInput } from '../components/forms/FormInput';
 import { FormLayout } from '../components/forms/FormLayout';
@@ -58,7 +58,10 @@ const MaintenanceItemFormPage: React.FC = () => {
   });
 
   const { control, handleSubmit, reset, setValue } = useForm<MaintenanceItemFormData>({
-    resolver: zodResolver(maintenanceItemFormSchema),
+    // v5 resolvers infer the schema's Zod *input* type (fields with `.default()`
+    // are optional pre-parse); this form seeds all fields via defaultValues, so
+    // its field values are the *output* shape — assert against MaintenanceItemFormData.
+    resolver: zodResolver(maintenanceItemFormSchema) as Resolver<MaintenanceItemFormData>,
     defaultValues: {
       title: '',
       description: '',

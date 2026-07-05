@@ -45,7 +45,7 @@ import {
   IconChevronUp,
 } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, Resolver, useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import AssetMaintenanceSection from '../components/assets/AssetMaintenanceSection';
@@ -130,7 +130,13 @@ const AssetFormPage: React.FC = () => {
     setValue,
     reset,
   } = useForm<AssetFormData>({
-    resolver: zodResolver(assetFormSchema),
+    // @hookform/resolvers v5 infers a schema's Zod *input* type (fields with
+    // `.default()` are optional pre-parse) as the resolver's field-value type,
+    // which diverges from AssetFormData (the *output* type, defaults applied).
+    // This form seeds every field via `defaultValues`, so its field values are
+    // the output shape — assert the resolver against it to keep the form typed
+    // on AssetFormData without threading z.input/z.output through the tree.
+    resolver: zodResolver(assetFormSchema) as Resolver<AssetFormData>,
     defaultValues: {
       name: '',
       description: '',

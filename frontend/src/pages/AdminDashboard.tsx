@@ -8,10 +8,8 @@
  * successful row mutation.
  */
 import { Button, Group, Stack, TextInput } from '@mantine/core';
-import { DateInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { modals } from '@mantine/modals';
-import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useState } from 'react';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
@@ -19,58 +17,6 @@ import '../styles/AdminDashboard.css';
 import { Asset, InventoryItem, ReorderRequest } from '../types';
 import { formatDateOnly, parseYmd } from '../utils/dates';
 import { promptInput, showError, showSuccess } from '../utils/dialogs';
-
-interface MarkOrderedValues {
-  orderNumber: string;
-  estimatedDelivery: Date | null;
-  actualCost: string;
-}
-
-interface MarkOrderedFormProps {
-  modalId: string;
-  onSubmit: (values: MarkOrderedValues) => void;
-}
-
-const MarkOrderedForm: React.FC<MarkOrderedFormProps> = ({ modalId, onSubmit }) => {
-  const form = useForm<MarkOrderedValues>({
-    initialValues: { orderNumber: '', estimatedDelivery: null, actualCost: '' },
-  });
-
-  const handleSubmit = form.onSubmit((values) => {
-    modals.close(modalId);
-    onSubmit(values);
-  });
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <Stack>
-        <TextInput
-          label="Order number"
-          placeholder="Optional"
-          {...form.getInputProps('orderNumber')}
-        />
-        <DateInput
-          label="Estimated delivery date"
-          placeholder="Select date (optional)"
-          valueFormat="YYYY-MM-DD"
-          clearable
-          {...form.getInputProps('estimatedDelivery')}
-        />
-        <TextInput
-          label="Actual cost"
-          placeholder="Optional"
-          {...form.getInputProps('actualCost')}
-        />
-        <Group justify="flex-end">
-          <Button variant="default" type="button" onClick={() => modals.close(modalId)}>
-            Cancel
-          </Button>
-          <Button type="submit">Mark Ordered</Button>
-        </Group>
-      </Stack>
-    </form>
-  );
-};
 
 interface UpdateTrackingValues {
   trackingNumber: string;
@@ -269,36 +215,22 @@ const AdminDashboard: React.FC = () => {
     );
   };
 
+  // Marking ordered is a one-click action. The order/PO number belongs to the
+  // Purchase Order domain and its send/confirm lifecycle — it is carried onto
+  // the request automatically when a PO is created/finalized, so we do not make
+  // the operator re-type it here. Estimated delivery / tracking can still be
+  // added afterwards via the "Update Tracking" action on ordered rows.
   const handleMarkOrdered = (id: number) => {
     if (isRowPending(id)) return;
-    const modalId = `mark-ordered-${id}-${Date.now()}`;
-    modals.open({
-      modalId,
-      title: 'Mark as Ordered',
-      children: (
-        <MarkOrderedForm
-          modalId={modalId}
-          onSubmit={(values) => {
-            const data: any = {};
-            if (values.orderNumber) data.order_number = values.orderNumber;
-            if (values.estimatedDelivery) {
-              data.estimated_delivery = dayjs(values.estimatedDelivery).format('YYYY-MM-DD');
-            }
-            if (values.actualCost) data.actual_cost = parseFloat(values.actualCost);
-
-            void runRowMutation(
-              id,
-              () =>
-                reorderAPI.markOrdered(id, data) as Promise<{
-                  data: Partial<ReorderRequest>;
-                }>,
-              'Marked as ordered with tracking information',
-              'Failed to mark as ordered',
-            );
-          }}
-        />
-      ),
-    });
+    void runRowMutation(
+      id,
+      () =>
+        reorderAPI.markOrdered(id) as Promise<{
+          data: Partial<ReorderRequest>;
+        }>,
+      'Marked as ordered',
+      'Failed to mark as ordered',
+    );
   };
 
   const handleMarkReceived = (id: number) => {

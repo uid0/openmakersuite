@@ -136,7 +136,7 @@ describe('AdminDashboard — approve flow', () => {
 });
 
 describe('AdminDashboard — mark ordered flow', () => {
-  it('opens a multi-field modal and posts the consolidated tracking data', async () => {
+  it('marks a request ordered in one click, without prompting for an order number', async () => {
     mockReorderAPI.getPendingRequests.mockResolvedValue({
       data: [buildRequest({ id: 7, status: 'approved' })],
     } as any);
@@ -147,59 +147,29 @@ describe('AdminDashboard — mark ordered flow', () => {
     const markOrderedBtn = await screen.findByRole('button', { name: /mark ordered/i });
     fireEvent.click(markOrderedBtn);
 
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText(/order number/i), {
-      target: { value: 'PO-123' },
-    });
-    fireEvent.change(within(dialog).getByLabelText(/estimated delivery date/i), {
-      target: { value: '2026-05-01' },
-    });
-    fireEvent.change(within(dialog).getByLabelText(/actual cost/i), {
-      target: { value: '42.50' },
-    });
-
-    fireEvent.click(within(dialog).getByRole('button', { name: /mark ordered/i }));
+    // No modal is opened — the order/PO number lives in the Purchase Order
+    // domain and is not re-typed here, so the operator is not interrupted.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     await waitFor(() => {
-      expect(mockReorderAPI.markOrdered).toHaveBeenCalledWith(7, {
-        order_number: 'PO-123',
-        estimated_delivery: '2026-05-01',
-        actual_cost: 42.5,
-      });
+      expect(mockReorderAPI.markOrdered).toHaveBeenCalledWith(7);
     });
 
-    expect(
-      await screen.findByText('Marked as ordered with tracking information'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Marked as ordered')).toBeInTheDocument();
   });
 
-  it('normalizes a non-ISO date entry to YYYY-MM-DD before submit', async () => {
+  it('surfaces an error when marking ordered fails', async () => {
     mockReorderAPI.getPendingRequests.mockResolvedValue({
       data: [buildRequest({ id: 8, status: 'approved' })],
     } as any);
-    mockReorderAPI.markOrdered.mockResolvedValue({ data: {} } as any);
+    mockReorderAPI.markOrdered.mockRejectedValue(new Error('boom'));
 
     renderDashboard();
 
     const markOrderedBtn = await screen.findByRole('button', { name: /mark ordered/i });
     fireEvent.click(markOrderedBtn);
 
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText(/estimated delivery date/i), {
-      target: { value: '05/01/2026' },
-    });
-
-    fireEvent.click(within(dialog).getByRole('button', { name: /mark ordered/i }));
-
-    await waitFor(() => {
-      expect(mockReorderAPI.markOrdered).toHaveBeenCalledWith(8, {
-        estimated_delivery: '2026-05-01',
-      });
-    });
-
-    expect(
-      await screen.findByText('Marked as ordered with tracking information'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Failed to mark as ordered')).toBeInTheDocument();
   });
 });
 

@@ -282,6 +282,48 @@ class TestReorderRequestAPI:
         assert request_obj.ordered_at is not None
         assert request_obj.order_number == "ORD-12345"
 
+    def test_mark_ordered_one_click_without_body(self, authenticated_client):
+        """Marking ordered needs no order number — a bare POST is enough.
+
+        The order/PO number belongs to the Purchase Order domain, so the
+        operator is not forced to type one at mark-ordered time.
+        """
+        client, user = authenticated_client
+        request_obj = ReorderRequestFactory(status="approved")
+
+        url = reverse("reorderrequest-mark-ordered", kwargs={"pk": request_obj.pk})
+        response = client.post(url, {}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == "ordered"
+
+        request_obj.refresh_from_db()
+        assert request_obj.status == "ordered"
+        assert request_obj.ordered_at is not None
+        # No number was typed; it stays blank for the PO to carry later.
+        assert request_obj.order_number == ""
+
+    def test_mark_ordered_preserves_po_fields_when_omitted(self, authenticated_client):
+        """A bare mark-ordered must not wipe values a PO already populated."""
+        client, user = authenticated_client
+        existing_delivery = (timezone.now() + timedelta(days=5)).date()
+        request_obj = ReorderRequestFactory(
+            status="approved",
+            order_number="PO-2026-0007",
+            estimated_delivery=existing_delivery,
+        )
+
+        url = reverse("reorderrequest-mark-ordered", kwargs={"pk": request_obj.pk})
+        response = client.post(url, {}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+
+        request_obj.refresh_from_db()
+        assert request_obj.status == "ordered"
+        # Omitted fields are left untouched, not blanked.
+        assert request_obj.order_number == "PO-2026-0007"
+        assert request_obj.estimated_delivery == existing_delivery
+
     def test_public_transparency_endpoint_returns_ledger(self, api_client):
         """Ensure the transparency endpoint is publicly accessible and returns ledger data."""
         ordered_time = timezone.now()

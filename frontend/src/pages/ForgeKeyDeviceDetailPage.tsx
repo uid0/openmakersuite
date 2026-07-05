@@ -13,11 +13,13 @@ import DeviceControlsCard from '../components/DeviceControlsCard';
 import DeviceLifecycleCard from '../components/DeviceLifecycleCard';
 import DeviceSectionGate from '../components/DeviceSectionGate';
 import IndicatorManagementCard from '../components/IndicatorManagementCard';
+import IndicatorSwatch from '../components/IndicatorSwatch';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
   ForgeKeyCommandResponse,
   ForgeKeyDevice,
   ForgeKeyDeviceType,
+  ForgeKeyIndicatorState,
   ForgeKeyOccupancyResponse,
   ForgeKeyTemperatureResponse,
   forgekeyAPI,
@@ -468,7 +470,7 @@ const CapabilityRow: React.FC<CapabilityRowProps> = ({
   } else if (capability === 'status_led') {
     body = (
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <span style={{ color: '#555' }}>State: —</span>
+        <IndicatorStateInline state={device.indicator_state} />
         <button type="button" onClick={onBlink} disabled={blinkState.pending}>
           {blinkState.pending ? 'Blinking…' : 'Blink LED'}
         </button>
@@ -502,15 +504,78 @@ const ButtonEventWidget: React.FC<{ device: ForgeKeyDevice }> = () => (
   <small style={{ color: '#777' }}>No recent button events.</small>
 );
 
+// Live indicator/status-LED colour the firmware reports over its status message
+// (op-2cr). Shows a swatch + colour name (and non-solid pattern); falls back to
+// "State: —" until the device reports a state.
+const IndicatorStateInline: React.FC<{ state: ForgeKeyIndicatorState | undefined }> = ({
+  state,
+}) => {
+  const color = state?.color ?? null;
+  const pattern = state?.pattern ?? null;
+  if (!color && !pattern) {
+    return (
+      <span style={{ color: '#555' }} data-testid="indicator-state">
+        State: —
+      </span>
+    );
+  }
+  return (
+    <span
+      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: '#555' }}
+      data-testid="indicator-state"
+    >
+      State:
+      <IndicatorSwatch
+        presentation={{ color, pattern: pattern ?? undefined }}
+        size={14}
+        testId="indicator-state-swatch"
+      />
+      <strong data-testid="indicator-state-color">{color ?? pattern}</strong>
+      {color && pattern && pattern !== 'solid' && (
+        <span style={{ color: '#777' }}>· {pattern}</span>
+      )}
+    </span>
+  );
+};
+
 const RELAY_CHANNELS = [1, 2];
 
+// Current on/off pill for a channel, from the cached live sub-state (op-2cr).
+// `undefined` means the firmware hasn't reported this channel yet.
+const RelayChannelState: React.FC<{ on: boolean | undefined }> = ({ on }) => {
+  if (on === undefined) {
+    return (
+      <span data-testid="relay-channel-state" style={{ color: '#777', minWidth: '3.75rem' }}>
+        —
+      </span>
+    );
+  }
+  return (
+    <span
+      data-testid="relay-channel-state"
+      data-on={on ? 'true' : 'false'}
+      style={{ minWidth: '3.75rem', fontWeight: 600, color: on ? '#1f8a3a' : '#c0392b' }}
+    >
+      {on ? '● On' : '○ Off'}
+    </span>
+  );
+};
+
 // Per-channel control of the 2-channel power relay (ga-40w). Each click emits a
-// signed `power_set` command for that channel; the device has no live
-// channel-state feed to this page yet, so we surface controls + errors rather
-// than the current on/off.
+// signed `power_set` command for that channel; the current on/off is surfaced
+// from the live sub-state the firmware reports over its status message (op-2cr).
 const PowerRelayWidget: React.FC<{ device: ForgeKeyDevice }> = ({ device }) => {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const channelState = useMemo(() => {
+    const map = new Map<number, boolean>();
+    for (const ch of device.relay_channels ?? []) {
+      if (typeof ch?.channel === 'number') map.set(ch.channel, Boolean(ch.on));
+    }
+    return map;
+  }, [device.relay_channels]);
+  const hasLiveState = (device.relay_channels?.length ?? 0) > 0;
 
   const send = async (channel: number, on: boolean) => {
     setBusy(`${channel}:${on}`);
@@ -535,6 +600,7 @@ const PowerRelayWidget: React.FC<{ device: ForgeKeyDevice }> = ({ device }) => {
           style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
         >
           <span style={{ color: '#555', minWidth: '5.5rem' }}>Channel {ch}</span>
+          <RelayChannelState on={channelState.get(ch)} />
           <button
             type="button"
             onClick={() => send(ch, true)}
@@ -558,7 +624,9 @@ const PowerRelayWidget: React.FC<{ device: ForgeKeyDevice }> = ({ device }) => {
           {error}
         </small>
       )}
-      <small style={{ color: '#777' }}>Live on/off state isn’t reported to this page yet.</small>
+      {!hasLiveState && (
+        <small style={{ color: '#777' }}>Live on/off state not reported yet.</small>
+      )}
     </div>
   );
 };

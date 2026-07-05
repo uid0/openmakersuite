@@ -2008,6 +2008,18 @@ export interface MakerBoxLookupResult {
   days_remaining: number | null;
 }
 
+/** Last-reported on/off state of a single power-relay channel (op-2cr). */
+export interface ForgeKeyRelayChannel {
+  channel: number;
+  on: boolean;
+}
+
+/** Last-reported indicator/status-LED sub-state (op-2cr). Empty until reported. */
+export interface ForgeKeyIndicatorState {
+  color?: string | null;
+  pattern?: string | null;
+}
+
 export interface ForgeKeyDevice {
   id: string;
   mac_address: string;
@@ -2027,6 +2039,9 @@ export interface ForgeKeyDevice {
   ip: string | null;
   capabilities: string[];
   capabilities_announced_at: string | null;
+  // Live device sub-state cached from the firmware status message (op-2cr).
+  relay_channels: ForgeKeyRelayChannel[];
+  indicator_state: ForgeKeyIndicatorState;
   created_at: string;
   updated_at: string;
 }

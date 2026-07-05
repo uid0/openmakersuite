@@ -27,6 +27,8 @@ from forgekey.management.commands.mqtt_consumer import (
     _STARTUP_GRACE_SECONDS,
     LOG_RATE_LIMIT_MAX_EVENTS,
     _connack_log_level,
+    _parse_indicator_state,
+    _parse_relay_channels,
     dispatch_message,
     handle_capabilities_message,
     handle_log_message,
@@ -145,6 +147,72 @@ class TestMqttConsumer:
     def test_handle_status_message_unknown_mac_returns_false(self):
         topic = "forgekey/aabbccddeeff/status"
         assert handle_status_message(topic, b"{}") is False
+
+    def test_handle_status_message_caches_relay_channels_and_indicator(self):
+        # op-2cr: the status payload's power_relay.channels + indicator
+        # sub-state must be cached on the device so the control cards can show
+        # live state instead of being write-only.
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:5B:57:01")
+        topic = f"forgekey/{_topic_segment(device.mac_address)}/status"
+        payload = json.dumps(
+            {
+                "online": True,
+                "power_relay": {
+                    "channels": [
+                        {"channel": 1, "on": True},
+                        {"channel": 2, "on": False},
+                    ]
+                },
+                "indicator": {"color": "green", "pattern": "solid"},
+            }
+        ).encode("utf-8")
+
+        assert handle_status_message(topic, payload) is True
+        device.refresh_from_db()
+        assert device.relay_channels == [
+            {"channel": 1, "on": True},
+            {"channel": 2, "on": False},
+        ]
+        assert device.indicator_state == {"color": "green", "pattern": "solid"}
+
+    def test_handle_status_message_caches_bool_array_channels(self):
+        # Firmware may report channels as a bare boolean array positionally
+        # (channel 1 = index 0); it must normalize to the 1-indexed object form.
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:5B:57:02")
+        topic = f"forgekey/{_topic_segment(device.mac_address)}/status"
+        payload = json.dumps({"power_relay": {"channels": [False, True]}}).encode("utf-8")
+
+        assert handle_status_message(topic, payload) is True
+        device.refresh_from_db()
+        assert device.relay_channels == [
+            {"channel": 1, "on": False},
+            {"channel": 2, "on": True},
+        ]
+
+    def test_handle_status_message_caches_bare_string_indicator(self):
+        device = ESP32DeviceFactory(mac_address="AA:BB:CC:5B:57:03")
+        topic = f"forgekey/{_topic_segment(device.mac_address)}/status"
+        payload = json.dumps({"indicator": "red"}).encode("utf-8")
+
+        assert handle_status_message(topic, payload) is True
+        device.refresh_from_db()
+        assert device.indicator_state == {"color": "red", "pattern": None}
+
+    def test_handle_status_message_preserves_substate_when_absent(self):
+        # A bare heartbeat ping (no sub-state) must not wipe the last-known
+        # cached channel/indicator state.
+        device = ESP32DeviceFactory(
+            mac_address="AA:BB:CC:5B:57:04",
+            relay_channels=[{"channel": 1, "on": True}],
+            indicator_state={"color": "green", "pattern": None},
+        )
+        topic = f"forgekey/{_topic_segment(device.mac_address)}/status"
+        payload = json.dumps({"online": True}).encode("utf-8")
+
+        assert handle_status_message(topic, payload) is True
+        device.refresh_from_db()
+        assert device.relay_channels == [{"channel": 1, "on": True}]
+        assert device.indicator_state == {"color": "green", "pattern": None}
 
     def test_handle_capabilities_message_ingests_capability_set(self):
         # ga-c6m: the consumer must ingest the retained capabilities announce
@@ -294,6 +362,75 @@ class TestMqttConsumer:
         # The sensitive key is rewritten — not dropped — so dashboards
         # still see the shape but not the value.
         assert event.raw_payload["device_token"] == "***REDACTED***"
+
+
+# ---------------------------------------------------------------------------
+# op-2cr: live device sub-state parsing (power_relay.channels + indicator)
+# ---------------------------------------------------------------------------
+
+
+class TestDeviceSubStateParsing:
+    """Pure-function coverage for the status sub-state normalizers."""
+
+    def test_relay_channels_object_form_with_explicit_channel_numbers(self):
+        body = {"power_relay": {"channels": [{"channel": 2, "on": False}]}}
+        assert _parse_relay_channels(body) == [{"channel": 2, "on": False}]
+
+    def test_relay_channels_accepts_verb_and_state_keys(self):
+        body = {
+            "power_relay": {
+                "channels": [
+                    {"channel": 1, "state": "on"},
+                    {"channel": 2, "action": "disable"},
+                ]
+            }
+        }
+        assert _parse_relay_channels(body) == [
+            {"channel": 1, "on": True},
+            {"channel": 2, "on": False},
+        ]
+
+    def test_relay_channels_accepts_bare_list_and_int_flags(self):
+        # power_relay published directly as a list of 0/1 ints.
+        assert _parse_relay_channels({"power_relay": [1, 0]}) == [
+            {"channel": 1, "on": True},
+            {"channel": 2, "on": False},
+        ]
+
+    def test_relay_channels_absent_returns_none(self):
+        assert _parse_relay_channels({"online": True}) is None
+        # power_relay present but without a channels list -> nothing to cache.
+        assert _parse_relay_channels({"power_relay": {"foo": 1}}) is None
+
+    def test_relay_channels_empty_list_is_reported_not_none(self):
+        # An explicit empty channels report is a valid state, distinct from
+        # "field absent" (which returns None to preserve the cache).
+        assert _parse_relay_channels({"power_relay": {"channels": []}}) == []
+
+    def test_indicator_object_color_only(self):
+        assert _parse_indicator_state({"indicator": {"color": "blue"}}) == {
+            "color": "blue",
+            "pattern": None,
+        }
+
+    def test_indicator_object_pattern_off_without_color(self):
+        # An off pattern is meaningful even with no colour.
+        assert _parse_indicator_state({"indicator": {"pattern": "off"}}) == {
+            "color": None,
+            "pattern": "off",
+        }
+
+    def test_indicator_firmware_compat_name_field(self):
+        # op-8ph: some firmware carries the colour NAME under `indicator`.
+        assert _parse_indicator_state({"indicator": {"indicator": "yellow"}}) == {
+            "color": "yellow",
+            "pattern": None,
+        }
+
+    def test_indicator_absent_or_empty_returns_none(self):
+        assert _parse_indicator_state({"online": True}) is None
+        assert _parse_indicator_state({"indicator": ""}) is None
+        assert _parse_indicator_state({"indicator": {}}) is None
 
 
 # ---------------------------------------------------------------------------

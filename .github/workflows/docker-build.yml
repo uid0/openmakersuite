@@ -208,10 +208,18 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ needs.determine-tags.outputs.frontend_tags }}
+          # Vite inlines VITE_* at build time, so the frontend Sentry DSN must
+          # reach the image build or Sentry.init() silently no-ops and browser
+          # crashes are never captured (op-j1f). Set the VITE_SENTRY_DSN repo
+          # secret; empty is tolerated (build succeeds, Sentry stays off) and
+          # mirrors docker-compose.prod.yml's ${VITE_SENTRY_DSN:-}. (Comments
+          # must stay OUT of the block scalar below — each line there is a
+          # literal build-arg passed straight to buildx.)
           build-args: |
             VITE_API_URL=/api
             VITE_GIT_HASH=${{ steps.git.outputs.hash }}
             VITE_GITHUB_URL=https://github.com/${{ github.repository }}
+            VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

@@ -47,7 +47,17 @@ const DashboardPage: React.FC = () => {
       setLoading(true);
       setError(null);
       const response = await dashboardAPI.getWidgets();
-      setWidgets(response.data);
+      // The widgets endpoint returns a bare array, but a mis-deployed
+      // gateway/login HTML page — or a serializer change to a paginated
+      // `{ results: [...] }` envelope — can hand back a non-array. Coerce
+      // defensively so a bad response degrades to the empty state instead
+      // of throwing when `.filter`/`.map` runs on a non-array and taking
+      // the whole page into the error boundary (op-j1f).
+      const payload = response.data as unknown;
+      const list: DashboardWidgetType[] = Array.isArray(payload)
+        ? payload
+        : (payload as { results?: DashboardWidgetType[] } | null)?.results ?? [];
+      setWidgets(list);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load dashboard widgets');
       console.error('Error loading widgets:', err);

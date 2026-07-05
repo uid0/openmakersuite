@@ -171,4 +171,64 @@ describe('DashboardPage', () => {
       expect(screen.getByText(/No widgets configured/i)).toBeInTheDocument();
     });
   });
+
+  it('renders the empty state (not a crash) when getWidgets returns a non-array', async () => {
+    // A mis-deployed gateway/login HTML page or a serializer shape change
+    // can make getWidgets resolve to a non-array. The page must coerce that
+    // to the empty state rather than let `widgets.filter` throw into the
+    // app-level error boundary (op-j1f).
+    (dashboardAPI.getWidgets as jest.Mock).mockResolvedValueOnce({
+      data: { detail: 'Authentication credentials were not provided.' },
+    });
+
+    render(
+      <MantineProvider>
+        <BrowserRouter>
+          <DashboardPage />
+        </BrowserRouter>
+      </MantineProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/No widgets configured/i)).toBeInTheDocument();
+    });
+    // The grid never mounts — a non-array must not reach react-grid-layout.
+    expect(screen.queryByTestId('grid-layout')).not.toBeInTheDocument();
+  });
+
+  it('unwraps a paginated { results: [...] } envelope into widgets', async () => {
+    // Defensive fallback: if the endpoint ever returns a DRF-paginated
+    // envelope instead of a bare array, the widgets in `results` still render.
+    const mockWidgets = [
+      {
+        id: 1,
+        widget_type: 'low_stock',
+        position_x: 0,
+        position_y: 0,
+        width: 2,
+        height: 2,
+        is_visible: true,
+        order: 0,
+        settings: {},
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
+    ];
+
+    (dashboardAPI.getWidgets as jest.Mock).mockResolvedValueOnce({
+      data: { count: 1, next: null, previous: null, results: mockWidgets },
+    });
+
+    render(
+      <MantineProvider>
+        <BrowserRouter>
+          <DashboardPage />
+        </BrowserRouter>
+      </MantineProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('low-stock-widget')).toBeInTheDocument();
+    });
+  });
 });

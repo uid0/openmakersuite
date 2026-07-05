@@ -17,9 +17,10 @@
 #   - ForgeKey: FORGEKEY_PROVISIONING_TOKEN (warned if empty/placeholder)
 #   - Webhook tokens: POSTMARK_INBOUND_TOKEN, LOCATION_PING_TOKEN (warned if empty)
 #   - Email: EMAIL_BACKEND must not be the console backend in prod
-#   - Sentry: if SENTRY_DSN / REACT_APP_SENTRY_DSN set, must be an https:// URL.
-#     A warning fires when Sentry is unconfigured (no observability sink —
-#     production errors will only land in container logs).
+#   - Sentry: if SENTRY_DSN (backend) / VITE_SENTRY_DSN (frontend) set, must be
+#     an https:// URL. A warning fires when either is unconfigured — an empty
+#     VITE_SENTRY_DSN silently disables ALL frontend error capture (Sentry.init
+#     no-ops), so that warning is loud.
 #   - Cookie security: SESSION_COOKIE_SECURE and CSRF_COOKIE_SECURE default to
 #     `not DEBUG` in settings.py. Operators who explicitly override either to
 #     a falsy value when DEBUG=0 are warned — this re-enables plaintext cookies
@@ -246,9 +247,16 @@ if [ -z "${DEFAULT_FROM_EMAIL:-}" ] || is_placeholder "${DEFAULT_FROM_EMAIL:-}";
 fi
 
 # --- 10. Sentry --------------------------------------------------------------
-# Sentry DSNs are optional-but-validated: empty is fine, but any value that's
+# Sentry DSNs are optional-but-validated: empty is allowed, but any value that's
 # set must be an https:// URL — http leaks events in plaintext, and a typo
 # would silently disable error reporting in production.
+#
+# Two independent sinks:
+#   - SENTRY_DSN       — backend (Django/Celery) errors.
+#   - VITE_SENTRY_DSN  — frontend SPA errors. Vite inlines VITE_* at BUILD time,
+#                        so it must be present when the frontend image is built.
+#                        (The legacy CRA name REACT_APP_SENTRY_DSN is a no-op
+#                        under Vite and is intentionally no longer validated.)
 
 if [ -n "${SENTRY_DSN:-}" ]; then
     case "$SENTRY_DSN" in
@@ -257,10 +265,10 @@ if [ -n "${SENTRY_DSN:-}" ]; then
     esac
 fi
 
-if [ -n "${REACT_APP_SENTRY_DSN:-}" ]; then
-    case "$REACT_APP_SENTRY_DSN" in
+if [ -n "${VITE_SENTRY_DSN:-}" ]; then
+    case "$VITE_SENTRY_DSN" in
         https://*) ;;
-        *) err "REACT_APP_SENTRY_DSN must be an https:// URL for production (got: $REACT_APP_SENTRY_DSN)." ;;
+        *) err "VITE_SENTRY_DSN must be an https:// URL for production (got: $VITE_SENTRY_DSN)." ;;
     esac
 fi
 
@@ -270,7 +278,16 @@ fi
 # proceed if the operator has accepted that trade-off.
 
 if [ -z "${SENTRY_DSN:-}" ]; then
-    warn "SENTRY_DSN is not set — production errors will only appear in container logs. Configure Sentry for visibility into crashes and 5xx responses."
+    warn "SENTRY_DSN is not set — backend errors will only appear in container logs. Configure Sentry for visibility into crashes and 5xx responses."
+fi
+
+# VITE_SENTRY_DSN empty is the confirmed silent-failure mode behind op-j1f: the
+# frontend ships without Sentry.init(), so every uncaught render error — the
+# dashboard "Something went wrong" boundary included — vanishes and never
+# reaches Sentry. It is invisible at runtime and only reproducible in prod, so
+# warn LOUDLY rather than letting the build ship blind.
+if [ -z "${VITE_SENTRY_DSN:-}" ]; then
+    warn "VITE_SENTRY_DSN is not set — the frontend build ships WITHOUT Sentry (Sentry.init no-ops), so browser crashes are NEVER captured (this is the gap that hid op-j1f). Set VITE_SENTRY_DSN before building the frontend image."
 fi
 
 # --- 10a. Cookie security ----------------------------------------------------

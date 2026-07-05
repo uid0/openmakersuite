@@ -133,7 +133,7 @@ describe('InventoryItemFormPage', () => {
 
   const renderCreatePage = () => {
     return render(
-      <MantineProvider>
+      <MantineProvider env="test">
         <MemoryRouter initialEntries={['/inventory/items/new']}>
           <Routes>
             <Route path="/inventory/items/new" element={<InventoryItemFormPage />} />
@@ -149,7 +149,7 @@ describe('InventoryItemFormPage', () => {
     });
 
     return render(
-      <MantineProvider>
+      <MantineProvider env="test">
         <MemoryRouter initialEntries={[`/inventory/items/${itemId}/edit`]}>
           <Routes>
             <Route path="/inventory/items/:id/edit" element={<InventoryItemFormPage />} />
@@ -401,7 +401,7 @@ describe('InventoryItemFormPage', () => {
     });
 
     render(
-      <MantineProvider>
+      <MantineProvider env="test">
         <MemoryRouter initialEntries={['/inventory/items/test-id/edit']}>
           <Routes>
             <Route
@@ -469,7 +469,7 @@ describe('InventoryItemFormPage', () => {
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: mockItem });
 
     render(
-      <MantineProvider>
+      <MantineProvider env="test">
         <MemoryRouter initialEntries={['/inventory/items/test-id/edit']}>
           <SessionExpiredBanner />
           <Routes>
@@ -591,7 +591,7 @@ describe('InventoryItemFormPage', () => {
     (api.inventoryAPI.updateItem as jest.Mock).mockResolvedValue({ data: mockItem });
 
     render(
-      <MantineProvider>
+      <MantineProvider env="test">
         <MemoryRouter initialEntries={['/inventory/items/test-id/edit']}>
           <Routes>
             <Route path="/inventory/items/:id/edit" element={<InventoryItemFormPage />} />

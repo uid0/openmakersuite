@@ -88,7 +88,7 @@ const buildBinding = (overrides: Partial<any> = {}) => ({
 
 const renderCard = (device = buildDevice()) =>
   render(
-    <MantineProvider>
+    <MantineProvider env="test">
       <IndicatorManagementCard device={device as any} />
     </MantineProvider>,
   );

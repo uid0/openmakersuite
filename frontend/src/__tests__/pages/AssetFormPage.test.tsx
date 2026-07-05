@@ -23,7 +23,7 @@ vi.mock('react-router-dom', async () => ({
 
 const renderWithMantine = (component: React.ReactElement) => {
   return render(
-    <MantineProvider>
+    <MantineProvider env="test">
       {component}
     </MantineProvider>
   );

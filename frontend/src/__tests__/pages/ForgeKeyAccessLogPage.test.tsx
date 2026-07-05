@@ -53,7 +53,7 @@ const deniedEvent = {
 
 const renderPage = (initialEntry = '/facilities/forgekey-access-log') =>
   render(
-    <MantineProvider>
+    <MantineProvider env="test">
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/facilities/forgekey-access-log" element={<ForgeKeyAccessLogPage />} />

@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Alert, Button, Group, Modal, Paper, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, Resolver, useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
 import NFPADiamond from '../components/NFPADiamond';
 import SupplierRelationshipForm, { SupplierRelationship } from '../components/SupplierRelationshipForm';
@@ -48,7 +48,10 @@ const InventoryItemFormPage: React.FC = () => {
     setValue,
     reset,
   } = useForm<InventoryItemFormData>({
-    resolver: zodResolver(inventoryItemSchema),
+    // v5 resolvers infer the schema's Zod *input* type (fields with `.default()`
+    // are optional pre-parse); this form seeds all fields via defaultValues, so
+    // its field values are the *output* shape — assert against InventoryItemFormData.
+    resolver: zodResolver(inventoryItemSchema) as Resolver<InventoryItemFormData>,
     defaultValues: {
       name: '',
       description: '',

@@ -187,6 +187,26 @@ class ESP32Device(models.Model):
         blank=True,
         help_text="When the device last published its capability set.",
     )
+    relay_channels = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Last-reported power-relay channel states, parsed from the "
+            "``power_relay.channels`` sub-state of the device's status message "
+            "(ga-40w live-state). Normalized list of ``{'channel': <1-indexed "
+            "int>, 'on': <bool>}`` — empty until the firmware reports it."
+        ),
+    )
+    indicator_state = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Last-reported indicator/status-LED sub-state, parsed from the "
+            "``indicator`` field of the device's status message. Normalized "
+            "``{'color': <str>, 'pattern': <str|None>}`` — empty until the "
+            "firmware reports it."
+        ),
+    )
     identity = models.OneToOneField(
         "DeviceIdentity",
         on_delete=models.PROTECT,

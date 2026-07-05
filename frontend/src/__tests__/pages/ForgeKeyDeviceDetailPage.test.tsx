@@ -71,6 +71,8 @@ const buildDevice = (overrides: Partial<any> = {}) => ({
   ip: null,
   capabilities: [],
   capabilities_announced_at: null,
+  relay_channels: [],
+  indicator_state: {},
   created_at: '2026-04-27T00:00:00Z',
   updated_at: '2026-05-01T03:00:00Z',
   ...overrides,
@@ -166,6 +168,69 @@ describe('ForgeKeyDeviceDetailPage', () => {
 
     fireEvent.click(await screen.findByTestId('relay-channel-1-enable'));
     expect(await screen.findByTestId('relay-channel-error')).toBeInTheDocument();
+  });
+
+  it('surfaces live per-channel relay on/off from the cached sub-state (op-2cr)', async () => {
+    seedHappyPath();
+    mockApi.getDevice.mockResolvedValue({
+      data: buildDevice({
+        capabilities: ['power_relay'],
+        relay_channels: [
+          { channel: 1, on: true },
+          { channel: 2, on: false },
+        ],
+      }),
+    } as any);
+
+    renderAt('/facilities/forgekey-devices/dev-1');
+
+    const ch1 = await screen.findByTestId('relay-channel-1');
+    const ch1State = within(ch1).getByTestId('relay-channel-state');
+    expect(ch1State).toHaveTextContent(/on/i);
+    expect(ch1State).toHaveAttribute('data-on', 'true');
+
+    const ch2 = screen.getByTestId('relay-channel-2');
+    const ch2State = within(ch2).getByTestId('relay-channel-state');
+    expect(ch2State).toHaveTextContent(/off/i);
+    expect(ch2State).toHaveAttribute('data-on', 'false');
+  });
+
+  it('notes when live relay state has not been reported yet (op-2cr)', async () => {
+    seedHappyPath();
+    mockApi.getDevice.mockResolvedValue({
+      data: buildDevice({ capabilities: ['power_relay'], relay_channels: [] }),
+    } as any);
+
+    renderAt('/facilities/forgekey-devices/dev-1');
+
+    expect(await screen.findByText(/live on\/off state not reported yet/i)).toBeInTheDocument();
+  });
+
+  it('surfaces the live indicator colour from the cached sub-state (op-2cr)', async () => {
+    seedHappyPath();
+    mockApi.getDevice.mockResolvedValue({
+      data: buildDevice({
+        capabilities: ['status_led'],
+        indicator_state: { color: 'green', pattern: 'solid' },
+      }),
+    } as any);
+
+    renderAt('/facilities/forgekey-devices/dev-1');
+
+    const state = await screen.findByTestId('indicator-state');
+    expect(within(state).getByTestId('indicator-state-color')).toHaveTextContent('green');
+    expect(within(state).getByTestId('indicator-state-swatch')).toBeInTheDocument();
+  });
+
+  it('shows a placeholder when no indicator state has been reported (op-2cr)', async () => {
+    seedHappyPath();
+    mockApi.getDevice.mockResolvedValue({
+      data: buildDevice({ capabilities: ['status_led'], indicator_state: {} }),
+    } as any);
+
+    renderAt('/facilities/forgekey-devices/dev-1');
+
+    expect(await screen.findByTestId('indicator-state')).toHaveTextContent('State: —');
   });
 
   it('renders the temperature chart when the device reports readings', async () => {

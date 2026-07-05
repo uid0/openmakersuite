@@ -279,6 +279,108 @@ def handle_reading_message(topic: str, payload: bytes) -> Optional[TemperatureRe
     return reading
 
 
+def _coerce_on_state(value: Any) -> Optional[bool]:
+    """Best-effort coercion of a firmware on/off representation to ``bool``.
+
+    Accepts the several shapes firmware builds use interchangeably — bare
+    booleans, 1/0 ints, and the ``on``/``off`` / ``enable``/``disable`` /
+    ``true``/``false`` verb strings the command channel already speaks.
+    Returns ``None`` when the value carries no recognizable on/off signal so
+    the caller can skip it rather than guess.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in {"on", "enable", "enabled", "true", "1"}:
+            return True
+        if token in {"off", "disable", "disabled", "false", "0"}:
+            return False
+    return None
+
+
+def _channel_on(item: dict) -> Optional[bool]:
+    """Pull the on/off signal out of a channel object, trying known keys."""
+    for key in ("on", "state", "action", "enabled"):
+        if key in item:
+            coerced = _coerce_on_state(item[key])
+            if coerced is not None:
+                return coerced
+    return None
+
+
+def _parse_relay_channels(body: dict) -> Optional[list]:
+    """Normalize the ``power_relay.channels`` sub-state of a status payload.
+
+    The firmware publishes live per-channel relay state inside its status
+    message; :func:`handle_status_message` historically ignored it, leaving the
+    device-detail control cards write-only (ga-40w live-state follow-up).
+
+    Accepts ``power_relay`` as either ``{"channels": [...]}`` or a bare list,
+    and each channel element as a bool, a 0/1 int, an on/off verb string, or an
+    object carrying an ``on`` / ``state`` / ``action`` / ``enabled`` field (with
+    an optional 1-indexed ``channel``). Returns a normalized list of
+    ``{"channel": int, "on": bool}`` (positionally 1-indexed when the element
+    omits its own channel number), or ``None`` when the payload carries no
+    parseable channel sub-state so the caller preserves the last-known cache.
+    """
+    relay = body.get("power_relay")
+    if isinstance(relay, dict):
+        raw = relay.get("channels")
+    elif isinstance(relay, list):
+        raw = relay
+    else:
+        return None
+    if not isinstance(raw, list):
+        return None
+
+    channels: list = []
+    for idx, item in enumerate(raw, start=1):
+        if isinstance(item, bool):
+            channels.append({"channel": idx, "on": item})
+        elif isinstance(item, (int, float)):
+            channels.append({"channel": idx, "on": bool(item)})
+        elif isinstance(item, str):
+            on = _coerce_on_state(item)
+            if on is not None:
+                channels.append({"channel": idx, "on": on})
+        elif isinstance(item, dict):
+            ch = item.get("channel")
+            channel_num = ch if isinstance(ch, int) and not isinstance(ch, bool) else idx
+            on = _channel_on(item)
+            if on is not None:
+                channels.append({"channel": channel_num, "on": on})
+    return channels
+
+
+def _parse_indicator_state(body: dict) -> Optional[dict]:
+    """Normalize the ``indicator`` sub-state of a status payload.
+
+    Firmware reports its current indicator/status-LED either as a bare colour
+    name (``"indicator": "green"``) or as an object
+    (``"indicator": {"color": "green", "pattern": "solid"}``). Some builds
+    carry the colour name under ``indicator`` inside that object for command
+    round-trip symmetry (op-8ph). Returns a normalized
+    ``{"color": str|None, "pattern": str|None}`` when either is present, or
+    ``None`` when there is no indicator sub-state to cache.
+    """
+    ind = body.get("indicator")
+    if isinstance(ind, str):
+        color = ind.strip()
+        return {"color": color, "pattern": None} if color else None
+    if isinstance(ind, dict):
+        color = ind.get("color") or ind.get("indicator")
+        pattern = ind.get("pattern")
+        result = {
+            "color": color.strip() if isinstance(color, str) and color.strip() else None,
+            "pattern": pattern.strip() if isinstance(pattern, str) and pattern.strip() else None,
+        }
+        return result if (result["color"] or result["pattern"]) else None
+    return None
+
+
 def handle_status_message(topic: str, payload: bytes) -> bool:
     """Update device last_seen / status fields from a status message.
 
@@ -316,6 +418,18 @@ def handle_status_message(topic: str, payload: bytes) -> bool:
         updates["free_heap"] = body["free_heap"]
     if isinstance(body.get("ip"), str):
         updates["ip"] = body["ip"]
+
+    # Live device sub-state (op-2cr): cache the per-channel relay state and the
+    # indicator/LED colour the firmware already publishes so the device-detail
+    # control cards can surface current state instead of being write-only. Only
+    # overwrite when the payload actually carries the sub-state — a bare
+    # heartbeat ping must not wipe the last-known cache.
+    relay_channels = _parse_relay_channels(body)
+    if relay_channels is not None:
+        updates["relay_channels"] = relay_channels
+    indicator_state = _parse_indicator_state(body)
+    if indicator_state is not None:
+        updates["indicator_state"] = indicator_state
 
     # Capture prior online state before the bulk update so we can detect a
     # transition (the bulk .update() below emits no post_save signal).

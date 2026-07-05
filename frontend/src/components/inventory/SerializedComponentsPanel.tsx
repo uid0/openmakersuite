@@ -51,6 +51,16 @@ interface Props {
   itemId: string;
   /** Owning item's tracking mode, shown as context in the header. */
   trackingMode?: SerializedTrackingMode;
+  /**
+   * Whether the owning item is flagged `is_serialized`. When false the panel
+   * shows a discoverable "turn this on" call-to-action instead of a dead,
+   * empty units view — a user who came here to add a serial number gets a
+   * clear next step rather than no input field (op-qff). Defaults to true so
+   * existing serialized callers are unaffected.
+   */
+  isSerialized?: boolean;
+  /** Invoked by the "Enable serial tracking" CTA shown when not serialized. */
+  onEnableTracking?: () => void;
 }
 
 const fmtDateTime = (iso: string | null): string =>
@@ -64,7 +74,12 @@ const fmtDateTime = (iso: string | null): string =>
       })
     : '—';
 
-const SerializedComponentsPanel: React.FC<Props> = ({ itemId, trackingMode }) => {
+const SerializedComponentsPanel: React.FC<Props> = ({
+  itemId,
+  trackingMode,
+  isSerialized = true,
+  onEnableTracking,
+}) => {
   const [units, setUnits] = useState<SerializedComponent[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -93,6 +108,14 @@ const SerializedComponentsPanel: React.FC<Props> = ({ itemId, trackingMode }) =>
   const [disposalReason, setDisposalReason] = useState('');
 
   const load = useCallback(async () => {
+    // A non-serialized item has no units to fetch — skip the request and let
+    // the panel render its "enable serial tracking" CTA instead.
+    if (!isSerialized) {
+      setUnits([]);
+      setTotal(0);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -105,7 +128,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({ itemId, trackingMode }) =>
     } finally {
       setLoading(false);
     }
-  }, [itemId]);
+  }, [itemId, isSerialized]);
 
   useEffect(() => {
     load();
@@ -264,6 +287,35 @@ const SerializedComponentsPanel: React.FC<Props> = ({ itemId, trackingMode }) =>
   );
 
   const truncated = total > units.length;
+
+  // The item isn't tracked by serial number: don't strand the user in front of
+  // an empty panel with no way to add a unit. Explain the state and offer a
+  // direct path to turn serial tracking on (op-qff).
+  if (!isSerialized) {
+    return (
+      <Paper withBorder p="md" data-testid="serialized-components-panel">
+        <Group gap="xs" mb="sm">
+          <Title order={4}>Serialized units</Title>
+        </Group>
+        <Alert color="blue" variant="light" data-testid="serialized-not-tracked">
+          This item isn&apos;t tracked by serial number yet, so there are no units
+          to add. Turn on serial tracking to record individual units by serial
+          number and follow their lifecycle (receive, install, consume, retire,
+          dispose).
+        </Alert>
+        {onEnableTracking && (
+          <Button
+            mt="sm"
+            leftSection={<IconPlus size={14} />}
+            onClick={onEnableTracking}
+            data-testid="serialized-enable-tracking"
+          >
+            Enable serial tracking
+          </Button>
+        )}
+      </Paper>
+    );
+  }
 
   return (
     <Paper withBorder p="md" data-testid="serialized-components-panel">

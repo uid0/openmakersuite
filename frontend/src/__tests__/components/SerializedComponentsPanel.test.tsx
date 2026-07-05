@@ -139,6 +139,31 @@ describe('SerializedComponentsPanel', () => {
     expect(await screen.findByText('SN-9999')).toBeInTheDocument();
   });
 
+  it('shows an enable-tracking CTA (not a dead panel) when the item is not serialized', async () => {
+    const onEnableTracking = jest.fn();
+    render(
+      <MantineProvider>
+        <SerializedComponentsPanel
+          itemId={ITEM_ID}
+          isSerialized={false}
+          onEnableTracking={onEnableTracking}
+        />
+      </MantineProvider>,
+    );
+
+    // The state is explained rather than silently empty...
+    expect(await screen.findByTestId('serialized-not-tracked')).toBeInTheDocument();
+    // ...the add-unit form is not offered for a non-serialized item...
+    expect(screen.queryByTestId('serialized-add-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('serialized-add-serial')).not.toBeInTheDocument();
+    // ...no units are fetched (nothing to list)...
+    expect(mockAPI.list).not.toHaveBeenCalled();
+
+    // ...and the CTA hands off to enabling serial tracking.
+    fireEvent.click(screen.getByTestId('serialized-enable-tracking'));
+    expect(onEnableTracking).toHaveBeenCalledTimes(1);
+  });
+
   it('loads and shows per-unit usage history on expand', async () => {
     mockAPI.list.mockResolvedValue(listResponse([buildUnit()]));
     mockAPI.listUsageEvents.mockResolvedValue({

@@ -286,6 +286,26 @@ describe('InventoryItemDetailPage', () => {
     expect(linkedAssetsTab).toBeInTheDocument();
   });
 
+  it('always offers a Serialized Units tab and guides enabling tracking when the item is not serialized', async () => {
+    // mockItem has no is_serialized flag, so the item is not serialized.
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    // The tab is present even for a non-serialized item — no dead end.
+    const serializedTab = screen.getByRole('tab', { name: /Serialized Units/i });
+    expect(serializedTab).toBeInTheDocument();
+
+    fireEvent.click(serializedTab);
+
+    // Instead of an empty panel, the user sees why and a way forward.
+    expect(await screen.findByTestId('serialized-not-tracked')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('serialized-enable-tracking'));
+    expect(mockNavigate).toHaveBeenCalledWith('/inventory/items/test-id/edit');
+  });
+
   it('handles missing item gracefully', async () => {
     (api.inventoryAPI.getItem as jest.Mock).mockRejectedValue({
       response: { data: { detail: 'Not found' } },

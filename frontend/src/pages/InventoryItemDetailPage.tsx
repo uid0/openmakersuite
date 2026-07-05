@@ -171,9 +171,10 @@ const InventoryItemDetailPage: React.FC = () => {
           <Tabs.Tab value="reorder-history">Reorder History</Tabs.Tab>
           <Tabs.Tab value="usage-logs">Usage Logs</Tabs.Tab>
           <Tabs.Tab value="linked-assets">Linked Assets</Tabs.Tab>
-          {item.is_serialized && (
-            <Tabs.Tab value="serialized-units">Serialized Units</Tabs.Tab>
-          )}
+          {/* Always present so a user looking to add a serial number can find
+              it — even when the item isn't flagged serialized yet, the panel
+              explains the state and links to enabling it (op-qff). */}
+          <Tabs.Tab value="serialized-units">Serialized Units</Tabs.Tab>
         </Tabs.List>
 
         {/* Overview Tab */}
@@ -454,15 +455,17 @@ const InventoryItemDetailPage: React.FC = () => {
           </Card>
         </Tabs.Panel>
 
-        {/* Serialized Units Tab — per-unit lifecycle for serialized items */}
-        {item.is_serialized && (
-          <Tabs.Panel value="serialized-units" pt="md">
-            <SerializedComponentsPanel
-              itemId={item.id}
-              trackingMode={item.serial_tracking_mode}
-            />
-          </Tabs.Panel>
-        )}
+        {/* Serialized Units Tab — per-unit lifecycle for serialized items.
+            Shown for every item; when the item isn't serialized the panel
+            renders a CTA to enable tracking rather than a dead view (op-qff). */}
+        <Tabs.Panel value="serialized-units" pt="md">
+          <SerializedComponentsPanel
+            itemId={item.id}
+            trackingMode={item.serial_tracking_mode}
+            isSerialized={item.is_serialized ?? false}
+            onEnableTracking={() => navigate(`/inventory/items/${item.id}/edit`)}
+          />
+        </Tabs.Panel>
       </Tabs>
     </WorkspacePage>
   );

@@ -14,8 +14,10 @@ from inventory.services.asset_tag_service import (
     SCAN_URL_TEMPLATE,
     SIZES,
     InvalidTagSizeError,
+    get_qr_box_px,
     get_rivet_centers_px,
     get_safe_rect_px,
+    get_text_box_px,
     render_asset_tag,
 )
 from inventory.tests.factories import AssetFactory
@@ -93,52 +95,79 @@ class TestRenderAssetTag:
                         f"in rivet exclusion zone, got {px}"
                     )
 
-    def test_no_text_in_tag(self):
-        # The only non-white content on the tag should be the QR code itself —
-        # the call-to-action text was removed because it's unreadable at print
-        # size. Verify by checking that the bounding box of non-white pixels is
-        # square-ish (matches a QR) rather than a wide rectangle that would
-        # include text to the right of the code.
+    def test_asset_tag_text_printed_below_qr(self):
+        # The human-readable asset tag string is printed as text directly
+        # beneath the QR so a tag is identifiable by eye without scanning.
+        # Verify there is ink inside the reserved text band and that the band
+        # sits strictly below the QR (no overlap).
         asset = AssetFactory()
-        png = render_asset_tag(asset, size="standard", dpi=1440)
-        img = _open_png(png).convert("RGB")
-        white = Image.new("RGB", img.size, "white")
-        bbox = ImageChops.difference(img, white).getbbox()
-        assert bbox is not None, "tag rendered as fully blank"
-        bbox_w = bbox[2] - bbox[0]
-        bbox_h = bbox[3] - bbox[1]
-        # QR is square; allow a 5% tolerance.
-        assert abs(bbox_w - bbox_h) <= max(bbox_w, bbox_h) * 0.05, (
-            f"non-white region is not square (w={bbox_w}, h={bbox_h}); "
-            "indicates extra text rendering alongside QR"
-        )
-
-    def test_qr_code_takes_full_safe_rect(self):
-        # QR should fill the safe rect (the area between rivet exclusion zones).
-        # The limiting dimension is the safe-rect width on the standard tag.
-        asset = AssetFactory()
+        assert asset.asset_tag  # factory always assigns one
         png = render_asset_tag(asset, size="standard", dpi=1440)
         img = _open_png(png).convert("RGB")
 
+        left, top, right, bottom = get_text_box_px("standard", dpi=1440)
+        text_region = img.crop((left, top, right, bottom))
+        white = Image.new("RGB", text_region.size, "white")
+        text_bbox = ImageChops.difference(text_region, white).getbbox()
+        assert text_bbox is not None, "no asset-tag text rendered below the QR"
+
+        qr_box = get_qr_box_px("standard", dpi=1440)
+        assert top >= qr_box[3], "text band overlaps the QR vertically"
+
+    def test_asset_tag_text_printed_on_large_size(self):
+        # The large tag shrinks the QR slightly to fit the same text band.
+        asset = AssetFactory()
+        png = render_asset_tag(asset, size="large", dpi=1440)
+        img = _open_png(png).convert("RGB")
+
+        left, top, right, bottom = get_text_box_px("large", dpi=1440)
+        text_region = img.crop((left, top, right, bottom))
+        white = Image.new("RGB", text_region.size, "white")
+        assert (
+            ImageChops.difference(text_region, white).getbbox() is not None
+        ), "no asset-tag text rendered on the large tag"
+
+    def test_asset_without_tag_renders_qr_only(self):
+        # An asset with a blank tag renders the QR and no text (blank band),
+        # and must not raise.
+        asset = AssetFactory.build(asset_tag="")
+        png = render_asset_tag(asset, size="standard", dpi=1440)
+        img = _open_png(png).convert("RGB")
+
+        left, top, right, bottom = get_text_box_px("standard", dpi=1440)
+        text_region = img.crop((left, top, right, bottom))
+        white = Image.new("RGB", text_region.size, "white")
+        assert (
+            ImageChops.difference(text_region, white).getbbox() is None
+        ), "text band should be blank when the asset has no tag"
+
+    def test_qr_code_fills_its_box_within_safe_rect(self):
+        # The QR should fill its allotted box (dark modules reach ~85% of the
+        # box after the QR's own quiet zone), and that box must sit inside the
+        # safe rect (the area between the rivet exclusion zones). Measuring the
+        # QR box directly keeps this robust to the text printed beneath it.
+        asset = AssetFactory()
+        png = render_asset_tag(asset, size="standard", dpi=1440)
+        img = _open_png(png).convert("RGB")
+
+        qr_left, qr_top, qr_right, qr_bottom = get_qr_box_px("standard", dpi=1440)
         safe_left, safe_top, safe_right, safe_bottom = get_safe_rect_px("standard", dpi=1440)
-        safe_w = safe_right - safe_left
-        safe_h = safe_bottom - safe_top
-        limiting_dim = min(safe_w, safe_h)
+        assert safe_left <= qr_left and qr_right <= safe_right
+        assert safe_top <= qr_top and qr_bottom <= safe_bottom
 
-        white = Image.new("RGB", img.size, "white")
-        bbox = ImageChops.difference(img, white).getbbox()
+        qr_region = img.crop((qr_left, qr_top, qr_right, qr_bottom))
+        white = Image.new("RGB", qr_region.size, "white")
+        bbox = ImageChops.difference(qr_region, white).getbbox()
         assert bbox is not None
         bbox_w = bbox[2] - bbox[0]
         bbox_h = bbox[3] - bbox[1]
-        # QR fills the safe rect minus a small inner padding and minus the QR's
-        # own quiet zone — so the dark content reaches ~85% of the limiting
-        # safe-rect dimension.
+        qr_dim = qr_right - qr_left
         assert (
-            bbox_w >= limiting_dim * 0.85
-        ), f"QR width {bbox_w}px does not fill safe rect (limiting dim {limiting_dim}px)"
+            bbox_w >= qr_dim * 0.85
+        ), f"QR width {bbox_w}px does not fill its box (dim {qr_dim}px)"
         assert (
-            bbox_h >= limiting_dim * 0.85
-        ), f"QR height {bbox_h}px does not fill safe rect (limiting dim {limiting_dim}px)"
+            bbox_h >= qr_dim * 0.85
+        ), f"QR height {bbox_h}px does not fill its box (dim {qr_dim}px)"
 
     def test_render_executes_without_error_at_default_dpi(self):
         asset = AssetFactory()

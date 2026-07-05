@@ -12,7 +12,7 @@ from django.conf import settings
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -985,6 +985,67 @@ class UsageLog(models.Model):
         return f"{self.item.name} - {self.quantity_used} units on {self.usage_date.date()}"
 
 
+class AssetTagSequence(models.Model):
+    """Atomic per-year counter backing the ``DMS-YYANNNSS`` asset tag.
+
+    One row per calendar year. ``number`` runs 1..999 and resets each year;
+    when it would exceed 999 the ``alpha`` section advances (``A`` -> ``B`` ->
+    ...). :meth:`allocate_core` hands out the next ``YYANNN`` core inside a
+    ``select_for_update`` lock so concurrent asset creation can never mint the
+    same sequence value twice.
+    """
+
+    year = models.PositiveIntegerField(
+        unique=True,
+        help_text="Calendar year this counter tracks (e.g. 2026).",
+    )
+    alpha = models.CharField(
+        max_length=1,
+        default="A",
+        help_text="Current alpha section, advances when the numeric run passes 999.",
+    )
+    number = models.PositiveIntegerField(
+        default=0,
+        help_text="Last allocated number for the year (0 means none allocated yet).",
+    )
+
+    class Meta:
+        ordering = ["year"]
+        verbose_name = "asset tag sequence"
+        verbose_name_plural = "asset tag sequences"
+
+    def __str__(self) -> str:
+        return f"{self.year}: {self.alpha}{self.number:03d}"
+
+    @staticmethod
+    def _next_alpha(alpha: str) -> str:
+        """Return the alpha section that follows ``alpha`` (``A`` -> ``B`` ...)."""
+        nxt = chr(ord(alpha.upper()) + 1)
+        if nxt > "Z":
+            raise ValueError("Asset tag sequence exhausted: alpha section passed 'Z'")
+        return nxt
+
+    @classmethod
+    def allocate_core(cls, year: int) -> str:
+        """Atomically allocate and return the next ``YYANNN`` core for ``year``.
+
+        Advances the per-year counter under ``select_for_update`` and returns
+        the six significant characters (two-digit year, alpha, zero-padded
+        three-digit number). Callers add the ``DMS-`` prefix and checksum.
+        """
+        with transaction.atomic():
+            # get_or_create absorbs the create race on the unique ``year``;
+            # the subsequent select_for_update serializes the increment.
+            cls.objects.get_or_create(year=year)
+            seq = cls.objects.select_for_update().get(year=year)
+            seq.number += 1
+            if seq.number > 999:
+                seq.number = 1
+                seq.alpha = cls._next_alpha(seq.alpha)
+            seq.save(update_fields=["alpha", "number"])
+            return f"{year % 100:02d}{seq.alpha}{seq.number:03d}"
+
+
 class Asset(models.Model):
     """
     Track individual hard assets in the makerspace.
@@ -1484,18 +1545,34 @@ class Asset(models.Model):
         return self.name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate asset tag if not provided.
+        """Auto-generate a ``DMS-YYANNNSS`` asset tag on first save.
 
-        ``generate_sku()`` returns a UUID7, whose first 12 hex characters
-        are a millisecond timestamp. Slicing ``[:8]`` meant any two assets
-        created in the same ~256 ms window collided on asset_tag and
-        raised IntegrityError — caught by the gh-456 Playwright suite
-        when its setup seeds multiple assets back-to-back. Use the last
-        8 hex chars (from the UUID7 random portion) so collisions only
-        happen at ~10^9 odds.
+        The tag is a human-meaningful identifier printed under the QR code:
+        ``DMS-`` + two-digit received year + alpha section + per-year counter
+        + a two-character checksum (see
+        :mod:`inventory.services.asset_tag_id`). It is assigned once, only
+        when ``asset_tag`` is empty, so an existing tag is never regenerated.
+
+        The QR payload is unaffected — scanning still resolves the asset by
+        its UUID (see ``qr_code_service``); the tag exists for humans reading
+        the physical label.
+
+        Year comes from ``date_received`` (the asset is usually entered when
+        received) and falls back to the current year when unset. The per-year
+        counter guarantees uniqueness, but we still retry on the off chance a
+        backfilled tag collides with the freshly allocated one.
         """
         if not self.asset_tag:
-            self.asset_tag = f"DMS-{generate_sku().replace('-', '')[-8:].upper()}"
+            from .services.asset_tag_id import generate_asset_tag
+
+            year = self.date_received.year if self.date_received else timezone.now().year
+            for _ in range(10):
+                candidate = generate_asset_tag(year)
+                if not Asset.objects.filter(asset_tag=candidate).exists():
+                    self.asset_tag = candidate
+                    break
+            else:  # pragma: no cover - only if 10 consecutive allocations collide
+                raise IntegrityError("Could not allocate a unique asset tag")
 
         super().save(*args, **kwargs)
 

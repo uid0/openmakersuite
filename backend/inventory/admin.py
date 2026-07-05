@@ -17,6 +17,7 @@ from .models import (
     Asset,
     AssetPart,
     AssetProblem,
+    AssetTagSequence,
     Category,
     ComponentUsageEvent,
     InventoryItem,
@@ -829,6 +830,19 @@ class UsageLogAdmin(admin.ModelAdmin):
     search_fields = ["item__name", "notes"]
     readonly_fields = ["usage_date"]
     date_hierarchy = "usage_date"
+
+
+@admin.register(AssetTagSequence)
+class AssetTagSequenceAdmin(admin.ModelAdmin):
+    """Read-only view of the per-year DMS-YYANNNSS counter."""
+
+    list_display = ["year", "alpha", "number"]
+    ordering = ["-year"]
+    readonly_fields = ["year", "alpha", "number"]
+
+    def has_add_permission(self, request):
+        # Rows are created on demand by the tag generator; never hand-added.
+        return False
 
 
 @admin.register(Asset)

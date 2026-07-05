@@ -5,7 +5,7 @@
 import { Button, Loader, Paper, Stack, Text } from '@mantine/core';
 import { useDebouncedCallback } from '@mantine/hooks';
 import React, { useCallback, useEffect, useState } from 'react';
-import GridLayout, { Layout } from 'react-grid-layout';
+import GridLayout, { Layout, LayoutItem } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import AssetProblemsWidget from '../components/dashboard/AssetProblemsWidget';
@@ -90,7 +90,9 @@ const DashboardPage: React.FC = () => {
 
   const debouncedSave = useDebouncedCallback(saveWidgets, 1000);
 
-  const handleLayoutChange = (layout: Layout[]) => {
+  // react-grid-layout v2 renamed the per-item type to `LayoutItem`; `Layout` is
+  // now the array (`readonly LayoutItem[]`) that `onLayoutChange` hands back.
+  const handleLayoutChange = (layout: Layout) => {
     const updatedWidgets = widgets.map((widget) => {
       const layoutItem = layout.find((item) => item.i === widget.id.toString());
       if (layoutItem) {
@@ -133,7 +135,7 @@ const DashboardPage: React.FC = () => {
     }
   };
 
-  const getLayout = (): Layout[] => {
+  const getLayout = (): LayoutItem[] => {
     return widgets
       .filter((w) => w.is_visible)
       .map((widget) => ({
@@ -191,13 +193,14 @@ const DashboardPage: React.FC = () => {
         <GridLayout
           className="layout"
           layout={getLayout()}
-          cols={6}
-          rowHeight={100}
           width={containerWidth}
           onLayoutChange={handleLayoutChange}
-          isDraggable={true}
-          isResizable={true}
-          draggableHandle=".dashboard-widget-drag-handle"
+          // v2 groups the former flat props into config objects: cols/rowHeight
+          // under gridConfig, isDraggable/draggableHandle under dragConfig, and
+          // isResizable under resizeConfig.
+          gridConfig={{ cols: 6, rowHeight: 100 }}
+          dragConfig={{ enabled: true, handle: '.dashboard-widget-drag-handle' }}
+          resizeConfig={{ enabled: true }}
         >
           {visibleWidgets.map((widget) => (
             <div key={widget.id}>{renderWidget(widget)}</div>

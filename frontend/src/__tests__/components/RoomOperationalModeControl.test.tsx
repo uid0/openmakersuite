@@ -41,13 +41,16 @@ const buildMode = (overrides: Partial<any> = {}) => ({
 
 const renderControl = () =>
   render(
-    <MantineProvider>
+    <MantineProvider env="test">
       <RoomOperationalModeControl locationId={5} locationName="Wood Shop" />
     </MantineProvider>,
   );
 
 const pickMode = async (label: string) => {
-  fireEvent.click(screen.getByLabelText('Set mode'));
+  // Mantine 9.4 gives the eagerly-rendered listbox an accessible name via
+  // aria-labelledby, so 'Set mode' now matches both the input and the listbox.
+  // Scope to the input element to keep targeting the Select control.
+  fireEvent.click(screen.getByLabelText('Set mode', { selector: 'input' }));
   fireEvent.click(await screen.findByRole('option', { name: label }));
 };
 

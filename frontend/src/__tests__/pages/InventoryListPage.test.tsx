@@ -170,7 +170,7 @@ describe('InventoryListPage', () => {
 
   const renderPage = () => {
     return render(
-      <MantineProvider>
+      <MantineProvider env="test">
         <MemoryRouter>
           <InventoryListPage />
         </MemoryRouter>
@@ -493,7 +493,7 @@ describe('InventoryListPage', () => {
   it('shows the re-login banner with a return path on session expiry, keeping the list', async () => {
     sessionStorage.clear();
     render(
-      <MantineProvider>
+      <MantineProvider env="test">
         <MemoryRouter>
           <SessionExpiredBanner />
           <InventoryListPage />

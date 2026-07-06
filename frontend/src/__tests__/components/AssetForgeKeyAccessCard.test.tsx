@@ -85,7 +85,7 @@ const buildLockout = (overrides: Partial<any> = {}) => ({
 
 const renderCard = (assetId = 'a1') =>
   render(
-    <MantineProvider>
+    <MantineProvider env="test">
       <AssetForgeKeyAccessCard assetId={assetId} />
     </MantineProvider>,
   );

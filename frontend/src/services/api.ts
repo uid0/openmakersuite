@@ -1237,7 +1237,7 @@ export const reorderAPI = {
     order_number?: string;
     estimated_delivery?: string;
     actual_cost?: number;
-  }) =>
+  } = {}) =>
     api.post(`/reorders/requests/${id}/mark_ordered/`, data),
 
   markReceived: (id: number, actualDelivery?: string) =>

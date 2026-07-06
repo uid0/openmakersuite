@@ -364,13 +364,25 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def mark_ordered(self, request, pk=None):
-        """Mark a request as ordered."""
+        """Mark a request as ordered.
+
+        The order/PO number lives in the Purchase Order domain and is carried
+        onto the request automatically when a PO is created/finalized, so it is
+        not required here — marking ordered is a one-click action. Any of
+        ``order_number``, ``estimated_delivery`` or ``actual_cost`` may still be
+        supplied optionally, but fields that are omitted are left untouched so a
+        bare mark-ordered never wipes values a PO already populated.
+        """
         reorder = self.get_object()
         reorder.status = "ordered"
         reorder.ordered_at = timezone.now()
-        reorder.order_number = request.data.get("order_number", "")
-        reorder.estimated_delivery = request.data.get("estimated_delivery")
-        reorder.actual_cost = request.data.get("actual_cost")
+
+        if "order_number" in request.data:
+            reorder.order_number = request.data.get("order_number", "")
+        if "estimated_delivery" in request.data:
+            reorder.estimated_delivery = request.data.get("estimated_delivery")
+        if "actual_cost" in request.data:
+            reorder.actual_cost = request.data.get("actual_cost")
 
         if not reorder.reviewed_by:
             reorder.reviewed_by = request.user

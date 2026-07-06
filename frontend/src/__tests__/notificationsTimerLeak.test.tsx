@@ -8,11 +8,11 @@
  * jsdom is torn down and throws "window is not defined", failing the whole run
  * (flaky — passes in isolation, fails in the full suite).
  *
- * `setupTests.ts` clears leaked long-lived timers in a global afterEach. This
- * test proves it works: a notification's auto-close timer must NOT survive into
- * the next test. If the afterEach guard is removed, the orphaned timer fires
- * during the second test's wait and flips `closedAfterTeardown` — turning this
- * test deterministically red instead of letting the leak flake the suite.
+ * `setupTests.ts` clears every window timer still pending in a global afterEach.
+ * This test proves it works: a notification's auto-close timer must NOT survive
+ * into the next test. If the afterEach guard is removed, the orphaned timer
+ * fires during the second test's wait and flips `closedAfterTeardown` — turning
+ * this test deterministically red instead of letting the leak flake the suite.
  */
 import { MantineProvider } from '@mantine/core';
 import { Notifications, notifications } from '@mantine/notifications';
@@ -22,7 +22,7 @@ import { describe, expect, it } from 'vitest';
 // Survives across the two tests (module scope). Set if a notification's
 // auto-close timer fires after its test ended — i.e. it leaked.
 let closedAfterTeardown = false;
-const AUTO_CLOSE_MS = 1200; // >= setupTests' leaked-timer threshold (1000ms)
+const AUTO_CLOSE_MS = 1200; // long enough to still be pending when the test ends
 
 describe('@mantine/notifications auto-close timer leak guard', () => {
   it('shows a notification, scheduling an auto-close timer', async () => {

@@ -118,46 +118,53 @@ if (typeof document !== 'undefined' && !(document as Document & { fonts?: unknow
 }
 
 // ---------------------------------------------------------------------------
-// Clear leaked long-lived timers after every test (e.g. @mantine/notifications
-// auto-close timers).
+// Cancel leaked timers after every test (Mantine transition + @mantine/
+// notifications auto-close timers).
 //
-// Mantine v9's NotificationContainer schedules its auto-close
-// `window.setTimeout(handleHide, …)` from two separate effects that share a
-// single `autoCloseTimeout` ref, so the first timer's id is overwritten and
-// orphaned. On unmount Mantine cancels only the tracked (second) timer; the
-// orphaned one survives, then fires a few seconds later — after vitest has torn
-// down this file's jsdom environment — and runs `window.clearTimeout(...)`,
-// throwing "window is not defined". Under vitest v4's stricter unhandled-error
-// handling that reddens the whole run. It is flaky because it depends on
-// teardown-vs-timer timing: a file passes in isolation but fails in the full
-// suite (observed first on AdminDashboard.test.tsx, gh-660).
+// Mantine drives notifications, modals, tooltips, menus, etc. through
+// @mantine/core's <Transition> (components/Transition/use-transition.ts), whose
+// animation ends in a `window.setTimeout(…, transitionDuration)`;
+// @mantine/notifications then adds a multi-second auto-close `window.setTimeout`
+// on top. When one of those fires AFTER Testing Library has unmounted the tree —
+// or after vitest tears down this file's jsdom environment — it calls
+// `dispatchSetState` on a torn-down React 19 root and throws inside
+// `resolveUpdatePriority`. Vitest v4 reports that as an unhandled error and
+// reddens the whole run even though every assertion passed. It is flaky because
+// it depends on teardown-vs-timer timing: a file passes in isolation but the
+// full suite fails.
 //
-// Fix (test-only, no production impact): track timers with a delay at or above
-// the threshold and clear any still pending after each test, so no notification
-// auto-close timer (autoClose is 3–5s in this app) can outlive the test that
-// scheduled it. The threshold leaves sub-second timers (Testing Library
-// polling, Mantine transitions, React scheduling) untouched to keep the blast
-// radius minimal.
+// First seen on the notification auto-close timer (gh-660), which a >=1000ms
+// threshold fixed. It resurfaced on the one-click mark-ordered notification
+// (op-28u): there the SUB-second transition timer, not the auto-close one, won
+// the teardown race, so the threshold let it through. So track every window
+// timer and clear whatever is still pending after each test.
+//
+// Fix (test-only, no production impact): afterEach runs after Testing Library's
+// own unmount (registered later, so it runs first), so a timer still pending
+// here is leaked async work the finished test no longer needs. Clearing it
+// cannot affect an assertion that already ran, and it guarantees no Mantine
+// transition or notification callback can fire against a torn-down root. Only
+// setTimeout is wrapped (the leaking callback is a setTimeout, per the
+// use-transition.mjs stack); requestAnimationFrame is deliberately left alone so
+// jsdom's pretendToBeVisual frame loop — which Mantine/floating-ui popovers rely
+// on — keeps running normally between tests.
 // ---------------------------------------------------------------------------
-const LEAKED_TIMER_THRESHOLD_MS = 1000;
-const longLivedTimers = new Set<unknown>();
+const pendingTimers = new Set<unknown>();
 const nativeSetTimeout = window.setTimeout.bind(window);
 const nativeClearTimeout = window.clearTimeout.bind(window);
 
 window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
   const id = nativeSetTimeout(handler as never, timeout as never, ...(args as never[]));
-  if (typeof timeout === 'number' && timeout >= LEAKED_TIMER_THRESHOLD_MS) {
-    longLivedTimers.add(id);
-  }
+  pendingTimers.add(id);
   return id;
 }) as typeof window.setTimeout;
 
 window.clearTimeout = ((id?: unknown) => {
-  longLivedTimers.delete(id);
+  pendingTimers.delete(id);
   return nativeClearTimeout(id as never);
 }) as typeof window.clearTimeout;
 
 afterEach(() => {
-  longLivedTimers.forEach((id) => nativeClearTimeout(id as never));
-  longLivedTimers.clear();
+  pendingTimers.forEach((id) => nativeClearTimeout(id as never));
+  pendingTimers.clear();
 });

@@ -126,7 +126,7 @@ class TestProductionEnvValidatorAC23:
             ("LETSENCRYPT_EMAIL", "", "LETSENCRYPT_EMAIL"),
             ("FORGEKEY_FIRMWARE_SIGNING_KEY", "not-a-pem", "FORGEKEY_FIRMWARE_SIGNING_KEY"),
             ("SENTRY_DSN", "http://abc@o0.ingest.sentry.io/123", "SENTRY_DSN"),
-            ("REACT_APP_SENTRY_DSN", "http://abc@o0.ingest.sentry.io/123", "REACT_APP_SENTRY_DSN"),
+            ("VITE_SENTRY_DSN", "http://abc@o0.ingest.sentry.io/123", "VITE_SENTRY_DSN"),
         ],
     )
     def test_unsafe_value_rejected(self, tmp_path, key, value, fragment):
@@ -161,7 +161,7 @@ class TestProductionEnvValidatorAC23:
         "key",
         [
             "SENTRY_DSN",
-            "REACT_APP_SENTRY_DSN",
+            "VITE_SENTRY_DSN",
         ],
     )
     def test_sentry_https_value_allowed(self, tmp_path, key):
@@ -176,7 +176,7 @@ class TestProductionEnvValidatorAC23:
         "key",
         [
             "SENTRY_DSN",
-            "REACT_APP_SENTRY_DSN",
+            "VITE_SENTRY_DSN",
         ],
     )
     def test_empty_sentry_value_allowed(self, tmp_path, key):

@@ -13,7 +13,7 @@ import {
 } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, Resolver, useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FormInput } from '../components/forms/FormInput';
 import { FormLayout } from '../components/forms/FormLayout';
@@ -39,7 +39,10 @@ const SupplierFormPage: React.FC = () => {
     formState: { errors },
     reset,
   } = useForm<SupplierFormData>({
-    resolver: zodResolver(supplierSchema),
+    // v5 resolvers infer the schema's Zod *input* type (fields with `.default()`
+    // are optional pre-parse); this form seeds all fields via defaultValues, so
+    // its field values are the *output* shape — assert against SupplierFormData.
+    resolver: zodResolver(supplierSchema) as Resolver<SupplierFormData>,
     defaultValues: {
       name: '',
       supplier_type: 'local',

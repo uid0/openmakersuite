@@ -49,16 +49,17 @@ class SupplierAdmin(admin.ModelAdmin):
     list_display = [
         "name",
         "supplier_type",
+        "ordering_adapter",
         "account_number",
         "tax_free_paperwork_filed",
         "website",
     ]
-    list_filter = ["supplier_type", "tax_free_paperwork_filed"]
+    list_filter = ["supplier_type", "ordering_adapter", "tax_free_paperwork_filed"]
     search_fields = ["name", "account_number"]
     fieldsets = (
         (
             "Basic Information",
-            {"fields": ("name", "supplier_type", "website")},
+            {"fields": ("name", "supplier_type", "ordering_adapter", "website")},
         ),
         (
             "Account Information",

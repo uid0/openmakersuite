@@ -215,6 +215,12 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
 
     # Related data
     supplier_details = serializers.CharField(source="supplier.name", read_only=True)
+    # Drives the adapter-aware order-pad affordances in the web UI (op-svpq): the
+    # PurchaseOrderPage picks the Amazon "Open cart" vs HD Supply / generic
+    # download+copy buttons from this without a second request.
+    supplier_ordering_adapter = serializers.CharField(
+        source="supplier.ordering_adapter", read_only=True, allow_null=True
+    )
     created_by_username = serializers.CharField(source="created_by.username", read_only=True)
     sent_by_username = serializers.CharField(
         source="sent_by.username", read_only=True, allow_null=True
@@ -247,6 +253,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "po_number",
             "supplier",
             "supplier_details",
+            "supplier_ordering_adapter",
             "status",
             "order_date",
             "expected_delivery_date",

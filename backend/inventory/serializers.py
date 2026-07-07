@@ -650,6 +650,7 @@ class AssetPartSerializer(serializers.ModelSerializer):
             "is_required",
             "maintenance_interval_days",
             "last_replaced_at",
+            "replacement_serial_number",
             "days_since_replacement",
             "needs_replacement",
             "notes",
@@ -675,6 +676,7 @@ class AssetPartSerializer(serializers.ModelSerializer):
             "minimum_stock": part.minimum_stock,
             "needs_reorder": part.needs_reorder,
             "category_name": part.category.name if part.category else None,
+            "is_serialized": part.is_serialized,
         }
 
 

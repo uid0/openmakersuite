@@ -2678,12 +2678,40 @@ class AssetPartViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def mark_replaced(self, request, pk=None):
-        """Mark a part as replaced (updates last_replaced_at to now)."""
+        """Mark a part as replaced (updates last_replaced_at to now).
+
+        For serialized parts, an optional ``replacement_serial_number`` in the
+        request body records the serial of the newly installed unit. Omitting
+        it (or sending an empty value) preserves the original one-click
+        behaviour used by non-serialized parts.
+        """
         from django.utils import timezone
 
         asset_part = self.get_object()
+        update_fields = ["last_replaced_at"]
+
+        raw_serial = request.data.get("replacement_serial_number")
+        if raw_serial not in (None, ""):
+            if not isinstance(raw_serial, str):
+                raise serializers.ValidationError(
+                    {"replacement_serial_number": "Must be a string."}
+                )
+            serial = raw_serial.strip()
+            if serial:
+                max_length = AssetPart._meta.get_field("replacement_serial_number").max_length
+                if len(serial) > max_length:
+                    raise serializers.ValidationError(
+                        {
+                            "replacement_serial_number": (
+                                f"Ensure this value has at most {max_length} " "characters."
+                            )
+                        }
+                    )
+                asset_part.replacement_serial_number = serial
+                update_fields.append("replacement_serial_number")
+
         asset_part.last_replaced_at = timezone.now()
-        asset_part.save(update_fields=["last_replaced_at"])
+        asset_part.save(update_fields=update_fields)
 
         serializer = self.get_serializer(asset_part)
         return Response(serializer.data)

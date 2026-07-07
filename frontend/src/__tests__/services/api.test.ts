@@ -792,11 +792,34 @@ describe('API Service', () => {
         last_replaced_at: '2024-01-01T00:00:00Z',
       };
 
-      mock.onPost('/inventory/asset-parts/1/mark_replaced/').reply(200, mockResponse);
+      mock.onPost('/inventory/asset-parts/1/mark_replaced/').reply((config) => {
+        // One-click path posts no body so non-serialized parts are unchanged.
+        expect(config.data).toBeUndefined();
+        return [200, mockResponse];
+      });
 
       const response = await assetPartsAPI.markReplaced('1');
 
       expect(response.data.last_replaced_at).toBeDefined();
+    });
+
+    test('markReplaced sends replacement_serial_number when provided', async () => {
+      const mockResponse = {
+        id: '1',
+        last_replaced_at: '2024-01-01T00:00:00Z',
+        replacement_serial_number: 'SN-XYZ',
+      };
+
+      mock.onPost('/inventory/asset-parts/1/mark_replaced/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({
+          replacement_serial_number: 'SN-XYZ',
+        });
+        return [200, mockResponse];
+      });
+
+      const response = await assetPartsAPI.markReplaced('1', 'SN-XYZ');
+
+      expect(response.data.replacement_serial_number).toBe('SN-XYZ');
     });
   });
 

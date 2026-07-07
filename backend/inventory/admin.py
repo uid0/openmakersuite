@@ -326,6 +326,7 @@ class AssetPartInline(admin.TabularInline):
         "is_required",
         "maintenance_interval_days",
         "last_replaced_at",
+        "replacement_serial_number",
         "needs_replacement_display",
         "days_since_replacement_display",
         "notes",
@@ -1349,6 +1350,7 @@ class AssetPartAdmin(admin.ModelAdmin):
                 "fields": (
                     "maintenance_interval_days",
                     "last_replaced_at",
+                    "replacement_serial_number",
                     "needs_replacement_display",
                     "days_since_replacement_display",
                 )

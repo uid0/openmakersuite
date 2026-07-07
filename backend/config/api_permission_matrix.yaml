@@ -1322,6 +1322,9 @@ views:
       low_stock:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      metrics:
+        permission_classes:
+        - AllowAny
       my_sig_inventory:
         permission_classes:
         - IsAuthenticated

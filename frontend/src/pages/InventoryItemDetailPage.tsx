@@ -25,13 +25,14 @@ import { IconClipboardCheck, IconEdit, IconQrcode } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import InventoryMetricsRow from '../components/inventory/InventoryMetricsRow';
 import SerializedComponentsPanel from '../components/inventory/SerializedComponentsPanel';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { useNotifications } from '../hooks/useNotifications';
 import { assetsAPI, CycleCountPayload, inventoryAPI, reorderAPI } from '../services/api';
-import { Asset, InventoryItem, ReorderRequest, UsageLog } from '../types';
+import { Asset, InventoryItem, InventoryItemMetrics, ReorderRequest, UsageLog } from '../types';
 import { showError } from '../utils/dialogs';
 
 // Cycle-count reason options (op-c7y4). Mirrors the reconciliation grid's
@@ -167,6 +168,7 @@ const InventoryItemDetailPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [item, setItem] = useState<InventoryItem | null>(null);
+  const [metrics, setMetrics] = useState<InventoryItemMetrics | null>(null);
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
   const [reorderHistory, setReorderHistory] = useState<ReorderRequest[]>([]);
   const [linkedAssets, setLinkedAssets] = useState<Asset[]>([]);
@@ -190,8 +192,9 @@ const InventoryItemDetailPage: React.FC = () => {
     // and show "Item not found" even though the item exists — uid0 hit
     // this on items with no linked-assets filter match where assetsAPI
     // returned a 400.
-    const [itemRes, usageLogsRes, reorderRes, assetsRes] = await Promise.allSettled([
+    const [itemRes, metricsRes, usageLogsRes, reorderRes, assetsRes] = await Promise.allSettled([
       inventoryAPI.getItem(id),
+      inventoryAPI.getItemMetrics(id),
       inventoryAPI.getUsageLogs(id),
       reorderAPI.listRequests({ status: undefined }),
       assetsAPI.listAssets({ inventory_item: id }),
@@ -201,6 +204,12 @@ const InventoryItemDetailPage: React.FC = () => {
       setItem(itemRes.value.data);
     } else {
       console.error('Error loading item:', itemRes.reason);
+    }
+
+    if (metricsRes.status === 'fulfilled') {
+      setMetrics(metricsRes.value.data);
+    } else {
+      console.error('Error loading item metrics:', metricsRes.reason);
     }
 
     if (usageLogsRes.status === 'fulfilled') {
@@ -305,6 +314,10 @@ const InventoryItemDetailPage: React.FC = () => {
         {item.is_hazardous && <Badge color="orange">Hazardous Material</Badge>}
         {item.is_serialized && <Badge color="grape">Serialized</Badge>}
       </Group>
+
+      {/* Prominent metrics strip — hard to get from a single screen otherwise
+          (issue-5): SKU · QOH · QOO · QA · QC · QIT · RP · Lead · Cost. */}
+      {metrics && <InventoryMetricsRow sku={item.sku} metrics={metrics} />}
 
       {/* Tabs */}
       <Tabs value={activeTab} onChange={setActiveTab}>

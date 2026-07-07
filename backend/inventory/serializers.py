@@ -636,6 +636,40 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
         return {"trend": "no_data", "change_percentage": None}
 
 
+class InventoryMetricsSerializer(serializers.Serializer):
+    """Computed stock + cost metrics for the inventory-item detail view.
+
+    Powers the ``SKU · QOH · QOO · QA · QC · QIT · RP · Lead · Cost`` row on
+    the web item-detail page and the paired ScanTTY TUI row (issue-5). The
+    field names below are a pinned contract shared with the ScanTTY worker, so
+    do not rename them.
+
+    All values are computed in ``InventoryItemViewSet.metrics``; this
+    serializer only shapes the output and is fed a plain ``dict`` (not a model
+    instance). Quantities are numbers; money fields are DRF ``DecimalField``s
+    (serialized as strings, matching the item serializer's ``unit_cost``).
+    """
+
+    current_stock = serializers.IntegerField()  # QOH — on hand
+    quantity_on_order = serializers.IntegerField()  # QOO — open PO units
+    quantity_available = serializers.FloatField()  # QA — QOH minus QC
+    quantity_committed = serializers.FloatField()  # QC — open work-order demand
+    quantity_in_transit = serializers.IntegerField()  # QIT — partially-received (⊆ QOO)
+    reorder_point = serializers.IntegerField()  # RP — reorder_quantity
+    lead_time_days = serializers.IntegerField(allow_null=True)  # Lead — average_lead_time
+    unit_cost = serializers.DecimalField(  # Cost — per-item, or per-case when case-based
+        max_digits=10, decimal_places=2, allow_null=True
+    )
+    cost_trend = serializers.ChoiceField(choices=["up", "down", "flat", "no_history"])
+    last_po_unit_cost = (
+        serializers.DecimalField(  # most recent PO unit cost (for the arrow tooltip)
+            max_digits=10, decimal_places=4, allow_null=True
+        )
+    )
+    is_case_based = serializers.BooleanField()
+    case_size = serializers.IntegerField(allow_null=True)  # units per case (quantity_per_package)
+
+
 class AssetPartSerializer(serializers.ModelSerializer):
     """Serializer for asset parts/consumables."""
 

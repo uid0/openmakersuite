@@ -195,6 +195,26 @@ export interface InventoryItem {
   days_since_last_count: number | null;
 }
 
+export type InventoryCostTrend = 'up' | 'down' | 'flat' | 'no_history';
+
+// Computed stock + cost metrics for the item-detail metrics row (issue-5).
+// Served by GET /api/inventory/items/<id>/metrics/. Quantities are numbers;
+// money fields arrive as decimal strings (matching InventoryItem.unit_cost).
+export interface InventoryItemMetrics {
+  current_stock: number; // QOH — on hand
+  quantity_on_order: number; // QOO — open PO units
+  quantity_available: number; // QA — on hand minus committed
+  quantity_committed: number; // QC — open work-order demand
+  quantity_in_transit: number; // QIT — partially-received (⊆ QOO)
+  reorder_point: number; // RP
+  lead_time_days: number | null; // Lead
+  unit_cost: string | null; // Cost — per-item, or per-case when case-based
+  cost_trend: InventoryCostTrend;
+  last_po_unit_cost: string | null;
+  is_case_based: boolean;
+  case_size: number | null; // units per case
+}
+
 export interface UsageLog {
   id: number;
   item: string;

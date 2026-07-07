@@ -1298,6 +1298,9 @@ views:
       create:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      cycle_count:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       destroy:
         permission_classes:
         - IsAuthenticatedOrReadOnly

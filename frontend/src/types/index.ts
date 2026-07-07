@@ -189,6 +189,10 @@ export interface InventoryItem {
   nfpa_fire_diamond_display: string;
   hazmat_compliance_status: string;
   has_complete_nfpa_data: boolean;
+  // Cycle-count tracking (op-c7y4): timestamp of the most recent cycle count
+  // and whole days since (null when the item has never been counted).
+  last_counted_at: string | null;
+  days_since_last_count: number | null;
 }
 
 export interface UsageLog {

@@ -259,6 +259,11 @@ class InventoryItem(models.Model):
         blank=True,
         help_text="Date and time when this inventory item was last scanned via QR code",
     )
+    last_counted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the most recent cycle count",
+    )
 
     # Hazardous Materials Information
     is_hazardous = models.BooleanField(

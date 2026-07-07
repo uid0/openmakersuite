@@ -446,6 +446,10 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     has_complete_nfpa_data = serializers.ReadOnlyField()
     msds_file_url = serializers.SerializerMethodField()
 
+    # Cycle-count tracking (op-c7y4): whole days since the most recent cycle
+    # count, or None if the item has never been counted.
+    days_since_last_count = serializers.SerializerMethodField()
+
     class Meta:
         model = InventoryItem
         fields = [
@@ -503,6 +507,8 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "is_serialized",
             "serial_tracking_mode",
             "last_scanned_at",
+            "last_counted_at",
+            "days_since_last_count",
             "notes",
             "needs_reorder",
             "total_value",
@@ -517,6 +523,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "qr_code",
             "created_at",
             "updated_at",
+            "last_counted_at",
         ]
 
     def get_thumbnail(self, obj):
@@ -545,6 +552,14 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             return obj.msds_file.url if obj.msds_file else None
         except Exception:
             return None
+
+    def get_days_since_last_count(self, obj):
+        """Whole days since the most recent cycle count, or None if never counted."""
+        if not obj.last_counted_at:
+            return None
+        from django.utils import timezone
+
+        return (timezone.now() - obj.last_counted_at).days
 
     def get_active_reorder_request(self, obj):
         """Return details of the active reorder request if any."""

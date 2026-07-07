@@ -253,6 +253,12 @@ export const inventoryAPI = {
       notes,
     }),
 
+  // Cycle count (op-c7y4): count physical qty for a single item, reconcile
+  // system on-hand through the shared reconciliation helper, and stamp
+  // last_counted_at. Returns the fresh stock snapshot + audit row.
+  cycleCount: (itemId: string, payload: CycleCountPayload) =>
+    api.post<CycleCountResponse>(`/inventory/items/${itemId}/cycle-count/`, payload),
+
   getLocation: (id: string) =>
     api.get(`/inventory/locations/${id}/`),
 
@@ -399,6 +405,31 @@ export interface ReconciliationRow {
     | 'other';
   notes?: string;
   skip_reorder?: boolean;
+}
+
+// Cycle count (op-c7y4). Reuses the reconciliation reason codes; the user-
+// facing form omits the system-only `vision_supply_check` reason.
+export interface CycleCountPayload {
+  counted_qty: number;
+  reason: ReconciliationRow['reason'];
+  skip_reorder?: boolean;
+  notes?: string;
+}
+
+export interface CycleCountResponse {
+  id: string;
+  current_stock: number;
+  last_counted_at: string | null;
+  days_since_last_count: number | null;
+  reconciliation: {
+    id: number;
+    projected_count: number;
+    actual_count: number;
+    delta: number;
+    reason: string;
+    reconciled_at: string;
+    reconciled_by: number;
+  };
 }
 
 export interface StockReconciliation {

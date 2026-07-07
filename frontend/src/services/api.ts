@@ -1373,6 +1373,21 @@ export interface CreatePurchaseOrderData {
   items: CreatePurchaseOrderItem[];
 }
 
+/**
+ * Vendor-agnostic order-pad export for a purchase order: a `part#,qty` CSV
+ * (with header) plus a tab-separated copy-paste block, built from each line's
+ * supplier part number. `missing_sku` lists lines whose supplier part number
+ * is blank so the operator can fix them before ordering.
+ */
+export interface OrderPadExport {
+  csv: string;
+  text: string;
+  filename: string;
+  supplier: string;
+  line_count: number;
+  missing_sku: string[];
+}
+
 export const purchaseOrderAPI = {
   listOrders: (params?: { status?: string }) =>
     api.get<{ results: any[] }>('/reorders/purchase-orders/', { params }),
@@ -1392,6 +1407,8 @@ export const purchaseOrderAPI = {
     api.post<any>(`/reorders/purchase-orders/${id}/send_to_supplier/`),
   confirmOrder: (id: string, body?: { expected_delivery_date?: string }) =>
     api.post<any>(`/reorders/purchase-orders/${id}/confirm_order/`, body),
+  exportOrder: (id: string) =>
+    api.get<OrderPadExport>(`/reorders/purchase-orders/${id}/export-order/`),
   markDelivered: (
     orderId: string,
     data: { delivery_date: string; tracking_number?: string; carrier?: string; receipt_notes?: string },

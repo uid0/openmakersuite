@@ -454,35 +454,168 @@ class TestReorderRequestAPI:
         assert request_obj.reviewed_by == user
         assert request_obj.admin_notes == "Duplicate request"
 
-    def test_generate_cart_links(self, authenticated_client):
-        """Test generating shopping cart links."""
+    def test_generate_cart_links_groups_live_queue_by_supplier(self, authenticated_client):
+        """generate_cart_links groups the live reorder queue (pending +
+        approved) by supplier into per-supplier part#,qty order pads.
+
+        Rebuilt from the dead supplier_type-branching code (op-ls52): the
+        Supplier model only produces local/online/national types, so the old
+        amazon/grainger/hdsupply branches never matched and it returned {}.
+        """
         client, user = authenticated_client
 
-        supplier1 = SupplierFactory(supplier_type="amazon")
-        supplier2 = SupplierFactory(supplier_type="grainger")
+        acme = SupplierFactory(name="Acme Tools")
+        globex = SupplierFactory(name="Globex Supply")
 
-        item1 = InventoryItemFactory(
-            supplier=supplier1,
-            supplier_sku="AMZN-123",
-            supplier_url="https://amazon.com/item1",
-        )
-        item2 = InventoryItemFactory(
-            supplier=supplier2,
-            supplier_sku="GRNG-456",
-            supplier_url="https://grainger.com/item2",
-        )
+        item1 = InventoryItemFactory(supplier=acme, supplier_sku="ACME-123")
+        item2 = InventoryItemFactory(supplier=globex, supplier_sku="GLBX-456")
 
-        ReorderRequestFactory(item=item1, status="approved")
-        ReorderRequestFactory(item=item2, status="approved")
+        # An approved and a pending request both count as "live".
+        ReorderRequestFactory(item=item1, status="approved", quantity=3)
+        ReorderRequestFactory(item=item2, status="pending", quantity=5)
 
         url = reverse("reorderrequest-generate-cart-links")
         response = client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
-        assert "amazon" in response.data
-        assert "grainger" in response.data
-        assert len(response.data["amazon"]["items"]) == 1
-        assert len(response.data["grainger"]["items"]) == 1
+        assert set(response.data.keys()) == {"Acme Tools", "Globex Supply"}
+
+        acme_pad = response.data["Acme Tools"]
+        assert acme_pad["supplier"] == "Acme Tools"
+        assert acme_pad["line_count"] == 1
+        assert acme_pad["csv"] == "part#,qty\nACME-123,3\n"
+        assert acme_pad["text"] == "ACME-123\t3"
+
+        globex_pad = response.data["Globex Supply"]
+        assert globex_pad["line_count"] == 1
+        assert globex_pad["csv"] == "part#,qty\nGLBX-456,5\n"
+        assert globex_pad["text"] == "GLBX-456\t5"
+
+    def test_generate_cart_links_excludes_non_live_requests(self, authenticated_client):
+        """Only pending/approved requests are live; ordered/received/cancelled
+        have left the queue and must not appear in the order pad."""
+        client, user = authenticated_client
+
+        supplier = SupplierFactory(name="Acme Tools")
+        live_item = InventoryItemFactory(supplier=supplier, supplier_sku="LIVE-1")
+        done_item = InventoryItemFactory(supplier=supplier, supplier_sku="DONE-1")
+
+        ReorderRequestFactory(item=live_item, status="approved", quantity=2)
+        ReorderRequestFactory(item=done_item, status="ordered", quantity=9)
+        ReorderRequestFactory(item=done_item, status="received", quantity=9)
+        ReorderRequestFactory(item=done_item, status="cancelled", quantity=9)
+
+        url = reverse("reorderrequest-generate-cart-links")
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert list(response.data.keys()) == ["Acme Tools"]
+        pad = response.data["Acme Tools"]
+        assert pad["line_count"] == 1
+        assert "LIVE-1,2" in pad["csv"]
+        assert "DONE-1" not in pad["csv"]
+
+
+@pytest.mark.integration
+class TestPurchaseOrderExportOrder:
+    """Order-pad export action: GET purchase-orders/<id>/export-order/ (op-ls52).
+
+    Turns a PO's lines into a vendor-ready part#,qty list an operator can paste
+    or upload into any distributor bulk order pad, built from each line's
+    ItemSupplier.supplier_sku with zero schema change.
+    """
+
+    def _po(self, user, supplier=None, po_number="PO-2026-0009"):
+        supplier = supplier or SupplierFactory(name="Distributor Co")
+        purchase_order = PurchaseOrder.objects.create(
+            po_number=po_number,
+            supplier=supplier,
+            status=PurchaseOrder.DRAFT,
+            created_by=user,
+        )
+        return purchase_order, supplier
+
+    def _add_line(self, purchase_order, supplier, *, name, sku, qty, voided=False):
+        item = InventoryItemFactory(name=name, supplier=supplier, supplier_sku=sku)
+        return PurchaseOrderItem.objects.create(
+            purchase_order=purchase_order,
+            item_supplier=item.primary_item_supplier,
+            quantity_ordered=qty,
+            unit_cost_ordered=Decimal("1.00"),
+            is_voided=voided,
+        )
+
+    def test_export_order_emits_part_qty_csv_and_text(self, authenticated_client):
+        client, user = authenticated_client
+        purchase_order, supplier = self._po(user)
+        self._add_line(purchase_order, supplier, name="Alpha Widget", sku="W-1", qty=2)
+        self._add_line(purchase_order, supplier, name="Beta Gadget", sku="G-2", qty=5)
+
+        url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["line_count"] == 2
+        assert response.data["missing_sku"] == []
+        assert response.data["supplier"] == "Distributor Co"
+        assert response.data["filename"] == "PO-2026-0009-order.csv"
+
+        csv_lines = response.data["csv"].splitlines()
+        assert csv_lines[0] == "part#,qty"
+        assert "W-1,2" in csv_lines
+        assert "G-2,5" in csv_lines
+
+        text_lines = response.data["text"].splitlines()
+        assert "W-1\t2" in text_lines
+        assert "G-2\t5" in text_lines
+        assert "part#" not in response.data["text"]  # copy block has no header
+
+    def test_export_order_skips_voided_lines(self, authenticated_client):
+        client, user = authenticated_client
+        purchase_order, supplier = self._po(user)
+        self._add_line(purchase_order, supplier, name="Kept", sku="KEEP-1", qty=1)
+        self._add_line(purchase_order, supplier, name="Dropped", sku="VOID-1", qty=9, voided=True)
+
+        url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["line_count"] == 1
+        assert "KEEP-1,1" in response.data["csv"]
+        assert "VOID-1" not in response.data["csv"]
+        assert "VOID-1" not in response.data["text"]
+        # A voided line is out of scope entirely — not even a missing_sku note.
+        assert response.data["missing_sku"] == []
+
+    def test_export_order_lists_missing_sku_without_dropping_them(self, authenticated_client):
+        client, user = authenticated_client
+        purchase_order, supplier = self._po(user)
+        self._add_line(purchase_order, supplier, name="Has SKU", sku="OK-1", qty=4)
+        self._add_line(purchase_order, supplier, name="No SKU Item", sku="", qty=7)
+
+        url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        # Blank-sku line is surfaced, not silently dropped...
+        assert response.data["missing_sku"] == ["No SKU Item"]
+        # ...and it stays out of the machine-readable pad (a blank part# is junk).
+        assert response.data["line_count"] == 1
+        assert "OK-1,4" in response.data["csv"]
+        assert response.data["text"] == "OK-1\t4"
+
+    def test_export_order_requires_authentication(self, api_client, authenticated_client):
+        _, user = authenticated_client
+        purchase_order, supplier = self._po(user)
+        self._add_line(purchase_order, supplier, name="Widget", sku="W-1", qty=1)
+
+        url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
+        response = api_client.get(url)  # anonymous — no credentials
+
+        assert response.status_code in (
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        )
 
 
 @pytest.mark.integration

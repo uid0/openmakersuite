@@ -2438,6 +2438,9 @@ views:
       destroy_attachment:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      export_order:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       list:
         permission_classes:
         - IsAuthenticatedOrReadOnly

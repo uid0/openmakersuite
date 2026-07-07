@@ -1042,3 +1042,142 @@ describe('PurchaseOrderPage send-to-supplier + confirm (op-alh)', () => {
     expect(screen.getByRole('button', { name: /^confirm$/i })).not.toBeDisabled();
   });
 });
+
+describe('PurchaseOrderPage order-pad export (op-ls52)', () => {
+  const orderWithLines = {
+    ...baseOrder,
+    status: 'sent',
+    status_label: 'Sent',
+    attachments: [],
+    items: [
+      {
+        id: 'line-1',
+        item_type: 'inventory_item',
+        description: null,
+        item_details: { id: 'i1', name: 'Widget', sku: 'SKU-1' },
+        asset_details: null,
+        quantity_ordered: 2,
+        quantity_received: 0,
+        quantity_pending: 2,
+        is_fully_received: false,
+        unit_cost_ordered: '1.00',
+        unit_cost_actual: null,
+        estimated_cost: '2.00',
+        actual_cost: null,
+        expected_shipment_date: null,
+        notes: '',
+        is_voided: false,
+        voided_at: null,
+        void_reason: '',
+      },
+    ],
+  };
+
+  const exportPayload = {
+    csv: 'part#,qty\nW-1,2\n',
+    text: 'W-1\t2',
+    filename: 'PO-2026-0001-order.csv',
+    supplier: 'Acme Supplies',
+    line_count: 1,
+    missing_sku: [] as string[],
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: orderWithLines });
+  });
+
+  test('Download order pad calls the API and triggers a CSV file download', async () => {
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({ data: exportPayload });
+
+    const createObjectURL = vi.fn(() => 'blob:mock');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      value: createObjectURL,
+      configurable: true,
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      value: revokeObjectURL,
+      configurable: true,
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /download order pad/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.exportOrder).toHaveBeenCalledWith('po-1');
+    });
+    // A Blob is created from the CSV and the anchor is clicked to save it.
+    await waitFor(() => {
+      expect(clickSpy).toHaveBeenCalled();
+    });
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+
+    clickSpy.mockRestore();
+  });
+
+  test('Copy order pad calls the API and writes the copy block to the clipboard', async () => {
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({ data: exportPayload });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /copy order pad/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.exportOrder).toHaveBeenCalledWith('po-1');
+    });
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('W-1\t2');
+    });
+    expect(showSuccess).toHaveBeenCalledWith('Order pad copied to clipboard');
+  });
+
+  test('warns when some lines have no supplier part number', async () => {
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({
+      data: {
+        ...exportPayload,
+        csv: 'part#,qty\n',
+        text: '',
+        line_count: 0,
+        missing_sku: ['Widget', 'Gadget'],
+      },
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /copy order pad/i }));
+
+    const warning = await screen.findByTestId('order-pad-missing-sku-warning');
+    expect(warning).toHaveTextContent(/2 lines have no supplier part number/i);
+  });
+
+  test('hides the order-pad buttons for anonymous (logged-out) viewers', async () => {
+    localStorage.clear(); // no token → the page treats the viewer as anonymous
+
+    renderPage();
+
+    // Page has loaded once the PO number is on screen.
+    await screen.findByText('PO-2026-0001', { exact: false });
+    expect(
+      screen.queryByRole('button', { name: /download order pad/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /copy order pad/i })).not.toBeInTheDocument();
+  });
+});

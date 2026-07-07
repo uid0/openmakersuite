@@ -73,6 +73,7 @@ from .serializers import (
     FixtureSerializer,
     InventoryItemDetailSerializer,
     InventoryItemSerializer,
+    InventoryMetricsSerializer,
     ItemSupplierSerializer,
     LocationProblemSerializer,
     LocationReconcileItemSerializer,
@@ -494,6 +495,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         if self.action in [
             "list",
             "retrieve",
+            "metrics",
             "low_stock",
             "reordered",
             "download_card",
@@ -1029,6 +1031,128 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def metrics(self, request, pk=None):
+        """Computed stock + cost metrics for the item detail view (issue-5).
+
+        Powers the ``SKU · QOH · QOO · QA · QC · QIT · RP · Lead · Cost`` row on
+        the web item-detail page and the paired ScanTTY TUI row. The field
+        names are a pinned contract shared with the ScanTTY worker — see
+        ``InventoryMetricsSerializer``. Read-only; no migration.
+        """
+        from django.db.models import ExpressionWrapper, IntegerField, Sum
+
+        from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
+
+        item = self.get_object()
+
+        # QOO — units on open purchase orders (sent / confirmed / partially
+        # received), excluding voided lines.
+        on_order_statuses = [
+            PurchaseOrder.SENT,
+            PurchaseOrder.CONFIRMED,
+            PurchaseOrder.PARTIALLY_RECEIVED,
+        ]
+        quantity_on_order = (
+            PurchaseOrderItem.objects.filter(
+                item_supplier__item=item,
+                is_voided=False,
+                purchase_order__status__in=on_order_statuses,
+            ).aggregate(total=Sum("quantity_ordered"))["total"]
+            or 0
+        )
+
+        # QIT — still-pending units on partially-received POs. A line is "in
+        # transit" when some but not all of it has arrived. This is a subset of
+        # QOO (partially_received ∈ on-order statuses), so QIT ≤ QOO.
+        quantity_in_transit = (
+            PurchaseOrderItem.objects.filter(
+                item_supplier__item=item,
+                is_voided=False,
+                purchase_order__status=PurchaseOrder.PARTIALLY_RECEIVED,
+                quantity_received__lt=F("quantity_ordered"),
+            ).aggregate(
+                total=Sum(
+                    ExpressionWrapper(
+                        F("quantity_ordered") - F("quantity_received"),
+                        output_field=IntegerField(),
+                    )
+                )
+            )[
+                "total"
+            ]
+            or 0
+        )
+
+        # QC — quantity committed to open work orders. Collect distinct material
+        # ids first so a task with several open work orders doesn't multiply the
+        # join and double-count the material's quantity.
+        open_wo_statuses = [
+            WorkOrder.STATUS_OPEN,
+            WorkOrder.STATUS_IN_PROGRESS,
+            WorkOrder.STATUS_BLOCKED,
+        ]
+        committed_material_ids = list(
+            MaintenanceMaterial.objects.filter(
+                inventory_item=item,
+                maintenance_item__work_orders__status__in=open_wo_statuses,
+            )
+            .values_list("id", flat=True)
+            .distinct()
+        )
+        quantity_committed = float(
+            MaintenanceMaterial.objects.filter(id__in=committed_material_ids).aggregate(
+                total=Sum("quantity")
+            )["total"]
+            or 0
+        )
+
+        # QA — available = on hand minus committed.
+        quantity_available = float(item.current_stock) - quantity_committed
+
+        # Cost trend vs the most recent purchase-order line for this item. The
+        # comparison is per-unit on both sides (item.unit_cost vs the PO's
+        # unit_cost_ordered), independent of case-based packaging.
+        latest_po_item = (
+            PurchaseOrderItem.objects.filter(item_supplier__item=item)
+            .order_by("-created_at")
+            .first()
+        )
+        current_unit_cost = item.unit_cost  # primary supplier's per-unit cost
+        if latest_po_item is None:
+            last_po_unit_cost = None
+            cost_trend = "no_history"
+        else:
+            last_po_unit_cost = latest_po_item.unit_cost_ordered
+            if current_unit_cost is None or last_po_unit_cost is None:
+                cost_trend = "no_history"
+            elif current_unit_cost > last_po_unit_cost:
+                cost_trend = "up"
+            elif current_unit_cost < last_po_unit_cost:
+                cost_trend = "down"
+            else:
+                cost_trend = "flat"
+
+        # Cost shown on the row: the case cost for case-based items (what you
+        # actually pay per package), else the per-unit cost.
+        display_cost = item.package_cost if item.use_case_based_reorder else current_unit_cost
+
+        payload = {
+            "current_stock": item.current_stock,
+            "quantity_on_order": quantity_on_order,
+            "quantity_available": quantity_available,
+            "quantity_committed": quantity_committed,
+            "quantity_in_transit": quantity_in_transit,
+            "reorder_point": item.reorder_quantity,
+            "lead_time_days": item.average_lead_time,
+            "unit_cost": display_cost,
+            "cost_trend": cost_trend,
+            "last_po_unit_cost": last_po_unit_cost,
+            "is_case_based": item.use_case_based_reorder,
+            "case_size": item.quantity_per_package,
+        }
+        return Response(InventoryMetricsSerializer(payload).data)
 
     def _resolve_location(self, value):
         if not value:

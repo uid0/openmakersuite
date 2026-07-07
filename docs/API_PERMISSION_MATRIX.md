@@ -83,6 +83,7 @@ below are public.
 | --- | --- | --- | --- | --- |
 | POST | `inventory/items/<id>/scan/` | public | Increment scan count when a member scans a QR code. | Required: per-IP throttle + duplicate-submit dedupe. |
 | GET  | `inventory/items/<id>/public/` | public | Public read of scannable item fields (no cost/supplier data). | Not required (read). |
+| GET  | `inventory/items/<id>/metrics/` | public | Computed stock + cost metrics row (QOH/QOO/QA/QC/QIT/RP/Lead/Cost + trend). Mirrors `retrieve`'s exposure — includes cost. | Not required (read). |
 | GET  | `inventory/items/by-qr/<qr>/` | public | Resolve a QR code to a public item view. | Not required (read). |
 | POST | `inventory/items/<id>/report-need/` | public | Member reports the bin needs restocking. | Required: per-IP throttle + dedupe per (item, day). |
 | POST | `inventory/items/<id>/report-problem/` | public | Member reports a problem with the item. | Required: per-IP throttle + dedupe per (item, day). |

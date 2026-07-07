@@ -106,6 +106,7 @@ const cycleCountResponse = {
 
 const setupItem = (item: Record<string, unknown>) => {
   (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({ data: item });
+  (api.inventoryAPI.getItemMetrics as jest.Mock).mockResolvedValue({ data: null });
   (api.inventoryAPI.getUsageLogs as jest.Mock).mockResolvedValue({ data: { results: [] } });
   (api.reorderAPI.listRequests as jest.Mock).mockResolvedValue({ data: { results: [] } });
   (api.assetsAPI.listAssets as jest.Mock).mockResolvedValue({ data: { results: [] } });

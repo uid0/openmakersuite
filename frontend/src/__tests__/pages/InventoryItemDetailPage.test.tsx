@@ -91,10 +91,28 @@ describe('InventoryItemDetailPage', () => {
     days_since_last_count: null,
   };
 
+  const mockMetrics = {
+    current_stock: 10,
+    quantity_on_order: 20,
+    quantity_available: 8,
+    quantity_committed: 2,
+    quantity_in_transit: 5,
+    reorder_point: 20,
+    lead_time_days: 7,
+    unit_cost: '15.99',
+    cost_trend: 'flat' as const,
+    last_po_unit_cost: '15.99',
+    is_case_based: false,
+    case_size: null,
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
     (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
       data: mockItem,
+    });
+    (api.inventoryAPI.getItemMetrics as jest.Mock).mockResolvedValue({
+      data: mockMetrics,
     });
     (api.inventoryAPI.getUsageLogs as jest.Mock).mockResolvedValue({
       data: { results: [] },
@@ -432,5 +450,36 @@ describe('InventoryItemDetailPage', () => {
     expect(screen.getByText(/where you left off/i)).toBeInTheDocument();
     expect(consumePendingReturnTo()).toBe('/inventory/items/test-id');
     expect(screen.getByText('Test Item')).toBeInTheDocument();
+  });
+
+  // ---- issue-5 metrics strip ----
+
+  it('renders the computed metrics strip near the top of the detail view', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    const row = await screen.findByTestId('inventory-metrics-row');
+    expect(row).toBeInTheDocument();
+    // A couple of computed values from the mocked /metrics/ payload.
+    expect(screen.getByTestId('metric-qoo')).toHaveTextContent('20');
+    expect(screen.getByTestId('metric-qit')).toHaveTextContent('5');
+  });
+
+  it('still renders the item when the metrics call fails (graceful degradation)', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.inventoryAPI.getItemMetrics as jest.Mock).mockRejectedValue(new Error('boom'));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    // The item view is intact; only the metrics strip is absent.
+    expect(screen.queryByTestId('inventory-metrics-row')).not.toBeInTheDocument();
+    consoleError.mockRestore();
   });
 });

@@ -4,6 +4,7 @@ Views for reorder queue API.
 
 import csv
 import io
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -18,7 +19,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from inventory.models import InventoryItem
+from inventory.models import InventoryItem, Supplier
 
 from .audit import record_event as record_audit_event
 from .models import (
@@ -68,8 +69,43 @@ def _po_line_display_name(po_item):
     return po_item.description or f"Line {po_item.pk}"
 
 
-def build_order_pad(lines):
-    """Build a vendor-agnostic order-pad payload from order lines.
+# Per-supplier ordering adapters (op-svpq). A supplier's ``ordering_adapter``
+# selects which artifact the order-pad export emits: a generic part#,qty pad, an
+# Amazon add-to-cart URL, or an HD Supply Part#,Qty CSV. The SKU validators below
+# are reused by the export so a mis-typed part number is surfaced in
+# ``invalid_sku`` before it ever reaches a vendor cart, rather than silently
+# ordering the wrong thing.
+
+# An Amazon ASIN is exactly ten uppercase alphanumerics (e.g. ``B07X1234YZ``).
+ASIN_RE = re.compile(r"^[A-Z0-9]{10}$")
+# HD Supply part numbers are numeric.
+HDSUPPLY_PART_RE = re.compile(r"^[0-9]+$")
+
+# Amazon's public add-to-cart endpoint. Served by Amazon retail and independent
+# of the Product Advertising API (which sunsets 2026-05-15) — RE-VERIFY it still
+# resolves after that date. A plain GET: NO AssociateTag and NO request signing.
+# The user must be signed in to amazon.com to complete the cart (the link
+# redirects to sign-in preserving the params) and may hit a "Confirm Your Action"
+# interstitial — it is the pragmatic path, not a guaranteed one-click, and
+# Amazon Business does not officially honor it.
+AMAZON_CART_BASE = "https://www.amazon.com/gp/aws/cart/add.html"
+# Keep each cart URL comfortably under common ~2000-char URL limits; longer POs
+# are chunked across multiple URLs.
+AMAZON_URL_MAX_LEN = 2000
+
+
+def is_valid_asin(supplier_sku):
+    """True when ``supplier_sku`` is a syntactically valid Amazon ASIN."""
+    return bool(ASIN_RE.match((supplier_sku or "").strip()))
+
+
+def is_valid_hdsupply_part(supplier_sku):
+    """True when ``supplier_sku`` is a valid (numeric) HD Supply part number."""
+    return bool(HDSUPPLY_PART_RE.match((supplier_sku or "").strip()))
+
+
+def build_order_pad(lines, *, header=("part#", "qty"), validate=None):
+    """Build a vendor order-pad payload (CSV + copy block) from order lines.
 
     ``lines`` is an iterable of ``(name, supplier_sku, quantity)`` triples. The
     ``supplier_sku`` is the vendor's real part number (an ``ItemSupplier``
@@ -77,31 +113,45 @@ def build_order_pad(lines):
     McMaster, Digi-Key, Amazon, Uline, MSC — keys on, so a plain ``part#,qty``
     list is the lowest-effort, highest-coverage ordering export.
 
+    ``header`` sets the CSV header row so a supplier-specific format can reuse
+    this builder (HD Supply's Saved-List upload wants ``Part Number,Quantity``).
+
+    ``validate`` is an optional ``callable(cleaned_sku) -> bool``. When given, a
+    non-blank SKU that fails it is collected in ``invalid_sku`` (and kept out of
+    the pad) so a mis-typed part number is caught before it reaches a vendor
+    cart. Without a validator every non-blank SKU is accepted and ``invalid_sku``
+    is always empty.
+
     Returns a dict with:
 
-    - ``csv``: a ``part#,qty`` CSV string including a header row.
+    - ``csv``: a ``part#,qty`` CSV string including the header row.
     - ``text``: a plain ``part#\\tqty`` tab-separated copy-paste block
       (no header) suitable for pasting straight into an order pad.
     - ``line_count``: number of usable rows emitted.
     - ``missing_sku``: names of lines whose ``supplier_sku`` is blank/unusable.
+    - ``invalid_sku``: names of lines whose ``supplier_sku`` failed ``validate``.
 
-    Lines with a blank or whitespace-only ``supplier_sku`` are *not* written
-    into the CSV/text — a row with no part number is junk a distributor pad
-    rejects — but their names are collected in ``missing_sku`` so the operator
-    knows exactly what to fix. They are surfaced, never silently dropped.
+    Lines with a blank/whitespace-only or invalid ``supplier_sku`` are *not*
+    written into the CSV/text — a row with no usable part number is junk a
+    distributor pad rejects — but their names are collected in ``missing_sku`` /
+    ``invalid_sku`` so the operator knows exactly what to fix. They are surfaced,
+    never silently dropped.
     """
     usable = []
     missing_sku = []
+    invalid_sku = []
     for name, supplier_sku, quantity in lines:
         cleaned = (supplier_sku or "").strip()
-        if cleaned:
-            usable.append((cleaned, quantity))
-        else:
+        if not cleaned:
             missing_sku.append(name)
+        elif validate is not None and not validate(cleaned):
+            invalid_sku.append(name)
+        else:
+            usable.append((cleaned, quantity))
 
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(["part#", "qty"])
+    writer.writerow(list(header))
     for supplier_sku, quantity in usable:
         writer.writerow([supplier_sku, quantity])
 
@@ -112,6 +162,65 @@ def build_order_pad(lines):
         "text": text,
         "line_count": len(usable),
         "missing_sku": missing_sku,
+        "invalid_sku": invalid_sku,
+    }
+
+
+def build_amazon_cart(lines):
+    """Build Amazon add-to-cart URL(s) from order lines (op-svpq).
+
+    ``lines`` is an iterable of ``(name, supplier_sku, quantity)`` triples where
+    ``supplier_sku`` must be an Amazon ASIN. Each valid line contributes an
+    ``ASIN.{i}=<asin>&Quantity.{i}=<qty>`` pair (``i`` is 1-indexed *within each
+    URL*). ASINs are ``[A-Z0-9]{10}`` and quantities are integers, so no value
+    needs URL-encoding — the params are appended verbatim (plain GET, no signing).
+
+    When a single URL would exceed :data:`AMAZON_URL_MAX_LEN`, the lines are
+    chunked across multiple URLs (each restarting the index at 1). Lines whose
+    ``supplier_sku`` is blank land in ``missing_sku``; lines whose SKU is not a
+    valid ASIN land in ``invalid_sku`` — never silently dropped into a cart.
+
+    Returns ``{cart_urls, line_count, missing_sku, invalid_sku}``.
+    """
+    valid = []
+    missing_sku = []
+    invalid_sku = []
+    for name, supplier_sku, quantity in lines:
+        cleaned = (supplier_sku or "").strip()
+        if not cleaned:
+            missing_sku.append(name)
+        elif is_valid_asin(cleaned):
+            valid.append((cleaned, quantity))
+        else:
+            invalid_sku.append(name)
+
+    def render(chunk):
+        params = []
+        for index, (asin, quantity) in enumerate(chunk, start=1):
+            params.append(f"ASIN.{index}={asin}")
+            params.append(f"Quantity.{index}={quantity}")
+        return AMAZON_CART_BASE + "?" + "&".join(params)
+
+    cart_urls = []
+    current = []
+    for asin, quantity in valid:
+        trial = current + [(asin, quantity)]
+        # Start a new URL when appending this line would blow the length cap —
+        # but only if the current chunk already has a line, so one oversized line
+        # still gets its own URL rather than looping forever.
+        if current and len(render(trial)) > AMAZON_URL_MAX_LEN:
+            cart_urls.append(render(current))
+            current = [(asin, quantity)]
+        else:
+            current = trial
+    if current:
+        cart_urls.append(render(current))
+
+    return {
+        "cart_urls": cart_urls,
+        "line_count": len(valid),
+        "missing_sku": missing_sku,
+        "invalid_sku": invalid_sku,
     }
 
 
@@ -1141,14 +1250,27 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="export-order")
     def export_order(self, request, pk=None):
-        """Export this PO as a vendor-agnostic order pad (``part#, qty``).
+        """Export this PO as a supplier-appropriate order artifact (op-svpq).
 
-        Builds a CSV (with a header row) and a tab-separated copy-paste block
-        from each non-voided line's ``supplier_sku`` + ``quantity_ordered`` so
-        the operator can paste or upload it into any distributor's bulk order
-        pad with zero per-vendor integration and zero schema change. Lines
-        whose ``supplier_sku`` is blank are surfaced in ``missing_sku`` rather
-        than dropped, so nothing goes missing silently.
+        The PO supplier's ``ordering_adapter`` selects what this emits from the
+        non-voided lines (each line's ``supplier_sku`` + ``quantity_ordered``):
+
+        - ``amazon`` → one or more Amazon add-to-cart URLs (``cart_urls``); each
+          ``supplier_sku`` must be an ASIN.
+        - ``hdsupply`` → a ``Part Number,Quantity`` CSV (HD Supply Saved-List
+          format) plus a ``part\\tqty`` paste block for their Quick Order pad;
+          each ``supplier_sku`` must be numeric.
+        - ``generic_csv`` / ``none`` (default) → the vendor-agnostic ``part#,qty``
+          order pad (#855), which pastes/uploads into any distributor bulk order
+          pad with zero per-vendor integration and zero schema change.
+
+        Lines whose ``supplier_sku`` is blank are surfaced in ``missing_sku`` and
+        lines whose SKU fails the adapter's format are surfaced in
+        ``invalid_sku`` — never silently dropped, so a mis-entered part number is
+        caught before it reaches a vendor cart.
+
+        Unified response: ``{adapter, cart_urls?, csv?, text?, filename?,
+        supplier, line_count, missing_sku, invalid_sku}``.
 
         Read-gated to authenticated users (via :meth:`get_permissions`), matching
         the ``send_to_supplier`` action.
@@ -1165,13 +1287,32 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             if not po_item.is_voided
         ]
 
-        payload = build_order_pad(lines)
-        # PO numbers here already carry a "PO-" prefix; only add one when the
-        # number (or the draft fallback) doesn't, so the file is never "PO-PO-…".
-        po_number = purchase_order.po_number or f"draft-{purchase_order.pk}"
-        base = po_number if po_number.upper().startswith("PO-") else f"PO-{po_number}"
-        payload["filename"] = f"{base}-order.csv"
-        payload["supplier"] = purchase_order.supplier.name if purchase_order.supplier_id else ""
+        supplier = purchase_order.supplier if purchase_order.supplier_id else None
+        adapter = supplier.ordering_adapter if supplier else Supplier.ADAPTER_NONE
+
+        if adapter == Supplier.ADAPTER_AMAZON:
+            payload = build_amazon_cart(lines)
+        elif adapter == Supplier.ADAPTER_HDSUPPLY:
+            payload = build_order_pad(
+                lines,
+                header=("Part Number", "Quantity"),
+                validate=is_valid_hdsupply_part,
+            )
+        else:
+            payload = build_order_pad(lines)
+
+        payload["adapter"] = adapter
+        payload["supplier"] = supplier.name if supplier else ""
+
+        # A downloadable filename only makes sense for the CSV adapters; the
+        # Amazon adapter emits URLs, not a file.
+        if "csv" in payload:
+            # PO numbers here already carry a "PO-" prefix; only add one when the
+            # number (or the draft fallback) doesn't, so it's never "PO-PO-…".
+            po_number = purchase_order.po_number or f"draft-{purchase_order.pk}"
+            base = po_number if po_number.upper().startswith("PO-") else f"PO-{po_number}"
+            payload["filename"] = f"{base}-order.csv"
+
         return Response(payload)
 
     @action(detail=True, methods=["post"], url_path="mark-delivered")

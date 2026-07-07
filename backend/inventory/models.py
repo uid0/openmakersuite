@@ -90,11 +90,37 @@ class Supplier(models.Model):
         (NATIONAL, "National"),
     ]
 
+    # Ordering adapter — selects the artifact the order-pad export emits for this
+    # supplier (op-svpq). ``none``/``generic_csv`` produce the vendor-agnostic
+    # part#,qty pad; ``amazon`` produces an add-to-cart URL; ``hdsupply`` produces
+    # a Part Number,Quantity CSV for HD Supply's Saved-List / Quick Order pad.
+    ADAPTER_NONE = "none"
+    ADAPTER_GENERIC_CSV = "generic_csv"
+    ADAPTER_AMAZON = "amazon"
+    ADAPTER_HDSUPPLY = "hdsupply"
+
+    ORDERING_ADAPTER_CHOICES = [
+        (ADAPTER_NONE, "None (generic part#,qty pad)"),
+        (ADAPTER_GENERIC_CSV, "Generic CSV (part#,qty pad)"),
+        (ADAPTER_AMAZON, "Amazon (add-to-cart URL)"),
+        (ADAPTER_HDSUPPLY, "HD Supply (Part#,Qty CSV)"),
+    ]
+
     name = models.CharField(max_length=200)
     supplier_type = models.CharField(
         max_length=20,
         choices=SUPPLIER_TYPE_CHOICES,
         help_text="Classification of supplier by distribution type",
+    )
+    ordering_adapter = models.CharField(
+        max_length=20,
+        choices=ORDERING_ADAPTER_CHOICES,
+        default=ADAPTER_NONE,
+        help_text=(
+            "How the order-pad export builds an order for this supplier: a "
+            "generic part#,qty pad, an Amazon add-to-cart URL, or an HD Supply "
+            "Part#,Qty CSV."
+        ),
     )
     website = models.URLField(blank=True)
     account_number = models.CharField(

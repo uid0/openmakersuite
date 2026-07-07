@@ -2360,6 +2360,9 @@ views:
       print_queue:
         permission_classes:
         - AllowAny
+      reprint:
+        permission_classes:
+        - IsAdminUser
       retrieve:
         permission_classes:
         - IsStorageAdminOrStaff

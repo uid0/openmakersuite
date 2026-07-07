@@ -234,6 +234,81 @@ class TestMarkRemoved:
         assert resp.status_code == 409
 
 
+class TestReprint:
+    """Warden re-queues a printed stint's claim ticket (ScanTTY + web).
+
+    reprint is the reverse of the daemon's mark-printed: it clears
+    printed_at so the stint re-appears in print-queue and the Pi daemon
+    reprints it on the next poll.
+    """
+
+    def test_clears_printed_at_and_requeues(self, staff_client):
+        # A printed stint has dropped off the print queue.
+        stint = ProjectStorageStintFactory(printed_at=timezone.now())
+        assert not any(
+            row["stint_id"] == stint.stint_id
+            for row in staff_client.get("/api/project-storage/stints/print-queue/").json()
+        )
+        resp = staff_client.post(
+            f"/api/project-storage/stints/{stint.stint_id}/reprint/",
+            {"note": "reprint please"},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+        stint.refresh_from_db()
+        # printed_at cleared → the daemon sees it in the queue again.
+        assert stint.printed_at is None
+        assert resp.json()["stint_id"] == stint.stint_id
+        assert any(
+            row["stint_id"] == stint.stint_id
+            for row in staff_client.get("/api/project-storage/stints/print-queue/").json()
+        )
+
+    def test_records_reprint_event(self, staff_client):
+        stint = ProjectStorageStintFactory(printed_at=timezone.now())
+        staff_client.post(
+            f"/api/project-storage/stints/{stint.stint_id}/reprint/",
+            {"note": "warden note"},
+            format="json",
+        )
+        ev = stint.events.filter(actor_label="reprint requested").first()
+        assert ev is not None
+        assert ev.event_type == ProjectStorageEvent.EVENT_NOTE_ADDED
+        # The warden is recorded as the structured actor, like the other
+        # IsAdminUser mutations (mark-removed etc.).
+        assert ev.actor is not None and ev.actor.username == "warden"
+        assert ev.note == "warden note"
+
+    def test_reprint_on_never_printed_is_harmless(self, staff_client):
+        # printed_at already NULL (stint still queued) — reprint is a
+        # no-op on the field but still records the warden's intent.
+        stint = ProjectStorageStintFactory()
+        assert stint.printed_at is None
+        resp = staff_client.post(f"/api/project-storage/stints/{stint.stint_id}/reprint/")
+        assert resp.status_code == 200, resp.content
+        stint.refresh_from_db()
+        assert stint.printed_at is None
+        assert stint.events.filter(actor_label="reprint requested").count() == 1
+
+    def test_storage_admin_cannot_reprint(self, storage_admin_client):
+        # Storage Admin is a read-only group — same tightening as
+        # mark-removed / send-notice: they must not re-queue prints.
+        stint = ProjectStorageStintFactory(printed_at=timezone.now())
+        resp = storage_admin_client.post(f"/api/project-storage/stints/{stint.stint_id}/reprint/")
+        assert resp.status_code == 403
+        stint.refresh_from_db()
+        assert stint.printed_at is not None  # unchanged
+
+    def test_anonymous_rejected(self, client):
+        stint = ProjectStorageStintFactory(printed_at=timezone.now())
+        resp = client.post(f"/api/project-storage/stints/{stint.stint_id}/reprint/")
+        assert resp.status_code in (401, 403)
+
+    def test_unknown_stint_returns_404(self, staff_client):
+        resp = staff_client.post("/api/project-storage/stints/PS-NOPE0000/reprint/")
+        assert resp.status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # Label render endpoint — Pi daemon pulls this
 # ---------------------------------------------------------------------------

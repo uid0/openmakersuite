@@ -4051,6 +4051,13 @@ export const projectStorageAPI = {
       note: note ?? '',
     }),
 
+  // Warden re-queues the claim ticket for printing — the backend clears
+  // printed_at so the Pi daemon reprints the label on its next poll.
+  reprint: (stintId: string, note?: string) =>
+    api.post<ProjectStorageStint>(`/project-storage/stints/${stintId}/reprint/`, {
+      note: note ?? '',
+    }),
+
   labelUrl: (stintId: string, printer: 'brother_ql' | 'epson_tm' = 'brother_ql') =>
     `${API_BASE_URL}/project-storage/stints/${stintId}/label/?printer=${printer}`,
 

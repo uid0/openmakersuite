@@ -19,7 +19,7 @@ import {
   workOrderAPI,
 } from '../services/api';
 import '../styles/AssetDetailPage.css';
-import { Asset, AssetProblem, MaintenanceItem, WorkOrder } from '../types';
+import { Asset, AssetPart, AssetProblem, MaintenanceItem, WorkOrder } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -52,6 +52,10 @@ const AssetDetailPage: React.FC = () => {
   const [cloneToast, setCloneToast] = useState<string | null>(null);
   const [tagSize, setTagSize] = useState<'standard' | 'large'>('standard');
   const [loto, setLoto] = useState<AssetLOTORequirements | null>(null);
+  // Serialized parts prompt for the new unit's serial number before recording
+  // a replacement; non-serialized parts stay one-click.
+  const [serialModalPart, setSerialModalPart] = useState<AssetPart | null>(null);
+  const [replacementSerial, setReplacementSerial] = useState<string>('');
 
   const loadAssetDetails = useCallback(async () => {
     if (!id) return;
@@ -223,16 +227,50 @@ const AssetDetailPage: React.FC = () => {
     }
   };
 
-  const handleMarkPartReplaced = async (partId: string) => {
+  const handleMarkPartReplaced = async (
+    partId: string,
+    replacementSerialNumber?: string,
+  ): Promise<boolean> => {
     try {
       setActionLoading(`part-${partId}`);
-      await assetPartsAPI.markReplaced(partId);
+      // Only forward the serial when one was captured so non-serialized parts
+      // keep posting an empty (one-click) body exactly as before.
+      if (replacementSerialNumber) {
+        await assetPartsAPI.markReplaced(partId, replacementSerialNumber);
+      } else {
+        await assetPartsAPI.markReplaced(partId);
+      }
       await loadAssetDetails();
+      return true;
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to mark part as replaced'));
+      return false;
     } finally {
       setActionLoading(null);
     }
+  };
+
+  // Serialized parts open a prompt for the replacement unit's serial number;
+  // everything else keeps the original one-click behaviour.
+  const handleMarkReplacedClick = (part: AssetPart) => {
+    if (part.part_details?.is_serialized) {
+      setReplacementSerial('');
+      setSerialModalPart(part);
+    } else {
+      handleMarkPartReplaced(part.id);
+    }
+  };
+
+  const closeSerialModal = () => {
+    setSerialModalPart(null);
+    setReplacementSerial('');
+  };
+
+  const handleSerialModalSubmit = async () => {
+    if (!serialModalPart) return;
+    const trimmed = replacementSerial.trim();
+    const ok = await handleMarkPartReplaced(serialModalPart.id, trimmed || undefined);
+    if (ok) closeSerialModal();
   };
 
   const handleEdit = () => {
@@ -702,7 +740,7 @@ const AssetDetailPage: React.FC = () => {
                       <td>
                         <button
                           className="mark-replaced-button"
-                          onClick={() => handleMarkPartReplaced(part.id)}
+                          onClick={() => handleMarkReplacedClick(part)}
                           disabled={actionLoading === `part-${part.id}`}
                         >
                           {actionLoading === `part-${part.id}` ? 'Updating...' : 'Mark Replaced'}
@@ -1281,6 +1319,54 @@ const AssetDetailPage: React.FC = () => {
                 disabled={!cloneTargetId || cloneSubmitting}
               >
                 {cloneSubmitting ? 'Cloning...' : 'Clone'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {serialModalPart && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="replace-serial-title"
+          onClick={closeSerialModal}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3 id="replace-serial-title">Record replacement serial number</h3>
+            <p>
+              {serialModalPart.part_name} is a serialized part. Enter the serial number of
+              the new unit you installed (optional).
+            </p>
+            <label htmlFor="replacement-serial-input">Replacement serial number</label>
+            <input
+              id="replacement-serial-input"
+              type="text"
+              aria-label="Replacement serial number"
+              value={replacementSerial}
+              maxLength={200}
+              autoFocus
+              onChange={(e) => setReplacementSerial(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSerialModalSubmit();
+              }}
+            />
+            <div className="modal-actions">
+              <button
+                type="button"
+                onClick={closeSerialModal}
+                disabled={actionLoading === `part-${serialModalPart.id}`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={handleSerialModalSubmit}
+                disabled={actionLoading === `part-${serialModalPart.id}`}
+              >
+                {actionLoading === `part-${serialModalPart.id}` ? 'Saving...' : 'Mark Replaced'}
               </button>
             </div>
           </div>

@@ -2,7 +2,7 @@
  * Tests for AssetDetailPage component
  */
 import { MantineProvider } from '@mantine/core';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AxiosError } from 'axios';
 import { MemoryRouter } from 'react-router-dom';
@@ -297,6 +297,120 @@ describe('AssetDetailPage', () => {
 
     await waitFor(() => {
       expect(mockAssetPartsAPI.markReplaced).toHaveBeenCalledWith('part-1');
+    });
+  });
+
+  describe('replacement serial number (op-8nxe)', () => {
+    const serializedAsset: Asset = {
+      ...mockAsset,
+      parts: [
+        {
+          id: 'part-ser',
+          asset: 'test-id',
+          asset_name: 'Test Asset',
+          asset_tag: 'TAG001',
+          part: 'ink-id',
+          part_name: 'Magenta Ink',
+          part_sku: 'INK-M',
+          quantity_needed: 1,
+          is_required: true,
+          maintenance_interval_days: null,
+          last_replaced_at: null,
+          days_since_replacement: null,
+          needs_replacement: false,
+          notes: '',
+          part_details: {
+            id: 'ink-id',
+            name: 'Magenta Ink',
+            sku: 'INK-M',
+            current_stock: 3,
+            minimum_stock: 1,
+            needs_reorder: false,
+            is_serialized: true,
+          },
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+        },
+      ],
+    };
+
+    const renderSerialized = () => {
+      mockAssetsAPI.getAsset.mockResolvedValue({
+        data: serializedAsset,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+      return render(
+        <MantineProvider><MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter></MantineProvider>
+      );
+    };
+
+    it('prompts for a serial instead of one-click for a serialized part', async () => {
+      renderSerialized();
+
+      const markButton = (await screen.findAllByText('Mark Replaced'))[0];
+      await userEvent.click(markButton);
+
+      // The modal opens and the API is NOT called until the user confirms.
+      expect(
+        await screen.findByText('Record replacement serial number')
+      ).toBeInTheDocument();
+      expect(mockAssetPartsAPI.markReplaced).not.toHaveBeenCalled();
+    });
+
+    it('submits the entered serial number to markReplaced', async () => {
+      mockAssetPartsAPI.markReplaced.mockResolvedValue({
+        data: { ...serializedAsset.parts![0], replacement_serial_number: 'SN-NEW-1' },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+
+      renderSerialized();
+
+      await userEvent.click((await screen.findAllByText('Mark Replaced'))[0]);
+
+      const input = await screen.findByLabelText('Replacement serial number');
+      await userEvent.type(input, 'SN-NEW-1');
+
+      const dialog = screen.getByRole('dialog');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Mark Replaced' }));
+
+      await waitFor(() => {
+        expect(mockAssetPartsAPI.markReplaced).toHaveBeenCalledWith('part-ser', 'SN-NEW-1');
+      });
+    });
+
+    it('keeps non-serialized parts one-click with no prompt', async () => {
+      // mockAsset's part carries no part_details.is_serialized → stays one-click.
+      mockAssetPartsAPI.markReplaced.mockResolvedValue({
+        data: (mockAsset.parts ?? [])[0],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+
+      render(
+        <MantineProvider><MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter></MantineProvider>
+      );
+
+      await userEvent.click((await screen.findAllByText('Mark Replaced'))[0]);
+
+      await waitFor(() => {
+        expect(mockAssetPartsAPI.markReplaced).toHaveBeenCalledWith('part-1');
+      });
+      // No serial modal for non-serialized parts.
+      expect(
+        screen.queryByText('Record replacement serial number')
+      ).not.toBeInTheDocument();
     });
   });
 

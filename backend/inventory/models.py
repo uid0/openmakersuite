@@ -1747,6 +1747,15 @@ class AssetPart(models.Model):
         blank=True,
         help_text="When this part was last replaced",
     )
+    replacement_serial_number = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text=(
+            "Serial number of the replacement unit installed at the last "
+            "replacement (captured only for serialized parts)"
+        ),
+    )
     notes = models.TextField(
         blank=True,
         help_text="Additional notes about this part (installation instructions, compatibility, etc.)",

@@ -1209,8 +1209,13 @@ export const assetPartsAPI = {
   deleteAssetPart: (id: string) =>
     api.delete(`/inventory/asset-parts/${id}/`),
 
-  markReplaced: (id: string) =>
-    api.post<AssetPart>(`/inventory/asset-parts/${id}/mark_replaced/`),
+  markReplaced: (id: string, replacementSerialNumber?: string) =>
+    api.post<AssetPart>(
+      `/inventory/asset-parts/${id}/mark_replaced/`,
+      replacementSerialNumber
+        ? { replacement_serial_number: replacementSerialNumber }
+        : undefined,
+    ),
 };
 
 // Reorder API

@@ -349,6 +349,7 @@ export interface AssetPart {
   is_required: boolean;
   maintenance_interval_days: number | null;
   last_replaced_at: string | null;
+  replacement_serial_number?: string;
   days_since_replacement: number | null;
   needs_replacement: boolean;
   notes: string;
@@ -359,6 +360,7 @@ export interface AssetPart {
     current_stock: number;
     minimum_stock: number;
     needs_reorder: boolean;
+    is_serialized?: boolean;
   };
   created_at: string;
   updated_at: string;

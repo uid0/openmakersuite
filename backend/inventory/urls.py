@@ -8,6 +8,7 @@ from rest_framework.routers import DefaultRouter
 
 from .safety_sheet import LocationSafetySheetView
 from .views import (
+    AssetDocumentViewSet,
     AssetOutOfServiceViewSet,
     AssetPartViewSet,
     AssetProblemViewSet,
@@ -44,6 +45,7 @@ router.register(r"categories", CategoryViewSet)
 router.register(r"locations", LocationViewSet)
 router.register(r"items", InventoryItemViewSet)
 router.register(r"assets", AssetViewSet)
+router.register(r"asset-documents", AssetDocumentViewSet)
 router.register(r"asset-problems", AssetProblemViewSet)
 router.register(r"asset-reservations", AssetReservationViewSet, basename="asset-reservation")
 router.register(r"asset-out-of-service", AssetOutOfServiceViewSet, basename="asset-out-of-service")

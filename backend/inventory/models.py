@@ -1918,6 +1918,104 @@ class AssetProblemPhoto(models.Model):
         return f"Photo for problem {self.problem_id} ({self.uploaded_at.date()})"
 
 
+class AssetDocument(models.Model):
+    """A document in an asset's per-asset document library.
+
+    Beyond the single ``Asset.manual_pdf``/``image``, maker spaces need a real
+    library of manuals, CAD sources, wiring diagrams, cut-sheets, and the
+    maker-native twist: cut-ready reference files (DXF/SVG/G-code/STL) that
+    live WITH the machine. Extensions are deliberately unrestricted so CAD/DXF/
+    STL uploads are first-class.
+
+    Lightweight versioning keeps people off stale manuals (Maximo's weakness):
+    uploading a new version of a document links ``supersedes`` back to the
+    prior one, bumps ``version``, and flips the prior one's ``is_current`` to
+    False so it drops out of the "current" view.
+    """
+
+    MANUAL = "manual"
+    CAD_SOURCE = "cad_source"
+    WIRING_DIAGRAM = "wiring_diagram"
+    CUT_SHEET_SPEC = "cut_sheet_spec"
+    CUT_READY_TEMPLATE = "cut_ready_template"
+    PHOTO = "photo"
+    OTHER = "other"
+
+    CATEGORY_CHOICES = [
+        (MANUAL, "Manual / Documentation"),
+        (CAD_SOURCE, "CAD Source"),
+        (WIRING_DIAGRAM, "Wiring Diagram"),
+        (CUT_SHEET_SPEC, "Cut Sheet / Spec"),
+        (CUT_READY_TEMPLATE, "Cut-Ready Template (DXF/SVG/G-code/STL)"),
+        (PHOTO, "Photo"),
+        (OTHER, "Other"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="documents",
+        help_text="The asset this document belongs to",
+    )
+    file = models.FileField(
+        upload_to="assets/documents/%Y/%m/",
+        help_text=(
+            "The document file (manual, CAD source, wiring diagram, cut-sheet, "
+            "cut-ready template, etc.). Any file type is accepted."
+        ),
+    )
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        default=OTHER,
+        help_text="What kind of document this is",
+    )
+    title = models.CharField(
+        max_length=255,
+        help_text="Human-readable title for the document",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Optional notes about this document",
+    )
+    version = models.PositiveIntegerField(
+        default=1,
+        help_text="Version number; incremented when this document supersedes an earlier one",
+    )
+    is_current = models.BooleanField(
+        default=True,
+        help_text="False once a newer version supersedes this document",
+    )
+    supersedes = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="superseded_by",
+        help_text="The prior document version this one replaces (if any)",
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_asset_documents",
+        help_text="User who uploaded this document",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["asset", "category", "-version", "-uploaded_at"]
+        indexes = [
+            models.Index(fields=["asset", "category"]),
+            models.Index(fields=["asset", "is_current"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.title} (v{self.version}) — {self.get_category_display()}"
+
+
 class LocationProblem(models.Model):
     """
     Track problems reported against a Location (not a specific asset).

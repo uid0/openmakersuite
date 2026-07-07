@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from .models import (
     Asset,
+    AssetDocument,
     AssetOutOfService,
     AssetPart,
     AssetProblem,
@@ -1149,6 +1150,76 @@ class AssetProblemPhotoSerializer(serializers.ModelSerializer):
         if obj.image:
             return obj.image.url
         return None
+
+
+class AssetDocumentSerializer(serializers.ModelSerializer):
+    """Read+write serializer for an asset's document-library entries.
+
+    ``version``/``is_current`` are server-controlled (set by the viewset when a
+    document supersedes an earlier one), so they are read-only here. ``file`` is
+    uploaded via multipart; ``file_url`` exposes an absolute URL for the web/TUI
+    clients. ``supersedes`` is writable so an "upload a new version" request can
+    link back to the document it replaces.
+    """
+
+    file_url = serializers.SerializerMethodField()
+    category_display = serializers.CharField(source="get_category_display", read_only=True)
+    uploaded_by_name = serializers.SerializerMethodField()
+    supersedes_title = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssetDocument
+        fields = [
+            "id",
+            "asset",
+            "file",
+            "file_url",
+            "category",
+            "category_display",
+            "title",
+            "description",
+            "version",
+            "is_current",
+            "supersedes",
+            "supersedes_title",
+            "uploaded_by",
+            "uploaded_by_name",
+            "uploaded_at",
+        ]
+        read_only_fields = [
+            "version",
+            "is_current",
+            "uploaded_by",
+            "uploaded_at",
+        ]
+
+    def get_file_url(self, obj):
+        request = self.context.get("request")
+        if obj.file and request:
+            return request.build_absolute_uri(obj.file.url)
+        if obj.file:
+            return obj.file.url
+        return None
+
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by:
+            return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
+        return None
+
+    def get_supersedes_title(self, obj):
+        if obj.supersedes:
+            return f"{obj.supersedes.title} (v{obj.supersedes.version})"
+        return None
+
+    def validate(self, attrs):
+        """Guard against superseding a document that belongs to another asset."""
+        supersedes = attrs.get("supersedes")
+        asset = attrs.get("asset")
+        if supersedes is not None and asset is not None and supersedes.asset_id != asset.id:
+            raise serializers.ValidationError(
+                {"supersedes": "The superseded document must belong to the same asset."}
+            )
+        return attrs
 
 
 class AffectedAssetPartSerializer(serializers.ModelSerializer):

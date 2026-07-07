@@ -15,6 +15,7 @@ from django.utils.safestring import mark_safe
 
 from .models import (
     Asset,
+    AssetDocument,
     AssetPart,
     AssetProblem,
     AssetTagSequence,
@@ -848,6 +849,49 @@ class AssetTagSequenceAdmin(admin.ModelAdmin):
         return False
 
 
+@admin.register(AssetDocument)
+class AssetDocumentAdmin(admin.ModelAdmin):
+    """Standalone admin for asset document-library entries.
+
+    Registered on its own (not just as an inline) so the inline's
+    ``autocomplete_fields=["supersedes"]`` has a searchable target admin.
+    """
+
+    list_display = [
+        "title",
+        "asset",
+        "category",
+        "version",
+        "is_current",
+        "uploaded_by",
+        "uploaded_at",
+    ]
+    list_filter = ["category", "is_current"]
+    search_fields = ["title", "description", "asset__name", "asset__asset_tag"]
+    autocomplete_fields = ["asset", "supersedes"]
+    readonly_fields = ["id", "version", "uploaded_at"]
+
+
+class AssetDocumentInline(admin.TabularInline):
+    """Manage an asset's document library inline from the asset admin."""
+
+    model = AssetDocument
+    extra = 0
+    fk_name = "asset"
+    fields = [
+        "title",
+        "category",
+        "file",
+        "version",
+        "is_current",
+        "supersedes",
+        "uploaded_by",
+        "uploaded_at",
+    ]
+    readonly_fields = ["version", "uploaded_at"]
+    autocomplete_fields = ["supersedes"]
+
+
 @admin.register(Asset)
 class AssetAdmin(admin.ModelAdmin):
     """Admin interface for managing hard assets."""
@@ -889,7 +933,7 @@ class AssetAdmin(admin.ModelAdmin):
         "manufacturer_name",
         "donor_name",
     ]
-    inlines = [AssetPartInline]
+    inlines = [AssetPartInline, AssetDocumentInline]
     readonly_fields = [
         "id",
         "asset_tag",

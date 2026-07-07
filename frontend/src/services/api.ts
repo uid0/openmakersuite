@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetDocument, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -1030,6 +1030,66 @@ export const assetProblemsAPI = {
       { headers: { 'Content-Type': 'multipart/form-data' } },
     );
   },
+};
+
+// Asset Document Library API (per-asset manuals / CAD / wiring / cut-ready files)
+export const assetDocumentsAPI = {
+  list: (params?: { asset?: string; category?: string; is_current?: boolean }) =>
+    api.get<{ count: number; next: string | null; previous: string | null; results: AssetDocument[] }>(
+      '/inventory/asset-documents/',
+      { params },
+    ),
+
+  upload: (payload: {
+    asset: string;
+    file: File;
+    title: string;
+    category: string;
+    description?: string;
+    supersedes?: string;
+  }) => {
+    const formData = new FormData();
+    formData.append('asset', payload.asset);
+    formData.append('file', payload.file);
+    formData.append('title', payload.title);
+    formData.append('category', payload.category);
+    if (payload.description) {
+      formData.append('description', payload.description);
+    }
+    if (payload.supersedes) {
+      formData.append('supersedes', payload.supersedes);
+    }
+    return api.post<AssetDocument>('/inventory/asset-documents/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  supersede: (
+    id: string,
+    payload: { file: File; title?: string; category?: string; description?: string },
+  ) => {
+    const formData = new FormData();
+    formData.append('file', payload.file);
+    if (payload.title) {
+      formData.append('title', payload.title);
+    }
+    if (payload.category) {
+      formData.append('category', payload.category);
+    }
+    if (payload.description) {
+      formData.append('description', payload.description);
+    }
+    return api.post<AssetDocument>(
+      `/inventory/asset-documents/${id}/supersede/`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+  },
+
+  update: (id: string, data: Partial<Pick<AssetDocument, 'title' | 'category' | 'description'>>) =>
+    api.patch<AssetDocument>(`/inventory/asset-documents/${id}/`, data),
+
+  delete: (id: string) => api.delete(`/inventory/asset-documents/${id}/`),
 };
 
 // Maintenance API

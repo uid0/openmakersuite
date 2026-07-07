@@ -403,6 +403,33 @@ export interface AssetProblemPhoto {
   uploaded_at: string;
 }
 
+export type AssetDocumentCategory =
+  | 'manual'
+  | 'cad_source'
+  | 'wiring_diagram'
+  | 'cut_sheet_spec'
+  | 'cut_ready_template'
+  | 'photo'
+  | 'other';
+
+export interface AssetDocument {
+  id: string;
+  asset: string;
+  file: string;
+  file_url: string | null;
+  category: AssetDocumentCategory;
+  category_display: string;
+  title: string;
+  description: string;
+  version: number;
+  is_current: boolean;
+  supersedes: string | null;
+  supersedes_title: string | null;
+  uploaded_by: number | null;
+  uploaded_by_name: string | null;
+  uploaded_at: string;
+}
+
 export interface AssetProblem {
   id: string;
   asset: string;

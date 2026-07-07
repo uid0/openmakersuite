@@ -31,6 +31,7 @@ from membership.permissions import IsAuthenticatedOrStaffSigAdminWrite, IsStaffO
 from .audit import record_event as record_maintenance_audit_event
 from .models import (
     Asset,
+    AssetDocument,
     AssetOutOfService,
     AssetPart,
     AssetProblem,
@@ -60,6 +61,7 @@ from .models import (
     WorkOrderValidation,
 )
 from .serializers import (
+    AssetDocumentSerializer,
     AssetOutOfServiceSerializer,
     AssetPartSerializer,
     AssetProblemPhotoSerializer,
@@ -2618,6 +2620,85 @@ class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):
         uploaded_by = user if (user and user.is_authenticated) else None
         serializer.save(problem=problem, uploaded_by=uploaded_by)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AssetDocumentViewSet(viewsets.ModelViewSet):
+    """API endpoint for an asset's document library (EAM P1.3).
+
+    Manuals, CAD sources, wiring diagrams, cut-sheets, and cut-ready templates
+    (DXF/SVG/G-code/STL) that live WITH a machine. Read is open (mirrors
+    ``AssetViewSet``); create/update/delete require authentication.
+
+    Lightweight versioning: POST a document with ``supersedes=<prior id>`` (or
+    use the ``supersede`` detail action) to upload a new version — the server
+    bumps ``version`` and flips the prior document's ``is_current`` to False so
+    it drops out of the current view.
+    """
+
+    queryset = AssetDocument.objects.select_related("asset", "uploaded_by", "supersedes").all()
+    serializer_class = AssetDocumentSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_queryset(self):
+        """Honor ``?asset=``, ``?category=``, and ``?is_current=`` filters.
+
+        The asset detail page GETs ``?asset={id}`` for one asset's library, and
+        ``?is_current=true`` for the "current" view (superseded versions live
+        behind a toggle). Filtering is done here rather than via
+        ``filterset_fields`` because django-filter is not a dependency of this
+        project — this mirrors ``AssetProblemViewSet``/``LocationProblemViewSet``.
+        """
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        category = self.request.query_params.get("category")
+        if category:
+            qs = qs.filter(category=category)
+        is_current = self.request.query_params.get("is_current")
+        if is_current is not None:
+            qs = qs.filter(is_current=is_current.lower() in ("1", "true", "yes"))
+        return qs
+
+    def perform_create(self, serializer):
+        """Stamp the uploader and apply versioning when ``supersedes`` is set.
+
+        A brand-new document is version 1. A document that supersedes an
+        existing one takes ``prior.version + 1`` and flips the prior document's
+        ``is_current`` to False so people don't follow a stale manual.
+        """
+        user = self.request.user if self.request.user.is_authenticated else None
+        supersedes = serializer.validated_data.get("supersedes")
+        version = (supersedes.version + 1) if supersedes is not None else 1
+        serializer.save(uploaded_by=user, version=version)
+        if supersedes is not None:
+            AssetDocument.objects.filter(pk=supersedes.pk).update(is_current=False)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def supersede(self, request, pk=None):
+        """Upload a new version that replaces this document.
+
+        The new document inherits this document's ``asset`` (and its
+        ``category``/``title`` unless the caller overrides them), links
+        ``supersedes`` back to it, bumps ``version``, and flips this document's
+        ``is_current`` to False. Requires authentication (write action).
+        """
+        prior = self.get_object()
+        data = request.data.copy()
+        data["supersedes"] = str(prior.pk)
+        data.setdefault("asset", str(prior.asset_id))
+        data.setdefault("category", prior.category)
+        data.setdefault("title", prior.title)
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
 class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):

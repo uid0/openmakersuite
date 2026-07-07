@@ -2,6 +2,8 @@
 Views for reorder queue API.
 """
 
+import csv
+import io
 from datetime import timedelta
 from decimal import Decimal
 
@@ -49,6 +51,68 @@ from .serializers import (
 )
 from .webhook_audit import diff_audited_fields as diff_webhook_audited_fields
 from .webhook_audit import record_event as record_webhook_audit_event
+
+
+def _po_line_display_name(po_item):
+    """Human-readable name for a purchase-order line.
+
+    Used only to label ``missing_sku`` entries so an operator can tell which
+    line needs a supplier part number fixed. Prefers the inventory item name,
+    then the asset name, then the freeform description.
+    """
+    item = po_item.item  # item_supplier.item, or None for asset/freeform lines
+    if item is not None:
+        return item.name
+    if po_item.asset is not None:
+        return po_item.asset.name
+    return po_item.description or f"Line {po_item.pk}"
+
+
+def build_order_pad(lines):
+    """Build a vendor-agnostic order-pad payload from order lines.
+
+    ``lines`` is an iterable of ``(name, supplier_sku, quantity)`` triples. The
+    ``supplier_sku`` is the vendor's real part number (an ``ItemSupplier``
+    field), which is what every distributor bulk order pad — Grainger,
+    McMaster, Digi-Key, Amazon, Uline, MSC — keys on, so a plain ``part#,qty``
+    list is the lowest-effort, highest-coverage ordering export.
+
+    Returns a dict with:
+
+    - ``csv``: a ``part#,qty`` CSV string including a header row.
+    - ``text``: a plain ``part#\\tqty`` tab-separated copy-paste block
+      (no header) suitable for pasting straight into an order pad.
+    - ``line_count``: number of usable rows emitted.
+    - ``missing_sku``: names of lines whose ``supplier_sku`` is blank/unusable.
+
+    Lines with a blank or whitespace-only ``supplier_sku`` are *not* written
+    into the CSV/text — a row with no part number is junk a distributor pad
+    rejects — but their names are collected in ``missing_sku`` so the operator
+    knows exactly what to fix. They are surfaced, never silently dropped.
+    """
+    usable = []
+    missing_sku = []
+    for name, supplier_sku, quantity in lines:
+        cleaned = (supplier_sku or "").strip()
+        if cleaned:
+            usable.append((cleaned, quantity))
+        else:
+            missing_sku.append(name)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(["part#", "qty"])
+    for supplier_sku, quantity in usable:
+        writer.writerow([supplier_sku, quantity])
+
+    text = "\n".join(f"{supplier_sku}\t{quantity}" for supplier_sku, quantity in usable)
+
+    return {
+        "csv": buffer.getvalue(),
+        "text": text,
+        "line_count": len(usable),
+        "missing_sku": missing_sku,
+    }
 
 
 def _create_lead_time_log(po_item, delivery_date):
@@ -424,56 +488,48 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
     def generate_cart_links(self, request):
-        """Generate shopping cart links for approved items by supplier."""
-        approved = (
-            ReorderRequest.objects.filter(status="approved")
+        """Group the live reorder queue by supplier into per-supplier order pads.
+
+        For every open reorder request (``pending`` or ``approved``) whose item
+        has a supplier relationship, emit a ``part#,qty`` order pad (CSV +
+        tab-separated copy block) built from the item's supplier SKU and
+        requested quantity — the same vendor-agnostic builder the PO
+        ``export_order`` action uses (DRY). The operator pastes or uploads each
+        supplier's block into that distributor's bulk order pad.
+
+        Replaces the previous dead implementation, which branched on
+        ``supplier_type`` values (``amazon``/``grainger``/``hdsupply``) that the
+        ``Supplier`` model never produces — its types are ``local``/``online``/
+        ``national`` — so it always returned ``{}``.
+        """
+        open_requests = (
+            ReorderRequest.objects.filter(
+                status__in=[ReorderRequest.PENDING, ReorderRequest.APPROVED]
+            )
             .select_related("item")
             .prefetch_related("item__item_suppliers__supplier")
         )
 
-        supplier_items = {}
-        for req in approved:
-            if not req.item.supplier:
+        # Group each request under its item's primary supplier so the emitted
+        # SKU and the supplier heading always come from the same ItemSupplier.
+        grouped = {}
+        for req in open_requests:
+            link = req.item.primary_item_supplier
+            if link is None:
                 continue
-
-            supplier_type = req.item.supplier.supplier_type
-            if supplier_type not in supplier_items:
-                supplier_items[supplier_type] = []
-
-            supplier_items[supplier_type].append(
-                {
-                    "item_name": req.item.name,
-                    "quantity": req.quantity,
-                    "supplier_sku": req.item.supplier_sku,
-                    "supplier_url": req.item.supplier_url,
-                    "estimated_cost": (float(req.estimated_cost) if req.estimated_cost else None),
-                }
+            grouped.setdefault(link.supplier.name, []).append(
+                (req.item.name, link.supplier_sku, req.quantity)
             )
 
-        # Generate cart links/data for each supplier
         cart_data = {}
-        for supplier_type, items in supplier_items.items():
-            if supplier_type == "amazon":
-                # Amazon: Generate add-to-cart URLs
-                cart_data[supplier_type] = {
-                    "supplier": "Amazon",
-                    "items": items,
-                    "instructions": "Click the supplier URL for each item to add to cart manually",
-                }
-            elif supplier_type == "grainger":
-                # Grainger: Similar approach
-                cart_data[supplier_type] = {
-                    "supplier": "Grainger",
-                    "items": items,
-                    "instructions": "Use supplier SKUs to build cart on Grainger website",
-                }
-            elif supplier_type == "hdsupply":
-                # HD Supply
-                cart_data[supplier_type] = {
-                    "supplier": "HD Supply",
-                    "items": items,
-                    "instructions": "Use supplier SKUs to build cart on HD Supply website",
-                }
+        for supplier_name, lines in grouped.items():
+            payload = build_order_pad(lines)
+            cart_data[supplier_name] = {
+                "supplier": supplier_name,
+                "csv": payload["csv"],
+                "text": payload["text"],
+                "line_count": payload["line_count"],
+            }
 
         return Response(cart_data)
 
@@ -1082,6 +1138,41 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="export-order")
+    def export_order(self, request, pk=None):
+        """Export this PO as a vendor-agnostic order pad (``part#, qty``).
+
+        Builds a CSV (with a header row) and a tab-separated copy-paste block
+        from each non-voided line's ``supplier_sku`` + ``quantity_ordered`` so
+        the operator can paste or upload it into any distributor's bulk order
+        pad with zero per-vendor integration and zero schema change. Lines
+        whose ``supplier_sku`` is blank are surfaced in ``missing_sku`` rather
+        than dropped, so nothing goes missing silently.
+
+        Read-gated to authenticated users (via :meth:`get_permissions`), matching
+        the ``send_to_supplier`` action.
+        """
+        purchase_order = self.get_object()
+
+        lines = [
+            (
+                _po_line_display_name(po_item),
+                po_item.item_supplier.supplier_sku if po_item.item_supplier else "",
+                po_item.quantity_ordered,
+            )
+            for po_item in purchase_order.items.all()
+            if not po_item.is_voided
+        ]
+
+        payload = build_order_pad(lines)
+        # PO numbers here already carry a "PO-" prefix; only add one when the
+        # number (or the draft fallback) doesn't, so the file is never "PO-PO-…".
+        po_number = purchase_order.po_number or f"draft-{purchase_order.pk}"
+        base = po_number if po_number.upper().startswith("PO-") else f"PO-{po_number}"
+        payload["filename"] = f"{base}-order.csv"
+        payload["supplier"] = purchase_order.supplier.name if purchase_order.supplier_id else ""
+        return Response(payload)
 
     @action(detail=True, methods=["post"], url_path="mark-delivered")
     def mark_delivered(self, request, pk=None):

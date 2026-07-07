@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
+  OrderPadExport,
   purchaseOrderAPI,
   serializedComponentsAPI,
   SerializedTrackingMode,
@@ -136,6 +137,10 @@ const PurchaseOrderPage: React.FC = () => {
   const [attachmentDescription, setAttachmentDescription] = useState('');
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  // Order-pad export (part#,qty) — last-fetched payload drives the missing-SKU
+  // warning; `exportingOrderPad` disables the buttons while a fetch is in flight.
+  const [orderPad, setOrderPad] = useState<OrderPadExport | null>(null);
+  const [exportingOrderPad, setExportingOrderPad] = useState(false);
 
   const loadOrder = useCallback(async () => {
     try {
@@ -324,6 +329,54 @@ const PurchaseOrderPage: React.FC = () => {
       console.error('Error confirming purchase order:', err);
     } finally {
       setTransitioning(false);
+    }
+  };
+
+  // Fetch the vendor-agnostic order pad (part#,qty CSV + copy block) for this
+  // PO. Shared by the download and copy affordances; also refreshes the
+  // missing-SKU warning so the operator sees which lines still need a supplier
+  // part number before they order.
+  const fetchOrderPad = async (): Promise<OrderPadExport | null> => {
+    try {
+      setExportingOrderPad(true);
+      const response = await purchaseOrderAPI.exportOrder(orderId!);
+      setOrderPad(response.data);
+      return response.data;
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to build order pad'));
+      console.error('Error building order pad:', err);
+      return null;
+    } finally {
+      setExportingOrderPad(false);
+    }
+  };
+
+  const handleDownloadOrderPad = async () => {
+    const pad = await fetchOrderPad();
+    if (!pad) return;
+    const blob = new Blob([pad.csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = pad.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleCopyOrderPad = async () => {
+    const pad = await fetchOrderPad();
+    if (!pad) return;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(pad.text);
+        showSuccess('Order pad copied to clipboard');
+      } catch {
+        showError('Could not copy order pad to clipboard');
+      }
+    } else {
+      showError('Clipboard is not available in this browser');
     }
   };
 
@@ -649,6 +702,29 @@ const PurchaseOrderPage: React.FC = () => {
       </Button>,
     );
   }
+  // Order-pad export: turn this PO's lines into a vendor-ready part#,qty list to
+  // paste/upload into any distributor bulk order pad. Login-gated (like the API)
+  // and only offered when there's at least one non-voided line to order.
+  if (isAuthenticated && order.items.some((item) => !item.is_voided)) {
+    heroActions.push(
+      <Button
+        key="download-order-pad"
+        variant="default"
+        onClick={handleDownloadOrderPad}
+        disabled={exportingOrderPad}
+      >
+        Download order pad (CSV)
+      </Button>,
+      <Button
+        key="copy-order-pad"
+        variant="default"
+        onClick={handleCopyOrderPad}
+        disabled={exportingOrderPad}
+      >
+        Copy order pad
+      </Button>,
+    );
+  }
   if (canReceiveItems(order) && !markingDelivered && !receivingItems) {
     heroActions.push(
       <Button key="receive-items" onClick={handleOpenReceiveItems}>
@@ -671,6 +747,23 @@ const PurchaseOrderPage: React.FC = () => {
       }}
     >
       <div className="purchase-order-page">
+        {orderPad && orderPad.missing_sku.length > 0 && (
+          <Paper
+            withBorder
+            p="sm"
+            radius="md"
+            bg="yellow.0"
+            c="yellow.9"
+            mb="md"
+            data-testid="order-pad-missing-sku-warning"
+          >
+            <Text size="sm">
+              {orderPad.missing_sku.length}{' '}
+              {orderPad.missing_sku.length === 1 ? 'line has' : 'lines have'} no supplier
+              part number — fix the item supplier before ordering.
+            </Text>
+          </Paper>
+        )}
         <div className="po-status">
           {canVoidOrder(order) && (
             <button

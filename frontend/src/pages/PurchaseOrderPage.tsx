@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import {
+  OrderingAdapter,
   OrderPadExport,
   purchaseOrderAPI,
   serializedComponentsAPI,
@@ -71,6 +72,9 @@ interface PurchaseOrder {
   id: string;
   po_number: string;
   supplier_details: string;
+  // Selects the adapter-aware order-pad affordances (op-svpq): Amazon "Open
+  // cart" vs HD Supply / generic download+copy. Read-only, from the supplier.
+  supplier_ordering_adapter: OrderingAdapter | null;
   status: string;
   status_label: string;
   order_date: string;
@@ -137,8 +141,9 @@ const PurchaseOrderPage: React.FC = () => {
   const [attachmentDescription, setAttachmentDescription] = useState('');
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
-  // Order-pad export (part#,qty) — last-fetched payload drives the missing-SKU
-  // warning; `exportingOrderPad` disables the buttons while a fetch is in flight.
+  // Order export (adapter-aware, op-svpq) — last-fetched payload drives the
+  // missing-/invalid-SKU warnings and the Amazon multi-cart panel;
+  // `exportingOrderPad` disables the buttons while a fetch is in flight.
   const [orderPad, setOrderPad] = useState<OrderPadExport | null>(null);
   const [exportingOrderPad, setExportingOrderPad] = useState(false);
 
@@ -332,10 +337,10 @@ const PurchaseOrderPage: React.FC = () => {
     }
   };
 
-  // Fetch the vendor-agnostic order pad (part#,qty CSV + copy block) for this
-  // PO. Shared by the download and copy affordances; also refreshes the
-  // missing-SKU warning so the operator sees which lines still need a supplier
-  // part number before they order.
+  // Fetch the adapter-appropriate order export for this PO (op-svpq). Shared by
+  // every export affordance (CSV download, copy block, Amazon cart); also
+  // refreshes the missing-/invalid-SKU warnings so the operator sees which lines
+  // still need a usable supplier part number before they order.
   const fetchOrderPad = async (): Promise<OrderPadExport | null> => {
     try {
       setExportingOrderPad(true);
@@ -353,12 +358,12 @@ const PurchaseOrderPage: React.FC = () => {
 
   const handleDownloadOrderPad = async () => {
     const pad = await fetchOrderPad();
-    if (!pad) return;
+    if (!pad || pad.csv == null) return;
     const blob = new Blob([pad.csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = pad.filename;
+    a.download = pad.filename ?? 'order.csv';
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -367,7 +372,7 @@ const PurchaseOrderPage: React.FC = () => {
 
   const handleCopyOrderPad = async () => {
     const pad = await fetchOrderPad();
-    if (!pad) return;
+    if (!pad || pad.text == null) return;
     if (navigator.clipboard?.writeText) {
       try {
         await navigator.clipboard.writeText(pad.text);
@@ -378,6 +383,25 @@ const PurchaseOrderPage: React.FC = () => {
     } else {
       showError('Clipboard is not available in this browser');
     }
+  };
+
+  // Amazon adapter (op-svpq): the export returns add-to-cart URL(s) rather than a
+  // file. Open the first cart in a new tab; when the PO is chunked across
+  // several carts (Amazon caps cart-URL length) the per-chunk buttons rendered
+  // below let the operator open each one.
+  const openAmazonCart = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleOpenAmazonCart = async () => {
+    const pad = await fetchOrderPad();
+    if (!pad) return;
+    const urls = pad.cart_urls ?? [];
+    if (urls.length === 0) {
+      showError('No Amazon cart could be built — check the lines have valid ASINs.');
+      return;
+    }
+    openAmazonCart(urls[0]);
   };
 
   const handleOpenMarkDelivered = () => {
@@ -702,28 +726,63 @@ const PurchaseOrderPage: React.FC = () => {
       </Button>,
     );
   }
-  // Order-pad export: turn this PO's lines into a vendor-ready part#,qty list to
-  // paste/upload into any distributor bulk order pad. Login-gated (like the API)
-  // and only offered when there's at least one non-voided line to order.
+  // Order export: turn this PO's lines into a vendor-ready order artifact whose
+  // shape follows the supplier's ordering adapter (op-svpq) — an Amazon add-to-
+  // cart link, an HD Supply Part#,Qty CSV, or the generic part#,qty pad. Login-
+  // gated (like the API) and only offered when there's a non-voided line to
+  // order.
   if (isAuthenticated && order.items.some((item) => !item.is_voided)) {
-    heroActions.push(
-      <Button
-        key="download-order-pad"
-        variant="default"
-        onClick={handleDownloadOrderPad}
-        disabled={exportingOrderPad}
-      >
-        Download order pad (CSV)
-      </Button>,
-      <Button
-        key="copy-order-pad"
-        variant="default"
-        onClick={handleCopyOrderPad}
-        disabled={exportingOrderPad}
-      >
-        Copy order pad
-      </Button>,
-    );
+    const adapter = order.supplier_ordering_adapter;
+    if (adapter === 'amazon') {
+      heroActions.push(
+        <Button
+          key="open-amazon-cart"
+          variant="default"
+          onClick={handleOpenAmazonCart}
+          disabled={exportingOrderPad}
+        >
+          Open Amazon cart
+        </Button>,
+      );
+    } else if (adapter === 'hdsupply') {
+      heroActions.push(
+        <Button
+          key="download-order-pad"
+          variant="default"
+          onClick={handleDownloadOrderPad}
+          disabled={exportingOrderPad}
+        >
+          Download for HD Supply
+        </Button>,
+        <Button
+          key="copy-order-pad"
+          variant="default"
+          onClick={handleCopyOrderPad}
+          disabled={exportingOrderPad}
+        >
+          Copy order pad
+        </Button>,
+      );
+    } else {
+      heroActions.push(
+        <Button
+          key="download-order-pad"
+          variant="default"
+          onClick={handleDownloadOrderPad}
+          disabled={exportingOrderPad}
+        >
+          Download order pad (CSV)
+        </Button>,
+        <Button
+          key="copy-order-pad"
+          variant="default"
+          onClick={handleCopyOrderPad}
+          disabled={exportingOrderPad}
+        >
+          Copy order pad
+        </Button>,
+      );
+    }
   }
   if (canReceiveItems(order) && !markingDelivered && !receivingItems) {
     heroActions.push(
@@ -762,6 +821,44 @@ const PurchaseOrderPage: React.FC = () => {
               {orderPad.missing_sku.length === 1 ? 'line has' : 'lines have'} no supplier
               part number — fix the item supplier before ordering.
             </Text>
+          </Paper>
+        )}
+        {orderPad && orderPad.invalid_sku.length > 0 && (
+          <Paper
+            withBorder
+            p="sm"
+            radius="md"
+            bg="red.0"
+            c="red.9"
+            mb="md"
+            data-testid="order-pad-invalid-sku-warning"
+          >
+            <Text size="sm">
+              {orderPad.invalid_sku.length}{' '}
+              {orderPad.invalid_sku.length === 1 ? 'item has' : 'items have'}{' '}
+              {orderPad.adapter === 'amazon' ? 'an invalid ASIN' : 'an invalid part number'} —
+              fix the item supplier part number before ordering.
+            </Text>
+          </Paper>
+        )}
+        {orderPad?.adapter === 'amazon' && (orderPad.cart_urls?.length ?? 0) > 1 && (
+          <Paper withBorder p="sm" radius="md" mb="md" data-testid="amazon-cart-chunks">
+            <Text size="sm" mb="xs">
+              This order is split across {orderPad.cart_urls!.length} Amazon carts (Amazon
+              limits cart-URL length). Open each:
+            </Text>
+            <Group gap="sm">
+              {orderPad.cart_urls!.map((url, index) => (
+                <Button
+                  key={`amazon-cart-${index}`}
+                  size="xs"
+                  variant="light"
+                  onClick={() => openAmazonCart(url)}
+                >
+                  Open cart {index + 1}/{orderPad.cart_urls!.length}
+                </Button>
+              ))}
+            </Group>
           </Paper>
         )}
         <div className="po-status">

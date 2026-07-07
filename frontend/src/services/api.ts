@@ -1374,18 +1374,37 @@ export interface CreatePurchaseOrderData {
 }
 
 /**
- * Vendor-agnostic order-pad export for a purchase order: a `part#,qty` CSV
- * (with header) plus a tab-separated copy-paste block, built from each line's
- * supplier part number. `missing_sku` lists lines whose supplier part number
- * is blank so the operator can fix them before ordering.
+ * Per-supplier ordering adapter (op-svpq). Selects what the order-pad export
+ * emits for a supplier: a generic part#,qty pad (`none`/`generic_csv`), an
+ * Amazon add-to-cart URL (`amazon`), or an HD Supply Part#,Qty CSV (`hdsupply`).
+ */
+export type OrderingAdapter = 'none' | 'generic_csv' | 'amazon' | 'hdsupply';
+
+/**
+ * Order-pad export for a purchase order. The supplier's `adapter` selects the
+ * shape (op-svpq):
+ *
+ * - `none`/`generic_csv`/`hdsupply` → a CSV (`csv`, with header) + a
+ *   tab-separated copy-paste block (`text`) + a `filename`.
+ * - `amazon` → one or more Amazon add-to-cart URLs (`cart_urls`); no CSV/file.
+ *
+ * `missing_sku` lists lines whose supplier part number is blank; `invalid_sku`
+ * lists lines whose part number fails the adapter's format (a non-ASIN for
+ * Amazon, a non-numeric part for HD Supply) — both surfaced so the operator can
+ * fix them before ordering, never silently dropped.
  */
 export interface OrderPadExport {
-  csv: string;
-  text: string;
-  filename: string;
+  adapter: OrderingAdapter;
   supplier: string;
   line_count: number;
   missing_sku: string[];
+  invalid_sku: string[];
+  // CSV adapters (none/generic_csv/hdsupply) only.
+  csv?: string;
+  text?: string;
+  filename?: string;
+  // Amazon adapter only.
+  cart_urls?: string[];
 }
 
 export const purchaseOrderAPI = {

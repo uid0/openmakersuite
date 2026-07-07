@@ -167,6 +167,10 @@ export const supplierSchema = z.object({
   supplier_type: z.enum(['local', 'online', 'national'], {
     required_error: 'Supplier type is required',
   }),
+  // Selects the order-pad export artifact for this supplier (op-svpq).
+  ordering_adapter: z
+    .enum(['none', 'generic_csv', 'amazon', 'hdsupply'])
+    .default('none'),
   website: z.string().url('Invalid URL').optional().or(z.literal('')),
   account_number: z.string().max(100, 'Account number must be 100 characters or less').optional(),
   tax_free_paperwork_filed: z.boolean().default(false),

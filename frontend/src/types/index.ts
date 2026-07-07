@@ -2,10 +2,14 @@
  * TypeScript type definitions for the application
  */
 
+export type OrderingAdapter = 'none' | 'generic_csv' | 'amazon' | 'hdsupply';
+
 export interface Supplier {
   id: number;
   name: string;
   supplier_type: 'local' | 'online' | 'national';
+  // Selects the order-pad export artifact for this supplier (op-svpq).
+  ordering_adapter: OrderingAdapter;
   website: string;
   account_number?: string;
   tax_free_paperwork_filed: boolean;

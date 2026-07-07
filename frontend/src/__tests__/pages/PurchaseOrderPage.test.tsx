@@ -1181,3 +1181,173 @@ describe('PurchaseOrderPage order-pad export (op-ls52)', () => {
     expect(screen.queryByRole('button', { name: /copy order pad/i })).not.toBeInTheDocument();
   });
 });
+
+describe('PurchaseOrderPage adapter-aware order export (op-svpq)', () => {
+  const makeAdapterOrder = (adapter: string) => ({
+    ...baseOrder,
+    status: 'sent',
+    status_label: 'Sent',
+    supplier_ordering_adapter: adapter,
+    attachments: [],
+    items: [
+      {
+        id: 'line-1',
+        item_type: 'inventory_item',
+        description: null,
+        item_details: { id: 'i1', name: 'Widget', sku: 'SKU-1' },
+        asset_details: null,
+        quantity_ordered: 2,
+        quantity_received: 0,
+        quantity_pending: 2,
+        is_fully_received: false,
+        unit_cost_ordered: '1.00',
+        unit_cost_actual: null,
+        estimated_cost: '2.00',
+        actual_cost: null,
+        expected_shipment_date: null,
+        notes: '',
+        is_voided: false,
+        voided_at: null,
+        void_reason: '',
+      },
+    ],
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  test('amazon: pre-fetches on load and opens the single cart URL in a new tab', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeAdapterOrder('amazon'),
+    });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({
+      data: {
+        adapter: 'amazon',
+        cart_urls: ['https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=B07X1234YZ&Quantity.1=2'],
+        supplier: 'Acme Supplies',
+        line_count: 1,
+        missing_sku: [],
+        invalid_sku: [],
+      },
+    });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    renderPage();
+
+    // Amazon pre-fetches the cart on load (no click needed to build it).
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.exportOrder).toHaveBeenCalledWith('po-1');
+    });
+    // Generic download/copy affordances are not used for Amazon.
+    expect(screen.queryByRole('button', { name: /download order pad/i })).not.toBeInTheDocument();
+
+    const cartBtn = await screen.findByRole('button', { name: /^open amazon cart$/i });
+    fireEvent.click(cartBtn);
+
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=B07X1234YZ&Quantity.1=2',
+      '_blank',
+      expect.stringContaining('noopener'),
+    );
+    openSpy.mockRestore();
+  });
+
+  test('amazon: renders one button per chunk when the order is split across URLs', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeAdapterOrder('amazon'),
+    });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({
+      data: {
+        adapter: 'amazon',
+        cart_urls: ['https://amzn/cart?part=1', 'https://amzn/cart?part=2'],
+        supplier: 'Acme Supplies',
+        line_count: 2,
+        missing_sku: [],
+        invalid_sku: [],
+      },
+    });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    renderPage();
+
+    const part2 = await screen.findByRole('button', { name: /open amazon cart \(part 2\/2\)/i });
+    expect(screen.getByRole('button', { name: /open amazon cart \(part 1\/2\)/i })).toBeInTheDocument();
+
+    fireEvent.click(part2);
+    expect(openSpy).toHaveBeenCalledWith('https://amzn/cart?part=2', '_blank', expect.any(String));
+    openSpy.mockRestore();
+  });
+
+  test('amazon: warns about invalid ASINs from the pre-fetched export', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeAdapterOrder('amazon'),
+    });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({
+      data: {
+        adapter: 'amazon',
+        cart_urls: [],
+        supplier: 'Acme Supplies',
+        line_count: 0,
+        missing_sku: [],
+        invalid_sku: ['Widget'],
+      },
+    });
+
+    renderPage();
+
+    const warning = await screen.findByTestId('order-pad-invalid-sku-warning');
+    expect(warning).toHaveTextContent(/1 item has an invalid ASIN/i);
+    // With no valid cart URL, the Open cart button is present but disabled.
+    expect(await screen.findByRole('button', { name: /^open amazon cart$/i })).toBeDisabled();
+  });
+
+  test('hdsupply: labels the download/copy affordances for Saved List / Quick Order', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: makeAdapterOrder('hdsupply'),
+    });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({
+      data: {
+        adapter: 'hdsupply',
+        csv: 'Part Number,Quantity\n12345,2\n',
+        text: '12345\t2',
+        filename: 'PO-2026-0001-order.csv',
+        supplier: 'Acme Supplies',
+        line_count: 1,
+        missing_sku: [],
+        invalid_sku: [],
+      },
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      value: vi.fn(() => 'blob:mock'),
+      configurable: true,
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+
+    renderPage();
+
+    // HD Supply keeps the download/copy model but with its own labels; no
+    // Amazon cart button. It fetches lazily on click (not pre-fetched).
+    const downloadBtn = await screen.findByRole('button', {
+      name: /download for hd supply saved list/i,
+    });
+    expect(screen.getByRole('button', { name: /copy for quick order/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /open amazon cart/i })).not.toBeInTheDocument();
+    expect(api.purchaseOrderAPI.exportOrder).not.toHaveBeenCalled();
+
+    fireEvent.click(downloadBtn);
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.exportOrder).toHaveBeenCalledWith('po-1');
+    });
+    await waitFor(() => {
+      expect(clickSpy).toHaveBeenCalled();
+    });
+    clickSpy.mockRestore();
+  });
+});

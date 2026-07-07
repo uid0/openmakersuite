@@ -46,6 +46,7 @@ const SupplierFormPage: React.FC = () => {
     defaultValues: {
       name: '',
       supplier_type: 'local',
+      ordering_adapter: 'none',
       website: '',
       account_number: '',
       tax_free_paperwork_filed: false,
@@ -70,6 +71,7 @@ const SupplierFormPage: React.FC = () => {
       reset({
         name: supplier.name,
         supplier_type: supplier.supplier_type,
+        ordering_adapter: supplier.ordering_adapter || 'none',
         website: supplier.website || '',
         account_number: supplier.account_number || '',
         tax_free_paperwork_filed: supplier.tax_free_paperwork_filed,
@@ -166,6 +168,21 @@ const SupplierFormPage: React.FC = () => {
                         { value: 'national', label: 'National' },
                       ]}
                       error={errors.supplier_type?.message}
+                    />
+
+                    <FormSelect
+                      name="ordering_adapter"
+                      control={control}
+                      label="Ordering adapter"
+                      placeholder="Select ordering adapter"
+                      description="How the order-pad export builds an order for this supplier."
+                      data={[
+                        { value: 'none', label: 'None (generic part#,qty pad)' },
+                        { value: 'generic_csv', label: 'Generic CSV (part#,qty pad)' },
+                        { value: 'amazon', label: 'Amazon (add-to-cart URL)' },
+                        { value: 'hdsupply', label: 'HD Supply (Part#,Qty CSV)' },
+                      ]}
+                      error={errors.ordering_adapter?.message}
                     />
 
                     <FormInput

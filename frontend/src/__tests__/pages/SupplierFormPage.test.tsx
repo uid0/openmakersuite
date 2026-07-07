@@ -64,6 +64,33 @@ describe('SupplierFormPage - Create Mode', () => {
     });
   });
 
+  it('submits the default ordering adapter (none) for a new supplier', async () => {
+    (api.inventoryAPI.createSupplier as jest.Mock).mockResolvedValue({
+      data: { id: 1, name: 'New Supplier' },
+    });
+
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/inventory/suppliers/new']}>
+          <Routes>
+            <Route path="/inventory/suppliers/new" element={<SupplierFormPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>
+    );
+
+    fireEvent.change(await screen.findByPlaceholderText('Supplier name'), {
+      target: { value: 'New Supplier' },
+    });
+    fireEvent.click(screen.getByText('Create Supplier'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.createSupplier).toHaveBeenCalledWith(
+        expect.objectContaining({ ordering_adapter: 'none' }),
+      );
+    });
+  });
+
   it('validates required fields', async () => {
     render(
       <MantineProvider>
@@ -103,6 +130,7 @@ describe('SupplierFormPage - Edit Mode', () => {
     id: 1,
     name: 'Existing Supplier',
     supplier_type: 'local' as const,
+    ordering_adapter: 'amazon' as const,
     website: 'https://example.com',
     account_number: 'ACC-123',
     tax_free_paperwork_filed: true,
@@ -163,6 +191,8 @@ describe('SupplierFormPage - Edit Mode', () => {
     await waitFor(() => {
       expect(api.inventoryAPI.updateSupplier).toHaveBeenCalledWith('1', expect.objectContaining({
         name: 'Updated Supplier',
+        // The loaded ordering adapter round-trips back on save.
+        ordering_adapter: 'amazon',
       }));
       expect(mockNavigate).toHaveBeenCalledWith('/inventory/suppliers');
     });

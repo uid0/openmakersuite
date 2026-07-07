@@ -13,6 +13,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from inventory.models import Supplier
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 from reorder_queue.models import (
     LeadTimeLog,
@@ -616,6 +617,132 @@ class TestPurchaseOrderExportOrder:
             status.HTTP_401_UNAUTHORIZED,
             status.HTTP_403_FORBIDDEN,
         )
+
+    def test_generic_adapter_reports_adapter_and_empty_invalid_sku(self, authenticated_client):
+        # A supplier with the default (none) adapter keeps the #855 generic pad
+        # but now reports adapter + invalid_sku in the unified shape (op-svpq).
+        client, user = authenticated_client
+        supplier = SupplierFactory(name="Generic Co", ordering_adapter=Supplier.ADAPTER_NONE)
+        purchase_order, _ = self._po(user, supplier=supplier)
+        self._add_line(purchase_order, supplier, name="Widget", sku="W-1", qty=2)
+
+        url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["adapter"] == "none"
+        assert response.data["invalid_sku"] == []
+        assert "cart_urls" not in response.data
+        assert response.data["csv"].splitlines()[0] == "part#,qty"
+
+
+@pytest.mark.integration
+class TestPurchaseOrderExportOrderAdapters:
+    """Adapter-aware order-pad export (op-svpq): the PO supplier's
+    ``ordering_adapter`` selects the emitted artifact — an Amazon add-to-cart
+    URL, an HD Supply Part#,Qty CSV, or the generic part#,qty pad."""
+
+    def _po(self, user, supplier):
+        purchase_order = PurchaseOrder.objects.create(
+            po_number="PO-2026-0100",
+            supplier=supplier,
+            status=PurchaseOrder.DRAFT,
+            created_by=user,
+        )
+        return purchase_order
+
+    def _add_line(self, purchase_order, supplier, *, name, sku, qty):
+        item = InventoryItemFactory(name=name, supplier=supplier, supplier_sku=sku)
+        return PurchaseOrderItem.objects.create(
+            purchase_order=purchase_order,
+            item_supplier=item.primary_item_supplier,
+            quantity_ordered=qty,
+            unit_cost_ordered=Decimal("1.00"),
+        )
+
+    def test_amazon_adapter_builds_add_to_cart_url(self, authenticated_client):
+        client, user = authenticated_client
+        supplier = SupplierFactory(name="Amazon", ordering_adapter=Supplier.ADAPTER_AMAZON)
+        purchase_order = self._po(user, supplier)
+        self._add_line(purchase_order, supplier, name="Widget", sku="B07X1234YZ", qty=2)
+        self._add_line(purchase_order, supplier, name="Gadget", sku="B00ABCDE12", qty=3)
+
+        url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["adapter"] == "amazon"
+        assert response.data["line_count"] == 2
+        assert response.data["invalid_sku"] == []
+        assert len(response.data["cart_urls"]) == 1
+
+        # Parse the query so the ASIN↔Quantity pairing is asserted independently
+        # of the DB row order (items.all() order is not guaranteed).
+        from urllib.parse import parse_qs, urlparse
+
+        cart_url = response.data["cart_urls"][0]
+        assert cart_url.startswith("https://www.amazon.com/gp/aws/cart/add.html?")
+        params = parse_qs(urlparse(cart_url).query)
+        carted = {
+            params[key][0]: params[f"Quantity.{key.split('.')[1]}"][0]
+            for key in params
+            if key.startswith("ASIN.")
+        }
+        assert carted == {"B07X1234YZ": "2", "B00ABCDE12": "3"}
+        # URL adapter has no CSV/filename.
+        assert "csv" not in response.data
+        assert "filename" not in response.data
+
+    def test_amazon_adapter_flags_non_asin_sku(self, authenticated_client):
+        client, user = authenticated_client
+        supplier = SupplierFactory(name="Amazon", ordering_adapter=Supplier.ADAPTER_AMAZON)
+        purchase_order = self._po(user, supplier)
+        self._add_line(purchase_order, supplier, name="Good", sku="B07X1234YZ", qty=1)
+        self._add_line(purchase_order, supplier, name="Mistyped", sku="not-an-asin", qty=9)
+
+        url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        # The bad ASIN is surfaced, never silently added to a cart.
+        assert response.data["invalid_sku"] == ["Mistyped"]
+        assert response.data["line_count"] == 1
+        assert "not-an-asin" not in response.data["cart_urls"][0]
+
+    def test_hdsupply_adapter_builds_part_number_csv(self, authenticated_client):
+        client, user = authenticated_client
+        supplier = SupplierFactory(name="HD Supply", ordering_adapter=Supplier.ADAPTER_HDSUPPLY)
+        purchase_order = self._po(user, supplier)
+        self._add_line(purchase_order, supplier, name="Fastener", sku="12345", qty=4)
+
+        url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["adapter"] == "hdsupply"
+        # HD Supply Saved-List header + numeric part rows.
+        csv_lines = response.data["csv"].splitlines()
+        assert csv_lines[0] == "Part Number,Quantity"
+        assert "12345,4" in csv_lines
+        # Quick Order paste block (tab-separated, no header).
+        assert response.data["text"] == "12345\t4"
+        assert response.data["filename"] == "PO-2026-0100-order.csv"
+        assert "cart_urls" not in response.data
+
+    def test_hdsupply_adapter_flags_non_numeric_part(self, authenticated_client):
+        client, user = authenticated_client
+        supplier = SupplierFactory(name="HD Supply", ordering_adapter=Supplier.ADAPTER_HDSUPPLY)
+        purchase_order = self._po(user, supplier)
+        self._add_line(purchase_order, supplier, name="Numeric", sku="9001", qty=1)
+        self._add_line(purchase_order, supplier, name="Alpha", sku="ABC-1", qty=2)
+
+        url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["invalid_sku"] == ["Alpha"]
+        assert response.data["line_count"] == 1
+        assert "ABC-1" not in response.data["csv"]
 
 
 @pytest.mark.integration

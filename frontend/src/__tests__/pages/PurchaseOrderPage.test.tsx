@@ -1074,12 +1074,14 @@ describe('PurchaseOrderPage order-pad export (op-ls52)', () => {
   };
 
   const exportPayload = {
+    adapter: 'generic_csv',
     csv: 'part#,qty\nW-1,2\n',
     text: 'W-1\t2',
     filename: 'PO-2026-0001-order.csv',
     supplier: 'Acme Supplies',
     line_count: 1,
     missing_sku: [] as string[],
+    invalid_sku: [] as string[],
   };
 
   beforeEach(() => {
@@ -1179,5 +1181,209 @@ describe('PurchaseOrderPage order-pad export (op-ls52)', () => {
       screen.queryByRole('button', { name: /download order pad/i }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /copy order pad/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('PurchaseOrderPage adapter-aware export (op-svpq)', () => {
+  const lineItem = {
+    id: 'line-1',
+    item_type: 'inventory_item',
+    description: null,
+    item_details: { id: 'i1', name: 'Widget', sku: 'SKU-1' },
+    asset_details: null,
+    quantity_ordered: 2,
+    quantity_received: 0,
+    quantity_pending: 2,
+    is_fully_received: false,
+    unit_cost_ordered: '1.00',
+    unit_cost_actual: null,
+    estimated_cost: '2.00',
+    actual_cost: null,
+    expected_shipment_date: null,
+    notes: '',
+    is_voided: false,
+    voided_at: null,
+    void_reason: '',
+  };
+
+  const amazonOrder = {
+    ...baseOrder,
+    supplier_ordering_adapter: 'amazon',
+    attachments: [],
+    items: [lineItem],
+  };
+
+  const hdsupplyOrder = {
+    ...baseOrder,
+    supplier_ordering_adapter: 'hdsupply',
+    attachments: [],
+    items: [lineItem],
+  };
+
+  const cartUrl1 =
+    'https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=B07X1234YZ&Quantity.1=2';
+  const cartUrl2 =
+    'https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=B08ABCDE12&Quantity.1=1';
+
+  const amazonPayload = {
+    adapter: 'amazon',
+    supplier: 'Acme Supplies',
+    line_count: 1,
+    missing_sku: [] as string[],
+    invalid_sku: [] as string[],
+    cart_urls: [cartUrl1],
+  };
+
+  const hdsupplyPayload = {
+    adapter: 'hdsupply',
+    csv: 'Part Number,Quantity\n12345,2\n',
+    text: '12345\t2',
+    filename: 'PO-2026-0001-order.csv',
+    supplier: 'Acme Supplies',
+    line_count: 1,
+    missing_sku: [] as string[],
+    invalid_sku: [] as string[],
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  test('amazon supplier shows an "Open Amazon cart" button and opens the cart URL in a new tab', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: amazonOrder });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({ data: amazonPayload });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    renderPage();
+
+    // The Amazon adapter replaces the CSV download/copy affordances with a cart link.
+    const cartButton = await screen.findByRole('button', { name: /open amazon cart/i });
+    expect(
+      screen.queryByRole('button', { name: /download order pad/i }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(cartButton);
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.exportOrder).toHaveBeenCalledWith('po-1');
+    });
+    await waitFor(() => {
+      expect(openSpy).toHaveBeenCalledWith(cartUrl1, '_blank', 'noopener,noreferrer');
+    });
+
+    openSpy.mockRestore();
+  });
+
+  test('amazon multi-chunk PO renders an "Open cart i/N" button per cart and opens each', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: amazonOrder });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({
+      data: { ...amazonPayload, cart_urls: [cartUrl1, cartUrl2] },
+    });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /open amazon cart/i }));
+
+    // First cart opens immediately; the per-chunk panel then lets the operator open the rest.
+    await waitFor(() => {
+      expect(openSpy).toHaveBeenCalledWith(cartUrl1, '_blank', 'noopener,noreferrer');
+    });
+    const secondCart = await screen.findByRole('button', { name: /open cart 2\/2/i });
+    fireEvent.click(secondCart);
+    expect(openSpy).toHaveBeenCalledWith(cartUrl2, '_blank', 'noopener,noreferrer');
+
+    openSpy.mockRestore();
+  });
+
+  test('amazon adapter warns about lines with an invalid ASIN', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: amazonOrder });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({
+      data: {
+        ...amazonPayload,
+        cart_urls: [] as string[],
+        line_count: 0,
+        invalid_sku: ['Widget', 'Gadget'],
+      },
+    });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /open amazon cart/i }));
+
+    const warning = await screen.findByTestId('order-pad-invalid-sku-warning');
+    expect(warning).toHaveTextContent(/2 items have an invalid ASIN/i);
+
+    openSpy.mockRestore();
+  });
+
+  test('hdsupply supplier shows a "Download for HD Supply" button that saves the CSV', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: hdsupplyOrder });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({ data: hdsupplyPayload });
+
+    const createObjectURL = vi.fn(() => 'blob:mock');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      value: createObjectURL,
+      configurable: true,
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      value: revokeObjectURL,
+      configurable: true,
+    });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /download for hd supply/i }));
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.exportOrder).toHaveBeenCalledWith('po-1');
+    });
+    await waitFor(() => {
+      expect(clickSpy).toHaveBeenCalled();
+    });
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+
+    clickSpy.mockRestore();
+  });
+
+  test('hdsupply "Copy order pad" writes the Part#,Qty paste block to the clipboard', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: hdsupplyOrder });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({ data: hdsupplyPayload });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /copy order pad/i }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('12345\t2');
+    });
+    expect(showSuccess).toHaveBeenCalledWith('Order pad copied to clipboard');
+  });
+
+  test('hdsupply adapter warns about lines with a non-numeric part number', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({ data: hdsupplyOrder });
+    (api.purchaseOrderAPI.exportOrder as jest.Mock).mockResolvedValue({
+      data: { ...hdsupplyPayload, invalid_sku: ['Widget'] },
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /download for hd supply/i }));
+
+    const warning = await screen.findByTestId('order-pad-invalid-sku-warning');
+    expect(warning).toHaveTextContent(/1 item has an invalid part number/i);
   });
 });

@@ -35,6 +35,7 @@ import {
   IconKeyboard,
   IconList,
   IconMail,
+  IconPrinter,
   IconQrcode,
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -97,7 +98,7 @@ const FacilitiesProjectStoragePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [actionInFlight, setActionInFlight] = useState<
-    'notice' | 'purgatory' | 'removed' | 'qr' | null
+    'notice' | 'purgatory' | 'removed' | 'qr' | 'reprint' | null
   >(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -226,6 +227,25 @@ const FacilitiesProjectStoragePage: React.FC = () => {
       notifications.showSuccess(`Regenerated QR for ${resp.data.stint_id}.`);
     } catch (err) {
       notifications.showError(extractErrorMessage(err, 'Could not regenerate QR.'));
+    } finally {
+      setActionInFlight(null);
+    }
+  };
+
+  // One-click reprint: clears printed_at on the backend so the stint
+  // re-enters the Pi daemon's print queue and the label reprints on the
+  // next poll. Parity with the ScanTTY reprint action.
+  const reprintTicket = async () => {
+    if (!stint) return;
+    setActionInFlight('reprint');
+    try {
+      const resp = await projectStorageAPI.reprint(stint.stint_id);
+      setStint(resp.data);
+      notifications.showSuccess(
+        `Reprint queued for ${resp.data.stint_id} — the label printer picks it up shortly.`,
+      );
+    } catch (err) {
+      notifications.showError(extractErrorMessage(err, 'Could not queue reprint.'));
     } finally {
       setActionInFlight(null);
     }
@@ -420,6 +440,15 @@ const FacilitiesProjectStoragePage: React.FC = () => {
                 data-testid="regenerate-qr-button"
               >
                 {stint.qr_code_url ? 'Regenerate QR' : 'Generate QR'}
+              </Button>
+              <Button
+                variant="default"
+                leftSection={<IconPrinter size={16} />}
+                loading={actionInFlight === 'reprint'}
+                onClick={reprintTicket}
+                data-testid="reprint-ticket-button"
+              >
+                Reprint claim ticket
               </Button>
             </Group>
 

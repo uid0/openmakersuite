@@ -395,6 +395,35 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
     @action(
         detail=True,
         methods=["post"],
+        url_path="reprint",
+        permission_classes=[IsAdminUser],
+    )
+    def reprint(self, request, stint_id: str):
+        """Warden re-queues a stint's claim ticket for printing.
+
+        The reverse of the daemon's ``mark_printed``: clearing ``printed_at``
+        drops the stint back into ``print_queue`` so the Pi daemon reprints
+        its label on its next poll. Gated to ``IsAdminUser`` like the other
+        warden mutations — the daemon never reprints on its own.
+
+        Unblocks the ScanTTY reprint action (and the web parity button),
+        both of which already POST this path.
+        """
+        stint = self.get_object()
+        stint.printed_at = None
+        stint.save(update_fields=["printed_at", "updated_at"])
+        ProjectStorageEvent.objects.create(
+            stint=stint,
+            event_type=ProjectStorageEvent.EVENT_NOTE_ADDED,
+            actor=request.user if request.user.is_authenticated else None,
+            actor_label="reprint requested",
+            note=request.data.get("note", ""),
+        )
+        return Response(ProjectStorageStintSerializer(stint).data)
+
+    @action(
+        detail=True,
+        methods=["post"],
         url_path="generate-qr",
         permission_classes=[IsStorageAdminOrStaff],
     )

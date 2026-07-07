@@ -2352,6 +2352,29 @@ class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AssetProblemSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
+    def get_queryset(self):
+        """Honor the ``?asset=``, ``?status=``, and ``?part=`` query filters.
+
+        Clients (ScanTTY asset detail) GET ``?asset={id}`` to see only that
+        asset's problems; without this override the list returns *every*
+        problem for every asset. Filtering is done here in ``get_queryset``
+        rather than via ``filterset_fields`` because django-filter is not a
+        dependency of this project — this mirrors the sibling
+        ``LocationProblemViewSet``. Unfiltered requests still return all
+        problems (dashboard use).
+        """
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        part_id = self.request.query_params.get("part")
+        if part_id:
+            qs = qs.filter(part_id=part_id)
+        return qs
+
     @action(
         detail=True,
         methods=["post"],

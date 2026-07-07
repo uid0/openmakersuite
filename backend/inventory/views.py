@@ -950,6 +950,86 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
         return Response(UsageLogSerializer(usage_log).data)
 
+    @action(detail=True, methods=["post"], url_path="cycle-count")
+    def cycle_count(self, request, pk=None):
+        """Record a physical cycle count for this inventory item.
+
+        Reconciles system on-hand to the counted quantity via the shared
+        ``_apply_reconciliation_row`` helper — it writes the StockReconciliation
+        audit row, sets ``current_stock`` to the actual count, and auto-creates a
+        ReorderRequest when at/below minimum (unless ``skip_reorder``). Afterwards
+        the item's ``last_counted_at`` is stamped so the detail views can show
+        days-since-last-count.
+
+        Body: ``counted_qty`` (required int >= 0), ``reason`` (required, from
+        ``StockReconciliation.REASON_CHOICES``), ``skip_reorder`` (optional bool),
+        ``notes`` (optional str).
+        """
+        item = self.get_object()
+
+        if not _user_can_reconcile_item(request.user, item):
+            return Response(
+                {"detail": "You do not have permission to cycle-count this item."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            counted_qty = int(request.data.get("counted_qty"))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "counted_qty is required and must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if counted_qty < 0:
+            return Response(
+                {"detail": "counted_qty must be >= 0."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = request.data.get("reason")
+        valid_reasons = {v for v, _ in StockReconciliation.REASON_CHOICES}
+        if reason not in valid_reasons:
+            return Response(
+                {"detail": ("reason is required; choose from " f"{sorted(valid_reasons)}.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        skip_reorder = bool(request.data.get("skip_reorder", False))
+        notes = request.data.get("notes", "") or ""
+
+        with transaction.atomic():
+            reconciliation, _reorder_created = _apply_reconciliation_row(
+                request.user,
+                item,
+                counted_qty,
+                reason,
+                notes=notes,
+                skip_reorder=skip_reorder,
+            )
+            item.last_counted_at = timezone.now()
+            item.save(update_fields=["last_counted_at"])
+
+        days_since_last_count = (timezone.now() - item.last_counted_at).days
+
+        return Response(
+            {
+                "id": str(item.id),
+                "current_stock": item.current_stock,
+                "last_counted_at": item.last_counted_at,
+                "days_since_last_count": days_since_last_count,
+                "reconciliation": {
+                    "id": reconciliation.id,
+                    "projected_count": reconciliation.projected_count,
+                    "actual_count": reconciliation.actual_count,
+                    "delta": reconciliation.delta,
+                    "reason": reconciliation.reason,
+                    "reconciled_at": reconciliation.reconciled_at,
+                    "reconciled_by": reconciliation.reconciled_by_id,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
     def _resolve_location(self, value):
         if not value:
             return None

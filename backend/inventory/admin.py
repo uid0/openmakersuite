@@ -370,6 +370,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "location",
         "current_stock",
         "minimum_stock",
+        "last_counted_at",
         "needs_reorder",
         "use_case_based_reorder",
         "is_active",
@@ -394,6 +395,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "sku",
         "created_at",
         "updated_at",
+        "last_counted_at",
         "qr_code",
         "thumbnail",
         "api_link",
@@ -422,7 +424,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         ("Images", {"fields": ("image", "image_url", "thumbnail", "qr_code")}),
         (
             "Stock Information",
-            {"fields": ("current_stock", "minimum_stock", "reorder_quantity")},
+            {"fields": ("current_stock", "minimum_stock", "reorder_quantity", "last_counted_at")},
         ),
         (
             "Serial Tracking",

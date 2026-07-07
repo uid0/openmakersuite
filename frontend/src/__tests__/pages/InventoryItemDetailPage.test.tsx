@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import SessionExpiredBanner, {
   consumePendingReturnTo,
 } from '../../components/SessionExpiredBanner';
+import { NotificationProvider } from '../../contexts/NotificationContext';
 import InventoryItemDetailPage from '../../pages/InventoryItemDetailPage';
 import * as api from '../../services/api';
 import { showError } from '../../utils/dialogs';
@@ -86,6 +87,8 @@ describe('InventoryItemDetailPage', () => {
     nfpa_fire_diamond_display: '',
     hazmat_compliance_status: '',
     has_complete_nfpa_data: false,
+    last_counted_at: null,
+    days_since_last_count: null,
   };
 
   beforeEach(() => {
@@ -107,11 +110,13 @@ describe('InventoryItemDetailPage', () => {
   const renderPage = (itemId = 'test-id') => {
     return render(
       <MantineProvider>
-        <MemoryRouter initialEntries={[`/inventory/items/${itemId}`]}>
-          <Routes>
-            <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
-          </Routes>
-        </MemoryRouter>
+        <NotificationProvider>
+          <MemoryRouter initialEntries={[`/inventory/items/${itemId}`]}>
+            <Routes>
+              <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </NotificationProvider>
       </MantineProvider>
     );
   };
@@ -399,12 +404,14 @@ describe('InventoryItemDetailPage', () => {
     sessionStorage.clear();
     render(
       <MantineProvider>
-        <MemoryRouter initialEntries={['/inventory/items/test-id']}>
-          <SessionExpiredBanner />
-          <Routes>
-            <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
-          </Routes>
-        </MemoryRouter>
+        <NotificationProvider>
+          <MemoryRouter initialEntries={['/inventory/items/test-id']}>
+            <SessionExpiredBanner />
+            <Routes>
+              <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </NotificationProvider>
       </MantineProvider>
     );
 

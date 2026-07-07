@@ -7,16 +7,21 @@ import {
     Badge,
     Button,
     Card,
+    Checkbox,
     Group,
     Image,
+    Modal,
+    NumberInput,
     Paper,
+    Select,
     Stack,
     Table,
     Tabs,
     Text,
+    Textarea,
     Title,
 } from '@mantine/core';
-import { IconEdit, IconQrcode } from '@tabler/icons-react';
+import { IconClipboardCheck, IconEdit, IconQrcode } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -24,9 +29,138 @@ import SerializedComponentsPanel from '../components/inventory/SerializedCompone
 import WorkspacePage from '../components/landing/WorkspacePage';
 import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
-import { assetsAPI, inventoryAPI, reorderAPI } from '../services/api';
+import { useNotifications } from '../hooks/useNotifications';
+import { assetsAPI, CycleCountPayload, inventoryAPI, reorderAPI } from '../services/api';
 import { Asset, InventoryItem, ReorderRequest, UsageLog } from '../types';
 import { showError } from '../utils/dialogs';
+
+// Cycle-count reason options (op-c7y4). Mirrors the reconciliation grid's
+// user-facing set — the system-only `vision_supply_check` reason is omitted.
+const CYCLE_COUNT_REASONS: { value: CycleCountPayload['reason']; label: string }[] = [
+  { value: 'miscounted', label: 'Miscounted' },
+  { value: 'lost', label: 'Lost' },
+  { value: 'damaged', label: 'Damaged' },
+  { value: 'used_without_scan', label: 'Used without scanning' },
+  { value: 'found', label: 'Found (positive delta)' },
+  { value: 'other', label: 'Other' },
+];
+
+interface CycleCountModalProps {
+  itemId: string;
+  itemName: string;
+  currentStock: number;
+  opened: boolean;
+  onClose: () => void;
+  onCounted: () => void;
+}
+
+/**
+ * Modal for recording a physical cycle count. Mirrors the reconciliation form
+ * controls: counted quantity, reason, notes, and a skip-reorder toggle. On
+ * success it reloads the parent item so days-since-last-count refreshes.
+ */
+const CycleCountModal: React.FC<CycleCountModalProps> = ({
+  itemId,
+  itemName,
+  currentStock,
+  opened,
+  onClose,
+  onCounted,
+}) => {
+  const notifications = useNotifications();
+  const [countedQty, setCountedQty] = useState<number | ''>(currentStock);
+  const [reason, setReason] = useState<CycleCountPayload['reason']>('miscounted');
+  const [notes, setNotes] = useState('');
+  const [skipReorder, setSkipReorder] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Re-seed the form from the current system on-hand each time the modal opens
+  // so the operator starts from the number they're reconciling against.
+  useEffect(() => {
+    if (opened) {
+      setCountedQty(currentStock);
+      setReason('miscounted');
+      setNotes('');
+      setSkipReorder(false);
+    }
+  }, [opened, currentStock]);
+
+  const handleSubmit = async () => {
+    if (countedQty === '' || countedQty < 0) {
+      notifications.showWarning('Counted quantity required', 'Enter a whole number of 0 or more.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { data } = await inventoryAPI.cycleCount(itemId, {
+        counted_qty: countedQty,
+        reason,
+        notes: notes || undefined,
+        skip_reorder: skipReorder,
+      });
+      const delta = data.reconciliation.delta;
+      notifications.showSuccess(
+        'Cycle count recorded',
+        `On-hand set to ${data.current_stock} (Δ ${delta >= 0 ? '+' : ''}${delta}).`
+      );
+      onCounted();
+      onClose();
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      notifications.showError('Cycle count failed', detail || 'Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal opened={opened} onClose={onClose} title={`Cycle Count — ${itemName}`} centered>
+      <Stack gap="md">
+        <NumberInput
+          label="Counted quantity"
+          description="Physical count of units on the shelf"
+          value={countedQty}
+          onChange={(v) => setCountedQty(v === '' ? '' : Number(v))}
+          min={0}
+          allowDecimal={false}
+          allowNegative={false}
+          required
+          data-testid="cycle-count-qty"
+        />
+        <Select
+          label="Reason"
+          data={CYCLE_COUNT_REASONS}
+          value={reason}
+          onChange={(v) => v && setReason(v as CycleCountPayload['reason'])}
+          allowDeselect={false}
+          required
+          data-testid="cycle-count-reason"
+        />
+        <Textarea
+          label="Notes"
+          placeholder="Optional context for this count"
+          value={notes}
+          onChange={(e) => setNotes(e.currentTarget.value)}
+          data-testid="cycle-count-notes"
+        />
+        <Checkbox
+          label="Skip auto-reorder if at or below minimum"
+          checked={skipReorder}
+          onChange={(e) => setSkipReorder(e.currentTarget.checked)}
+          data-testid="cycle-count-skip-reorder"
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} loading={submitting} data-testid="cycle-count-submit">
+            Record Count
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+};
 
 const InventoryItemDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -38,6 +172,7 @@ const InventoryItemDetailPage: React.FC = () => {
   const [linkedAssets, setLinkedAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string | null>('overview');
+  const [cycleCountOpen, setCycleCountOpen] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -139,6 +274,14 @@ const InventoryItemDetailPage: React.FC = () => {
           <Group gap="sm">
             <Button
               variant="default"
+              leftSection={<IconClipboardCheck size={16} />}
+              onClick={() => setCycleCountOpen(true)}
+              data-testid="cycle-count-button"
+            >
+              Cycle Count
+            </Button>
+            <Button
+              variant="default"
               leftSection={<IconQrcode size={16} />}
               onClick={handleGenerateQR}
             >
@@ -225,6 +368,19 @@ const InventoryItemDetailPage: React.FC = () => {
                     <Text size="sm">
                       {item.use_case_based_reorder ? `${item.reorder_cases} cases` : `${item.reorder_quantity} units`}
                     </Text>
+                  </Group>
+                  <Group justify="space-between">
+                    <Text size="sm">Last Cycle Count:</Text>
+                    {item.last_counted_at ? (
+                      <Text size="sm" data-testid="days-since-count">
+                        {item.days_since_last_count} day{item.days_since_last_count === 1 ? '' : 's'} ago (
+                        {new Date(item.last_counted_at).toLocaleDateString()})
+                      </Text>
+                    ) : (
+                      <Text size="sm" c="dimmed" data-testid="days-since-count">
+                        Never counted
+                      </Text>
+                    )}
                   </Group>
                   {item.unit_cost && (
                     <Group justify="space-between">
@@ -467,6 +623,15 @@ const InventoryItemDetailPage: React.FC = () => {
           />
         </Tabs.Panel>
       </Tabs>
+
+      <CycleCountModal
+        itemId={item.id}
+        itemName={item.name}
+        currentStock={item.current_stock}
+        opened={cycleCountOpen}
+        onClose={() => setCycleCountOpen(false)}
+        onCounted={loadData}
+      />
     </WorkspacePage>
   );
 };

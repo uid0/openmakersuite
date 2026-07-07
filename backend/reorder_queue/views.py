@@ -78,7 +78,11 @@ def _po_line_display_name(po_item):
 
 # An Amazon ASIN is exactly ten uppercase alphanumerics (e.g. ``B07X1234YZ``).
 ASIN_RE = re.compile(r"^[A-Z0-9]{10}$")
-# HD Supply part numbers are numeric.
+# HD Supply part numbers are numeric. NOTE: HD Supply has NO public API and NO
+# deep-link — the CSV/paste is submitted by a logged-in user via the Saved-List
+# upload or the 12-row Quick Order pad. The exact Saved-List CSV header is only
+# visible after login, so we ASSUME ``Part Number,Quantity`` (what their help
+# text says); confirm against a real HD Supply template before relying on it.
 HDSUPPLY_PART_RE = re.compile(r"^[0-9]+$")
 
 # Amazon's public add-to-cart endpoint. Served by Amazon retail and independent

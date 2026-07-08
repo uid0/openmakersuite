@@ -80,6 +80,24 @@ class TestRenderAssetTag:
             pytest.skip("pyzbar not installed; cannot decode QR for verification")
         assert decoded == SCAN_URL_TEMPLATE.format(asset_id=asset.id)
 
+    def test_asset_with_tag_renders_qr_without_manual_generate(self):
+        # A saved asset already carries its human-readable asset_tag, and its
+        # single QR is produced on read by render_asset_tag. No manual
+        # "generate QR" step is required and no QR image is stored on the model
+        # (the redundant generate_qr UI flow was removed) — yet the on-read QR
+        # still resolves to the asset's scan page.
+        asset = AssetFactory()
+        assert asset.asset_tag  # tag present without any generate step
+        assert not asset.qr_code  # nothing generated / stored on the model
+
+        png = render_asset_tag(asset, size="standard")
+        img = _open_png(png)
+
+        decoded = _try_decode_qr(img)
+        if decoded is None:
+            pytest.skip("pyzbar not installed; cannot decode QR for verification")
+        assert decoded == SCAN_URL_TEMPLATE.format(asset_id=asset.id)
+
     def test_rivet_exclusion_zones_are_blank(self):
         asset = AssetFactory()
         png = render_asset_tag(asset, size="standard", dpi=1440)

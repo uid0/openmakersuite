@@ -57,6 +57,52 @@ const STATUS_COLORS: Record<WorkOrderStatus, string> = {
   completed: 'green',
 };
 
+// OMR bead-2: a small warped crop of one scanned mark so the reviewer can
+// eyeball the ink. The crop endpoint is authenticated, so we fetch the PNG as
+// a blob (Bearer token) and render it from an object URL rather than a bare
+// <img src> (which would send no auth header).
+const OmrMarkCrop: React.FC<{
+  workOrderId: string;
+  submissionId: string;
+  targetId: string;
+}> = ({ workOrderId, submissionId, targetId }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    workOrderAPI
+      .getMarkCrop(workOrderId, submissionId, targetId)
+      .then((res) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(res.data as Blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [workOrderId, submissionId, targetId]);
+
+  if (failed) return null;
+  if (!url) return <Loader size="xs" />;
+  return (
+    <Image
+      src={url}
+      alt={`Scanned mark ${targetId}`}
+      w={72}
+      h={44}
+      fit="contain"
+      radius="sm"
+      style={{ border: '1px solid #dee2e6', backgroundColor: '#fff', flexShrink: 0 }}
+    />
+  );
+};
+
 const WorkOrderPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -81,6 +127,8 @@ const WorkOrderPage: React.FC = () => {
 
   // AC-4: per-submission pending-review action state.
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  // OMR bead-2: per-row action state (`${submissionId}:${target_id}`).
+  const [rowActionKey, setRowActionKey] = useState<string | null>(null);
 
   const loadWorkOrder = useCallback(async () => {
     if (!id) return;
@@ -216,15 +264,20 @@ const WorkOrderPage: React.FC = () => {
     }
   };
 
-  const handleApplyPending = async (submissionId: string) => {
+  const handleApplyPending = async (
+    submissionId: string,
+    body?: { target_ids?: string[]; confirm_complete?: boolean },
+  ) => {
     if (!workOrder) return;
     setPendingActionId(submissionId);
     try {
-      await workOrderAPI.applyPendingChanges(workOrder.id, submissionId);
+      const res = await workOrderAPI.applyPendingChanges(workOrder.id, submissionId, body);
       await loadWorkOrder();
       notifications.show({
-        title: 'Applied',
-        message: 'Auto-detected changes accepted.',
+        title: res.data?.work_order_completed ? 'Work order completed' : 'Applied',
+        message: res.data?.work_order_completed
+          ? 'Marks confirmed and the work order was closed.'
+          : 'Auto-detected changes accepted.',
         color: 'green',
         icon: <IconCheck size={16} />,
       });
@@ -239,11 +292,11 @@ const WorkOrderPage: React.FC = () => {
     }
   };
 
-  const handleDiscardPending = async (submissionId: string) => {
+  const handleDiscardPending = async (submissionId: string, body?: { target_ids?: string[] }) => {
     if (!workOrder) return;
     setPendingActionId(submissionId);
     try {
-      await workOrderAPI.discardPendingChanges(workOrder.id, submissionId);
+      await workOrderAPI.discardPendingChanges(workOrder.id, submissionId, body);
       await loadWorkOrder();
       notifications.show({
         title: 'Discarded',
@@ -260,6 +313,37 @@ const WorkOrderPage: React.FC = () => {
       setPendingActionId(null);
     }
   };
+
+  // OMR bead-2: accept / reject a single scanned mark (per-row review).
+  const handleRowAction = async (
+    submissionId: string,
+    targetId: string,
+    action: 'accept' | 'reject',
+  ) => {
+    if (!workOrder || !targetId) return;
+    setRowActionKey(`${submissionId}:${targetId}`);
+    try {
+      if (action === 'accept') {
+        await workOrderAPI.applyPendingChanges(workOrder.id, submissionId, {
+          target_ids: [targetId],
+        });
+      } else {
+        await workOrderAPI.discardPendingChanges(workOrder.id, submissionId, {
+          target_ids: [targetId],
+        });
+      }
+      await loadWorkOrder();
+    } catch {
+      notifications.show({ title: 'Error', message: 'Could not update that mark.', color: 'red' });
+    } finally {
+      setRowActionKey(null);
+    }
+  };
+
+  // OMR bead-2: the human confirm that advances the WO to Completed. A scan
+  // never closes a work order on its own.
+  const handleConfirmComplete = (submissionId: string) =>
+    handleApplyPending(submissionId, { confirm_complete: true });
 
   const handleToggleTask = async (taskCompletionId: string, isCompleted: boolean) => {
     if (!workOrder) return;
@@ -567,64 +651,167 @@ const WorkOrderPage: React.FC = () => {
         )}
       </Card>
 
-      {/* AC-4 Pending CV-derived changes (auto-detected from paper form). */}
-      {workOrder.submissions.some((s) => (s.pending_changes?.length ?? 0) > 0) && (
+      {/* Pending review — CV-detected (email) or OMR scan marks (bead-2). */}
+      {workOrder.submissions.some(
+        (s) => (s.pending_changes?.length ?? 0) > 0 || s.status === 'pending_review',
+      ) && (
         <Card withBorder p="md" radius="md" mb="md" style={{ borderColor: '#ffd43b' }}>
           <Group mb="sm" gap="xs">
             <IconRobot size={18} />
-            <Title order={5}>Auto-detected from paper form (pending review)</Title>
+            <Title order={5}>Detected from paper form (pending review)</Title>
           </Group>
           <Stack gap="md">
             {workOrder.submissions
-              .filter((s) => (s.pending_changes?.length ?? 0) > 0)
-              .map((sub) => (
-                <Box
-                  key={sub.id}
-                  p="sm"
-                  style={{
-                    borderRadius: 8,
-                    backgroundColor: '#fff9db',
-                    border: '1px solid #ffe066',
-                  }}
-                >
-                  <Text size="xs" c="dimmed" mb={6}>
-                    Submission {sub.subject || sub.id} ·{' '}
-                    {new Date(sub.received_at).toLocaleString()}
-                  </Text>
-                  <Stack gap={4} mb="sm">
-                    {sub.pending_changes.map((c, idx) => (
-                      <Group key={idx} gap="xs">
-                        <Badge size="xs" variant="light" color="yellow">
-                          {Math.round(c.confidence * 100)}%
+              .filter((s) => (s.pending_changes?.length ?? 0) > 0 || s.status === 'pending_review')
+              .map((sub) => {
+                const isScan = sub.source === 'scan';
+                return (
+                  <Box
+                    key={sub.id}
+                    p="sm"
+                    style={{
+                      borderRadius: 8,
+                      backgroundColor: '#fff9db',
+                      border: '1px solid #ffe066',
+                    }}
+                  >
+                    <Group gap="xs" mb={6}>
+                      {isScan && (
+                        <Badge size="xs" variant="filled" color="grape" leftSection={<IconScan size={11} />}>
+                          Flatbed scan
                         </Badge>
-                        <Text size="sm">
-                          <b>{c.label || c.kind}:</b>{' '}
-                          {typeof c.value === 'string' ? c.value : String(c.value)}
-                        </Text>
-                      </Group>
-                    ))}
-                  </Stack>
-                  <Group gap="xs">
-                    <Button
-                      size="xs"
-                      color="green"
-                      leftSection={<IconCheck size={14} />}
-                      loading={pendingActionId === sub.id}
-                      onClick={() => handleApplyPending(sub.id)}
-                    >
-                      Accept all
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="default"
-                      loading={pendingActionId === sub.id}
-                      onClick={() => handleDiscardPending(sub.id)}
-                    >
-                      Reject all
-                    </Button>
-                  </Group>
-                </Box>
-              ))}
+                      )}
+                      <Text size="xs" c="dimmed">
+                        Submission {sub.subject || sub.id} ·{' '}
+                        {new Date(sub.received_at).toLocaleString()}
+                      </Text>
+                    </Group>
+
+                    {sub.parse_error && (
+                      <Alert
+                        color="orange"
+                        variant="light"
+                        mb="sm"
+                        icon={<IconAlertTriangle size={16} />}
+                      >
+                        {sub.parse_error}
+                      </Alert>
+                    )}
+
+                    <Stack gap={6} mb="sm">
+                      {sub.pending_changes.map((c, idx) => {
+                        const rowKey = `${sub.id}:${c.target_id}`;
+                        const isMark = c.kind === 'checkbox' || c.kind === 'ink';
+                        const rowBusy = rowActionKey === rowKey || pendingActionId === sub.id;
+                        return (
+                          <Group
+                            key={c.target_id || idx}
+                            gap="xs"
+                            wrap="nowrap"
+                            align="center"
+                            justify="space-between"
+                          >
+                            <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                              {isScan && c.crop_url && c.target_id && (
+                                <OmrMarkCrop
+                                  workOrderId={workOrder.id}
+                                  submissionId={sub.id}
+                                  targetId={c.target_id}
+                                />
+                              )}
+                              <Badge
+                                size="xs"
+                                variant="light"
+                                color={c.confidence >= 0.999 ? 'green' : 'yellow'}
+                              >
+                                {Math.round(c.confidence * 100)}%
+                              </Badge>
+                              <Box style={{ minWidth: 0 }}>
+                                <Text size="sm" truncate>
+                                  <b>{c.label || c.kind}</b>
+                                </Text>
+                                <Text size="xs" c="dimmed">
+                                  {isMark
+                                    ? `reader: ${c.value ? 'marked' : 'blank'}${
+                                        c.auto_applied ? ' · pre-checked' : ''
+                                      }`
+                                    : typeof c.value === 'string'
+                                      ? c.value
+                                      : String(c.value)}
+                                </Text>
+                              </Box>
+                            </Group>
+                            {isMark && c.target_id && (
+                              <Group gap={4} wrap="nowrap">
+                                <Tooltip label="Accept this mark">
+                                  <ActionIcon
+                                    size="sm"
+                                    color="green"
+                                    variant="light"
+                                    loading={rowBusy}
+                                    onClick={() => handleRowAction(sub.id, c.target_id!, 'accept')}
+                                    aria-label={`Accept ${c.label}`}
+                                  >
+                                    <IconCheck size={14} />
+                                  </ActionIcon>
+                                </Tooltip>
+                                <Tooltip label="Reject this mark">
+                                  <ActionIcon
+                                    size="sm"
+                                    color="red"
+                                    variant="light"
+                                    loading={rowBusy}
+                                    onClick={() => handleRowAction(sub.id, c.target_id!, 'reject')}
+                                    aria-label={`Reject ${c.label}`}
+                                  >
+                                    <IconAlertTriangle size={14} />
+                                  </ActionIcon>
+                                </Tooltip>
+                              </Group>
+                            )}
+                          </Group>
+                        );
+                      })}
+                    </Stack>
+
+                    <Group gap="xs">
+                      {sub.pending_changes.length > 0 && (
+                        <>
+                          <Button
+                            size="xs"
+                            color="green"
+                            leftSection={<IconCheck size={14} />}
+                            loading={pendingActionId === sub.id}
+                            onClick={() => handleApplyPending(sub.id)}
+                          >
+                            Accept all
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="default"
+                            loading={pendingActionId === sub.id}
+                            onClick={() => handleDiscardPending(sub.id)}
+                          >
+                            Reject all
+                          </Button>
+                        </>
+                      )}
+                      {isScan && (
+                        <Button
+                          size="xs"
+                          color="blue"
+                          variant="filled"
+                          leftSection={<IconClipboard size={14} />}
+                          loading={pendingActionId === sub.id}
+                          onClick={() => handleConfirmComplete(sub.id)}
+                        >
+                          Confirm &amp; complete work order
+                        </Button>
+                      )}
+                    </Group>
+                  </Box>
+                );
+              })}
           </Stack>
         </Card>
       )}

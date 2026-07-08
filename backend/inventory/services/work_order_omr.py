@@ -250,12 +250,16 @@ def _rectangularity(centers: dict) -> float:
         denom = (_norm(u) * _norm(w)) or 1e-6
         return abs(float(np.dot(u, w)) / denom)
 
-    right_angle = 1.0 - (
-        _cos_at("bl", "tl", "tr")
-        + _cos_at("tl", "tr", "br")
-        + _cos_at("tr", "br", "bl")
-        + _cos_at("br", "bl", "tl")
-    ) / 4.0
+    right_angle = (
+        1.0
+        - (
+            _cos_at("bl", "tl", "tr")
+            + _cos_at("tl", "tr", "br")
+            + _cos_at("tr", "br", "bl")
+            + _cos_at("br", "bl", "tl")
+        )
+        / 4.0
+    )
 
     score = max(0.0, min(1.0, side * diag * right_angle))
     return 1.0 if score >= _REG_SNAP_TO_ONE else score
@@ -311,13 +315,14 @@ def _crop_region(warp, rect_px, inset: float = _REGION_INSET):
     return warp[iy0:iy1, ix0:ix1]
 
 
-def _ink_fill_ratio(warp, interior) -> float:
+def _ink_fill_ratio(interior, paper_white: float) -> float:
     """Fraction of interior pixels that are ADDED ink, robust to lighting.
 
     Combines a per-region *adaptive* threshold (catches strokes under a
     brightness gradient, where a global cutoff fails) with a global
-    paper-relative absolute cutoff (catches solid fills, where the local mean
-    is itself dark and the adaptive pass under-reports).
+    paper-relative absolute cutoff (``paper_white`` is the page's bright-paper
+    level, catching solid fills where the local mean is itself dark and the
+    adaptive pass under-reports).
     """
     interior = interior.astype(np.uint8)
     ih, iw = interior.shape[:2]
@@ -328,20 +333,21 @@ def _ink_fill_ratio(warp, interior) -> float:
     )
     ink = adaptive > 0
 
-    paper_white = float(np.percentile(warp, 92)) or 255.0
     abs_dark = interior < (0.5 * paper_white)
 
     return float(np.count_nonzero(ink | abs_dark)) / float(interior.size)
 
 
-def _score_region(warp, rect_px, kind: str, reg_conf: float) -> "tuple[bool, float, float]":
+def _score_region(
+    warp, rect_px, kind: str, reg_conf: float, paper_white: float
+) -> "tuple[bool, float, float]":
     """Threshold one region → (marked, confidence, fill_ratio). Confidence is
     the decision certainty already multiplied by the registration confidence."""
     interior = _crop_region(warp, rect_px)
     if interior is None or interior.size == 0:
         return False, 0.0, 0.0
 
-    fill = _ink_fill_ratio(warp, interior)
+    fill = _ink_fill_ratio(interior, paper_white)
     on, off = (_INK_ON, _INK_OFF) if kind == "ink" else (_CHECK_ON, _CHECK_OFF)
 
     if fill >= on:
@@ -385,9 +391,7 @@ def _register_and_warp(gray, fiducials: dict, page_w_pt: float, page_h_pt: float
         src = np.array([centers[c] for c in present], dtype=np.float32)
         dpts = np.array([dst[c] for c in present], dtype=np.float32)
         matrix = cv2.getAffineTransform(src, dpts)
-        warp = cv2.warpAffine(
-            gray, matrix, (w_px, h_px), borderValue=255, flags=cv2.INTER_LINEAR
-        )
+        warp = cv2.warpAffine(gray, matrix, (w_px, h_px), borderValue=255, flags=cv2.INTER_LINEAR)
         # An affine model cannot correct keystoning; cap confidence hard so a
         # 3-corner read can never clear the 0.999 bar (always routes to review).
         return warp, 0.7, None
@@ -395,7 +399,9 @@ def _register_and_warp(gray, fiducials: dict, page_w_pt: float, page_h_pt: float
     return None, 0.0, "could not align form: fewer than 3 corner fiducials detected"
 
 
-def read_omr_scan(image, template, *, recovered_work_order_id: Optional[str] = None) -> OmrReadResult:
+def read_omr_scan(
+    image, template, *, recovered_work_order_id: Optional[str] = None
+) -> OmrReadResult:
     """Read a scanned OMR page against its persisted template snapshot.
 
     ``image`` is either encoded image bytes (JPG/PNG) or a numpy array (BGR or
@@ -425,12 +431,17 @@ def read_omr_scan(image, template, *, recovered_work_order_id: Optional[str] = N
         return OmrReadResult(ok=False, error=error, registration_confidence=reg_conf)
 
     dst = _canonical_dst(fiducials, page_h_pt)
+    # Bright-paper level for the whole warped page — the absolute-darkness
+    # baseline for every region (computed once, not per region).
+    paper_white = float(np.percentile(warp, 92)) or 255.0
     reads: list = []
     for region in regions:
         rect_px = _region_px_rect(region["rect_norm"], dst)
         if rect_px is None:
             continue
-        marked, confidence, fill = _score_region(warp, rect_px, region.get("kind", "checkbox"), reg_conf)
+        marked, confidence, fill = _score_region(
+            warp, rect_px, region.get("kind", "checkbox"), reg_conf, paper_white
+        )
         reads.append(
             OmrRegionRead(
                 target_id=region["target_id"],
@@ -474,7 +485,9 @@ def render_mark_crop(image, template, target_id: str, *, pad: float = 0.35) -> O
     if warp is None:
         return None
 
-    region = next((r for r in (template.regions_json or []) if r.get("target_id") == target_id), None)
+    region = next(
+        (r for r in (template.regions_json or []) if r.get("target_id") == target_id), None
+    )
     if region is None:
         return None
     rect_px = _region_px_rect(region["rect_norm"], _canonical_dst(fiducials, page_h_pt))

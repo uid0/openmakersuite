@@ -6,13 +6,18 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('inventory', '0077_workorderomrtemplate'),
+        ("inventory", "0077_workorderomrtemplate"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='workordersubmission',
-            name='source',
-            field=models.CharField(choices=[('email', 'Email'), ('manual', 'Manual'), ('scan', 'Scan (OMR)')], default='email', help_text='How this submission entered the system (email webhook vs manual upload)', max_length=20),
+            model_name="workordersubmission",
+            name="source",
+            field=models.CharField(
+                choices=[("email", "Email"), ("manual", "Manual"), ("scan", "Scan (OMR)")],
+                default="email",
+                help_text="How this submission entered the system (email webhook vs manual upload)",
+                max_length=20,
+            ),
         ),
     ]

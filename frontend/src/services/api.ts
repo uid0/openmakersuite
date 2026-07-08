@@ -1261,14 +1261,33 @@ export const workOrderAPI = {
     }
   ) => api.post(`/inventory/work-orders/${id}/validate/`, data),
 
-  applyPendingChanges: (workOrderId: string, submissionId: string) =>
+  // Optional body (OMR bead-2): `target_ids` applies/rejects only those marks
+  // (per-row), and `confirm_complete` is the human gate that closes the WO.
+  applyPendingChanges: (
+    workOrderId: string,
+    submissionId: string,
+    body?: { target_ids?: string[]; confirm_complete?: boolean },
+  ) =>
     api.post(
       `/inventory/work-orders/${workOrderId}/submissions/${submissionId}/apply-pending/`,
+      body ?? {},
     ),
 
-  discardPendingChanges: (workOrderId: string, submissionId: string) =>
+  discardPendingChanges: (
+    workOrderId: string,
+    submissionId: string,
+    body?: { target_ids?: string[] },
+  ) =>
     api.post(
       `/inventory/work-orders/${workOrderId}/submissions/${submissionId}/discard-pending/`,
+      body ?? {},
+    ),
+
+  // Authed PNG of one warped OMR mark region (returns a Blob for object-URL use).
+  getMarkCrop: (workOrderId: string, submissionId: string, targetId: string) =>
+    api.get(
+      `/inventory/work-orders/${workOrderId}/submissions/${submissionId}/mark-crop/${targetId}/`,
+      { responseType: 'blob' },
     ),
 
   getDueThisWeek: () =>

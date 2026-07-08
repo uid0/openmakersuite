@@ -33,7 +33,7 @@ from inventory.models import (
     WorkOrderTaskCompletion,
 )
 from inventory.services import work_order_omr as omr
-from inventory.services.work_order_ingest import _apply_omr_submission, apply_submission
+from inventory.services.work_order_ingest import apply_submission
 from inventory.services.work_order_omr import (
     OMR_AUTO_APPLY_THRESHOLD,
     build_and_persist_omr_template,
@@ -334,7 +334,9 @@ class TestScanIngestion:
         assert sub.status == WorkOrderSubmission.STATUS_PENDING_REVIEW
         assert "reprint" in sub.parse_error.lower()
         assert sub.pending_changes == []
-        assert not wo.task_completions.filter(id=tasks[0][len("task_") :], is_completed=True).exists()
+        assert not wo.task_completions.filter(
+            id=tasks[0][len("task_") :], is_completed=True
+        ).exists()
 
     def test_no_template_routes_to_review(self):
         wo = _make_work_order(num_tasks=2)
@@ -414,7 +416,8 @@ class TestReviewFlow:
         tasks = _task_target_ids(template)
         # two marginal marks (both queued, neither pre-applied)
         sub = _submission_for(
-            wo, _synth_scan(template, wo_id=wo.id, marks={tasks[0]: "marginal", tasks[1]: "marginal"})
+            wo,
+            _synth_scan(template, wo_id=wo.id, marks={tasks[0]: "marginal", tasks[1]: "marginal"}),
         )
         apply_submission(sub)
 
@@ -426,7 +429,9 @@ class TestReviewFlow:
         )
         assert resp.status_code == status.HTTP_200_OK
         assert WorkOrderTaskCompletion.objects.get(id=tasks[0][len("task_") :]).is_completed is True
-        assert WorkOrderTaskCompletion.objects.get(id=tasks[1][len("task_") :]).is_completed is False
+        assert (
+            WorkOrderTaskCompletion.objects.get(id=tasks[1][len("task_") :]).is_completed is False
+        )
         sub.refresh_from_db()
         # one row applied, one still queued → stays in review
         assert sub.status == WorkOrderSubmission.STATUS_PENDING_REVIEW

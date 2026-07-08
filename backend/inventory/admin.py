@@ -1319,6 +1319,22 @@ class AssetAdmin(admin.ModelAdmin):
 
                 new_asset.save()
 
+                # Copy the asset's parts configuration onto the clone. The form
+                # promises "All other information will be copied from the original
+                # asset", so the AssetPart through-model rows must come along too.
+                # Copy configuration fields only; replacement-tracking fields
+                # (last_replaced_at, replacement_serial_number) hold the ORIGINAL
+                # asset's history and must reset on the clone so it starts fresh.
+                for original_part in original_asset.asset_parts.all():
+                    AssetPart.objects.create(
+                        asset=new_asset,
+                        part=original_part.part,
+                        quantity_needed=original_part.quantity_needed,
+                        is_required=original_part.is_required,
+                        maintenance_interval_days=original_part.maintenance_interval_days,
+                        notes=original_part.notes,
+                    )
+
                 messages.success(
                     request,
                     f'Asset "{new_asset.name}" has been duplicated successfully. '

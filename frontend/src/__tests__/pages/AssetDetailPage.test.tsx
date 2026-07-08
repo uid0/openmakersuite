@@ -414,7 +414,11 @@ describe('AssetDetailPage', () => {
     });
   });
 
-  it('displays QR code when available', async () => {
+  it('no longer renders a standalone QR Code section or Generate QR Code button', async () => {
+    // The redundant standalone "QR Code" section and its manual "Generate QR
+    // Code" step were removed. Even though the serializer still returns a
+    // qr_code_url (mockAsset sets one), the page must not render that section —
+    // the single QR now lives in the Asset Tag section.
     render(
       <MantineProvider><MemoryRouter>
         <AssetDetailPage />
@@ -422,46 +426,18 @@ describe('AssetDetailPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('QR Code')).toBeInTheDocument();
+      expect(screen.getByText('Test Asset')).toBeInTheDocument();
     });
 
-    const qrImage = screen.getByAltText('QR Code');
-    expect(qrImage).toHaveAttribute('src', 'https://example.com/qr.png');
-  });
-
-  it('generates QR code when not available', async () => {
-    const assetWithoutQR = { ...mockAsset, qr_code_url: null };
-    mockAssetsAPI.getAsset.mockResolvedValueOnce({
-      data: assetWithoutQR,
-      status: 200,
-      statusText: 'OK',
-      headers: {},
-      config: {} as any,
-    });
-    mockAssetsAPI.generateQR.mockResolvedValueOnce({
-      data: {},
-      status: 200,
-      statusText: 'OK',
-      headers: {},
-      config: {} as any,
-    });
-
-    render(
-      <MantineProvider><MemoryRouter>
-        <AssetDetailPage />
-      </MemoryRouter></MantineProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('QR code not generated yet.')).toBeInTheDocument();
-    });
-
-    const generateButton = screen.getByText('Generate QR Code');
-    await userEvent.click(generateButton);
-
-    await waitFor(() => {
-      expect(mockAssetsAPI.generateQR).toHaveBeenCalledWith('test-id');
-    });
+    expect(screen.queryByText('QR Code')).not.toBeInTheDocument();
+    expect(screen.queryByAltText('QR Code')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Generate QR Code' })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('QR code not generated yet.')
+    ).not.toBeInTheDocument();
+    expect(mockAssetsAPI.generateQR).not.toHaveBeenCalled();
   });
 
   it('hides asset tag section when not logged in', async () => {
@@ -518,6 +494,34 @@ describe('AssetDetailPage', () => {
         'src',
         expect.stringContaining('size=large')
       );
+    });
+
+    it('shows exactly one QR (the asset tag) and no Generate QR button', async () => {
+      render(
+        <MantineProvider><MemoryRouter>
+          <AssetDetailPage />
+        </MemoryRouter></MantineProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('asset-tag-section')).toBeInTheDocument();
+      });
+
+      // Exactly one QR on the page: the asset tag, rendered on-read from the
+      // tag endpoint (which encodes the /scan/asset/<id> URL that resolves to
+      // this asset). No standalone QR image, no manual generate step.
+      const qrImages = screen.getAllByAltText(/Asset tag/);
+      expect(qrImages).toHaveLength(1);
+      expect(qrImages[0]).toHaveAttribute(
+        'src',
+        expect.stringContaining('/inventory/assets/test-id/tag/')
+      );
+
+      expect(screen.queryByText('QR Code')).not.toBeInTheDocument();
+      expect(screen.queryByAltText('QR Code')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Generate QR Code' })
+      ).not.toBeInTheDocument();
     });
   });
 

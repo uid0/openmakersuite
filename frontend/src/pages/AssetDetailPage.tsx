@@ -1167,58 +1167,10 @@ const AssetDetailPage: React.FC = () => {
             </section>
           )}
 
-        {/* QR Code */}
-        <section className="asset-detail-section">
-          <h2>QR Code</h2>
-          {asset.qr_code_url ? (
-            <div className="qr-code-section">
-              <img src={asset.qr_code_url} alt="QR Code" className="qr-code-image" />
-              <div className="qr-code-actions">
-                <a
-                  href={asset.qr_code_url}
-                  download={`${asset.name}-qr-code.png`}
-                  className="download-button"
-                >
-                  Download QR Code
-                </a>
-                {asset.qr_code_scan_url && (
-                  <a
-                    href={asset.qr_code_scan_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="scan-link"
-                  >
-                    View Scan Page
-                  </a>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="qr-code-section">
-              <p>QR code not generated yet.</p>
-              <button
-                className="generate-qr-button"
-                onClick={async () => {
-                  if (id) {
-                    try {
-                      await assetsAPI.generateQR(id);
-                      await loadAssetDetails();
-                    } catch (err: any) {
-                      showError(extractErrorMessage(err, 'Failed to generate QR code'));
-                    }
-                  }
-                }}
-              >
-                Generate QR Code
-              </button>
-            </div>
-          )}
-        </section>
-
-        {/* Asset Tag */}
+        {/* Asset Tag (the single QR — auto-generated with the tag, rendered on read) */}
         {isLoggedIn && id && (
           <section className="asset-detail-section" data-testid="asset-tag-section">
-            <h2>Asset Tag</h2>
+            <h2>Asset QR &amp; Tag</h2>
             <div className="asset-tag-section">
               <img
                 src={assetsAPI.getTagUrl(id, tagSize)}
@@ -1248,8 +1200,8 @@ const AssetDetailPage: React.FC = () => {
                 </a>
               </div>
               <p className="asset-tag-note" style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#555' }}>
-                Designed for rivet mounting &mdash; holes at &frac14;&quot; from each
-                short edge for a 3/32&quot; rivet.
+                Scan the QR to open this asset&rsquo;s page. Designed for rivet mounting
+                &mdash; holes at &frac14;&quot; from each short edge for a 3/32&quot; rivet.
               </p>
             </div>
           </section>

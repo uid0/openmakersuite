@@ -61,6 +61,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "storage_vision.prune_original_captures",
         crontab(minute=30, hour=3),  # 03:30 UTC daily — AC-26 retention
     ),
+    "inventory-roll-up-meters": (
+        "inventory.tasks.roll_up_meters",
+        900.0,  # every 15 min — asset meter rollup (EAM bead-1)
+    ),
 }
 
 

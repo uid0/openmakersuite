@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetDocument, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -1090,6 +1090,49 @@ export const assetDocumentsAPI = {
     api.patch<AssetDocument>(`/inventory/asset-documents/${id}/`, data),
 
   delete: (id: string) => api.delete(`/inventory/asset-documents/${id}/`),
+};
+
+// Asset meters (EAM bead-1) — usage counters + manual reading entry. Meters are
+// also embedded read-only on the asset detail payload (`asset.meters`); these
+// endpoints are for the manual-first record-reading / adjust flow (staff-gated)
+// and the read-only reading ledger.
+export const assetMetersAPI = {
+  list: (params?: { asset?: string; is_active?: boolean }) =>
+    api.get<{ count: number; next: string | null; previous: string | null; results: AssetMeter[] }>(
+      '/inventory/asset-meters/',
+      { params },
+    ),
+
+  create: (payload: {
+    asset: string;
+    name: string;
+    meter_type: string;
+    unit?: string;
+    source?: string;
+  }) => api.post<AssetMeter>('/inventory/asset-meters/', payload),
+
+  recordReading: (
+    id: string,
+    payload: { value: number; is_absolute: boolean; is_estimated?: boolean; observed_at?: string },
+  ) =>
+    api.post<{ meter: AssetMeter; reading: AssetMeterReading }>(
+      `/inventory/asset-meters/${id}/record-reading/`,
+      payload,
+    ),
+
+  adjust: (id: string, payload: { target: number; reason: string }) =>
+    api.post<{ meter: AssetMeter; reading: AssetMeterReading }>(
+      `/inventory/asset-meters/${id}/adjust/`,
+      payload,
+    ),
+
+  delete: (id: string) => api.delete(`/inventory/asset-meters/${id}/`),
+
+  listReadings: (params: { meter?: string; asset?: string }) =>
+    api.get<{ count: number; next: string | null; previous: string | null; results: AssetMeterReading[] }>(
+      '/inventory/asset-meter-readings/',
+      { params },
+    ),
 };
 
 // Maintenance API

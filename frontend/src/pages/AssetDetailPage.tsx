@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import AssetForgeKeyAccessCard from '../components/AssetForgeKeyAccessCard';
 import AssetReservationsAndOOSSection from '../components/AssetReservationsAndOOSSection';
 import AssetDocumentsSection from '../components/assets/AssetDocumentsSection';
+import AssetMetersSection from '../components/assets/AssetMetersSection';
 import MaintenanceHistorySection from '../components/assets/MaintenanceHistorySection';
 import AssetSerializedComponentsSection from '../components/inventory/AssetSerializedComponentsSection';
 import WorkspacePage from '../components/landing/WorkspacePage';
@@ -1110,6 +1111,19 @@ const AssetDetailPage: React.FC = () => {
             </ul>
           )}
         </section>
+
+        {id && (
+          <AssetMetersSection
+            meters={asset.meters ?? []}
+            assetId={id}
+            canManage={
+              isLoggedIn &&
+              (localStorage.getItem('is_staff') === 'true' ||
+                localStorage.getItem('is_superuser') === 'true')
+            }
+            onChanged={loadAssetDetails}
+          />
+        )}
 
         {id && <AssetReservationsAndOOSSection assetId={id} />}
 

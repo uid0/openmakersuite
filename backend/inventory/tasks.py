@@ -154,3 +154,19 @@ def update_average_lead_times():
                 updated_count += 1
 
     return f"Updated lead times for {updated_count} items"
+
+
+@shared_task
+def roll_up_meters():
+    """Beat task: advance every active AssetMeter from its source (EAM bead-1).
+
+    Thin wrapper over :func:`inventory.services.meter_sources.run_rollup` so the
+    rollup logic lives in the service layer (single source of truth, unit-testable
+    without Celery) and this task only handles scheduling. Runs every 15 minutes
+    via ``CELERY_BEAT_SCHEDULE`` — folds ended usage sessions into runtime-hour
+    readings (exactly-once via each meter's watermark) and dual-writes
+    ``Asset.hours_used`` so the maintenance forecast keeps working untouched.
+    """
+    from .services.meter_sources import run_rollup
+
+    return run_rollup()

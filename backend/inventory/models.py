@@ -2042,6 +2042,205 @@ class AssetDocument(models.Model):
         return f"{self.title} (v{self.version}) — {self.get_category_display()}"
 
 
+class AssetMeter(models.Model):
+    """A meter tracking a cumulative usage quantity on an asset (EAM bead-1).
+
+    Beyond ``Asset.hours_used`` (a single manually-logged integer), maker spaces
+    run assets whose maintenance is driven by *measured* usage: runtime hours off
+    ForgeKey usage sessions, gallons through a water fountain, cycles on a press,
+    kWh on a kiln. A meter is a named counter on an asset with a ``source`` that
+    says HOW it advances:
+
+    * ``auto_session`` — pulled from ended ``forgekey.DeviceUsage`` sessions on a
+      15-minute rollup (the framework's real work; see
+      :mod:`inventory.services.meter_sources`).
+    * ``auto_telemetry`` — pushed from an MQTT flow/counter sensor. Registered as
+      a stub in this bead; the MQTT ingestion is a noted follow-up.
+    * ``manual`` — a human enters the reading (e.g. the fountain's gallon
+      counter). Manual entry is first-class and usable now.
+
+    ``current_value`` caches the latest reading's ``value_after`` so clients get
+    the number without walking the ledger. Readings themselves are the immutable
+    source of truth (:class:`AssetMeterReading`).
+    """
+
+    RUNTIME_HOURS = "runtime_hours"
+    VOLUME_GALLONS = "volume_gallons"
+    CYCLES = "cycles"
+    KWH = "kwh"
+    GENERIC_COUNT = "generic_count"
+
+    METER_TYPE_CHOICES = [
+        (RUNTIME_HOURS, "Runtime hours"),
+        (VOLUME_GALLONS, "Volume (gallons)"),
+        (CYCLES, "Cycles"),
+        (KWH, "Energy (kWh)"),
+        (GENERIC_COUNT, "Generic count"),
+    ]
+
+    SOURCE_AUTO_SESSION = "auto_session"
+    SOURCE_AUTO_TELEMETRY = "auto_telemetry"
+    SOURCE_MANUAL = "manual"
+
+    SOURCE_CHOICES = [
+        (SOURCE_AUTO_SESSION, "Auto — usage sessions"),
+        (SOURCE_AUTO_TELEMETRY, "Auto — telemetry"),
+        (SOURCE_MANUAL, "Manual entry"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(
+        Asset,
+        on_delete=models.CASCADE,
+        related_name="meters",
+        help_text="The asset this meter measures",
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text="Meter name (e.g. 'Spindle runtime', 'Water dispensed')",
+    )
+    meter_type = models.CharField(
+        max_length=20,
+        choices=METER_TYPE_CHOICES,
+        default=GENERIC_COUNT,
+        help_text="What this meter measures",
+    )
+    unit = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Unit label for the value (e.g. hours, gallons, cycles, kWh, count)",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_MANUAL,
+        help_text="How this meter advances — auto rollup or manual entry",
+    )
+    current_value = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        default=Decimal("0"),
+        help_text="Cached latest reading value (value_after of the newest reading)",
+    )
+    current_is_estimated = models.BooleanField(
+        default=False,
+        help_text="True when the current value came from an estimated (eyeballed) reading",
+    )
+    rollup_watermark_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Idempotency watermark for auto_session meters — the ended_at of the "
+            "last usage session already folded into a reading. The rollup only "
+            "consumes sessions ended AFTER this, so re-runs are exactly-once."
+        ),
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive meters are skipped by the rollup and hidden by default",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["asset", "name"]
+        unique_together = [("asset", "name")]
+        indexes = [
+            models.Index(fields=["asset", "is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.asset.name} — {self.name} ({self.current_value} {self.unit})".rstrip()
+
+
+class AssetMeterReading(models.Model):
+    """An append-only ledger entry for an :class:`AssetMeter` (EAM bead-1).
+
+    Every change to a meter — an auto_session rollup, a telemetry push, a manual
+    reading, or a manual correction — writes ONE immutable row here. ``delta`` is
+    the signed change and ``value_after`` snapshots the meter total right after
+    this reading, so the full history reconstructs without recomputation and a
+    bad reading can be audited (never edited).
+
+    Absolute vs delta reads collapse into the same row via a shared helper:
+    an absolute reading of ``V`` becomes ``delta = V - current_value`` /
+    ``value_after = V``; a delta reading of ``d`` becomes
+    ``value_after = current_value + d``.
+    """
+
+    SOURCE_AUTO_SESSION = "auto_session"
+    SOURCE_AUTO_TELEMETRY = "auto_telemetry"
+    SOURCE_MANUAL = "manual"
+    SOURCE_MANUAL_ADJUST = "manual_adjust"
+
+    SOURCE_CHOICES = [
+        (SOURCE_AUTO_SESSION, "Auto — usage sessions"),
+        (SOURCE_AUTO_TELEMETRY, "Auto — telemetry"),
+        (SOURCE_MANUAL, "Manual entry"),
+        (SOURCE_MANUAL_ADJUST, "Manual correction"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    meter = models.ForeignKey(
+        AssetMeter,
+        on_delete=models.CASCADE,
+        related_name="readings",
+        help_text="The meter this reading belongs to",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        help_text="What produced this reading",
+    )
+    delta = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        help_text="Signed change to the meter total from this reading",
+    )
+    value_after = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        help_text="Meter total immediately after applying this reading",
+    )
+    is_estimated = models.BooleanField(
+        default=False,
+        help_text="False for measured readings; True for a human eyeball estimate",
+    )
+    observed_at = models.DateTimeField(
+        help_text="When the reading was observed / the usage it covers ended",
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recorded_meter_readings",
+        help_text="User who recorded a manual reading (null for automatic rollups)",
+    )
+    source_ref = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=(
+            "Soft provenance string (e.g. 'device_usage x12 ≤<ts>'). Deliberately "
+            "NOT a foreign key so inventory need not migrate against forgekey."
+        ),
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Optional notes (e.g. the reason for a manual correction)",
+    )
+
+    class Meta:
+        ordering = ["-recorded_at"]
+        indexes = [
+            models.Index(fields=["meter", "recorded_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.meter.name}: {self.delta:+} → {self.value_after} @ {self.observed_at:%Y-%m-%d %H:%M}"
+
+
 class LocationProblem(models.Model):
     """
     Track problems reported against a Location (not a specific asset).

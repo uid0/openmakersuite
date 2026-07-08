@@ -630,6 +630,15 @@ CELERY_BEAT_SCHEDULE = {
         "task": "storage_vision.prune_original_captures",
         "schedule": crontab(minute=30, hour=3),
     },
+    # Every 15 min — advance asset meters (EAM bead-1). Folds ended ForgeKey
+    # usage sessions into runtime-hour readings (exactly-once via each meter's
+    # rollup watermark) and dual-writes Asset.hours_used so the maintenance
+    # forecast keeps working. Manual/telemetry meters are push sources and are
+    # skipped by the pull.
+    "inventory-roll-up-meters": {
+        "task": "inventory.tasks.roll_up_meters",
+        "schedule": 900.0,
+    },
 }
 
 # Backups (R-03). Output volume and retention window for the

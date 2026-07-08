@@ -546,10 +546,18 @@ export const assetsAPI = {
 
   // `partIds` are AssetPart ids the reporter flagged as needing replace/fix.
   // Only sent when non-empty so description-only reports keep the same payload.
-  reportProblem: (id: string, description: string, partIds?: string[]) =>
+  // `lockoutRequested` (public "Request Lockout") only rides along when true so
+  // ordinary reports keep the exact same payload as before.
+  reportProblem: (
+    id: string,
+    description: string,
+    partIds?: string[],
+    lockoutRequested?: boolean,
+  ) =>
     api.post<AssetProblem>(`/inventory/assets/${id}/report_problem/`, {
       description,
       ...(partIds && partIds.length > 0 ? { part_ids: partIds } : {}),
+      ...(lockoutRequested ? { lockout_requested: true } : {}),
     }),
 
   resolveProblem: (id: string, problemId: string, resolutionNotes?: string, status?: string) =>

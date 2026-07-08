@@ -423,4 +423,191 @@ describe('AssetScanPage — modal flows', () => {
       expect(api.assetsAPI.reportProblem).toHaveBeenCalledWith('asset-1', 'Belt is frayed'),
     );
   });
+
+  // --- op-jhlt: public (anonymous) scan landing ----------------------------
+  // The bare /scan/asset/:assetId route renders this page with no
+  // WorkspaceLayout, so an anonymous scanner gets a clean, mobile-first stack
+  // instead of the full workspace menu + inline-wrapping checkboxes.
+
+  test('public: shows the clean request prompt and hides the staff form for anon', async () => {
+    // no token set → anonymous scanner
+    renderPage();
+
+    expect(
+      await screen.findByText(/not working\? needs supplies\? please let us know!/i),
+    ).toBeInTheDocument();
+    // The staff "Report a Problem" textarea is NOT exposed to anonymous users.
+    expect(
+      screen.queryByPlaceholderText(/describe the problem/i),
+    ).not.toBeInTheDocument();
+  });
+
+  test('public: multi-item asset renders one checkbox per line (own row each)', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockAsset,
+        parts: [
+          { ...assetPart, id: 'part-1', part: 'p1', part_name: 'Drive Belt' },
+          { ...assetPart, id: 'part-2', part: 'p2', part_name: 'Air Filter' },
+        ],
+      },
+    });
+
+    const { container } = renderPage();
+
+    await screen.findByText(/which parts need replacing/i);
+    const rows = container.querySelectorAll(
+      '.affected-parts .affected-part-option',
+    );
+    expect(rows).toHaveLength(2);
+    // Each label is its own row and owns exactly one checkbox (block layout,
+    // not an inline flex-wrap jumble).
+    rows.forEach((row) => {
+      expect(row.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+    });
+  });
+
+  test('public: mobile viewport collapses the nav into a hamburger', async () => {
+    const original = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 375,
+    });
+    try {
+      renderPage();
+
+      expect(
+        await screen.findByRole('button', { name: /toggle navigation/i }),
+      ).toBeInTheDocument();
+      // The inline desktop nav link is not rendered while collapsed.
+      expect(
+        screen.queryByRole('link', { name: /^home$/i }),
+      ).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        writable: true,
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+
+  test('public: desktop viewport shows inline nav links (no hamburger)', async () => {
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 1024,
+    });
+    renderPage();
+
+    await screen.findByText(/not working\?/i);
+    expect(screen.getByRole('link', { name: /^home$/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /toggle navigation/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  test('public: Request Lockout renders only when the asset is forgekey-managed', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: { ...mockAsset, is_forgekey_managed: true },
+    });
+    renderPage();
+
+    expect(
+      await screen.findByRole('button', { name: /request lockout/i }),
+    ).toBeInTheDocument();
+  });
+
+  test('public: Request Lockout is hidden when the asset is not forgekey-managed', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: { ...mockAsset, is_forgekey_managed: false },
+    });
+    renderPage();
+
+    await screen.findByText(/not working\?/i);
+    expect(
+      screen.queryByRole('button', { name: /request lockout/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  test('public: "Not working" files a problem report via the anon endpoint', async () => {
+    (api.assetsAPI.reportProblem as jest.Mock).mockResolvedValue({
+      data: { id: 'prob-1' },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^not working$/i }));
+
+    await waitFor(() =>
+      expect(api.assetsAPI.reportProblem).toHaveBeenCalledWith(
+        'asset-1',
+        'Reported not working from asset scan',
+        undefined,
+        undefined,
+      ),
+    );
+  });
+
+  test('public: "Submit item request" sends the checked parts', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: { ...mockAsset, parts: [assetPart] },
+    });
+    (api.assetsAPI.reportProblem as jest.Mock).mockResolvedValue({
+      data: { id: 'prob-1' },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: /drive belt/i }));
+    fireEvent.click(screen.getByRole('button', { name: /submit item request/i }));
+
+    await waitFor(() =>
+      expect(api.assetsAPI.reportProblem).toHaveBeenCalledWith(
+        'asset-1',
+        'Item/supplies request from asset scan',
+        ['part-1'],
+        undefined,
+      ),
+    );
+  });
+
+  test('public: "Submit item request" with nothing checked warns instead of submitting', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: { ...mockAsset, parts: [assetPart] },
+    });
+    (api.assetsAPI.reportProblem as jest.Mock).mockResolvedValue({
+      data: { id: 'prob-1' },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /submit item request/i }));
+
+    expect(
+      await screen.findByText(/select the item\(s\) you need/i),
+    ).toBeInTheDocument();
+    expect(api.assetsAPI.reportProblem).not.toHaveBeenCalled();
+  });
+
+  test('public: "Request Lockout" files a lockout request, never a direct actuation', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: { ...mockAsset, is_forgekey_managed: true },
+    });
+    (api.assetsAPI.reportProblem as jest.Mock).mockResolvedValue({
+      data: { id: 'prob-1' },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /request lockout/i }));
+
+    await waitFor(() =>
+      expect(api.assetsAPI.reportProblem).toHaveBeenCalledWith(
+        'asset-1',
+        'Lockout requested from asset scan',
+        undefined,
+        true,
+      ),
+    );
+    // The public path never calls the direct lock actuation endpoint.
+    expect(api.assetsAPI.lockAsset).not.toHaveBeenCalled();
+  });
 });

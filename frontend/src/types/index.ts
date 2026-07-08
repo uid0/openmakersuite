@@ -335,6 +335,11 @@ export interface Asset {
   // Authorization
   can_enable: boolean;
   can_unlock: boolean;
+  // True when the asset has a ForgeKey/Keymaster lockout device attached (or is
+  // marked ForgeKey-controlled). Read-only boolean exposed to anonymous scanners
+  // so the public scan page can show a "Request Lockout" action — never device
+  // internals. Gates the Request-Lockout button on AssetScanPage.
+  is_forgekey_managed: boolean;
   // Operational status
   operational_status: OperationalStatus;
   // Parts/consumables

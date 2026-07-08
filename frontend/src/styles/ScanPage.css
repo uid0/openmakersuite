@@ -496,3 +496,133 @@
     width: 100%;
   }
 }
+
+/* ---- Public asset-scan landing (anonymous QR scan) ---------------------- */
+
+/* Slim public top bar. Links show inline on desktop; on phones they collapse
+   into the hamburger (the .scan-nav-menu is toggled open below the bar). */
+.scan-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 4px;
+  margin-bottom: 12px;
+}
+
+.scan-nav-brand {
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: #4a5bc4;
+  text-decoration: none;
+}
+
+.scan-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.scan-nav-link {
+  color: #555;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.scan-nav-link:hover {
+  color: #4a5bc4;
+}
+
+.scan-nav-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 8px 16px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #eee;
+}
+
+/* One checkbox per line. The parts fieldset renders each label as its own
+   row so the replace-item options never wrap inline into a jumble. Shared by
+   the public card and the staff report form. */
+.affected-parts {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 8px 0 16px;
+}
+
+.affected-parts legend {
+  padding: 0 6px;
+  font-weight: 600;
+  color: #555;
+}
+
+.affected-part-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  min-height: 44px;
+}
+
+.affected-part-option:last-child {
+  margin-bottom: 0;
+}
+
+/* Public quick-request stack: header prompt, one-per-line checkboxes, then
+   vertically stacked action buttons (mobile-first, full-width tap targets). */
+.public-actions {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.public-actions-prompt {
+  margin: 0 0 12px;
+  font-size: 1.2rem;
+  color: #333;
+}
+
+.public-action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.public-action-buttons button {
+  width: 100%;
+  padding: 14px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  min-height: 48px;
+  touch-action: manipulation;
+  transition: filter 0.15s, transform 0.1s;
+}
+
+.public-action-buttons button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.public-action-buttons button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.public-action-buttons .btn-report {
+  background-color: #667eea;
+}
+
+.public-action-buttons .btn-notworking {
+  background-color: #e8590c;
+}
+
+/* Request Lockout is a safety-critical request (staff act on it) — strong red. */
+.public-action-buttons .btn-lockout {
+  background-color: #c92a2a;
+}

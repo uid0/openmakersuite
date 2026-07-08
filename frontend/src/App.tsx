@@ -174,11 +174,6 @@ const RedirectScanFixture = () => {
   return <Navigate to={`/inventory/scan/fixture/${fixtureId}`} replace />;
 };
 
-const RedirectScanAsset = () => {
-  const { assetId } = useParams();
-  return <Navigate to={`/inventory/scan/asset/${assetId}`} replace />;
-};
-
 const RedirectScanLocation = () => {
   const { locationId } = useParams();
   return <Navigate to={`/inventory/scan/location/${locationId}`} replace />;
@@ -401,7 +396,10 @@ function AppContent() {
           <Route path="/tax-receipt/lookup" element={<Navigate to="/settings/tax-receipt/lookup" replace />} />
           <Route path="/scan/:itemId" element={<RedirectScanItem />} />
           <Route path="/scan/fixture/:fixtureId" element={<RedirectScanFixture />} />
-          <Route path="/scan/asset/:assetId" element={<RedirectScanAsset />} />
+          {/* Public QR-scan landing — no WorkspaceLayout, so an anonymous phone
+              gets a clean page (not the full workspace menu). The asset QR encodes
+              this path; staff keep the in-workspace view at /inventory/scan/asset. */}
+          <Route path="/scan/asset/:assetId" element={<AssetScanPage />} />
           <Route path="/scan/location/:locationId" element={<RedirectScanLocation />} />
           <Route path="/scan/donation-item/:itemId" element={<RedirectScanDonationItem />} />
           <Route path="/scan/project-storage/:stintId" element={<RedirectScanProjectStorageStint />} />

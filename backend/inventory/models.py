@@ -1879,6 +1879,14 @@ class AssetProblem(models.Model):
     description = models.TextField(
         help_text="Description of the problem or issue",
     )
+    lockout_requested = models.BooleanField(
+        default=False,
+        help_text=(
+            "The reporter asked staff to lock out this asset (e.g. an anonymous "
+            "scanner tapped 'Request Lockout'). This is a REQUEST for staff to "
+            "act on, never a direct device actuation."
+        ),
+    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,

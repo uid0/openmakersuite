@@ -88,7 +88,7 @@ below are public.
 | POST | `inventory/items/<id>/report-need/` | public | Member reports the bin needs restocking. | Required: per-IP throttle + dedupe per (item, day). |
 | POST | `inventory/items/<id>/report-problem/` | public | Member reports a problem with the item. | Required: per-IP throttle + dedupe per (item, day). |
 | POST | `inventory/locations/<id>/report-problem/` | public | Member reports a problem at a location. | Required: per-IP throttle + dedupe per (location, day). |
-| POST | `inventory/assets/<id>/report-problem/` | public | Member reports a problem with an asset. | Required: per-IP throttle + dedupe per (asset, day). |
+| POST | `inventory/assets/<id>/report-problem/` | public | `AllowAny` on `AssetViewSet.report_problem` — an unauthenticated scanner on the public asset-scan page reports a problem ("Not working"), requests supplies (flags `part_ids`), or requests a lockout (`lockout_requested=true`). Always a staff-actioned record, never a device actuation; anonymous reports store `reported_by=""`. | Required: per-IP throttle + dedupe per (asset, day). |
 | POST | `inventory/work-orders/<id>/upload/` | public | Upload a completed paper work-order PDF for ingest. | Required: PDF is signed by AcroForm field; rate-limit per-IP. |
 | GET  | `inventory/health/` | public | Inventory app health summary. | Not required. |
 | any  | `inventory/items/...` (CRUD) | member-rw | `IsAuthenticatedOrReadOnly` — list/retrieve open to anonymous callers, write requires login. Staff-level gating is enforced inside `perform_create/_update/_destroy` via `_check_staff()`. |

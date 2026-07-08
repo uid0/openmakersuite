@@ -2139,9 +2139,15 @@ class AssetViewSet(viewsets.ModelViewSet):
         # Default to user level
         return LockoutLevel.USER
 
-    @action(detail=True, methods=["post"])
+    @action(detail=True, methods=["post"], permission_classes=[AllowAny])
     def report_problem(self, request, pk=None):
-        """Report a problem with an asset."""
+        """Report a problem with an asset.
+
+        AllowAny: an unauthenticated scanner who lands on the public asset-scan
+        page can report a problem, request supplies, or request a lockout. The
+        report is a record staff act on — anonymous reporters are stored with
+        ``reported_by=""`` (mirrors the AllowAny photo-upload path).
+        """
         asset = self.get_object()
         description = request.data.get("description", "")
         if not description:
@@ -2193,10 +2199,19 @@ class AssetViewSet(viewsets.ModelViewSet):
         if request.user and request.user.is_authenticated:
             reported_by = request.user.username
 
+        # Optional "Request Lockout" flag from the public scan page. Accept
+        # real JSON booleans and the common string encodings from form posts.
+        raw_lockout = request.data.get("lockout_requested", False)
+        if isinstance(raw_lockout, str):
+            lockout_requested = raw_lockout.strip().lower() in ("true", "1", "yes", "on")
+        else:
+            lockout_requested = bool(raw_lockout)
+
         problem = AssetProblem.objects.create(
             asset=asset,
             reported_by=reported_by,
             description=description,
+            lockout_requested=lockout_requested,
         )
         if valid_parts:
             problem.affected_parts.set(valid_parts)
@@ -2218,17 +2233,29 @@ class AssetViewSet(viewsets.ModelViewSet):
             from notifications.services import notify_admins
 
             reporter_text = f" by {reported_by}" if reported_by else ""
-            notify_admins(
-                type="warning",
-                title=f"Asset problem reported: {asset.name}",
-                message=(
+            if lockout_requested:
+                notify_type = "error"
+                notify_title = f"🔒 Lockout requested: {asset.name}"
+                notify_message = (
+                    f"A lockout was requested{reporter_text} for {asset.name}. "
+                    f"Review and lock out the asset if warranted: {description[:200]}"
+                )
+            else:
+                notify_type = "warning"
+                notify_title = f"Asset problem reported: {asset.name}"
+                notify_message = (
                     f"A problem was reported{reporter_text} for {asset.name}: "
                     f"{description[:200]}"
-                ),
+                )
+            notify_admins(
+                type=notify_type,
+                title=notify_title,
+                message=notify_message,
                 action_url=f"/inventory/assets/{asset.id}",
                 metadata={
                     "asset_problem_id": str(problem.id),
                     "asset_id": str(asset.id),
+                    "lockout_requested": lockout_requested,
                 },
             )
         except Exception:  # nosec B110

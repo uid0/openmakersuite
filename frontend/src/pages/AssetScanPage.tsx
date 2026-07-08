@@ -3,11 +3,11 @@
  * - Unauthenticated users: Show basic info and QR code, update last_scanned_at
  * - Authenticated users: Show full info, enable/disable, report problem options
  */
-import { Button, Group, Image, SimpleGrid, Stack, Text } from '@mantine/core';
+import { Burger, Button, Group, Image, SimpleGrid, Stack, Text } from '@mantine/core';
 import { Dropzone, IMAGE_MIME_TYPE } from '@mantine/dropzone';
 import { IconPhoto, IconUpload, IconX } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { assetProblemsAPI, assetsAPI, checklistsAPI, maintenanceAPI } from '../services/api';
 import '../styles/ScanPage.css';
 import { Asset, Checklist, MaintenanceItem } from '../types';
@@ -20,6 +20,11 @@ const AssetScanPage: React.FC = () => {
 
   // Authentication state
   const [isLoggedIn] = useState<boolean>(() => !!localStorage.getItem('token'));
+
+  // Public responsive nav: on small screens the nav collapses into a hamburger
+  // instead of showing links inline (mirrors WorkspaceLayout's < 768 breakpoint).
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [navOpen, setNavOpen] = useState<boolean>(false);
 
   // Data state
   const [asset, setAsset] = useState<Asset | null>(null);
@@ -71,6 +76,14 @@ const AssetScanPage: React.FC = () => {
       photoPreviews.forEach((url) => URL.revokeObjectURL(url));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Track viewport width so the public nav collapses to a hamburger on phones.
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
   const loadAsset = useCallback(async () => {
@@ -296,6 +309,60 @@ const AssetScanPage: React.FC = () => {
     }
   };
 
+  // Public (anonymous) quick requests. Every button files an AssetProblem
+  // record for staff to act on via the AllowAny report_problem endpoint — a
+  // request, never a direct device actuation.
+  const submitPublicRequest = async (opts: {
+    description: string;
+    partIds?: string[];
+    lockoutRequested?: boolean;
+    successMessage: string;
+  }) => {
+    if (!asset || submitting) return;
+    try {
+      setSubmitting(true);
+      await assetsAPI.reportProblem(
+        asset.id,
+        opts.description,
+        opts.partIds && opts.partIds.length > 0 ? opts.partIds : undefined,
+        opts.lockoutRequested,
+      );
+      setAffectedPartIds([]);
+      setActionSuccess(opts.successMessage);
+      setTimeout(() => setActionSuccess(null), 4000);
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to send your request'));
+      console.error('Error submitting asset request:', err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSubmitItemRequest = () => {
+    if (affectedPartIds.length === 0) {
+      showError('Select the item(s) you need, then tap Submit item request.');
+      return;
+    }
+    submitPublicRequest({
+      description: 'Item/supplies request from asset scan',
+      partIds: affectedPartIds,
+      successMessage: 'Thanks! Your item request was sent to staff.',
+    });
+  };
+
+  const handleNotWorking = () =>
+    submitPublicRequest({
+      description: 'Reported not working from asset scan',
+      successMessage: 'Thanks! Staff were notified this asset is not working.',
+    });
+
+  const handleRequestLockout = () =>
+    submitPublicRequest({
+      description: 'Lockout requested from asset scan',
+      lockoutRequested: true,
+      successMessage: 'Thanks! A lockout request was sent to staff.',
+    });
+
   if (loading) {
     return (
       <div className="scan-page">
@@ -329,6 +396,35 @@ const AssetScanPage: React.FC = () => {
 
   return (
     <div className="scan-page">
+      {/* Public top bar. On phones the links collapse into a hamburger instead
+          of rendering inline, so a scanned QR never shows the full workspace menu. */}
+      <nav className="scan-nav">
+        <Link to="/" className="scan-nav-brand">
+          OpenMakerSuite
+        </Link>
+        {isMobile ? (
+          <Burger
+            opened={navOpen}
+            onClick={() => setNavOpen((o) => !o)}
+            aria-label="Toggle navigation"
+            size="sm"
+          />
+        ) : (
+          <div className="scan-nav-links">
+            <Link to="/" className="scan-nav-link">
+              Home
+            </Link>
+          </div>
+        )}
+      </nav>
+      {isMobile && navOpen && (
+        <div className="scan-nav-menu">
+          <Link to="/" className="scan-nav-link" onClick={() => setNavOpen(false)}>
+            Home
+          </Link>
+        </div>
+      )}
+
       <div className="item-card">
         <div className="item-header">
           {asset.image_url && (
@@ -600,6 +696,77 @@ const AssetScanPage: React.FC = () => {
               <a href={asset.wiki_page_url} target="_blank" rel="noopener noreferrer">
                 📖 View Wiki Page
               </a>
+            </div>
+          )}
+
+          {/* Public quick-request stack for anonymous scanners: a clean,
+              mobile-first vertical layout — header prompt, one checkbox per
+              line, then stacked action buttons. Staff get the richer form
+              below. Every button files a staff-actioned request, never a
+              direct device command. */}
+          {!isLoggedIn && (
+            <div className="public-actions">
+              <h3 className="public-actions-prompt">
+                Not working? Needs Supplies? Please let us know!
+              </h3>
+
+              {actionSuccess && (
+                <div className="alert alert-success">
+                  <strong>✓ Sent</strong>
+                  <p>{actionSuccess}</p>
+                </div>
+              )}
+
+              {asset.parts && asset.parts.length > 0 && (
+                <fieldset className="affected-parts">
+                  <legend>Which parts need replacing?</legend>
+                  {asset.parts.map((part) => (
+                    <label key={part.id} className="affected-part-option">
+                      <input
+                        type="checkbox"
+                        checked={affectedPartIds.includes(String(part.id))}
+                        onChange={() => toggleAffectedPart(String(part.id))}
+                        disabled={submitting}
+                      />
+                      <span>
+                        {part.part_name}
+                        {part.quantity_needed ? ` (qty ${part.quantity_needed})` : ''}
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+
+              <div className="public-action-buttons">
+                {asset.parts && asset.parts.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-report"
+                    onClick={handleSubmitItemRequest}
+                    disabled={submitting}
+                  >
+                    Submit item request
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn-notworking"
+                  onClick={handleNotWorking}
+                  disabled={submitting}
+                >
+                  Not working
+                </button>
+                {asset.is_forgekey_managed && (
+                  <button
+                    type="button"
+                    className="btn-lockout"
+                    onClick={handleRequestLockout}
+                    disabled={submitting}
+                  >
+                    Request Lockout
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

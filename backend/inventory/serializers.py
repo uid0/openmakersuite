@@ -1349,6 +1349,7 @@ class AssetProblemSerializer(serializers.ModelSerializer):
             "asset_tag",
             "reported_by",
             "description",
+            "lockout_requested",
             "status",
             "resolution_notes",
             "created_at",

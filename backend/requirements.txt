@@ -37,7 +37,7 @@ django-passkey-auth==0.2.0
 django-imagekit==6.1.0
 
 # API Documentation
-drf-spectacular==0.29.0
+drf-spectacular==0.30.0
 
 # Used by config/permission_matrix.py for the API permission matrix snapshot
 # (gh #328). drf-spectacular pulls this in transitively today, but we pin it

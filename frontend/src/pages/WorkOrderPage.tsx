@@ -31,6 +31,7 @@ import {
   IconLock,
   IconPhoto,
   IconRobot,
+  IconScan,
   IconTag,
   IconUpload,
 } from '@tabler/icons-react';
@@ -71,7 +72,7 @@ const WorkOrderPage: React.FC = () => {
 
   // AC-3: validation prompt state.
   const [validationOpen, setValidationOpen] = useState(false);
-  const [validationKind, setValidationKind] = useState<'finalize' | 'pdf'>('finalize');
+  const [validationKind, setValidationKind] = useState<'finalize' | 'pdf' | 'omr-pdf'>('finalize');
   const [ackElectrical, setAckElectrical] = useState(false);
   const [ackLoto, setAckLoto] = useState(false);
   const [ackRequired, setAckRequired] = useState(false);
@@ -160,9 +161,9 @@ const WorkOrderPage: React.FC = () => {
       notifications.show({
         title: 'Validated',
         message:
-          validationKind === 'pdf'
-            ? 'Validation recorded. The PDF can now be generated.'
-            : 'Validation recorded. The work order can now be marked completed.',
+          validationKind === 'finalize'
+            ? 'Validation recorded. The work order can now be marked completed.'
+            : 'Validation recorded. The PDF can now be generated.',
         color: 'green',
         icon: <IconCheck size={16} />,
       });
@@ -170,8 +171,12 @@ const WorkOrderPage: React.FC = () => {
         // Re-attempt finalization now that the gate is open.
         await handleStatusChange('completed');
       } else {
-        // Open the PDF in a new tab now that the gate is open.
-        window.open(workOrderAPI.getPdfUrl(workOrder.id), '_blank', 'noopener,noreferrer');
+        // Open the requested PDF variant in a new tab now that the gate is open.
+        const url =
+          validationKind === 'omr-pdf'
+            ? workOrderAPI.getOmrPdfUrl(workOrder.id)
+            : workOrderAPI.getPdfUrl(workOrder.id);
+        window.open(url, '_blank', 'noopener,noreferrer');
       }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } } };
@@ -189,6 +194,20 @@ const WorkOrderPage: React.FC = () => {
     if (!workOrder?.validation?.is_complete) {
       e.preventDefault();
       setValidationKind('pdf');
+      setAckElectrical(false);
+      setAckLoto(false);
+      setAckRequired(false);
+      setValidationNotes('');
+      setValidationOpen(true);
+    }
+  };
+
+  const handlePrintOmrPdf = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    // Same validation gate as the standard PDF; on success the anchor href
+    // opens the OMR variant, otherwise the modal drives validate-then-open.
+    if (!workOrder?.validation?.is_complete) {
+      e.preventDefault();
+      setValidationKind('omr-pdf');
       setAckElectrical(false);
       setAckLoto(false);
       setAckRequired(false);
@@ -418,6 +437,21 @@ const WorkOrderPage: React.FC = () => {
                 onClick={handlePrintPdf}
               >
                 <IconFileText size={20} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Print scan-to-complete form">
+              <ActionIcon
+                variant="light"
+                color="gray"
+                size="lg"
+                component="a"
+                href={workOrderAPI.getOmrPdfUrl(workOrder.id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={handlePrintOmrPdf}
+                aria-label="Print scan-to-complete form"
+              >
+                <IconScan size={20} />
               </ActionIcon>
             </Tooltip>
           </Stack>
@@ -893,16 +927,16 @@ const WorkOrderPage: React.FC = () => {
         opened={validationOpen}
         onClose={() => setValidationOpen(false)}
         title={
-          validationKind === 'pdf'
-            ? 'Validate before generating PDF'
-            : 'Validate before finalizing'
+          validationKind === 'finalize'
+            ? 'Validate before finalizing'
+            : 'Validate before generating PDF'
         }
         centered
       >
         <Stack gap="sm">
           <Alert color="blue" variant="light">
             Confirm the work order is ready
-            {validationKind === 'pdf' ? ' to print' : ' to be marked completed'}.
+            {validationKind === 'finalize' ? ' to be marked completed' : ' to print'}.
             All three items must be acknowledged.
           </Alert>
           <Checkbox

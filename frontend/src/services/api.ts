@@ -1208,6 +1208,10 @@ export const workOrderAPI = {
 
   getPdfUrl: (id: string) => `${API_BASE_URL}/inventory/work-orders/${id}/pdf/`,
 
+  // OMR "scan-to-complete" form variant: printable form with corner fiducials
+  // that can be filled by hand and scanned back in (op-w4ju).
+  getOmrPdfUrl: (id: string) => `${API_BASE_URL}/inventory/work-orders/${id}/omr-pdf/`,
+
   generateWorkOrder: (maintenanceItemId: string, data?: { due_date?: string; notes?: string }) =>
     api.post<WorkOrder>(`/inventory/maintenance-items/${maintenanceItemId}/generate_work_order/`, data || {}),
 

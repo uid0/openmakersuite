@@ -200,4 +200,20 @@ describe('WorkOrderPage resilience (#457 R4)', () => {
       ).not.toBeDisabled();
     });
   });
+
+  it('offers a print button for the scan-to-complete (OMR) form variant (op-w4ju)', async () => {
+    mockWorkOrderAPI.getWorkOrder.mockResolvedValue(okResponse(buildWorkOrder()));
+    mockWorkOrderAPI.getOmrPdfUrl.mockReturnValue(
+      'http://localhost:8000/api/inventory/work-orders/wo-1/omr-pdf/',
+    );
+
+    renderPage();
+
+    const scanBtn = await screen.findByLabelText('Print scan-to-complete form');
+    expect(scanBtn).toHaveAttribute(
+      'href',
+      'http://localhost:8000/api/inventory/work-orders/wo-1/omr-pdf/',
+    );
+    expect(mockWorkOrderAPI.getOmrPdfUrl).toHaveBeenCalledWith('wo-1');
+  });
 });

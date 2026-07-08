@@ -2801,6 +2801,77 @@ class WorkOrderValidation(models.Model):
         )
 
 
+class WorkOrderOmrTemplate(models.Model):
+    """Persisted OMR region map for a printed scan-to-complete work-order form.
+
+    When the OMR form variant is generated (``generate_work_order_omr_pdf``),
+    the absolute page rect of every mark — each task/material checkbox plus the
+    completion boxes (``work_complete``, ``result_pass``/``result_fail``) and
+    the ink initials/date regions — is captured and normalized against the 4
+    corner fiducials into ``regions_json``. bead-2's reader detects the
+    fiducials in a *scanned* copy, warps into template space, and thresholds
+    each region. The snapshot mirrors the ``parsed_fields`` convention on
+    :class:`WorkOrderSubmission`: a JSON blob describing marks by target_id.
+
+    **Template-drift guard.** ``template_version`` is a stable content
+    signature of the WO's current task/material set at print time (see
+    ``inventory.services.work_order_omr.compute_template_version``). Exactly
+    one row is kept per work order (replaced on reprint). bead-2 recomputes the
+    signature from the WO's *current* tasks and refuses a scan whose stored
+    ``template_version`` no longer matches — i.e. the checklist was edited after
+    the sheet was printed, so the physical box layout is stale.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.CASCADE,
+        related_name="omr_templates",
+        help_text="The work order this printed OMR form belongs to.",
+    )
+    template_version = models.PositiveIntegerField(
+        help_text=(
+            "Content signature of the WO's task/material set at print time. "
+            "A scan is refused if this no longer matches the WO's current tasks."
+        ),
+    )
+    page_w_pt = models.FloatField(help_text="Form page width in PDF points.")
+    page_h_pt = models.FloatField(help_text="Form page height in PDF points.")
+    fiducial_dict = models.CharField(
+        max_length=32,
+        default="aruco_4x4_50",
+        help_text="cv2.aruco dictionary the 4 corner fiducials are drawn from.",
+    )
+    fiducials_json = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="The 4 corner fiducial anchors: {corner: {id, cx, cy}} in points.",
+    )
+    regions_json = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Per-mark region map: list of {target_id, kind, page, rect_norm}. "
+            "rect_norm is [x0,y0,x1,y1] normalized against the fiducial centers."
+        ),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            # One live template per work order — a reprint replaces the snapshot
+            # (Template-drift guard keys off the single current row).
+            models.UniqueConstraint(
+                fields=["work_order"],
+                name="unique_omr_template_per_work_order",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"OMR template v{self.template_version} — WO {self.work_order.short_id}"
+
+
 class WorkOrderSubmission(models.Model):
     """
     An inbound, emailed copy of a completed work order PDF.

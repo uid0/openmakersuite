@@ -10,13 +10,14 @@ Generates a printable work order form that includes:
 """
 
 import io
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import qrcode
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     Flowable,
     HRFlowable,
@@ -28,8 +29,53 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from fiducials.services.apriltag_render import (
+    FAMILY_ARUCO_4X4_50,
+    FORM_FIDUCIAL_IDS,
+    build_form_fiducials,
+)
+
 if TYPE_CHECKING:
     from inventory.models import WorkOrder
+
+# ── OMR (scan-to-complete) form geometry ─────────────────────────────────────
+# The OMR variant of the work-order form adds 4 corner AprilTag fiducials and
+# records the absolute page rect of every mark (checkbox / ink region) so
+# bead-2's reader can align a *scanned* form and threshold each mark. The
+# fiducials are DICT_4X4_50 ids 0..3 at fixed page positions (see
+# ``_fiducial_layout``); every mark rect is normalized against the 4 fiducial
+# centers into a resolution-independent template map.
+
+# Fixed corner-fiducial size and how far the marker's outer edge sits from the
+# page edge, both in points. 30pt fills to the 0.5in content margin so the
+# markers frame the content without overlapping it, and stay inside the
+# printable area on a laser printer.
+_FIDUCIAL_SIZE_PT = 30.0
+_FIDUCIAL_MARGIN_PT = 6.0
+# Render the marker bitmap at a high DPI, then let reportlab scale it down to
+# _FIDUCIAL_SIZE_PT so the printed modules stay crisp (30pt @ 600dpi = 250px).
+_FIDUCIAL_RENDER_DPI = 600
+
+
+class RegionCollector:
+    """Accumulates OMR mark regions as they are drawn (capture-at-draw).
+
+    Option A from the design: rather than re-deriving box positions from the
+    layout, each mark flowable records its own absolute page rect at
+    ``draw()`` time via ``canvas.absolutePosition``. The collector holds those
+    raw rects (PDF points, origin bottom-left); the caller normalizes them
+    against the 4 fiducial centers into a resolution-independent template map
+    (see :func:`build_omr_template_map`).
+    """
+
+    def __init__(self) -> None:
+        # Each entry: {"target_id", "kind", "page", "rect": (x0, y0, x1, y1)}.
+        self.regions: list[dict] = []
+
+    def add(self, target_id: str, kind: str, page: int, rect: tuple) -> None:
+        self.regions.append(
+            {"target_id": target_id, "kind": kind, "page": page, "rect": tuple(rect)}
+        )
 
 
 class AcroCheckbox(Flowable):
@@ -39,14 +85,27 @@ class AcroCheckbox(Flowable):
     Registers an interactive checkbox field on the PDF so that the filled-in
     value can be read back out of the saved PDF via pypdf. The field name is
     used to route the value back to a specific record on ingest.
+
+    When a ``collector`` is supplied (OMR variant), the box also records its
+    absolute page rect so a scanned copy — whose interactive layer is gone —
+    can be thresholded at the same spot.
     """
 
-    def __init__(self, name: str, size: float = 10.0):
+    def __init__(
+        self,
+        name: str,
+        size: float = 10.0,
+        *,
+        collector: "Optional[RegionCollector]" = None,
+        kind: str = "checkbox",
+    ):
         super().__init__()
         self.name = name
         self.size = size
         self.width = size
         self.height = size
+        self._collector = collector
+        self._kind = kind
 
     def draw(self) -> None:
         self.canv.acroForm.checkbox(
@@ -61,6 +120,129 @@ class AcroCheckbox(Flowable):
             forceBorder=True,
             tooltip=self.name,
         )
+        if self._collector is not None:
+            x0, y0 = self.canv.absolutePosition(0, 0)
+            x1, y1 = self.canv.absolutePosition(self.width, self.height)
+            self._collector.add(self.name, self._kind, self.canv.getPageNumber(), (x0, y0, x1, y1))
+
+
+class InkRegion(Flowable):
+    """A bordered write-in box (tech initials / date) for the OMR variant.
+
+    Unlike a checkbox there is no interactive field — the tech writes ink and
+    bead-2 reads *ink presence* over the captured rect via ``detect_signature``.
+    Records its absolute page rect into the collector at draw time.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        width: float,
+        height: float,
+        *,
+        collector: "Optional[RegionCollector]" = None,
+    ):
+        super().__init__()
+        self.name = name
+        self.width = width
+        self.height = height
+        self._collector = collector
+
+    def draw(self) -> None:
+        self.canv.setLineWidth(0.75)
+        self.canv.setStrokeColor(colors.black)
+        self.canv.rect(0, 0, self.width, self.height, stroke=1, fill=0)
+        if self._collector is not None:
+            x0, y0 = self.canv.absolutePosition(0, 0)
+            x1, y1 = self.canv.absolutePosition(self.width, self.height)
+            self._collector.add(self.name, "ink", self.canv.getPageNumber(), (x0, y0, x1, y1))
+
+
+def _fiducial_layout(page_w: float, page_h: float) -> dict:
+    """Fixed page positions of the 4 corner fiducials (PDF points, y-up).
+
+    Returns ``{corner: {"id", "x0", "y0", "cx", "cy"}}`` where (x0, y0) is the
+    marker's draw origin (bottom-left) and (cx, cy) is its center — the anchor
+    the reader maps a detected marker center onto.
+    """
+    s = _FIDUCIAL_SIZE_PT
+    m = _FIDUCIAL_MARGIN_PT
+    origins = {
+        "tl": (m, page_h - m - s),
+        "tr": (page_w - m - s, page_h - m - s),
+        "br": (page_w - m - s, m),
+        "bl": (m, m),
+    }
+    return {
+        corner: {
+            "id": FORM_FIDUCIAL_IDS[corner],
+            "x0": x0,
+            "y0": y0,
+            "cx": x0 + s / 2.0,
+            "cy": y0 + s / 2.0,
+        }
+        for corner, (x0, y0) in origins.items()
+    }
+
+
+def _draw_fiducials(canvas, doc) -> None:
+    """``onPage`` hook: stamp the 4 corner fiducials at fixed page positions."""
+    page_w, page_h = doc.pagesize
+    layout = _fiducial_layout(page_w, page_h)
+    px = max(1, int(round(_FIDUCIAL_SIZE_PT / 72.0 * _FIDUCIAL_RENDER_DPI)))
+    images = build_form_fiducials(px)
+    for corner, spec in layout.items():
+        canvas.drawImage(
+            ImageReader(images[corner]),
+            spec["x0"],
+            spec["y0"],
+            width=_FIDUCIAL_SIZE_PT,
+            height=_FIDUCIAL_SIZE_PT,
+        )
+
+
+def build_omr_template_map(collector: "RegionCollector", page_w: float, page_h: float) -> dict:
+    """Turn captured rects + the fiducial layout into a resolution-independent map.
+
+    Every rect is normalized against the bounding box of the 4 fiducial
+    *centers*, so a reader that recovers the 4 marker centers from a scan (at
+    any DPI / skew, post-warp) can map ``rect_norm`` straight back to pixels.
+    """
+    layout = _fiducial_layout(page_w, page_h)
+    fx0 = layout["bl"]["cx"]
+    fx1 = layout["br"]["cx"]
+    fy0 = layout["bl"]["cy"]
+    fy1 = layout["tl"]["cy"]
+    span_x = fx1 - fx0
+    span_y = fy1 - fy0
+
+    regions = []
+    for r in collector.regions:
+        x0, y0, x1, y1 = r["rect"]
+        nx0 = (x0 - fx0) / span_x
+        ny0 = (y0 - fy0) / span_y
+        nx1 = (x1 - fx0) / span_x
+        ny1 = (y1 - fy0) / span_y
+        regions.append(
+            {
+                "target_id": r["target_id"],
+                "kind": r["kind"],
+                "page": r["page"],
+                "rect_norm": [min(nx0, nx1), min(ny0, ny1), max(nx0, nx1), max(ny0, ny1)],
+            }
+        )
+
+    fiducials = {
+        corner: {"id": spec["id"], "cx": spec["cx"], "cy": spec["cy"]}
+        for corner, spec in layout.items()
+    }
+    return {
+        "page_w_pt": page_w,
+        "page_h_pt": page_h,
+        "fiducial_dict": FAMILY_ARUCO_4X4_50,
+        "fiducials": fiducials,
+        "regions": regions,
+    }
 
 
 class WorkOrderIdField(Flowable):
@@ -137,17 +319,29 @@ def _make_qr_image(url: str, size_inches: float = 1.5) -> Image:
     return Image(buf, width=size, height=size)
 
 
-def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> bytes:
+def generate_work_order_pdf(
+    work_order: "WorkOrder",
+    base_url: str = "",
+    *,
+    region_collector: "Optional[RegionCollector]" = None,
+) -> bytes:
     """
     Generate a printable PDF work order.
 
     Args:
         work_order: The WorkOrder instance to generate a form for.
         base_url: Base URL of the application (used for the QR code link).
+        region_collector: When supplied, produces the *OMR* (scan-to-complete)
+            variant — every task/material checkbox records its absolute page
+            rect into the collector, extra completion marks (work-complete,
+            pass/fail, tech initials/date) are added, and 4 corner fiducials
+            are stamped on every page. When ``None`` the output is byte-for-byte
+            the original digital-completion form.
 
     Returns:
         PDF content as bytes.
     """
+    omr = region_collector is not None
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -433,7 +627,7 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
             qty_str = str(qty).rstrip("0").rstrip(".") if qty is not None else "—"
             mat_rows.append(
                 [
-                    AcroCheckbox(name=field_name),
+                    AcroCheckbox(name=field_name, collector=region_collector),
                     Paragraph(name, normal_style),
                     qty_str,
                     unit or "—",
@@ -476,7 +670,7 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
             req_marker = "✱" if tc.is_required else ""
             task_rows.append(
                 [
-                    AcroCheckbox(name=f"task_{tc.id}"),
+                    AcroCheckbox(name=f"task_{tc.id}", collector=region_collector),
                     str(i),
                     Paragraph(tc.task_title, normal_style),
                     req_marker,
@@ -550,6 +744,59 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
     )
     story.append(signoff_table)
 
+    # ── OMR completion marks (scan-to-complete variant only) ──────────────────
+    # The paper-only marks a scan needs to close out the form: an overall
+    # "work complete" box, a pass/fail result, and an ink initials/date region.
+    # Each records its page rect via the collector so bead-2 thresholds the
+    # same spot on a scanned copy (checkboxes via fill %, ink via presence).
+    if omr:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("Scan-to-Complete Marks", subheading_style))
+        story.append(
+            Paragraph(
+                "<font size='7' color='#666666'>Fill these by hand — this form "
+                "is read back by scanning the completed sheet.</font>",
+                small_style,
+            )
+        )
+        omr_rows = [
+            [
+                AcroCheckbox(name="work_complete", collector=region_collector),
+                Paragraph("Work complete", label_style),
+                AcroCheckbox(name="result_pass", collector=region_collector),
+                Paragraph("Pass", label_style),
+                AcroCheckbox(name="result_fail", collector=region_collector),
+                Paragraph("Fail", label_style),
+            ],
+            [
+                Paragraph("Tech initials:", label_style),
+                InkRegion("tech_initials", 1.1 * inch, 0.3 * inch, collector=region_collector),
+                Paragraph("Date:", label_style),
+                InkRegion("tech_date", 1.1 * inch, 0.3 * inch, collector=region_collector),
+                "",
+                "",
+            ],
+        ]
+        omr_table = Table(
+            omr_rows,
+            colWidths=[0.3 * inch, 1.3 * inch, 0.3 * inch, 1.3 * inch, 0.3 * inch, 1.3 * inch],
+        )
+        omr_table.setStyle(
+            TableStyle(
+                [
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("PADDING", (0, 0), (-1, -1), 4),
+                    ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                    ("ALIGN", (2, 0), (2, 0), "CENTER"),
+                    ("ALIGN", (4, 0), (4, 0), "CENTER"),
+                    ("SPAN", (4, 1), (5, 1)),
+                ]
+            )
+        )
+        story.append(omr_table)
+        story.append(Spacer(1, 4))
+
     # Notes lines
     for _ in range(3):
         story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#aaaaaa")))
@@ -565,5 +812,23 @@ def generate_work_order_pdf(work_order: "WorkOrder", base_url: str = "") -> byte
         )
     )
 
-    doc.build(story)
+    if omr:
+        doc.build(story, onFirstPage=_draw_fiducials, onLaterPages=_draw_fiducials)
+    else:
+        doc.build(story)
     return buf.getvalue()
+
+
+def generate_work_order_omr_pdf(work_order: "WorkOrder", base_url: str = "") -> tuple[bytes, dict]:
+    """Generate the OMR (scan-to-complete) form variant and its template map.
+
+    Returns ``(pdf_bytes, template_map)`` where ``template_map`` is the
+    resolution-independent region map (page size, fiducial anchors, and the
+    normalized rect of every task/material checkbox plus the completion marks)
+    that bead-2's reader consumes to threshold a scanned copy.
+    """
+    collector = RegionCollector()
+    pdf_bytes = generate_work_order_pdf(work_order, base_url, region_collector=collector)
+    page_w, page_h = letter
+    template_map = build_omr_template_map(collector, page_w, page_h)
+    return pdf_bytes, template_map

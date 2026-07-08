@@ -3835,6 +3835,38 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         response["Content-Disposition"] = f'inline; filename="work-order-{short_id}.pdf"'
         return response
 
+    @action(detail=True, methods=["get"], url_path="omr-pdf")
+    def omr_pdf(self, request, pk=None):
+        """Generate the OMR (scan-to-complete) work-order form variant.
+
+        Same completed-validation gate as :meth:`pdf` (412 until the WO has a
+        fully-acknowledged validation). Draws 4 corner fiducials, adds the
+        completion marks, and persists the region map (WorkOrderOmrTemplate) so
+        bead-2's reader can align and threshold a scanned copy of this exact
+        sheet.
+        """
+        from .services.work_order_omr import build_and_persist_omr_template
+
+        work_order = self.get_object()
+        if not self._has_complete_validation(work_order):
+            return Response(
+                {
+                    "detail": (
+                        "Confirm the validation checklist (electrical, LOTO, "
+                        "required fields) before generating a PDF."
+                    ),
+                    "code": "validation_required",
+                },
+                status=status.HTTP_412_PRECONDITION_FAILED,
+            )
+        base_url = request.build_absolute_uri("/").rstrip("/")
+        pdf_bytes, _template = build_and_persist_omr_template(work_order, base_url=base_url)
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        short_id = work_order.short_id.replace(" ", "-")
+        response["Content-Disposition"] = f'inline; filename="work-order-{short_id}-scan.pdf"'
+        return response
+
     @action(detail=True, methods=["post"], url_path="validate")
     def validate_checklist(self, request, pk=None):
         """AC-3: record a pre-finalization validation acknowledgement.

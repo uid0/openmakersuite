@@ -310,6 +310,17 @@ def apply_submission(submission: WorkOrderSubmission) -> WorkOrderSubmission:
     finally:
         submission.attachment.close()
 
+    # OMR scan path (bead-2): a flatbed scan of a printed PM work-order form.
+    # The interactive AcroForm layer is gone, so marks are recovered by
+    # computer vision and — per the 0.999 bar — almost everything routes to
+    # human review. Only PM-completion scans use OMR; 3PWO/LOCPROB keep their
+    # existing QR/text handlers.
+    if (
+        submission.source == WorkOrderSubmission.SOURCE_SCAN
+        and submission.kind == WorkOrderSubmission.KIND_PM_COMPLETION
+    ):
+        return _apply_omr_submission(submission, pdf_bytes)
+
     if submission.kind == WorkOrderSubmission.KIND_THIRD_PARTY_WO:
         return _apply_third_party_submission(submission, pdf_bytes)
     if submission.kind == WorkOrderSubmission.KIND_LOCATION_PROBLEM:
@@ -448,6 +459,285 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
             "parse_error",
             "pending_changes",
         ]
+    )
+    return submission
+
+
+# ---------------------------------------------------------------------------
+# OMR scan ingestion (bead-2)
+# ---------------------------------------------------------------------------
+
+# Human-readable labels for the fixed completion marks every OMR form carries.
+OMR_FIXED_MARK_LABELS = {
+    "work_complete": "Work complete",
+    "result_pass": "Result: pass",
+    "result_fail": "Result: fail",
+    "tech_initials": "Technician initials",
+    "tech_date": "Date signed",
+}
+
+
+def looks_like_scan(raw_bytes: bytes, *, is_image: bool = False) -> bool:
+    """Decide whether an inbound attachment is a flatbed scan (vs born-digital).
+
+    An image attachment is always a scan. A PDF is a scan when its interactive
+    AcroForm layer is gone (no ``work_order_id`` field) but it still carries an
+    embedded page raster — i.e. a printed form that was scanned back. A
+    born-digital OMR form keeps its ``work_order_id`` field and stays on the
+    fast AcroForm path.
+    """
+    if is_image:
+        return True
+    try:
+        reader = PdfReader(io.BytesIO(raw_bytes))
+        fields = reader.get_fields() or {}
+        if "work_order_id" in fields:
+            return False
+        return any(True for _ in _iter_pdf_images(reader))
+    except Exception:  # noqa: BLE001  # nosec B110 - unreadable => not a scan we can OMR
+        return False
+
+
+def _extract_id_from_image(image_bytes: bytes) -> Tuple[Optional[str], Optional[str]]:
+    """Recover the WO UUID from a scanned image's QR code (no PDF wrapper)."""
+    try:
+        payloads = _decode_qr_payloads(image_bytes)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"qr: decode failed ({exc})"
+    for payload in payloads:
+        match = UUID_RE.search(payload)
+        if match:
+            return match.group(0), None
+    if payloads:
+        return None, "qr: QR payload(s) decoded but none contained a UUID"
+    return None, "qr: no QR code decoded from the scanned image"
+
+
+def _omr_scan_inputs(raw_bytes: bytes) -> "Tuple[Optional[str], Optional[str], Optional[bytes]]":
+    """Return ``(work_order_id, id_error, image_bytes)`` for a scan attachment.
+
+    Handles both a scanned PDF (recover id via the AcroForm→QR→text chain, page
+    raster via the first embedded image) and a directly-attached JPG/PNG.
+    """
+    if raw_bytes[:5] == b"%PDF-":
+        try:
+            reader = PdfReader(io.BytesIO(raw_bytes))
+        except Exception as exc:  # noqa: BLE001
+            return None, f"Failed to read scanned PDF: {exc}", None
+        wo_id, errors = extract_work_order_id(reader)
+        id_err = None if wo_id else "; ".join(errors or []) or "no id marker in scan"
+        image_bytes = next(_iter_pdf_images(reader), None)
+        return wo_id, id_err, image_bytes
+    wo_id, id_err = _extract_id_from_image(raw_bytes)
+    return wo_id, id_err, raw_bytes
+
+
+def _omr_label(target_id: str, task_titles: dict, material_names: dict) -> str:
+    if target_id in OMR_FIXED_MARK_LABELS:
+        return OMR_FIXED_MARK_LABELS[target_id]
+    if target_id.startswith("task_"):
+        return task_titles.get(target_id[len("task_") :], target_id)
+    if target_id.startswith("material_"):
+        return material_names.get(target_id[len("material_") :], target_id)
+    if target_id.startswith("materialspec_"):
+        return f"Material {target_id[len('materialspec_') :]}"
+    return target_id
+
+
+def omr_apply_mark(work_order: WorkOrder, target_id: str, *, marked: bool, now=None, note: str = "") -> int:
+    """Apply (or undo) a single task/material mark. Returns 1 if state changed.
+
+    Fixed completion marks (``work_complete`` etc.) carry no task/material
+    state and are intentionally a no-op here — WO closure is a separate,
+    human-confirmed step.
+    """
+    now = now or timezone.now()
+    if target_id.startswith("task_"):
+        tc = work_order.task_completions.filter(id=target_id[len("task_") :]).first()
+        if tc is None or tc.is_completed == marked:
+            return 0
+        tc.is_completed = marked
+        tc.completed_at = now if marked else None
+        if marked and note:
+            tc.notes = (tc.notes + "\n" + note).strip() if tc.notes else note
+        tc.save(update_fields=["is_completed", "completed_at", "notes"])
+        return 1
+    if target_id.startswith("material_"):
+        mu = WorkOrderMaterialUsage.objects.filter(
+            work_order=work_order, id=target_id[len("material_") :]
+        ).first()
+        if mu is None or mu.was_used == marked:
+            return 0
+        mu.was_used = marked
+        mu.save(update_fields=["was_used"])
+        return 1
+    return 0
+
+
+def omr_confirm_completion(work_order: WorkOrder, submission: WorkOrderSubmission, user=None) -> bool:
+    """Human-confirmed WO completion from a reviewed scan.
+
+    This is the ONLY place a scanned submission may advance a work order to
+    COMPLETED (design rule: never auto-close from a scan). Closes the WO — and
+    runs the same maintenance-history side effects as the born-digital path —
+    only when every required task is complete. Returns True if it closed.
+    """
+    required_total = work_order.task_completions.filter(is_required=True).count()
+    required_done = work_order.task_completions.filter(is_required=True, is_completed=True).count()
+    if not (required_total > 0 and required_done >= required_total):
+        return False
+    if work_order.status == WorkOrder.STATUS_COMPLETED:
+        return False
+    now = timezone.now()
+    work_order.status = WorkOrder.STATUS_COMPLETED
+    work_order.completed_at = now
+    work_order.save(update_fields=["status", "completed_at", "updated_at"])
+    item = work_order.maintenance_item
+    item.last_completed_at = now
+    item.save(update_fields=["last_completed_at"])
+    MaintenanceLog.objects.create(
+        maintenance_item=item,
+        completed_by=user if (user and getattr(user, "is_authenticated", False)) else None,
+        notes=(
+            f"Completed via reviewed flatbed scan "
+            f"(submission {submission.id}, WO {work_order.short_id})."
+        ),
+    )
+    return True
+
+
+def _omr_fail(submission: WorkOrderSubmission, message: str) -> WorkOrderSubmission:
+    """Unrecoverable scan (no WO id / WO missing): mark FAILED."""
+    submission.status = WorkOrderSubmission.STATUS_FAILED
+    submission.parse_error = message
+    submission.save(update_fields=["status", "parse_error", "work_order"])
+    return submission
+
+
+def _omr_review(
+    submission: WorkOrderSubmission, work_order: Optional[WorkOrder], message: str
+) -> WorkOrderSubmission:
+    """Recoverable scan problem (bad alignment / template drift / no template):
+    hold for human review with an explanatory message and apply nothing."""
+    submission.work_order = work_order
+    submission.status = WorkOrderSubmission.STATUS_PENDING_REVIEW
+    submission.parse_error = message
+    submission.pending_changes = []
+    submission.save(
+        update_fields=["status", "parse_error", "work_order", "pending_changes"]
+    )
+    return submission
+
+
+@transaction.atomic
+def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> WorkOrderSubmission:
+    """Read marks off a flatbed OMR scan and stage them for human review.
+
+    Marks at confidence ≥ 0.999 pre-check their task/material box; everything
+    else queues to ``pending_changes``. The work order is NEVER auto-advanced
+    to COMPLETED here — that transition is gated behind an explicit human
+    confirm on the review screen (design rule: never auto-close from a scan).
+    """
+    from inventory.services.work_order_cv import auto_apply_or_queue
+    from inventory.services.work_order_omr import (
+        OMR_AUTO_APPLY_THRESHOLD,
+        compute_template_version,
+        detections_from_result,
+        read_omr_scan,
+    )
+
+    wo_id, id_err, image_bytes = _omr_scan_inputs(raw_bytes)
+    if not wo_id:
+        return _omr_fail(submission, f"Could not recover the work order id from the scan: {id_err}")
+    try:
+        work_order = WorkOrder.objects.get(id=wo_id)
+    except WorkOrder.DoesNotExist:
+        return _omr_fail(submission, f"Work order {wo_id} not found.")
+
+    template = work_order.omr_templates.order_by("-created_at").first()
+    if template is None:
+        return _omr_review(
+            submission,
+            work_order,
+            "No OMR template on file for this work order — reprint the OMR form before scanning.",
+        )
+
+    # Drift guard: refuse a scan whose checklist changed since the sheet printed.
+    if compute_template_version(work_order) != template.template_version:
+        return _omr_review(
+            submission,
+            work_order,
+            "The work order's tasks changed after this form was printed. "
+            "Reprint the OMR form and scan again.",
+        )
+
+    if image_bytes is None:
+        return _omr_review(submission, work_order, "The scanned PDF contained no page image to read.")
+
+    result = read_omr_scan(image_bytes, template, recovered_work_order_id=str(wo_id))
+
+    # Keep the raw scan on the WO for history + on-demand crop rendering.
+    if not work_order.completed_scan:
+        ext = "pdf" if raw_bytes[:5] == b"%PDF-" else "png"
+        work_order.completed_scan.save(
+            f"wo-{work_order.short_id}-scan.{ext}", ContentFile(raw_bytes), save=False
+        )
+        work_order.save(update_fields=["completed_scan"])
+
+    if not result.ok:
+        return _omr_review(
+            submission,
+            work_order,
+            f"Could not align the scanned form: {result.error}. Please review the scan by hand.",
+        )
+
+    detections = detections_from_result(result)
+    auto, queue = auto_apply_or_queue(detections, threshold=OMR_AUTO_APPLY_THRESHOLD)
+
+    now = timezone.now()
+    note = "Pre-checked from flatbed scan (OMR, pending confirmation)."
+    task_titles = {str(tc.id): tc.task_title for tc in work_order.task_completions.all()}
+    material_names = {str(mu.id): mu.material_name for mu in work_order.material_usage.all()}
+
+    applied = 0
+    for det in auto:
+        applied += omr_apply_mark(work_order, det.target_id, marked=bool(det.value), now=now, note=note)
+
+    # Progress is allowed (OPEN → IN_PROGRESS); COMPLETED is NOT — never here.
+    if applied and work_order.status == WorkOrder.STATUS_OPEN:
+        work_order.status = WorkOrder.STATUS_IN_PROGRESS
+        work_order.save(update_fields=["status"])
+
+    base = f"/api/inventory/work-orders/{work_order.id}/submissions/{submission.id}/mark-crop/"
+    pending: list = []
+    for det, auto_applied in [(d, True) for d in auto] + [(d, False) for d in queue]:
+        pending.append(
+            {
+                "kind": det.kind,
+                "target_id": det.target_id,
+                "value": bool(det.value),
+                "confidence": round(float(det.confidence), 4),
+                "label": _omr_label(det.target_id, task_titles, material_names),
+                "crop_url": f"{base}{det.target_id}/",
+                "auto_applied": auto_applied,
+            }
+        )
+
+    submission.work_order = work_order
+    submission.pending_changes = pending
+    submission.parsed_fields = {
+        "work_order_id": str(wo_id),
+        "source": "scan",
+        "registration_confidence": round(float(result.registration_confidence), 4),
+        "auto_applied_count": len(auto),
+        "queued_count": len(queue),
+    }
+    # A scan ALWAYS ends in review — the human confirms the marks (and any WO
+    # completion) on screen. Never auto-applied, never auto-closed.
+    submission.status = WorkOrderSubmission.STATUS_PENDING_REVIEW
+    submission.parse_error = ""
+    submission.save(
+        update_fields=["status", "work_order", "parsed_fields", "parse_error", "pending_changes"]
     )
     return submission
 

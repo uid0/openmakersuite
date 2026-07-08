@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("inventory", "0076_assetdocument"),
+        ("inventory", "0077_workorderomrtemplate"),
     ]
 
     operations = [

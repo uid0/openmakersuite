@@ -1750,6 +1750,9 @@ views:
       list:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
+      mark_crop:
+        permission_classes:
+        - IsAuthenticated
       omr_pdf:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite

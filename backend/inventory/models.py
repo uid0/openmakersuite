@@ -3122,10 +3122,12 @@ class WorkOrderSubmission(models.Model):
 
     SOURCE_EMAIL = "email"
     SOURCE_MANUAL = "manual"
+    SOURCE_SCAN = "scan"
 
     SOURCE_CHOICES = [
         (SOURCE_EMAIL, "Email"),
         (SOURCE_MANUAL, "Manual"),
+        (SOURCE_SCAN, "Scan (OMR)"),
     ]
 
     KIND_PM_COMPLETION = "pm_completion"

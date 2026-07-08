@@ -16,6 +16,8 @@ from django.utils.safestring import mark_safe
 from .models import (
     Asset,
     AssetDocument,
+    AssetMeter,
+    AssetMeterReading,
     AssetPart,
     AssetProblem,
     AssetTagSequence,
@@ -893,6 +895,122 @@ class AssetDocumentInline(admin.TabularInline):
     autocomplete_fields = ["supersedes"]
 
 
+class AssetMeterReadingInline(admin.TabularInline):
+    """Append-only reading ledger, shown read-only under a meter."""
+
+    model = AssetMeterReading
+    extra = 0
+    can_delete = False
+    fields = [
+        "source",
+        "delta",
+        "value_after",
+        "is_estimated",
+        "observed_at",
+        "recorded_by",
+        "recorded_at",
+        "source_ref",
+    ]
+    readonly_fields = fields
+    ordering = ["-recorded_at"]
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(AssetMeter)
+class AssetMeterAdmin(admin.ModelAdmin):
+    """Admin for asset usage meters.
+
+    Registered on its own so the inline's ``autocomplete_fields=["asset"]`` and
+    the reading admin have a searchable target. The cached value and rollup
+    watermark are server-controlled and shown read-only.
+    """
+
+    list_display = [
+        "name",
+        "asset",
+        "meter_type",
+        "unit",
+        "source",
+        "current_value",
+        "current_is_estimated",
+        "is_active",
+        "updated_at",
+    ]
+    list_filter = ["meter_type", "source", "is_active", "current_is_estimated"]
+    search_fields = ["name", "asset__name", "asset__asset_tag"]
+    autocomplete_fields = ["asset"]
+    readonly_fields = [
+        "id",
+        "current_value",
+        "current_is_estimated",
+        "rollup_watermark_at",
+        "created_at",
+        "updated_at",
+    ]
+    inlines = [AssetMeterReadingInline]
+
+
+@admin.register(AssetMeterReading)
+class AssetMeterReadingAdmin(admin.ModelAdmin):
+    """Standalone read-only view of the append-only reading ledger."""
+
+    list_display = [
+        "meter",
+        "source",
+        "delta",
+        "value_after",
+        "is_estimated",
+        "observed_at",
+        "recorded_by",
+        "recorded_at",
+    ]
+    list_filter = ["source", "is_estimated"]
+    search_fields = ["meter__name", "meter__asset__name", "source_ref", "notes"]
+    readonly_fields = [
+        "id",
+        "meter",
+        "source",
+        "delta",
+        "value_after",
+        "is_estimated",
+        "observed_at",
+        "recorded_by",
+        "recorded_at",
+        "source_ref",
+        "notes",
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class AssetMeterInline(admin.TabularInline):
+    """Manage an asset's meters inline from the asset admin."""
+
+    model = AssetMeter
+    extra = 0
+    fk_name = "asset"
+    fields = [
+        "name",
+        "meter_type",
+        "unit",
+        "source",
+        "current_value",
+        "current_is_estimated",
+        "is_active",
+    ]
+    readonly_fields = ["current_value", "current_is_estimated"]
+    show_change_link = True
+
+
 @admin.register(Asset)
 class AssetAdmin(admin.ModelAdmin):
     """Admin interface for managing hard assets."""
@@ -934,7 +1052,7 @@ class AssetAdmin(admin.ModelAdmin):
         "manufacturer_name",
         "donor_name",
     ]
-    inlines = [AssetPartInline, AssetDocumentInline]
+    inlines = [AssetPartInline, AssetDocumentInline, AssetMeterInline]
     readonly_fields = [
         "id",
         "asset_tag",

@@ -1056,6 +1056,40 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+  inventory.views.AssetMeterReadingViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAuthenticated
+      retrieve:
+        permission_classes:
+        - IsAuthenticated
+  inventory.views.AssetMeterViewSet:
+    actions:
+      adjust:
+        permission_classes:
+        - IsStaffOrSigAdmin
+      create:
+        permission_classes:
+        - IsStaffOrSigAdmin
+      destroy:
+        permission_classes:
+        - IsStaffOrSigAdmin
+      list:
+        permission_classes:
+        - IsStaffOrSigAdmin
+      partial_update:
+        permission_classes:
+        - IsStaffOrSigAdmin
+      record_reading:
+        permission_classes:
+        - IsStaffOrSigAdmin
+      retrieve:
+        permission_classes:
+        - IsStaffOrSigAdmin
+      update:
+        permission_classes:
+        - IsStaffOrSigAdmin
   inventory.views.AssetOutOfServiceViewSet:
     actions:
       create:

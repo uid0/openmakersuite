@@ -339,6 +339,8 @@ export interface Asset {
   operational_status: OperationalStatus;
   // Parts/consumables
   parts?: AssetPart[];
+  // Usage meters (EAM bead-1) — nested read-only on the asset-detail payload
+  meters?: AssetMeter[];
   // Power / electrical — direct FKs to PowerBreaker + Disconnect, plus
   // server-rendered summaries for read-only display.
   breaker: number | null;
@@ -428,6 +430,54 @@ export interface AssetDocument {
   uploaded_by: number | null;
   uploaded_by_name: string | null;
   uploaded_at: string;
+}
+
+export type AssetMeterType =
+  | 'runtime_hours'
+  | 'volume_gallons'
+  | 'cycles'
+  | 'kwh'
+  | 'generic_count';
+
+export type AssetMeterSource = 'auto_session' | 'auto_telemetry' | 'manual';
+
+export type AssetMeterReadingSource =
+  | 'auto_session'
+  | 'auto_telemetry'
+  | 'manual'
+  | 'manual_adjust';
+
+export interface AssetMeter {
+  id: string;
+  asset: string;
+  name: string;
+  meter_type: AssetMeterType;
+  meter_type_display: string;
+  unit: string;
+  source: AssetMeterSource;
+  source_display: string;
+  current_value: string;
+  current_is_estimated: boolean;
+  rollup_watermark_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetMeterReading {
+  id: string;
+  meter: string;
+  source: AssetMeterReadingSource;
+  source_display: string;
+  delta: string;
+  value_after: string;
+  is_estimated: boolean;
+  observed_at: string;
+  recorded_at: string;
+  recorded_by: number | null;
+  recorded_by_name: string | null;
+  source_ref: string;
+  notes: string;
 }
 
 export interface AssetProblem {

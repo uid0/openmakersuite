@@ -32,6 +32,8 @@ from .audit import record_event as record_maintenance_audit_event
 from .models import (
     Asset,
     AssetDocument,
+    AssetMeter,
+    AssetMeterReading,
     AssetOutOfService,
     AssetPart,
     AssetProblem,
@@ -62,6 +64,8 @@ from .models import (
 )
 from .serializers import (
     AssetDocumentSerializer,
+    AssetMeterReadingSerializer,
+    AssetMeterSerializer,
     AssetOutOfServiceSerializer,
     AssetPartSerializer,
     AssetProblemPhotoSerializer,
@@ -1350,6 +1354,9 @@ class AssetViewSet(viewsets.ModelViewSet):
             "asset_parts__part",
             "asset_parts__part__category",
             "required_certifications__sig",
+            # Nested `meters` on AssetSerializer — prefetch so the asset list
+            # stays bounded (see test_asset_list_is_bounded).
+            "meters",
         )
         .all()
     )
@@ -2641,6 +2648,177 @@ class AssetDocumentViewSet(viewsets.ModelViewSet):
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+def _parse_bool(value, *, default=False):
+    """Coerce a request-body value to bool, accepting bools and string forms."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _parse_datetime(value):
+    """Parse an ISO-8601 string to an aware datetime, or None if blank/unparseable."""
+    if not value or not isinstance(value, str):
+        return None
+    from django.utils.dateparse import parse_datetime
+
+    dt = parse_datetime(value)
+    if dt is not None and timezone.is_naive(dt):
+        dt = timezone.make_aware(dt)
+    return dt
+
+
+class AssetMeterViewSet(viewsets.ModelViewSet):
+    """API endpoint for asset usage meters (EAM bead-1).
+
+    A meter is a named cumulative counter on an asset (runtime hours, gallons,
+    cycles, kWh, …). This viewset is CRUD over meter *definitions* plus the two
+    manual-entry actions that make the manual-first flow usable:
+
+    * ``record-reading`` — enter a measured/estimated reading, absolute (the
+      counter now reads N) or delta (add N). This is how a human enters the
+      fountain's gallon counter.
+    * ``adjust`` — post a correction to a target value with a required reason
+      (source ``manual_adjust``).
+
+    Everything here — CRUD and both actions — requires staff / SIG admin, the
+    same gate as the log-hours endpoint. Regular users still SEE meters via the
+    nested ``meters`` on the asset detail payload and the read-only reading
+    endpoint. Filter by ``?asset=<id>``; filterless list returns all meters.
+    Manual entry and auto rollup share one write path
+    (:func:`inventory.services.meter_sources.apply_reading`) so ``current_value``,
+    the ledger, and the hours_used dual-write always stay consistent.
+    """
+
+    queryset = AssetMeter.objects.select_related("asset").all()
+    serializer_class = AssetMeterSerializer
+    permission_classes = [IsStaffOrSigAdmin]
+
+    def get_queryset(self):
+        """Honor ``?asset=`` and ``?is_active=`` filters.
+
+        Manual query-param filtering (not filterset_fields) because django-filter
+        is not a dependency of this project — mirrors AssetDocumentViewSet /
+        LocationProblemViewSet.
+        """
+        qs = super().get_queryset()
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() in ("1", "true", "yes"))
+        return qs
+
+    def _apply_and_respond(self, meter, spec):
+        """Apply a reading via the shared service and return meter + reading."""
+        from .services.meter_sources import apply_reading
+
+        user = self.request.user if self.request.user.is_authenticated else None
+        reading = apply_reading(meter, spec, recorded_by=user)
+        meter.refresh_from_db()
+        return Response(
+            {
+                "meter": AssetMeterSerializer(meter, context={"request": self.request}).data,
+                "reading": AssetMeterReadingSerializer(
+                    reading, context={"request": self.request}
+                ).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="record-reading")
+    def record_reading(self, request, pk=None):
+        """Record a manual meter reading (source ``manual``).
+
+        Body: ``{"value": <number>, "is_absolute": <bool, default true>,
+        "is_estimated": <bool, default false>, "observed_at": <iso8601, optional>}``.
+        An absolute reading sets the meter to ``value``; a delta reading adds
+        ``value``. ``is_estimated`` marks a human eyeball vs a measured read.
+        """
+        from .services.meter_sources import ReadingSpec
+
+        meter = self.get_object()
+        try:
+            value = Decimal(str(request.data.get("value")))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response(
+                {"detail": "value must be a number"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        is_absolute = _parse_bool(request.data.get("is_absolute"), default=True)
+        is_estimated = _parse_bool(request.data.get("is_estimated"), default=False)
+        observed_at = _parse_datetime(request.data.get("observed_at")) or timezone.now()
+
+        spec_kwargs = {"absolute": value} if is_absolute else {"delta": value}
+        spec = ReadingSpec(
+            source=AssetMeterReading.SOURCE_MANUAL,
+            observed_at=observed_at,
+            is_estimated=is_estimated,
+            source_ref="manual entry",
+            **spec_kwargs,
+        )
+        return self._apply_and_respond(meter, spec)
+
+    @action(detail=True, methods=["post"])
+    def adjust(self, request, pk=None):
+        """Post a correction to a target value (source ``manual_adjust``).
+
+        Body: ``{"target": <number>, "reason": <str, required>}``. Writes a
+        signed ledger row that moves the meter to ``target`` and records the
+        reason in ``notes`` so the correction is auditable.
+        """
+        from .services.meter_sources import ReadingSpec
+
+        meter = self.get_object()
+        try:
+            target = Decimal(str(request.data.get("target")))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response(
+                {"detail": "target must be a number"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response(
+                {"detail": "reason is required for an adjustment"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        spec = ReadingSpec(
+            source=AssetMeterReading.SOURCE_MANUAL_ADJUST,
+            observed_at=timezone.now(),
+            absolute=target,
+            is_estimated=False,
+            source_ref="manual adjustment",
+            notes=reason,
+        )
+        return self._apply_and_respond(meter, spec)
+
+
+class AssetMeterReadingViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only API for the append-only meter reading ledger (EAM bead-1).
+
+    Readings are written only via the rollup and the record-reading / adjust
+    actions, never through this endpoint. Any authenticated user can read the
+    history; filter by ``?meter=<id>`` for one meter's ledger.
+    """
+
+    queryset = AssetMeterReading.objects.select_related("meter", "recorded_by").all()
+    serializer_class = AssetMeterReadingSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        meter_id = self.request.query_params.get("meter")
+        if meter_id:
+            qs = qs.filter(meter_id=meter_id)
+        asset_id = self.request.query_params.get("asset")
+        if asset_id:
+            qs = qs.filter(meter__asset_id=asset_id)
+        return qs
 
 
 class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):

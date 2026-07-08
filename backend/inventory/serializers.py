@@ -7,6 +7,8 @@ from rest_framework import serializers
 from .models import (
     Asset,
     AssetDocument,
+    AssetMeter,
+    AssetMeterReading,
     AssetOutOfService,
     AssetPart,
     AssetProblem,
@@ -730,6 +732,85 @@ class AssetPartSerializer(serializers.ModelSerializer):
         }
 
 
+class AssetMeterSerializer(serializers.ModelSerializer):
+    """Serializer for an asset's usage meters (EAM bead-1).
+
+    ``current_value`` / ``current_is_estimated`` / ``rollup_watermark_at`` are
+    server-controlled — they only move when a reading is applied (auto rollup or
+    a manual record-reading / adjust action), so they are read-only here. The
+    definition fields (``name``, ``meter_type``, ``unit``, ``source``,
+    ``is_active``) round-trip so meters can be created/edited via CRUD.
+
+    Defined before :class:`AssetSerializer` so it can be embedded there as the
+    nested read-only ``meters`` field.
+    """
+
+    meter_type_display = serializers.CharField(source="get_meter_type_display", read_only=True)
+    source_display = serializers.CharField(source="get_source_display", read_only=True)
+
+    class Meta:
+        model = AssetMeter
+        fields = [
+            "id",
+            "asset",
+            "name",
+            "meter_type",
+            "meter_type_display",
+            "unit",
+            "source",
+            "source_display",
+            "current_value",
+            "current_is_estimated",
+            "rollup_watermark_at",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "current_value",
+            "current_is_estimated",
+            "rollup_watermark_at",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class AssetMeterReadingSerializer(serializers.ModelSerializer):
+    """Read-only serializer for the append-only meter reading ledger (EAM bead-1).
+
+    Readings are created only through :func:`inventory.services.meter_sources.apply_reading`
+    (via the rollup or the record-reading / adjust actions), never by a direct
+    POST to this serializer — every field is read-only.
+    """
+
+    source_display = serializers.CharField(source="get_source_display", read_only=True)
+    recorded_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssetMeterReading
+        fields = [
+            "id",
+            "meter",
+            "source",
+            "source_display",
+            "delta",
+            "value_after",
+            "is_estimated",
+            "observed_at",
+            "recorded_at",
+            "recorded_by",
+            "recorded_by_name",
+            "source_ref",
+            "notes",
+        ]
+        read_only_fields = fields
+
+    def get_recorded_by_name(self, obj):
+        if obj.recorded_by:
+            return obj.recorded_by.get_full_name() or obj.recorded_by.username
+        return None
+
+
 class AssetSerializer(serializers.ModelSerializer):
     """Serializer for hard asset tracking."""
 
@@ -764,6 +845,12 @@ class AssetSerializer(serializers.ModelSerializer):
 
     # Parts/consumables
     parts = AssetPartSerializer(source="asset_parts", many=True, read_only=True)
+
+    # Usage meters (EAM bead-1) — nested read-only so the asset-detail payload
+    # carries them without a second round-trip. Writes go through the dedicated
+    # asset-meters endpoint. This is also the additive contract the ScanTTY
+    # asset-meters follow-up displays against.
+    meters = AssetMeterSerializer(many=True, read_only=True)
 
     # Power / electrical computed flag
     is_forgekey_managed = serializers.ReadOnlyField()
@@ -816,6 +903,8 @@ class AssetSerializer(serializers.ModelSerializer):
             "maintenance_plan",
             # Parts/consumables
             "parts",
+            # Usage meters (EAM bead-1)
+            "meters",
             # Operational requirements
             "circuit",
             "needs_compressed_air",

@@ -3969,7 +3969,11 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         """
         from django.core.files.base import ContentFile
 
-        from .services.work_order_ingest import apply_submission, detect_submission_kind
+        from .services.work_order_ingest import (
+            apply_submission,
+            detect_submission_kind,
+            looks_like_scan,
+        )
 
         user = request.user
         if not (user.is_authenticated and (user.is_staff or user.is_superuser)):
@@ -3986,14 +3990,19 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             )
 
         pdf_bytes = pdf_file.read()
-        kind = detect_submission_kind(pdf_bytes, subject=pdf_file.name or "")
+        upload_name = pdf_file.name or ""
+        kind = detect_submission_kind(pdf_bytes, subject=upload_name)
+        is_image = upload_name.lower().endswith((".jpg", ".jpeg", ".png"))
+        is_scan = looks_like_scan(pdf_bytes, is_image=is_image)
 
         submission = WorkOrderSubmission(
             kind=kind,
-            source=WorkOrderSubmission.SOURCE_MANUAL,
+            source=(
+                WorkOrderSubmission.SOURCE_SCAN if is_scan else WorkOrderSubmission.SOURCE_MANUAL
+            ),
             submitted_by=user,
             from_email=(user.email or "")[:254],
-            subject=(pdf_file.name or "")[:500],
+            subject=(upload_name)[:500],
             status=WorkOrderSubmission.STATUS_RECEIVED,
         )
         submission.attachment.save(
@@ -4051,13 +4060,19 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         url_path="submissions/(?P<submission_id>[^/.]+)/apply-pending",
     )
     def apply_pending_changes(self, request, pk=None, submission_id=None):
-        """AC-4: accept all CV-derived pending changes on a submission.
+        """Accept CV-derived pending changes on a submission (all, or per row).
 
-        ``signature`` detections become a notes line on the work order;
-        ``handwritten`` detections append their OCR'd text to the WO notes.
-        After application, ``pending_changes`` is cleared and the submission
-        moves from ``pending_review`` to ``applied``.
+        Back-compat: with no request body, every applicable change is applied
+        and the queue is cleared (``signature``/``handwritten`` → WO notes).
+
+        Per-row (OMR, bead-2): an optional ``target_ids`` list applies only the
+        named ``checkbox``/``ink`` marks (pre-checking their task/material) and
+        leaves the rest queued. An optional ``confirm_complete`` boolean is the
+        HUMAN gate that advances the WO to COMPLETED — a scan never closes a WO
+        on its own.
         """
+        from .services.work_order_ingest import omr_apply_mark, omr_confirm_completion
+
         work_order = self.get_object()
         try:
             submission = work_order.submissions.get(id=submission_id)
@@ -4067,45 +4082,72 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        body = request.data if isinstance(request.data, dict) else {}
+        raw_target_ids = body.get("target_ids")
+        target_ids = set(raw_target_ids) if isinstance(raw_target_ids, list) else None
+        confirm_complete = bool(body.get("confirm_complete"))
+
         pending = list(submission.pending_changes or [])
-        if not pending:
+        if not pending and not confirm_complete:
             return Response(
-                {
-                    "detail": "No pending changes to apply.",
-                    "submission_status": submission.status,
-                },
+                {"detail": "No pending changes to apply.", "submission_status": submission.status},
                 status=status.HTTP_200_OK,
             )
 
-        applied: list[str] = []
+        def _selected(change):
+            return target_ids is None or change.get("target_id") in target_ids
+
+        notes_to_add: list[str] = []
+        remaining: list[dict] = []
+        applied_count = 0
         for change in pending:
+            if not _selected(change):
+                remaining.append(change)
+                continue
             kind = change.get("kind")
             value = change.get("value")
-            confidence = change.get("confidence", 0.0)
-            if kind == "signature":
-                applied.append(
-                    f"Signature accepted by reviewer " f"(original confidence {confidence:.2f})."
+            confidence = change.get("confidence", 0.0) or 0.0
+            if kind in ("checkbox", "ink"):
+                # Accepting a scanned mark = confirm the task/material is done.
+                omr_apply_mark(work_order, change.get("target_id") or "", marked=True)
+                applied_count += 1
+            elif kind == "signature":
+                notes_to_add.append(
+                    f"Signature accepted by reviewer (original confidence {confidence:.2f})."
                 )
+                applied_count += 1
             elif kind == "handwritten" and isinstance(value, str) and value:
-                applied.append(
+                notes_to_add.append(
                     f'Handwritten note accepted (confidence {confidence:.2f}): "{value}"'
                 )
+                applied_count += 1
+            # ``error`` / unknown rows are simply cleared, not applied.
 
-        if applied:
+        if notes_to_add:
             existing = work_order.notes or ""
-            combined = existing + ("\n" if existing else "") + "\n".join(applied)
+            combined = existing + ("\n" if existing else "") + "\n".join(notes_to_add)
             work_order.notes = combined.strip()
             work_order.save(update_fields=["notes", "updated_at"])
 
-        submission.pending_changes = []
-        submission.status = WorkOrderSubmission.STATUS_APPLIED
+        completed = False
+        if confirm_complete:
+            completed = omr_confirm_completion(work_order, submission, user=request.user)
+
+        submission.pending_changes = remaining
+        submission.status = (
+            WorkOrderSubmission.STATUS_APPLIED
+            if not remaining
+            else WorkOrderSubmission.STATUS_PENDING_REVIEW
+        )
         submission.save(update_fields=["pending_changes", "status"])
 
         return Response(
             {
-                "detail": f"Applied {len(applied)} pending change(s).",
+                "detail": f"Applied {applied_count} pending change(s).",
                 "submission_status": submission.status,
-                "applied_count": len(applied),
+                "applied_count": applied_count,
+                "work_order_completed": completed,
+                "work_order_status": work_order.status,
             },
             status=status.HTTP_200_OK,
         )
@@ -4116,12 +4158,15 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         url_path="submissions/(?P<submission_id>[^/.]+)/discard-pending",
     )
     def discard_pending_changes(self, request, pk=None, submission_id=None):
-        """AC-4: reject (drop) all CV-derived pending changes on a submission.
+        """Reject pending changes on a submission (all, or per row).
 
-        Submission keeps its applied checkbox state but the queued detections
-        are discarded and status moves to ``applied`` (since the auto-applied
-        portion is committed even when the queued portion is rejected).
+        Back-compat: with no body, the whole queue is dropped. Per-row (OMR):
+        an optional ``target_ids`` list rejects only those marks — and any mark
+        that was auto-pre-checked (``auto_applied``) is UNDONE on the work order
+        so a rejected scan read leaves no trace.
         """
+        from .services.work_order_ingest import omr_apply_mark
+
         work_order = self.get_object()
         try:
             submission = work_order.submissions.get(id=submission_id)
@@ -4131,9 +4176,23 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        dropped = len(submission.pending_changes or [])
-        submission.pending_changes = []
-        if submission.status == WorkOrderSubmission.STATUS_PENDING_REVIEW:
+        body = request.data if isinstance(request.data, dict) else {}
+        raw_target_ids = body.get("target_ids")
+        target_ids = set(raw_target_ids) if isinstance(raw_target_ids, list) else None
+
+        remaining: list[dict] = []
+        dropped = 0
+        for change in submission.pending_changes or []:
+            if target_ids is not None and change.get("target_id") not in target_ids:
+                remaining.append(change)
+                continue
+            # Undo an auto-applied pre-check so a rejected read leaves no mark.
+            if change.get("auto_applied") and change.get("kind") in ("checkbox", "ink"):
+                omr_apply_mark(work_order, change.get("target_id") or "", marked=False)
+            dropped += 1
+
+        submission.pending_changes = remaining
+        if not remaining and submission.status == WorkOrderSubmission.STATUS_PENDING_REVIEW:
             submission.status = WorkOrderSubmission.STATUS_APPLIED
         submission.save(update_fields=["pending_changes", "status"])
 
@@ -4145,6 +4204,61 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="submissions/(?P<submission_id>[^/.]+)/mark-crop/(?P<target_id>[^/.]+)",
+        permission_classes=[IsAuthenticated],
+    )
+    def mark_crop(self, request, pk=None, submission_id=None, target_id=None):
+        """Serve a small PNG of one warped OMR mark region for the reviewer.
+
+        Re-warps the stored scan into template space on demand and crops the
+        ``target_id`` region (bead-2). Authenticated read-only — rendering a
+        crop can never mutate state — so the review screen can eyeball the ink.
+        """
+        from .services.work_order_ingest import _omr_scan_inputs
+        from .services.work_order_omr import render_mark_crop
+
+        work_order = self.get_object()
+        try:
+            submission = work_order.submissions.get(id=submission_id)
+        except WorkOrderSubmission.DoesNotExist:
+            return Response(
+                {"detail": "Submission not found for this work order."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        template = work_order.omr_templates.order_by("-created_at").first()
+        if template is None or not submission.attachment:
+            return Response(
+                {"detail": "No scan crop available for this submission."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        submission.attachment.open("rb")
+        try:
+            raw_bytes = submission.attachment.read()
+        finally:
+            submission.attachment.close()
+
+        _wo_id, _err, image_bytes = _omr_scan_inputs(raw_bytes)
+        if image_bytes is None:
+            return Response(
+                {"detail": "No scan crop available for this submission."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        png = render_mark_crop(image_bytes, template, target_id)
+        if png is None:
+            return Response(
+                {"detail": "Could not render a crop for this mark."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        response = HttpResponse(png, content_type="image/png")
+        response["Content-Disposition"] = f'inline; filename="omr-{target_id}.png"'
+        return response
 
     @action(detail=True, methods=["patch"], url_path="materials/(?P<material_id>[^/.]+)/toggle")
     def toggle_material(self, request, pk=None, material_id=None):
@@ -5104,23 +5218,39 @@ class AssetReportViewSet(viewsets.ViewSet):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _pick_pdf_attachment(attachments):
-    """Return (filename, raw_bytes) for the first PDF attachment, or (None, None)."""
+def _pick_submission_attachment(attachments):
+    """Return (filename, raw_bytes, is_image) for the first usable attachment.
+
+    Accepts a PDF (born-digital form OR scanned form) or a directly-attached
+    scan image (JPG/PNG). PDFs win over images when both are present, since a
+    born-digital PDF carries the richer AcroForm layer. Returns
+    ``(None, None, False)`` when nothing usable is attached.
+    """
     import base64
 
+    image_fallback = None
     for att in attachments or []:
         name = att.get("Name", "") or ""
+        lname = name.lower()
         content_type = (att.get("ContentType") or "").lower()
-        is_pdf = content_type == "application/pdf" or name.lower().endswith(".pdf")
-        if not is_pdf:
+        is_pdf = content_type == "application/pdf" or lname.endswith(".pdf")
+        is_image = content_type in {"image/jpeg", "image/jpg", "image/png"} or lname.endswith(
+            (".jpg", ".jpeg", ".png")
+        )
+        if not (is_pdf or is_image):
             continue
         raw = att.get("Content") or ""
         try:
             data = base64.b64decode(raw)
         except (ValueError, TypeError):
             continue
-        return name or "work-order.pdf", data
-    return None, None
+        if is_pdf:
+            return name or "work-order.pdf", data, False
+        if image_fallback is None:
+            image_fallback = (name or "work-order-scan.png", data, True)
+    if image_fallback is not None:
+        return image_fallback
+    return None, None, False
 
 
 @api_view(["POST"])
@@ -5139,7 +5269,11 @@ def postmark_inbound_work_order(request):
     from django.conf import settings as django_settings
     from django.core.files.base import ContentFile
 
-    from .services.work_order_ingest import apply_submission, detect_submission_kind
+    from .services.work_order_ingest import (
+        apply_submission,
+        detect_submission_kind,
+        looks_like_scan,
+    )
 
     expected = getattr(django_settings, "POSTMARK_INBOUND_TOKEN", "") or ""
     if not expected:
@@ -5171,15 +5305,16 @@ def postmark_inbound_work_order(request):
                 status=status.HTTP_200_OK,
             )
 
-    filename, pdf_bytes = _pick_pdf_attachment(payload.get("Attachments") or [])
+    filename, pdf_bytes, is_image = _pick_submission_attachment(payload.get("Attachments") or [])
     if not pdf_bytes:
         return Response(
-            {"detail": "No PDF attachment found on inbound message."},
+            {"detail": "No PDF or scan-image attachment found on inbound message."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
     subject = (payload.get("Subject") or "")[:500]
     kind = detect_submission_kind(pdf_bytes, subject=subject)
+    is_scan = looks_like_scan(pdf_bytes, is_image=is_image)
 
     submission = WorkOrderSubmission(
         kind=kind,
@@ -5187,7 +5322,9 @@ def postmark_inbound_work_order(request):
         subject=subject,
         postmark_message_id=message_id[:200],
         status=WorkOrderSubmission.STATUS_RECEIVED,
-        source=WorkOrderSubmission.SOURCE_EMAIL,
+        source=(
+            WorkOrderSubmission.SOURCE_SCAN if is_scan else WorkOrderSubmission.SOURCE_EMAIL
+        ),
     )
     submission.attachment.save(filename, ContentFile(pdf_bytes), save=False)
     submission.save()

@@ -622,6 +622,10 @@ export interface WorkOrderSubmissionPendingChange {
   value: unknown;
   confidence: number;
   label: string;
+  // OMR scan (bead-2): a URL to a warped crop of the mark, and whether the
+  // mark was auto-pre-checked (confidence >= 0.999) vs queued for review.
+  crop_url?: string | null;
+  auto_applied?: boolean;
 }
 
 export interface WorkOrderSubmission {
@@ -629,7 +633,7 @@ export interface WorkOrderSubmission {
   pdf_url: string | null;
   received_at: string;
   status: 'received' | 'applied' | 'failed' | 'pending_review';
-  source: 'email' | 'manual';
+  source: 'email' | 'manual' | 'scan';
   from_email: string;
   subject: string;
   submitted_by: number | null;

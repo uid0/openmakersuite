@@ -5322,9 +5322,7 @@ def postmark_inbound_work_order(request):
         subject=subject,
         postmark_message_id=message_id[:200],
         status=WorkOrderSubmission.STATUS_RECEIVED,
-        source=(
-            WorkOrderSubmission.SOURCE_SCAN if is_scan else WorkOrderSubmission.SOURCE_EMAIL
-        ),
+        source=(WorkOrderSubmission.SOURCE_SCAN if is_scan else WorkOrderSubmission.SOURCE_EMAIL),
     )
     submission.attachment.save(filename, ContentFile(pdf_bytes), save=False)
     submission.save()

@@ -544,7 +544,9 @@ def _omr_label(target_id: str, task_titles: dict, material_names: dict) -> str:
     return target_id
 
 
-def omr_apply_mark(work_order: WorkOrder, target_id: str, *, marked: bool, now=None, note: str = "") -> int:
+def omr_apply_mark(
+    work_order: WorkOrder, target_id: str, *, marked: bool, now=None, note: str = ""
+) -> int:
     """Apply (or undo) a single task/material mark. Returns 1 if state changed.
 
     Fixed completion marks (``work_complete`` etc.) carry no task/material
@@ -574,7 +576,9 @@ def omr_apply_mark(work_order: WorkOrder, target_id: str, *, marked: bool, now=N
     return 0
 
 
-def omr_confirm_completion(work_order: WorkOrder, submission: WorkOrderSubmission, user=None) -> bool:
+def omr_confirm_completion(
+    work_order: WorkOrder, submission: WorkOrderSubmission, user=None
+) -> bool:
     """Human-confirmed WO completion from a reviewed scan.
 
     This is the ONLY place a scanned submission may advance a work order to
@@ -623,9 +627,7 @@ def _omr_review(
     submission.status = WorkOrderSubmission.STATUS_PENDING_REVIEW
     submission.parse_error = message
     submission.pending_changes = []
-    submission.save(
-        update_fields=["status", "parse_error", "work_order", "pending_changes"]
-    )
+    submission.save(update_fields=["status", "parse_error", "work_order", "pending_changes"])
     return submission
 
 
@@ -672,7 +674,9 @@ def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> 
         )
 
     if image_bytes is None:
-        return _omr_review(submission, work_order, "The scanned PDF contained no page image to read.")
+        return _omr_review(
+            submission, work_order, "The scanned PDF contained no page image to read."
+        )
 
     result = read_omr_scan(image_bytes, template, recovered_work_order_id=str(wo_id))
 
@@ -701,7 +705,9 @@ def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> 
 
     applied = 0
     for det in auto:
-        applied += omr_apply_mark(work_order, det.target_id, marked=bool(det.value), now=now, note=note)
+        applied += omr_apply_mark(
+            work_order, det.target_id, marked=bool(det.value), now=now, note=note
+        )
 
     # Progress is allowed (OPEN → IN_PROGRESS); COMPLETED is NOT — never here.
     if applied and work_order.status == WorkOrder.STATUS_OPEN:

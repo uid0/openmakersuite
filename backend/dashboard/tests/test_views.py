@@ -175,30 +175,59 @@ class TestDashboardWidgetDataViews:
         assert "daily_scans" in data
 
     def test_get_deliveries_data(self, authenticated_client):
-        """Test getting deliveries data."""
+        """Deliveries widget returns 200 for a delivery that HAS items.
+
+        Regression (prod 500 -> whole-dashboard crash): get_deliveries_data
+        used prefetch_related("items__purchase_order_item__item"), but
+        PurchaseOrderItem has no "item" relation. Django only validates that
+        trailing segment once level-2 (the DeliveryItems) yields objects, so a
+        delivery WITH items raised ValueError while a delivery without items did
+        not. The previous version of this test created a delivery with no items
+        and thus never traversed far enough to catch it.
+        """
         client, user = authenticated_client
         from datetime import timedelta
+        from decimal import Decimal
 
         from django.utils import timezone
 
         from inventory.tests.factories import SupplierFactory
-        from reorder_queue.models import OrderDelivery, PurchaseOrder
+        from reorder_queue.models import (
+            DeliveryItem,
+            OrderDelivery,
+            PurchaseOrder,
+            PurchaseOrderItem,
+        )
 
-        # Create a purchase order and delivery
         supplier = SupplierFactory()
         po = PurchaseOrder.objects.create(
             supplier=supplier, status=PurchaseOrder.SENT, created_by=user
         )
-        OrderDelivery.objects.create(
+        # Freeform line item (no item_supplier / asset needed).
+        po_item = PurchaseOrderItem.objects.create(
+            purchase_order=po,
+            description="Freeform widget",
+            quantity_ordered=5,
+            unit_cost_ordered=Decimal("1.00"),
+        )
+        delivery = OrderDelivery.objects.create(
             purchase_order=po,
             delivery_date=timezone.now() - timedelta(days=1),
             received_by=user,
+        )
+        DeliveryItem.objects.create(
+            delivery=delivery,
+            purchase_order_item=po_item,
+            quantity_received=3,
         )
 
         response = client.get("/api/dashboard/widget-data/deliveries/")
 
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert "count" in data
-        assert "deliveries" in data
-        assert len(data["deliveries"]) >= 0
+        assert data["count"] == 1
+        assert len(data["deliveries"]) == 1
+        row = data["deliveries"][0]
+        assert row["items_count"] == 1
+        assert row["total_quantity"] == 3
+        assert row["supplier_name"] == supplier.name

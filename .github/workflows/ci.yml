@@ -155,6 +155,35 @@ jobs:
           ALLOWED_HOSTS: localhost,127.0.0.1
           REDIS_URL: redis://localhost:6379/0
 
+      - name: Check for conflicting migration leaves
+        run: |
+          # Fails when an app's migration graph has more than one leaf node —
+          # e.g. two PRs each branch a 0079 migration off 0078 and both land,
+          # leaving 0079_a and 0079_b as siblings. Django's `migrate` aborts at
+          # startup on such a graph ("multiple leaf nodes"), so on 2026-07-08
+          # this turned into a prod deploy outage that failed every deploy until
+          # the 0080 merge migration landed (PR #864). The drift check above
+          # also trips on this today, but only as a side effect of graph
+          # loading; this is the explicit, named gate that tells a developer to
+          # run `makemigrations --merge`. It reads the on-disk graph only (no
+          # DB) — see backend/config/management/commands/check_migration_conflicts.py.
+          #
+          # IMPORTANT: this only sees the conflict when CI evaluates a tree that
+          # contains BOTH leaves. GitHub already runs PR CI against the
+          # PR-merged-into-base ref, but a stale PR is merged against an old
+          # base. Enable branch protection "Require branches to be up to date
+          # before merging" so a PR adding 0079 is rebased onto a main that
+          # already has the other 0079 (and CI re-runs) before the merge button
+          # unlocks. That branch-protection setting is what makes this gate fire.
+          cd backend
+          python manage.py check_migration_conflicts
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_makerspace_inventory
+          SECRET_KEY: test-secret-key-for-ci-only
+          DEBUG: 1
+          ALLOWED_HOSTS: localhost,127.0.0.1
+          REDIS_URL: redis://localhost:6379/0
+
       - name: Run migrations
         run: |
           cd backend

@@ -657,7 +657,7 @@ def get_deliveries_data(request):
         deliveries = (
             OrderDelivery.objects.filter(delivery_date__gte=thirty_days_ago)
             .select_related("purchase_order__supplier", "received_by")
-            .prefetch_related("items__purchase_order_item__item")
+            .prefetch_related("items")
             .order_by("-delivery_date")[:50]
         )
 

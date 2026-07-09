@@ -6,6 +6,7 @@ import { Badge, ScrollArea, Text } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { dashboardAPI } from '../../services/api';
 import { QRScansData } from '../../types';
+import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import DashboardWidget from './DashboardWidget';
 
 const QRScansWidget: React.FC = () => {
@@ -26,7 +27,7 @@ const QRScansWidget: React.FC = () => {
       const response = await dashboardAPI.getQRScansData();
       setData(response.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load QR scan data');
+      setError(extractErrorMessage(err, 'Failed to load QR scan data'));
       console.error('Error loading QR scan data:', err);
     } finally {
       setLoading(false);

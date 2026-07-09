@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { dashboardAPI } from '../../services/api';
 import { DeliveriesData } from '../../types';
+import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import DashboardWidget from './DashboardWidget';
 
 const DeliveriesWidget: React.FC = () => {
@@ -28,7 +29,7 @@ const DeliveriesWidget: React.FC = () => {
       const response = await dashboardAPI.getDeliveriesData();
       setData(response.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load deliveries data');
+      setError(extractErrorMessage(err, 'Failed to load deliveries data'));
       console.error('Error loading deliveries data:', err);
     } finally {
       setLoading(false);

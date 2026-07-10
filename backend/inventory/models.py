@@ -3852,6 +3852,15 @@ class SerializedComponent(models.Model):
         blank=True,
         help_text="Optional batch/lot number for grouped provenance",
     )
+    expiration_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Optional expiry/best-by date for this unit. Recorded and displayed "
+            "only — an expired unit still counts normally in available/on-hand "
+            "and drives no forecast effect or alert."
+        ),
+    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,

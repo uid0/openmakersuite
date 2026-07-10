@@ -55,7 +55,10 @@ class SerializedComponentAdminSmokeTest(TestCase):
 
     def test_serialized_component_change_view_loads(self):
         url = reverse("admin:inventory_serializedcomponent_change", args=[self.component.pk])
-        self.assertEqual(self.client.get(url).status_code, 200)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        # expiration_date is part of the change form fieldset.
+        self.assertContains(response, "expiration_date")
 
     def test_component_usage_event_changelist_loads(self):
         url = reverse("admin:inventory_componentusageevent_changelist")

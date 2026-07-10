@@ -360,7 +360,7 @@ class SerializedComponentInline(admin.TabularInline):
 
     model = SerializedComponent
     extra = 0
-    fields = ["serial_number", "lot", "status", "installed_in_asset"]
+    fields = ["serial_number", "lot", "expiration_date", "status", "installed_in_asset"]
     autocomplete_fields = ["installed_in_asset"]
     show_change_link = True
 
@@ -716,6 +716,7 @@ class SerializedComponentAdmin(admin.ModelAdmin):
         "serial_number",
         "item",
         "lot",
+        "expiration_date",
         "status",
         "installed_in_asset",
         "received_at",
@@ -729,7 +730,7 @@ class SerializedComponentAdmin(admin.ModelAdmin):
     readonly_fields = ["id", "created_at", "updated_at"]
     date_hierarchy = "received_at"
     fieldsets = (
-        (None, {"fields": ("id", "item", "serial_number", "lot", "status")}),
+        (None, {"fields": ("id", "item", "serial_number", "lot", "expiration_date", "status")}),
         (
             "Installation",
             {"fields": ("installed_in_asset", "received_at", "installed_at")},

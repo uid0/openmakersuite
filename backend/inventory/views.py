@@ -6245,6 +6245,71 @@ class SerializedComponentViewSet(viewsets.ModelViewSet):
         """Dispose the unit (requires ``disposal_reason``; -> ``disposed``)."""
         return self._run_lifecycle_action(request, SerializedComponent.ACTION_DISPOSE)
 
+    @action(detail=False, methods=["post"])
+    def scan_receive(self, request):
+        """Idempotently create-and-receive a scanned unit (scan = received).
+
+        A scanned serial is treated as *received* with no purchase order
+        required — serials are unknown until receipt, and batch scanning (web +
+        ScanTTY) drives this endpoint. Body: ``{item, serial_number, lot?,
+        expiration_date?}``.
+
+        * **First scan** of an ``(item, serial_number)`` pair creates the unit
+          (recording ``lot`` / ``expiration_date``) and applies ``receive`` so
+          it lands ``in_stock`` (i.e. *available*). Returns 201 with
+          ``created: true``.
+        * **Re-scan** of the same pair is a no-op that returns the existing unit
+          with 200 and ``created: false`` — never a 400 unique-constraint error,
+          so double-scans within a batch are tolerated.
+
+        The owning item must be ``is_serialized`` (validated exactly like the
+        create path, via ``validate_item``).
+        """
+        # Reuse the component serializer to validate the item is serialized
+        # (validate_item) and to parse/clean lot + expiration_date. We do NOT
+        # persist through it, and we drop the auto-generated
+        # (item, serial_number) UniqueTogetherValidator: a re-scan must resolve
+        # to the existing unit via get_or_create below (idempotent, HTTP 200),
+        # not fail is_valid() with a 400 unique-constraint error.
+        from rest_framework.validators import UniqueTogetherValidator
+
+        in_serializer = self.get_serializer(
+            data={
+                "item": request.data.get("item"),
+                "serial_number": request.data.get("serial_number"),
+                "lot": request.data.get("lot", ""),
+                "expiration_date": request.data.get("expiration_date"),
+            }
+        )
+        in_serializer.validators = [
+            v for v in in_serializer.validators if not isinstance(v, UniqueTogetherValidator)
+        ]
+        in_serializer.is_valid(raise_exception=True)
+        validated = in_serializer.validated_data
+        item = validated["item"]
+        serial_number = validated["serial_number"]
+
+        actor = request.user if request.user.is_authenticated else None
+        with transaction.atomic():
+            component, created = SerializedComponent.objects.get_or_create(
+                item=item,
+                serial_number=serial_number,
+                defaults={
+                    "lot": validated.get("lot", ""),
+                    "expiration_date": validated.get("expiration_date"),
+                },
+            )
+            if created:
+                component.apply_action(SerializedComponent.ACTION_RECEIVE, actor=actor)
+
+        component.refresh_from_db()
+        data = self.get_serializer(component).data
+        data["created"] = created
+        return Response(
+            data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
 
 class ComponentUsageEventViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only access to the serialized-component usage/audit log.

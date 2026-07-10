@@ -18,6 +18,7 @@ User = get_user_model()
 pytestmark = pytest.mark.django_db
 
 LIST_URL = reverse("serialized-component-list")
+SCAN_RECEIVE_URL = reverse("serialized-component-scan-receive")
 
 
 def _user(username, **flags):
@@ -370,3 +371,215 @@ class TestComponentUsageEventApi:
         )
         assert resp.status_code == 405
         assert ComponentUsageEvent.objects.count() == 0
+
+
+@pytest.mark.integration
+class TestSerializedComponentExpirationDate:
+    """expiration_date is writable on create + update and round-trips."""
+
+    def test_create_with_expiration_date(self, consumable_item):
+        resp = _client(_user("exp-staff", is_staff=True)).post(
+            LIST_URL,
+            data={
+                "item": str(consumable_item.id),
+                "serial_number": "EXP-C1",
+                "expiration_date": "2026-12-31",
+            },
+            format="json",
+        )
+        assert resp.status_code == 201
+        assert resp.data["expiration_date"] == "2026-12-31"
+        unit = SerializedComponent.objects.get(id=resp.data["id"])
+        assert str(unit.expiration_date) == "2026-12-31"
+
+    def test_create_without_expiration_date_is_null(self, consumable_item):
+        resp = _client(_user("exp-staff2", is_staff=True)).post(
+            LIST_URL,
+            data={"item": str(consumable_item.id), "serial_number": "EXP-C2"},
+            format="json",
+        )
+        assert resp.status_code == 201
+        assert resp.data["expiration_date"] is None
+
+    def test_expiration_date_edit_round_trip(self, consumable_item):
+        client = _client(_user("exp-staff3", is_staff=True))
+        component = SerializedComponentFactory(item=consumable_item)
+        url = reverse("serialized-component-detail", kwargs={"pk": str(component.id)})
+
+        resp = client.patch(url, data={"expiration_date": "2028-06-01"}, format="json")
+        assert resp.status_code == 200
+        assert resp.data["expiration_date"] == "2028-06-01"
+        component.refresh_from_db()
+        assert str(component.expiration_date) == "2028-06-01"
+
+        # Clearing back to null also round-trips.
+        resp2 = client.patch(url, data={"expiration_date": None}, format="json")
+        assert resp2.status_code == 200
+        assert resp2.data["expiration_date"] is None
+        component.refresh_from_db()
+        assert component.expiration_date is None
+
+    def test_expired_unit_still_counts_in_stock_split(self, consumable_item):
+        """An expired unit is record/display only — it still counts normally in
+        on_hand and available."""
+        from inventory.services.component_forecast import stock_split_for_item
+
+        _client(_user("exp-staff4", is_staff=True)).post(
+            SCAN_RECEIVE_URL,
+            data={
+                "item": str(consumable_item.id),
+                "serial_number": "EXP-OLD",
+                "expiration_date": "2000-01-01",
+            },
+            format="json",
+        )
+        split = stock_split_for_item(consumable_item)
+        assert split == {"on_hand": 1, "installed": 0, "available": 1}
+
+
+@pytest.mark.integration
+class TestScanReceive:
+    """Idempotent scan-to-receive: scan = received, no PO required."""
+
+    def test_scan_creates_and_receives_into_stock(self, consumable_item):
+        resp = _client(_user("scan-staff", is_staff=True)).post(
+            SCAN_RECEIVE_URL,
+            data={"item": str(consumable_item.id), "serial_number": "SCAN-1", "lot": "L9"},
+            format="json",
+        )
+        assert resp.status_code == 201
+        assert resp.data["created"] is True
+        # scan = received -> receive applied -> lands in_stock (available).
+        assert resp.data["status"] == SerializedComponent.IN_STOCK
+        assert resp.data["lot"] == "L9"
+
+        unit = SerializedComponent.objects.get(item=consumable_item, serial_number="SCAN-1")
+        assert unit.status == SerializedComponent.IN_STOCK
+        assert unit.received_at is not None
+        assert unit.usage_events.filter(action=SerializedComponent.ACTION_RECEIVE).count() == 1
+
+    def test_rescan_is_idempotent(self, consumable_item):
+        client = _client(_user("scan-staff2", is_staff=True))
+        payload = {"item": str(consumable_item.id), "serial_number": "DUP-1"}
+
+        first = client.post(SCAN_RECEIVE_URL, data=payload, format="json")
+        assert first.status_code == 201
+        assert first.data["created"] is True
+
+        second = client.post(SCAN_RECEIVE_URL, data=payload, format="json")
+        # Re-scan returns the existing unit with 200 + created:false, NOT a 400.
+        assert second.status_code == 200
+        assert second.data["created"] is False
+        assert second.data["id"] == first.data["id"]
+
+        # No duplicate row, no duplicate receive event.
+        units = SerializedComponent.objects.filter(item=consumable_item, serial_number="DUP-1")
+        assert units.count() == 1
+        assert (
+            units.first().usage_events.filter(action=SerializedComponent.ACTION_RECEIVE).count()
+            == 1
+        )
+
+    def test_scan_records_lot_and_expiration_date(self, consumable_item):
+        resp = _client(_user("scan-staff3", is_staff=True)).post(
+            SCAN_RECEIVE_URL,
+            data={
+                "item": str(consumable_item.id),
+                "serial_number": "EXP-1",
+                "lot": "BATCH-7",
+                "expiration_date": "2027-01-15",
+            },
+            format="json",
+        )
+        assert resp.status_code == 201
+        assert resp.data["lot"] == "BATCH-7"
+        assert resp.data["expiration_date"] == "2027-01-15"
+        unit = SerializedComponent.objects.get(item=consumable_item, serial_number="EXP-1")
+        assert str(unit.expiration_date) == "2027-01-15"
+
+    def test_scan_rejects_non_serialized_item(self):
+        plain = InventoryItemFactory(is_serialized=False)
+        resp = _client(_user("scan-staff4", is_staff=True)).post(
+            SCAN_RECEIVE_URL,
+            data={"item": str(plain.id), "serial_number": "NS-1"},
+            format="json",
+        )
+        assert resp.status_code == 400
+        # Serializer ValidationErrors are wrapped in the project error envelope.
+        assert "item" in resp.data["error"]["details"]
+        assert not SerializedComponent.objects.filter(serial_number="NS-1").exists()
+
+    def test_scan_requires_serial_number(self, consumable_item):
+        resp = _client(_user("scan-staff5", is_staff=True)).post(
+            SCAN_RECEIVE_URL,
+            data={"item": str(consumable_item.id)},
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "serial_number" in resp.data["error"]["details"]
+
+    def test_reusable_scan_receive_lands_in_stock(self, reusable_item):
+        resp = _client(_user("scan-staff6", is_staff=True)).post(
+            SCAN_RECEIVE_URL,
+            data={"item": str(reusable_item.id), "serial_number": "RE-1"},
+            format="json",
+        )
+        assert resp.status_code == 201
+        assert resp.data["status"] == SerializedComponent.IN_STOCK
+
+    def test_volunteer_cannot_scan_receive(self, consumable_item):
+        resp = _client(_user("scan-vol")).post(
+            SCAN_RECEIVE_URL,
+            data={"item": str(consumable_item.id), "serial_number": "V-1"},
+            format="json",
+        )
+        assert resp.status_code == 403
+
+    def test_anonymous_cannot_scan_receive(self, consumable_item):
+        resp = _client().post(
+            SCAN_RECEIVE_URL,
+            data={"item": str(consumable_item.id), "serial_number": "A-1"},
+            format="json",
+        )
+        assert resp.status_code in (401, 403)
+
+
+@pytest.mark.integration
+class TestItemDetailSerializedStock:
+    """The item-detail serializer exposes the serialized available/on-hand split."""
+
+    def test_detail_exposes_serialized_stock_split(self, consumable_item):
+        # 3 in_stock + 2 installed + 1 consumed (consumed is depleted).
+        for i in range(3):
+            SerializedComponent.objects.create(
+                item=consumable_item,
+                serial_number=f"ss-stock-{i}",
+                status=SerializedComponent.IN_STOCK,
+            )
+        for i in range(2):
+            SerializedComponent.objects.create(
+                item=consumable_item,
+                serial_number=f"ss-inst-{i}",
+                status=SerializedComponent.INSTALLED,
+            )
+        SerializedComponent.objects.create(
+            item=consumable_item,
+            serial_number="ss-consumed",
+            status=SerializedComponent.CONSUMED,
+        )
+
+        url = reverse("inventoryitem-detail", kwargs={"pk": consumable_item.pk})
+        resp = _client(_user("ss-member")).get(url)
+        assert resp.status_code == 200
+        assert resp.data["serialized_stock"] == {
+            "on_hand": 5,  # 3 in_stock + 2 installed
+            "installed": 2,
+            "available": 3,  # on_hand - installed
+        }
+
+    def test_detail_serialized_stock_null_for_non_serialized(self):
+        item = InventoryItemFactory(is_serialized=False)
+        url = reverse("inventoryitem-detail", kwargs={"pk": item.pk})
+        resp = _client(_user("ss-member2")).get(url)
+        assert resp.status_code == 200
+        assert resp.data["serialized_stock"] is None

@@ -593,6 +593,7 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
     category_details = CategorySerializer(source="category", read_only=True)
     all_suppliers = ItemSupplierDetailSerializer(source="item_suppliers", many=True, read_only=True)
     price_trend_summary = serializers.SerializerMethodField()
+    serialized_stock = serializers.SerializerMethodField()
 
     class Meta(InventoryItemSerializer.Meta):
         fields = InventoryItemSerializer.Meta.fields + [
@@ -601,7 +602,23 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
             "category_details",
             "all_suppliers",
             "price_trend_summary",
+            "serialized_stock",
         ]
+
+    def get_serialized_stock(self, obj):
+        """Serialized units summary for the item-detail serialized panel.
+
+        Returns ``{"available", "on_hand", "installed"}`` for serialized items,
+        ``None`` otherwise. ``on_hand`` is every physically-present (not-yet-
+        depleted) unit; ``available`` excludes the units currently installed in
+        an asset (``available = on_hand - installed``). Display-only — this does
+        not touch the aggregate ``current_stock`` / generic reorder path.
+        """
+        if not obj.is_serialized:
+            return None
+        from inventory.services.component_forecast import stock_split_for_item
+
+        return stock_split_for_item(obj)
 
     def get_price_trend_summary(self, obj):
         """Get price trend summary for the primary supplier."""
@@ -2254,6 +2271,7 @@ class SerializedComponentSerializer(serializers.ModelSerializer):
             "item_sku",
             "serial_number",
             "lot",
+            "expiration_date",
             "status",
             "status_display",
             "tracking_mode",

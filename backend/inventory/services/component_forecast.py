@@ -223,7 +223,9 @@ def build_component_forecast(
     window_start = now - timedelta(days=window_days)
 
     items = list(
-        InventoryItem.objects.filter(is_serialized=True, is_active=True).select_related("category")
+        InventoryItem.objects.filter(
+            is_serialized=True, is_active=True, is_retired=False
+        ).select_related("category")
     )
     if not items:
         return []

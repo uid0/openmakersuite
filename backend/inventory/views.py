@@ -558,10 +558,13 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 | Q(sku__icontains=search)
             )
 
-        # Filter by low stock if specified
+        # Filter by low stock if specified. Retired items are phased out and
+        # must never surface in a low-stock filter, even when explicitly empty.
         low_stock = self.request.query_params.get("low_stock", "").lower()
         if low_stock == "true":
-            queryset = queryset.filter(current_stock__lte=F("minimum_stock"))
+            queryset = queryset.filter(current_stock__lte=F("minimum_stock")).exclude(
+                is_retired=True
+            )
         elif low_stock == "false":
             queryset = queryset.filter(current_stock__gt=F("minimum_stock"))
 
@@ -569,6 +572,16 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == "true")
+
+        # Retired visibility (Ian's decision): a retired item stays listed so its
+        # remaining stock is drawn down, but is auto-hidden once stock reaches 0.
+        # Retired items with stock > 0 are always shown. ``include_retired=true``
+        # opts out of the auto-hide so retired-and-empty items are reachable too.
+        # This is the single visibility chokepoint the low_stock/reordered
+        # actions reuse.
+        include_retired = self.request.query_params.get("include_retired", "").lower()
+        if include_retired != "true":
+            queryset = queryset.exclude(is_retired=True, current_stock__lte=0)
 
         # Ordering support (validated against an allow-list to keep the
         # client-driven `ordering` param from reaching arbitrary fields).
@@ -985,6 +998,34 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 reordered_items.append(item)
 
         serializer = self.get_serializer(reordered_items, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def retire(self, request, pk=None):
+        """Retire (phase out) this item.
+
+        A retired item is never flagged for reorder and is auto-hidden from the
+        default list once its stock hits 0 (retired items with stock remaining
+        stay listed so the remaining stock is drawn down). Idempotent: retiring
+        an already-retired item preserves the original ``retired_at`` stamp.
+        """
+        item = self.get_object()
+        if not item.is_retired:
+            item.is_retired = True
+            item.retired_at = timezone.now()
+            item.save(update_fields=["is_retired", "retired_at", "updated_at"])
+        serializer = self.get_serializer(item)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def unretire(self, request, pk=None):
+        """Un-retire this item, returning it to normal reorder/list behavior."""
+        item = self.get_object()
+        if item.is_retired:
+            item.is_retired = False
+            item.retired_at = None
+            item.save(update_fields=["is_retired", "retired_at", "updated_at"])
+        serializer = self.get_serializer(item)
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
@@ -3373,7 +3414,10 @@ class InventoryReportViewSet(viewsets.ViewSet):
                     F("current_stock") * Coalesce("unit_cost_value", Value(0)),
                     output_field=models.DecimalField(max_digits=20, decimal_places=2),
                 ),
-                low_stock_count=Count("id", filter=Q(current_stock__lte=F("minimum_stock"))),
+                low_stock_count=Count(
+                    "id",
+                    filter=Q(current_stock__lte=F("minimum_stock")) & Q(is_retired=False),
+                ),
             )
             .order_by("category_name_coalesced")
         )
@@ -4552,6 +4596,9 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
         for material in materials:
             inv = material.inventory_item
             if inv is None:
+                continue
+            # Retired items are phased out — never emit a low-stock alert.
+            if inv.is_retired:
                 continue
             if inv.current_stock >= inv.minimum_stock:
                 continue
@@ -5738,7 +5785,9 @@ def _apply_reconciliation_row(user, item, actual_count, reason, notes="", skip_r
     )
 
     reorder_created = False
-    if not skip_reorder and actual <= item.minimum_stock:
+    # Retired items are phased out: reconciliation must never auto-create a
+    # ReorderRequest for them, even when the counted stock is at/below minimum.
+    if not skip_reorder and not item.is_retired and actual <= item.minimum_stock:
         from reorder_queue.models import ReorderRequest
 
         requested_by = (user.get_full_name() or user.username).strip()

@@ -2182,3 +2182,78 @@ class TestPurchaseOrderAutoTransitionToSent:
         event = self._po_send_events(po).get()
         assert event.purchase_order == po
         assert event.actor == user
+
+
+@pytest.mark.integration
+class TestCreateOptimizedOrder:
+    """create_optimized_order excludes retired items from its recommendations."""
+
+    URL = "/api/reorders/purchase-orders/create_optimized_order/"
+
+    def test_retired_low_stock_item_excluded_from_recommendations(self, authenticated_client):
+        """A retired low-stock item is never recommended; an active one still is.
+
+        ``unit_cost=None`` on the item makes its auto-created primary supplier
+        score via the lead-time/primary path, sidestepping a pre-existing
+        ``Decimal * float`` bug in the optimizer's cost scoring that is
+        unrelated to retirement.
+        """
+        client, _ = authenticated_client
+
+        active_low = InventoryItemFactory(current_stock=1, minimum_stock=10, unit_cost=None)
+        retired_low = InventoryItemFactory(
+            current_stock=1, minimum_stock=10, is_retired=True, unit_cost=None
+        )
+
+        response = client.post(self.URL, {}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        recommended_ids = {
+            line["item_id"]
+            for rec in response.data.get("recommendations", [])
+            for line in rec["items"]
+        }
+        assert active_low.id in recommended_ids
+        assert retired_low.id not in recommended_ids
+
+    def test_only_retired_low_stock_yields_no_recommendations(self, authenticated_client):
+        """When the only low-stock item is retired, nothing needs reordering."""
+        client, _ = authenticated_client
+
+        InventoryItemFactory(current_stock=0, minimum_stock=10, is_retired=True)
+
+        response = client.post(self.URL, {}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["message"] == "No items currently need reordering"
+
+
+@pytest.mark.integration
+class TestReorderDataExcludesRetired:
+    """reorder_data never surfaces a retired item — via low stock OR a request."""
+
+    URL = "/api/reorders/purchase-orders/reorder_data/"
+
+    def test_reorder_data_excludes_retired_items(self, authenticated_client):
+        """A retired item is excluded from reorder_data even when it still carries
+        a pending reorder request (the items_with_requests branch)."""
+        client, _ = authenticated_client
+
+        # Active low-stock item with a pending request -> should appear.
+        active = InventoryItemFactory(current_stock=1, minimum_stock=10)
+        ReorderRequestFactory(item=active, status="pending", quantity=5)
+
+        # Retired item that still carries a pending request -> must NOT appear.
+        retired = InventoryItemFactory(current_stock=1, minimum_stock=10, is_retired=True)
+        ReorderRequestFactory(item=retired, status="pending", quantity=5)
+
+        response = client.get(self.URL)
+
+        assert response.status_code == status.HTTP_200_OK
+        listed_item_ids = {
+            line["item_id"] for group in response.data["suppliers"] for line in group["items"]
+        }
+        assert str(active.id) in listed_item_ids
+        assert str(retired.id) not in listed_item_ids
+        # Only the active item counts toward the active-request tally.
+        assert response.data["items_with_requests"] == 1

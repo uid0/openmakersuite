@@ -204,6 +204,19 @@ class TestBuildComponentForecast:
         assert str(low.id) in ids
         assert str(healthy.id) not in ids
 
+    def test_retired_serialized_item_excluded_from_forecast(self):
+        """A retired serialized item never appears in the forecast, so it is
+        never flagged needs_reorder no matter how low its available stock is."""
+        now = timezone.now()
+        retired = _serialized_item(
+            InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=5, is_retired=True
+        )
+        # Available (1) is under minimum, so an active item here would flag.
+        _components(retired, SerializedComponent.IN_STOCK, 1, "ret")
+
+        rows = build_component_forecast(now=now)
+        assert all(r["item_id"] != str(retired.id) for r in rows)
+
     def test_lead_time_falls_back_to_supplier_estimate(self):
         now = timezone.now()
         item = _serialized_item(

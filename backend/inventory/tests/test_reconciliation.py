@@ -144,6 +144,32 @@ class TestBatchReconcile:
         rec = StockReconciliation.objects.filter(item=low_item).first()
         assert rec.triggered_reorder is None
 
+    def test_retired_item_not_auto_reordered(self, staff_client, location):
+        """Reconciling a retired item below minimum must not auto-create a reorder."""
+        client, _ = staff_client
+        retired = InventoryItemFactory(
+            location=location,
+            current_stock=20,
+            minimum_stock=10,
+            reorder_quantity=15,
+            is_retired=True,
+        )
+        payload = {
+            "rows": [
+                {
+                    "item_id": str(retired.id),
+                    "actual_count": 1,  # well under minimum_stock (10)
+                    "reason": "used_without_scan",
+                }
+            ]
+        }
+        response = client.post(BATCH_URL, payload, format="json")
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["reorders_created"] == 0
+        assert not ReorderRequest.objects.filter(item=retired).exists()
+        rec = StockReconciliation.objects.filter(item=retired).first()
+        assert rec.triggered_reorder is None
+
     def test_non_admin_for_item_rejected_403(self, item):
         regular = _make_user()
         client = APIClient()

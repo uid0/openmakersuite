@@ -378,6 +378,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "needs_reorder",
         "use_case_based_reorder",
         "is_active",
+        "is_retired",
         "is_requestable",
         "is_serialized",
         "hazmat_status_icon",
@@ -388,6 +389,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "category",
         "location",
         "is_active",
+        "is_retired",
         "is_requestable",
         "is_serialized",
         "is_hazardous",
@@ -400,6 +402,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
         "last_counted_at",
+        "retired_at",
         "qr_code",
         "thumbnail",
         "api_link",
@@ -421,6 +424,8 @@ class InventoryItemAdmin(admin.ModelAdmin):
                     "location",
                     "shelf_position",
                     "is_active",
+                    "is_retired",
+                    "retired_at",
                     "is_requestable",
                 )
             },
@@ -648,7 +653,35 @@ class InventoryItemAdmin(admin.ModelAdmin):
         # For regular "Save" button, redirect back to change page instead of list
         return HttpResponseRedirect(reverse("admin:inventory_inventoryitem_change", args=[obj.pk]))
 
-    actions = ["print_selected_items", "regenerate_qr_codes"]
+    actions = [
+        "print_selected_items",
+        "regenerate_qr_codes",
+        "retire_selected",
+        "unretire_selected",
+    ]
+
+    @admin.action(description="Retire selected items (phase out — no reorder)")
+    def retire_selected(self, request, queryset):
+        """Mark selected items retired, stamping retired_at for the newly retired."""
+        from django.utils import timezone
+
+        to_retire = queryset.filter(is_retired=False)
+        updated = to_retire.update(is_retired=True, retired_at=timezone.now())
+        self.message_user(
+            request,
+            f"Retired {updated} item(s).",
+            level=messages.SUCCESS,
+        )
+
+    @admin.action(description="Un-retire selected items (resume normal reorder)")
+    def unretire_selected(self, request, queryset):
+        """Clear the retired flag + audit stamp on selected items."""
+        updated = queryset.filter(is_retired=True).update(is_retired=False, retired_at=None)
+        self.message_user(
+            request,
+            f"Un-retired {updated} item(s).",
+            level=messages.SUCCESS,
+        )
 
     @admin.action(description="Print these items (Avery card templates)")
     def print_selected_items(self, request, queryset):

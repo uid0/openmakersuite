@@ -52,6 +52,12 @@ EPSON_SIZE_PX = (576, 340)
 
 def _try_font(size: int) -> ImageFont.ImageFont:
     candidates: Iterable[str] = (
+        # Absolute paths first: Pillow does NOT resolve a bare filename against
+        # the system font dirs, so the bare names below fell through to
+        # load_default() (a fixed ~10px bitmap that ignores `size`) even when
+        # DejaVu was installed. DejaVu ships via fonts-dejavu-core (Dockerfile).
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "DejaVuSans-Bold.ttf",
         "DejaVuSans.ttf",
         "Arial Bold.ttf",
@@ -62,7 +68,12 @@ def _try_font(size: int) -> ImageFont.ImageFont:
             return ImageFont.truetype(name, size=size)
         except OSError:
             continue
-    return ImageFont.load_default()
+    # Last resort: a size-scaled default so text stays legible even with no
+    # TrueType font present (Pillow >= 10.1 honours size=).
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
 
 
 def _build_qr_image(value: str, target_px: int) -> Image.Image:

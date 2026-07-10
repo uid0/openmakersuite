@@ -2,11 +2,13 @@
 API views for dashboard configuration management.
 """
 
+import logging
 from datetime import datetime
 
 from django.http import JsonResponse
 from django.utils import timezone as dj_timezone
 
+import sentry_sdk
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
@@ -17,6 +19,28 @@ from config.api_errors import ErrorCode, error_response
 from .audit_feed import collect_events
 from .models import DashboardConfig, DashboardMessage, DashboardWidget
 from .serializers import DashboardWidgetSerializer
+
+logger = logging.getLogger(__name__)
+
+
+def _widget_data_server_error(exc):
+    """Report a swallowed widget-data exception, then return the standardized 500 envelope.
+
+    Every ``get_*_data`` widget view wraps its body in a broad ``except Exception``
+    and returns the standardized error envelope so a single failing widget can't
+    500 the whole dashboard request. That broad catch also swallows the traceback
+    before Django's default handler can report it, so the real failure never
+    reaches Sentry and we stay blind to why a widget 500s (op-8lhv). Capture the
+    exception to Sentry and log it here — BEFORE returning the envelope — so
+    swallowed widget-data 500s become visible without changing the response shape.
+    """
+    logger.exception("dashboard widget-data view failed")
+    sentry_sdk.capture_exception(exc)
+    return error_response(
+        ErrorCode.SERVER_ERROR,
+        str(exc),
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
 
 
 @api_view(["GET"])
@@ -423,11 +447,7 @@ def get_low_stock_data(request):
         )
 
     except Exception as e:
-        return error_response(
-            ErrorCode.SERVER_ERROR,
-            str(e),
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        return _widget_data_server_error(e)
 
 
 @api_view(["GET"])
@@ -485,11 +505,7 @@ def get_pending_reorders_data(request):
         )
 
     except Exception as e:
-        return error_response(
-            ErrorCode.SERVER_ERROR,
-            str(e),
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        return _widget_data_server_error(e)
 
 
 @api_view(["GET"])
@@ -547,11 +563,7 @@ def get_asset_problems_data(request):
         )
 
     except Exception as e:
-        return error_response(
-            ErrorCode.SERVER_ERROR,
-            str(e),
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        return _widget_data_server_error(e)
 
 
 @api_view(["GET"])
@@ -630,11 +642,7 @@ def get_qr_scans_data(request):
         )
 
     except Exception as e:
-        return error_response(
-            ErrorCode.SERVER_ERROR,
-            str(e),
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        return _widget_data_server_error(e)
 
 
 @api_view(["GET"])
@@ -691,11 +699,7 @@ def get_deliveries_data(request):
         )
 
     except Exception as e:
-        return error_response(
-            ErrorCode.SERVER_ERROR,
-            str(e),
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        return _widget_data_server_error(e)
 
 
 def _parse_audit_feed_dt(value):

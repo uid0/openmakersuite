@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { dashboardAPI } from '../../services/api';
 import { AssetProblemsData } from '../../types';
+import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import DashboardWidget from './DashboardWidget';
 
 const AssetProblemsWidget: React.FC = () => {
@@ -28,7 +29,7 @@ const AssetProblemsWidget: React.FC = () => {
       const response = await dashboardAPI.getAssetProblemsData();
       setData(response.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load asset problems');
+      setError(extractErrorMessage(err, 'Failed to load asset problems'));
       console.error('Error loading asset problems:', err);
     } finally {
       setLoading(false);

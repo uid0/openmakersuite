@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { dashboardAPI } from '../../services/api';
 import { PendingReordersData } from '../../types';
+import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import DashboardWidget from './DashboardWidget';
 
 const PendingReordersWidget: React.FC = () => {
@@ -28,7 +29,7 @@ const PendingReordersWidget: React.FC = () => {
       const response = await dashboardAPI.getPendingReordersData();
       setData(response.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load pending reorders');
+      setError(extractErrorMessage(err, 'Failed to load pending reorders'));
       console.error('Error loading pending reorders:', err);
     } finally {
       setLoading(false);

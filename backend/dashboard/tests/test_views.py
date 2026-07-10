@@ -2,6 +2,8 @@
 Integration tests for dashboard API views.
 """
 
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 
 import pytest
@@ -231,3 +233,41 @@ class TestDashboardWidgetDataViews:
         assert row["items_count"] == 1
         assert row["total_quantity"] == 3
         assert row["supplier_name"] == supplier.name
+
+    def test_widget_data_view_reports_swallowed_exception(self, authenticated_client):
+        """A widget-data view that 500s must report the exception before it returns.
+
+        The ``get_*_data`` views wrap their body in a broad ``except Exception``
+        that turns any failure into a standardized error envelope so one widget
+        can't 500 the whole dashboard request. That broad catch also swallowed
+        the traceback, so real failures never reached Sentry and we were blind
+        to why a widget 500s. Regression for op-8lhv: the handler must report
+        the exception (``sentry_sdk.capture_exception``) yet still emit the
+        standardized envelope unchanged.
+        """
+        from inventory.models import InventoryItem
+
+        client, _user = authenticated_client
+
+        with (
+            mock.patch("dashboard.views.sentry_sdk.capture_exception") as mock_capture,
+            mock.patch.object(
+                InventoryItem.objects,
+                "filter",
+                side_effect=RuntimeError("boom: missing column"),
+            ),
+        ):
+            response = client.get("/api/dashboard/widget-data/low-stock/")
+
+        # Standardized error envelope, unchanged shape, 500.
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        body = response.json()
+        assert body["error"]["code"] == "server_error"
+        assert "boom: missing column" in body["error"]["message"]
+
+        # The swallowed exception was reported to Sentry before the envelope
+        # was returned — the failure is no longer invisible.
+        mock_capture.assert_called_once()
+        reported = mock_capture.call_args[0][0]
+        assert isinstance(reported, RuntimeError)
+        assert str(reported) == "boom: missing column"

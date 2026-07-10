@@ -2,6 +2,8 @@
 Integration tests for dashboard API views.
 """
 
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 
 import pytest
@@ -175,30 +177,97 @@ class TestDashboardWidgetDataViews:
         assert "daily_scans" in data
 
     def test_get_deliveries_data(self, authenticated_client):
-        """Test getting deliveries data."""
+        """Deliveries widget returns 200 for a delivery that HAS items.
+
+        Regression (prod 500 -> whole-dashboard crash): get_deliveries_data
+        used prefetch_related("items__purchase_order_item__item"), but
+        PurchaseOrderItem has no "item" relation. Django only validates that
+        trailing segment once level-2 (the DeliveryItems) yields objects, so a
+        delivery WITH items raised ValueError while a delivery without items did
+        not. The previous version of this test created a delivery with no items
+        and thus never traversed far enough to catch it.
+        """
         client, user = authenticated_client
         from datetime import timedelta
+        from decimal import Decimal
 
         from django.utils import timezone
 
         from inventory.tests.factories import SupplierFactory
-        from reorder_queue.models import OrderDelivery, PurchaseOrder
+        from reorder_queue.models import (
+            DeliveryItem,
+            OrderDelivery,
+            PurchaseOrder,
+            PurchaseOrderItem,
+        )
 
-        # Create a purchase order and delivery
         supplier = SupplierFactory()
         po = PurchaseOrder.objects.create(
             supplier=supplier, status=PurchaseOrder.SENT, created_by=user
         )
-        OrderDelivery.objects.create(
+        # Freeform line item (no item_supplier / asset needed).
+        po_item = PurchaseOrderItem.objects.create(
+            purchase_order=po,
+            description="Freeform widget",
+            quantity_ordered=5,
+            unit_cost_ordered=Decimal("1.00"),
+        )
+        delivery = OrderDelivery.objects.create(
             purchase_order=po,
             delivery_date=timezone.now() - timedelta(days=1),
             received_by=user,
+        )
+        DeliveryItem.objects.create(
+            delivery=delivery,
+            purchase_order_item=po_item,
+            quantity_received=3,
         )
 
         response = client.get("/api/dashboard/widget-data/deliveries/")
 
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert "count" in data
-        assert "deliveries" in data
-        assert len(data["deliveries"]) >= 0
+        assert data["count"] == 1
+        assert len(data["deliveries"]) == 1
+        row = data["deliveries"][0]
+        assert row["items_count"] == 1
+        assert row["total_quantity"] == 3
+        assert row["supplier_name"] == supplier.name
+
+    def test_widget_data_view_reports_swallowed_exception(self, authenticated_client):
+        """A widget-data view that 500s must report the exception before it returns.
+
+        The ``get_*_data`` views wrap their body in a broad ``except Exception``
+        that turns any failure into a standardized error envelope so one widget
+        can't 500 the whole dashboard request. That broad catch also swallowed
+        the traceback, so real failures never reached Sentry and we were blind
+        to why a widget 500s. Regression for op-8lhv: the handler must report
+        the exception (``sentry_sdk.capture_exception``) yet still emit the
+        standardized envelope unchanged.
+        """
+        from inventory.models import InventoryItem
+
+        client, _user = authenticated_client
+
+        with (
+            mock.patch("dashboard.views.sentry_sdk.capture_exception") as mock_capture,
+            mock.patch.object(
+                InventoryItem.objects,
+                "filter",
+                side_effect=RuntimeError("boom: missing column"),
+            ),
+        ):
+            response = client.get("/api/dashboard/widget-data/low-stock/")
+
+        # Standardized error envelope, unchanged shape, 500.
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        body = response.json()
+        assert body["error"]["code"] == "server_error"
+        assert "boom: missing column" in body["error"]["message"]
+
+        # The swallowed exception was reported to Sentry before the envelope
+        # was returned — the failure is no longer invisible.
+        mock_capture.assert_called_once()
+        reported = mock_capture.call_args[0][0]
+        assert isinstance(reported, RuntimeError)
+        assert str(reported) == "boom: missing column"

@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { dashboardAPI } from '../../services/api';
 import { LowStockData } from '../../types';
+import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import DashboardWidget from './DashboardWidget';
 
 const LowStockWidget: React.FC = () => {
@@ -29,7 +30,7 @@ const LowStockWidget: React.FC = () => {
       const response = await dashboardAPI.getLowStockData();
       setData(response.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load low stock data');
+      setError(extractErrorMessage(err, 'Failed to load low stock data'));
       console.error('Error loading low stock data:', err);
     } finally {
       setLoading(false);

@@ -13,10 +13,22 @@ import DeliveriesWidget from '../components/dashboard/DeliveriesWidget';
 import LowStockWidget from '../components/dashboard/LowStockWidget';
 import PendingReordersWidget from '../components/dashboard/PendingReordersWidget';
 import QRScansWidget from '../components/dashboard/QRScansWidget';
+import WidgetErrorBoundary from '../components/dashboard/WidgetErrorBoundary';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { dashboardAPI } from '../services/api';
 import '../styles/DashboardPage.css';
 import { DashboardWidget as DashboardWidgetType } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
+
+// Human-readable titles for the per-widget error-boundary fallback, so a
+// crashed widget still tells the user which panel failed.
+const WIDGET_TITLES: Record<string, string> = {
+  low_stock: 'Low Stock',
+  pending_reorders: 'Pending Reorders',
+  asset_problems: 'Asset Problems',
+  qr_scans: 'QR Scans',
+  deliveries: 'Recent Deliveries',
+};
 
 const DashboardPage: React.FC = () => {
   const [widgets, setWidgets] = useState<DashboardWidgetType[]>([]);
@@ -59,7 +71,10 @@ const DashboardPage: React.FC = () => {
         : (payload as { results?: DashboardWidgetType[] } | null)?.results ?? [];
       setWidgets(list);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load dashboard widgets');
+      // Never store the raw error envelope object ({code,message}) in error
+      // state — it would render as a JSX child and throw React #31. Always
+      // resolve to a string (op-8lhv).
+      setError(extractErrorMessage(err, 'Failed to load dashboard widgets'));
       console.error('Error loading widgets:', err);
     } finally {
       setLoading(false);
@@ -115,24 +130,34 @@ const DashboardPage: React.FC = () => {
       return null;
     }
 
-    const widgetProps = {
-      key: widget.id,
-    };
-
+    let inner: React.ReactNode;
     switch (widget.widget_type) {
       case 'low_stock':
-        return <LowStockWidget {...widgetProps} />;
+        inner = <LowStockWidget />;
+        break;
       case 'pending_reorders':
-        return <PendingReordersWidget {...widgetProps} />;
+        inner = <PendingReordersWidget />;
+        break;
       case 'asset_problems':
-        return <AssetProblemsWidget {...widgetProps} />;
+        inner = <AssetProblemsWidget />;
+        break;
       case 'qr_scans':
-        return <QRScansWidget {...widgetProps} />;
+        inner = <QRScansWidget />;
+        break;
       case 'deliveries':
-        return <DeliveriesWidget {...widgetProps} />;
+        inner = <DeliveriesWidget />;
+        break;
       default:
         return null;
     }
+
+    // Isolate each widget: a render crash in one widget shows a compact
+    // per-widget fallback instead of bubbling to the app-level error boundary
+    // and blanking the whole dashboard (op-8lhv). The list key lives on the
+    // wrapping <div> in the grid below.
+    return (
+      <WidgetErrorBoundary title={WIDGET_TITLES[widget.widget_type]}>{inner}</WidgetErrorBoundary>
+    );
   };
 
   const getLayout = (): LayoutItem[] => {

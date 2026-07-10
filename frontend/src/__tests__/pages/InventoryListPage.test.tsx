@@ -50,6 +50,8 @@ describe('InventoryListPage', () => {
       needs_reorder: false,
       has_pending_reorder: false,
       is_active: true,
+      is_retired: false,
+      retired_at: null,
       description: 'Test description',
       image: null,
       thumbnail: null,
@@ -97,6 +99,8 @@ describe('InventoryListPage', () => {
       needs_reorder: true,
       has_pending_reorder: false,
       is_active: true,
+      is_retired: false,
+      retired_at: null,
       description: 'Low stock item',
       image: null,
       thumbnail: null,
@@ -260,6 +264,49 @@ describe('InventoryListPage', () => {
         expect.objectContaining({ low_stock: true, page: 1 })
       );
     });
+  });
+
+  it('requests include_retired when the Show Retired filter is selected', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
+    });
+    (api.inventoryAPI.listItems as jest.Mock).mockClear();
+
+    const retiredSelect = screen.getByPlaceholderText('Retired');
+    fireEvent.click(retiredSelect);
+    const option = await screen.findByRole('option', { name: 'Show Retired' });
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.listItems).toHaveBeenCalledWith(
+        expect.objectContaining({ include_retired: true, page: 1 })
+      );
+    });
+  });
+
+  it('renders a Retired badge for retired items', async () => {
+    (api.inventoryAPI.listItems as jest.Mock).mockResolvedValue(
+      fullPage([{ ...mockItems[0], is_retired: true }])
+    );
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Retired')).toBeInTheDocument();
+  });
+
+  it('does not render a Retired badge for non-retired items', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
+    });
+    // Neither seed item is retired (is_retired is absent/falsy).
+    expect(screen.queryByText('Retired')).not.toBeInTheDocument();
   });
 
   it('requests server-side sorting when a column header is clicked', async () => {

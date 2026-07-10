@@ -224,6 +224,9 @@ export const inventoryAPI = {
     low_stock?: boolean;
     owning_group?: number;
     is_active?: boolean;
+    // Retired items with stock are always listed; retired-and-empty items are
+    // hidden by default. Pass include_retired=true to surface them (op-jv7r).
+    include_retired?: boolean;
     ordering?: string;
     page?: number;
     page_size?: number;
@@ -249,6 +252,15 @@ export const inventoryAPI = {
 
   generateQR: (id: string) =>
     api.post(`/inventory/items/${id}/generate_qr/`),
+
+  // Retire / un-retire an item (op-jv7r). Retiring phases the item out: it is
+  // never flagged for reorder and auto-hides from the list once stock hits 0.
+  // Both actions return the refreshed item payload (with is_retired/retired_at).
+  retireItem: (id: string) =>
+    api.post<InventoryItem>(`/inventory/items/${id}/retire/`),
+
+  unretireItem: (id: string) =>
+    api.post<InventoryItem>(`/inventory/items/${id}/unretire/`),
 
   logUsage: (id: string, quantity: number, notes?: string) =>
     api.post(`/inventory/items/${id}/log_usage/`, {

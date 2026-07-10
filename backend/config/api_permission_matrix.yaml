@@ -1158,6 +1158,9 @@ views:
       maintenance_due:
         permission_classes:
         - IsAuthenticated
+      supplies_used:
+        permission_classes:
+        - IsAuthenticated
       tco:
         permission_classes:
         - IsAuthenticated

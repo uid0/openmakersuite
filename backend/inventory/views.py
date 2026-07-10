@@ -5262,6 +5262,137 @@ class AssetReportViewSet(viewsets.ViewSet):
         serializer = AssetTcoReportSerializer(rows, many=True)
         return Response(serializer.data)
 
+    @staticmethod
+    def _supplies_window(request):
+        """Parse ``start_date``/``end_date`` query params for supplies_used.
+
+        Mirrors ``utilization``/``tco`` windowing: both params must be present
+        and valid ``YYYY-MM-DD`` strings, otherwise it falls back to the last
+        30 days. Returns ``(start_date, end_date)`` as ``date`` objects.
+        """
+        from datetime import datetime
+
+        start_date_str = request.query_params.get("start_date")
+        end_date_str = request.query_params.get("end_date")
+        if start_date_str and end_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+                end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+                return start_date, end_date
+            except ValueError:
+                pass
+        start_date = (timezone.now() - timedelta(days=30)).date()
+        end_date = timezone.now().date()
+        return start_date, end_date
+
+    @action(detail=False, methods=["get"])
+    def supplies_used(self, request):
+        """Historical supplies used per asset over a date window.
+
+        Merges two sources into one flat, per-asset-labeled row list. Every row
+        carries the common keys ``asset_id``, ``asset_name``, ``source``,
+        ``item_name`` and ``used_at`` (ISO-8601); the remaining keys are
+        source-specific:
+
+        - ``source == "serialized"`` — a serial-numbered unit put into service
+          on, or consumed by, the asset. Sourced from ``ComponentUsageEvent``
+          rows tied to an asset with ``action`` in ``install``/``consume``,
+          windowed by the event timestamp ``at``. Extra keys: ``serial_number``,
+          ``action``, ``action_display``, ``actor``.
+        - ``source == "consumable"`` — a bulk maintenance material actually used
+          while closing a preventive-maintenance work order. Sourced from
+          ``WorkOrderMaterialUsage`` rows with ``was_used=True``, reached via
+          ``asset -> maintenance_items -> work_orders -> material_usage`` and
+          windowed by the work order's ``completed_at`` date (the same field
+          ``tco`` uses). Extra keys: ``quantity`` (planned qty), ``unit``,
+          ``work_order_id``, ``estimated_cost`` (``quantity`` ×
+          ``material.estimated_cost_per_unit``; null if the material was
+          deleted after the work order was created).
+
+        Query params ``start_date``/``end_date`` (``YYYY-MM-DD``) default to the
+        last 30 days. Rows are sorted by ``asset_name`` then ``used_at``.
+        """
+        from django.db.models import Prefetch
+
+        start_date, end_date = self._supplies_window(request)
+
+        rows = []
+
+        # Serialized usage: ComponentUsageEvent tied to an asset. Only install
+        # and consume count as "put into service on / used up by" the asset —
+        # receive/remove/retire/dispose are stock or teardown events.
+        events = ComponentUsageEvent.objects.filter(
+            asset__isnull=False,
+            action__in=[
+                SerializedComponent.ACTION_INSTALL,
+                SerializedComponent.ACTION_CONSUME,
+            ],
+            at__date__gte=start_date,
+            at__date__lte=end_date,
+        ).select_related("asset", "component", "component__item", "actor")
+        for event in events:
+            rows.append(
+                {
+                    "asset_id": str(event.asset_id),
+                    "asset_name": event.asset.name,
+                    "source": "serialized",
+                    "item_name": event.component.item.name,
+                    "serial_number": event.component.serial_number,
+                    "action": event.action,
+                    "action_display": event.get_action_display(),
+                    "used_at": event.at,
+                    "actor": event.actor.username if event.actor else None,
+                }
+            )
+
+        # Consumable usage: materials marked used on a completed PM work order.
+        # Reuse tco's asset -> maintenance_items -> work_orders -> material_usage
+        # prefetch traversal to avoid N+1.
+        assets = Asset.objects.all().prefetch_related(
+            Prefetch(
+                "maintenance_items__work_orders",
+                queryset=WorkOrder.objects.prefetch_related("material_usage__material"),
+            ),
+        )
+        for asset in assets:
+            for mi in asset.maintenance_items.all():
+                for wo in mi.work_orders.all():
+                    if wo.status != WorkOrder.STATUS_COMPLETED or wo.completed_at is None:
+                        continue
+                    completed_date = wo.completed_at.date()
+                    if not (start_date <= completed_date <= end_date):
+                        continue
+                    for usage in wo.material_usage.all():
+                        if not usage.was_used:
+                            continue
+                        estimated_cost = None
+                        if usage.material is not None:
+                            estimated_cost = str(
+                                (
+                                    usage.quantity_planned * usage.material.estimated_cost_per_unit
+                                ).quantize(Decimal("0.01"))
+                            )
+                        rows.append(
+                            {
+                                "asset_id": str(asset.id),
+                                "asset_name": asset.name,
+                                "source": "consumable",
+                                "item_name": usage.material_name,
+                                "quantity": str(usage.quantity_planned),
+                                "unit": usage.unit,
+                                "used_at": wo.completed_at,
+                                "work_order_id": str(wo.id),
+                                "estimated_cost": estimated_cost,
+                            }
+                        )
+
+        # Sort on the aware datetimes, then serialize used_at to ISO-8601.
+        rows.sort(key=lambda r: (r["asset_name"], r["used_at"]))
+        for row in rows:
+            row["used_at"] = row["used_at"].isoformat()
+
+        return Response(rows)
+
     @action(detail=False, methods=["get"])
     def export(self, request):
         """Export asset report data as CSV."""
@@ -5384,6 +5515,38 @@ class AssetReportViewSet(viewsets.ViewSet):
                         "repair_cost": row["repair_cost"],
                         "tco": row["tco"],
                     }
+                )
+
+            return response_obj
+        elif report_type == "supplies_used":
+            response = self.supplies_used(request)
+            data = response.data
+
+            response_obj = HttpResponse(content_type="text/csv")
+            response_obj["Content-Disposition"] = 'attachment; filename="assets_supplies_used.csv"'
+
+            # Union of both source shapes; source-specific columns are left
+            # blank on rows where they do not apply.
+            fieldnames = [
+                "asset_id",
+                "asset_name",
+                "source",
+                "item_name",
+                "serial_number",
+                "action",
+                "action_display",
+                "quantity",
+                "unit",
+                "used_at",
+                "work_order_id",
+                "estimated_cost",
+                "actor",
+            ]
+            writer = csv.DictWriter(response_obj, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in data:
+                writer.writerow(
+                    {key: ("" if row.get(key) is None else row.get(key)) for key in fieldnames}
                 )
 
             return response_obj

@@ -201,19 +201,19 @@ describe('WorkOrderPage resilience (#457 R4)', () => {
     });
   });
 
-  it('offers a print button for the scan-to-complete (OMR) form variant (op-w4ju)', async () => {
+  it('offers a single print button for the unified work order (OMR) PDF (op-3irz)', async () => {
     mockWorkOrderAPI.getWorkOrder.mockResolvedValue(okResponse(buildWorkOrder()));
-    mockWorkOrderAPI.getOmrPdfUrl.mockReturnValue(
-      'http://localhost:8000/api/inventory/work-orders/wo-1/omr-pdf/',
+    mockWorkOrderAPI.getPdfUrl.mockReturnValue(
+      'http://localhost:8000/api/inventory/work-orders/wo-1/pdf/',
     );
 
     renderPage();
 
-    const scanBtn = await screen.findByLabelText('Print scan-to-complete form');
-    expect(scanBtn).toHaveAttribute(
+    const printBtn = await screen.findByLabelText('Print work order form');
+    expect(printBtn).toHaveAttribute(
       'href',
-      'http://localhost:8000/api/inventory/work-orders/wo-1/omr-pdf/',
+      'http://localhost:8000/api/inventory/work-orders/wo-1/pdf/',
     );
-    expect(mockWorkOrderAPI.getOmrPdfUrl).toHaveBeenCalledWith('wo-1');
+    expect(mockWorkOrderAPI.getPdfUrl).toHaveBeenCalledWith('wo-1');
   });
 });

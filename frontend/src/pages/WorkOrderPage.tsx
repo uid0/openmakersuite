@@ -118,7 +118,7 @@ const WorkOrderPage: React.FC = () => {
 
   // AC-3: validation prompt state.
   const [validationOpen, setValidationOpen] = useState(false);
-  const [validationKind, setValidationKind] = useState<'finalize' | 'pdf' | 'omr-pdf'>('finalize');
+  const [validationKind, setValidationKind] = useState<'finalize' | 'pdf'>('finalize');
   const [ackElectrical, setAckElectrical] = useState(false);
   const [ackLoto, setAckLoto] = useState(false);
   const [ackRequired, setAckRequired] = useState(false);
@@ -219,12 +219,12 @@ const WorkOrderPage: React.FC = () => {
         // Re-attempt finalization now that the gate is open.
         await handleStatusChange('completed');
       } else {
-        // Open the requested PDF variant in a new tab now that the gate is open.
-        const url =
-          validationKind === 'omr-pdf'
-            ? workOrderAPI.getOmrPdfUrl(workOrder.id)
-            : workOrderAPI.getPdfUrl(workOrder.id);
-        window.open(url, '_blank', 'noopener,noreferrer');
+        // Open the work order PDF in a new tab now that the gate is open.
+        window.open(
+          workOrderAPI.getPdfUrl(workOrder.id),
+          '_blank',
+          'noopener,noreferrer',
+        );
       }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } } };
@@ -242,20 +242,6 @@ const WorkOrderPage: React.FC = () => {
     if (!workOrder?.validation?.is_complete) {
       e.preventDefault();
       setValidationKind('pdf');
-      setAckElectrical(false);
-      setAckLoto(false);
-      setAckRequired(false);
-      setValidationNotes('');
-      setValidationOpen(true);
-    }
-  };
-
-  const handlePrintOmrPdf = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    // Same validation gate as the standard PDF; on success the anchor href
-    // opens the OMR variant, otherwise the modal drives validate-then-open.
-    if (!workOrder?.validation?.is_complete) {
-      e.preventDefault();
-      setValidationKind('omr-pdf');
       setAckElectrical(false);
       setAckLoto(false);
       setAckRequired(false);
@@ -508,37 +494,21 @@ const WorkOrderPage: React.FC = () => {
               </Text>
             )}
           </Box>
-          <Stack gap="xs">
-            <Tooltip label="Print PDF">
-              <ActionIcon
-                variant="light"
-                color="gray"
-                size="lg"
-                component="a"
-                href={workOrderAPI.getPdfUrl(workOrder.id)}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={handlePrintPdf}
-              >
-                <IconFileText size={20} />
-              </ActionIcon>
-            </Tooltip>
-            <Tooltip label="Print scan-to-complete form">
-              <ActionIcon
-                variant="light"
-                color="gray"
-                size="lg"
-                component="a"
-                href={workOrderAPI.getOmrPdfUrl(workOrder.id)}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={handlePrintOmrPdf}
-                aria-label="Print scan-to-complete form"
-              >
-                <IconScan size={20} />
-              </ActionIcon>
-            </Tooltip>
-          </Stack>
+          <Tooltip label="Print work order form">
+            <ActionIcon
+              variant="light"
+              color="gray"
+              size="lg"
+              component="a"
+              href={workOrderAPI.getPdfUrl(workOrder.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={handlePrintPdf}
+              aria-label="Print work order form"
+            >
+              <IconFileText size={20} />
+            </ActionIcon>
+          </Tooltip>
         </Group>
 
         {/* Status selector */}

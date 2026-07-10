@@ -1013,11 +1013,4 @@ describe('API Service', () => {
       expect(url).toBe('http://localhost:8000/api/inventory/work-orders/abc-123/pdf/');
     });
   });
-
-  describe('workOrderAPI.getOmrPdfUrl targets the scan-to-complete endpoint', () => {
-    test('produces the omr-pdf URL prefixed by the resolved API base URL', () => {
-      const url = workOrderAPI.getOmrPdfUrl('abc-123');
-      expect(url).toBe('http://localhost:8000/api/inventory/work-orders/abc-123/omr-pdf/');
-    });
-  });
 });

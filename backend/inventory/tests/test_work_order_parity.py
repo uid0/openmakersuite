@@ -31,6 +31,7 @@ from inventory.models import (
     MaintenanceItem,
     MaintenanceTask,
     WorkOrder,
+    WorkOrderOmrTemplate,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
     WorkOrderValidation,
@@ -41,6 +42,7 @@ from inventory.services.work_order_context import (
     build_work_order_context,
 )
 from inventory.services.work_order_cv import Detection, auto_apply_or_queue
+from inventory.services.work_order_omr import compute_template_version
 from inventory.tests.factories import AssetFactory, LocationFactory
 
 pytestmark = pytest.mark.django_db
@@ -375,6 +377,10 @@ def test_pdf_allowed_after_full_validation(api):
     res = api.get(f"/api/inventory/work-orders/{wo.id}/pdf/")
     assert res.status_code == status.HTTP_200_OK
     assert res["Content-Type"] == "application/pdf"
+    # op-8mjw: the /pdf/ route now emits the unified OMR variant, so it upserts
+    # exactly one WorkOrderOmrTemplate snapshot (as omr-pdf did previously).
+    template = WorkOrderOmrTemplate.objects.get(work_order=wo)
+    assert template.template_version == compute_template_version(wo)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

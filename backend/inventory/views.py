@@ -3983,17 +3983,23 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             return gate
         return super().partial_update(request, *args, **kwargs)
 
-    @action(detail=True, methods=["get"])
-    def pdf(self, request, pk=None):
-        """Generate a printable PDF work order form.
+    def _render_wo_pdf(self, work_order, base_url):
+        """Shared work-order PDF renderer for :meth:`pdf` and :meth:`omr_pdf`.
+
+        Unifies both endpoints on the OMR variant (owner directive: one PDF
+        generation route, not two). ``build_and_persist_omr_template`` renders a
+        PDF that is a strict SUPERSET of the plain form — the same interactive
+        AcroForm checkboxes and layout PLUS 4 corner fiducials — and upserts the
+        ``WorkOrderOmrTemplate`` region map. So every printed sheet is both
+        digitally fillable (on-screen/emailed AcroForm) and scan-to-complete
+        capable, from a single generation route.
 
         AC-3 (oms-2da): gated on at least one fully-acknowledged validation
         record. The frontend shows the validation modal when this returns 412
         and retries after the user submits the checklist.
         """
-        from .utils.work_order_pdf import generate_work_order_pdf
+        from .services.work_order_omr import build_and_persist_omr_template
 
-        work_order = self.get_object()
         if not self._has_complete_validation(work_order):
             return Response(
                 {
@@ -4005,45 +4011,43 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_412_PRECONDITION_FAILED,
             )
-        base_url = request.build_absolute_uri("/").rstrip("/")
-        pdf_bytes = generate_work_order_pdf(work_order, base_url=base_url)
+        pdf_bytes, _template = build_and_persist_omr_template(work_order, base_url=base_url)
 
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         short_id = work_order.short_id.replace(" ", "-")
         response["Content-Disposition"] = f'inline; filename="work-order-{short_id}.pdf"'
         return response
 
+    @action(detail=True, methods=["get"])
+    def pdf(self, request, pk=None):
+        """Generate a printable work-order PDF (OMR scan-to-complete variant).
+
+        Produces the unified OMR form: interactive AcroForm fill PLUS 4 corner
+        fiducials and a persisted ``WorkOrderOmrTemplate``, so the one sheet
+        serves both emailed-digital completion and flatbed-scan completion.
+
+        AC-3 (oms-2da): gated on at least one fully-acknowledged validation
+        record. The frontend shows the validation modal when this returns 412
+        and retries after the user submits the checklist.
+        """
+        work_order = self.get_object()
+        base_url = request.build_absolute_uri("/").rstrip("/")
+        return self._render_wo_pdf(work_order, base_url)
+
     @action(detail=True, methods=["get"], url_path="omr-pdf")
     def omr_pdf(self, request, pk=None):
-        """Generate the OMR (scan-to-complete) work-order form variant.
+        """DEPRECATED alias for :meth:`pdf` — identical OMR PDF + persisted template.
 
-        Same completed-validation gate as :meth:`pdf` (412 until the WO has a
-        fully-acknowledged validation). Draws 4 corner fiducials, adds the
-        completion marks, and persists the region map (WorkOrderOmrTemplate) so
-        bead-2's reader can align and threshold a scanned copy of this exact
-        sheet.
+        Both endpoints now unify on the OMR variant (owner directive: a single
+        PDF generation route), so this returns the exact same result as
+        ``pdf``. Retained only so the ``omr-pdf`` URL keeps resolving — and the
+        API permission matrix stays unchanged — during the frontend rollout that
+        collapses the two download buttons into one pointed at ``/pdf/``.
+        Removable in a later cleanup once no caller hits this path.
         """
-        from .services.work_order_omr import build_and_persist_omr_template
-
         work_order = self.get_object()
-        if not self._has_complete_validation(work_order):
-            return Response(
-                {
-                    "detail": (
-                        "Confirm the validation checklist (electrical, LOTO, "
-                        "required fields) before generating a PDF."
-                    ),
-                    "code": "validation_required",
-                },
-                status=status.HTTP_412_PRECONDITION_FAILED,
-            )
         base_url = request.build_absolute_uri("/").rstrip("/")
-        pdf_bytes, _template = build_and_persist_omr_template(work_order, base_url=base_url)
-
-        response = HttpResponse(pdf_bytes, content_type="application/pdf")
-        short_id = work_order.short_id.replace(" ", "-")
-        response["Content-Disposition"] = f'inline; filename="work-order-{short_id}-scan.pdf"'
-        return response
+        return self._render_wo_pdf(work_order, base_url)
 
     @action(detail=True, methods=["post"], url_path="validate")
     def validate_checklist(self, request, pk=None):

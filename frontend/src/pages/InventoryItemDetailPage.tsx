@@ -630,7 +630,10 @@ const InventoryItemDetailPage: React.FC = () => {
         <Tabs.Panel value="serialized-units" pt="md">
           <SerializedComponentsPanel
             itemId={item.id}
+            itemName={item.name}
             trackingMode={item.serial_tracking_mode}
+            serializedStock={item.serialized_stock}
+            onStockChanged={loadData}
             isSerialized={item.is_serialized ?? false}
             onEnableTracking={() => navigate(`/inventory/items/${item.id}/edit`)}
           />

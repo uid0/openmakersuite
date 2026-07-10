@@ -3,7 +3,7 @@
  * low-stock report surfaced on the inventory + purchasing overviews.
  */
 import { MantineProvider } from '@mantine/core';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import SerializedForecastPanel from '../../components/inventory/SerializedForecastPanel';
 import { reportsAPI, SerializedForecastRow } from '../../services/api';
@@ -26,8 +26,11 @@ const buildRow = (overrides: Partial<SerializedForecastRow> = {}): SerializedFor
   sku: 'BLD-1',
   category_name: 'Consumables',
   serial_tracking_mode: 'consumable',
-  available_stock: 3,
-  current_stock: 3,
+  available: 3,
+  on_hand: 5,
+  installed: 2,
+  available_stock: 5,
+  current_stock: 5,
   window_days: 90,
   units_depleted_in_window: 9,
   avg_daily_use: 0.1,
@@ -113,6 +116,21 @@ describe('SerializedForecastPanel', () => {
         low_stock_only: true,
       }),
     );
+  });
+
+  it('shows available (reorder driver) and on-hand as distinct columns', async () => {
+    // Distinct, collision-free numbers (reorder_point is 3, avg_daily_use 0.1,
+    // stockout "30 d" — 7 and 9 appear only as available / on-hand).
+    mockReports.getSerializedForecast.mockResolvedValue({
+      data: [buildRow({ available: 7, on_hand: 9, installed: 2 })],
+    } as never);
+    renderPanel();
+
+    const row = await screen.findByTestId('serialized-forecast-row-item-1');
+    expect(within(row).getByText('7')).toBeInTheDocument();
+    expect(within(row).getByText('9')).toBeInTheDocument();
+    // A legend spells out that reorder follows available, not on-hand.
+    expect(screen.getByTestId('serialized-forecast-legend')).toBeInTheDocument();
   });
 
   it('invokes onSelectItem when a row is clicked', async () => {

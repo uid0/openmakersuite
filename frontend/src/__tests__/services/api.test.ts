@@ -2,7 +2,7 @@
  * Tests for API service
  */
 import MockAdapter from 'axios-mock-adapter';
-import api, { assetPartsAPI, assetsAPI, authAPI, checklistsAPI, inventoryAPI, purchaseOrderAPI, reorderAPI, resolveApiBaseUrl, workOrderAPI } from '../../services/api';
+import api, { assetPartsAPI, assetsAPI, authAPI, checklistsAPI, inventoryAPI, purchaseOrderAPI, reorderAPI, reportsAPI, resolveApiBaseUrl, serializedComponentsAPI, workOrderAPI } from '../../services/api';
 
 describe('API Service', () => {
   let mock: MockAdapter;
@@ -820,6 +820,92 @@ describe('API Service', () => {
       const response = await assetPartsAPI.markReplaced('1', 'SN-XYZ');
 
       expect(response.data.replacement_serial_number).toBe('SN-XYZ');
+    });
+  });
+
+  describe('Serialized Components API', () => {
+    test('scanReceive posts item/serial/lot/expiration and returns the created flag (201)', async () => {
+      const mockUnit = {
+        id: 'unit-1',
+        item: 'item-1',
+        serial_number: 'SN-1',
+        lot: 'LOT-A',
+        expiration_date: '2027-01-31',
+        status: 'in_stock',
+        created: true,
+      };
+
+      mock.onPost('/inventory/serialized-components/scan_receive/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({
+          item: 'item-1',
+          serial_number: 'SN-1',
+          lot: 'LOT-A',
+          expiration_date: '2027-01-31',
+        });
+        return [201, mockUnit];
+      });
+
+      const response = await serializedComponentsAPI.scanReceive({
+        item: 'item-1',
+        serial_number: 'SN-1',
+        lot: 'LOT-A',
+        expiration_date: '2027-01-31',
+      });
+
+      expect(response.status).toBe(201);
+      expect(response.data.created).toBe(true);
+      expect(response.data.serial_number).toBe('SN-1');
+    });
+
+    test('scanReceive surfaces an idempotent re-scan (created:false, HTTP 200)', async () => {
+      mock.onPost('/inventory/serialized-components/scan_receive/').reply(200, {
+        id: 'unit-1',
+        item: 'item-1',
+        serial_number: 'SN-1',
+        created: false,
+      });
+
+      const response = await serializedComponentsAPI.scanReceive({
+        item: 'item-1',
+        serial_number: 'SN-1',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.data.created).toBe(false);
+    });
+
+    test('create forwards an optional expiration_date', async () => {
+      mock.onPost('/inventory/serialized-components/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({
+          item: 'item-1',
+          serial_number: 'SN-2',
+          expiration_date: '2026-12-01',
+        });
+        return [201, { id: 'unit-2', serial_number: 'SN-2', expiration_date: '2026-12-01' }];
+      });
+
+      const response = await serializedComponentsAPI.create({
+        item: 'item-1',
+        serial_number: 'SN-2',
+        expiration_date: '2026-12-01',
+      });
+
+      expect(response.data.expiration_date).toBe('2026-12-01');
+    });
+
+    test('getSerializedForecast passes window + low-stock params and carries available/on_hand', async () => {
+      mock.onGet('/inventory/reports/inventory/serialized_forecast/').reply((config) => {
+        expect(config.params).toEqual({ window_days: 60, low_stock_only: true });
+        return [200, [{ item_id: 'i1', available: 2, on_hand: 5, installed: 3 }]];
+      });
+
+      const response = await reportsAPI.getSerializedForecast({
+        window_days: 60,
+        low_stock_only: true,
+      });
+
+      expect(response.data[0].available).toBe(2);
+      expect(response.data[0].on_hand).toBe(5);
     });
   });
 

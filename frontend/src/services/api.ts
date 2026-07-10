@@ -720,6 +720,9 @@ export interface SerializedComponent {
   item_sku: string;
   serial_number: string;
   lot: string;
+  // Optional shelf-life date (record/display only — no forecast/alert effect).
+  // ISO calendar date "YYYY-MM-DD" as returned by the DRF DateField, or null.
+  expiration_date: string | null;
   status: SerializedComponentStatus;
   status_display: string;
   tracking_mode: SerializedTrackingMode;
@@ -739,6 +742,13 @@ export interface SerializedComponent {
 // A lifecycle action returns the updated unit plus the event it logged.
 export interface SerializedComponentActionResult extends SerializedComponent {
   event: ComponentUsageEvent;
+}
+
+// scan_receive returns the (created-or-existing) unit plus a `created` flag:
+// true when this scan minted+received a new unit (HTTP 201), false on an
+// idempotent re-scan of the same (item, serial_number) pair (HTTP 200).
+export interface SerializedComponentScanResult extends SerializedComponent {
+  created: boolean;
 }
 
 interface Paginated<T> {
@@ -765,9 +775,26 @@ export const serializedComponentsAPI = {
     item: string;
     serial_number: string;
     lot?: string;
+    expiration_date?: string | null;
     provenance_delivery_item?: number | null;
     provenance_purchase_order_item?: number | null;
   }) => api.post<SerializedComponent>('/inventory/serialized-components/', data),
+
+  // Scan-driven batch receive: idempotent get-or-create-and-receive by
+  // (item, serial_number). A first scan mints the unit and applies `receive`
+  // (201 `created:true`); a re-scan resolves to the existing unit without a
+  // unique-constraint 400 (200 `created:false`). Drives the web + ScanTTY
+  // batch-scan surfaces.
+  scanReceive: (data: {
+    item: string;
+    serial_number: string;
+    lot?: string;
+    expiration_date?: string | null;
+  }) =>
+    api.post<SerializedComponentScanResult>(
+      '/inventory/serialized-components/scan_receive/',
+      data,
+    ),
 
   // Lifecycle actions — each returns the updated unit plus the logged event.
   receive: (id: string, data?: { notes?: string }) =>
@@ -817,6 +844,13 @@ export interface SerializedForecastRow {
   sku: string;
   category_name: string | null;
   serial_tracking_mode: SerializedTrackingMode;
+  // Serialized stock split. `available` (= on_hand − installed) is what drives
+  // the reorder math; `on_hand` counts every physically-present unit including
+  // those currently installed in an asset. `available_stock` is a
+  // backward-compatible alias of `on_hand`.
+  available: number;
+  on_hand: number;
+  installed: number;
   available_stock: number;
   current_stock: number;
   window_days: number;

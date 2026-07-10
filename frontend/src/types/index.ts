@@ -161,6 +161,15 @@ export interface InventoryItem {
   // matches `SerializedTrackingMode` in services/api.ts.)
   is_serialized?: boolean;
   serial_tracking_mode?: 'consumable' | 'reusable';
+  // Display-only serialized stock split, present on the item-detail (retrieve)
+  // payload for serialized items and null otherwise. `available` = on_hand −
+  // installed; `on_hand` counts every physically-present unit. Does not touch
+  // the aggregate `current_stock` / generic reorder path.
+  serialized_stock?: {
+    available: number;
+    on_hand: number;
+    installed: number;
+  } | null;
   // Reorder status and tracking
   reorder_status: string;
   has_pending_reorder: boolean;

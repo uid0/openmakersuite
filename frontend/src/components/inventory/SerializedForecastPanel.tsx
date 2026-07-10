@@ -125,13 +125,14 @@ const SerializedForecastPanel: React.FC<Props> = ({
             : 'No serialized items to forecast yet.'}
         </Text>
       ) : (
-        <Table.ScrollContainer minWidth={720}>
+        <Table.ScrollContainer minWidth={800}>
           <Table highlightOnHover verticalSpacing="xs">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Item</Table.Th>
                 <Table.Th>Mode</Table.Th>
                 <Table.Th ta="right">Available</Table.Th>
+                <Table.Th ta="right">On-hand</Table.Th>
                 <Table.Th ta="right">Avg/day</Table.Th>
                 <Table.Th ta="right">Stockout</Table.Th>
                 <Table.Th ta="right">Reorder pt</Table.Th>
@@ -160,7 +161,12 @@ const SerializedForecastPanel: React.FC<Props> = ({
                     </Text>
                   </Table.Td>
                   <Table.Td tt="capitalize">{row.serial_tracking_mode}</Table.Td>
-                  <Table.Td ta="right">{row.available_stock}</Table.Td>
+                  <Table.Td ta="right" fw={600}>
+                    {row.available}
+                  </Table.Td>
+                  <Table.Td ta="right" c="dimmed">
+                    {row.on_hand}
+                  </Table.Td>
                   <Table.Td ta="right">{row.avg_daily_use}</Table.Td>
                   <Table.Td ta="right">{fmtDays(row.days_until_stockout)}</Table.Td>
                   <Table.Td ta="right">{row.reorder_point}</Table.Td>
@@ -180,6 +186,13 @@ const SerializedForecastPanel: React.FC<Props> = ({
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
+      )}
+
+      {!loading && !error && rows.length > 0 && (
+        <Text size="xs" c="dimmed" mt="xs" data-testid="serialized-forecast-legend">
+          Reorder is driven by <b>available</b> (on-hand minus units installed in
+          an asset), not on-hand.
+        </Text>
       )}
     </Paper>
   );

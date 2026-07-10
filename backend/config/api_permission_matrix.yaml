@@ -1397,12 +1397,18 @@ views:
       reordered:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      retire:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       retrieve:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       scan:
         permission_classes:
         - AllowAny
+      unretire:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       update:
         permission_classes:
         - IsAuthenticatedOrReadOnly

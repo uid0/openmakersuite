@@ -241,7 +241,11 @@ def get_inventory_summary(request):
         items_query = InventoryItem.objects.filter(is_active=True)
 
         total_items = items_query.count()
-        low_stock_items = items_query.filter(current_stock__lte=F("minimum_stock")).count()
+        low_stock_items = (
+            items_query.filter(current_stock__lte=F("minimum_stock"))
+            .exclude(is_retired=True)
+            .count()
+        )
 
         # Items with pending reorders
         items_with_reorders = (
@@ -260,6 +264,7 @@ def get_inventory_summary(request):
         # Get actual low stock items list (limit to 20)
         low_stock_list = (
             items_query.filter(current_stock__lte=F("minimum_stock"))
+            .exclude(is_retired=True)
             .order_by("current_stock")[:20]
             .values("id", "name", "current_stock", "minimum_stock", "reorder_quantity")
         )
@@ -412,7 +417,7 @@ def get_low_stock_data(request):
         from inventory.models import InventoryItem
 
         items_query = InventoryItem.objects.filter(
-            is_active=True, current_stock__lte=F("minimum_stock")
+            is_active=True, is_retired=False, current_stock__lte=F("minimum_stock")
         ).select_related("category", "location")
 
         # Apply SIG filtering if user is not staff/logistics

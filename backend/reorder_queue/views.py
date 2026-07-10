@@ -793,9 +793,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     def create_optimized_order(self, request):
         """Create an optimized purchase order based on current needs and supplier analysis."""
 
-        # Get items that need reordering
+        # Get items that need reordering (retired items are phased out and
+        # excluded — no optimized order line for them).
         low_stock_items = (
-            InventoryItem.objects.filter(current_stock__lte=F("minimum_stock"))
+            InventoryItem.objects.filter(current_stock__lte=F("minimum_stock"), is_retired=False)
             .select_related("category", "location")
             .prefetch_related("item_suppliers__supplier")
         )
@@ -882,11 +883,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         """
         from inventory.models import Asset, Supplier
 
-        # First, get items with active reorder requests (pending or approved)
+        # First, get items with active reorder requests (pending or approved).
+        # Retired items are phased out and must never appear in the reorder data,
+        # even if a request lingered from before they were retired.
         items_with_requests = (
             InventoryItem.objects.filter(
                 reorder_requests__status__in=[ReorderRequest.PENDING, ReorderRequest.APPROVED],
                 is_active=True,
+                is_retired=False,
             )
             .distinct()
             .select_related("category", "location")
@@ -899,6 +903,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             InventoryItem.objects.filter(
                 current_stock__lte=F("minimum_stock"),
                 is_active=True,
+                is_retired=False,
             )
             .exclude(id__in=items_with_requests.values_list("id", flat=True))
             .select_related("category", "location")

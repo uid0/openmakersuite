@@ -2,7 +2,10 @@
 API tests for inventory endpoints.
 """
 
+from datetime import timedelta
+
 from django.urls import reverse
+from django.utils import timezone
 
 import pytest
 from rest_framework import status
@@ -200,6 +203,157 @@ class TestInventoryItemAPI:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) == 1
         assert response.data[0]["id"] == str(low_item.id)
+
+    def test_low_stock_endpoint_excludes_retired(self, api_client):
+        """The low_stock action never lists a retired item, even below minimum."""
+        low_item = InventoryItemFactory(current_stock=5, minimum_stock=10)
+        InventoryItemFactory(current_stock=2, minimum_stock=10, is_retired=True)
+
+        url = reverse("inventoryitem-low-stock")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [r["id"] for r in response.data] == [str(low_item.id)]
+
+    def test_low_stock_filter_excludes_retired(self, api_client):
+        """?low_stock=true excludes retired items even when they are under min."""
+        low_item = InventoryItemFactory(current_stock=5, minimum_stock=10)
+        InventoryItemFactory(current_stock=2, minimum_stock=10, is_retired=True)
+
+        url = reverse("inventoryitem-list")
+        response = api_client.get(url, {"low_stock": "true"})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [r["id"] for r in response.data["results"]] == [str(low_item.id)]
+
+    def test_list_hides_retired_item_at_zero_stock_by_default(self, api_client):
+        """A retired item is auto-hidden from the default list once stock hits 0."""
+        visible = InventoryItemFactory(current_stock=5, minimum_stock=10)
+        InventoryItemFactory(current_stock=0, minimum_stock=10, is_retired=True)
+
+        url = reverse("inventoryitem-list")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [r["id"] for r in response.data["results"]] == [str(visible.id)]
+
+    def test_list_shows_retired_empty_item_with_include_retired(self, api_client):
+        """include_retired=true reveals retired-and-empty items."""
+        visible = InventoryItemFactory(current_stock=5, minimum_stock=10)
+        retired_empty = InventoryItemFactory(current_stock=0, minimum_stock=10, is_retired=True)
+
+        url = reverse("inventoryitem-list")
+        response = api_client.get(url, {"include_retired": "true"})
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = {r["id"] for r in response.data["results"]}
+        assert ids == {str(visible.id), str(retired_empty.id)}
+
+    def test_list_always_shows_retired_item_with_stock(self, api_client):
+        """A retired item with stock remaining always stays listed (draw-down)."""
+        retired_with_stock = InventoryItemFactory(
+            current_stock=7, minimum_stock=10, is_retired=True
+        )
+
+        url = reverse("inventoryitem-list")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [r["id"] for r in response.data["results"]] == [str(retired_with_stock.id)]
+
+    def test_retire_requires_auth(self, api_client):
+        """Retiring an item requires authentication."""
+        item = InventoryItemFactory(is_retired=False)
+        url = reverse("inventoryitem-retire", kwargs={"pk": str(item.id)})
+        response = api_client.post(url)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        item.refresh_from_db()
+        assert item.is_retired is False
+
+    def test_unretire_requires_auth(self, api_client):
+        """Un-retiring an item requires authentication."""
+        item = InventoryItemFactory(is_retired=True, retired_at=timezone.now())
+        url = reverse("inventoryitem-unretire", kwargs={"pk": str(item.id)})
+        response = api_client.post(url)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        item.refresh_from_db()
+        assert item.is_retired is True
+
+    def test_retire_action_sets_flag_and_stamp(self, authenticated_client):
+        """The retire action flags the item and stamps retired_at."""
+        client, _ = authenticated_client
+        item = InventoryItemFactory(is_retired=False)
+
+        url = reverse("inventoryitem-retire", kwargs={"pk": str(item.id)})
+        response = client.post(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["is_retired"] is True
+        assert response.data["retired_at"] is not None
+        item.refresh_from_db()
+        assert item.is_retired is True
+        assert item.retired_at is not None
+
+    def test_unretire_action_clears_flag_and_stamp(self, authenticated_client):
+        """The unretire action clears the flag and the retired_at stamp."""
+        client, _ = authenticated_client
+        item = InventoryItemFactory(is_retired=True, retired_at=timezone.now())
+
+        url = reverse("inventoryitem-unretire", kwargs={"pk": str(item.id)})
+        response = client.post(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["is_retired"] is False
+        assert response.data["retired_at"] is None
+        item.refresh_from_db()
+        assert item.is_retired is False
+        assert item.retired_at is None
+
+    def test_retire_is_idempotent_and_preserves_stamp(self, authenticated_client):
+        """Retiring an already-retired item is a no-op that keeps retired_at."""
+        client, _ = authenticated_client
+        original = timezone.now() - timedelta(days=3)
+        item = InventoryItemFactory(is_retired=True, retired_at=original)
+
+        url = reverse("inventoryitem-retire", kwargs={"pk": str(item.id)})
+        response = client.post(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        item.refresh_from_db()
+        assert item.is_retired is True
+        # The original stamp is preserved (not re-stamped).
+        assert item.retired_at == original
+
+    def test_unretire_on_active_item_is_noop(self, authenticated_client):
+        """Un-retiring an item that is not retired is a harmless no-op."""
+        client, _ = authenticated_client
+        item = InventoryItemFactory(is_retired=False)
+
+        url = reverse("inventoryitem-unretire", kwargs={"pk": str(item.id)})
+        response = client.post(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        item.refresh_from_db()
+        assert item.is_retired is False
+        assert item.retired_at is None
+
+    def test_is_retired_writable_via_patch_retired_at_read_only(self, authenticated_client):
+        """is_retired round-trips through PATCH; retired_at stays read-only."""
+        client, _ = authenticated_client
+        item = InventoryItemFactory(is_retired=False)
+
+        url = reverse("inventoryitem-detail", kwargs={"pk": str(item.id)})
+        stamp = "2020-01-01T00:00:00Z"
+        response = client.patch(url, {"is_retired": True, "retired_at": stamp}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["is_retired"] is True
+        item.refresh_from_db()
+        assert item.is_retired is True
+        # retired_at is read-only on the serializer: the client value is ignored.
+        assert item.retired_at is None
 
     def test_generate_qr_endpoint(self, authenticated_client, mocker):
         """Test QR code generation endpoint."""

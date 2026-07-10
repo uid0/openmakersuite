@@ -502,6 +502,11 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "hazmat_compliance_status",
             "has_complete_nfpa_data",
             "is_active",
+            # Retirement (op-jv7r). ``is_retired`` is writable so the item form
+            # + admin can toggle phase-out directly; ``retired_at`` is a
+            # read-only audit stamp set by the retire/unretire actions.
+            "is_retired",
+            "retired_at",
             "is_requestable",
             # Serialized-component tracking (#818). Writable so the item
             # create/edit form can flag an item as serialized and pick the
@@ -527,6 +532,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "last_counted_at",
+            "retired_at",
         ]
 
     def get_thumbnail(self, obj):

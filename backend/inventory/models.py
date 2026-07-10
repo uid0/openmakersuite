@@ -402,6 +402,14 @@ class InventoryItem(models.Model):
 
     # Metadata
     is_active = models.BooleanField(default=True)
+    is_retired = models.BooleanField(
+        default=False,
+        help_text=(
+            "Retired/phased-out: never flagged for reorder; "
+            "hidden from the list once stock hits 0."
+        ),
+    )
+    retired_at = models.DateTimeField(null=True, blank=True)
     is_requestable = models.BooleanField(
         default=True,
         help_text="Allow general users to request reorders for this item. "
@@ -458,6 +466,12 @@ class InventoryItem(models.Model):
     @property
     def needs_reorder(self) -> bool:
         """Check if item stock is below minimum and needs reordering."""
+        # Retired items are phased out: never flagged for reorder, regardless of
+        # stock level. This is the central chokepoint for every property-based
+        # low-stock surface (reorder_status, low_stock action, serializer
+        # needs_reorder field, admin, AssetPart, Fixture refill).
+        if self.is_retired:
+            return False
         if self.use_case_based_reorder:
             # For case-based reordering, calculate current cases and compare to minimum cases
             current_cases = self.current_cases

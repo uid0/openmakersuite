@@ -154,6 +154,31 @@ class TestInventoryReportViewSet:
         assert len(response.data) == 1
         assert response.data[0]["low_stock_count"] == 2
 
+    def test_stock_by_category_low_stock_count_excludes_retired(self, authenticated_client):
+        """Retired items stay counted as inventory but never as low-stock."""
+        client, user = authenticated_client
+        category = CategoryFactory(name="Electronics")
+
+        InventoryItemFactory(
+            category=category, current_stock=3, minimum_stock=5, is_active=True
+        )  # low -> counts
+        InventoryItemFactory(
+            category=category,
+            current_stock=1,
+            minimum_stock=5,
+            is_active=True,
+            is_retired=True,
+        )  # low but retired -> excluded from low_stock_count
+
+        url = "/api/inventory/reports/inventory/stock_by_category/"
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        # Retired item remains a visible inventory item, but is not reorder-flagged.
+        assert response.data[0]["total_items"] == 2
+        assert response.data[0]["low_stock_count"] == 1
+
     def test_stock_by_category_excludes_inactive_items(self, authenticated_client):
         """Test stock_by_category excludes inactive items."""
         client, user = authenticated_client

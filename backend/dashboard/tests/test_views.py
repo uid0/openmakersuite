@@ -118,6 +118,33 @@ class TestDashboardWidgetDataViews:
         assert item1.name in item_names
         assert item2.name in item_names
 
+    def test_get_low_stock_data_excludes_retired(self, authenticated_client):
+        """The low-stock widget never lists a retired item."""
+        client, user = authenticated_client
+        active_low = InventoryItemFactory(current_stock=5, minimum_stock=10)
+        retired_low = InventoryItemFactory(current_stock=2, minimum_stock=10, is_retired=True)
+
+        response = client.get("/api/dashboard/widget-data/low-stock/")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        names = [item["name"] for item in data["items"]]
+        assert active_low.name in names
+        assert retired_low.name not in names
+
+    def test_inventory_summary_low_stock_count_excludes_retired(self, authenticated_client):
+        """The dashboard summary counts a retired item as inventory but not as low-stock."""
+        client, user = authenticated_client
+        InventoryItemFactory(current_stock=5, minimum_stock=10)  # active + low
+        InventoryItemFactory(current_stock=2, minimum_stock=10, is_retired=True)  # retired + low
+
+        response = client.get("/api/dashboard/inventory-summary/")
+
+        assert response.status_code == status.HTTP_200_OK
+        inventory = response.json()["inventory"]
+        assert inventory["total_items"] == 2  # retired still counted as an item
+        assert inventory["low_stock_count"] == 1  # but never as low-stock
+
     def test_get_pending_reorders_data(self, authenticated_client):
         """Test getting pending reorders data."""
         client, user = authenticated_client

@@ -92,6 +92,33 @@ class TestInventoryItemModel:
         item = InventoryItemFactory(current_stock=10, minimum_stock=10)
         assert item.needs_reorder is True
 
+    def test_retired_defaults_false_with_no_stamp(self):
+        """A freshly created item is not retired and has no retired_at stamp."""
+        item = InventoryItemFactory()
+        assert item.is_retired is False
+        assert item.retired_at is None
+
+    def test_needs_reorder_false_when_retired(self):
+        """A retired item is never flagged for reorder, even below minimum."""
+        item = InventoryItemFactory(current_stock=1, minimum_stock=10, is_retired=True)
+        assert item.needs_reorder is False
+
+    def test_needs_reorder_false_when_retired_case_based(self):
+        """Retirement suppresses reorder for case-based items too."""
+        item = InventoryItemFactory(
+            current_stock=0,
+            minimum_stock=10,
+            use_case_based_reorder=True,
+            minimum_cases=5,
+            is_retired=True,
+        )
+        assert item.needs_reorder is False
+
+    def test_reorder_status_well_stocked_when_retired(self):
+        """reorder_status reflects the suppressed needs_reorder for retired items."""
+        item = InventoryItemFactory(current_stock=1, minimum_stock=10, is_retired=True)
+        assert item.reorder_status == "well_stocked"
+
     def test_total_value_calculation(self):
         """Test total_value property calculates correctly."""
         item = InventoryItemFactory(current_stock=10, unit_cost=Decimal("25.50"))

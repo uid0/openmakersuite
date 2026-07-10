@@ -28,7 +28,9 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import { IconChevronDown, IconChevronRight, IconPlus } from '@tabler/icons-react';
+import { DateInput } from '@mantine/dates';
+import { IconChevronDown, IconChevronRight, IconPlus, IconScan } from '@tabler/icons-react';
+import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
@@ -46,11 +48,27 @@ import {
   serializedActionLabel,
   serializedStatusColor,
 } from '../../utils/serializedComponents';
+import SerializedScanReceiveModal from './SerializedScanReceiveModal';
 
 interface Props {
   itemId: string;
+  /** Owning item's name, shown in the batch scan-receive modal title. */
+  itemName?: string;
   /** Owning item's tracking mode, shown as context in the header. */
   trackingMode?: SerializedTrackingMode;
+  /**
+   * Display-only {available, on_hand, installed} split for the item, rendered
+   * as a header summary. Read straight off the item-detail payload
+   * (`item.serialized_stock`); null/undefined hides the summary. `available`
+   * (= on_hand − installed) is what drives reorder — units installed in an
+   * asset reduce available but not on-hand.
+   */
+  serializedStock?: { available: number; on_hand: number; installed: number } | null;
+  /**
+   * Invoked after units are received / mutated so the parent can refresh the
+   * item and hand a fresh `serializedStock` back down.
+   */
+  onStockChanged?: () => void;
   /**
    * Whether the owning item is flagged `is_serialized`. When false the panel
    * shows a discoverable "turn this on" call-to-action instead of a dead,
@@ -74,9 +92,14 @@ const fmtDateTime = (iso: string | null): string =>
       })
     : '—';
 
+const fmtDate = (d: string | null): string => (d ? dayjs(d).format('MMM D, YYYY') : '—');
+
 const SerializedComponentsPanel: React.FC<Props> = ({
   itemId,
+  itemName,
   trackingMode,
+  serializedStock,
+  onStockChanged,
   isSerialized = true,
   onEnableTracking,
 }) => {
@@ -95,7 +118,11 @@ const SerializedComponentsPanel: React.FC<Props> = ({
   const [showAdd, setShowAdd] = useState(false);
   const [newSerial, setNewSerial] = useState('');
   const [newLot, setNewLot] = useState('');
+  const [newExpiration, setNewExpiration] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+
+  // Scan-driven batch receive modal.
+  const [scanOpen, setScanOpen] = useState(false);
 
   // Install modal.
   const [installUnit, setInstallUnit] = useState<SerializedComponent | null>(null);
@@ -172,6 +199,9 @@ const SerializedComponentsPanel: React.FC<Props> = ({
       try {
         const res = await serializedComponentsAPI[action](unit.id);
         if (res?.data) replaceUnit(res.data);
+        // A lifecycle transition (receive/install/remove/…) shifts the
+        // available/on-hand/installed split — let the parent refresh it.
+        onStockChanged?.();
         if (expandedId === unit.id) {
           refreshHistory(unit.id);
         }
@@ -181,7 +211,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
         setBusyId(null);
       }
     },
-    [expandedId, refreshHistory, replaceUnit],
+    [expandedId, refreshHistory, replaceUnit, onStockChanged],
   );
 
   const openInstall = useCallback(
@@ -210,6 +240,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
     try {
       const res = await serializedComponentsAPI.install(installUnit.id, { asset: selectedAssetId });
       if (res?.data) replaceUnit(res.data);
+      onStockChanged?.();
       if (expandedId === installUnit.id) refreshHistory(installUnit.id);
       setInstallUnit(null);
     } catch (err) {
@@ -217,7 +248,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
     } finally {
       setBusyId(null);
     }
-  }, [installUnit, selectedAssetId, expandedId, refreshHistory, replaceUnit]);
+  }, [installUnit, selectedAssetId, expandedId, refreshHistory, replaceUnit, onStockChanged]);
 
   const submitDispose = useCallback(async () => {
     if (!disposeUnit || !disposalReason.trim()) return;
@@ -228,6 +259,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
         disposal_reason: disposalReason.trim(),
       });
       if (res?.data) replaceUnit(res.data);
+      onStockChanged?.();
       if (expandedId === disposeUnit.id) refreshHistory(disposeUnit.id);
       setDisposeUnit(null);
       setDisposalReason('');
@@ -236,7 +268,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
     } finally {
       setBusyId(null);
     }
-  }, [disposeUnit, disposalReason, expandedId, refreshHistory, replaceUnit]);
+  }, [disposeUnit, disposalReason, expandedId, refreshHistory, replaceUnit, onStockChanged]);
 
   const handleAction = useCallback(
     (unit: SerializedComponent, action: SerializedComponentAction) => {
@@ -262,20 +294,23 @@ const SerializedComponentsPanel: React.FC<Props> = ({
         item: itemId,
         serial_number: serial,
         lot: newLot.trim() || undefined,
+        expiration_date: newExpiration || undefined,
       });
       if (res?.data) {
         setUnits((prev) => [res.data, ...prev]);
         setTotal((prev) => prev + 1);
+        onStockChanged?.();
       }
       setNewSerial('');
       setNewLot('');
+      setNewExpiration(null);
       setShowAdd(false);
     } catch (err) {
       setError(extractErrorMessage(err, 'Could not add unit.'));
     } finally {
       setAdding(false);
     }
-  }, [itemId, newSerial, newLot]);
+  }, [itemId, newSerial, newLot, newExpiration, onStockChanged]);
 
   const assetOptions = useMemo(
     () =>
@@ -329,16 +364,62 @@ const SerializedComponentsPanel: React.FC<Props> = ({
             </Badge>
           )}
         </Group>
-        <Button
-          size="xs"
-          variant="light"
-          leftSection={<IconPlus size={14} />}
-          onClick={() => setShowAdd((v) => !v)}
-          data-testid="serialized-add-toggle"
-        >
-          {showAdd ? 'Cancel' : 'Add unit'}
-        </Button>
+        <Group gap="xs">
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconScan size={14} />}
+            onClick={() => setScanOpen(true)}
+            data-testid="serialized-scan-receive-open"
+          >
+            Receive serials
+          </Button>
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconPlus size={14} />}
+            onClick={() => setShowAdd((v) => !v)}
+            data-testid="serialized-add-toggle"
+          >
+            {showAdd ? 'Cancel' : 'Add unit'}
+          </Button>
+        </Group>
       </Group>
+
+      {/* Available / on-hand split (display-only). `available` drives reorder;
+          installed units reduce available but remain on-hand. */}
+      {serializedStock && (
+        <Group gap="xl" mb="sm" data-testid="serialized-stock-summary">
+          <div>
+            <Text size="xs" c="dimmed">
+              Available
+            </Text>
+            <Text fw={600} data-testid="serialized-stock-available">
+              {serializedStock.available}
+            </Text>
+          </div>
+          <div>
+            <Text size="xs" c="dimmed">
+              On-hand
+            </Text>
+            <Text fw={600} data-testid="serialized-stock-on-hand">
+              {serializedStock.on_hand}
+            </Text>
+          </div>
+          <div>
+            <Text size="xs" c="dimmed">
+              Installed
+            </Text>
+            <Text fw={600} data-testid="serialized-stock-installed">
+              {serializedStock.installed}
+            </Text>
+          </div>
+          <Text size="xs" c="dimmed" maw={280}>
+            Reorder is driven by <b>available</b> — units installed in an asset
+            reduce available but not on-hand.
+          </Text>
+        </Group>
+      )}
 
       {error && (
         <Alert color="red" mb="sm" onClose={() => setError(null)} withCloseButton>
@@ -363,6 +444,15 @@ const SerializedComponentsPanel: React.FC<Props> = ({
               value={newLot}
               onChange={(e) => setNewLot(e.currentTarget.value)}
               data-testid="serialized-add-lot"
+              style={{ flex: 1 }}
+            />
+            <DateInput
+              label="Expires (optional)"
+              placeholder="Shelf-life date"
+              value={newExpiration}
+              onChange={setNewExpiration}
+              clearable
+              data-testid="serialized-add-expiration"
               style={{ flex: 1 }}
             />
             <Button
@@ -390,6 +480,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
               <Table.Th w={40} />
               <Table.Th>Serial</Table.Th>
               <Table.Th>Lot</Table.Th>
+              <Table.Th>Expires</Table.Th>
               <Table.Th>Status</Table.Th>
               <Table.Th>Installed in</Table.Th>
               <Table.Th>Actions</Table.Th>
@@ -421,6 +512,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
                       <Text fw={500}>{unit.serial_number}</Text>
                     </Table.Td>
                     <Table.Td>{unit.lot || '—'}</Table.Td>
+                    <Table.Td>{fmtDate(unit.expiration_date)}</Table.Td>
                     <Table.Td>
                       <Badge color={serializedStatusColor(unit.status)} variant="light">
                         {unit.status_display}
@@ -452,7 +544,7 @@ const SerializedComponentsPanel: React.FC<Props> = ({
                     </Table.Td>
                   </Table.Tr>
                   <Table.Tr>
-                    <Table.Td colSpan={6} p={0} style={{ border: isExpanded ? undefined : 'none' }}>
+                    <Table.Td colSpan={7} p={0} style={{ border: isExpanded ? undefined : 'none' }}>
                       <Collapse in={isExpanded}>
                         <div style={{ padding: '0.5rem 1rem 1rem 3rem' }}>
                           {historyLoadingId === unit.id ? (
@@ -575,6 +667,17 @@ const SerializedComponentsPanel: React.FC<Props> = ({
           </Group>
         </Stack>
       </Modal>
+
+      {/* Scan-driven batch receive — keyboard-wedge-friendly bulk intake. */}
+      <SerializedScanReceiveModal
+        opened={scanOpen}
+        onClose={() => setScanOpen(false)}
+        item={{ id: itemId, name: itemName ?? 'this item' }}
+        onReceived={() => {
+          load();
+          onStockChanged?.();
+        }}
+      />
     </Paper>
   );
 };

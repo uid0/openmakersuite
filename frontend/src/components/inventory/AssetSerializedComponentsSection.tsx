@@ -13,6 +13,7 @@
  * import + one JSX line.
  */
 import { Badge, Group, Loader, Table, Text, Title } from '@mantine/core';
+import dayjs from 'dayjs';
 import React, { useEffect, useMemo, useState } from 'react';
 
 import {
@@ -37,6 +38,10 @@ const fmtDateTime = (iso: string | null): string =>
         minute: '2-digit',
       })
     : '—';
+
+// expiration_date is a calendar date ("YYYY-MM-DD"); parse it as local (dayjs)
+// rather than `new Date(...)` to avoid a UTC-midnight off-by-one-day shift.
+const fmtDate = (d: string | null): string => (d ? dayjs(d).format('MMM D, YYYY') : '—');
 
 const AssetSerializedComponentsSection: React.FC<Props> = ({ assetId }) => {
   const [installed, setInstalled] = useState<SerializedComponent[]>([]);
@@ -117,6 +122,7 @@ const AssetSerializedComponentsSection: React.FC<Props> = ({ assetId }) => {
             <Table.Tr>
               <Table.Th>Serial</Table.Th>
               <Table.Th>Component</Table.Th>
+              <Table.Th>Expires</Table.Th>
               <Table.Th>Status</Table.Th>
               <Table.Th>Installed</Table.Th>
             </Table.Tr>
@@ -128,6 +134,7 @@ const AssetSerializedComponentsSection: React.FC<Props> = ({ assetId }) => {
                   <Text fw={500}>{unit.serial_number}</Text>
                 </Table.Td>
                 <Table.Td>{unit.item_name}</Table.Td>
+                <Table.Td>{fmtDate(unit.expiration_date)}</Table.Td>
                 <Table.Td>
                   <Badge color={serializedStatusColor(unit.status)} variant="light">
                     {unit.status_display}

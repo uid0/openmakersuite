@@ -20,6 +20,7 @@ vi.mock('../../services/api', async () => {
     serializedComponentsAPI: {
       list: jest.fn(),
       create: jest.fn(),
+      scanReceive: jest.fn(),
       receive: jest.fn(),
       install: jest.fn(),
       remove: jest.fn(),
@@ -46,6 +47,7 @@ const buildUnit = (overrides: Partial<SerializedComponent> = {}): SerializedComp
   item_sku: 'BLD-1',
   serial_number: 'SN-0001',
   lot: '',
+  expiration_date: null,
   status: 'received',
   status_display: 'Received',
   tracking_mode: 'consumable',
@@ -134,9 +136,49 @@ describe('SerializedComponentsPanel', () => {
         item: ITEM_ID,
         serial_number: 'SN-9999',
         lot: undefined,
+        // No expiry set on the form → the optional field is left undefined.
+        expiration_date: undefined,
       }),
     );
     expect(await screen.findByText('SN-9999')).toBeInTheDocument();
+  });
+
+  it('renders a unit expiration date in the Expires column', async () => {
+    mockAPI.list.mockResolvedValue(listResponse([buildUnit({ expiration_date: '2027-03-15' })]));
+    renderPanel();
+
+    expect(await screen.findByText('SN-0001')).toBeInTheDocument();
+    // Formatted for display (date-only, no UTC off-by-one).
+    expect(screen.getByText('Mar 15, 2027')).toBeInTheDocument();
+  });
+
+  it('shows the available / on-hand / installed stock summary when provided', async () => {
+    mockAPI.list.mockResolvedValue(listResponse([buildUnit()]));
+    render(
+      <MantineProvider>
+        <SerializedComponentsPanel
+          itemId={ITEM_ID}
+          trackingMode="consumable"
+          serializedStock={{ available: 4, on_hand: 6, installed: 2 }}
+        />
+      </MantineProvider>,
+    );
+
+    const summary = await screen.findByTestId('serialized-stock-summary');
+    expect(within(summary).getByTestId('serialized-stock-available')).toHaveTextContent('4');
+    expect(within(summary).getByTestId('serialized-stock-on-hand')).toHaveTextContent('6');
+    expect(within(summary).getByTestId('serialized-stock-installed')).toHaveTextContent('2');
+  });
+
+  it('opens the scan-driven batch receive modal from the header', async () => {
+    mockAPI.list.mockResolvedValue(listResponse([]));
+    renderPanel();
+    await screen.findByText('No serialized units recorded for this item yet.');
+
+    fireEvent.click(screen.getByTestId('serialized-scan-receive-open'));
+
+    expect(await screen.findByTestId('serialized-scan-receive-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('scan-receive-serial')).toBeInTheDocument();
   });
 
   it('shows an enable-tracking CTA (not a dead panel) when the item is not serialized', async () => {

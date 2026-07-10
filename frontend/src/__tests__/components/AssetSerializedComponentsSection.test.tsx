@@ -3,7 +3,7 @@
  * "serial history" surface on the asset detail page.
  */
 import { MantineProvider } from '@mantine/core';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 
 import AssetSerializedComponentsSection from '../../components/inventory/AssetSerializedComponentsSection';
 import {
@@ -34,6 +34,7 @@ const buildUnit = (overrides: Partial<SerializedComponent> = {}): SerializedComp
   item_sku: 'BLD-1',
   serial_number: 'SN-INSTALLED',
   lot: '',
+  expiration_date: null,
   status: 'installed',
   status_display: 'Installed',
   tracking_mode: 'reusable',
@@ -100,6 +101,16 @@ describe('AssetSerializedComponentsSection', () => {
     });
     // History is every serial this machine has used (?asset=).
     expect(mockAPI.listUsageEvents).toHaveBeenCalledWith({ asset: ASSET_ID });
+  });
+
+  it('shows the expiration date for an installed unit in the Expires column', async () => {
+    mockAPI.list.mockResolvedValue(paginated([buildUnit({ expiration_date: '2027-03-15' })]));
+    mockAPI.listUsageEvents.mockResolvedValue(paginated([]));
+
+    renderSection();
+
+    const installed = await screen.findByTestId('asset-serialized-installed');
+    expect(within(installed).getByText('Mar 15, 2027')).toBeInTheDocument();
   });
 
   it('renders nothing when the asset has no serialized history at all', async () => {

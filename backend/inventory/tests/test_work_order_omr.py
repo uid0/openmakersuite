@@ -294,3 +294,78 @@ class TestOmrPdfEndpoint:
         _validate(wo)
         resp = APIClient().get(self.URL.format(wo.id))
         assert resp.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+
+@pytest.mark.integration
+class TestPdfEndpointUnifiedOnOmr:
+    """op-8mjw: the ``/pdf/`` route unifies on the OMR variant and ``omr-pdf``
+    is a thin deprecated alias — a single PDF generation route. Every printed
+    sheet now carries fiducials + an upserted template (scan-to-complete) while
+    keeping the interactive AcroForm layer (emailed-digital fill)."""
+
+    PDF_URL = "/api/inventory/work-orders/{}/pdf/"
+    OMR_URL = "/api/inventory/work-orders/{}/omr-pdf/"
+
+    @staticmethod
+    def _template_snapshot(wo):
+        t = WorkOrderOmrTemplate.objects.get(work_order=wo)  # exactly one row (upsert)
+        return {
+            "template_version": t.template_version,
+            "page_w_pt": t.page_w_pt,
+            "page_h_pt": t.page_h_pt,
+            "fiducial_dict": t.fiducial_dict,
+            "fiducials_json": t.fiducials_json,
+            "regions_json": t.regions_json,
+        }
+
+    def test_pdf_route_still_gated_without_validation(self):
+        client, _u = _staff_client()
+        wo = _make_wo_with_materials()
+        resp = client.get(self.PDF_URL.format(wo.id))
+        assert resp.status_code == status.HTTP_412_PRECONDITION_FAILED
+        assert resp.json()["code"] == "validation_required"
+        # A blocked request must not persist a template.
+        assert not WorkOrderOmrTemplate.objects.filter(work_order=wo).exists()
+
+    def test_pdf_route_emits_omr_variant_and_upserts_template(self):
+        client, _u = _staff_client()
+        wo = _make_wo_with_materials()
+        _validate(wo)
+
+        resp = client.get(self.PDF_URL.format(wo.id))
+
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp["Content-Type"] == "application/pdf"
+        assert resp.content[:5] == b"%PDF-"
+        # The /pdf/ route now upserts exactly one OMR template (as omr-pdf did).
+        snapshot = self._template_snapshot(wo)
+        assert snapshot["template_version"] == compute_template_version(wo)
+        # ...and the bytes are the OMR superset, not the plain digital form
+        # (which persists nothing — see TestOmrVariantVsStandard).
+        plain = generate_work_order_pdf(wo, base_url="")
+        assert len(resp.content) > len(plain)
+
+    def test_pdf_and_omr_pdf_are_equivalent_and_both_upsert(self):
+        client, _u = _staff_client()
+        wo = _make_wo_with_materials()
+        _validate(wo)
+
+        pdf_resp = client.get(self.PDF_URL.format(wo.id))
+        assert pdf_resp.status_code == status.HTTP_200_OK
+        after_pdf = self._template_snapshot(wo)
+
+        omr_resp = client.get(self.OMR_URL.format(wo.id))
+        assert omr_resp.status_code == status.HTTP_200_OK
+        after_omr = self._template_snapshot(wo)
+
+        # Same HTTP envelope, both OMR-variant bytes, and — crucially — the same
+        # upserted template snapshot: the two routes are equivalent, and omr-pdf
+        # upserts in place rather than creating a second row.
+        assert pdf_resp["Content-Type"] == omr_resp["Content-Type"] == "application/pdf"
+        assert pdf_resp.content[:5] == omr_resp.content[:5] == b"%PDF-"
+        assert after_omr == after_pdf
+        assert after_pdf["template_version"] == compute_template_version(wo)
+
+        plain = generate_work_order_pdf(wo, base_url="")
+        assert len(pdf_resp.content) > len(plain)
+        assert len(omr_resp.content) > len(plain)

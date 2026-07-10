@@ -1681,6 +1681,9 @@ views:
       retrieve:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
+      scan_receive:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
       update:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite

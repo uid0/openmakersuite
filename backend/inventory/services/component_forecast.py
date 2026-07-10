@@ -15,10 +15,13 @@ This module turns that usage history into a demand forecast:
     (``retire`` / ``dispose``); the ``install`` <-> ``remove`` reuse cycle does
     **not** reduce stock.
 
-* ``days_until_stockout = available_stock / avg_daily_use`` — where
-  ``available_stock`` counts the units that have **not yet** been depleted
-  (again branched on mode, so an installed reusable unit still counts as stock
-  while an already-consumed consumable unit does not).
+* ``days_until_stockout = available / avg_daily_use`` — where ``available`` is
+  the ready-to-install stock: physically-present (**not yet** depleted, branched
+  on mode) **minus** the units currently installed in an asset. Each row also
+  carries ``on_hand`` (present, installed included) and ``installed`` for
+  display; ``available_stock`` is kept as a backward-compatible alias of
+  ``on_hand``. Installing a unit lowers ``available`` (and can trip the reorder
+  point) without lowering ``on_hand``; only a depleting transition lowers both.
 
 * ``reorder_point = avg_daily_use * lead_time_days + safety_stock`` — the
   classic reorder trigger. ``lead_time_days`` reuses observed supplier
@@ -116,8 +119,18 @@ def _lead_time_days_by_item(items: list[InventoryItem]) -> dict[Any, Optional[fl
     return resolved
 
 
-def _available_stock_by_item(items: list[InventoryItem]) -> dict[Any, int]:
-    """Count not-yet-depleted serialized units per item (branched on mode)."""
+def _stock_split_by_item(items: list[InventoryItem]) -> dict[Any, dict[str, int]]:
+    """Per-item ``on_hand`` / ``installed`` / ``available`` split (mode-aware).
+
+    * ``on_hand`` — physically-present units = every unit not in a *depleted*
+      status for the item's mode (consumable present = received/in_stock/
+      installed; reusable present additionally counts ``removed``).
+    * ``installed`` — units currently installed in an asset.
+    * ``available`` — ready-to-install stock = ``on_hand`` minus ``installed``.
+      An ``install`` moves a unit out of ``available`` while leaving ``on_hand``
+      unchanged; only a depleting transition (consume; retire/dispose) lowers
+      ``on_hand``.
+    """
     counts: dict[Any, dict[str, int]] = {}
     rows = (
         SerializedComponent.objects.filter(item__in=items)
@@ -127,12 +140,27 @@ def _available_stock_by_item(items: list[InventoryItem]) -> dict[Any, int]:
     for row in rows:
         counts.setdefault(row["item_id"], {})[row["status"]] = row["n"]
 
-    available: dict[Any, int] = {}
+    split: dict[Any, dict[str, int]] = {}
     for item in items:
         depleted = _DEPLETED_STATUSES.get(item.serial_tracking_mode, set())
         per_status = counts.get(item.id, {})
-        available[item.id] = sum(n for status, n in per_status.items() if status not in depleted)
-    return available
+        on_hand = sum(n for status, n in per_status.items() if status not in depleted)
+        installed = per_status.get(SerializedComponent.INSTALLED, 0)
+        split[item.id] = {
+            "on_hand": on_hand,
+            "installed": installed,
+            "available": on_hand - installed,
+        }
+    return split
+
+
+def stock_split_for_item(item: InventoryItem) -> dict[str, int]:
+    """``on_hand`` / ``installed`` / ``available`` for a single serialized item.
+
+    Thin convenience wrapper around :func:`_stock_split_by_item` for callers
+    that hold one item (e.g. the item-detail serialized panel).
+    """
+    return _stock_split_by_item([item])[item.id]
 
 
 def _depletion_counts(items: list[InventoryItem], window_start, now) -> dict[Any, int]:
@@ -181,7 +209,7 @@ def build_component_forecast(
     Args:
         window_days: Trailing window (in days) used to estimate the depletion
             rate. Clamped to a minimum of 1.
-        low_stock_only: When ``True``, only rows whose ``available_stock`` is at
+        low_stock_only: When ``True``, only rows whose ``available`` stock is at
             or below their ``reorder_point`` are returned.
         now: Reference "now" (defaults to :func:`django.utils.timezone.now`);
             injectable for deterministic tests.
@@ -200,19 +228,26 @@ def build_component_forecast(
     if not items:
         return []
 
-    available_by_item = _available_stock_by_item(items)
+    split_by_item = _stock_split_by_item(items)
     depleted_by_item = _depletion_counts(items, window_start, now)
     lead_time_by_item = _lead_time_days_by_item(items)
 
     rows: list[dict[str, Any]] = []
     for item in items:
-        available_stock = available_by_item.get(item.id, 0)
+        split = split_by_item.get(item.id, {"on_hand": 0, "installed": 0, "available": 0})
+        on_hand = split["on_hand"]
+        installed = split["installed"]
+        # ``available`` (on-hand minus installed) is the ready-to-install stock
+        # that actually backs future demand, so it — not on_hand — drives the
+        # stockout / reorder math. An installed unit lowers ``available`` and
+        # can therefore push an item over its reorder point.
+        available = split["available"]
         units_depleted = depleted_by_item.get(item.id, 0)
         avg_daily_use = units_depleted / window_days
 
         if avg_daily_use > 0:
-            days_until_stockout = round(available_stock / avg_daily_use, 1)
-            projected_stockout_date = (now + timedelta(days=available_stock / avg_daily_use)).date()
+            days_until_stockout = round(available / avg_daily_use, 1)
+            projected_stockout_date = (now + timedelta(days=available / avg_daily_use)).date()
         else:
             days_until_stockout = None
             projected_stockout_date = None
@@ -221,7 +256,7 @@ def build_component_forecast(
         safety_stock = item.minimum_stock or 0
         lead_component = avg_daily_use * (lead_time_days or 0)
         reorder_point = int(math.ceil(lead_component + safety_stock))
-        needs_reorder = available_stock <= reorder_point
+        needs_reorder = available <= reorder_point
 
         if low_stock_only and not needs_reorder:
             continue
@@ -233,7 +268,13 @@ def build_component_forecast(
                 "sku": item.sku,
                 "category_name": item.category.name if item.category else None,
                 "serial_tracking_mode": item.serial_tracking_mode,
-                "available_stock": available_stock,
+                # ``available`` / ``on_hand`` / ``installed`` are the serialized
+                # split; ``available_stock`` is retained as a backward-compatible
+                # alias of ``on_hand`` for existing consumers of this row.
+                "available": available,
+                "on_hand": on_hand,
+                "installed": installed,
+                "available_stock": on_hand,
                 "current_stock": item.current_stock,
                 "window_days": window_days,
                 "units_depleted_in_window": units_depleted,

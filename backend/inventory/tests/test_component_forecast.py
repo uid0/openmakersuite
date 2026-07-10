@@ -70,12 +70,13 @@ def _add_lead_time_log(item, user, actual_days):
 @pytest.mark.unit
 class TestBuildComponentForecast:
     def test_consumable_depletes_on_consume_not_receive_or_install(self):
-        """Only ``consume`` counts as depletion for consumable items; an
-        installed-but-not-consumed unit still counts as available stock."""
+        """Only ``consume`` counts as depletion for consumable items. An
+        installed unit stays *on hand* (physically present) but is no longer
+        *available* to install; the depletion rate ignores receive/install."""
         now = timezone.now()
         item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
 
-        # Available: 6 on the shelf + 1 installed (not yet consumed) = 7.
+        # On hand: 6 on the shelf + 1 installed (not yet consumed) = 7.
         _components(item, SerializedComponent.IN_STOCK, 6, "stock")
         installed = _components(item, SerializedComponent.INSTALLED, 1, "inst")
 
@@ -90,17 +91,21 @@ class TestBuildComponentForecast:
 
         row = _row_for(build_component_forecast(now=now), item)
 
-        assert row["available_stock"] == 7
+        assert row["on_hand"] == 7
+        assert row["installed"] == 1
+        assert row["available"] == 6  # on_hand minus the 1 installed
+        assert row["available_stock"] == 7  # back-compat alias of on_hand
         assert row["units_depleted_in_window"] == 4
         assert row["avg_daily_use"] == round(4 / DEFAULT_WINDOW_DAYS, 4)
 
     def test_reusable_depletes_on_retire_dispose_not_reuse(self):
         """Reusable install/remove cycling does not deplete; only retire/dispose
-        does, and installed/removed units still count as available stock."""
+        does. Installed and removed units are both *on hand*, but only removed
+        (and in-stock) units are *available* — installed ones are not."""
         now = timezone.now()
         item = _serialized_item(InventoryItem.SERIAL_TRACKING_REUSABLE, minimum_stock=0)
 
-        # Available: 5 in stock + 2 installed + 1 removed = 8 (reuse states count).
+        # On hand: 5 in stock + 2 installed + 1 removed = 8 (reuse states count).
         in_stock = _components(item, SerializedComponent.IN_STOCK, 5, "stock")
         installed = _components(item, SerializedComponent.INSTALLED, 2, "inst")
         removed = _components(item, SerializedComponent.REMOVED, 1, "rem")
@@ -117,7 +122,10 @@ class TestBuildComponentForecast:
 
         row = _row_for(build_component_forecast(now=now), item)
 
-        assert row["available_stock"] == 8
+        assert row["on_hand"] == 8
+        assert row["installed"] == 2
+        assert row["available"] == 6  # 8 on_hand - 2 installed; removed stays available
+        assert row["available_stock"] == 8  # back-compat alias of on_hand
         assert row["units_depleted_in_window"] == 3
         assert row["avg_daily_use"] == round(3 / DEFAULT_WINDOW_DAYS, 4)
 
@@ -257,6 +265,80 @@ class TestBuildComponentForecast:
         assert str(plain.id) not in ids
         assert str(inactive.id) not in ids
 
+    def test_install_lowers_available_but_not_on_hand(self):
+        """Installing a consumable unit moves it out of ``available`` while it
+        stays ``on_hand`` (physically present) until it is consumed."""
+        now = timezone.now()
+        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
+        _components(item, SerializedComponent.IN_STOCK, 4, "stock")
+        _components(item, SerializedComponent.INSTALLED, 3, "inst")
+
+        row = _row_for(build_component_forecast(now=now), item)
+        assert row["on_hand"] == 7  # 4 in_stock + 3 installed
+        assert row["installed"] == 3
+        assert row["available"] == 4  # installed excluded
+
+    def test_consume_lowers_on_hand_and_available(self):
+        """A consumed unit is depleted: it counts toward neither on_hand nor
+        available (only the 2 in-stock units remain)."""
+        now = timezone.now()
+        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
+        _components(item, SerializedComponent.IN_STOCK, 2, "stock")
+        _components(item, SerializedComponent.CONSUMED, 5, "used")
+
+        row = _row_for(build_component_forecast(now=now), item)
+        assert row["on_hand"] == 2
+        assert row["available"] == 2
+        assert row["installed"] == 0
+
+    def test_reusable_removed_unit_is_available(self):
+        """A reusable unit that has been *removed* from its asset returns to the
+        available pool, while installed units do not."""
+        now = timezone.now()
+        item = _serialized_item(InventoryItem.SERIAL_TRACKING_REUSABLE, minimum_stock=0)
+        _components(item, SerializedComponent.INSTALLED, 2, "inst")
+        _components(item, SerializedComponent.REMOVED, 3, "rem")
+
+        row = _row_for(build_component_forecast(now=now), item)
+        assert row["on_hand"] == 5  # installed + removed are both present
+        assert row["installed"] == 2
+        assert row["available"] == 3  # removed counts as available; installed does not
+
+    def test_installed_units_can_trigger_reorder(self):
+        """The forecast math uses ``available``, so units that are installed
+        (lowering available without lowering on_hand) can push an item to its
+        reorder point even with no depletion history."""
+        now = timezone.now()
+        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=3)
+        _components(item, SerializedComponent.IN_STOCK, 2, "stock")
+        _components(item, SerializedComponent.INSTALLED, 4, "inst")
+
+        row = _row_for(build_component_forecast(now=now), item)
+        assert row["on_hand"] == 6
+        assert row["available"] == 2
+        # No depletion -> reorder_point == safety_stock (minimum_stock) == 3.
+        assert row["reorder_point"] == 3
+        # available(2) <= 3 -> reorder; had the math used on_hand(6) it would not.
+        assert row["needs_reorder"] is True
+
+    def test_days_until_stockout_uses_available_not_on_hand(self):
+        """Runway is measured against ``available``: installed units do not
+        extend the projected stockout."""
+        now = timezone.now()
+        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
+        _components(item, SerializedComponent.IN_STOCK, 5, "stock")
+        _components(item, SerializedComponent.INSTALLED, 5, "inst")
+        consumed = _components(item, SerializedComponent.CONSUMED, 9, "used")
+        for i, comp in enumerate(consumed):
+            _event(comp, SerializedComponent.ACTION_CONSUME, days_ago=i + 1, now=now)
+
+        row = _row_for(build_component_forecast(now=now), item)
+        assert row["on_hand"] == 10
+        assert row["available"] == 5
+        # 9 consume events / 90 days = 0.1/day; available 5 -> 50 days (not 100).
+        assert row["avg_daily_use"] == 0.1
+        assert row["days_until_stockout"] == 50.0
+
 
 @pytest.mark.integration
 class TestSerializedForecastEndpoint:
@@ -277,6 +359,9 @@ class TestSerializedForecastEndpoint:
         row = _row_for(response.data, item)
         assert row["serial_tracking_mode"] == InventoryItem.SERIAL_TRACKING_CONSUMABLE
         assert row["available_stock"] == 4
+        assert row["on_hand"] == 4
+        assert row["available"] == 4
+        assert row["installed"] == 0
         assert row["units_depleted_in_window"] == 9
 
     def test_low_stock_only_query_param(self, authenticated_client):

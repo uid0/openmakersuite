@@ -909,6 +909,38 @@ describe('API Service', () => {
     });
   });
 
+  describe('Reports API', () => {
+    test('getAssetSuppliesUsed requests supplies_used with the date window', async () => {
+      mock.onGet('/inventory/reports/assets/supplies_used/').reply((config) => {
+        expect(config.params).toEqual({
+          start_date: '2026-06-01',
+          end_date: '2026-06-30',
+        });
+        return [
+          200,
+          [
+            {
+              asset_id: 'a1',
+              asset_name: 'Laser Cutter',
+              source: 'serialized',
+              item_name: 'Lens Assembly',
+              serial_number: 'SN-1001',
+              used_at: '2026-06-01T10:00:00Z',
+            },
+          ],
+        ];
+      });
+
+      const response = await reportsAPI.getAssetSuppliesUsed({
+        start_date: '2026-06-01',
+        end_date: '2026-06-30',
+      });
+
+      expect(response.data[0].source).toBe('serialized');
+      expect(response.data[0].serial_number).toBe('SN-1001');
+    });
+  });
+
   describe('resolveApiBaseUrl (deployment-configurable API base URL)', () => {
     const ORIGINAL_LOCATION = window.location;
 

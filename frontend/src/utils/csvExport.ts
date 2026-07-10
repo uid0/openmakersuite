@@ -230,7 +230,7 @@ export function exportPurchasingReportToCSV(
  */
 export function exportAssetReportToCSV(
   data: any[],
-  reportType: 'assets_by_status' | 'maintenance_due' | 'utilization' | 'tco'
+  reportType: 'assets_by_status' | 'maintenance_due' | 'utilization' | 'tco' | 'supplies_used'
 ): void {
   let headers: string[] = [];
   let csvData: any[] = [];
@@ -289,6 +289,33 @@ export function exportAssetReportToCSV(
       'Unscheduled Maintenance Cost': item.unscheduled_maintenance_cost ?? '0.00',
       'Repair Cost': item.repair_cost ?? '0.00',
       'Total Cost of Ownership': item.tco ?? '0.00',
+    }));
+  } else if (reportType === 'supplies_used') {
+    // Union of both source shapes; source-specific columns are blank on rows
+    // where they do not apply (serialized has no qty/cost, consumable no serial).
+    headers = [
+      'Asset',
+      'Source',
+      'Item',
+      'Serial Number',
+      'Quantity',
+      'Unit',
+      'Action',
+      'Used At',
+      'Work Order',
+      'Estimated Cost',
+    ];
+    csvData = data.map((item) => ({
+      Asset: item.asset_name || '',
+      Source: item.source || '',
+      Item: item.item_name || '',
+      'Serial Number': item.serial_number || '',
+      Quantity: item.quantity ?? '',
+      Unit: item.unit || '',
+      Action: item.action_display || item.action || '',
+      'Used At': item.used_at || '',
+      'Work Order': item.work_order_id || '',
+      'Estimated Cost': item.estimated_cost != null ? `$${item.estimated_cost}` : '',
     }));
   }
 

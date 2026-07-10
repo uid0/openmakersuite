@@ -1147,6 +1147,27 @@ export interface AssetTco {
   total_maintenance_cost_90d: string;
 }
 
+// One supply used on an asset over a date window. The backend merges two
+// sources into a single flat row list; common keys are always present and the
+// remaining keys are source-specific (see inventory/views.py supplies_used).
+export interface AssetSuppliesUsed {
+  asset_id: string;
+  asset_name: string;
+  source: 'serialized' | 'consumable';
+  item_name: string;
+  used_at: string;
+  // serialized only — a serial-numbered unit put into service on / consumed by the asset
+  serial_number?: string;
+  action?: string;
+  action_display?: string;
+  actor?: string | null;
+  // consumable only — a bulk material used while closing a PM work order
+  quantity?: string;
+  unit?: string;
+  work_order_id?: string;
+  estimated_cost?: string | null;
+}
+
 // Dashboard Widget Types
 export type WidgetType = 'low_stock' | 'pending_reorders' | 'asset_problems' | 'qr_scans' | 'deliveries';
 

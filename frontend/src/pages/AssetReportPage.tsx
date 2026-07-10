@@ -15,11 +15,12 @@ import {
 import { DatePickerInput, DatesRangeValue } from '@mantine/dates';
 import { IconDownload } from '@tabler/icons-react';
 import dayjs from 'dayjs';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { reportsAPI } from '../services/api';
 import {
   AssetAssetsByStatus,
   AssetMaintenanceDue,
+  AssetSuppliesUsed,
   AssetTco,
   AssetUtilization,
 } from '../types';
@@ -42,6 +43,7 @@ const AssetReportPage: React.FC = () => {
   const [maintenanceDue, setMaintenanceDue] = useState<AssetMaintenanceDue[]>([]);
   const [utilization, setUtilization] = useState<AssetUtilization[]>([]);
   const [tcoRows, setTcoRows] = useState<AssetTco[]>([]);
+  const [suppliesUsed, setSuppliesUsed] = useState<AssetSuppliesUsed[]>([]);
   const [dateRange, setDateRange] = useState<DatesRangeValue>(getDefaultDateRange);
   const [sortField, setSortField] = useState<SortField>('');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -57,6 +59,8 @@ const AssetReportPage: React.FC = () => {
       loadUtilization();
     } else if (activeTab === 'tco') {
       loadTco();
+    } else if (activeTab === 'supplies_used') {
+      loadSuppliesUsed();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, dateRange]);
@@ -113,6 +117,22 @@ const AssetReportPage: React.FC = () => {
     }
   };
 
+  const loadSuppliesUsed = async () => {
+    if (!dateRange[0] || !dateRange[1]) return;
+    try {
+      setLoading(true);
+      const response = await reportsAPI.getAssetSuppliesUsed({
+        start_date: dayjs(dateRange[0]).format('YYYY-MM-DD'),
+        end_date: dayjs(dateRange[1]).format('YYYY-MM-DD'),
+      });
+      setSuppliesUsed(response.data);
+    } catch (err) {
+      console.error('Error loading supplies used:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -122,26 +142,30 @@ const AssetReportPage: React.FC = () => {
     }
   };
 
-  const sortData = <T extends Record<string, any>>(data: T[]): T[] => {
-    const sorted = [...data];
-    if (!sortField) return sorted;
-    sorted.sort((a, b) => {
-      let aVal: any = a[sortField];
-      let bVal: any = b[sortField];
-      if (typeof aVal === 'string') {
-        aVal = aVal.toLowerCase();
-        bVal = bVal.toLowerCase();
-      }
-      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-    return sorted;
-  };
+  const sortData = useCallback(
+    <T extends Record<string, any>>(data: T[]): T[] => {
+      const sorted = [...data];
+      if (!sortField) return sorted;
+      sorted.sort((a, b) => {
+        let aVal: any = a[sortField];
+        let bVal: any = b[sortField];
+        if (typeof aVal === 'string') {
+          aVal = aVal.toLowerCase();
+          bVal = bVal.toLowerCase();
+        }
+        if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+      });
+      return sorted;
+    },
+    [sortField, sortDirection],
+  );
 
-  const sortedAssetsByStatus = useMemo(() => sortData(assetsByStatus), [assetsByStatus, sortField, sortDirection]);
-  const sortedMaintenanceDue = useMemo(() => sortData(maintenanceDue), [maintenanceDue, sortField, sortDirection]);
-  const sortedUtilization = useMemo(() => sortData(utilization), [utilization, sortField, sortDirection]);
+  const sortedAssetsByStatus = useMemo(() => sortData(assetsByStatus), [assetsByStatus, sortData]);
+  const sortedMaintenanceDue = useMemo(() => sortData(maintenanceDue), [maintenanceDue, sortData]);
+  const sortedUtilization = useMemo(() => sortData(utilization), [utilization, sortData]);
+  const sortedSuppliesUsed = useMemo(() => sortData(suppliesUsed), [suppliesUsed, sortData]);
   const sortedTco = useMemo(() => {
     if (!sortField) {
       return [...tcoRows].sort(
@@ -193,6 +217,8 @@ const AssetReportPage: React.FC = () => {
       exportAssetReportToCSV(utilization, 'utilization');
     } else if (activeTab === 'tco') {
       exportAssetReportToCSV(tcoRows, 'tco');
+    } else if (activeTab === 'supplies_used') {
+      exportAssetReportToCSV(suppliesUsed, 'supplies_used');
     }
   };
 
@@ -231,6 +257,7 @@ const AssetReportPage: React.FC = () => {
           <Tabs.Tab value="maintenance_due">Maintenance Due</Tabs.Tab>
           <Tabs.Tab value="utilization">Utilization</Tabs.Tab>
           <Tabs.Tab value="tco">Total Cost of Ownership</Tabs.Tab>
+          <Tabs.Tab value="supplies_used">Supplies Used</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="assets_by_status" pt="md">
@@ -478,6 +505,99 @@ const AssetReportPage: React.FC = () => {
                           <Table.Td>${formatMoney(item.vendor_maintenance_cost)}</Table.Td>
                           <Table.Td>
                             <Text fw={600}>${formatMoney(item.total_maintenance_cost_90d)}</Text>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))
+                    )}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            </Paper>
+          </Stack>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="supplies_used" pt="md">
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              Supplies consumed per asset over the selected window. Serialized rows
+              are serial-numbered units put into service on / consumed by the asset;
+              consumable rows are bulk materials used while closing a preventive-
+              maintenance work order. Serial/Qty, Action, and Cost are blank where
+              they do not apply to that source.
+            </Text>
+            <Group>
+              <DatePickerInput
+                type="range"
+                label="Date Range"
+                placeholder="Select date range"
+                value={dateRange}
+                onChange={setDateRange}
+                allowSingleDateInRange
+                clearable
+                maxDate={new Date()}
+                style={{ minWidth: 280 }}
+              />
+            </Group>
+            <Paper withBorder>
+              <Table.ScrollContainer minWidth={1000}>
+                <Table highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('asset_name')}>
+                        Asset
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('source')}>
+                        Source
+                      </Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('item_name')}>
+                        Item
+                      </Table.Th>
+                      <Table.Th>Serial/Qty</Table.Th>
+                      <Table.Th>Action</Table.Th>
+                      <Table.Th style={{ cursor: 'pointer' }} onClick={() => handleSort('used_at')}>
+                        Used At
+                      </Table.Th>
+                      <Table.Th>Cost</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {loading ? (
+                      <Table.Tr>
+                        <Table.Td colSpan={7} style={{ textAlign: 'center' }}>
+                          <Text>Loading...</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ) : sortedSuppliesUsed.length === 0 ? (
+                      <Table.Tr>
+                        <Table.Td colSpan={7} style={{ textAlign: 'center' }}>
+                          <Text>No supplies used in this period</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ) : (
+                      sortedSuppliesUsed.map((item, idx) => (
+                        <Table.Tr key={idx}>
+                          <Table.Td>{item.asset_name}</Table.Td>
+                          <Table.Td>
+                            {item.source === 'serialized' ? 'Serialized' : 'Consumable'}
+                          </Table.Td>
+                          <Table.Td>{item.item_name}</Table.Td>
+                          <Table.Td>
+                            {item.source === 'serialized'
+                              ? item.serial_number || '—'
+                              : [item.quantity, item.unit].filter(Boolean).join(' ') || '—'}
+                          </Table.Td>
+                          <Table.Td>
+                            {item.source === 'serialized'
+                              ? item.action_display || item.action || '—'
+                              : ''}
+                          </Table.Td>
+                          <Table.Td>
+                            {item.used_at ? new Date(item.used_at).toLocaleDateString() : '—'}
+                          </Table.Td>
+                          <Table.Td>
+                            {item.source === 'consumable' && item.estimated_cost != null
+                              ? `$${formatMoney(item.estimated_cost)}`
+                              : ''}
                           </Table.Td>
                         </Table.Tr>
                       ))

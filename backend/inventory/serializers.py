@@ -4,6 +4,12 @@ Serializers for inventory API.
 
 from rest_framework import serializers
 
+# The asset's breaker/disconnect FKs live on facilities.AssetSiteRequirements
+# (#880); the serializer keeps the historical PK-shaped keys, so it needs the
+# related querysets here. Safe at module top: serializers import only after all
+# app models are loaded, so there is no import cycle.
+from electrical_circuits.models import Disconnect, PowerBreaker
+
 from .models import (
     Asset,
     AssetDocument,
@@ -883,6 +889,32 @@ class AssetSerializer(serializers.ModelSerializer):
     breaker_summary = serializers.SerializerMethodField()
     disconnect_summary = serializers.SerializerMethodField()
 
+    # Operational/site-requirements fields now live on the 1:1
+    # facilities.AssetSiteRequirements profile (#880). They are declared
+    # explicitly (rather than auto-built from the model) because they resolve
+    # through Asset compat properties, not real model fields. The JSON keys +
+    # shapes are unchanged, so the SPA + ScanTTY need no change. Reads go
+    # through the properties; writes are routed into the profile by
+    # ``create``/``update`` below. ``circuit`` is now a read-only
+    # breaker-derived label.
+    breaker = serializers.PrimaryKeyRelatedField(
+        queryset=PowerBreaker.objects.all(), required=False, allow_null=True
+    )
+    disconnect = serializers.PrimaryKeyRelatedField(
+        queryset=Disconnect.objects.all(), required=False, allow_null=True
+    )
+    needs_compressed_air = serializers.BooleanField(required=False)
+    needs_ventilation = serializers.BooleanField(required=False)
+    generates_heat_or_flame = serializers.BooleanField(required=False)
+    needs_chilling = serializers.BooleanField(required=False)
+    special_requirements = serializers.CharField(
+        required=False, allow_blank=True, trim_whitespace=False
+    )
+    work_safety_notes = serializers.CharField(
+        required=False, allow_blank=True, trim_whitespace=False
+    )
+    circuit = serializers.CharField(read_only=True)
+
     # Required certifications — IDs round-trip for writes; the *_details
     # array carries name + SIG so the SPA + e-paper render don't need a
     # second round-trip per cert lookup.
@@ -928,10 +960,14 @@ class AssetSerializer(serializers.ModelSerializer):
             "parts",
             # Usage meters (EAM bead-1)
             "meters",
-            # Operational requirements
+            # Operational / site requirements (facilities.AssetSiteRequirements)
             "circuit",
             "needs_compressed_air",
             "needs_ventilation",
+            "generates_heat_or_flame",
+            "needs_chilling",
+            "special_requirements",
+            "work_safety_notes",
             "is_chargeable",
             "mac_address",
             # Power / electrical
@@ -1012,6 +1048,53 @@ class AssetSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    # Keys that live on the 1:1 facilities.AssetSiteRequirements profile but are
+    # flattened onto the Asset payload for API back-compat (#880). Writes to
+    # these keys are diverted from the Asset into the profile.
+    _PROFILE_FIELDS = (
+        "breaker",
+        "disconnect",
+        "needs_compressed_air",
+        "needs_ventilation",
+        "generates_heat_or_flame",
+        "needs_chilling",
+        "special_requirements",
+        "work_safety_notes",
+    )
+
+    def _pop_profile_fields(self, validated_data):
+        return {
+            key: validated_data.pop(key) for key in self._PROFILE_FIELDS if key in validated_data
+        }
+
+    def _apply_profile(self, asset, profile_data):
+        from facilities.models import AssetSiteRequirements
+
+        profile, _ = AssetSiteRequirements.objects.update_or_create(
+            asset=asset, defaults=profile_data
+        )
+        # Refresh the reverse-relation cache so a follow-up read and the loto
+        # post_save derivation see the new values without a stale-cache miss.
+        asset.site_requirements = profile
+
+    def create(self, validated_data):
+        profile_data = self._pop_profile_fields(validated_data)
+        asset = super().create(validated_data)
+        if profile_data:
+            self._apply_profile(asset, profile_data)
+            # Re-fire the asset post_save so downstream derivations (loto) run
+            # now that the breaker is resolvable through the profile.
+            asset.save()
+        return asset
+
+    def update(self, instance, validated_data):
+        profile_data = self._pop_profile_fields(validated_data)
+        if profile_data:
+            # Upsert the profile first so the reverse cache is fresh before
+            # super().update() saves the asset and fires the derivation signal.
+            self._apply_profile(instance, profile_data)
+        return super().update(instance, validated_data)
 
     def get_required_certification_details(self, obj):
         # Consume the AssetViewSet's prefetched `required_certifications__sig`

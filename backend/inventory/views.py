@@ -1388,8 +1388,10 @@ class AssetViewSet(viewsets.ModelViewSet):
             "category",
             "location",
             "manufacturer",
-            "breaker__panel",
-            "disconnect",
+            # breaker/disconnect moved to the 1:1 site_requirements profile (#880);
+            # traverse it so breaker_summary/disconnect_summary stay N+0.
+            "site_requirements__breaker__panel",
+            "site_requirements__disconnect",
         )
         .prefetch_related(
             "asset_parts__part",

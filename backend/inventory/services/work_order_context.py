@@ -79,6 +79,14 @@ def _build_electrical_rows(asset: "Asset") -> list[list[str]]:
             ]
         )
 
+    # Site-requirements safety guidance (facilities.AssetSiteRequirements, #880).
+    # High-value for a tech about to work on the asset — surfaced on both the
+    # digital view and the printed work order.
+    if asset.special_requirements:
+        rows.append(["Special Requirements", asset.special_requirements])
+    if asset.work_safety_notes:
+        rows.append(["Crew Should Know", asset.work_safety_notes])
+
     return rows
 
 

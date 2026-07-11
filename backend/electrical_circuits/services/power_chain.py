@@ -77,13 +77,13 @@ def get_power_chain(asset: Asset) -> List[PowerChainHop]:
 def get_devices_on_circuit(circuit: PowerCircuit) -> QuerySet[Asset]:
     """Return Assets whose ``breaker`` is the breaker feeding this circuit."""
 
-    return Asset.objects.filter(breaker=circuit.breaker).distinct()
+    return Asset.objects.filter(site_requirements__breaker=circuit.breaker).distinct()
 
 
 def get_devices_on_breaker(breaker: PowerBreaker) -> QuerySet[Asset]:
     """Return Assets directly assigned to ``breaker``."""
 
-    return Asset.objects.filter(breaker=breaker).distinct()
+    return Asset.objects.filter(site_requirements__breaker=breaker).distinct()
 
 
 def assets_by_outlet(outlet_pks) -> dict[int, list[Asset]]:
@@ -116,7 +116,9 @@ def assets_by_outlet(outlet_pks) -> dict[int, list[Asset]]:
         return result
 
     assets_by_breaker: dict[int, list[Asset]] = {}
-    for asset in Asset.objects.filter(breaker_id__in=breaker_to_outlets):
+    for asset in Asset.objects.filter(
+        site_requirements__breaker_id__in=breaker_to_outlets
+    ).select_related("site_requirements"):
         assets_by_breaker.setdefault(asset.breaker_id, []).append(asset)
 
     for breaker_id, outlet_ids in breaker_to_outlets.items():

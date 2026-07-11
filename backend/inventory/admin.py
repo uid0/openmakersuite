@@ -13,6 +13,8 @@ from django.urls import path, reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
+from facilities.models import AssetSiteRequirements
+
 from .models import (
     Asset,
     AssetDocument,
@@ -1045,6 +1047,34 @@ class AssetMeterInline(admin.TabularInline):
     show_change_link = True
 
 
+class AssetSiteRequirementsInline(admin.StackedInline):
+    """Edit the asset's site-requirements profile inline on the asset page.
+
+    The operational/site-requirements fields (breaker, disconnect, compressed
+    air, ventilation, heat/flame, chilling, plus the free-text requirement and
+    safety notes) moved off ``Asset`` into
+    ``facilities.AssetSiteRequirements`` in #880. This inline keeps them
+    editable where admins expect them.
+    """
+
+    model = AssetSiteRequirements
+    can_delete = True
+    extra = 0
+    autocomplete_fields = ["breaker", "disconnect"]
+    fields = (
+        "breaker",
+        "disconnect",
+        "needs_compressed_air",
+        "generates_heat_or_flame",
+        "needs_ventilation",
+        "needs_chilling",
+        "special_requirements",
+        "work_safety_notes",
+    )
+    verbose_name = "Site requirements"
+    verbose_name_plural = "Site requirements"
+
+
 @admin.register(Asset)
 class AssetAdmin(admin.ModelAdmin):
     """Admin interface for managing hard assets."""
@@ -1086,7 +1116,12 @@ class AssetAdmin(admin.ModelAdmin):
         "manufacturer_name",
         "donor_name",
     ]
-    inlines = [AssetPartInline, AssetDocumentInline, AssetMeterInline]
+    inlines = [
+        AssetPartInline,
+        AssetDocumentInline,
+        AssetMeterInline,
+        AssetSiteRequirementsInline,
+    ]
     readonly_fields = [
         "id",
         "asset_tag",
@@ -1179,13 +1214,15 @@ class AssetAdmin(admin.ModelAdmin):
             "Operational Requirements",
             {
                 "fields": (
-                    "circuit",
-                    "needs_compressed_air",
-                    "needs_ventilation",
                     "is_chargeable",
                     "mac_address",
                 ),
-                "description": "Operational requirements and billing information for the asset.",
+                "description": (
+                    "Billing + networking. The site/operational requirements "
+                    "(breaker, disconnect, compressed air, ventilation, heat/"
+                    "flame, chilling, special requirements, work-safety notes) "
+                    "moved to the Site requirements section below (#880)."
+                ),
             },
         ),
         (

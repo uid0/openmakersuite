@@ -131,6 +131,7 @@ INSTALLED_APPS = [
     "vendors",
     "maintenance_orders",
     "electrical_circuits",
+    "facilities",
     "devices",
     "loto",
     "lockers",

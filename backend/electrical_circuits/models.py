@@ -690,6 +690,20 @@ class PowerBreaker(models.Model):
                 }
             )
 
+    @property
+    def assets(self):
+        """Assets fed by this breaker.
+
+        Compat shim: the ``Asset → breaker`` FK moved to
+        ``facilities.AssetSiteRequirements`` (#880, whose FK uses
+        ``related_name="asset_requirements"``). Historical callers used the
+        old FK's ``related_name="assets"`` reverse accessor; keep that read
+        API working via the profile.
+        """
+        from inventory.models import Asset
+
+        return Asset.objects.filter(site_requirements__breaker=self)
+
 
 class PowerCircuit(models.Model):
     """
@@ -874,6 +888,18 @@ class Disconnect(models.Model):
             flag = True
         if flag:
             self.needs_review = True
+
+    @property
+    def assets(self):
+        """Assets isolated by this disconnect.
+
+        Compat shim for the ``Asset → disconnect`` FK that moved to
+        ``facilities.AssetSiteRequirements`` (#880); preserves the old
+        ``disconnect.assets`` reverse-accessor read API via the profile.
+        """
+        from inventory.models import Asset
+
+        return Asset.objects.filter(site_requirements__disconnect=self)
 
 
 class PowerOutlet(models.Model):

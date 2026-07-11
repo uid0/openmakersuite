@@ -792,10 +792,13 @@ class TestEPaperServiceInfo:
         asset.electrical_box = "East enclosure"
         asset.breaker_location = "Panel A, Breaker 12"
         panel = PowerPanel.objects.create(location=asset.location, name="Panel A")
+        # ``breaker`` now lives on facilities.AssetSiteRequirements (#880); the
+        # compat setter writes it through to the profile immediately, so it is
+        # not part of the Asset's own ``update_fields``.
         asset.breaker = PowerBreaker.objects.create(
             panel=panel, position="12", amperage=20, label="Lathe feed"
         )
-        asset.save(update_fields=["suite", "electrical_box", "breaker_location", "breaker"])
+        asset.save(update_fields=["suite", "electrical_box", "breaker_location"])
 
         item = _make_item(asset, "Lube", interval_days=30, last_done_days=5)
 

@@ -85,7 +85,7 @@ def derive_for_breaker(breaker: PowerBreaker) -> list[AssetEnergySource]:
     """Re-derive energy sources for every asset assigned to ``breaker``."""
 
     results: list[AssetEnergySource] = []
-    for asset in Asset.objects.filter(breaker=breaker):
+    for asset in Asset.objects.filter(site_requirements__breaker=breaker):
         derived = derive_for_asset(asset)
         if derived is not None:
             results.append(derived)
@@ -108,7 +108,7 @@ def rederive_all() -> dict[str, int]:
 
     derived = 0
     skipped = 0
-    for asset in Asset.objects.exclude(breaker__isnull=True):
+    for asset in Asset.objects.exclude(site_requirements__breaker__isnull=True):
         result = derive_for_asset(asset)
         if result is not None:
             derived += 1
@@ -122,7 +122,7 @@ def _iter_assets_for_breakers(breakers: Iterable[PowerBreaker]) -> Iterable[Asse
 
     seen: set = set()
     for breaker in breakers:
-        for asset in Asset.objects.filter(breaker=breaker):
+        for asset in Asset.objects.filter(site_requirements__breaker=breaker):
             if asset.pk in seen:
                 continue
             seen.add(asset.pk)

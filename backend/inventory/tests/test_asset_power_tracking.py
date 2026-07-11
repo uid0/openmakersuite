@@ -206,11 +206,18 @@ class TestElectricalRowsHelper:
         assert "Lockout Type" in labels
         assert "Lockout Responsible" in labels
 
-    def test_legacy_circuit_used_when_no_breaker_location(self):
-        asset = AssetFactory(
-            wiring_type=Asset.WIRING_120V_PLUG,
-            circuit="Bench outlet C-3",
-        )
+    def test_breaker_derived_circuit_used_when_no_breaker_location(self):
+        # The free-text ``circuit`` field was removed in #880; ``asset.circuit``
+        # is now a read-only shim that falls back to a breaker-derived label
+        # when ``breaker_location`` is blank. That fallback still renders as the
+        # "Circuit" row.
+        from electrical_circuits.models import PowerBreaker, PowerPanel
+
+        asset = AssetFactory(wiring_type=Asset.WIRING_120V_PLUG)
+        panel = PowerPanel.objects.create(location=asset.location, name="Panel Z")
+        breaker = PowerBreaker.objects.create(panel=panel, position="7", amperage=15)
+        # Write-through the compat setter; no breaker_location is set.
+        asset.breaker = breaker
         rows = _build_electrical_rows(asset)
         labels = [r[0] for r in rows]
         assert "Circuit" in labels

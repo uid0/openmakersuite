@@ -3145,8 +3145,8 @@ class EPaperServiceInfoView(APIView):
             display = EPaperDisplay.objects.select_related(
                 "asset",
                 "asset__location",
-                "asset__breaker__panel__location",
-                "asset__disconnect__location",
+                "asset__site_requirements__breaker__panel__location",
+                "asset__site_requirements__disconnect__location",
             ).get(pk=display_id)
         except EPaperDisplay.DoesNotExist:
             return Response({"detail": "Unknown display."}, status=status.HTTP_404_NOT_FOUND)

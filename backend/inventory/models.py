@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from django.conf import settings
 from django.contrib.auth.models import Group
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
@@ -1224,19 +1224,10 @@ class Asset(models.Model):
     )
 
     # Operational requirements
-    circuit = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="Circuit identification where this device is plugged in",
-    )
-    needs_compressed_air = models.BooleanField(
-        default=False,
-        help_text="Device requires compressed air to operate",
-    )
-    needs_ventilation = models.BooleanField(
-        default=False,
-        help_text="Device requires ventilation when running",
-    )
+    # NOTE: ``circuit``, ``needs_compressed_air`` and ``needs_ventilation``
+    # moved to facilities.AssetSiteRequirements in #880. Read/write compat
+    # accessors live at the bottom of this class so existing callers keep
+    # working (``circuit`` is now a read-only breaker-derived label).
     is_chargeable = models.BooleanField(
         default=False,
         help_text="Device is chargeable to members (for billing purposes)",
@@ -1301,26 +1292,10 @@ class Asset(models.Model):
         blank=True,
         help_text="Specific breaker label / number serving this asset (e.g., 'Panel A, Breaker 12').",
     )
-    breaker = models.ForeignKey(
-        "electrical_circuits.PowerBreaker",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="assets",
-        help_text="Breaker that feeds this asset (replaces the previous cable-and-port chain).",
-    )
-    disconnect = models.ForeignKey(
-        "electrical_circuits.Disconnect",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="assets",
-        help_text=(
-            "Disconnect switch used to isolate this asset for lock-out / tag-out. "
-            "Optional — only the disconnect-relevant LOTO data is kept on the asset; "
-            "the rest of the cable/cordset modelling has been removed."
-        ),
-    )
+    # NOTE: the ``breaker`` and ``disconnect`` FKs moved to
+    # facilities.AssetSiteRequirements in #880. Read/write compat accessors
+    # (plus ``breaker_id`` / ``disconnect_id``) live at the bottom of this
+    # class so existing callers keep working.
     is_critical = models.BooleanField(
         default=False,
         help_text=(
@@ -1743,6 +1718,130 @@ class Asset(models.Model):
         except Exception:
             # forgekey app may not be installed in some test contexts
             return False
+
+    # ─────────────────────────────────────────────────────────────────────
+    # facilities.AssetSiteRequirements compatibility layer (#880)
+    #
+    # The operational/site-requirements fields moved to a 1:1 profile in the
+    # ``facilities`` app. These accessors preserve the historical
+    # ``asset.<field>`` read/write API so existing callers, the serializer,
+    # and the admin keep working unchanged.
+    #
+    # * Getters tolerate a missing profile row (return the field default).
+    # * Setters get-or-create the profile and write through immediately — the
+    #   asset must already be saved (it needs a PK for the profile FK). The
+    #   reverse-relation cache is refreshed so a subsequent read sees the new
+    #   value and the loto post_save derivation reads the fresh breaker.
+    # ─────────────────────────────────────────────────────────────────────
+    def _get_site_requirements(self):
+        """Return the 1:1 site-requirements row, or ``None`` if absent."""
+        try:
+            return self.site_requirements
+        except ObjectDoesNotExist:
+            return None
+
+    def _read_site_requirement(self, field: str, default: Any) -> Any:
+        profile = self._get_site_requirements()
+        return getattr(profile, field) if profile is not None else default
+
+    def _write_site_requirement(self, field: str, value: Any) -> None:
+        from facilities.models import AssetSiteRequirements
+
+        profile = self._get_site_requirements()
+        if profile is None:
+            profile = AssetSiteRequirements(asset=self)
+        setattr(profile, field, value)
+        profile.save()
+        # Keep the reverse-relation cache coherent with what we just wrote so
+        # a follow-up read (and the loto post_save signal) sees it.
+        self.site_requirements = profile
+
+    @property
+    def breaker(self):
+        return self._read_site_requirement("breaker", None)
+
+    @breaker.setter
+    def breaker(self, value) -> None:
+        self._write_site_requirement("breaker", value)
+
+    @property
+    def breaker_id(self):
+        return self._read_site_requirement("breaker_id", None)
+
+    @property
+    def disconnect(self):
+        return self._read_site_requirement("disconnect", None)
+
+    @disconnect.setter
+    def disconnect(self, value) -> None:
+        self._write_site_requirement("disconnect", value)
+
+    @property
+    def disconnect_id(self):
+        return self._read_site_requirement("disconnect_id", None)
+
+    @property
+    def needs_compressed_air(self) -> bool:
+        return self._read_site_requirement("needs_compressed_air", False)
+
+    @needs_compressed_air.setter
+    def needs_compressed_air(self, value: bool) -> None:
+        self._write_site_requirement("needs_compressed_air", value)
+
+    @property
+    def needs_ventilation(self) -> bool:
+        return self._read_site_requirement("needs_ventilation", False)
+
+    @needs_ventilation.setter
+    def needs_ventilation(self, value: bool) -> None:
+        self._write_site_requirement("needs_ventilation", value)
+
+    @property
+    def generates_heat_or_flame(self) -> bool:
+        return self._read_site_requirement("generates_heat_or_flame", False)
+
+    @generates_heat_or_flame.setter
+    def generates_heat_or_flame(self, value: bool) -> None:
+        self._write_site_requirement("generates_heat_or_flame", value)
+
+    @property
+    def needs_chilling(self) -> bool:
+        return self._read_site_requirement("needs_chilling", False)
+
+    @needs_chilling.setter
+    def needs_chilling(self, value: bool) -> None:
+        self._write_site_requirement("needs_chilling", value)
+
+    @property
+    def special_requirements(self) -> str:
+        return self._read_site_requirement("special_requirements", "")
+
+    @special_requirements.setter
+    def special_requirements(self, value: str) -> None:
+        self._write_site_requirement("special_requirements", value)
+
+    @property
+    def work_safety_notes(self) -> str:
+        return self._read_site_requirement("work_safety_notes", "")
+
+    @work_safety_notes.setter
+    def work_safety_notes(self, value: str) -> None:
+        self._write_site_requirement("work_safety_notes", value)
+
+    @property
+    def circuit(self) -> str:
+        """Read-only compat shim for the removed free-text ``circuit`` field.
+
+        The breaker FK (now on the site-requirements profile) plus
+        ``breaker_location`` supersede the old free-text circuit string. Old
+        readers still reference ``asset.circuit``; return the best label
+        available: the explicit breaker location, else a breaker-derived
+        label, else empty.
+        """
+        if self.breaker_location:
+            return self.breaker_location
+        breaker = self.breaker
+        return str(breaker) if breaker is not None else ""
 
 
 class AssetPart(models.Model):

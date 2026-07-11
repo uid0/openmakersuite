@@ -47,7 +47,9 @@ def _assets_by_breaker(breaker_ids) -> Dict[int, List[Asset]]:
     """Return ``{breaker_id: [Asset, ...]}`` for the given breakers."""
 
     out: Dict[int, List[Asset]] = defaultdict(list)
-    for asset in Asset.objects.filter(breaker_id__in=list(breaker_ids)):
+    for asset in Asset.objects.filter(
+        site_requirements__breaker_id__in=list(breaker_ids)
+    ).select_related("site_requirements"):
         out[asset.breaker_id].append(asset)
     return out
 

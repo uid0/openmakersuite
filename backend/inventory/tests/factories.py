@@ -221,7 +221,16 @@ class FixtureFactory(DjangoModelFactory):
 
 
 class AssetFactory(DjangoModelFactory):
-    """Factory for creating Asset instances."""
+    """Factory for creating Asset instances.
+
+    The operational/site-requirements fields (``breaker``, ``disconnect``,
+    ``needs_compressed_air``, ``needs_ventilation``,
+    ``generates_heat_or_flame``, ``needs_chilling``, ``special_requirements``,
+    ``work_safety_notes``) moved to the 1:1 ``facilities.AssetSiteRequirements``
+    profile in #880. They are still accepted as ``AssetFactory(breaker=...)``
+    kwargs for back-compat and routed into that profile after the asset is
+    saved (a profile row is only created when a non-default is requested).
+    """
 
     class Meta:
         model = Asset
@@ -235,10 +244,39 @@ class AssetFactory(DjangoModelFactory):
     manufacturer = SubFactory(SupplierFactory)
     status = Asset.ACTIVE
     is_active = True
-    circuit = ""
-    needs_compressed_air = False
-    needs_ventilation = False
     is_chargeable = False
+
+    @classmethod
+    def _create(cls, model_class, *args, **kwargs):
+        profile_fields = (
+            "breaker",
+            "disconnect",
+            "needs_compressed_air",
+            "needs_ventilation",
+            "generates_heat_or_flame",
+            "needs_chilling",
+            "special_requirements",
+            "work_safety_notes",
+        )
+        profile_data = {key: kwargs.pop(key) for key in profile_fields if key in kwargs}
+        asset = super()._create(model_class, *args, **kwargs)
+
+        # Only materialise a profile row when a non-default was requested so
+        # assets with no site requirements stay row-free (matching production).
+        meaningful = {
+            key: value for key, value in profile_data.items() if value not in (None, False, "")
+        }
+        if meaningful:
+            from facilities.models import AssetSiteRequirements
+
+            profile, _ = AssetSiteRequirements.objects.update_or_create(
+                asset=asset, defaults=meaningful
+            )
+            asset.site_requirements = profile
+            # Re-fire post_save so signal-driven derivations (loto) run with the
+            # breaker now resolvable — matching the old direct-FK create path.
+            asset.save()
+        return asset
 
 
 class AssetPartFactory(DjangoModelFactory):

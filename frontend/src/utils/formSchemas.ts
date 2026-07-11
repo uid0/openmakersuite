@@ -127,6 +127,9 @@ export const inventoryItemSchema = z
 
     // Other
     is_active: z.boolean().default(true),
+    // Retirement (op-jv7r): must be in the schema or the resolver strips it
+    // from the submit payload.
+    is_retired: z.boolean().default(false),
     notes: z.string().optional(),
   })
   .refine(

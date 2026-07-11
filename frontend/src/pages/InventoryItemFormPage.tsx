@@ -75,6 +75,7 @@ const InventoryItemFormPage: React.FC = () => {
       is_serialized: false,
       serial_tracking_mode: null,
       is_active: true,
+      is_retired: false,
       notes: '',
     },
   });
@@ -145,6 +146,7 @@ const InventoryItemFormPage: React.FC = () => {
         is_serialized: item.is_serialized ?? false,
         serial_tracking_mode: item.serial_tracking_mode ?? null,
         is_active: item.is_active,
+        is_retired: item.is_retired ?? false,
         notes: item.notes || '',
         image_url: item.image ? (item.image.startsWith('http') ? item.image : '') : '',
       });
@@ -589,6 +591,14 @@ const InventoryItemFormPage: React.FC = () => {
                           label="Active"
                           checked={watch('is_active')}
                           onChange={(e) => setValue('is_active', e.currentTarget.checked)}
+                        />
+                      </div>
+                      <div>
+                        <Switch
+                          label="Retired"
+                          description="Phased out: never flagged for reorder; hidden from the list once stock hits 0."
+                          checked={watch('is_retired')}
+                          onChange={(e) => setValue('is_retired', e.currentTarget.checked)}
                         />
                       </div>
                     </>

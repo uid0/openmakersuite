@@ -21,7 +21,7 @@ import {
     Textarea,
     Title,
 } from '@mantine/core';
-import { IconClipboardCheck, IconEdit, IconQrcode } from '@tabler/icons-react';
+import { IconArchive, IconArchiveOff, IconClipboardCheck, IconEdit, IconQrcode } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -175,6 +175,7 @@ const InventoryItemDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string | null>('overview');
   const [cycleCountOpen, setCycleCountOpen] = useState(false);
+  const [retiring, setRetiring] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -246,6 +247,28 @@ const InventoryItemDetailPage: React.FC = () => {
     }
   };
 
+  // Retire / un-retire (op-jv7r). Mirrors handleGenerateQR: call the action
+  // then reload so the badge + button label reflect the new state. Toggles by
+  // the item's current is_retired.
+  const handleToggleRetire = async () => {
+    if (!id || !item) return;
+
+    try {
+      setRetiring(true);
+      if (item.is_retired) {
+        await inventoryAPI.unretireItem(id);
+      } else {
+        await inventoryAPI.retireItem(id);
+      }
+      await loadData();
+    } catch (err) {
+      console.error('Error updating retirement status:', err);
+      showError('Failed to update retirement status. Please try again.');
+    } finally {
+      setRetiring(false);
+    }
+  };
+
   if (loading) {
     return (
       <WorkspacePage
@@ -291,6 +314,18 @@ const InventoryItemDetailPage: React.FC = () => {
             </Button>
             <Button
               variant="default"
+              color={item.is_retired ? undefined : 'orange'}
+              leftSection={
+                item.is_retired ? <IconArchiveOff size={16} /> : <IconArchive size={16} />
+              }
+              onClick={handleToggleRetire}
+              loading={retiring}
+              data-testid="retire-button"
+            >
+              {item.is_retired ? 'Unretire' : 'Retire'}
+            </Button>
+            <Button
+              variant="default"
               leftSection={<IconQrcode size={16} />}
               onClick={handleGenerateQR}
             >
@@ -311,6 +346,7 @@ const InventoryItemDetailPage: React.FC = () => {
         {item.needs_reorder && <Badge color="red">Low Stock</Badge>}
         {item.has_pending_reorder && <Badge color="blue">Reorder Pending</Badge>}
         {!item.is_active && <Badge color="gray">Inactive</Badge>}
+        {item.is_retired && <Badge color="orange">Retired</Badge>}
         {item.is_hazardous && <Badge color="orange">Hazardous Material</Badge>}
         {item.is_serialized && <Badge color="grape">Serialized</Badge>}
       </Group>

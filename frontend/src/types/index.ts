@@ -145,6 +145,12 @@ export interface InventoryItem {
   average_lead_time: number;
   qr_code: string | null;
   is_active: boolean;
+  // Retirement (op-jv7r). A retired item is never flagged for reorder and is
+  // auto-hidden from the default list once its stock hits 0. `is_retired` is
+  // writable (item form/admin toggle); `retired_at` is a read-only audit stamp
+  // set by the retire/unretire actions.
+  is_retired: boolean;
+  retired_at: string | null;
   notes: string;
   needs_reorder: boolean;
   total_value: string;

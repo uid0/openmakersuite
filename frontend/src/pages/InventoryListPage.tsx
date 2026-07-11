@@ -56,6 +56,7 @@ const InventoryListPage: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
   const [lowStockFilter, setLowStockFilter] = useState<string | null>(null);
+  const [showRetired, setShowRetired] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -111,6 +112,10 @@ const InventoryListPage: React.FC = () => {
     } else if (lowStockFilter === 'false') {
       params.low_stock = false;
     }
+    // Retired-and-empty items are hidden by default; opt in to see them.
+    if (showRetired === 'true') {
+      params.include_retired = true;
+    }
     return params;
   };
 
@@ -132,7 +137,7 @@ const InventoryListPage: React.FC = () => {
     };
     loadFirstPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, selectedCategory, selectedLocation, lowStockFilter, sortField, sortDirection]);
+  }, [debouncedSearch, selectedCategory, selectedLocation, lowStockFilter, showRetired, sortField, sortDirection]);
 
   const loadMore = async () => {
     if (loadingMore || loading || !hasMore) {
@@ -372,6 +377,16 @@ const InventoryListPage: React.FC = () => {
               onChange={(value) => setLowStockFilter(value || null)}
               clearable
             />
+            <Select
+              placeholder="Retired"
+              data={[
+                { value: '', label: 'Hide Retired' },
+                { value: 'true', label: 'Show Retired' },
+              ]}
+              value={showRetired || ''}
+              onChange={(value) => setShowRetired(value || null)}
+              clearable
+            />
           </Group>
 
           {/* Bulk Actions */}
@@ -526,6 +541,7 @@ const InventoryListPage: React.FC = () => {
                       {item.needs_reorder && <Badge color="red" size="sm">Low Stock</Badge>}
                       {item.has_pending_reorder && <Badge color="blue" size="sm">Reorder Pending</Badge>}
                       {!item.is_active && <Badge color="gray" size="sm">Inactive</Badge>}
+                      {item.is_retired && <Badge color="orange" size="sm">Retired</Badge>}
                       {item.is_serialized && <Badge color="grape" size="sm">Serialized</Badge>}
                     </Group>
                   </Table.Td>

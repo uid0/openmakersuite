@@ -614,4 +614,90 @@ describe('InventoryItemFormPage', () => {
     expect(formData.get('is_serialized')).toBe('true');
     expect(formData.get('serial_tracking_mode')).toBe('reusable');
   });
+
+  // ---- op-jv7r: retire toggle ----
+
+  it('renders the Retired switch', async () => {
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/Retired/i).length).toBeGreaterThan(0);
+    });
+  });
+
+  it('sends is_retired=false by default', async () => {
+    (api.inventoryAPI.createItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, id: 'new-id' },
+    });
+
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/Name/i).length).toBeGreaterThan(0);
+    });
+    fillRequiredFields();
+    fireEvent.click(screen.getByText('Create Item'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.createItem).toHaveBeenCalled();
+    });
+
+    const formData = (api.inventoryAPI.createItem as jest.Mock).mock.calls[0][0] as FormData;
+    expect(formData.get('is_retired')).toBe('false');
+  });
+
+  it('includes is_retired=true in the create payload when toggled on', async () => {
+    (api.inventoryAPI.createItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, id: 'new-id' },
+    });
+
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/Name/i).length).toBeGreaterThan(0);
+    });
+    fillRequiredFields();
+
+    fireEvent.click(screen.getAllByLabelText(/Retired/i)[0]);
+    fireEvent.click(screen.getByText('Create Item'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.createItem).toHaveBeenCalled();
+    });
+
+    const formData = (api.inventoryAPI.createItem as jest.Mock).mock.calls[0][0] as FormData;
+    expect(formData.get('is_retired')).toBe('true');
+  });
+
+  it('hydrates is_retired in edit mode and includes it on update', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, is_retired: true, retired_at: '2026-07-10T00:00:00Z' },
+    });
+    (api.inventoryAPI.updateItem as jest.Mock).mockResolvedValue({ data: mockItem });
+
+    render(
+      <MantineProvider env="test">
+        <MemoryRouter initialEntries={['/inventory/items/test-id/edit']}>
+          <Routes>
+            <Route path="/inventory/items/:id/edit" element={<InventoryItemFormPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>
+    );
+
+    // The Retired switch hydrates on from the fetched item.
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Test Item')).toBeInTheDocument();
+    });
+    expect((screen.getAllByLabelText(/Retired/i)[0] as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(screen.getByText('Save Changes'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.updateItem).toHaveBeenCalled();
+    });
+
+    const formData = (api.inventoryAPI.updateItem as jest.Mock).mock.calls[0][1] as FormData;
+    expect(formData.get('is_retired')).toBe('true');
+  });
 });

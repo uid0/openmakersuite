@@ -2,7 +2,8 @@
  * Asset Detail Page
  * Full page view for asset details with part tracking, problem history, maintenance, QR code, and lock/unlock controls
  */
-import { Badge, Button, Group, Paper, Text } from '@mantine/core';
+import { Alert, Badge, Button, Group, Paper, Text } from '@mantine/core';
+import { IconAlertTriangle } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AssetForgeKeyAccessCard from '../components/AssetForgeKeyAccessCard';
@@ -574,9 +575,20 @@ const AssetDetailPage: React.FC = () => {
         </section>
 
         {/* Operational Requirements */}
-        {(asset.circuit || asset.mac_address || asset.needs_compressed_air || asset.needs_ventilation || asset.is_chargeable || asset.training_required || (asset.required_certification_details && asset.required_certification_details.length > 0)) && (
+        {(asset.circuit || asset.mac_address || asset.needs_compressed_air || asset.needs_ventilation || asset.generates_heat_or_flame || asset.needs_chilling || asset.special_requirements || asset.work_safety_notes || asset.is_chargeable || asset.training_required || (asset.required_certification_details && asset.required_certification_details.length > 0)) && (
           <section className="asset-detail-section">
             <h2>Operational Requirements</h2>
+            {asset.work_safety_notes && (
+              <Alert
+                color="red"
+                icon={<IconAlertTriangle size={18} />}
+                title="Work safety notes"
+                mb="md"
+                data-testid="work-safety-notes"
+              >
+                {asset.work_safety_notes}
+              </Alert>
+            )}
             <div className="info-grid">
               {asset.circuit && (
                 <div className="info-item">
@@ -599,6 +611,18 @@ const AssetDetailPage: React.FC = () => {
               {asset.needs_ventilation && (
                 <div className="info-item">
                   <span className="info-label">Needs Ventilation:</span>
+                  <span className="info-value">Yes</span>
+                </div>
+              )}
+              {asset.generates_heat_or_flame && (
+                <div className="info-item" data-testid="generates-heat-or-flame-row">
+                  <span className="info-label">Generates Heat or Flame:</span>
+                  <span className="info-value">Yes</span>
+                </div>
+              )}
+              {asset.needs_chilling && (
+                <div className="info-item" data-testid="needs-chilling-row">
+                  <span className="info-label">Needs Chilling:</span>
                   <span className="info-value">Yes</span>
                 </div>
               )}
@@ -625,6 +649,12 @@ const AssetDetailPage: React.FC = () => {
                     </span>
                   </div>
                 )}
+              {asset.special_requirements && (
+                <div className="info-item full-width" data-testid="special-requirements-row">
+                  <span className="info-label">Special requirements:</span>
+                  <span className="info-value">{asset.special_requirements}</span>
+                </div>
+              )}
             </div>
           </section>
         )}

@@ -179,6 +179,10 @@ describe('AssetFormPage', () => {
       circuit: '',
       needs_compressed_air: false,
       needs_ventilation: false,
+      generates_heat_or_flame: false,
+      needs_chilling: false,
+      special_requirements: '',
+      work_safety_notes: '',
       is_chargeable: false,
       last_scanned_at: null,
       ownership_type: 'space',
@@ -301,6 +305,10 @@ describe('AssetFormPage', () => {
       circuit: '',
       needs_compressed_air: false,
       needs_ventilation: false,
+      generates_heat_or_flame: true,
+      needs_chilling: true,
+      special_requirements: 'Requires 220V dedicated circuit',
+      work_safety_notes: 'Lock out at Panel A before servicing',
       is_chargeable: false,
       last_scanned_at: null,
       ownership_type: 'space',
@@ -339,6 +347,19 @@ describe('AssetFormPage', () => {
     await waitFor(() => {
       expect(screen.getByDisplayValue('Test Asset')).toBeInTheDocument();
     });
+
+    // The site-requirement inputs live under the collapsed "Advanced" panel.
+    fireEvent.click(screen.getByRole('button', { name: /show advanced options/i }));
+
+    // Boolean flags hydrate the switches (op-m40s).
+    await waitFor(() => {
+      expect(screen.getByLabelText(/generates heat or flame/i)).toBeChecked();
+    });
+    expect(screen.getByLabelText(/needs chilling/i)).toBeChecked();
+
+    // Free-text fields hydrate the textareas.
+    expect(screen.getByDisplayValue('Requires 220V dedicated circuit')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Lock out at Panel A before servicing')).toBeInTheDocument();
   });
 
   it('shows loading state', () => {
@@ -519,6 +540,10 @@ describe('AssetFormPage', () => {
       circuit: '',
       needs_compressed_air: false,
       needs_ventilation: false,
+      generates_heat_or_flame: true,
+      needs_chilling: true,
+      special_requirements: 'Requires 220V dedicated circuit',
+      work_safety_notes: 'Lock out at Panel A before servicing',
       is_chargeable: false,
       last_scanned_at: null,
       ownership_type: 'space',

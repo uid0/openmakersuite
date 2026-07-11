@@ -509,6 +509,13 @@ const AssetScanPage: React.FC = () => {
         )}
 
         <div className="item-details">
+          {asset.work_safety_notes && (
+            <div className="alert alert-warning" data-testid="scan-work-safety-notes">
+              <strong>⚠️ Work Safety Notes</strong>
+              {asset.work_safety_notes}
+            </div>
+          )}
+
           {asset.description && <p className="description">{asset.description}</p>}
 
           <div className="info-grid">
@@ -583,14 +590,27 @@ const AssetScanPage: React.FC = () => {
               </div>
             )}
 
-            {(asset.needs_compressed_air || asset.needs_ventilation || asset.is_chargeable) && (
+            {(asset.needs_compressed_air ||
+              asset.needs_ventilation ||
+              asset.generates_heat_or_flame ||
+              asset.needs_chilling ||
+              asset.is_chargeable) && (
               <div className="info-item">
                 <span className="label">Requirements:</span>
                 <span className="value">
                   {asset.needs_compressed_air && 'Compressed Air '}
                   {asset.needs_ventilation && 'Ventilation '}
+                  {asset.generates_heat_or_flame && 'Heat/Flame '}
+                  {asset.needs_chilling && 'Chilling '}
                   {asset.is_chargeable && 'Chargeable'}
                 </span>
+              </div>
+            )}
+
+            {asset.special_requirements && (
+              <div className="info-item" data-testid="scan-special-requirements">
+                <span className="label">Special Requirements:</span>
+                <span className="value">{asset.special_requirements}</span>
               </div>
             )}
           </div>

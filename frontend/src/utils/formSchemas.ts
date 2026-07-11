@@ -220,6 +220,10 @@ export const assetFormSchema = z
     // Maintenance section.
     needs_compressed_air: z.boolean().default(false),
     needs_ventilation: z.boolean().default(false),
+    generates_heat_or_flame: z.boolean().default(false),
+    needs_chilling: z.boolean().default(false),
+    special_requirements: z.string().optional(),
+    work_safety_notes: z.string().optional(),
     is_chargeable: z.boolean().default(false),
     training_required: z.boolean().default(false),
     required_certifications: z.array(z.number().int().positive()).default([]),

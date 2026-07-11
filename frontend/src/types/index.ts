@@ -328,6 +328,10 @@ export interface Asset {
   mac_address: string;
   needs_compressed_air: boolean;
   needs_ventilation: boolean;
+  generates_heat_or_flame: boolean;
+  needs_chilling: boolean;
+  special_requirements: string;
+  work_safety_notes: string;
   is_chargeable: boolean;
   training_required: boolean;
   required_certifications: number[];

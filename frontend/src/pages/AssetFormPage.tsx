@@ -151,6 +151,10 @@ const AssetFormPage: React.FC = () => {
       category: null,
       needs_compressed_air: false,
       needs_ventilation: false,
+      generates_heat_or_flame: false,
+      needs_chilling: false,
+      special_requirements: '',
+      work_safety_notes: '',
       is_chargeable: false,
       training_required: false,
       required_certifications: [],
@@ -233,6 +237,10 @@ const AssetFormPage: React.FC = () => {
           category: asset.category ? Number(asset.category) : null,
           needs_compressed_air: asset.needs_compressed_air,
           needs_ventilation: asset.needs_ventilation,
+          generates_heat_or_flame: asset.generates_heat_or_flame,
+          needs_chilling: asset.needs_chilling,
+          special_requirements: asset.special_requirements || '',
+          work_safety_notes: asset.work_safety_notes || '',
           is_chargeable: asset.is_chargeable,
           training_required: asset.training_required,
           required_certifications: asset.required_certifications || [],
@@ -743,6 +751,18 @@ const AssetFormPage: React.FC = () => {
                     onChange={(e) => setValue('needs_ventilation', e.currentTarget.checked)}
                   />
                   <Switch
+                    label="Generates heat or flame"
+                    description="Has a flame or gives off a lot of heat."
+                    checked={watch('generates_heat_or_flame')}
+                    onChange={(e) => setValue('generates_heat_or_flame', e.currentTarget.checked)}
+                  />
+                  <Switch
+                    label="Needs chilling"
+                    description="Requires chilled water / active cooling."
+                    checked={watch('needs_chilling')}
+                    onChange={(e) => setValue('needs_chilling', e.currentTarget.checked)}
+                  />
+                  <Switch
                     label="Chargeable use"
                     checked={watch('is_chargeable')}
                     onChange={(e) => setValue('is_chargeable', e.currentTarget.checked)}
@@ -778,6 +798,24 @@ const AssetFormPage: React.FC = () => {
                     description="Problem reporting only — no enable/disable flows."
                     checked={watch('report_only')}
                     onChange={(e) => setValue('report_only', e.currentTarget.checked)}
+                  />
+                  <FormTextarea
+                    name="special_requirements"
+                    control={control}
+                    label="Special requirements"
+                    description="Anything else the asset needs from the building."
+                    placeholder="e.g. 220V only, requires floor drain…"
+                    autosize
+                    minRows={2}
+                  />
+                  <FormTextarea
+                    name="work_safety_notes"
+                    control={control}
+                    label="Work safety notes"
+                    description="What the crew should know before working on the asset."
+                    placeholder="e.g. Lock out at Panel A before servicing."
+                    autosize
+                    minRows={2}
                   />
                   <FormTextarea
                     name="condition_notes"

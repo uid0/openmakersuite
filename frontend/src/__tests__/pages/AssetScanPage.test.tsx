@@ -62,6 +62,10 @@ describe('AssetScanPage — modal flows', () => {
     circuit: null,
     needs_compressed_air: false,
     needs_ventilation: false,
+    generates_heat_or_flame: false,
+    needs_chilling: false,
+    special_requirements: '',
+    work_safety_notes: '',
     is_chargeable: false,
     last_scanned_at: null,
     ownership_type: 'space',
@@ -101,6 +105,39 @@ describe('AssetScanPage — modal flows', () => {
         </ModalsProvider>
       </MantineProvider>,
     );
+
+  test('surfaces the facilities site-requirement fields on the scan view (op-m40s)', async () => {
+    (api.assetsAPI.scanAsset as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockAsset,
+        generates_heat_or_flame: true,
+        needs_chilling: true,
+        special_requirements: 'Requires 220V dedicated circuit',
+        work_safety_notes: 'Lock out at Panel A before servicing',
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Asset')).toBeInTheDocument();
+    });
+
+    // New boolean flags fold into the compact "Requirements:" line.
+    const requirements = screen.getByText('Requirements:').parentElement;
+    expect(requirements).toHaveTextContent('Heat/Flame');
+    expect(requirements).toHaveTextContent('Chilling');
+
+    // Free-text special requirements render.
+    expect(screen.getByTestId('scan-special-requirements')).toHaveTextContent(
+      'Requires 220V dedicated circuit',
+    );
+
+    // Work safety notes are surfaced prominently (safety) for anyone scanning.
+    expect(screen.getByTestId('scan-work-safety-notes')).toHaveTextContent(
+      'Lock out at Panel A before servicing',
+    );
+  });
 
   test('disable asset: clicking Disable opens confirm modal and calls API on confirm', async () => {
     localStorage.setItem('token', 'fake-token');

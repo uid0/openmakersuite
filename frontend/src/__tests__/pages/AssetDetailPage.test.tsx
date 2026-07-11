@@ -82,6 +82,10 @@ describe('AssetDetailPage', () => {
     circuit: 'Circuit A',
     needs_compressed_air: true,
     needs_ventilation: false,
+    generates_heat_or_flame: true,
+    needs_chilling: true,
+    special_requirements: 'Requires 220V dedicated circuit',
+    work_safety_notes: 'Lock out at Panel A before servicing',
     is_chargeable: true,
     last_scanned_at: '2024-01-15T00:00:00Z',
     ownership_type: 'space',
@@ -204,6 +208,31 @@ describe('AssetDetailPage', () => {
     expect(screen.getByText('Test Description')).toBeInTheDocument();
     expect(screen.getByText('TAG001')).toBeInTheDocument();
     expect(screen.getByText('SN001')).toBeInTheDocument();
+  });
+
+  it('surfaces the facilities site-requirement fields (op-m40s)', async () => {
+    render(
+      <MantineProvider><MemoryRouter>
+        <AssetDetailPage />
+      </MemoryRouter></MantineProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Asset')).toBeInTheDocument();
+    });
+
+    // Boolean flags render as labelled "Yes" rows.
+    expect(screen.getByText('Generates Heat or Flame:')).toBeInTheDocument();
+    expect(screen.getByText('Needs Chilling:')).toBeInTheDocument();
+
+    // Free-text special requirements render.
+    expect(screen.getByText('Special requirements:')).toBeInTheDocument();
+    expect(screen.getByText('Requires 220V dedicated circuit')).toBeInTheDocument();
+
+    // Work safety notes are surfaced prominently (safety) in a callout.
+    expect(screen.getByTestId('work-safety-notes')).toHaveTextContent(
+      'Lock out at Panel A before servicing',
+    );
   });
 
   it('displays part replacement tracking', async () => {

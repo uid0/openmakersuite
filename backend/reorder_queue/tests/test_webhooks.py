@@ -30,7 +30,7 @@ class TestWebHookModel(TestCase):
             name="Test Webhook",
             description="Test webhook description",
             url="https://example.com/webhook",
-            event_type=WebHook.REORDER_REQUEST_CREATED,
+            event_type=WebHook.EventType.REORDER_REQUEST_CREATED,
             is_active=True,
             secret="test-secret-key",
         )
@@ -39,7 +39,7 @@ class TestWebHookModel(TestCase):
         """Test webhook can be created."""
         self.assertEqual(self.webhook.name, "Test Webhook")
         self.assertEqual(self.webhook.url, "https://example.com/webhook")
-        self.assertEqual(self.webhook.event_type, WebHook.REORDER_REQUEST_CREATED)
+        self.assertEqual(self.webhook.event_type, WebHook.EventType.REORDER_REQUEST_CREATED)
         self.assertTrue(self.webhook.is_active)
         self.assertEqual(self.webhook.success_count, 0)
         self.assertEqual(self.webhook.failure_count, 0)
@@ -101,7 +101,7 @@ class TestWebHookModel(TestCase):
         webhook = WebHook.objects.create(
             name="Webhook with headers",
             url="https://api.example.com/hook",
-            event_type=WebHook.ITEM_LOW_STOCK,
+            event_type=WebHook.EventType.ITEM_LOW_STOCK,
             headers=headers,
         )
 
@@ -118,7 +118,7 @@ class TestWebHookTasks(TestCase):
         self.webhook = WebHook.objects.create(
             name="Test Webhook",
             url="https://example.com/webhook",
-            event_type=WebHook.REORDER_REQUEST_CREATED,
+            event_type=WebHook.EventType.REORDER_REQUEST_CREATED,
             is_active=True,
             secret="test-secret-key",
         )
@@ -150,10 +150,10 @@ class TestWebHookTasks(TestCase):
         payload = {"event": "test_event", "data": {"id": 1}}
         # Use .run() to call the task function directly without Celery
         result = send_webhook_notification.run(
-            event_type=WebHook.REORDER_REQUEST_CREATED, payload=payload
+            event_type=WebHook.EventType.REORDER_REQUEST_CREATED, payload=payload
         )
 
-        self.assertEqual(result["event_type"], WebHook.REORDER_REQUEST_CREATED)
+        self.assertEqual(result["event_type"], WebHook.EventType.REORDER_REQUEST_CREATED)
         self.assertEqual(result["webhooks_triggered"], 1)
         self.assertEqual(len(result["successful"]), 1)
         self.assertEqual(len(result["failed"]), 0)
@@ -171,10 +171,10 @@ class TestWebHookTasks(TestCase):
 
         payload = {"event": "test_event", "data": {"id": 1}}
         result = send_webhook_notification.run(
-            event_type=WebHook.REORDER_REQUEST_CREATED, payload=payload
+            event_type=WebHook.EventType.REORDER_REQUEST_CREATED, payload=payload
         )
 
-        self.assertEqual(result["event_type"], WebHook.REORDER_REQUEST_CREATED)
+        self.assertEqual(result["event_type"], WebHook.EventType.REORDER_REQUEST_CREATED)
         self.assertEqual(result["webhooks_triggered"], 1)
         self.assertEqual(len(result["successful"]), 0)
         self.assertEqual(len(result["failed"]), 1)
@@ -193,7 +193,9 @@ class TestWebHookTasks(TestCase):
         mock_post.return_value = mock_response
 
         payload = {"event": "test_event"}
-        send_webhook_notification.run(event_type=WebHook.REORDER_REQUEST_CREATED, payload=payload)
+        send_webhook_notification.run(
+            event_type=WebHook.EventType.REORDER_REQUEST_CREATED, payload=payload
+        )
 
         # Verify HMAC signature header was added
         call_args = mock_post.call_args
@@ -208,10 +210,10 @@ class TestWebHookTasks(TestCase):
 
         payload = {"event": "test_event"}
         result = send_webhook_notification.run(
-            event_type=WebHook.REORDER_REQUEST_CREATED, payload=payload
+            event_type=WebHook.EventType.REORDER_REQUEST_CREATED, payload=payload
         )
 
-        self.assertEqual(result["event_type"], WebHook.REORDER_REQUEST_CREATED)
+        self.assertEqual(result["event_type"], WebHook.EventType.REORDER_REQUEST_CREATED)
         self.assertEqual(result["webhooks_triggered"], 0)
         mock_post.assert_not_called()
 
@@ -221,7 +223,7 @@ class TestWebHookTasks(TestCase):
         """Test triggering webhook for reorder request."""
         # Mock the return value of send_webhook_notification.run()
         mock_send_webhook.run.return_value = {
-            "event_type": WebHook.REORDER_REQUEST_CREATED,
+            "event_type": WebHook.EventType.REORDER_REQUEST_CREATED,
             "webhooks_triggered": 1,
             "successful": [],
             "failed": [],
@@ -229,7 +231,10 @@ class TestWebHookTasks(TestCase):
 
         # Create reorder request (signal mocked so won't trigger webhook)
         reorder_request = ReorderRequest.objects.create(
-            item=self.item, quantity=20, requested_by="testuser", status="pending"
+            item=self.item,
+            quantity=20,
+            requested_by="testuser",
+            status=ReorderRequest.Status.PENDING,
         )
 
         # Call the task function directly
@@ -240,7 +245,7 @@ class TestWebHookTasks(TestCase):
         call_args = mock_send_webhook.run.call_args
 
         # Verify event type
-        self.assertEqual(call_args[0][0], "reorder_request_created")
+        self.assertEqual(call_args[0][0], WebHook.EventType.REORDER_REQUEST_CREATED)
 
         # Verify payload structure
         payload = call_args[0][1]
@@ -274,7 +279,7 @@ class TestWebHookSignals(TestCase):
         WebHook.objects.create(
             name="Reorder Request Webhook",
             url="https://example.com/webhook",
-            event_type=WebHook.REORDER_REQUEST_CREATED,
+            event_type=WebHook.EventType.REORDER_REQUEST_CREATED,
             is_active=True,
         )
 
@@ -295,7 +300,10 @@ class TestWebHookSignals(TestCase):
     def test_reorder_request_created_triggers_webhook(self, mock_trigger):
         """Test that creating a reorder request triggers webhook."""
         reorder_request = ReorderRequest.objects.create(
-            item=self.item, quantity=20, requested_by="testuser", status="pending"
+            item=self.item,
+            quantity=20,
+            requested_by="testuser",
+            status=ReorderRequest.Status.PENDING,
         )
 
         # Verify webhook task was queued
@@ -305,14 +313,17 @@ class TestWebHookSignals(TestCase):
     def test_reorder_request_update_does_not_trigger_webhook(self, mock_trigger):
         """Test that updating a reorder request does not trigger webhook."""
         reorder_request = ReorderRequest.objects.create(
-            item=self.item, quantity=20, requested_by="testuser", status="pending"
+            item=self.item,
+            quantity=20,
+            requested_by="testuser",
+            status=ReorderRequest.Status.PENDING,
         )
 
         # Reset mock to ignore the creation call
         mock_trigger.reset_mock()
 
         # Update the request
-        reorder_request.status = "approved"
+        reorder_request.status = ReorderRequest.Status.APPROVED
         reorder_request.save()
 
         # Verify webhook was not triggered on update

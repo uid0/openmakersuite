@@ -24,9 +24,9 @@ class TestSupplierModel:
 
     def test_supplier_creation(self):
         """Test creating a supplier instance."""
-        supplier = SupplierFactory(supplier_type="local")
+        supplier = SupplierFactory(supplier_type=Supplier.SupplierType.LOCAL)
         assert supplier.name is not None
-        assert supplier.supplier_type == "local"
+        assert supplier.supplier_type == Supplier.SupplierType.LOCAL
         assert str(supplier) == supplier.name
 
     def test_supplier_ordering(self):
@@ -178,7 +178,9 @@ class TestItemSupplierModel:
     def test_package_cost_auto_calculation(self):
         """Unit cost should be auto-calculated from package cost and quantity."""
 
-        supplier = Supplier.objects.create(name="Bulk Supplies", supplier_type=Supplier.LOCAL)
+        supplier = Supplier.objects.create(
+            name="Bulk Supplies", supplier_type=Supplier.SupplierType.LOCAL
+        )
         item = InventoryItem.objects.create(
             name="Zip Ties",
             description="Standard 4-inch zip ties",
@@ -202,7 +204,9 @@ class TestItemSupplierModel:
     def test_backward_compatibility_unit_cost_entry(self):
         """Legacy unit cost entry should still work and calculate package cost."""
 
-        supplier = Supplier.objects.create(name="Local Shop", supplier_type=Supplier.LOCAL)
+        supplier = Supplier.objects.create(
+            name="Local Shop", supplier_type=Supplier.SupplierType.LOCAL
+        )
         item = InventoryItem.objects.create(
             name="Painter's Tape",
             description="Blue painter's tape roll",
@@ -226,7 +230,9 @@ class TestItemSupplierModel:
     def test_no_pricing_data(self):
         """When no pricing is provided, both fields should be None."""
 
-        supplier = Supplier.objects.create(name="Local Shop", supplier_type=Supplier.LOCAL)
+        supplier = Supplier.objects.create(
+            name="Local Shop", supplier_type=Supplier.SupplierType.LOCAL
+        )
         item = InventoryItem.objects.create(
             name="Painter's Tape",
             description="Blue painter's tape roll",
@@ -251,7 +257,7 @@ class TestItemSupplierModel:
         """Each supplier relationship should store UPCs for package and individual units."""
 
         supplier = Supplier.objects.create(
-            name="Warehouse Supplier", supplier_type=Supplier.NATIONAL
+            name="Warehouse Supplier", supplier_type=Supplier.SupplierType.NATIONAL
         )
         item = InventoryItem.objects.create(
             name="Nitrile Gloves",

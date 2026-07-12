@@ -149,11 +149,11 @@ def _task_target_ids(template):
     return [r["target_id"] for r in template.regions_json if r["target_id"].startswith("task_")]
 
 
-def _submission_for(wo, scan_bytes, *, source=WorkOrderSubmission.SOURCE_SCAN):
+def _submission_for(wo, scan_bytes, *, source=WorkOrderSubmission.Source.SCAN):
     sub = WorkOrderSubmission(
-        kind=WorkOrderSubmission.KIND_PM_COMPLETION,
+        kind=WorkOrderSubmission.Kind.PM_COMPLETION,
         source=source,
-        status=WorkOrderSubmission.STATUS_RECEIVED,
+        status=WorkOrderSubmission.Status.RECEIVED,
     )
     sub.attachment.save("scan.png", ContentFile(scan_bytes), save=False)
     sub.save()
@@ -244,7 +244,7 @@ class TestScanIngestion:
         apply_submission(sub)
         sub.refresh_from_db()
 
-        assert sub.status == WorkOrderSubmission.STATUS_PENDING_REVIEW
+        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
         assert sub.work_order_id == wo.id
         # the solid mark pre-checked its task box
         tc0 = WorkOrderTaskCompletion.objects.get(id=tasks[0][len("task_") :])
@@ -268,10 +268,10 @@ class TestScanIngestion:
         wo.refresh_from_db()
         sub.refresh_from_db()
 
-        assert wo.status != WorkOrder.STATUS_COMPLETED
+        assert wo.status != WorkOrder.Status.COMPLETED
         assert wo.completed_at is None
         assert not MaintenanceLog.objects.filter(maintenance_item=wo.maintenance_item).exists()
-        assert sub.status == WorkOrderSubmission.STATUS_PENDING_REVIEW
+        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
         # tasks are pre-checked though (visible on the WO for the reviewer)
         assert all(tc.is_completed for tc in wo.task_completions.all())
 
@@ -293,7 +293,7 @@ class TestScanIngestion:
         assert resp.data["work_order_completed"] is True
 
         wo.refresh_from_db()
-        assert wo.status == WorkOrder.STATUS_COMPLETED
+        assert wo.status == WorkOrder.Status.COMPLETED
         assert wo.completed_at is not None
         wo.maintenance_item.refresh_from_db()
         assert wo.maintenance_item.last_completed_at is not None
@@ -331,7 +331,7 @@ class TestScanIngestion:
         apply_submission(sub)
         sub.refresh_from_db()
 
-        assert sub.status == WorkOrderSubmission.STATUS_PENDING_REVIEW
+        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
         assert "reprint" in sub.parse_error.lower()
         assert sub.pending_changes == []
         assert not wo.task_completions.filter(
@@ -346,7 +346,7 @@ class TestScanIngestion:
         sub = _submission_for(wo, scan)
         apply_submission(sub)
         sub.refresh_from_db()
-        assert sub.status == WorkOrderSubmission.STATUS_PENDING_REVIEW
+        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
         assert "template" in sub.parse_error.lower()
 
     def test_unresolvable_wo_id_fails(self):
@@ -358,7 +358,7 @@ class TestScanIngestion:
         sub = _submission_for(wo, scan)
         apply_submission(sub)
         sub.refresh_from_db()
-        assert sub.status == WorkOrderSubmission.STATUS_FAILED
+        assert sub.status == WorkOrderSubmission.Status.FAILED
 
     def test_registration_failure_holds_for_review(self):
         wo = _make_work_order(num_tasks=2)
@@ -367,7 +367,7 @@ class TestScanIngestion:
         sub = _submission_for(wo, scan)
         apply_submission(sub)
         sub.refresh_from_db()
-        assert sub.status == WorkOrderSubmission.STATUS_PENDING_REVIEW
+        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
         assert "align" in sub.parse_error.lower()
 
 
@@ -434,5 +434,5 @@ class TestReviewFlow:
         )
         sub.refresh_from_db()
         # one row applied, one still queued → stays in review
-        assert sub.status == WorkOrderSubmission.STATUS_PENDING_REVIEW
+        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
         assert len(sub.pending_changes) == 1

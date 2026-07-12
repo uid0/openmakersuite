@@ -627,9 +627,9 @@ class BarcodeReceiptSerializer(serializers.Serializer):
         try:
             po = PurchaseOrder.objects.get(id=value)
             if po.status not in [
-                PurchaseOrder.SENT,
-                PurchaseOrder.CONFIRMED,
-                PurchaseOrder.PARTIALLY_RECEIVED,
+                PurchaseOrder.Status.SENT,
+                PurchaseOrder.Status.CONFIRMED,
+                PurchaseOrder.Status.PARTIALLY_RECEIVED,
             ]:
                 raise serializers.ValidationError(
                     "Purchase order must be sent, confirmed, or partially received to accept deliveries"

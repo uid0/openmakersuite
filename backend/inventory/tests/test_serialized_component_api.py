@@ -45,7 +45,7 @@ def _action_url(component, name):
 def consumable_item():
     return InventoryItemFactory(
         is_serialized=True,
-        serial_tracking_mode=InventoryItem.SERIAL_TRACKING_CONSUMABLE,
+        serial_tracking_mode=InventoryItem.SerialTrackingMode.CONSUMABLE,
     )
 
 
@@ -53,7 +53,7 @@ def consumable_item():
 def reusable_item():
     return InventoryItemFactory(
         is_serialized=True,
-        serial_tracking_mode=InventoryItem.SERIAL_TRACKING_REUSABLE,
+        serial_tracking_mode=InventoryItem.SerialTrackingMode.REUSABLE,
     )
 
 
@@ -87,9 +87,9 @@ class TestSerializedComponentCreate:
             format="json",
         )
         assert resp.status_code == 201
-        assert resp.data["status"] == SerializedComponent.RECEIVED
-        assert resp.data["tracking_mode"] == InventoryItem.SERIAL_TRACKING_CONSUMABLE
-        assert resp.data["available_actions"] == [SerializedComponent.ACTION_RECEIVE]
+        assert resp.data["status"] == SerializedComponent.Status.RECEIVED
+        assert resp.data["tracking_mode"] == InventoryItem.SerialTrackingMode.CONSUMABLE
+        assert resp.data["available_actions"] == [SerializedComponent.Action.RECEIVE]
 
     def test_cannot_create_for_non_serialized_item(self):
         plain_item = InventoryItemFactory(is_serialized=False)
@@ -121,8 +121,8 @@ class TestSerializedComponentLifecycleApi:
 
         r1 = client.post(_action_url(component, "receive"), data={}, format="json")
         assert r1.status_code == 200
-        assert r1.data["status"] == SerializedComponent.IN_STOCK
-        assert r1.data["event"]["action"] == SerializedComponent.ACTION_RECEIVE
+        assert r1.data["status"] == SerializedComponent.Status.IN_STOCK
+        assert r1.data["event"]["action"] == SerializedComponent.Action.RECEIVE
 
         r2 = client.post(
             _action_url(component, "install"),
@@ -130,12 +130,12 @@ class TestSerializedComponentLifecycleApi:
             format="json",
         )
         assert r2.status_code == 200
-        assert r2.data["status"] == SerializedComponent.INSTALLED
+        assert r2.data["status"] == SerializedComponent.Status.INSTALLED
         assert str(r2.data["installed_in_asset"]) == str(asset.id)
 
         r3 = client.post(_action_url(component, "consume"), data={}, format="json")
         assert r3.status_code == 200
-        assert r3.data["status"] == SerializedComponent.CONSUMED
+        assert r3.data["status"] == SerializedComponent.Status.CONSUMED
         assert r3.data["installed_in_asset"] is None
 
         r4 = client.post(
@@ -144,7 +144,7 @@ class TestSerializedComponentLifecycleApi:
             format="json",
         )
         assert r4.status_code == 200
-        assert r4.data["status"] == SerializedComponent.DISPOSED
+        assert r4.data["status"] == SerializedComponent.Status.DISPOSED
 
         component.refresh_from_db()
         assert component.usage_events.count() == 4
@@ -189,7 +189,7 @@ class TestSerializedComponentLifecycleApi:
         resp = client.post(_action_url(component, "consume"), data={}, format="json")
         assert resp.status_code == 400
         component.refresh_from_db()
-        assert component.status == SerializedComponent.RECEIVED
+        assert component.status == SerializedComponent.Status.RECEIVED
 
     def test_dispose_requires_reason(self, consumable_item):
         client = _client(_user("staff7", is_staff=True))
@@ -224,7 +224,7 @@ class TestSerializedComponentLifecycleApi:
         )
         r_remove = client.post(_action_url(component, "remove"), data={}, format="json")
         assert r_remove.status_code == 200
-        assert r_remove.data["status"] == SerializedComponent.REMOVED
+        assert r_remove.data["status"] == SerializedComponent.Status.REMOVED
         assert r_remove.data["installed_in_asset"] is None
 
         r_reinstall = client.post(
@@ -233,7 +233,7 @@ class TestSerializedComponentLifecycleApi:
             format="json",
         )
         assert r_reinstall.status_code == 200
-        assert r_reinstall.data["status"] == SerializedComponent.INSTALLED
+        assert r_reinstall.data["status"] == SerializedComponent.Status.INSTALLED
 
     def test_reusable_retire_from_installed_clears_current_asset(self, reusable_item):
         client = _client(_user("staff8b", is_staff=True))
@@ -249,7 +249,7 @@ class TestSerializedComponentLifecycleApi:
         resp = client.post(_action_url(component, "retire"), data={}, format="json")
 
         assert resp.status_code == 200
-        assert resp.data["status"] == SerializedComponent.RETIRED
+        assert resp.data["status"] == SerializedComponent.Status.RETIRED
         assert resp.data["installed_in_asset"] is None
 
 
@@ -259,22 +259,22 @@ class TestSerializedComponentFilters:
         other_item = InventoryItemFactory(is_serialized=True)
         c1 = SerializedComponentFactory(item=consumable_item)
         SerializedComponentFactory(item=other_item)
-        c1.apply_action(SerializedComponent.ACTION_RECEIVE)  # -> in_stock
+        c1.apply_action(SerializedComponent.Action.RECEIVE)  # -> in_stock
 
         client = _client(_user("member2"))
 
         by_item = client.get(LIST_URL, {"item": str(consumable_item.id)})
         assert by_item.data["count"] == 1
 
-        by_status = client.get(LIST_URL, {"status": SerializedComponent.IN_STOCK})
+        by_status = client.get(LIST_URL, {"status": SerializedComponent.Status.IN_STOCK})
         assert by_status.data["count"] == 1
         assert by_status.data["results"][0]["id"] == str(c1.id)
 
     def test_filter_by_installed_in_asset(self, consumable_item):
         asset = AssetFactory()
         component = SerializedComponentFactory(item=consumable_item)
-        component.apply_action(SerializedComponent.ACTION_RECEIVE)
-        component.apply_action(SerializedComponent.ACTION_INSTALL, asset=asset)
+        component.apply_action(SerializedComponent.Action.RECEIVE)
+        component.apply_action(SerializedComponent.Action.INSTALL, asset=asset)
         SerializedComponentFactory(item=consumable_item)  # not installed
 
         resp = _client(_user("member4")).get(LIST_URL, {"installed_in_asset": str(asset.id)})
@@ -289,13 +289,13 @@ class TestInventoryItemSerializesSerialConfig:
     def test_item_detail_exposes_serial_fields(self):
         item = InventoryItemFactory(
             is_serialized=True,
-            serial_tracking_mode=InventoryItem.SERIAL_TRACKING_REUSABLE,
+            serial_tracking_mode=InventoryItem.SerialTrackingMode.REUSABLE,
         )
         url = reverse("inventoryitem-detail", kwargs={"pk": item.pk})
         resp = _client(_user("member7")).get(url)
         assert resp.status_code == 200
         assert resp.data["is_serialized"] is True
-        assert resp.data["serial_tracking_mode"] == InventoryItem.SERIAL_TRACKING_REUSABLE
+        assert resp.data["serial_tracking_mode"] == InventoryItem.SerialTrackingMode.REUSABLE
 
     def test_serial_fields_are_writable(self):
         """Serialization config is editable through the item serializer (op-5tc).
@@ -309,31 +309,31 @@ class TestInventoryItemSerializesSerialConfig:
             url,
             data={
                 "is_serialized": True,
-                "serial_tracking_mode": InventoryItem.SERIAL_TRACKING_REUSABLE,
+                "serial_tracking_mode": InventoryItem.SerialTrackingMode.REUSABLE,
             },
             format="json",
         )
         assert resp.status_code == 200
         item.refresh_from_db()
         assert item.is_serialized is True
-        assert item.serial_tracking_mode == InventoryItem.SERIAL_TRACKING_REUSABLE
+        assert item.serial_tracking_mode == InventoryItem.SerialTrackingMode.REUSABLE
 
 
 @pytest.mark.integration
 class TestComponentUsageEventApi:
     def test_events_are_listed_and_filterable(self, consumable_item):
         component = SerializedComponentFactory(item=consumable_item)
-        component.apply_action(SerializedComponent.ACTION_RECEIVE)
+        component.apply_action(SerializedComponent.Action.RECEIVE)
 
         url = reverse("component-usage-event-list")
         resp = _client(_user("member3")).get(url, {"component": str(component.id)})
         assert resp.status_code == 200
         assert resp.data["count"] == 1
-        assert resp.data["results"][0]["action"] == SerializedComponent.ACTION_RECEIVE
+        assert resp.data["results"][0]["action"] == SerializedComponent.Action.RECEIVE
 
     def test_events_list_without_filter(self, consumable_item):
         component = SerializedComponentFactory(item=consumable_item)
-        component.apply_action(SerializedComponent.ACTION_RECEIVE)
+        component.apply_action(SerializedComponent.Action.RECEIVE)
         url = reverse("component-usage-event-list")
         resp = _client(_user("member5")).get(url)
         assert resp.status_code == 200
@@ -345,12 +345,12 @@ class TestComponentUsageEventApi:
         other_asset = AssetFactory()
 
         used_here = SerializedComponentFactory(item=consumable_item)
-        used_here.apply_action(SerializedComponent.ACTION_RECEIVE)
-        used_here.apply_action(SerializedComponent.ACTION_INSTALL, asset=asset)
+        used_here.apply_action(SerializedComponent.Action.RECEIVE)
+        used_here.apply_action(SerializedComponent.Action.INSTALL, asset=asset)
 
         used_elsewhere = SerializedComponentFactory(item=consumable_item)
-        used_elsewhere.apply_action(SerializedComponent.ACTION_RECEIVE)
-        used_elsewhere.apply_action(SerializedComponent.ACTION_INSTALL, asset=other_asset)
+        used_elsewhere.apply_action(SerializedComponent.Action.RECEIVE)
+        used_elsewhere.apply_action(SerializedComponent.Action.INSTALL, asset=other_asset)
 
         url = reverse("component-usage-event-list")
         resp = _client(_user("member6")).get(url, {"asset": str(asset.id)})
@@ -359,7 +359,7 @@ class TestComponentUsageEventApi:
         # receive events (asset=None) and the other machine's event are excluded.
         assert resp.data["count"] == 1
         assert str(resp.data["results"][0]["component"]) == str(used_here.id)
-        assert resp.data["results"][0]["action"] == SerializedComponent.ACTION_INSTALL
+        assert resp.data["results"][0]["action"] == SerializedComponent.Action.INSTALL
 
     def test_events_are_read_only(self, consumable_item):
         component = SerializedComponentFactory(item=consumable_item)
@@ -450,13 +450,13 @@ class TestScanReceive:
         assert resp.status_code == 201
         assert resp.data["created"] is True
         # scan = received -> receive applied -> lands in_stock (available).
-        assert resp.data["status"] == SerializedComponent.IN_STOCK
+        assert resp.data["status"] == SerializedComponent.Status.IN_STOCK
         assert resp.data["lot"] == "L9"
 
         unit = SerializedComponent.objects.get(item=consumable_item, serial_number="SCAN-1")
-        assert unit.status == SerializedComponent.IN_STOCK
+        assert unit.status == SerializedComponent.Status.IN_STOCK
         assert unit.received_at is not None
-        assert unit.usage_events.filter(action=SerializedComponent.ACTION_RECEIVE).count() == 1
+        assert unit.usage_events.filter(action=SerializedComponent.Action.RECEIVE).count() == 1
 
     def test_rescan_is_idempotent(self, consumable_item):
         client = _client(_user("scan-staff2", is_staff=True))
@@ -476,7 +476,7 @@ class TestScanReceive:
         units = SerializedComponent.objects.filter(item=consumable_item, serial_number="DUP-1")
         assert units.count() == 1
         assert (
-            units.first().usage_events.filter(action=SerializedComponent.ACTION_RECEIVE).count()
+            units.first().usage_events.filter(action=SerializedComponent.Action.RECEIVE).count()
             == 1
         )
 
@@ -525,7 +525,7 @@ class TestScanReceive:
             format="json",
         )
         assert resp.status_code == 201
-        assert resp.data["status"] == SerializedComponent.IN_STOCK
+        assert resp.data["status"] == SerializedComponent.Status.IN_STOCK
 
     def test_volunteer_cannot_scan_receive(self, consumable_item):
         resp = _client(_user("scan-vol")).post(
@@ -554,18 +554,18 @@ class TestItemDetailSerializedStock:
             SerializedComponent.objects.create(
                 item=consumable_item,
                 serial_number=f"ss-stock-{i}",
-                status=SerializedComponent.IN_STOCK,
+                status=SerializedComponent.Status.IN_STOCK,
             )
         for i in range(2):
             SerializedComponent.objects.create(
                 item=consumable_item,
                 serial_number=f"ss-inst-{i}",
-                status=SerializedComponent.INSTALLED,
+                status=SerializedComponent.Status.INSTALLED,
             )
         SerializedComponent.objects.create(
             item=consumable_item,
             serial_number="ss-consumed",
-            status=SerializedComponent.CONSUMED,
+            status=SerializedComponent.Status.CONSUMED,
         )
 
         url = reverse("inventoryitem-detail", kwargs={"pk": consumable_item.pk})

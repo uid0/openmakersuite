@@ -341,7 +341,7 @@ class TestApplySubmissionFailureReporting:
         apply_submission(submission)
         submission.refresh_from_db()
 
-        assert submission.status == WorkOrderSubmission.STATUS_FAILED
+        assert submission.status == WorkOrderSubmission.Status.FAILED
         # Backwards-compatible prefix preserved so existing tests / dashboards
         # still match against "Work Order ID":
         assert "Work Order ID" in submission.parse_error
@@ -412,5 +412,5 @@ class TestImageOnlyPdfIngest:
         apply_submission(submission)
         submission.refresh_from_db()
 
-        assert submission.status == WorkOrderSubmission.STATUS_APPLIED
+        assert submission.status == WorkOrderSubmission.Status.APPLIED
         assert submission.work_order_id == wo.id

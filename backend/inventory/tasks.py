@@ -131,7 +131,7 @@ def update_average_lead_times():
         # For now, we'll update based on all reorders for the item
         completed_reorders = ReorderRequest.objects.filter(
             item=item_supplier.item,
-            status="received",
+            status=ReorderRequest.Status.RECEIVED,
             ordered_at__isnull=False,
             actual_delivery__isnull=False,
             ordered_at__gte=six_months_ago,

@@ -16,7 +16,9 @@ class TestNewCostingLogic:
     def test_trash_bag_example(self):
         """Test the specific example from the user: 50-count box for $40.49."""
 
-        supplier = Supplier.objects.create(name="Office Supply Co", supplier_type=Supplier.ONLINE)
+        supplier = Supplier.objects.create(
+            name="Office Supply Co", supplier_type=Supplier.SupplierType.ONLINE
+        )
         item = InventoryItem.objects.create(
             name="Trash Bags",
             description="Heavy-duty 13-gallon trash bags",
@@ -44,7 +46,9 @@ class TestNewCostingLogic:
     def test_cost_calculation_precision(self):
         """Test that cost calculations maintain proper decimal precision."""
 
-        supplier = Supplier.objects.create(name="Hardware Store", supplier_type=Supplier.LOCAL)
+        supplier = Supplier.objects.create(
+            name="Hardware Store", supplier_type=Supplier.SupplierType.LOCAL
+        )
         item = InventoryItem.objects.create(
             name="Screws",
             description="Phillips head screws #8",
@@ -68,7 +72,9 @@ class TestNewCostingLogic:
     def test_inventory_item_total_value_with_new_costing(self):
         """Test that inventory value calculations work correctly with new costing."""
 
-        supplier = Supplier.objects.create(name="Electronics Shop", supplier_type=Supplier.ONLINE)
+        supplier = Supplier.objects.create(
+            name="Electronics Shop", supplier_type=Supplier.SupplierType.ONLINE
+        )
         item = InventoryItem.objects.create(
             name="Resistors",
             description="1K ohm resistors",
@@ -93,7 +99,9 @@ class TestNewCostingLogic:
     def test_updating_package_cost_recalculates_unit_cost(self):
         """Test that updating package cost recalculates unit cost."""
 
-        supplier = Supplier.objects.create(name="Tool Supply", supplier_type=Supplier.LOCAL)
+        supplier = Supplier.objects.create(
+            name="Tool Supply", supplier_type=Supplier.SupplierType.LOCAL
+        )
         item = InventoryItem.objects.create(
             name="Drill Bits",
             description="HSS drill bit set",
@@ -123,7 +131,9 @@ class TestNewCostingLogic:
     def test_edge_case_quantity_per_package_change(self):
         """Test that changing quantity per package recalculates unit cost."""
 
-        supplier = Supplier.objects.create(name="Bulk Supplier", supplier_type=Supplier.ONLINE)
+        supplier = Supplier.objects.create(
+            name="Bulk Supplier", supplier_type=Supplier.SupplierType.ONLINE
+        )
         item = InventoryItem.objects.create(
             name="Cable Ties",
             description="4-inch cable ties",

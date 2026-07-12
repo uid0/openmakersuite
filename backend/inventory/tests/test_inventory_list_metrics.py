@@ -66,7 +66,7 @@ def _open_po_line(
     *,
     quantity_ordered,
     quantity_received=0,
-    po_status=PurchaseOrder.SENT,
+    po_status=PurchaseOrder.Status.SENT,
     unit_cost_ordered=_DEFAULT_PO_UNIT_COST,
 ):
     """Create a PurchaseOrder + single line for ``item``'s primary supplier."""
@@ -125,14 +125,14 @@ class TestListMetricsValues:
         asset = AssetFactory()
         # Item A: on order + in transit + committed against 20 on hand.
         a = InventoryItemFactory(image=None, current_stock=20, reorder_quantity=5)
-        _open_po_line(a, quantity_ordered=8, po_status=PurchaseOrder.SENT)
+        _open_po_line(a, quantity_ordered=8, po_status=PurchaseOrder.Status.SENT)
         _open_po_line(
             a,
             quantity_ordered=10,
             quantity_received=4,
-            po_status=PurchaseOrder.PARTIALLY_RECEIVED,
+            po_status=PurchaseOrder.Status.PARTIALLY_RECEIVED,
         )
-        _commit_material(a, asset, quantity="3", wo_statuses=[WorkOrder.STATUS_OPEN])
+        _commit_material(a, asset, quantity="3", wo_statuses=[WorkOrder.Status.OPEN])
         # Item B: no PO / work-order activity at all.
         b = InventoryItemFactory(image=None, current_stock=3, reorder_quantity=1)
 
@@ -159,7 +159,7 @@ class TestListMetricsValues:
             item,
             asset,
             quantity="4",
-            wo_statuses=[WorkOrder.STATUS_OPEN, WorkOrder.STATUS_IN_PROGRESS],
+            wo_statuses=[WorkOrder.Status.OPEN, WorkOrder.Status.IN_PROGRESS],
         )
 
         results = _results(api_client.get(_list_url(with_metrics=True)))
@@ -193,7 +193,7 @@ class TestListMetricsValues:
         _open_po_line(
             item,
             quantity_ordered=6,
-            po_status=PurchaseOrder.CONFIRMED,
+            po_status=PurchaseOrder.Status.CONFIRMED,
             unit_cost_ordered=Decimal("4.0000"),
         )
 
@@ -215,8 +215,8 @@ def _count_queries(api_client, url):
 def _make_active_item(asset):
     """An item with a PO line and a committed material, so the aggregates hit rows."""
     item = InventoryItemFactory(image=None, current_stock=15, reorder_quantity=2)
-    _open_po_line(item, quantity_ordered=5, po_status=PurchaseOrder.SENT)
-    _commit_material(item, asset, quantity="1", wo_statuses=[WorkOrder.STATUS_OPEN])
+    _open_po_line(item, quantity_ordered=5, po_status=PurchaseOrder.Status.SENT)
+    _commit_material(item, asset, quantity="1", wo_statuses=[WorkOrder.Status.OPEN])
     return item
 
 

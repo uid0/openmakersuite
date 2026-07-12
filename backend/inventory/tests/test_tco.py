@@ -25,7 +25,7 @@ URL = "/api/inventory/reports/assets/tco/"
 def _create_completed_wo(maintenance_item, completed_at, *, created_at=None):
     wo = WorkOrder.objects.create(
         maintenance_item=maintenance_item,
-        status=WorkOrder.STATUS_COMPLETED,
+        status=WorkOrder.Status.COMPLETED,
         completed_at=completed_at,
     )
     if created_at is not None:
@@ -151,7 +151,7 @@ class TestAssetTcoReport:
         )
 
         # Currently in MAINTENANCE — adds today.
-        asset.status = Asset.MAINTENANCE
+        asset.status = Asset.Status.MAINTENANCE
         asset.save(update_fields=["status"])
 
         response = client.get(URL)

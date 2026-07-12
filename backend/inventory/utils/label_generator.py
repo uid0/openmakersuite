@@ -176,7 +176,7 @@ class BrotherLabelRenderer:
         )
         font_size_status = 9  # Increased from 7
         pdf_canvas.setFont("Helvetica", font_size_status)
-        status_color = colors.green if asset.status == Asset.ACTIVE else colors.orange
+        status_color = colors.green if asset.status == Asset.Status.ACTIVE else colors.orange
         pdf_canvas.setFillColor(status_color)
         pdf_canvas.drawString(text_x, status_y, asset.get_status_display())
 

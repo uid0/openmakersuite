@@ -143,7 +143,7 @@ class BrotherESCPGenerator:
         # Status
         status_y = tag_y + 60 if asset.asset_tag else text_y + 80
         status_text = asset.get_status_display()
-        status_color = "green" if asset.status == Asset.ACTIVE else "orange"
+        status_color = "green" if asset.status == Asset.Status.ACTIVE else "orange"
         if font_medium:
             draw.text((text_x, status_y), status_text, fill=status_color, font=font_medium)
         else:

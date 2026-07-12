@@ -124,7 +124,7 @@ def test_electrical_context_pulls_asset_charfield_stubs():
         electrical_box="Panel A enclosure",
         breaker_location="Panel A / 12",
         suite="North bay",
-        wiring_type=Asset.WIRING_240V_PLUG,
+        wiring_type=Asset.WiringType.PLUG_240V,
         has_network_drop=True,
         network_drop_location="Wallplate 3A",
         power_draw_watts=1500,
@@ -173,7 +173,7 @@ def test_electrical_context_joins_electrical_circuits_via_location():
 
 
 def test_loto_context_empty_when_no_lockout_required():
-    asset = AssetFactory(lockout_type=Asset.LOCKOUT_NONE)
+    asset = AssetFactory(lockout_type=Asset.LockoutType.NONE)
     ctx = build_loto_context(asset)
     assert ctx["is_required"] is False
     assert ctx["is_empty"] is True
@@ -181,7 +181,7 @@ def test_loto_context_empty_when_no_lockout_required():
 
 def test_loto_context_populated_when_lockout_required():
     asset = AssetFactory(
-        lockout_type=Asset.LOCKOUT_LOTO,
+        lockout_type=Asset.LockoutType.LOTO,
         lockout_instructions="Open Panel A breaker 12. Lock with tag.",
         lockout_responsible="Ops lead",
     )
@@ -199,7 +199,7 @@ def test_loto_context_populated_when_lockout_required():
 
 def test_serializer_includes_electrical_and_loto_blocks(api):
     asset = AssetFactory(
-        lockout_type=Asset.LOCKOUT_LOTO,
+        lockout_type=Asset.LockoutType.LOTO,
         lockout_instructions="Lock breaker A12.",
         electrical_box="Panel A",
     )
@@ -223,13 +223,13 @@ def test_completion_blocked_without_validation(api):
     wo = _build_wo()
     res = api.patch(
         f"/api/inventory/work-orders/{wo.id}/",
-        {"status": WorkOrder.STATUS_COMPLETED},
+        {"status": WorkOrder.Status.COMPLETED},
         format="json",
     )
     assert res.status_code == status.HTTP_412_PRECONDITION_FAILED
     assert res.json()["code"] == "validation_required"
     wo.refresh_from_db()
-    assert wo.status != WorkOrder.STATUS_COMPLETED
+    assert wo.status != WorkOrder.Status.COMPLETED
 
 
 def test_pdf_generation_blocked_without_validation(api):
@@ -273,12 +273,12 @@ def test_completion_allowed_after_full_validation(api, staff_user):
 
     res = api.patch(
         f"/api/inventory/work-orders/{wo.id}/",
-        {"status": WorkOrder.STATUS_COMPLETED},
+        {"status": WorkOrder.Status.COMPLETED},
         format="json",
     )
     assert res.status_code == status.HTTP_200_OK
     wo.refresh_from_db()
-    assert wo.status == WorkOrder.STATUS_COMPLETED
+    assert wo.status == WorkOrder.Status.COMPLETED
 
 
 def test_completion_stamps_completed_at(api):
@@ -301,13 +301,13 @@ def test_completion_stamps_completed_at(api):
     )
     res = api.patch(
         f"/api/inventory/work-orders/{wo.id}/",
-        {"status": WorkOrder.STATUS_COMPLETED},
+        {"status": WorkOrder.Status.COMPLETED},
         format="json",
     )
 
     assert res.status_code == status.HTTP_200_OK
     wo.refresh_from_db()
-    assert wo.status == WorkOrder.STATUS_COMPLETED
+    assert wo.status == WorkOrder.Status.COMPLETED
     assert wo.completed_at is not None
 
 
@@ -325,7 +325,7 @@ def test_reopening_clears_completed_at(api):
     )
     api.patch(
         f"/api/inventory/work-orders/{wo.id}/",
-        {"status": WorkOrder.STATUS_COMPLETED},
+        {"status": WorkOrder.Status.COMPLETED},
         format="json",
     )
     wo.refresh_from_db()
@@ -333,13 +333,13 @@ def test_reopening_clears_completed_at(api):
 
     res = api.patch(
         f"/api/inventory/work-orders/{wo.id}/",
-        {"status": WorkOrder.STATUS_IN_PROGRESS},
+        {"status": WorkOrder.Status.IN_PROGRESS},
         format="json",
     )
 
     assert res.status_code == status.HTTP_200_OK
     wo.refresh_from_db()
-    assert wo.status == WorkOrder.STATUS_IN_PROGRESS
+    assert wo.status == WorkOrder.Status.IN_PROGRESS
     assert wo.completed_at is None
 
 
@@ -353,7 +353,7 @@ def test_backfill_migration_populates_completed_at():
     wo = _build_wo()
     # Simulate a legacy digital completion: completed status, no timestamp.
     # .update() bypasses auto_now, so updated_at stays at creation time.
-    WorkOrder.objects.filter(pk=wo.pk).update(status=WorkOrder.STATUS_COMPLETED, completed_at=None)
+    WorkOrder.objects.filter(pk=wo.pk).update(status=WorkOrder.Status.COMPLETED, completed_at=None)
 
     migration = importlib.import_module("inventory.migrations.0062_backfill_workorder_completed_at")
     migration.backfill_completed_at(global_apps, None)
@@ -403,9 +403,9 @@ def test_auto_apply_or_queue_splits_by_confidence(settings):
 def test_apply_pending_changes_endpoint(api):
     wo = _build_wo()
     sub = WorkOrderSubmission.objects.create(
-        kind=WorkOrderSubmission.KIND_PM_COMPLETION,
+        kind=WorkOrderSubmission.Kind.PM_COMPLETION,
         work_order=wo,
-        status=WorkOrderSubmission.STATUS_PENDING_REVIEW,
+        status=WorkOrderSubmission.Status.PENDING_REVIEW,
         pending_changes=[
             {
                 "kind": "signature",
@@ -428,7 +428,7 @@ def test_apply_pending_changes_endpoint(api):
     assert res.status_code == status.HTTP_200_OK
     assert res.json()["applied_count"] == 2
     sub.refresh_from_db()
-    assert sub.status == WorkOrderSubmission.STATUS_APPLIED
+    assert sub.status == WorkOrderSubmission.Status.APPLIED
     assert sub.pending_changes == []
     wo.refresh_from_db()
     assert "Replaced V-belt" in wo.notes
@@ -438,9 +438,9 @@ def test_apply_pending_changes_endpoint(api):
 def test_discard_pending_changes_endpoint(api):
     wo = _build_wo()
     sub = WorkOrderSubmission.objects.create(
-        kind=WorkOrderSubmission.KIND_PM_COMPLETION,
+        kind=WorkOrderSubmission.Kind.PM_COMPLETION,
         work_order=wo,
-        status=WorkOrderSubmission.STATUS_PENDING_REVIEW,
+        status=WorkOrderSubmission.Status.PENDING_REVIEW,
         pending_changes=[
             {
                 "kind": "handwritten",
@@ -456,7 +456,7 @@ def test_discard_pending_changes_endpoint(api):
     assert res.status_code == status.HTTP_200_OK
     assert res.json()["dropped_count"] == 1
     sub.refresh_from_db()
-    assert sub.status == WorkOrderSubmission.STATUS_APPLIED
+    assert sub.status == WorkOrderSubmission.Status.APPLIED
     assert sub.pending_changes == []
     wo.refresh_from_db()
     assert "illegible" not in wo.notes
@@ -474,10 +474,10 @@ def test_pdf_and_serializer_share_the_same_context_builder():
     LOTO data so any field that one surface drops will trip the test.
     """
     asset = AssetFactory(
-        wiring_type=Asset.WIRING_240V_PLUG,
+        wiring_type=Asset.WiringType.PLUG_240V,
         electrical_box="Panel A",
         breaker_location="Panel A / 12",
-        lockout_type=Asset.LOCKOUT_LOTO,
+        lockout_type=Asset.LockoutType.LOTO,
         lockout_instructions="Lock breaker A12.",
         lockout_responsible="Ops lead",
         has_network_drop=True,

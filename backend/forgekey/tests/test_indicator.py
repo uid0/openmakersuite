@@ -164,7 +164,7 @@ class TestPresentationMapping:
 # ---------------------------------------------------------------------------
 class TestDeriveAssetStatus:
     def test_default_active_asset_is_available(self):
-        asset = AssetFactory(status=Asset.ACTIVE)
+        asset = AssetFactory(status=Asset.Status.ACTIVE)
         assert derive_asset_status(asset) == IndicatorStatus.AVAILABLE
 
     def test_open_usage_is_in_use(self):
@@ -198,17 +198,17 @@ class TestDeriveAssetStatus:
         assert derive_asset_status(asset) == IndicatorStatus.UNAVAILABLE
 
     def test_non_active_asset_is_unavailable(self):
-        asset = AssetFactory(status=Asset.MAINTENANCE)
+        asset = AssetFactory(status=Asset.Status.MAINTENANCE)
         assert derive_asset_status(asset) == IndicatorStatus.UNAVAILABLE
 
     def test_offline_primary_device_is_unavailable(self):
-        asset = AssetFactory(status=Asset.ACTIVE)
+        asset = AssetFactory(status=Asset.Status.ACTIVE)
         offline = ESP32DeviceFactory(is_online=False)
         AssetDeviceFactory(asset=asset, device=offline, is_primary=True)
         assert derive_asset_status(asset) == IndicatorStatus.UNAVAILABLE
 
     def test_online_primary_device_stays_available(self):
-        asset = AssetFactory(status=Asset.ACTIVE)
+        asset = AssetFactory(status=Asset.Status.ACTIVE)
         online = ESP32DeviceFactory(is_online=True)
         AssetDeviceFactory(asset=asset, device=online, is_primary=True)
         assert derive_asset_status(asset) == IndicatorStatus.AVAILABLE
@@ -233,7 +233,7 @@ class TestDeriveAssetStatus:
 
     def test_precedence_usage_beats_unavailable(self):
         # in_use (step 3) wins over a non-ACTIVE status (step 4).
-        asset = AssetFactory(status=Asset.MAINTENANCE)
+        asset = AssetFactory(status=Asset.Status.MAINTENANCE)
         DeviceUsageFactory(asset=asset, ended_at=None)
         assert derive_asset_status(asset) == IndicatorStatus.IN_USE
 
@@ -639,7 +639,7 @@ class TestSignals:
         binding = IndicatorBindingFactory()
         sync_indicator(binding, force=True)  # prime last_presentation = available
         mock_publish.reset_mock()
-        binding.asset.status = Asset.MAINTENANCE
+        binding.asset.status = Asset.Status.MAINTENANCE
         binding.asset.save()
         assert mock_publish.called
         assert _last_payload(mock_publish)["color"] == "red"  # unavailable
@@ -678,7 +678,7 @@ class TestSignals:
 # ---------------------------------------------------------------------------
 class TestDeviceTransition:
     def test_sync_bindings_for_device_targets_asset(self, mock_publish):
-        asset = AssetFactory(status=Asset.ACTIVE)
+        asset = AssetFactory(status=Asset.Status.ACTIVE)
         control = ESP32DeviceFactory(is_online=False)
         AssetDeviceFactory(asset=asset, device=control, is_primary=True)
         binding = IndicatorBindingFactory(asset=asset)
@@ -695,7 +695,7 @@ class TestDeviceTransition:
         assert mock_publish.called
 
     def test_webhook_task_transition_resyncs(self, mock_publish):
-        asset = AssetFactory(status=Asset.ACTIVE)
+        asset = AssetFactory(status=Asset.Status.ACTIVE)
         control = ESP32DeviceFactory(mac_address="AA:BB:CC:DD:EE:01", is_online=False)
         AssetDeviceFactory(asset=asset, device=control, is_primary=True)
         binding = IndicatorBindingFactory(asset=asset)
@@ -707,7 +707,7 @@ class TestDeviceTransition:
         assert binding.last_status == IndicatorStatus.AVAILABLE
 
     def test_consumer_transition_resyncs(self, mock_publish):
-        asset = AssetFactory(status=Asset.ACTIVE)
+        asset = AssetFactory(status=Asset.Status.ACTIVE)
         control = ESP32DeviceFactory(mac_address="AA:BB:CC:DD:EE:02", is_online=False)
         AssetDeviceFactory(asset=asset, device=control, is_primary=True)
         binding = IndicatorBindingFactory(asset=asset)

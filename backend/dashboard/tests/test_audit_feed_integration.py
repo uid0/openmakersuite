@@ -94,7 +94,7 @@ def _make_webhook(**overrides) -> WebHook:
     defaults = {
         "name": "Audit Webhook",
         "url": "https://example.com/audit-webhook",
-        "event_type": WebHook.REORDER_REQUEST_CREATED,
+        "event_type": WebHook.EventType.REORDER_REQUEST_CREATED,
         "is_active": True,
         "secret": "initial-shared-secret",
     }
@@ -125,11 +125,11 @@ def _seed_one_event_per_domain(actor) -> dict:
     supplier = SupplierFactory()
     purchase_order = PurchaseOrder.objects.create(
         supplier=supplier,
-        status=PurchaseOrder.VOIDED,
+        status=PurchaseOrder.Status.VOIDED,
         created_by=actor,
     )
     po_event = record_po_audit(
-        action=PurchaseOrderAuditEvent.ACTION_PO_VOID,
+        action=PurchaseOrderAuditEvent.Action.PO_VOID,
         actor=actor,
         purchase_order=purchase_order,
         notes="audit feed integration test",
@@ -139,7 +139,7 @@ def _seed_one_event_per_domain(actor) -> dict:
     # carries before/after values we can assert against later.
     webhook = _make_webhook(name="Before Name")
     webhook_event = record_webhook_audit(
-        action=WebhookAuditEvent.ACTION_WEBHOOK_UPDATE,
+        action=WebhookAuditEvent.Action.WEBHOOK_UPDATE,
         actor=actor,
         webhook=webhook,
         metadata={
@@ -167,10 +167,10 @@ def _seed_one_event_per_domain(actor) -> dict:
     problem = LocationProblem.objects.create(
         location=location,
         description="Audit feed integration problem",
-        status=LocationProblem.REPORTED,
+        status=LocationProblem.Status.REPORTED,
     )
     maintenance_event = record_maintenance_audit(
-        action=MaintenanceAuditEvent.ACTION_LOCATION_PROBLEM_RESOLVE,
+        action=MaintenanceAuditEvent.Action.LOCATION_PROBLEM_RESOLVE,
         actor=actor,
         location_problem=problem,
         notes="resolved",
@@ -352,11 +352,11 @@ class TestAuditRowSurvivesEntityDeletion:
 
         purchase_order = PurchaseOrder.objects.create(
             supplier=SupplierFactory(),
-            status=PurchaseOrder.VOIDED,
+            status=PurchaseOrder.Status.VOIDED,
             created_by=actor,
         )
         event = record_po_audit(
-            action=PurchaseOrderAuditEvent.ACTION_PO_VOID,
+            action=PurchaseOrderAuditEvent.Action.PO_VOID,
             actor=actor,
             purchase_order=purchase_order,
         )
@@ -370,7 +370,7 @@ class TestAuditRowSurvivesEntityDeletion:
     def test_webhook_audit_survives_webhook_delete(self, actor):
         webhook = _make_webhook()
         event = record_webhook_audit(
-            action=WebhookAuditEvent.ACTION_WEBHOOK_DELETE,
+            action=WebhookAuditEvent.Action.WEBHOOK_DELETE,
             actor=actor,
             webhook=webhook,
             metadata={
@@ -410,10 +410,10 @@ class TestAuditRowSurvivesEntityDeletion:
         problem = LocationProblem.objects.create(
             location=LocationFactory(),
             description="Survival problem",
-            status=LocationProblem.REPORTED,
+            status=LocationProblem.Status.REPORTED,
         )
         event = record_maintenance_audit(
-            action=MaintenanceAuditEvent.ACTION_LOCATION_PROBLEM_RESOLVE,
+            action=MaintenanceAuditEvent.Action.LOCATION_PROBLEM_RESOLVE,
             actor=actor,
             location_problem=problem,
         )
@@ -495,14 +495,14 @@ class TestAuditFeedRedactsSecrets:
         # here we mirror it via the helper so the assertion is about what
         # gets stored, independent of the view).
         record_webhook_audit(
-            action=WebhookAuditEvent.ACTION_WEBHOOK_SECRET_ROTATE,
+            action=WebhookAuditEvent.Action.WEBHOOK_SECRET_ROTATE,
             actor=actor,
             webhook=webhook,
         )
         # Force a config update that would have leaked secret if the diff
         # helper had not excluded it.
         record_webhook_audit(
-            action=WebhookAuditEvent.ACTION_WEBHOOK_UPDATE,
+            action=WebhookAuditEvent.Action.WEBHOOK_UPDATE,
             actor=actor,
             webhook=webhook,
             metadata={"changes": {"name": {"before": "x", "after": "y"}}},
@@ -517,7 +517,7 @@ class TestAuditFeedRedactsSecrets:
         # The rotate row should be present so reviewers can see the rotation
         # happened, just without the value.
         actions = {event["action"] for event in response.data["events"]}
-        assert WebhookAuditEvent.ACTION_WEBHOOK_SECRET_ROTATE in actions
+        assert WebhookAuditEvent.Action.WEBHOOK_SECRET_ROTATE in actions
 
     def test_feed_response_never_includes_logo_or_favicon_binary(self, admin_client, actor):
         """The settings audit explicitly summarizes file fields by filename

@@ -61,7 +61,7 @@ def value_summary(period_start: date, period_end: date) -> ValueSummary:
     start_dt, end_dt = _aware_range(period_start, period_end)
 
     completed_wos = WorkOrder.objects.filter(
-        status=WorkOrder.STATUS_COMPLETED,
+        status=WorkOrder.Status.COMPLETED,
         completed_at__gte=start_dt,
         completed_at__lt=end_dt,
     )
@@ -112,7 +112,7 @@ def wo_volume(period_start: date, period_end: date, bucket: str = "month") -> li
 
     qs = (
         WorkOrder.objects.filter(
-            status=WorkOrder.STATUS_COMPLETED,
+            status=WorkOrder.Status.COMPLETED,
             completed_at__gte=start_dt,
             completed_at__lt=end_dt,
         )
@@ -129,7 +129,7 @@ def top_users(period_start: date, period_end: date, limit: int = 10) -> list[dic
     start_dt, end_dt = _aware_range(period_start, period_end)
     qs = (
         WorkOrder.objects.filter(
-            status=WorkOrder.STATUS_COMPLETED,
+            status=WorkOrder.Status.COMPLETED,
             completed_at__gte=start_dt,
             completed_at__lt=end_dt,
         )
@@ -171,7 +171,7 @@ def utilization(period_start: date, period_end: date) -> list[dict]:
             window_wo_count=Count(
                 "maintenance_items__work_orders",
                 filter=Q(
-                    maintenance_items__work_orders__status=WorkOrder.STATUS_COMPLETED,
+                    maintenance_items__work_orders__status=WorkOrder.Status.COMPLETED,
                     maintenance_items__work_orders__completed_at__gte=start_dt,
                     maintenance_items__work_orders__completed_at__lt=end_dt,
                 ),
@@ -205,7 +205,7 @@ def category_spend(period_start: date, period_end: date) -> list[dict]:
 
     internal_rows = (
         WorkOrder.objects.filter(
-            status=WorkOrder.STATUS_COMPLETED,
+            status=WorkOrder.Status.COMPLETED,
             completed_at__gte=start_dt,
             completed_at__lt=end_dt,
         )

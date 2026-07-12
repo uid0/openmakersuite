@@ -278,12 +278,12 @@ class TestDetectSubmissionKind:
         c.save()
 
         kind = detect_submission_kind(plain_pdf.getvalue(), subject="[3PWO] Vendor invoice")
-        assert kind == WorkOrderSubmission.KIND_THIRD_PARTY_WO
+        assert kind == WorkOrderSubmission.Kind.THIRD_PARTY_WO
 
     def test_acroform_marker_routes_to_third_party(self, tpwo):
         pdf_bytes = _make_3pwo_form_pdf(str(tpwo.id), include_header=False)
         kind = detect_submission_kind(pdf_bytes, subject="Completed work")
-        assert kind == WorkOrderSubmission.KIND_THIRD_PARTY_WO
+        assert kind == WorkOrderSubmission.Kind.THIRD_PARTY_WO
 
     def test_header_text_routes_to_third_party(self):
         buf = io.BytesIO()
@@ -292,7 +292,7 @@ class TestDetectSubmissionKind:
         c.showPage()
         c.save()
         kind = detect_submission_kind(buf.getvalue(), subject="WO from vendor")
-        assert kind == WorkOrderSubmission.KIND_THIRD_PARTY_WO
+        assert kind == WorkOrderSubmission.Kind.THIRD_PARTY_WO
 
     def test_default_to_pm_completion(self):
         buf = io.BytesIO()
@@ -301,7 +301,7 @@ class TestDetectSubmissionKind:
         c.showPage()
         c.save()
         kind = detect_submission_kind(buf.getvalue(), subject="Completed monthly check")
-        assert kind == WorkOrderSubmission.KIND_PM_COMPLETION
+        assert kind == WorkOrderSubmission.Kind.PM_COMPLETION
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -326,7 +326,7 @@ class TestApplyThirdPartySubmission:
         )
 
         submission = WorkOrderSubmission(
-            kind=WorkOrderSubmission.KIND_THIRD_PARTY_WO,
+            kind=WorkOrderSubmission.Kind.THIRD_PARTY_WO,
             submitted_by=staff_user,
         )
         submission.attachment.save("3pwo.pdf", ContentFile(filled), save=False)
@@ -336,7 +336,7 @@ class TestApplyThirdPartySubmission:
 
         submission.refresh_from_db()
         tpwo.refresh_from_db()
-        assert submission.status == WorkOrderSubmission.STATUS_APPLIED
+        assert submission.status == WorkOrderSubmission.Status.APPLIED
         assert submission.third_party_work_order_id == tpwo.id
         assert submission.work_order_id is None
         assert tpwo.status == ThirdPartyWorkOrder.STATUS_VALIDATED
@@ -368,7 +368,7 @@ class TestApplyThirdPartySubmission:
         pdf_bytes = _make_3pwo_form_pdf(bogus)
 
         submission = WorkOrderSubmission(
-            kind=WorkOrderSubmission.KIND_THIRD_PARTY_WO,
+            kind=WorkOrderSubmission.Kind.THIRD_PARTY_WO,
             submitted_by=staff_user,
         )
         submission.attachment.save("3pwo.pdf", ContentFile(pdf_bytes), save=False)
@@ -377,7 +377,7 @@ class TestApplyThirdPartySubmission:
         apply_submission(submission)
         submission.refresh_from_db()
 
-        assert submission.status == WorkOrderSubmission.STATUS_FAILED
+        assert submission.status == WorkOrderSubmission.Status.FAILED
         assert bogus in submission.parse_error
         assert submission.third_party_work_order_id is None
 
@@ -389,7 +389,7 @@ class TestApplyThirdPartySubmission:
         filled = _fill_text_fields(pdf_bytes, {"keyfob_id": "FOB-9999"})
 
         submission = WorkOrderSubmission(
-            kind=WorkOrderSubmission.KIND_THIRD_PARTY_WO,
+            kind=WorkOrderSubmission.Kind.THIRD_PARTY_WO,
             submitted_by=staff_user,
         )
         submission.attachment.save("3pwo.pdf", ContentFile(filled), save=False)
@@ -407,7 +407,7 @@ class TestApplyThirdPartySubmission:
         with_photo = _attach_image_to_pdf(pdf_bytes, _png_bytes())
 
         submission = WorkOrderSubmission(
-            kind=WorkOrderSubmission.KIND_THIRD_PARTY_WO,
+            kind=WorkOrderSubmission.Kind.THIRD_PARTY_WO,
             submitted_by=staff_user,
         )
         submission.attachment.save("3pwo.pdf", ContentFile(with_photo), save=False)
@@ -470,8 +470,8 @@ class TestPostmarkInbound3PWO:
         assert resp.status_code == status.HTTP_200_OK
 
         body = resp.json()
-        assert body["kind"] == WorkOrderSubmission.KIND_THIRD_PARTY_WO
-        assert body["status"] == WorkOrderSubmission.STATUS_APPLIED
+        assert body["kind"] == WorkOrderSubmission.Kind.THIRD_PARTY_WO
+        assert body["status"] == WorkOrderSubmission.Status.APPLIED
         assert body["third_party_work_order_id"] == str(tpwo.id)
         assert body["work_order_id"] is None
 

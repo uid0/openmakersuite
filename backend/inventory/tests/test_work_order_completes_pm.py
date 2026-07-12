@@ -59,7 +59,7 @@ def _validate(api, wo):
     )
 
 
-def _create_wo(api, item, *, status="open"):
+def _create_wo(api, item, *, status=WorkOrder.Status.OPEN):
     payload = {
         "maintenance_item": str(item.id),
         "due_date": (date.today() + timedelta(days=7)).isoformat(),
@@ -81,7 +81,7 @@ class TestWorkOrderClosesPM:
 
         resp = staff_client.patch(
             f"/api/inventory/work-orders/{wo.id}/",
-            {"status": "completed"},
+            {"status": WorkOrder.Status.COMPLETED},
             format="json",
         )
         assert resp.status_code == 200, resp.content
@@ -104,19 +104,19 @@ class TestWorkOrderClosesPM:
         _validate(staff_client, wo)
         staff_client.patch(
             f"/api/inventory/work-orders/{wo.id}/",
-            {"status": "completed"},
+            {"status": WorkOrder.Status.COMPLETED},
             format="json",
         )
         # Reopen.
         staff_client.patch(
             f"/api/inventory/work-orders/{wo.id}/",
-            {"status": "open"},
+            {"status": WorkOrder.Status.OPEN},
             format="json",
         )
         # Re-complete.
         staff_client.patch(
             f"/api/inventory/work-orders/{wo.id}/",
-            {"status": "completed"},
+            {"status": WorkOrder.Status.COMPLETED},
             format="json",
         )
 
@@ -131,7 +131,7 @@ class TestWorkOrderClosesPM:
         _validate(staff_client, wo)
         staff_client.patch(
             f"/api/inventory/work-orders/{wo.id}/",
-            {"status": "completed"},
+            {"status": WorkOrder.Status.COMPLETED},
             format="json",
         )
         pm_item.refresh_from_db()
@@ -142,7 +142,7 @@ class TestWorkOrderClosesPM:
         # completion is the last time the work was *actually* done).
         staff_client.patch(
             f"/api/inventory/work-orders/{wo.id}/",
-            {"status": "open"},
+            {"status": WorkOrder.Status.OPEN},
             format="json",
         )
         pm_item.refresh_from_db()
@@ -154,14 +154,14 @@ class TestWorkOrderClosesPM:
         # this unreachable. Build an in-memory WO with no FK set.
         from inventory.views import WorkOrderViewSet
 
-        wo = WorkOrder(status=WorkOrder.STATUS_COMPLETED, maintenance_item=None)
+        wo = WorkOrder(status=WorkOrder.Status.COMPLETED, maintenance_item=None)
         WorkOrderViewSet._sync_maintenance_item_completion(wo, actor=None)
         # Nothing was written.
         assert MaintenanceLog.objects.count() == 0
 
     def test_open_wo_no_log(self, staff_client, pm_item):
         # An open WO doesn't write a log even though the FK is set.
-        wo = _create_wo(staff_client, pm_item, status="open")
+        wo = _create_wo(staff_client, pm_item, status=WorkOrder.Status.OPEN)
         assert MaintenanceLog.objects.filter(work_order=wo).count() == 0
         pm_item.refresh_from_db()
         assert pm_item.last_completed_at is None

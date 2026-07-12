@@ -120,7 +120,7 @@ def test_loto_requirements_endpoint_empty_state(authenticated_client, asset):
 def test_loto_requirements_endpoint_populated(authenticated_client, asset):
     """AC-5: oms-2da serializer can join LOTO data via this endpoint."""
     client, _ = authenticated_client
-    asset.lockout_type = Asset.LOCKOUT_LOTO
+    asset.lockout_type = Asset.LockoutType.LOTO
     asset.lockout_instructions = "Lock breaker, tag valve, verify zero energy."
     asset.lockout_responsible = "Maintenance lead"
     asset.save()
@@ -138,7 +138,7 @@ def test_loto_requirements_endpoint_populated(authenticated_client, asset):
     body = client.get(url).json()
 
     assert body["is_required"] is True
-    assert body["lockout_type"] == Asset.LOCKOUT_LOTO
+    assert body["lockout_type"] == Asset.LockoutType.LOTO
     assert body["lockout_type_display"] == "LOTO (Lockout / Tagout)"
     assert body["lockout_instructions"].startswith("Lock breaker")
     assert body["lockout_responsible"] == "Maintenance lead"

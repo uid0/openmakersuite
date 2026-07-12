@@ -71,7 +71,7 @@ class TestBatchReconcile:
                 {
                     "item_id": str(item.id),
                     "actual_count": 18,
-                    "reason": "miscounted",
+                    "reason": StockReconciliation.ReasonCode.MISCOUNTED,
                     "notes": "off by two",
                     "skip_reorder": True,
                 }
@@ -89,7 +89,7 @@ class TestBatchReconcile:
                 {
                     "item_id": str(item.id),
                     "actual_count": 15,
-                    "reason": "lost",
+                    "reason": StockReconciliation.ReasonCode.LOST,
                     "skip_reorder": True,
                 }
             ]
@@ -102,7 +102,7 @@ class TestBatchReconcile:
         assert rec.projected_count == 20
         assert rec.actual_count == 15
         assert rec.delta == -5
-        assert rec.reason == "lost"
+        assert rec.reason == StockReconciliation.ReasonCode.LOST
         assert rec.reconciled_by_id == user.id
 
     def test_auto_reorder_on_low_stock(self, staff_client, low_item):
@@ -112,7 +112,7 @@ class TestBatchReconcile:
                 {
                     "item_id": str(low_item.id),
                     "actual_count": 3,  # <= minimum_stock (10)
-                    "reason": "used_without_scan",
+                    "reason": StockReconciliation.ReasonCode.USED_WITHOUT_SCAN,
                 }
             ]
         }
@@ -132,7 +132,7 @@ class TestBatchReconcile:
                 {
                     "item_id": str(low_item.id),
                     "actual_count": 2,
-                    "reason": "used_without_scan",
+                    "reason": StockReconciliation.ReasonCode.USED_WITHOUT_SCAN,
                     "skip_reorder": True,
                 }
             ]
@@ -159,7 +159,7 @@ class TestBatchReconcile:
                 {
                     "item_id": str(retired.id),
                     "actual_count": 1,  # well under minimum_stock (10)
-                    "reason": "used_without_scan",
+                    "reason": StockReconciliation.ReasonCode.USED_WITHOUT_SCAN,
                 }
             ]
         }
@@ -179,7 +179,7 @@ class TestBatchReconcile:
                 {
                     "item_id": str(item.id),
                     "actual_count": 15,
-                    "reason": "miscounted",
+                    "reason": StockReconciliation.ReasonCode.MISCOUNTED,
                     "skip_reorder": True,
                 }
             ]
@@ -202,7 +202,7 @@ class TestBatchReconcile:
                 {
                     "item_id": str(item.id),
                     "actual_count": 18,
-                    "reason": "miscounted",
+                    "reason": StockReconciliation.ReasonCode.MISCOUNTED,
                     "skip_reorder": True,
                 }
             ]
@@ -223,7 +223,7 @@ class TestBatchReconcile:
                 {
                     "item_id": str(item.id),
                     "actual_count": 19,
-                    "reason": "miscounted",
+                    "reason": StockReconciliation.ReasonCode.MISCOUNTED,
                     "skip_reorder": True,
                 }
             ]
@@ -252,13 +252,13 @@ class TestBatchReconcile:
                 {
                     "item_id": str(low_item.id),
                     "actual_count": 1,
-                    "reason": "used_without_scan",
+                    "reason": StockReconciliation.ReasonCode.USED_WITHOUT_SCAN,
                     "skip_reorder": True,
                 },
                 {
                     "item_id": str(item.id),  # not SIG admin for this one
                     "actual_count": 5,
-                    "reason": "miscounted",
+                    "reason": StockReconciliation.ReasonCode.MISCOUNTED,
                     "skip_reorder": True,
                 },
             ]
@@ -296,7 +296,7 @@ class TestReconciliationList:
             projected_count=20,
             actual_count=18,
             delta=-2,
-            reason="miscounted",
+            reason=StockReconciliation.ReasonCode.MISCOUNTED,
             reconciled_by=user,
         )
         response = client.get(LIST_URL)

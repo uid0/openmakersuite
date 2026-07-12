@@ -199,7 +199,7 @@ def derive_asset_status(asset) -> str:
 
     if (
         mode_value == OperationalMode.MODE_MAINTENANCE
-        or asset.status != asset.ACTIVE
+        or asset.status != asset.Status.ACTIVE
         or _has_offline_primary_device(asset)
     ):
         return IndicatorStatus.UNAVAILABLE

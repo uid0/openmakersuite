@@ -74,20 +74,20 @@ class TestBuildComponentForecast:
         installed unit stays *on hand* (physically present) but is no longer
         *available* to install; the depletion rate ignores receive/install."""
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
 
         # On hand: 6 on the shelf + 1 installed (not yet consumed) = 7.
-        _components(item, SerializedComponent.IN_STOCK, 6, "stock")
-        installed = _components(item, SerializedComponent.INSTALLED, 1, "inst")
+        _components(item, SerializedComponent.Status.IN_STOCK, 6, "stock")
+        installed = _components(item, SerializedComponent.Status.INSTALLED, 1, "inst")
 
         # Depleted: 4 consumed units, each with a consume event inside the window.
-        consumed = _components(item, SerializedComponent.CONSUMED, 4, "used")
+        consumed = _components(item, SerializedComponent.Status.CONSUMED, 4, "used")
         for i, comp in enumerate(consumed):
-            _event(comp, SerializedComponent.ACTION_CONSUME, days_ago=i + 1, now=now)
+            _event(comp, SerializedComponent.Action.CONSUME, days_ago=i + 1, now=now)
 
         # Noise the rate must ignore: receive/install events in the window.
-        _event(installed[0], SerializedComponent.ACTION_RECEIVE, days_ago=3, now=now)
-        _event(installed[0], SerializedComponent.ACTION_INSTALL, days_ago=2, now=now)
+        _event(installed[0], SerializedComponent.Action.RECEIVE, days_ago=3, now=now)
+        _event(installed[0], SerializedComponent.Action.INSTALL, days_ago=2, now=now)
 
         row = _row_for(build_component_forecast(now=now), item)
 
@@ -103,22 +103,22 @@ class TestBuildComponentForecast:
         does. Installed and removed units are both *on hand*, but only removed
         (and in-stock) units are *available* — installed ones are not."""
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_REUSABLE, minimum_stock=0)
+        item = _serialized_item(InventoryItem.SerialTrackingMode.REUSABLE, minimum_stock=0)
 
         # On hand: 5 in stock + 2 installed + 1 removed = 8 (reuse states count).
-        in_stock = _components(item, SerializedComponent.IN_STOCK, 5, "stock")
-        installed = _components(item, SerializedComponent.INSTALLED, 2, "inst")
-        removed = _components(item, SerializedComponent.REMOVED, 1, "rem")
+        in_stock = _components(item, SerializedComponent.Status.IN_STOCK, 5, "stock")
+        installed = _components(item, SerializedComponent.Status.INSTALLED, 2, "inst")
+        removed = _components(item, SerializedComponent.Status.REMOVED, 1, "rem")
 
         # Depleted: 3 retired units with retire events in the window.
-        retired = _components(item, SerializedComponent.RETIRED, 3, "ret")
+        retired = _components(item, SerializedComponent.Status.RETIRED, 3, "ret")
         for i, comp in enumerate(retired):
-            _event(comp, SerializedComponent.ACTION_RETIRE, days_ago=i + 1, now=now)
+            _event(comp, SerializedComponent.Action.RETIRE, days_ago=i + 1, now=now)
 
         # Reuse-cycle noise that must NOT be counted as depletion.
-        _event(installed[0], SerializedComponent.ACTION_INSTALL, days_ago=4, now=now)
-        _event(removed[0], SerializedComponent.ACTION_REMOVE, days_ago=3, now=now)
-        _event(in_stock[0], SerializedComponent.ACTION_RECEIVE, days_ago=2, now=now)
+        _event(installed[0], SerializedComponent.Action.INSTALL, days_ago=4, now=now)
+        _event(removed[0], SerializedComponent.Action.REMOVE, days_ago=3, now=now)
+        _event(in_stock[0], SerializedComponent.Action.RECEIVE, days_ago=2, now=now)
 
         row = _row_for(build_component_forecast(now=now), item)
 
@@ -133,17 +133,17 @@ class TestBuildComponentForecast:
         """A reusable unit retired *and* disposed inside the window is one
         depletion, not two."""
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_REUSABLE, minimum_stock=0)
-        _components(item, SerializedComponent.IN_STOCK, 2, "stock")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.REUSABLE, minimum_stock=0)
+        _components(item, SerializedComponent.Status.IN_STOCK, 2, "stock")
 
-        retired = _components(item, SerializedComponent.RETIRED, 2, "ret")
+        retired = _components(item, SerializedComponent.Status.RETIRED, 2, "ret")
         for i, comp in enumerate(retired):
-            _event(comp, SerializedComponent.ACTION_RETIRE, days_ago=i + 1, now=now)
+            _event(comp, SerializedComponent.Action.RETIRE, days_ago=i + 1, now=now)
 
         # One unit that has both a retire and a dispose event within the window.
-        disposed = _components(item, SerializedComponent.DISPOSED, 1, "disp")[0]
-        _event(disposed, SerializedComponent.ACTION_RETIRE, days_ago=6, now=now)
-        _event(disposed, SerializedComponent.ACTION_DISPOSE, days_ago=5, now=now)
+        disposed = _components(item, SerializedComponent.Status.DISPOSED, 1, "disp")[0]
+        _event(disposed, SerializedComponent.Action.RETIRE, days_ago=6, now=now)
+        _event(disposed, SerializedComponent.Action.DISPOSE, days_ago=5, now=now)
 
         row = _row_for(build_component_forecast(now=now), item)
 
@@ -154,14 +154,14 @@ class TestBuildComponentForecast:
         now = timezone.now()
         user = User.objects.create_user(username="lt-user", password="x")
         item = _serialized_item(
-            InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=2, current_stock=10
+            InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=2, current_stock=10
         )
         _add_lead_time_log(item, user, actual_days=10)
 
-        _components(item, SerializedComponent.IN_STOCK, 10, "stock")  # available = 10
-        consumed = _components(item, SerializedComponent.CONSUMED, 9, "used")
+        _components(item, SerializedComponent.Status.IN_STOCK, 10, "stock")  # available = 10
+        consumed = _components(item, SerializedComponent.Status.CONSUMED, 9, "used")
         for i, comp in enumerate(consumed):
-            _event(comp, SerializedComponent.ACTION_CONSUME, days_ago=i + 1, now=now)
+            _event(comp, SerializedComponent.Action.CONSUME, days_ago=i + 1, now=now)
 
         row = _row_for(build_component_forecast(now=now), item)
 
@@ -182,14 +182,14 @@ class TestBuildComponentForecast:
         now = timezone.now()
         user = User.objects.create_user(username="ls-user", password="x")
 
-        low = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=5)
+        low = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=5)
         _add_lead_time_log(low, user, actual_days=10)
-        _components(low, SerializedComponent.IN_STOCK, 2, "low")  # available = 2
-        for i, comp in enumerate(_components(low, SerializedComponent.CONSUMED, 18, "lu")):
-            _event(comp, SerializedComponent.ACTION_CONSUME, days_ago=(i % 80) + 1, now=now)
+        _components(low, SerializedComponent.Status.IN_STOCK, 2, "low")  # available = 2
+        for i, comp in enumerate(_components(low, SerializedComponent.Status.CONSUMED, 18, "lu")):
+            _event(comp, SerializedComponent.Action.CONSUME, days_ago=(i % 80) + 1, now=now)
 
-        healthy = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
-        _components(healthy, SerializedComponent.IN_STOCK, 50, "hs")
+        healthy = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
+        _components(healthy, SerializedComponent.Status.IN_STOCK, 50, "hs")
 
         all_rows = build_component_forecast(now=now)
         low_row = _row_for(all_rows, low)
@@ -209,10 +209,10 @@ class TestBuildComponentForecast:
         never flagged needs_reorder no matter how low its available stock is."""
         now = timezone.now()
         retired = _serialized_item(
-            InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=5, is_retired=True
+            InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=5, is_retired=True
         )
         # Available (1) is under minimum, so an active item here would flag.
-        _components(retired, SerializedComponent.IN_STOCK, 1, "ret")
+        _components(retired, SerializedComponent.Status.IN_STOCK, 1, "ret")
 
         rows = build_component_forecast(now=now)
         assert all(r["item_id"] != str(retired.id) for r in rows)
@@ -220,17 +220,17 @@ class TestBuildComponentForecast:
     def test_lead_time_falls_back_to_supplier_estimate(self):
         now = timezone.now()
         item = _serialized_item(
-            InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0, average_lead_time=7
+            InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0, average_lead_time=7
         )
-        _components(item, SerializedComponent.IN_STOCK, 3, "stock")
+        _components(item, SerializedComponent.Status.IN_STOCK, 3, "stock")
 
         row = _row_for(build_component_forecast(now=now), item)
         assert row["lead_time_days"] == 7.0
 
     def test_zero_depletion_has_no_stockout_date(self):
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=4)
-        _components(item, SerializedComponent.IN_STOCK, 3, "stock")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=4)
+        _components(item, SerializedComponent.Status.IN_STOCK, 3, "stock")
 
         row = _row_for(build_component_forecast(now=now), item)
         assert row["avg_daily_use"] == 0.0
@@ -242,11 +242,11 @@ class TestBuildComponentForecast:
 
     def test_events_outside_window_are_ignored(self):
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
-        _components(item, SerializedComponent.IN_STOCK, 5, "stock")
-        old = _components(item, SerializedComponent.CONSUMED, 3, "old")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
+        _components(item, SerializedComponent.Status.IN_STOCK, 5, "stock")
+        old = _components(item, SerializedComponent.Status.CONSUMED, 3, "old")
         for i, comp in enumerate(old):
-            _event(comp, SerializedComponent.ACTION_CONSUME, days_ago=200 + i, now=now)
+            _event(comp, SerializedComponent.Action.CONSUME, days_ago=200 + i, now=now)
 
         row = _row_for(build_component_forecast(now=now, window_days=90), item)
         assert row["units_depleted_in_window"] == 0
@@ -254,11 +254,11 @@ class TestBuildComponentForecast:
 
     def test_window_days_param_changes_rate(self):
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
-        _components(item, SerializedComponent.IN_STOCK, 10, "stock")
-        consumed = _components(item, SerializedComponent.CONSUMED, 10, "used")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
+        _components(item, SerializedComponent.Status.IN_STOCK, 10, "stock")
+        consumed = _components(item, SerializedComponent.Status.CONSUMED, 10, "used")
         for i, comp in enumerate(consumed):
-            _event(comp, SerializedComponent.ACTION_CONSUME, days_ago=i + 1, now=now)
+            _event(comp, SerializedComponent.Action.CONSUME, days_ago=i + 1, now=now)
 
         row = _row_for(build_component_forecast(now=now, window_days=10), item)
         # All 10 consume events fall within the tighter 10-day window.
@@ -267,11 +267,11 @@ class TestBuildComponentForecast:
 
     def test_excludes_non_serialized_and_inactive_items(self):
         now = timezone.now()
-        serialized = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE)
-        _components(serialized, SerializedComponent.IN_STOCK, 1, "stock")
+        serialized = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE)
+        _components(serialized, SerializedComponent.Status.IN_STOCK, 1, "stock")
 
         plain = InventoryItemFactory(is_serialized=False)
-        inactive = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, is_active=False)
+        inactive = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, is_active=False)
 
         ids = {r["item_id"] for r in build_component_forecast(now=now)}
         assert str(serialized.id) in ids
@@ -282,9 +282,9 @@ class TestBuildComponentForecast:
         """Installing a consumable unit moves it out of ``available`` while it
         stays ``on_hand`` (physically present) until it is consumed."""
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
-        _components(item, SerializedComponent.IN_STOCK, 4, "stock")
-        _components(item, SerializedComponent.INSTALLED, 3, "inst")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
+        _components(item, SerializedComponent.Status.IN_STOCK, 4, "stock")
+        _components(item, SerializedComponent.Status.INSTALLED, 3, "inst")
 
         row = _row_for(build_component_forecast(now=now), item)
         assert row["on_hand"] == 7  # 4 in_stock + 3 installed
@@ -295,9 +295,9 @@ class TestBuildComponentForecast:
         """A consumed unit is depleted: it counts toward neither on_hand nor
         available (only the 2 in-stock units remain)."""
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
-        _components(item, SerializedComponent.IN_STOCK, 2, "stock")
-        _components(item, SerializedComponent.CONSUMED, 5, "used")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
+        _components(item, SerializedComponent.Status.IN_STOCK, 2, "stock")
+        _components(item, SerializedComponent.Status.CONSUMED, 5, "used")
 
         row = _row_for(build_component_forecast(now=now), item)
         assert row["on_hand"] == 2
@@ -308,9 +308,9 @@ class TestBuildComponentForecast:
         """A reusable unit that has been *removed* from its asset returns to the
         available pool, while installed units do not."""
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_REUSABLE, minimum_stock=0)
-        _components(item, SerializedComponent.INSTALLED, 2, "inst")
-        _components(item, SerializedComponent.REMOVED, 3, "rem")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.REUSABLE, minimum_stock=0)
+        _components(item, SerializedComponent.Status.INSTALLED, 2, "inst")
+        _components(item, SerializedComponent.Status.REMOVED, 3, "rem")
 
         row = _row_for(build_component_forecast(now=now), item)
         assert row["on_hand"] == 5  # installed + removed are both present
@@ -322,9 +322,9 @@ class TestBuildComponentForecast:
         (lowering available without lowering on_hand) can push an item to its
         reorder point even with no depletion history."""
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=3)
-        _components(item, SerializedComponent.IN_STOCK, 2, "stock")
-        _components(item, SerializedComponent.INSTALLED, 4, "inst")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=3)
+        _components(item, SerializedComponent.Status.IN_STOCK, 2, "stock")
+        _components(item, SerializedComponent.Status.INSTALLED, 4, "inst")
 
         row = _row_for(build_component_forecast(now=now), item)
         assert row["on_hand"] == 6
@@ -338,12 +338,12 @@ class TestBuildComponentForecast:
         """Runway is measured against ``available``: installed units do not
         extend the projected stockout."""
         now = timezone.now()
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
-        _components(item, SerializedComponent.IN_STOCK, 5, "stock")
-        _components(item, SerializedComponent.INSTALLED, 5, "inst")
-        consumed = _components(item, SerializedComponent.CONSUMED, 9, "used")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
+        _components(item, SerializedComponent.Status.IN_STOCK, 5, "stock")
+        _components(item, SerializedComponent.Status.INSTALLED, 5, "inst")
+        consumed = _components(item, SerializedComponent.Status.CONSUMED, 9, "used")
         for i, comp in enumerate(consumed):
-            _event(comp, SerializedComponent.ACTION_CONSUME, days_ago=i + 1, now=now)
+            _event(comp, SerializedComponent.Action.CONSUME, days_ago=i + 1, now=now)
 
         row = _row_for(build_component_forecast(now=now), item)
         assert row["on_hand"] == 10
@@ -360,17 +360,17 @@ class TestSerializedForecastEndpoint:
 
     def test_returns_forecast_rows(self, authenticated_client):
         client, _ = authenticated_client
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
-        _components(item, SerializedComponent.IN_STOCK, 4, "stock")
-        consumed = _components(item, SerializedComponent.CONSUMED, 9, "used")
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
+        _components(item, SerializedComponent.Status.IN_STOCK, 4, "stock")
+        consumed = _components(item, SerializedComponent.Status.CONSUMED, 9, "used")
         now = timezone.now()
         for i, comp in enumerate(consumed):
-            _event(comp, SerializedComponent.ACTION_CONSUME, days_ago=i + 1, now=now)
+            _event(comp, SerializedComponent.Action.CONSUME, days_ago=i + 1, now=now)
 
         response = client.get(FORECAST_URL)
         assert response.status_code == status.HTTP_200_OK
         row = _row_for(response.data, item)
-        assert row["serial_tracking_mode"] == InventoryItem.SERIAL_TRACKING_CONSUMABLE
+        assert row["serial_tracking_mode"] == InventoryItem.SerialTrackingMode.CONSUMABLE
         assert row["available_stock"] == 4
         assert row["on_hand"] == 4
         assert row["available"] == 4
@@ -381,13 +381,13 @@ class TestSerializedForecastEndpoint:
         client, _ = authenticated_client
         now = timezone.now()
 
-        low = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=10)
-        _components(low, SerializedComponent.IN_STOCK, 1, "low")
-        for i, comp in enumerate(_components(low, SerializedComponent.CONSUMED, 5, "lu")):
-            _event(comp, SerializedComponent.ACTION_CONSUME, days_ago=i + 1, now=now)
+        low = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=10)
+        _components(low, SerializedComponent.Status.IN_STOCK, 1, "low")
+        for i, comp in enumerate(_components(low, SerializedComponent.Status.CONSUMED, 5, "lu")):
+            _event(comp, SerializedComponent.Action.CONSUME, days_ago=i + 1, now=now)
 
-        healthy = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
-        _components(healthy, SerializedComponent.IN_STOCK, 100, "hs")
+        healthy = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
+        _components(healthy, SerializedComponent.Status.IN_STOCK, 100, "hs")
 
         response = client.get(FORECAST_URL, {"low_stock_only": "true"})
         assert response.status_code == status.HTTP_200_OK
@@ -399,13 +399,13 @@ class TestSerializedForecastEndpoint:
         """End-to-end: real lifecycle transitions (which write ComponentUsageEvent
         rows) drive the depletion rate."""
         client, _ = authenticated_client
-        item = _serialized_item(InventoryItem.SERIAL_TRACKING_CONSUMABLE, minimum_stock=0)
+        item = _serialized_item(InventoryItem.SerialTrackingMode.CONSUMABLE, minimum_stock=0)
 
         # One unit consumed via the real lifecycle API path.
         component = SerializedComponent.objects.create(item=item, serial_number="LC-1")
-        component.apply_action(SerializedComponent.ACTION_RECEIVE)
+        component.apply_action(SerializedComponent.Action.RECEIVE)
         # Keep a couple of spare units available on the shelf.
-        _components(item, SerializedComponent.IN_STOCK, 3, "spare")
+        _components(item, SerializedComponent.Status.IN_STOCK, 3, "spare")
 
         response = client.get(FORECAST_URL)
         assert response.status_code == status.HTTP_200_OK

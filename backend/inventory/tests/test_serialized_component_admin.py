@@ -24,7 +24,7 @@ class SerializedComponentAdminSmokeTest(TestCase):
         cls.component = SerializedComponentFactory(item=cls.item)
         cls.event = ComponentUsageEvent.objects.create(
             component=cls.component,
-            action=SerializedComponent.ACTION_RECEIVE,
+            action=SerializedComponent.Action.RECEIVE,
         )
 
     def setUp(self):

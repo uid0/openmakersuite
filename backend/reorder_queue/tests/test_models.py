@@ -29,7 +29,7 @@ class TestReorderRequestModel:
         assert request.item == item
         assert request.quantity == 25
         assert request.requested_by == "John Doe"
-        assert request.status == "pending"
+        assert request.status == ReorderRequest.Status.PENDING
         assert str(request).startswith(item.name)
 
     def test_estimated_cost_calculation(self):
@@ -51,13 +51,13 @@ class TestReorderRequestModel:
         """Test days_pending property calculates correctly."""
         # Create request 5 days ago
         with freeze_time("2024-01-10 12:00:00"):
-            request = ReorderRequestFactory(status="pending")
+            request = ReorderRequestFactory(status=ReorderRequest.Status.PENDING)
 
         assert request.days_pending == 5
 
     def test_days_pending_for_non_pending_status(self):
         """Test days_pending returns 0 for non-pending requests."""
-        request = ReorderRequestFactory(status="approved")
+        request = ReorderRequestFactory(status=ReorderRequest.Status.APPROVED)
         assert request.days_pending == 0
 
     def test_request_ordering(self):
@@ -71,7 +71,13 @@ class TestReorderRequestModel:
 
     def test_status_choices(self):
         """Test all status choices are valid."""
-        statuses = ["pending", "approved", "ordered", "received", "cancelled"]
+        statuses = [
+            ReorderRequest.Status.PENDING,
+            ReorderRequest.Status.APPROVED,
+            ReorderRequest.Status.ORDERED,
+            ReorderRequest.Status.RECEIVED,
+            ReorderRequest.Status.CANCELLED,
+        ]
 
         for status_choice in statuses:
             request = ReorderRequestFactory(status=status_choice)
@@ -79,7 +85,12 @@ class TestReorderRequestModel:
 
     def test_priority_choices(self):
         """Test all priority choices are valid."""
-        priorities = ["low", "normal", "high", "urgent"]
+        priorities = [
+            ReorderRequest.Priority.LOW,
+            ReorderRequest.Priority.NORMAL,
+            ReorderRequest.Priority.HIGH,
+            ReorderRequest.Priority.URGENT,
+        ]
 
         for priority in priorities:
             request = ReorderRequestFactory(priority=priority)
@@ -89,7 +100,7 @@ class TestReorderRequestModel:
         """Test reviewed_by relationship with User."""
         user = UserFactory(username="admin")
         request = ReorderRequestFactory(
-            status="approved", reviewed_by=user, reviewed_at=timezone.now()
+            status=ReorderRequest.Status.APPROVED, reviewed_by=user, reviewed_at=timezone.now()
         )
 
         assert request.reviewed_by == user
@@ -98,7 +109,7 @@ class TestReorderRequestModel:
     def test_order_tracking_fields(self):
         """Test order tracking fields."""
         request = ReorderRequestFactory(
-            status="ordered",
+            status=ReorderRequest.Status.ORDERED,
             ordered_at=timezone.now(),
             order_number="ORD-12345",
             actual_cost=Decimal("125.50"),
@@ -114,7 +125,9 @@ class TestReorderRequestModel:
         actual = timezone.now().date() + timedelta(days=5)
 
         request = ReorderRequestFactory(
-            status="received", estimated_delivery=estimated, actual_delivery=actual
+            status=ReorderRequest.Status.RECEIVED,
+            estimated_delivery=estimated,
+            actual_delivery=actual,
         )
 
         assert request.estimated_delivery == estimated

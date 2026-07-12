@@ -95,7 +95,7 @@ class TestGlobalSearchView:
     def test_global_search_supplier(self, authenticated_client, db):
         """Test searching for suppliers."""
         client, _ = authenticated_client
-        SupplierFactory(name="Test Supplier", supplier_type=Supplier.ONLINE)
+        SupplierFactory(name="Test Supplier", supplier_type=Supplier.SupplierType.ONLINE)
 
         url = reverse("global-search")
         response = client.get(url, {"q": "Test Supplier"})

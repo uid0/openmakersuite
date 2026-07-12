@@ -47,8 +47,8 @@ def _build_electrical_rows(asset: "Asset") -> list[list[str]]:
     rows: list[list[str]] = []
 
     if asset.wiring_type and asset.wiring_type not in (
-        asset.WIRING_NONE,
-        asset.WIRING_UNKNOWN,
+        asset.WiringType.NONE,
+        asset.WiringType.UNKNOWN,
         "",
     ):
         rows.append(["Wiring", asset.get_wiring_type_display()])
@@ -144,7 +144,7 @@ def _real_lockout(asset: "Asset") -> bool:
     """True iff the asset has a meaningful lockout requirement to display."""
     return bool(
         asset.lockout_type
-        and asset.lockout_type not in (asset.LOCKOUT_NONE, asset.LOCKOUT_UNKNOWN, "")
+        and asset.lockout_type not in (asset.LockoutType.NONE, asset.LockoutType.UNKNOWN, "")
     )
 
 

@@ -133,7 +133,7 @@ class TestPulseCache:
         item = MaintenanceItem.objects.create(asset=asset, title="X", interval_days=30)
         WorkOrder.objects.create(
             maintenance_item=item,
-            status=WorkOrder.STATUS_COMPLETED,
+            status=WorkOrder.Status.COMPLETED,
             completed_at=timezone.make_aware(
                 datetime.combine(last_month_start + timedelta(days=5), datetime.min.time()),
                 timezone.get_current_timezone(),

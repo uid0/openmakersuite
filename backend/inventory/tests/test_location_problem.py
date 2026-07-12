@@ -125,15 +125,15 @@ class TestLocationProblemReporting:
             f"/api/inventory/locations/{location.id}/report_problem/",
             {
                 "description": "Light is flickering and buzzing.",
-                "severity": "high",
+                "severity": LocationProblem.Severity.HIGH,
             },
             format="multipart",
         )
         assert resp.status_code == 201, resp.content
         body = resp.json()
         assert body["location"] == location.id
-        assert body["status"] == LocationProblem.REPORTED
-        assert body["severity"] == "high"
+        assert body["status"] == LocationProblem.Status.REPORTED
+        assert body["severity"] == LocationProblem.Severity.HIGH
         assert LocationProblem.objects.filter(location=location).count() == 1
 
     def test_report_problem_anonymous_allowed(self, db, location):
@@ -146,13 +146,13 @@ class TestLocationProblemReporting:
         assert resp.status_code == 201, resp.content
         problem = LocationProblem.objects.get()
         assert problem.reported_by == ""
-        assert problem.severity == LocationProblem.SEVERITY_MEDIUM
+        assert problem.severity == LocationProblem.Severity.MEDIUM
 
     def test_report_problem_requires_description(self, admin_client, location):
         client, _ = admin_client
         resp = client.post(
             f"/api/inventory/locations/{location.id}/report_problem/",
-            {"severity": "low"},
+            {"severity": LocationProblem.Severity.LOW},
             format="multipart",
         )
         assert resp.status_code == 400
@@ -165,7 +165,7 @@ class TestPromoteToWorkOrder:
         problem = LocationProblem.objects.create(
             location=location,
             description="Drain backed up",
-            severity=LocationProblem.SEVERITY_HIGH,
+            severity=LocationProblem.Severity.HIGH,
         )
         resp = client.post(
             f"/api/inventory/location-problems/{problem.id}/promote-standard/",
@@ -177,7 +177,7 @@ class TestPromoteToWorkOrder:
         problem.refresh_from_db()
         assert problem.work_order is not None
         wo = problem.work_order
-        assert problem.status == LocationProblem.IN_PROGRESS
+        assert problem.status == LocationProblem.Status.IN_PROGRESS
         assert wo.maintenance_item_id == maintenance_item.id
         assert wo.notes == "Drain backed up"
         # Reverse relation: WorkOrder -> location_problems
@@ -205,7 +205,7 @@ class TestPromoteToThirdPartyWorkOrder:
         problem = LocationProblem.objects.create(
             location=location,
             description="HVAC making grinding noise.",
-            severity=LocationProblem.SEVERITY_URGENT,
+            severity=LocationProblem.Severity.URGENT,
         )
         # Attach a fake photo so the copy path is exercised.
         problem.photo.save("photo.png", ContentFile(_png_bytes()), save=True)
@@ -226,7 +226,7 @@ class TestPromoteToThirdPartyWorkOrder:
         assert tpwo.title == "HVAC grinding investigation"
         assert tpwo.location_id == location.id
         assert tpwo.notes == "HVAC making grinding noise."
-        assert problem.status == LocationProblem.IN_PROGRESS
+        assert problem.status == LocationProblem.Status.IN_PROGRESS
         # Photo was copied to TPWO attachments
         assert tpwo.attachments.filter(kind="photo").count() == 1
 
@@ -262,14 +262,14 @@ class TestUnionedActiveMaintenanceList:
 
         # Open LocationProblem (no WO promotion yet)
         lp = LocationProblem.objects.create(
-            location=location, description="Tile cracked", severity="medium"
+            location=location, description="Tile cracked", severity=LocationProblem.Severity.MEDIUM
         )
 
         # Closed LocationProblem (should NOT appear)
         LocationProblem.objects.create(
             location=location,
             description="Old issue",
-            status=LocationProblem.CLOSED,
+            status=LocationProblem.Status.CLOSED,
         )
 
         resp = client.get("/api/inventory/maintenance/active/")
@@ -290,11 +290,11 @@ class TestPaperFormIngestion:
     def test_detect_kind_by_subject(self, location):
         # Even with empty PDF bytes the subject should route correctly.
         kind = detect_submission_kind(b"", subject="[LOCPROB] leaky faucet")
-        assert kind == WorkOrderSubmission.KIND_LOCATION_PROBLEM
+        assert kind == WorkOrderSubmission.Kind.LOCATION_PROBLEM
 
     def test_detect_kind_by_header_text(self, location):
         pdf = _build_location_problem_pdf(location_id=location.id)
-        assert detect_submission_kind(pdf) == WorkOrderSubmission.KIND_LOCATION_PROBLEM
+        assert detect_submission_kind(pdf) == WorkOrderSubmission.Kind.LOCATION_PROBLEM
 
     def test_paper_form_ingestion_creates_location_problem(self, location):
         pdf_bytes = _build_location_problem_pdf(
@@ -303,14 +303,14 @@ class TestPaperFormIngestion:
             description="Sink overflowing - water on floor",
         )
         submission = WorkOrderSubmission.objects.create(
-            kind=WorkOrderSubmission.KIND_LOCATION_PROBLEM,
+            kind=WorkOrderSubmission.Kind.LOCATION_PROBLEM,
             from_email="reporter@example.com",
             subject="[LOCPROB] urgent leak",
         )
         submission.attachment.save("form.pdf", ContentFile(pdf_bytes), save=True)
 
         result = _apply_location_problem_submission(submission, pdf_bytes)
-        assert result.status == WorkOrderSubmission.STATUS_APPLIED
+        assert result.status == WorkOrderSubmission.Status.APPLIED
         problem = result.location_problem
         assert problem is not None
         assert problem.location_id == location.id
@@ -320,11 +320,11 @@ class TestPaperFormIngestion:
     def test_paper_form_ingestion_unknown_location_fails(self, db):
         pdf_bytes = _build_location_problem_pdf(location_id=999999)
         submission = WorkOrderSubmission.objects.create(
-            kind=WorkOrderSubmission.KIND_LOCATION_PROBLEM,
+            kind=WorkOrderSubmission.Kind.LOCATION_PROBLEM,
         )
         submission.attachment.save("f.pdf", ContentFile(pdf_bytes), save=True)
         result = _apply_location_problem_submission(submission, pdf_bytes)
-        assert result.status == WorkOrderSubmission.STATUS_FAILED
+        assert result.status == WorkOrderSubmission.Status.FAILED
         assert "999999" in result.parse_error
 
 
@@ -339,7 +339,10 @@ class TestLogisticsAlertFanOut:
         client = APIClient()
         resp = client.post(
             f"/api/inventory/locations/{location.id}/report_problem/",
-            {"description": "Ceiling leaking onto CNC", "severity": "urgent"},
+            {
+                "description": "Ceiling leaking onto CNC",
+                "severity": LocationProblem.Severity.URGENT,
+            },
             format="multipart",
         )
         assert resp.status_code == 201, resp.content
@@ -357,7 +360,7 @@ class TestLogisticsAlertFanOut:
         client = APIClient()
         resp = client.post(
             f"/api/inventory/locations/{location.id}/report_problem/",
-            {"description": "Light bulb burned out", "severity": "low"},
+            {"description": "Light bulb burned out", "severity": LocationProblem.Severity.LOW},
             format="multipart",
         )
         assert resp.status_code == 201
@@ -370,7 +373,7 @@ class TestLogisticsAlertFanOut:
         client = APIClient()
         resp = client.post(
             f"/api/inventory/locations/{location.id}/report_problem/",
-            {"description": "Major leak", "severity": "high"},
+            {"description": "Major leak", "severity": LocationProblem.Severity.HIGH},
             format="multipart",
         )
         assert resp.status_code == 201
@@ -389,7 +392,7 @@ class TestLogisticsAlertFanOut:
         client = APIClient()
         resp = client.post(
             f"/api/inventory/locations/{location.id}/report_problem/",
-            {"description": "Door wont latch", "severity": "medium"},
+            {"description": "Door wont latch", "severity": LocationProblem.Severity.MEDIUM},
             format="multipart",
         )
         assert resp.status_code == 201
@@ -405,7 +408,7 @@ class TestLogisticsAlertFanOut:
         problem = LocationProblem.objects.create(
             location=location,
             description="Roof leak",
-            severity=LocationProblem.SEVERITY_URGENT,
+            severity=LocationProblem.Severity.URGENT,
             reported_by="alice",
         )
         # No active webhooks: the task short-circuits but still validates the
@@ -418,7 +421,7 @@ class TestLogisticsAlertFanOut:
         WebHook.objects.create(
             name="Logistics LP",
             url="https://example.test/lp",
-            event_type=WebHook.LOCATION_PROBLEM_REPORTED,
+            event_type=WebHook.EventType.LOCATION_PROBLEM_REPORTED,
         )
         # send_webhook_notification posts to the URL, which we don't want in a
         # unit test. Stub it via patching at the module level.
@@ -433,7 +436,7 @@ class TestLogisticsAlertFanOut:
         event_type, payload = mocked.call_args.args
         assert event_type == "location_problem_reported"
         assert payload["data"]["id"] == str(problem.id)
-        assert payload["data"]["severity"] == "urgent"
+        assert payload["data"]["severity"] == LocationProblem.Severity.URGENT
         assert payload["data"]["location_name"] == location.name
 
 
@@ -447,7 +450,7 @@ class TestLogisticsDashboardLocationProblems:
         LocationProblem.objects.create(
             location=location,
             description="Tile cracked",
-            severity=LocationProblem.SEVERITY_LOW,
+            severity=LocationProblem.Severity.LOW,
         )
         resp = client.get("/api/reorders/analytics/logistics_dashboard/")
         assert resp.status_code == 200, resp.content
@@ -461,7 +464,7 @@ class TestLogisticsDashboardLocationProblems:
         LocationProblem.objects.create(
             location=location,
             description="Ceiling leak",
-            severity=LocationProblem.SEVERITY_URGENT,
+            severity=LocationProblem.Severity.URGENT,
         )
         resp = client.get("/api/reorders/analytics/logistics_dashboard/")
         assert resp.status_code == 200, resp.content
@@ -474,8 +477,8 @@ class TestLogisticsDashboardLocationProblems:
         LocationProblem.objects.create(
             location=location,
             description="Old leak",
-            severity=LocationProblem.SEVERITY_URGENT,
-            status=LocationProblem.RESOLVED,
+            severity=LocationProblem.Severity.URGENT,
+            status=LocationProblem.Status.RESOLVED,
         )
         resp = client.get("/api/reorders/analytics/logistics_dashboard/")
         assert resp.status_code == 200

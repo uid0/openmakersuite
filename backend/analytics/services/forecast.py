@@ -38,7 +38,7 @@ class ForecastEntry(TypedDict):
     due_reason: str  # "hours" | "days" | "both"
 
 
-_EXCLUDED_STATUSES = (Asset.RETIRED, Asset.LOST, Asset.DONATED_OUT)
+_EXCLUDED_STATUSES = (Asset.Status.RETIRED, Asset.Status.LOST, Asset.Status.DONATED_OUT)
 
 
 def maintenance_forecast(now: datetime | None = None) -> list[ForecastEntry]:

@@ -230,7 +230,7 @@ class TestDashboardWidgetDataViews:
 
         supplier = SupplierFactory()
         po = PurchaseOrder.objects.create(
-            supplier=supplier, status=PurchaseOrder.SENT, created_by=user
+            supplier=supplier, status=PurchaseOrder.Status.SENT, created_by=user
         )
         # Freeform line item (no item_supplier / asset needed).
         po_item = PurchaseOrderItem.objects.create(

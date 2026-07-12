@@ -46,7 +46,9 @@ class SupplierFactory(DjangoModelFactory):
         model = Supplier
 
     name = factory.Sequence(lambda n: f"supplier-{n}")
-    supplier_type = factory.Iterator([Supplier.LOCAL, Supplier.ONLINE, Supplier.NATIONAL])
+    supplier_type = factory.Iterator(
+        [Supplier.SupplierType.LOCAL, Supplier.SupplierType.ONLINE, Supplier.SupplierType.NATIONAL]
+    )
     website = Faker("url")
     notes = Faker("text", max_nb_chars=200)
 
@@ -242,7 +244,7 @@ class AssetFactory(DjangoModelFactory):
     category = SubFactory(CategoryFactory)
     location = SubFactory(LocationFactory)
     manufacturer = SubFactory(SupplierFactory)
-    status = Asset.ACTIVE
+    status = Asset.Status.ACTIVE
     is_active = True
     is_chargeable = False
 
@@ -303,14 +305,14 @@ class AssetProblemFactory(DjangoModelFactory):
     part = None  # Optional, can be set explicitly in tests
     reported_by = Faker("user_name")
     description = Faker("text", max_nb_chars=200)
-    status = AssetProblem.REPORTED
+    status = AssetProblem.Status.REPORTED
     resolution_notes = ""
 
 
 class SerializedComponentFactory(DjangoModelFactory):
     """Factory for SerializedComponent instances (consumable-mode by default).
 
-    Pass ``item__serial_tracking_mode=InventoryItem.SERIAL_TRACKING_REUSABLE``
+    Pass ``item__serial_tracking_mode=InventoryItem.SerialTrackingMode.REUSABLE``
     to build a reusable-mode component.
     """
 
@@ -320,8 +322,8 @@ class SerializedComponentFactory(DjangoModelFactory):
     item = SubFactory(
         InventoryItemFactory,
         is_serialized=True,
-        serial_tracking_mode=InventoryItem.SERIAL_TRACKING_CONSUMABLE,
+        serial_tracking_mode=InventoryItem.SerialTrackingMode.CONSUMABLE,
     )
     serial_number = factory.Sequence(lambda n: f"SN-{n:06d}")
     lot = ""
-    status = SerializedComponent.RECEIVED
+    status = SerializedComponent.Status.RECEIVED

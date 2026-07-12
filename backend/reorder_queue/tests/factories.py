@@ -43,8 +43,15 @@ class ReorderRequestFactory(DjangoModelFactory):
 
     item = SubFactory(InventoryItemFactory)
     quantity = Faker("random_int", min=1, max=100)
-    status = "pending"
-    priority = factory.Iterator(["low", "normal", "high", "urgent"])
+    status = ReorderRequest.Status.PENDING
+    priority = factory.Iterator(
+        [
+            ReorderRequest.Priority.LOW,
+            ReorderRequest.Priority.NORMAL,
+            ReorderRequest.Priority.HIGH,
+            ReorderRequest.Priority.URGENT,
+        ]
+    )
     requested_by = Faker("name")
     request_notes = Faker("text", max_nb_chars=200)
     admin_notes = ""

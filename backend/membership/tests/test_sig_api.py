@@ -370,8 +370,8 @@ class TestReorderRequestSIGPermissions:
         sig_item = InventoryItemFactory(owning_group=sig_group)
         other_item = InventoryItemFactory(owning_group=None)
 
-        sig_request = ReorderRequestFactory(item=sig_item, status=ReorderRequest.PENDING)
-        other_request = ReorderRequestFactory(item=other_item, status=ReorderRequest.PENDING)
+        sig_request = ReorderRequestFactory(item=sig_item, status=ReorderRequest.Status.PENDING)
+        other_request = ReorderRequestFactory(item=other_item, status=ReorderRequest.Status.PENDING)
 
         url = reverse("reorderrequest-sig-pending")
         response = client.get(url)

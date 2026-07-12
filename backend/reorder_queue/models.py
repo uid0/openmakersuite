@@ -33,40 +33,25 @@ class ReorderRequest(models.Model):
     - Cancelled: Request cancelled
     """
 
-    # Status choices
-    PENDING = "pending"
-    APPROVED = "approved"
-    ORDERED = "ordered"
-    RECEIVED = "received"
-    CANCELLED = "cancelled"
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        ORDERED = "ordered", "Ordered"
+        RECEIVED = "received", "Received"
+        CANCELLED = "cancelled", "Cancelled"
 
-    STATUS_CHOICES = [
-        (PENDING, "Pending"),
-        (APPROVED, "Approved"),
-        (ORDERED, "Ordered"),
-        (RECEIVED, "Received"),
-        (CANCELLED, "Cancelled"),
-    ]
-
-    # Priority choices
-    LOW = "low"
-    NORMAL = "normal"
-    HIGH = "high"
-    URGENT = "urgent"
-
-    PRIORITY_CHOICES = [
-        (LOW, "Low"),
-        (NORMAL, "Normal"),
-        (HIGH, "High"),
-        (URGENT, "Urgent"),
-    ]
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        NORMAL = "normal", "Normal"
+        HIGH = "high", "High"
+        URGENT = "urgent", "Urgent"
 
     item = models.ForeignKey(
         InventoryItem, on_delete=models.CASCADE, related_name="reorder_requests"
     )
     quantity = models.PositiveIntegerField(help_text="Quantity requested to reorder")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="normal")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    priority = models.CharField(max_length=20, choices=Priority.choices, default=Priority.NORMAL)
 
     # Request information
     requested_by = models.CharField(
@@ -132,7 +117,7 @@ class ReorderRequest(models.Model):
     @property
     def days_pending(self) -> int:
         """Calculate how many days the request has been pending."""
-        if self.status == self.PENDING and self.requested_at:
+        if self.status == self.Status.PENDING and self.requested_at:
             return (timezone.now() - self.requested_at).days
         return 0
 
@@ -164,24 +149,14 @@ class PurchaseOrder(models.Model):
     Tracks the complete lifecycle from creation to delivery.
     """
 
-    # Status choices
-    DRAFT = "draft"
-    SENT = "sent"
-    CONFIRMED = "confirmed"
-    PARTIALLY_RECEIVED = "partially_received"
-    RECEIVED = "received"
-    CANCELLED = "cancelled"
-    VOIDED = "voided"
-
-    STATUS_CHOICES = [
-        (DRAFT, "Draft"),
-        (SENT, "Sent to Supplier"),
-        (CONFIRMED, "Confirmed by Supplier"),
-        (PARTIALLY_RECEIVED, "Partially Received"),
-        (RECEIVED, "Fully Received"),
-        (CANCELLED, "Cancelled"),
-        (VOIDED, "Voided"),
-    ]
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        SENT = "sent", "Sent to Supplier"
+        CONFIRMED = "confirmed", "Confirmed by Supplier"
+        PARTIALLY_RECEIVED = "partially_received", "Partially Received"
+        RECEIVED = "received", "Fully Received"
+        CANCELLED = "cancelled", "Cancelled"
+        VOIDED = "voided", "Voided"
 
     # Core fields
     po_number = models.CharField(
@@ -192,7 +167,7 @@ class PurchaseOrder(models.Model):
         help_text="Purchase Order Number",
     )
     supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name="purchase_orders")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=DRAFT)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
 
     # Order details
     order_date = models.DateTimeField(auto_now_add=True)
@@ -816,41 +791,26 @@ class WebHook(models.Model):
     such as reorder requests, low stock alerts, delivery notifications, etc.
     """
 
-    # Event type choices
-    REORDER_REQUEST_CREATED = "reorder_request_created"
-    REORDER_REQUEST_APPROVED = "reorder_request_approved"
-    REORDER_REQUEST_ORDERED = "reorder_request_ordered"
-    REORDER_REQUEST_RECEIVED = "reorder_request_received"
-    ITEM_LOW_STOCK = "item_low_stock"
-    PURCHASE_ORDER_CREATED = "purchase_order_created"
-    DELIVERY_RECEIVED = "delivery_received"
-    FIXTURE_REFILL_REQUESTED = "fixture_refill_requested"
-    LOCATION_CHECKIN = "location_checkin"
-    LOCATION_FEEDBACK = "location_feedback"
-    SECURITY_REPORT = "security_report"
-    LOCATION_PROBLEM_REPORTED = "location_problem_reported"
-
-    EVENT_TYPE_CHOICES = [
-        (REORDER_REQUEST_CREATED, "Reorder Request Created"),
-        (REORDER_REQUEST_APPROVED, "Reorder Request Approved"),
-        (REORDER_REQUEST_ORDERED, "Reorder Request Ordered"),
-        (REORDER_REQUEST_RECEIVED, "Reorder Request Received"),
-        (ITEM_LOW_STOCK, "Item Low Stock"),
-        (PURCHASE_ORDER_CREATED, "Purchase Order Created"),
-        (DELIVERY_RECEIVED, "Delivery Received"),
-        (FIXTURE_REFILL_REQUESTED, "Fixture Refill Requested"),
-        (LOCATION_CHECKIN, "Location Check-in"),
-        (LOCATION_FEEDBACK, "Location Feedback"),
-        (SECURITY_REPORT, "Security Report"),
-        (LOCATION_PROBLEM_REPORTED, "Location Problem Reported"),
-    ]
+    class EventType(models.TextChoices):
+        REORDER_REQUEST_CREATED = "reorder_request_created", "Reorder Request Created"
+        REORDER_REQUEST_APPROVED = "reorder_request_approved", "Reorder Request Approved"
+        REORDER_REQUEST_ORDERED = "reorder_request_ordered", "Reorder Request Ordered"
+        REORDER_REQUEST_RECEIVED = "reorder_request_received", "Reorder Request Received"
+        ITEM_LOW_STOCK = "item_low_stock", "Item Low Stock"
+        PURCHASE_ORDER_CREATED = "purchase_order_created", "Purchase Order Created"
+        DELIVERY_RECEIVED = "delivery_received", "Delivery Received"
+        FIXTURE_REFILL_REQUESTED = "fixture_refill_requested", "Fixture Refill Requested"
+        LOCATION_CHECKIN = "location_checkin", "Location Check-in"
+        LOCATION_FEEDBACK = "location_feedback", "Location Feedback"
+        SECURITY_REPORT = "security_report", "Security Report"
+        LOCATION_PROBLEM_REPORTED = "location_problem_reported", "Location Problem Reported"
 
     # Core fields
     name = models.CharField(max_length=200, help_text="Descriptive name for this webhook")
     url = models.URLField(help_text="Webhook endpoint URL to POST notifications to")
     event_type = models.CharField(
         max_length=50,
-        choices=EVENT_TYPE_CHOICES,
+        choices=EventType.choices,
         help_text="Type of event that triggers this webhook",
     )
 
@@ -946,25 +906,15 @@ class PurchaseOrderAuditEvent(models.Model):
     review surface (gh #359) can join across domains cleanly.
     """
 
-    ACTION_PO_CREATE = "po_create"
-    ACTION_PO_SEND = "po_send"
-    ACTION_PO_VOID = "po_void"
-    ACTION_PO_LINE_VOID = "po_line_void"
-    ACTION_PO_MARK_DELIVERED = "po_mark_delivered"
-    ACTION_PO_RECEIVE_ITEMS = "po_receive_items"
-    ACTION_ATTACHMENT_ADD = "attachment_add"
-    ACTION_ATTACHMENT_REMOVE = "attachment_remove"
-
-    ACTION_CHOICES = [
-        (ACTION_PO_CREATE, "Purchase order created"),
-        (ACTION_PO_SEND, "Purchase order sent to supplier"),
-        (ACTION_PO_VOID, "Purchase order voided"),
-        (ACTION_PO_LINE_VOID, "Purchase order line item voided"),
-        (ACTION_PO_MARK_DELIVERED, "Purchase order marked delivered"),
-        (ACTION_PO_RECEIVE_ITEMS, "Purchase order line items received"),
-        (ACTION_ATTACHMENT_ADD, "Attachment added"),
-        (ACTION_ATTACHMENT_REMOVE, "Attachment removed"),
-    ]
+    class Action(models.TextChoices):
+        PO_CREATE = "po_create", "Purchase order created"
+        PO_SEND = "po_send", "Purchase order sent to supplier"
+        PO_VOID = "po_void", "Purchase order voided"
+        PO_LINE_VOID = "po_line_void", "Purchase order line item voided"
+        PO_MARK_DELIVERED = "po_mark_delivered", "Purchase order marked delivered"
+        PO_RECEIVE_ITEMS = "po_receive_items", "Purchase order line items received"
+        ATTACHMENT_ADD = "attachment_add", "Attachment added"
+        ATTACHMENT_REMOVE = "attachment_remove", "Attachment removed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -976,7 +926,7 @@ class PurchaseOrderAuditEvent(models.Model):
         related_name="purchase_order_audit_actions",
         help_text="User who performed the action; null for system-initiated events.",
     )
-    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    action = models.CharField(max_length=32, choices=Action.choices)
     # Optional FKs to the entities involved. At least one is set per row;
     # SET_NULL on delete so the audit trail survives entity teardown.
     purchase_order = models.ForeignKey(
@@ -1037,23 +987,16 @@ class WebhookAuditEvent(models.Model):
     becomes operationally necessary.
     """
 
-    ACTION_WEBHOOK_CREATE = "webhook_create"
-    ACTION_WEBHOOK_UPDATE = "webhook_update"
-    ACTION_WEBHOOK_DELETE = "webhook_delete"
-    ACTION_WEBHOOK_DISABLE = "webhook_disable"
-    ACTION_WEBHOOK_ENABLE = "webhook_enable"
-    ACTION_WEBHOOK_SECRET_ROTATE = (
-        "webhook_secret_rotate"  # nosec B105 — action name, not a credential
-    )
-
-    ACTION_CHOICES = [
-        (ACTION_WEBHOOK_CREATE, "Webhook created"),
-        (ACTION_WEBHOOK_UPDATE, "Webhook config updated"),
-        (ACTION_WEBHOOK_DELETE, "Webhook deleted"),
-        (ACTION_WEBHOOK_DISABLE, "Webhook disabled"),
-        (ACTION_WEBHOOK_ENABLE, "Webhook enabled"),
-        (ACTION_WEBHOOK_SECRET_ROTATE, "Webhook secret rotated"),
-    ]
+    class Action(models.TextChoices):
+        WEBHOOK_CREATE = "webhook_create", "Webhook created"
+        WEBHOOK_UPDATE = "webhook_update", "Webhook config updated"
+        WEBHOOK_DELETE = "webhook_delete", "Webhook deleted"
+        WEBHOOK_DISABLE = "webhook_disable", "Webhook disabled"
+        WEBHOOK_ENABLE = "webhook_enable", "Webhook enabled"
+        WEBHOOK_SECRET_ROTATE = (
+            "webhook_secret_rotate",  # nosec B105 — action name, not a credential
+            "Webhook secret rotated",
+        )
 
     # Non-secret config fields the audit hook tracks for diff capture.
     # ``secret`` is intentionally excluded — its value never appears in
@@ -1076,7 +1019,7 @@ class WebhookAuditEvent(models.Model):
         related_name="webhook_audit_actions",
         help_text="User who performed the action; null for system-initiated events.",
     )
-    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    action = models.CharField(max_length=32, choices=Action.choices)
     webhook = models.ForeignKey(
         WebHook,
         on_delete=models.SET_NULL,

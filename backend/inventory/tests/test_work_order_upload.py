@@ -81,7 +81,7 @@ class TestUploadPdfEndpoint:
 
         assert resp.status_code == status.HTTP_200_OK, resp.content
         body = resp.json()
-        assert body["status"] == WorkOrderSubmission.STATUS_APPLIED
+        assert body["status"] == WorkOrderSubmission.Status.APPLIED
         assert body["work_order_id"] == str(wo.id)
         assert body["errors"] == []
 
@@ -89,11 +89,11 @@ class TestUploadPdfEndpoint:
         assert completed_titles == {tc.task_title for tc in tcs}
 
         submission = WorkOrderSubmission.objects.get(id=body["submission_id"])
-        assert submission.source == WorkOrderSubmission.SOURCE_MANUAL
+        assert submission.source == WorkOrderSubmission.Source.MANUAL
         assert submission.submitted_by_id == user.id
 
         wo.refresh_from_db()
-        assert wo.status == WorkOrder.STATUS_COMPLETED
+        assert wo.status == WorkOrder.Status.COMPLETED
 
     def test_upload_without_pdf_returns_400(self):
         client, _ = _staff_client()
@@ -127,14 +127,14 @@ class TestUploadPdfEndpoint:
         resp = _upload(client, buf.getvalue())
         assert resp.status_code == status.HTTP_200_OK, resp.content
         body = resp.json()
-        assert body["status"] == WorkOrderSubmission.STATUS_FAILED
+        assert body["status"] == WorkOrderSubmission.Status.FAILED
         assert body["work_order_id"] is None
         assert body["completed_items"] == []
         assert body["errors"]
         assert "Work Order ID" in body["errors"][0]
 
         submission = WorkOrderSubmission.objects.get(id=body["submission_id"])
-        assert submission.source == WorkOrderSubmission.SOURCE_MANUAL
+        assert submission.source == WorkOrderSubmission.Source.MANUAL
 
     def test_source_set_to_manual(self):
         """Manual uploads must record source='manual' on the submission."""
@@ -146,7 +146,7 @@ class TestUploadPdfEndpoint:
         assert resp.status_code == status.HTTP_200_OK
 
         submission = WorkOrderSubmission.objects.get(id=resp.json()["submission_id"])
-        assert submission.source == WorkOrderSubmission.SOURCE_MANUAL
+        assert submission.source == WorkOrderSubmission.Source.MANUAL
         assert submission.submitted_by_id == user.id
 
 
@@ -175,6 +175,6 @@ class TestWorkOrderSerializerExposesSubmissions:
         sub = body["submissions"][0]
         assert sub["pdf_url"], "pdf_url must be a non-empty URL"
         assert sub["pdf_url"].endswith(".pdf")
-        assert sub["source"] == WorkOrderSubmission.SOURCE_MANUAL
-        assert sub["status"] == WorkOrderSubmission.STATUS_APPLIED
+        assert sub["source"] == WorkOrderSubmission.Source.MANUAL
+        assert sub["status"] == WorkOrderSubmission.Status.APPLIED
         assert sub["received_at"]

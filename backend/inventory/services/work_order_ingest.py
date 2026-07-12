@@ -316,14 +316,14 @@ def apply_submission(submission: WorkOrderSubmission) -> WorkOrderSubmission:
     # human review. Only PM-completion scans use OMR; 3PWO/LOCPROB keep their
     # existing QR/text handlers.
     if (
-        submission.source == WorkOrderSubmission.SOURCE_SCAN
-        and submission.kind == WorkOrderSubmission.KIND_PM_COMPLETION
+        submission.source == WorkOrderSubmission.Source.SCAN
+        and submission.kind == WorkOrderSubmission.Kind.PM_COMPLETION
     ):
         return _apply_omr_submission(submission, pdf_bytes)
 
-    if submission.kind == WorkOrderSubmission.KIND_THIRD_PARTY_WO:
+    if submission.kind == WorkOrderSubmission.Kind.THIRD_PARTY_WO:
         return _apply_third_party_submission(submission, pdf_bytes)
-    if submission.kind == WorkOrderSubmission.KIND_LOCATION_PROBLEM:
+    if submission.kind == WorkOrderSubmission.Kind.LOCATION_PROBLEM:
         return _apply_location_problem_submission(submission, pdf_bytes)
     return _apply_pm_submission(submission, pdf_bytes)
 
@@ -335,7 +335,7 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
         parsed = parse_work_order_pdf(pdf_bytes)
     except Exception as exc:  # noqa: BLE001 - defensive: malformed PDF
         logger.exception("Failed to parse work order submission %s", submission.id)
-        submission.status = WorkOrderSubmission.STATUS_FAILED
+        submission.status = WorkOrderSubmission.Status.FAILED
         submission.parse_error = f"Failed to parse PDF: {exc}"
         submission.save(update_fields=["status", "parse_error"])
         return submission
@@ -344,7 +344,7 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
 
     work_order, err = _resolve_work_order(submission, parsed)
     if err:
-        submission.status = WorkOrderSubmission.STATUS_FAILED
+        submission.status = WorkOrderSubmission.Status.FAILED
         submission.parse_error = err
         submission.save(update_fields=["status", "parse_error", "parsed_fields"])
         return submission
@@ -403,12 +403,12 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
 
     wo_became_complete = False
     if required_total > 0 and required_done >= required_total:
-        if work_order.status != WorkOrder.STATUS_COMPLETED:
-            work_order.status = WorkOrder.STATUS_COMPLETED
+        if work_order.status != WorkOrder.Status.COMPLETED:
+            work_order.status = WorkOrder.Status.COMPLETED
             work_order.completed_at = now
             wo_became_complete = True
-    elif applied_tasks > 0 and work_order.status == WorkOrder.STATUS_OPEN:
-        work_order.status = WorkOrder.STATUS_IN_PROGRESS
+    elif applied_tasks > 0 and work_order.status == WorkOrder.Status.OPEN:
+        work_order.status = WorkOrder.Status.IN_PROGRESS
 
     work_order.save()
 
@@ -447,9 +447,9 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
     # human review rather than marked applied — the digital UI surfaces the
     # pending list for accept/reject.
     if queue_cv:
-        submission.status = WorkOrderSubmission.STATUS_PENDING_REVIEW
+        submission.status = WorkOrderSubmission.Status.PENDING_REVIEW
     else:
-        submission.status = WorkOrderSubmission.STATUS_APPLIED
+        submission.status = WorkOrderSubmission.Status.APPLIED
     submission.parse_error = ""
     submission.save(
         update_fields=[
@@ -590,10 +590,10 @@ def omr_confirm_completion(
     required_done = work_order.task_completions.filter(is_required=True, is_completed=True).count()
     if not (required_total > 0 and required_done >= required_total):
         return False
-    if work_order.status == WorkOrder.STATUS_COMPLETED:
+    if work_order.status == WorkOrder.Status.COMPLETED:
         return False
     now = timezone.now()
-    work_order.status = WorkOrder.STATUS_COMPLETED
+    work_order.status = WorkOrder.Status.COMPLETED
     work_order.completed_at = now
     work_order.save(update_fields=["status", "completed_at", "updated_at"])
     item = work_order.maintenance_item
@@ -612,7 +612,7 @@ def omr_confirm_completion(
 
 def _omr_fail(submission: WorkOrderSubmission, message: str) -> WorkOrderSubmission:
     """Unrecoverable scan (no WO id / WO missing): mark FAILED."""
-    submission.status = WorkOrderSubmission.STATUS_FAILED
+    submission.status = WorkOrderSubmission.Status.FAILED
     submission.parse_error = message
     submission.save(update_fields=["status", "parse_error", "work_order"])
     return submission
@@ -624,7 +624,7 @@ def _omr_review(
     """Recoverable scan problem (bad alignment / template drift / no template):
     hold for human review with an explanatory message and apply nothing."""
     submission.work_order = work_order
-    submission.status = WorkOrderSubmission.STATUS_PENDING_REVIEW
+    submission.status = WorkOrderSubmission.Status.PENDING_REVIEW
     submission.parse_error = message
     submission.pending_changes = []
     submission.save(update_fields=["status", "parse_error", "work_order", "pending_changes"])
@@ -710,8 +710,8 @@ def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> 
         )
 
     # Progress is allowed (OPEN → IN_PROGRESS); COMPLETED is NOT — never here.
-    if applied and work_order.status == WorkOrder.STATUS_OPEN:
-        work_order.status = WorkOrder.STATUS_IN_PROGRESS
+    if applied and work_order.status == WorkOrder.Status.OPEN:
+        work_order.status = WorkOrder.Status.IN_PROGRESS
         work_order.save(update_fields=["status"])
 
     base = f"/api/inventory/work-orders/{work_order.id}/submissions/{submission.id}/mark-crop/"
@@ -740,7 +740,7 @@ def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> 
     }
     # A scan ALWAYS ends in review — the human confirms the marks (and any WO
     # completion) on screen. Never auto-applied, never auto-closed.
-    submission.status = WorkOrderSubmission.STATUS_PENDING_REVIEW
+    submission.status = WorkOrderSubmission.Status.PENDING_REVIEW
     submission.parse_error = ""
     submission.save(
         update_fields=["status", "work_order", "parsed_fields", "parse_error", "pending_changes"]
@@ -999,24 +999,24 @@ def detect_submission_kind(pdf_bytes: bytes, subject: str = "") -> str:
     """
     subject_norm = (subject or "").lstrip().upper()
     if subject_norm.startswith(THIRD_PARTY_SUBJECT_PREFIX):
-        return WorkOrderSubmission.KIND_THIRD_PARTY_WO
+        return WorkOrderSubmission.Kind.THIRD_PARTY_WO
     if subject_norm.startswith(LOCATION_PROBLEM_SUBJECT_PREFIX):
-        return WorkOrderSubmission.KIND_LOCATION_PROBLEM
+        return WorkOrderSubmission.Kind.LOCATION_PROBLEM
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         fields = reader.get_fields() or {}
         if "third_party_work_order_id" in fields:
-            return WorkOrderSubmission.KIND_THIRD_PARTY_WO
+            return WorkOrderSubmission.Kind.THIRD_PARTY_WO
         if "location_problem_report" in fields or "location_id" in fields:
-            return WorkOrderSubmission.KIND_LOCATION_PROBLEM
+            return WorkOrderSubmission.Kind.LOCATION_PROBLEM
     except Exception:  # noqa: BLE001  # nosec B110 - malformed PDFs default to PM path
         pass
     text = _pdf_text(pdf_bytes)
     if LOCATION_PROBLEM_HEADER_RE.search(text):
-        return WorkOrderSubmission.KIND_LOCATION_PROBLEM
+        return WorkOrderSubmission.Kind.LOCATION_PROBLEM
     if THIRD_PARTY_HEADER_RE.search(text):
-        return WorkOrderSubmission.KIND_THIRD_PARTY_WO
-    return WorkOrderSubmission.KIND_PM_COMPLETION
+        return WorkOrderSubmission.Kind.THIRD_PARTY_WO
+    return WorkOrderSubmission.Kind.PM_COMPLETION
 
 
 def _looks_like_qr_payload(image_bytes: bytes) -> bool:
@@ -1069,7 +1069,7 @@ def _apply_third_party_submission(
         parsed = parse_third_party_wo_pdf(pdf_bytes)
     except Exception as exc:  # noqa: BLE001 - defensive: malformed PDF
         logger.exception("Failed to parse third-party WO submission %s", submission.id)
-        submission.status = WorkOrderSubmission.STATUS_FAILED
+        submission.status = WorkOrderSubmission.Status.FAILED
         submission.parse_error = f"Failed to parse PDF: {exc}"
         submission.save(update_fields=["status", "parse_error"])
         return submission
@@ -1085,7 +1085,7 @@ def _apply_third_party_submission(
             if errors
             else "Could not find a Third-Party Work Order ID marker in the PDF."
         )
-        submission.status = WorkOrderSubmission.STATUS_FAILED
+        submission.status = WorkOrderSubmission.Status.FAILED
         submission.parse_error = msg
         submission.save(update_fields=["status", "parse_error", "parsed_fields"])
         return submission
@@ -1093,7 +1093,7 @@ def _apply_third_party_submission(
     try:
         tpwo = ThirdPartyWorkOrder.objects.get(id=tpwo_id)
     except ThirdPartyWorkOrder.DoesNotExist:
-        submission.status = WorkOrderSubmission.STATUS_FAILED
+        submission.status = WorkOrderSubmission.Status.FAILED
         submission.parse_error = f"Third-party work order {tpwo_id} not found."
         submission.save(update_fields=["status", "parse_error", "parsed_fields"])
         return submission
@@ -1200,7 +1200,7 @@ def _apply_third_party_submission(
             submission.id,
         )
 
-    submission.status = WorkOrderSubmission.STATUS_APPLIED
+    submission.status = WorkOrderSubmission.Status.APPLIED
     submission.parse_error = ""
     submission.save(
         update_fields=["status", "third_party_work_order", "parsed_fields", "parse_error"]
@@ -1287,7 +1287,7 @@ def _apply_location_problem_submission(
 
     location_id = parsed.get("location_id")
     if not location_id:
-        submission.status = WorkOrderSubmission.STATUS_FAILED
+        submission.status = WorkOrderSubmission.Status.FAILED
         submission.parse_error = (
             "Could not extract a Location ID from the form. "
             "Tried: AcroForm location_id, Location ID text, QR location:<id>."
@@ -1298,15 +1298,15 @@ def _apply_location_problem_submission(
     try:
         location = Location.objects.get(id=location_id)
     except Location.DoesNotExist:
-        submission.status = WorkOrderSubmission.STATUS_FAILED
+        submission.status = WorkOrderSubmission.Status.FAILED
         submission.parse_error = f"Location {location_id} not found."
         submission.save(update_fields=["status", "parse_error", "parsed_fields"])
         return submission
 
-    severity = parsed.get("severity") or LocationProblem.SEVERITY_MEDIUM
-    valid_severities = {choice for choice, _ in LocationProblem.SEVERITY_CHOICES}
+    severity = parsed.get("severity") or LocationProblem.Severity.MEDIUM
+    valid_severities = {choice for choice, _ in LocationProblem.Severity.choices}
     if severity not in valid_severities:
-        severity = LocationProblem.SEVERITY_MEDIUM
+        severity = LocationProblem.Severity.MEDIUM
 
     description = parsed.get("description") or "Reported via paper Location Problem Report"
 
@@ -1316,7 +1316,7 @@ def _apply_location_problem_submission(
             description=description,
             severity=severity,
             reported_by=submission.from_email or "",
-            status=LocationProblem.REPORTED,
+            status=LocationProblem.Status.REPORTED,
         )
         problem.paper_form_attachment.save(
             f"locprob-{problem.id}-paper.pdf",
@@ -1325,7 +1325,7 @@ def _apply_location_problem_submission(
         )
         submission.location_problem = problem
 
-    submission.status = WorkOrderSubmission.STATUS_APPLIED
+    submission.status = WorkOrderSubmission.Status.APPLIED
     submission.parse_error = ""
     submission.save(update_fields=["status", "location_problem", "parsed_fields", "parse_error"])
     return submission

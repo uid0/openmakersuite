@@ -115,29 +115,33 @@ class TestQuantityOnOrder:
         user = UserFactory()
 
         # Counted — the three open statuses.
-        _po_line(item, po_status=PurchaseOrder.SENT, quantity_ordered=5, created_by=user)
-        _po_line(item, po_status=PurchaseOrder.CONFIRMED, quantity_ordered=7, created_by=user)
+        _po_line(item, po_status=PurchaseOrder.Status.SENT, quantity_ordered=5, created_by=user)
+        _po_line(
+            item, po_status=PurchaseOrder.Status.CONFIRMED, quantity_ordered=7, created_by=user
+        )
         _po_line(
             item,
-            po_status=PurchaseOrder.PARTIALLY_RECEIVED,
+            po_status=PurchaseOrder.Status.PARTIALLY_RECEIVED,
             quantity_ordered=10,
             quantity_received=4,
             created_by=user,
         )
         # Not counted — draft / received / cancelled.
-        _po_line(item, po_status=PurchaseOrder.DRAFT, quantity_ordered=100, created_by=user)
+        _po_line(item, po_status=PurchaseOrder.Status.DRAFT, quantity_ordered=100, created_by=user)
         _po_line(
             item,
-            po_status=PurchaseOrder.RECEIVED,
+            po_status=PurchaseOrder.Status.RECEIVED,
             quantity_ordered=100,
             quantity_received=100,
             created_by=user,
         )
-        _po_line(item, po_status=PurchaseOrder.CANCELLED, quantity_ordered=100, created_by=user)
+        _po_line(
+            item, po_status=PurchaseOrder.Status.CANCELLED, quantity_ordered=100, created_by=user
+        )
         # Not counted — a voided line on an otherwise-open PO.
         _po_line(
             item,
-            po_status=PurchaseOrder.SENT,
+            po_status=PurchaseOrder.Status.SENT,
             quantity_ordered=100,
             is_voided=True,
             created_by=user,
@@ -164,7 +168,7 @@ class TestQuantityInTransit:
         # Partially received: 10 ordered, 4 received -> 6 in transit.
         _po_line(
             item,
-            po_status=PurchaseOrder.PARTIALLY_RECEIVED,
+            po_status=PurchaseOrder.Status.PARTIALLY_RECEIVED,
             quantity_ordered=10,
             quantity_received=4,
             created_by=user,
@@ -172,13 +176,13 @@ class TestQuantityInTransit:
         # A fully-received line on a partial PO contributes nothing in transit.
         _po_line(
             item,
-            po_status=PurchaseOrder.PARTIALLY_RECEIVED,
+            po_status=PurchaseOrder.Status.PARTIALLY_RECEIVED,
             quantity_ordered=8,
             quantity_received=8,
             created_by=user,
         )
         # A plain sent line is on order but not yet in transit.
-        _po_line(item, po_status=PurchaseOrder.SENT, quantity_ordered=5, created_by=user)
+        _po_line(item, po_status=PurchaseOrder.Status.SENT, quantity_ordered=5, created_by=user)
 
         data = api_client.get(_metrics_url(item)).json()
 
@@ -193,11 +197,11 @@ class TestQuantityCommittedAndAvailable:
         item = InventoryItemFactory(image=None, current_stock=20, reorder_quantity=1)
         asset = AssetFactory()
 
-        _committed_material(item, asset, quantity="3", wo_statuses=[WorkOrder.STATUS_OPEN])
-        _committed_material(item, asset, quantity="2", wo_statuses=[WorkOrder.STATUS_IN_PROGRESS])
-        _committed_material(item, asset, quantity="1", wo_statuses=[WorkOrder.STATUS_BLOCKED])
+        _committed_material(item, asset, quantity="3", wo_statuses=[WorkOrder.Status.OPEN])
+        _committed_material(item, asset, quantity="2", wo_statuses=[WorkOrder.Status.IN_PROGRESS])
+        _committed_material(item, asset, quantity="1", wo_statuses=[WorkOrder.Status.BLOCKED])
         # Completed work order -> not committed.
-        _committed_material(item, asset, quantity="100", wo_statuses=[WorkOrder.STATUS_COMPLETED])
+        _committed_material(item, asset, quantity="100", wo_statuses=[WorkOrder.Status.COMPLETED])
         # Material with no work order at all -> not committed.
         _committed_material(item, asset, quantity="50", wo_statuses=[])
 
@@ -215,7 +219,7 @@ class TestQuantityCommittedAndAvailable:
             item,
             asset,
             quantity="4",
-            wo_statuses=[WorkOrder.STATUS_OPEN, WorkOrder.STATUS_IN_PROGRESS],
+            wo_statuses=[WorkOrder.Status.OPEN, WorkOrder.Status.IN_PROGRESS],
         )
 
         data = api_client.get(_metrics_url(item)).json()
@@ -227,7 +231,7 @@ class TestQuantityCommittedAndAvailable:
         item = InventoryItemFactory(image=None, current_stock=1, reorder_quantity=1)
         asset = AssetFactory()
 
-        _committed_material(item, asset, quantity="5", wo_statuses=[WorkOrder.STATUS_OPEN])
+        _committed_material(item, asset, quantity="5", wo_statuses=[WorkOrder.Status.OPEN])
 
         data = api_client.get(_metrics_url(item)).json()
 
@@ -256,7 +260,7 @@ class TestCostAndTrend:
         item = InventoryItemFactory(image=None, reorder_quantity=1, unit_cost=current)
         _po_line(
             item,
-            po_status=PurchaseOrder.RECEIVED,
+            po_status=PurchaseOrder.Status.RECEIVED,
             quantity_ordered=1,
             quantity_received=1,
             unit_cost_ordered=last_po,
@@ -272,14 +276,14 @@ class TestCostAndTrend:
         item = InventoryItemFactory(image=None, reorder_quantity=1, unit_cost=Decimal("5.00"))
         older = _po_line(
             item,
-            po_status=PurchaseOrder.RECEIVED,
+            po_status=PurchaseOrder.Status.RECEIVED,
             quantity_ordered=1,
             quantity_received=1,
             unit_cost_ordered=Decimal("9.0000"),
         )
         newer = _po_line(
             item,
-            po_status=PurchaseOrder.RECEIVED,
+            po_status=PurchaseOrder.Status.RECEIVED,
             quantity_ordered=1,
             quantity_received=1,
             unit_cost_ordered=Decimal("4.0000"),

@@ -583,7 +583,7 @@ def _approve_one(obs, reviewer, reason_text: str):
             user=reviewer,
             item=item,
             actual_count=0,
-            reason=StockReconciliation.REASON_VISION_SUPPLY_CHECK,
+            reason=StockReconciliation.ReasonCode.VISION_SUPPLY_CHECK,
             notes=notes,
         )
 

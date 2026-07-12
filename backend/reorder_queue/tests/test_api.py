@@ -13,12 +13,14 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from inventory.models import Supplier
 from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
 from reorder_queue.models import (
     LeadTimeLog,
     PurchaseOrder,
     PurchaseOrderAuditEvent,
     PurchaseOrderItem,
+    ReorderRequest,
 )
 from reorder_queue.tests.factories import ReorderRequestFactory
 
@@ -53,14 +55,14 @@ class TestReorderRequestAPI:
             "quantity": 25,
             "requested_by": "Jane Doe",
             "request_notes": "We are running low",
-            "priority": "high",
+            "priority": ReorderRequest.Priority.HIGH,
         }
         response = client.post(url, data, format="json")
 
         assert response.status_code == status.HTTP_201_CREATED
         assert str(response.data["item"]) == str(item.id)
         assert response.data["quantity"] == 25
-        assert response.data["status"] == "pending"
+        assert response.data["status"] == ReorderRequest.Status.PENDING
 
     def test_create_reorder_request_minimal(self, authenticated_client):
         """Test creating request with minimal required fields."""
@@ -141,7 +143,7 @@ class TestReorderRequestAPI:
 
     def test_pending_reorder_requests_anonymous_denied(self, api_client):
         """Anonymous users cannot view the pending queue (gh #327)."""
-        ReorderRequestFactory(status="pending")
+        ReorderRequestFactory(status=ReorderRequest.Status.PENDING)
 
         url = reverse("reorderrequest-pending")
         response = api_client.get(url)
@@ -163,7 +165,7 @@ class TestReorderRequestAPI:
     def test_admin_actions_anonymous_denied(self, api_client, action_name, method, detail):
         """All admin reorder actions reject anonymous callers (gh #327)."""
         if detail:
-            request_obj = ReorderRequestFactory(status="pending")
+            request_obj = ReorderRequestFactory(status=ReorderRequest.Status.PENDING)
             url = reverse(f"reorderrequest-{action_name}", kwargs={"pk": request_obj.pk})
         else:
             url = reverse(f"reorderrequest-{action_name}")
@@ -189,7 +191,7 @@ class TestReorderRequestAPI:
         request_obj = ReorderRequestFactory()
 
         url = reverse("reorderrequest-detail", kwargs={"pk": request_obj.pk})
-        data = {"status": "approved"}
+        data = {"status": ReorderRequest.Status.APPROVED}
         response = api_client.patch(url, data, format="json")
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -199,10 +201,10 @@ class TestReorderRequestAPI:
         client, user = authenticated_client
 
         # Create requests with different statuses
-        ReorderRequestFactory(status="pending")
-        ReorderRequestFactory(status="pending")
-        ReorderRequestFactory(status="approved")
-        ReorderRequestFactory(status="cancelled")
+        ReorderRequestFactory(status=ReorderRequest.Status.PENDING)
+        ReorderRequestFactory(status=ReorderRequest.Status.PENDING)
+        ReorderRequestFactory(status=ReorderRequest.Status.APPROVED)
+        ReorderRequestFactory(status=ReorderRequest.Status.CANCELLED)
 
         url = reverse("reorderrequest-pending")
         response = client.get(url)
@@ -211,22 +213,22 @@ class TestReorderRequestAPI:
         # Endpoint returns list directly, not paginated
         assert len(response.data) == 2
         for req in response.data:
-            assert req["status"] == "pending"
+            assert req["status"] == ReorderRequest.Status.PENDING
 
     def test_by_supplier_endpoint(self, authenticated_client):
         """Test grouping requests by supplier."""
         client, user = authenticated_client
 
-        supplier1 = SupplierFactory(supplier_type="online")
-        supplier2 = SupplierFactory(supplier_type="national")
+        supplier1 = SupplierFactory(supplier_type=Supplier.SupplierType.ONLINE)
+        supplier2 = SupplierFactory(supplier_type=Supplier.SupplierType.NATIONAL)
 
         item1 = InventoryItemFactory(supplier=supplier1)
         item2 = InventoryItemFactory(supplier=supplier1)
         item3 = InventoryItemFactory(supplier=supplier2)
 
-        ReorderRequestFactory(item=item1, status="pending")
-        ReorderRequestFactory(item=item2, status="pending")
-        ReorderRequestFactory(item=item3, status="pending")
+        ReorderRequestFactory(item=item1, status=ReorderRequest.Status.PENDING)
+        ReorderRequestFactory(item=item2, status=ReorderRequest.Status.PENDING)
+        ReorderRequestFactory(item=item3, status=ReorderRequest.Status.PENDING)
 
         url = reverse("reorderrequest-by-supplier")
         response = client.get(url)
@@ -242,27 +244,27 @@ class TestReorderRequestAPI:
     def test_approve_request(self, authenticated_client):
         """Test approving a reorder request."""
         client, user = authenticated_client
-        request_obj = ReorderRequestFactory(status="pending")
+        request_obj = ReorderRequestFactory(status=ReorderRequest.Status.PENDING)
 
         url = reverse("reorderrequest-approve", kwargs={"pk": request_obj.pk})
         data = {"admin_notes": "Approved for ordering"}
         response = client.post(url, data, format="json")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["status"] == "approved"
+        assert response.data["status"] == ReorderRequest.Status.APPROVED
         assert response.data["reviewed_by"] == user.id
         assert response.data["admin_notes"] == "Approved for ordering"
 
         # Verify in database
         request_obj.refresh_from_db()
-        assert request_obj.status == "approved"
+        assert request_obj.status == ReorderRequest.Status.APPROVED
         assert request_obj.reviewed_by == user
         assert request_obj.reviewed_at is not None
 
     def test_mark_ordered(self, authenticated_client):
         """Test marking a request as ordered."""
         client, user = authenticated_client
-        request_obj = ReorderRequestFactory(status="approved")
+        request_obj = ReorderRequestFactory(status=ReorderRequest.Status.APPROVED)
 
         url = reverse("reorderrequest-mark-ordered", kwargs={"pk": request_obj.pk})
         data = {
@@ -273,12 +275,12 @@ class TestReorderRequestAPI:
         response = client.post(url, data, format="json")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["status"] == "ordered"
+        assert response.data["status"] == ReorderRequest.Status.ORDERED
         assert response.data["order_number"] == "ORD-12345"
 
         # Verify in database
         request_obj.refresh_from_db()
-        assert request_obj.status == "ordered"
+        assert request_obj.status == ReorderRequest.Status.ORDERED
         assert request_obj.ordered_at is not None
         assert request_obj.order_number == "ORD-12345"
 
@@ -289,16 +291,16 @@ class TestReorderRequestAPI:
         operator is not forced to type one at mark-ordered time.
         """
         client, user = authenticated_client
-        request_obj = ReorderRequestFactory(status="approved")
+        request_obj = ReorderRequestFactory(status=ReorderRequest.Status.APPROVED)
 
         url = reverse("reorderrequest-mark-ordered", kwargs={"pk": request_obj.pk})
         response = client.post(url, {}, format="json")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["status"] == "ordered"
+        assert response.data["status"] == ReorderRequest.Status.ORDERED
 
         request_obj.refresh_from_db()
-        assert request_obj.status == "ordered"
+        assert request_obj.status == ReorderRequest.Status.ORDERED
         assert request_obj.ordered_at is not None
         # No number was typed; it stays blank for the PO to carry later.
         assert request_obj.order_number == ""
@@ -308,7 +310,7 @@ class TestReorderRequestAPI:
         client, user = authenticated_client
         existing_delivery = (timezone.now() + timedelta(days=5)).date()
         request_obj = ReorderRequestFactory(
-            status="approved",
+            status=ReorderRequest.Status.APPROVED,
             order_number="PO-2026-0007",
             estimated_delivery=existing_delivery,
         )
@@ -319,7 +321,7 @@ class TestReorderRequestAPI:
         assert response.status_code == status.HTTP_200_OK
 
         request_obj.refresh_from_db()
-        assert request_obj.status == "ordered"
+        assert request_obj.status == ReorderRequest.Status.ORDERED
         # Omitted fields are left untouched, not blanked.
         assert request_obj.order_number == "PO-2026-0007"
         assert request_obj.estimated_delivery == existing_delivery
@@ -329,7 +331,7 @@ class TestReorderRequestAPI:
         ordered_time = timezone.now()
         delivery_date = ordered_time.date()
         request_obj = ReorderRequestFactory(
-            status="received",
+            status=ReorderRequest.Status.RECEIVED,
             ordered_at=ordered_time,
             actual_delivery=delivery_date,
             actual_cost="150.25",
@@ -361,9 +363,14 @@ class TestReorderRequestAPI:
     def test_logistics_dashboard_public_endpoint(self, api_client):
         """The logistics dashboard data should be accessible without authentication."""
         urgent_request = ReorderRequestFactory(
-            status="pending", priority="urgent", quantity=7, request_notes="Needs ASAP"
+            status=ReorderRequest.Status.PENDING,
+            priority=ReorderRequest.Priority.URGENT,
+            quantity=7,
+            request_notes="Needs ASAP",
         )
-        approved_request = ReorderRequestFactory(status="approved", quantity=3)  # noqa: F841
+        approved_request = ReorderRequestFactory(  # noqa: F841
+            status=ReorderRequest.Status.APPROVED, quantity=3
+        )
 
         user = User.objects.create_user(username="logistics-user", password="pass12345")
         item_supplier = urgent_request.item.primary_item_supplier
@@ -371,7 +378,7 @@ class TestReorderRequestAPI:
         purchase_order = PurchaseOrder.objects.create(
             po_number="PO-LOG-001",
             supplier=item_supplier.supplier,
-            status=PurchaseOrder.SENT,
+            status=PurchaseOrder.Status.SENT,
             created_by=user,
             sent_at=timezone.now(),
             expected_delivery_date=timezone.now().date() + timedelta(days=5),
@@ -419,13 +426,15 @@ class TestReorderRequestAPI:
         """Test marking a request as received and updating inventory."""
         client, user = authenticated_client
         item = InventoryItemFactory(current_stock=10)
-        request_obj = ReorderRequestFactory(item=item, quantity=50, status="ordered")
+        request_obj = ReorderRequestFactory(
+            item=item, quantity=50, status=ReorderRequest.Status.ORDERED
+        )
 
         url = reverse("reorderrequest-mark-received", kwargs={"pk": request_obj.pk})
         response = client.post(url, format="json")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["status"] == "received"
+        assert response.data["status"] == ReorderRequest.Status.RECEIVED
 
         # Verify inventory was updated
         item.refresh_from_db()
@@ -433,24 +442,24 @@ class TestReorderRequestAPI:
 
         # Verify in database
         request_obj.refresh_from_db()
-        assert request_obj.status == "received"
+        assert request_obj.status == ReorderRequest.Status.RECEIVED
         assert request_obj.actual_delivery is not None
 
     def test_cancel_request(self, authenticated_client):
         """Test cancelling a reorder request."""
         client, user = authenticated_client
-        request_obj = ReorderRequestFactory(status="pending")
+        request_obj = ReorderRequestFactory(status=ReorderRequest.Status.PENDING)
 
         url = reverse("reorderrequest-cancel", kwargs={"pk": request_obj.pk})
         data = {"admin_notes": "Duplicate request"}
         response = client.post(url, data, format="json")
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["status"] == "cancelled"
+        assert response.data["status"] == ReorderRequest.Status.CANCELLED
 
         # Verify in database
         request_obj.refresh_from_db()
-        assert request_obj.status == "cancelled"
+        assert request_obj.status == ReorderRequest.Status.CANCELLED
         assert request_obj.reviewed_by == user
         assert request_obj.admin_notes == "Duplicate request"
 
@@ -471,8 +480,8 @@ class TestReorderRequestAPI:
         item2 = InventoryItemFactory(supplier=globex, supplier_sku="GLBX-456")
 
         # An approved and a pending request both count as "live".
-        ReorderRequestFactory(item=item1, status="approved", quantity=3)
-        ReorderRequestFactory(item=item2, status="pending", quantity=5)
+        ReorderRequestFactory(item=item1, status=ReorderRequest.Status.APPROVED, quantity=3)
+        ReorderRequestFactory(item=item2, status=ReorderRequest.Status.PENDING, quantity=5)
 
         url = reverse("reorderrequest-generate-cart-links")
         response = client.get(url)
@@ -500,10 +509,10 @@ class TestReorderRequestAPI:
         live_item = InventoryItemFactory(supplier=supplier, supplier_sku="LIVE-1")
         done_item = InventoryItemFactory(supplier=supplier, supplier_sku="DONE-1")
 
-        ReorderRequestFactory(item=live_item, status="approved", quantity=2)
-        ReorderRequestFactory(item=done_item, status="ordered", quantity=9)
-        ReorderRequestFactory(item=done_item, status="received", quantity=9)
-        ReorderRequestFactory(item=done_item, status="cancelled", quantity=9)
+        ReorderRequestFactory(item=live_item, status=ReorderRequest.Status.APPROVED, quantity=2)
+        ReorderRequestFactory(item=done_item, status=ReorderRequest.Status.ORDERED, quantity=9)
+        ReorderRequestFactory(item=done_item, status=ReorderRequest.Status.RECEIVED, quantity=9)
+        ReorderRequestFactory(item=done_item, status=ReorderRequest.Status.CANCELLED, quantity=9)
 
         url = reverse("reorderrequest-generate-cart-links")
         response = client.get(url)
@@ -530,7 +539,7 @@ class TestPurchaseOrderExportOrder:
         purchase_order = PurchaseOrder.objects.create(
             po_number=po_number,
             supplier=supplier,
-            status=PurchaseOrder.DRAFT,
+            status=PurchaseOrder.Status.DRAFT,
             created_by=user,
         )
         return purchase_order, supplier
@@ -1097,7 +1106,7 @@ class TestPurchaseOrderMarkDelivered:
         purchase_order = PurchaseOrder.objects.create(
             po_number=f"PO-MD-{item_supplier.id}",
             supplier=supplier,
-            status=PurchaseOrder.SENT,
+            status=PurchaseOrder.Status.SENT,
             created_by=user,
             sent_by=user,
             sent_at=sent_at or (timezone.now() - timedelta(days=7)),
@@ -1134,7 +1143,7 @@ class TestPurchaseOrderMarkDelivered:
 
         purchase_order.refresh_from_db()
         po_item.refresh_from_db()
-        assert purchase_order.status == PurchaseOrder.RECEIVED
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
         assert po_item.quantity_received == po_item.quantity_ordered
         assert purchase_order.deliveries.count() == 1
 
@@ -1202,7 +1211,7 @@ class TestPurchaseOrderMarkDelivered:
         purchase_order = PurchaseOrder.objects.create(
             po_number="PO-MD-AUTH",
             supplier=supplier,
-            status=PurchaseOrder.SENT,
+            status=PurchaseOrder.Status.SENT,
             created_by=user,
             sent_at=timezone.now(),
         )
@@ -1219,7 +1228,7 @@ class TestPurchaseOrderMarkDelivered:
         """Draft/cancelled/received orders cannot be re-delivered."""
         client, user = authenticated_client
         purchase_order, _, _ = self._create_sent_po(user)
-        purchase_order.status = PurchaseOrder.DRAFT
+        purchase_order.status = PurchaseOrder.Status.DRAFT
         purchase_order.save()
 
         url = reverse("purchaseorder-mark-delivered", kwargs={"pk": purchase_order.pk})
@@ -1235,7 +1244,7 @@ class TestPurchaseOrderMarkDelivered:
 class TestPurchaseOrderReceive:
     """Tests for the per-line-item PO receive endpoint (POST .../receive/)."""
 
-    def _create_po(self, user, *, lines=None, status_=PurchaseOrder.SENT):
+    def _create_po(self, user, *, lines=None, status_=PurchaseOrder.Status.SENT):
         """Create a PO in ``status_`` with one item_supplier line per spec.
 
         ``lines`` is a list of dicts with optional ``quantity_ordered`` (default
@@ -1295,7 +1304,7 @@ class TestPurchaseOrderReceive:
         po_item.refresh_from_db()
         po_item.item.refresh_from_db()
 
-        assert purchase_order.status == PurchaseOrder.PARTIALLY_RECEIVED
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
         assert po_item.quantity_received == 2
         assert po_item.item.current_stock == 12  # 10 + 2
 
@@ -1326,7 +1335,7 @@ class TestPurchaseOrderReceive:
         po_item.refresh_from_db()
         po_item.item.refresh_from_db()
 
-        assert purchase_order.status == PurchaseOrder.RECEIVED
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
         assert po_item.quantity_received == 5
         assert po_item.item.current_stock == 15  # 10 + 5
 
@@ -1365,7 +1374,7 @@ class TestPurchaseOrderReceive:
         line_b.item.refresh_from_db()
 
         # line_a partial (3/5), line_b full (4/4) -> PO is partially received.
-        assert purchase_order.status == PurchaseOrder.PARTIALLY_RECEIVED
+        assert purchase_order.status == PurchaseOrder.Status.PARTIALLY_RECEIVED
         assert line_a.quantity_received == 3
         assert line_b.quantity_received == 4
         assert line_a.item.current_stock == 4  # 1 + 3
@@ -1379,7 +1388,7 @@ class TestPurchaseOrderReceive:
         client, user = authenticated_client
         purchase_order, (po_item,) = self._create_po(
             user,
-            status_=PurchaseOrder.PARTIALLY_RECEIVED,
+            status_=PurchaseOrder.Status.PARTIALLY_RECEIVED,
             lines=[{"quantity_ordered": 5, "quantity_received": 2, "current_stock": 7}],
         )
 
@@ -1394,7 +1403,7 @@ class TestPurchaseOrderReceive:
         po_item.refresh_from_db()
         po_item.item.refresh_from_db()
 
-        assert purchase_order.status == PurchaseOrder.RECEIVED
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
         assert po_item.quantity_received == 5
         assert po_item.item.current_stock == 10  # 7 + 3
 
@@ -1450,7 +1459,7 @@ class TestPurchaseOrderReceive:
         assert response.status_code == status.HTTP_200_OK, response.data
         event = PurchaseOrderAuditEvent.objects.filter(
             purchase_order=purchase_order,
-            action=PurchaseOrderAuditEvent.ACTION_PO_RECEIVE_ITEMS,
+            action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
         ).first()
         assert event is not None
         assert event.actor == user
@@ -1542,7 +1551,7 @@ class TestPurchaseOrderReceive:
     def test_receive_rejects_non_receivable_status(self, authenticated_client):
         """Draft/received/cancelled orders cannot receive items."""
         client, user = authenticated_client
-        purchase_order, (po_item,) = self._create_po(user, status_=PurchaseOrder.DRAFT)
+        purchase_order, (po_item,) = self._create_po(user, status_=PurchaseOrder.Status.DRAFT)
 
         response = client.post(
             self._url(purchase_order),
@@ -1611,7 +1620,7 @@ class TestPurchaseOrderReceive:
 class TestPurchaseOrderVoid:
     """Tests for PurchaseOrder void action (oms-rrx)."""
 
-    def _make_po_with_items(self, user, *, status_=PurchaseOrder.SENT, item_count=2):
+    def _make_po_with_items(self, user, *, status_=PurchaseOrder.Status.SENT, item_count=2):
         supplier = SupplierFactory()
         purchase_order = PurchaseOrder.objects.create(
             supplier=supplier,
@@ -1653,7 +1662,7 @@ class TestPurchaseOrderVoid:
 
         assert response.status_code == status.HTTP_200_OK
         purchase_order.refresh_from_db()
-        assert purchase_order.status == PurchaseOrder.VOIDED
+        assert purchase_order.status == PurchaseOrder.Status.VOIDED
         assert purchase_order.voided_at is not None
         assert purchase_order.voided_by == user
         assert purchase_order.void_reason == "supplier rejected all lines"
@@ -1688,14 +1697,14 @@ class TestPurchaseOrderVoid:
     def test_cannot_void_received_po(self):
         """AC-3: voiding a received PO returns 400."""
         client, user = self._staff_client()
-        purchase_order, _ = self._make_po_with_items(user, status_=PurchaseOrder.RECEIVED)
+        purchase_order, _ = self._make_po_with_items(user, status_=PurchaseOrder.Status.RECEIVED)
 
         url = reverse("purchaseorder-void", kwargs={"pk": purchase_order.pk})
         response = client.post(url, {"reason": "oops"}, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         purchase_order.refresh_from_db()
-        assert purchase_order.status == PurchaseOrder.RECEIVED
+        assert purchase_order.status == PurchaseOrder.Status.RECEIVED
 
     def test_cannot_double_void(self):
         """AC-2: voiding an already-voided PO returns 400."""
@@ -1719,7 +1728,7 @@ class TestPurchaseOrderVoid:
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         purchase_order.refresh_from_db()
-        assert purchase_order.status != PurchaseOrder.VOIDED
+        assert purchase_order.status != PurchaseOrder.Status.VOIDED
 
     def test_coo_group_member_can_void(self):
         """COO group members may void POs without is_staff."""
@@ -1741,7 +1750,7 @@ class TestPurchaseOrderVoid:
 
         assert response.status_code == status.HTTP_200_OK
         purchase_order.refresh_from_db()
-        assert purchase_order.status == PurchaseOrder.VOIDED
+        assert purchase_order.status == PurchaseOrder.Status.VOIDED
 
 
 @pytest.mark.integration
@@ -1752,7 +1761,7 @@ class TestPurchaseOrderMetadataAndAttachments:
         supplier = SupplierFactory()
         purchase_order = PurchaseOrder.objects.create(
             supplier=supplier,
-            status=PurchaseOrder.SENT,
+            status=PurchaseOrder.Status.SENT,
             created_by=user,
         )
         return purchase_order
@@ -1897,7 +1906,7 @@ class TestPurchaseOrderListVoidHandling:
         supplier = SupplierFactory()
         purchase_order = PurchaseOrder.objects.create(
             supplier=supplier,
-            status=PurchaseOrder.SENT,
+            status=PurchaseOrder.Status.SENT,
             created_by=user,
         )
         items = []
@@ -1995,7 +2004,7 @@ class TestPurchaseOrderAutoTransitionToSent:
     def _draft_po(self, user, **kwargs):
         return PurchaseOrder.objects.create(
             supplier=SupplierFactory(),
-            status=PurchaseOrder.DRAFT,
+            status=PurchaseOrder.Status.DRAFT,
             created_by=user,
             **kwargs,
         )
@@ -2004,7 +2013,7 @@ class TestPurchaseOrderAutoTransitionToSent:
         return reverse("purchaseorder-detail", kwargs={"pk": po.pk})
 
     def _po_send_events(self, po=None):
-        qs = PurchaseOrderAuditEvent.objects.filter(action=PurchaseOrderAuditEvent.ACTION_PO_SEND)
+        qs = PurchaseOrderAuditEvent.objects.filter(action=PurchaseOrderAuditEvent.Action.PO_SEND)
         return qs.filter(purchase_order=po) if po is not None else qs
 
     def test_attach_sales_order_number_to_draft_transitions_to_sent(self, authenticated_client):
@@ -2018,7 +2027,7 @@ class TestPurchaseOrderAutoTransitionToSent:
 
         assert response.status_code == status.HTTP_200_OK, response.data
         po.refresh_from_db()
-        assert po.status == PurchaseOrder.SENT
+        assert po.status == PurchaseOrder.Status.SENT
         assert po.sales_order_number == "SO-123"
         assert po.sent_at is not None
         assert po.sent_by == user
@@ -2042,7 +2051,7 @@ class TestPurchaseOrderAutoTransitionToSent:
         original_sent_at = timezone.now() - timedelta(days=3)
         po = PurchaseOrder.objects.create(
             supplier=SupplierFactory(),
-            status=PurchaseOrder.SENT,
+            status=PurchaseOrder.Status.SENT,
             created_by=user,
             sent_by=sender,
             sent_at=original_sent_at,
@@ -2055,7 +2064,7 @@ class TestPurchaseOrderAutoTransitionToSent:
 
         assert response.status_code == status.HTTP_200_OK, response.data
         po.refresh_from_db()
-        assert po.status == PurchaseOrder.SENT
+        assert po.status == PurchaseOrder.Status.SENT
         assert po.sales_order_number == "SO-NEW"
         # sent_by / sent_at untouched, and no new po_send event recorded.
         assert po.sent_by == sender
@@ -2076,7 +2085,7 @@ class TestPurchaseOrderAutoTransitionToSent:
 
         assert response.status_code == status.HTTP_200_OK, response.data
         po.refresh_from_db()
-        assert po.status == PurchaseOrder.DRAFT
+        assert po.status == PurchaseOrder.Status.DRAFT
         assert po.sent_at is None
         assert not self._po_send_events(po).exists()
 
@@ -2089,7 +2098,7 @@ class TestPurchaseOrderAutoTransitionToSent:
 
         assert response.status_code == status.HTTP_200_OK, response.data
         po.refresh_from_db()
-        assert po.status == PurchaseOrder.DRAFT
+        assert po.status == PurchaseOrder.Status.DRAFT
         assert po.notes == "rush order"
         assert po.sent_at is None
         assert not self._po_send_events(po).exists()
@@ -2099,7 +2108,7 @@ class TestPurchaseOrderAutoTransitionToSent:
         client, user = authenticated_client
         po = PurchaseOrder.objects.create(
             supplier=SupplierFactory(),
-            status=PurchaseOrder.SENT,
+            status=PurchaseOrder.Status.SENT,
             created_by=user,
             sent_by=user,
             sent_at=timezone.now(),
@@ -2110,7 +2119,7 @@ class TestPurchaseOrderAutoTransitionToSent:
 
         assert response.status_code == status.HTTP_200_OK, response.data
         po.refresh_from_db()
-        assert po.status == PurchaseOrder.SENT
+        assert po.status == PurchaseOrder.Status.SENT
         assert po.sales_order_number == ""
 
     def test_create_with_sales_order_number_transitions_to_sent(self, authenticated_client):
@@ -2132,11 +2141,11 @@ class TestPurchaseOrderAutoTransitionToSent:
         )
 
         assert response.status_code == status.HTTP_201_CREATED, response.data
-        assert response.data["status"] == PurchaseOrder.SENT
+        assert response.data["status"] == PurchaseOrder.Status.SENT
         assert response.data["sales_order_number"] == "SO-555"
 
         po = PurchaseOrder.objects.get(id=response.data["id"])
-        assert po.status == PurchaseOrder.SENT
+        assert po.status == PurchaseOrder.Status.SENT
         assert po.sent_at is not None
         assert po.sent_by == user
         # Both the create and the auto-send are audited.
@@ -2160,7 +2169,7 @@ class TestPurchaseOrderAutoTransitionToSent:
         )
 
         assert response.status_code == status.HTTP_201_CREATED, response.data
-        assert response.data["status"] == PurchaseOrder.DRAFT
+        assert response.data["status"] == PurchaseOrder.Status.DRAFT
         po = PurchaseOrder.objects.get(id=response.data["id"])
         assert po.sent_at is None
         assert not self._po_send_events(po).exists()
@@ -2176,7 +2185,7 @@ class TestPurchaseOrderAutoTransitionToSent:
 
         assert response.status_code == status.HTTP_200_OK, response.data
         po.refresh_from_db()
-        assert po.status == PurchaseOrder.SENT
+        assert po.status == PurchaseOrder.Status.SENT
         assert po.sent_by == user
         assert po.sent_at is not None
         event = self._po_send_events(po).get()
@@ -2241,11 +2250,11 @@ class TestReorderDataExcludesRetired:
 
         # Active low-stock item with a pending request -> should appear.
         active = InventoryItemFactory(current_stock=1, minimum_stock=10)
-        ReorderRequestFactory(item=active, status="pending", quantity=5)
+        ReorderRequestFactory(item=active, status=ReorderRequest.Status.PENDING, quantity=5)
 
         # Retired item that still carries a pending request -> must NOT appear.
         retired = InventoryItemFactory(current_stock=1, minimum_stock=10, is_retired=True)
-        ReorderRequestFactory(item=retired, status="pending", quantity=5)
+        ReorderRequestFactory(item=retired, status=ReorderRequest.Status.PENDING, quantity=5)
 
         response = client.get(self.URL)
 

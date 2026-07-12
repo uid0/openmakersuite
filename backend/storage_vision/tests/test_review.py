@@ -216,7 +216,7 @@ class TestApprove:
         # AC-21: reconciliation with reason=vision_supply_check, item set to 0.
         recon = StockReconciliation.objects.get(item=item)
         assert recon.actual_count == 0
-        assert recon.reason == StockReconciliation.REASON_VISION_SUPPLY_CHECK
+        assert recon.reason == StockReconciliation.ReasonCode.VISION_SUPPLY_CHECK
         assert f"VisionObservation #{obs.id}" in recon.notes
         assert recon.reconciled_by == staff_user
 

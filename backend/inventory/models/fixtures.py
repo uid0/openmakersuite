@@ -61,7 +61,7 @@ class Fixture(models.Model):
     @property
     def pending_requests_count(self) -> int:
         """Count of pending refill requests for this fixture."""
-        return self.refill_requests.filter(status="pending").count()
+        return self.refill_requests.filter(status=FixtureRefillRequest.Status.PENDING).count()
 
 
 class FixtureRefillRequest(models.Model):
@@ -71,12 +71,11 @@ class FixtureRefillRequest(models.Model):
     Created when someone scans a fixture's QR code to report it needs refilling.
     """
 
-    STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("in_progress", "In Progress"),
-        ("completed", "Completed"),
-        ("cancelled", "Cancelled"),
-    ]
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        IN_PROGRESS = "in_progress", "In Progress"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     fixture = models.ForeignKey(
@@ -87,8 +86,8 @@ class FixtureRefillRequest(models.Model):
     )
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default="pending",
+        choices=Status.choices,
+        default=Status.PENDING,
         help_text="Current status of this refill request",
     )
     requested_at = models.DateTimeField(auto_now_add=True)

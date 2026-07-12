@@ -309,9 +309,9 @@ def _apply_po_receipt(
             _create_lead_time_log(po_item, delivery.delivery_date)
 
     if purchase_order.is_fully_received:
-        purchase_order.status = PurchaseOrder.RECEIVED
+        purchase_order.status = PurchaseOrder.Status.RECEIVED
     else:
-        purchase_order.status = PurchaseOrder.PARTIALLY_RECEIVED
+        purchase_order.status = PurchaseOrder.Status.PARTIALLY_RECEIVED
     purchase_order.save()
 
     delivery.is_complete = purchase_order.is_fully_received
@@ -432,7 +432,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         try:
             # Return all pending requests without pagination for admin dashboard
             # Use the base queryset to ensure all prefetching is maintained
-            pending = self.queryset.filter(status="pending").order_by("-priority", "requested_at")
+            pending = self.queryset.filter(status=ReorderRequest.Status.PENDING).order_by(
+                "-priority", "requested_at"
+            )
 
             # Filter by SIG ownership for SIG admins
             user = request.user
@@ -485,9 +487,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        pending = self.queryset.filter(status="pending", item__owning_group__in=user_sigs).order_by(
-            "-priority", "requested_at"
-        )
+        pending = self.queryset.filter(
+            status=ReorderRequest.Status.PENDING, item__owning_group__in=user_sigs
+        ).order_by("-priority", "requested_at")
         serializer = self.get_serializer(pending, many=True)
         return Response(serializer.data)
 
@@ -495,7 +497,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     def by_supplier(self, request):
         """Group pending requests by supplier for easier bulk ordering."""
         pending = (
-            ReorderRequest.objects.filter(status="pending")
+            ReorderRequest.objects.filter(status=ReorderRequest.Status.PENDING)
             .select_related("item")
             .prefetch_related("item__item_suppliers__supplier")
         )
@@ -526,7 +528,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     def approve(self, request, pk=None):
         """Approve a reorder request."""
         reorder = self.get_object()
-        reorder.status = "approved"
+        reorder.status = ReorderRequest.Status.APPROVED
         reorder.reviewed_by = request.user
         reorder.reviewed_at = timezone.now()
         reorder.admin_notes = request.data.get("admin_notes", reorder.admin_notes)
@@ -547,7 +549,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         bare mark-ordered never wipes values a PO already populated.
         """
         reorder = self.get_object()
-        reorder.status = "ordered"
+        reorder.status = ReorderRequest.Status.ORDERED
         reorder.ordered_at = timezone.now()
 
         if "order_number" in request.data:
@@ -570,7 +572,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     def mark_received(self, request, pk=None):
         """Mark a request as received and update inventory."""
         reorder = self.get_object()
-        reorder.status = "received"
+        reorder.status = ReorderRequest.Status.RECEIVED
         reorder.actual_delivery = request.data.get("actual_delivery", timezone.now().date())
         reorder.save()
 
@@ -586,7 +588,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         """Cancel a reorder request."""
         reorder = self.get_object()
-        reorder.status = "cancelled"
+        reorder.status = ReorderRequest.Status.CANCELLED
         reorder.reviewed_by = request.user
         reorder.reviewed_at = timezone.now()
         reorder.admin_notes = request.data.get("admin_notes", reorder.admin_notes)
@@ -613,7 +615,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         """
         open_requests = (
             ReorderRequest.objects.filter(
-                status__in=[ReorderRequest.PENDING, ReorderRequest.APPROVED]
+                status__in=[ReorderRequest.Status.PENDING, ReorderRequest.Status.APPROVED]
             )
             .select_related("item")
             .prefetch_related("item__item_suppliers__supplier")
@@ -677,10 +679,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if not self.request.user.is_authenticated:
             queryset = queryset.filter(
                 status__in=[
-                    PurchaseOrder.SENT,
-                    PurchaseOrder.CONFIRMED,
-                    PurchaseOrder.PARTIALLY_RECEIVED,
-                    PurchaseOrder.RECEIVED,
+                    PurchaseOrder.Status.SENT,
+                    PurchaseOrder.Status.CONFIRMED,
+                    PurchaseOrder.Status.PARTIALLY_RECEIVED,
+                    PurchaseOrder.Status.RECEIVED,
                 ]
             )
 
@@ -717,7 +719,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         purchase_order = serializer.save()
         record_audit_event(
-            action=PurchaseOrderAuditEvent.ACTION_PO_CREATE,
+            action=PurchaseOrderAuditEvent.Action.PO_CREATE,
             actor=self.request.user,
             purchase_order=purchase_order,
             metadata={
@@ -757,7 +759,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         downgrades it. Wrapped defensively so a failure in the transition never
         breaks the create/update that triggered it (oms-qdxss).
         """
-        if purchase_order.status != PurchaseOrder.DRAFT:
+        if purchase_order.status != PurchaseOrder.Status.DRAFT:
             return
         try:
             self._mark_sent(purchase_order, self.request.user)
@@ -776,12 +778,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         ``sent_by``/``sent_at`` stamped, a ``po_send`` audit event recorded, and
         the linked reorder requests synced. Callers own the DRAFT precondition.
         """
-        purchase_order.status = PurchaseOrder.SENT
+        purchase_order.status = PurchaseOrder.Status.SENT
         purchase_order.sent_by = user
         purchase_order.sent_at = timezone.now()
         purchase_order.save()
         record_audit_event(
-            action=PurchaseOrderAuditEvent.ACTION_PO_SEND,
+            action=PurchaseOrderAuditEvent.Action.PO_SEND,
             actor=user,
             purchase_order=purchase_order,
             metadata={"po_number": purchase_order.po_number},
@@ -888,7 +890,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # even if a request lingered from before they were retired.
         items_with_requests = (
             InventoryItem.objects.filter(
-                reorder_requests__status__in=[ReorderRequest.PENDING, ReorderRequest.APPROVED],
+                reorder_requests__status__in=[
+                    ReorderRequest.Status.PENDING,
+                    ReorderRequest.Status.APPROVED,
+                ],
                 is_active=True,
                 is_retired=False,
             )
@@ -996,7 +1001,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             assets = Asset.objects.filter(
                 manufacturer_id=supplier_id,
                 is_active=True,
-                status__in=[Asset.ACTIVE, Asset.MAINTENANCE, Asset.IMPLEMENTING, Asset.TESTING],
+                status__in=[
+                    Asset.Status.ACTIVE,
+                    Asset.Status.MAINTENANCE,
+                    Asset.Status.IMPLEMENTING,
+                    Asset.Status.TESTING,
+                ],
             ).values("id", "name", "asset_tag", "serial_number", "product_url")
 
             data["assets"] = [
@@ -1022,10 +1032,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             Supplier.objects.filter(
                 manufactured_assets__is_active=True,
                 manufactured_assets__status__in=[
-                    Asset.ACTIVE,
-                    Asset.MAINTENANCE,
-                    Asset.IMPLEMENTING,
-                    Asset.TESTING,
+                    Asset.Status.ACTIVE,
+                    Asset.Status.MAINTENANCE,
+                    Asset.Status.IMPLEMENTING,
+                    Asset.Status.TESTING,
                 ],
             )
             .exclude(id__in=supplier_data.keys())
@@ -1036,7 +1046,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             assets = Asset.objects.filter(
                 manufacturer=supplier,
                 is_active=True,
-                status__in=[Asset.ACTIVE, Asset.MAINTENANCE, Asset.IMPLEMENTING, Asset.TESTING],
+                status__in=[
+                    Asset.Status.ACTIVE,
+                    Asset.Status.MAINTENANCE,
+                    Asset.Status.IMPLEMENTING,
+                    Asset.Status.TESTING,
+                ],
             ).values("id", "name", "asset_tag", "serial_number", "product_url")
 
             supplier_data[supplier.id] = {
@@ -1167,7 +1182,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             # Find active reorder requests for this item (pending or approved)
             active_requests = ReorderRequest.objects.filter(
                 item=item,
-                status__in=[ReorderRequest.PENDING, ReorderRequest.APPROVED],
+                status__in=[ReorderRequest.Status.PENDING, ReorderRequest.Status.APPROVED],
             )
 
             # Calculate estimated delivery date
@@ -1186,7 +1201,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
             # Update each active request
             for reorder_request in active_requests:
-                reorder_request.status = ReorderRequest.ORDERED
+                reorder_request.status = ReorderRequest.Status.ORDERED
                 reorder_request.order_number = purchase_order.po_number
                 reorder_request.ordered_at = purchase_order.sent_at or timezone.now()
                 reorder_request.estimated_delivery = estimated_delivery
@@ -1224,7 +1239,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         """Mark purchase order as sent to supplier."""
         purchase_order = self.get_object()
 
-        if purchase_order.status != PurchaseOrder.DRAFT:
+        if purchase_order.status != PurchaseOrder.Status.DRAFT:
             return Response(
                 {"error": "Only draft orders can be sent to suppliers"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1240,13 +1255,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         """Mark purchase order as confirmed by supplier."""
         purchase_order = self.get_object()
 
-        if purchase_order.status != PurchaseOrder.SENT:
+        if purchase_order.status != PurchaseOrder.Status.SENT:
             return Response(
                 {"error": "Only sent orders can be confirmed"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        purchase_order.status = PurchaseOrder.CONFIRMED
+        purchase_order.status = PurchaseOrder.Status.CONFIRMED
         purchase_order.expected_delivery_date = request.data.get("expected_delivery_date")
         purchase_order.save()
 
@@ -1293,11 +1308,11 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         ]
 
         supplier = purchase_order.supplier if purchase_order.supplier_id else None
-        adapter = supplier.ordering_adapter if supplier else Supplier.ADAPTER_NONE
+        adapter = supplier.ordering_adapter if supplier else Supplier.OrderingAdapter.NONE
 
-        if adapter == Supplier.ADAPTER_AMAZON:
+        if adapter == Supplier.OrderingAdapter.AMAZON:
             payload = build_amazon_cart(lines)
-        elif adapter == Supplier.ADAPTER_HDSUPPLY:
+        elif adapter == Supplier.OrderingAdapter.HDSUPPLY:
             payload = build_order_pad(
                 lines,
                 header=("Part Number", "Quantity"),
@@ -1334,9 +1349,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         purchase_order = self.get_object()
 
         if purchase_order.status not in [
-            PurchaseOrder.SENT,
-            PurchaseOrder.CONFIRMED,
-            PurchaseOrder.PARTIALLY_RECEIVED,
+            PurchaseOrder.Status.SENT,
+            PurchaseOrder.Status.CONFIRMED,
+            PurchaseOrder.Status.PARTIALLY_RECEIVED,
         ]:
             return Response(
                 {
@@ -1375,7 +1390,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             )
 
         record_audit_event(
-            action="po_mark_delivered",
+            action=PurchaseOrderAuditEvent.Action.PO_MARK_DELIVERED,
             actor=request.user,
             purchase_order=purchase_order,
             notes=data.get("receipt_notes", ""),
@@ -1383,7 +1398,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "delivery_date": delivery_datetime.isoformat(),
                 "tracking_number": data.get("tracking_number", ""),
                 "carrier": data.get("carrier", ""),
-                "fully_received": purchase_order.status == PurchaseOrder.RECEIVED,
+                "fully_received": purchase_order.status == PurchaseOrder.Status.RECEIVED,
             },
         )
 
@@ -1406,9 +1421,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         purchase_order = self.get_object()
 
         if purchase_order.status not in [
-            PurchaseOrder.SENT,
-            PurchaseOrder.CONFIRMED,
-            PurchaseOrder.PARTIALLY_RECEIVED,
+            PurchaseOrder.Status.SENT,
+            PurchaseOrder.Status.CONFIRMED,
+            PurchaseOrder.Status.PARTIALLY_RECEIVED,
         ]:
             return Response(
                 {
@@ -1480,7 +1495,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             )
 
         record_audit_event(
-            action="po_receive_items",
+            action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
             actor=request.user,
             purchase_order=purchase_order,
             notes=data.get("receipt_notes", ""),
@@ -1488,7 +1503,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 "delivery_date": delivery_datetime.isoformat(),
                 "tracking_number": data.get("tracking_number", ""),
                 "carrier": data.get("carrier", ""),
-                "fully_received": purchase_order.status == PurchaseOrder.RECEIVED,
+                "fully_received": purchase_order.status == PurchaseOrder.Status.RECEIVED,
                 "received_items": [
                     {"purchase_order_item": po_item.id, "quantity_received": quantity}
                     for po_item, quantity in resolved_lines
@@ -1645,7 +1660,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         line_item.save()
 
         record_audit_event(
-            action="po_line_void",
+            action=PurchaseOrderAuditEvent.Action.PO_LINE_VOID,
             actor=request.user,
             line_item=line_item,
             notes=line_item.void_reason or "",
@@ -1680,13 +1695,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         purchase_order = self.get_object()
 
-        if purchase_order.status == PurchaseOrder.VOIDED:
+        if purchase_order.status == PurchaseOrder.Status.VOIDED:
             return Response(
                 {"detail": "Purchase order is already voided."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if purchase_order.status == PurchaseOrder.RECEIVED:
+        if purchase_order.status == PurchaseOrder.Status.RECEIVED:
             return Response(
                 {"detail": "Cannot void a received PO; create a return instead."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1696,7 +1711,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         reason = request.data.get("reason", "")
 
         with transaction.atomic():
-            purchase_order.status = PurchaseOrder.VOIDED
+            purchase_order.status = PurchaseOrder.Status.VOIDED
             purchase_order.voided_at = now
             purchase_order.voided_by = user
             purchase_order.void_reason = reason
@@ -1710,7 +1725,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             )
 
         record_audit_event(
-            action="po_void",
+            action=PurchaseOrderAuditEvent.Action.PO_VOID,
             actor=user,
             purchase_order=purchase_order,
             notes=reason,
@@ -1742,7 +1757,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         attachment = serializer.save(purchase_order=purchase_order, uploaded_by=request.user)
         record_audit_event(
-            action="attachment_add",
+            action=PurchaseOrderAuditEvent.Action.ATTACHMENT_ADD,
             actor=request.user,
             purchase_order=purchase_order,
             attachment=attachment,
@@ -1777,7 +1792,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # survives, but we want the filename in metadata while we still have
         # the field on hand.
         record_audit_event(
-            action="attachment_remove",
+            action=PurchaseOrderAuditEvent.Action.ATTACHMENT_REMOVE,
             actor=user,
             purchase_order=purchase_order,
             attachment=attachment,
@@ -1792,24 +1807,26 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # Order status counts
         status_counts = PurchaseOrder.objects.aggregate(
             total=Count("id"),
-            draft=Count("id", filter=Q(status=PurchaseOrder.DRAFT)),
-            sent=Count("id", filter=Q(status=PurchaseOrder.SENT)),
-            confirmed=Count("id", filter=Q(status=PurchaseOrder.CONFIRMED)),
-            partially_received=Count("id", filter=Q(status=PurchaseOrder.PARTIALLY_RECEIVED)),
-            received=Count("id", filter=Q(status=PurchaseOrder.RECEIVED)),
+            draft=Count("id", filter=Q(status=PurchaseOrder.Status.DRAFT)),
+            sent=Count("id", filter=Q(status=PurchaseOrder.Status.SENT)),
+            confirmed=Count("id", filter=Q(status=PurchaseOrder.Status.CONFIRMED)),
+            partially_received=Count(
+                "id", filter=Q(status=PurchaseOrder.Status.PARTIALLY_RECEIVED)
+            ),
+            received=Count("id", filter=Q(status=PurchaseOrder.Status.RECEIVED)),
         )
 
         # Financial metrics
         financial_metrics = PurchaseOrder.objects.aggregate(
             total_value=Sum("estimated_total"),
-            received_value=Sum("actual_total", filter=Q(status=PurchaseOrder.RECEIVED)),
+            received_value=Sum("actual_total", filter=Q(status=PurchaseOrder.Status.RECEIVED)),
         )
 
         # Recent activity (this week)
         week_ago = timezone.now() - timedelta(days=7)
         recent_activity = PurchaseOrder.objects.filter(order_date__gte=week_ago).aggregate(
             orders_created=Count("id"),
-            orders_received=Count("id", filter=Q(status=PurchaseOrder.RECEIVED)),
+            orders_received=Count("id", filter=Q(status=PurchaseOrder.Status.RECEIVED)),
         )
 
         # Items metrics
@@ -1976,9 +1993,9 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
 
             # Update purchase order status
             if purchase_order.is_fully_received:
-                purchase_order.status = PurchaseOrder.RECEIVED
+                purchase_order.status = PurchaseOrder.Status.RECEIVED
             else:
-                purchase_order.status = PurchaseOrder.PARTIALLY_RECEIVED
+                purchase_order.status = PurchaseOrder.Status.PARTIALLY_RECEIVED
             purchase_order.save()
 
             # Create lead time log if order is complete
@@ -2008,9 +2025,9 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         pending_orders = (
             PurchaseOrder.objects.filter(
                 status__in=[
-                    PurchaseOrder.SENT,
-                    PurchaseOrder.CONFIRMED,
-                    PurchaseOrder.PARTIALLY_RECEIVED,
+                    PurchaseOrder.Status.SENT,
+                    PurchaseOrder.Status.CONFIRMED,
+                    PurchaseOrder.Status.PARTIALLY_RECEIVED,
                 ]
             )
             .select_related("supplier")
@@ -2063,9 +2080,9 @@ class AnalyticsViewSet(viewsets.ViewSet):
             # Order metrics
             orders = supplier.purchase_orders.all()
             total_orders = orders.count()
-            completed_orders = orders.filter(status=PurchaseOrder.RECEIVED).count()
+            completed_orders = orders.filter(status=PurchaseOrder.Status.RECEIVED).count()
             active_orders = orders.exclude(
-                status__in=[PurchaseOrder.RECEIVED, PurchaseOrder.CANCELLED]
+                status__in=[PurchaseOrder.Status.RECEIVED, PurchaseOrder.Status.CANCELLED]
             ).count()
 
             # Lead time metrics
@@ -2277,10 +2294,10 @@ class AnalyticsViewSet(viewsets.ViewSet):
             purchase_orders = (
                 PurchaseOrder.objects.filter(
                     status__in=[
-                        PurchaseOrder.SENT,
-                        PurchaseOrder.CONFIRMED,
-                        PurchaseOrder.PARTIALLY_RECEIVED,
-                        PurchaseOrder.RECEIVED,
+                        PurchaseOrder.Status.SENT,
+                        PurchaseOrder.Status.CONFIRMED,
+                        PurchaseOrder.Status.PARTIALLY_RECEIVED,
+                        PurchaseOrder.Status.RECEIVED,
                     ]
                 )
                 .select_related("supplier")
@@ -2393,7 +2410,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
         # Locations with open LocationProblem reports (oms-0yz). Anything still
         # in REPORTED/IN_PROGRESS counts toward the dashboard's problem total.
         open_location_problems_qs = LocationProblem.objects.filter(
-            status__in=[LocationProblem.REPORTED, LocationProblem.IN_PROGRESS]
+            status__in=[LocationProblem.Status.REPORTED, LocationProblem.Status.IN_PROGRESS]
         )
         locations_with_lp = open_location_problems_qs.values_list(
             "location_id", flat=True
@@ -2411,8 +2428,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
         # Urgent / high severity open problems trigger the dashboard alert mode.
         urgent_location_problems = open_location_problems_qs.filter(
             severity__in=[
-                LocationProblem.SEVERITY_HIGH,
-                LocationProblem.SEVERITY_URGENT,
+                LocationProblem.Severity.HIGH,
+                LocationProblem.Severity.URGENT,
             ]
         ).count()
         alert_active = urgent_location_problems > 0
@@ -2552,7 +2569,7 @@ class WebHookViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         webhook = serializer.save()
         record_webhook_audit_event(
-            action=WebhookAuditEvent.ACTION_WEBHOOK_CREATE,
+            action=WebhookAuditEvent.Action.WEBHOOK_CREATE,
             actor=self.request.user,
             webhook=webhook,
             metadata={
@@ -2576,7 +2593,7 @@ class WebHookViewSet(viewsets.ModelViewSet):
 
         if webhook.secret != before_secret:
             record_webhook_audit_event(
-                action=WebhookAuditEvent.ACTION_WEBHOOK_SECRET_ROTATE,
+                action=WebhookAuditEvent.Action.WEBHOOK_SECRET_ROTATE,
                 actor=self.request.user,
                 webhook=webhook,
             )
@@ -2593,7 +2610,7 @@ class WebHookViewSet(viewsets.ModelViewSet):
             changes.pop("is_active")
         if changes:
             record_webhook_audit_event(
-                action=WebhookAuditEvent.ACTION_WEBHOOK_UPDATE,
+                action=WebhookAuditEvent.Action.WEBHOOK_UPDATE,
                 actor=self.request.user,
                 webhook=webhook,
                 metadata={"changes": changes},
@@ -2601,9 +2618,9 @@ class WebHookViewSet(viewsets.ModelViewSet):
         if before_active != webhook.is_active:
             record_webhook_audit_event(
                 action=(
-                    WebhookAuditEvent.ACTION_WEBHOOK_ENABLE
+                    WebhookAuditEvent.Action.WEBHOOK_ENABLE
                     if webhook.is_active
-                    else WebhookAuditEvent.ACTION_WEBHOOK_DISABLE
+                    else WebhookAuditEvent.Action.WEBHOOK_DISABLE
                 ),
                 actor=self.request.user,
                 webhook=webhook,
@@ -2614,7 +2631,7 @@ class WebHookViewSet(viewsets.ModelViewSet):
         # fields while we still have the row. The webhook FK on the audit
         # row is SET_NULL on cascade, so the audit row survives the delete.
         record_webhook_audit_event(
-            action=WebhookAuditEvent.ACTION_WEBHOOK_DELETE,
+            action=WebhookAuditEvent.Action.WEBHOOK_DELETE,
             actor=self.request.user,
             webhook=instance,
             metadata={
@@ -2783,7 +2800,7 @@ class PurchasingReportViewSet(viewsets.ViewSet):
     def spend_by_supplier(self, request):
         """Get total spend per supplier from purchase orders."""
         queryset = (
-            PurchaseOrder.objects.filter(status=PurchaseOrder.RECEIVED)
+            PurchaseOrder.objects.filter(status=PurchaseOrder.Status.RECEIVED)
             .select_related("supplier")
             .values("supplier__id", "supplier__name")
             .annotate(
@@ -2813,7 +2830,7 @@ class PurchasingReportViewSet(viewsets.ViewSet):
         """Get total spend grouped by item category."""
         queryset = (
             PurchaseOrderItem.objects.filter(
-                purchase_order__status=PurchaseOrder.RECEIVED,
+                purchase_order__status=PurchaseOrder.Status.RECEIVED,
                 item_supplier__isnull=False,
             )
             .select_related("item_supplier__item__category", "purchase_order")

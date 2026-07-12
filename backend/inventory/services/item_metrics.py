@@ -24,16 +24,16 @@ from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 # PO statuses that count as "on order" (QOO): units committed on a live PO that
 # has been sent but not fully received, voided, or cancelled.
 ON_ORDER_STATUSES = (
-    PurchaseOrder.SENT,
-    PurchaseOrder.CONFIRMED,
-    PurchaseOrder.PARTIALLY_RECEIVED,
+    PurchaseOrder.Status.SENT,
+    PurchaseOrder.Status.CONFIRMED,
+    PurchaseOrder.Status.PARTIALLY_RECEIVED,
 )
 
 # Work-order statuses that keep a material "committed" (QC).
 OPEN_WO_STATUSES = (
-    WorkOrder.STATUS_OPEN,
-    WorkOrder.STATUS_IN_PROGRESS,
-    WorkOrder.STATUS_BLOCKED,
+    WorkOrder.Status.OPEN,
+    WorkOrder.Status.IN_PROGRESS,
+    WorkOrder.Status.BLOCKED,
 )
 
 
@@ -91,7 +91,7 @@ def compute_item_metrics_batch(items):
             PurchaseOrderItem.objects.filter(
                 item_supplier__item_id__in=item_ids,
                 is_voided=False,
-                purchase_order__status=PurchaseOrder.PARTIALLY_RECEIVED,
+                purchase_order__status=PurchaseOrder.Status.PARTIALLY_RECEIVED,
                 quantity_received__lt=F("quantity_ordered"),
             )
             .values("item_supplier__item")

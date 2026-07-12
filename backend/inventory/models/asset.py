@@ -93,23 +93,14 @@ class Asset(models.Model):
     """
 
     # Status choices
-    IMPLEMENTING = "implementing"
-    TESTING = "testing"
-    ACTIVE = "active"
-    MAINTENANCE = "maintenance"
-    RETIRED = "retired"
-    LOST = "lost"
-    DONATED_OUT = "donated_out"
-
-    STATUS_CHOICES = [
-        (IMPLEMENTING, "Implementing"),
-        (TESTING, "Testing"),
-        (ACTIVE, "Active"),
-        (MAINTENANCE, "Under Maintenance"),
-        (RETIRED, "Retired"),
-        (LOST, "Lost"),
-        (DONATED_OUT, "Donated Out"),
-    ]
+    class Status(models.TextChoices):
+        IMPLEMENTING = "implementing", "Implementing"
+        TESTING = "testing", "Testing"
+        ACTIVE = "active", "Active"
+        MAINTENANCE = "maintenance", "Under Maintenance"
+        RETIRED = "retired", "Retired"
+        LOST = "lost", "Lost"
+        DONATED_OUT = "donated_out", "Donated Out"
 
     # Note: Operational status, lockout, and authorization fields have been moved to the forgekey app
 
@@ -232,23 +223,14 @@ class Asset(models.Model):
     )
 
     # Power & electrical tracking
-    WIRING_120V_PLUG = "120v_plug"
-    WIRING_240V_PLUG = "240v_plug"
-    WIRING_HARDWIRED = "hardwired"
-    WIRING_BATTERY = "battery"
-    WIRING_PNEUMATIC = "pneumatic"
-    WIRING_NONE = "none"
-    WIRING_UNKNOWN = "unknown"
-
-    WIRING_TYPE_CHOICES = [
-        (WIRING_120V_PLUG, "120V Plug"),
-        (WIRING_240V_PLUG, "240V Plug"),
-        (WIRING_HARDWIRED, "Hardwired"),
-        (WIRING_BATTERY, "Battery"),
-        (WIRING_PNEUMATIC, "Pneumatic / non-electric"),
-        (WIRING_NONE, "No power required"),
-        (WIRING_UNKNOWN, "Unknown"),
-    ]
+    class WiringType(models.TextChoices):
+        PLUG_120V = "120v_plug", "120V Plug"
+        PLUG_240V = "240v_plug", "240V Plug"
+        HARDWIRED = "hardwired", "Hardwired"
+        BATTERY = "battery", "Battery"
+        PNEUMATIC = "pneumatic", "Pneumatic / non-electric"
+        NONE = "none", "No power required"
+        UNKNOWN = "unknown", "Unknown"
 
     power_draw_watts = models.DecimalField(
         max_digits=10,
@@ -259,8 +241,8 @@ class Asset(models.Model):
     )
     wiring_type = models.CharField(
         max_length=20,
-        choices=WIRING_TYPE_CHOICES,
-        default=WIRING_UNKNOWN,
+        choices=WiringType.choices,
+        default=WiringType.UNKNOWN,
         blank=True,
         help_text="How this asset is wired or supplied with power.",
     )
@@ -340,23 +322,14 @@ class Asset(models.Model):
     )
 
     # Interlock tracking
-    INTERLOCK_NONE = "none"
-    INTERLOCK_FORGEKEY = "forgekey"
-    INTERLOCK_KEY_SWITCH = "key_switch"
-    INTERLOCK_E_STOP = "e_stop"
-    INTERLOCK_CONTACTOR = "contactor"
-    INTERLOCK_OTHER = "other"
-    INTERLOCK_UNKNOWN = "unknown"
-
-    INTERLOCK_TYPE_CHOICES = [
-        (INTERLOCK_NONE, "None"),
-        (INTERLOCK_FORGEKEY, "ForgeKey-controlled"),
-        (INTERLOCK_KEY_SWITCH, "Key switch"),
-        (INTERLOCK_E_STOP, "E-Stop"),
-        (INTERLOCK_CONTACTOR, "Contactor / relay"),
-        (INTERLOCK_OTHER, "Other"),
-        (INTERLOCK_UNKNOWN, "Unknown"),
-    ]
+    class InterlockType(models.TextChoices):
+        NONE = "none", "None"
+        FORGEKEY = "forgekey", "ForgeKey-controlled"
+        KEY_SWITCH = "key_switch", "Key switch"
+        E_STOP = "e_stop", "E-Stop"
+        CONTACTOR = "contactor", "Contactor / relay"
+        OTHER = "other", "Other"
+        UNKNOWN = "unknown", "Unknown"
 
     has_interlock = models.BooleanField(
         default=False,
@@ -364,8 +337,8 @@ class Asset(models.Model):
     )
     interlock_type = models.CharField(
         max_length=20,
-        choices=INTERLOCK_TYPE_CHOICES,
-        default=INTERLOCK_UNKNOWN,
+        choices=InterlockType.choices,
+        default=InterlockType.UNKNOWN,
         blank=True,
         help_text="How the interlock is implemented.",
     )
@@ -376,30 +349,20 @@ class Asset(models.Model):
     )
 
     # Lockout / Tagout tracking
-    LOCKOUT_LOTO = "loto"
-    LOCKOUT_PLUG = "plug_lockout"
-    LOCKOUT_BREAKER = "breaker_lockout"
-    LOCKOUT_KEY = "key_lockout"
-    LOCKOUT_VALVE = "valve_lockout"
-    LOCKOUT_FORGEKEY = "forgekey"
-    LOCKOUT_NONE = "none"
-    LOCKOUT_UNKNOWN = "unknown"
-
-    LOCKOUT_TYPE_CHOICES = [
-        (LOCKOUT_LOTO, "LOTO (Lockout / Tagout)"),
-        (LOCKOUT_PLUG, "Plug lockout"),
-        (LOCKOUT_BREAKER, "Breaker lockout"),
-        (LOCKOUT_KEY, "Key lockout"),
-        (LOCKOUT_VALVE, "Valve lockout"),
-        (LOCKOUT_FORGEKEY, "ForgeKey-managed"),
-        (LOCKOUT_NONE, "None"),
-        (LOCKOUT_UNKNOWN, "Unknown"),
-    ]
+    class LockoutType(models.TextChoices):
+        LOTO = "loto", "LOTO (Lockout / Tagout)"
+        PLUG = "plug_lockout", "Plug lockout"
+        BREAKER = "breaker_lockout", "Breaker lockout"
+        KEY = "key_lockout", "Key lockout"
+        VALVE = "valve_lockout", "Valve lockout"
+        FORGEKEY = "forgekey", "ForgeKey-managed"
+        NONE = "none", "None"
+        UNKNOWN = "unknown", "Unknown"
 
     lockout_type = models.CharField(
         max_length=20,
-        choices=LOCKOUT_TYPE_CHOICES,
-        default=LOCKOUT_UNKNOWN,
+        choices=LockoutType.choices,
+        default=LockoutType.UNKNOWN,
         blank=True,
         help_text="How the asset is locked out for service.",
     )
@@ -462,8 +425,8 @@ class Asset(models.Model):
     # Status and condition
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default=ACTIVE,
+        choices=Status.choices,
+        default=Status.ACTIVE,
         help_text="Current status of the asset",
     )
     condition_notes = models.TextField(
@@ -472,20 +435,15 @@ class Asset(models.Model):
     )
 
     # Ownership - can be owned by User, Group, or Space (makerspace itself)
-    OWNERSHIP_TYPE_USER = "user"
-    OWNERSHIP_TYPE_GROUP = "group"
-    OWNERSHIP_TYPE_SPACE = "space"
-
-    OWNERSHIP_TYPE_CHOICES = [
-        (OWNERSHIP_TYPE_USER, "User"),
-        (OWNERSHIP_TYPE_GROUP, "Group"),
-        (OWNERSHIP_TYPE_SPACE, "Space"),
-    ]
+    class OwnershipType(models.TextChoices):
+        USER = "user", "User"
+        GROUP = "group", "Group"
+        SPACE = "space", "Space"
 
     ownership_type = models.CharField(
         max_length=10,
-        choices=OWNERSHIP_TYPE_CHOICES,
-        default=OWNERSHIP_TYPE_SPACE,
+        choices=OwnershipType.choices,
+        default=OwnershipType.SPACE,
         help_text="Type of ownership for this asset",
     )
     owning_user = models.ForeignKey(
@@ -652,11 +610,11 @@ class Asset(models.Model):
             return False
 
         # Active assets can be operated by anyone (subject to other permissions)
-        if self.status == self.ACTIVE:
+        if self.status == self.Status.ACTIVE:
             return True
 
         # Implementing and Testing status assets have restricted access
-        if self.status in [self.IMPLEMENTING, self.TESTING]:
+        if self.status in [self.Status.IMPLEMENTING, self.Status.TESTING]:
             # Check for COO
             try:
                 coo_group = Group.objects.get(name="COO")
@@ -696,9 +654,9 @@ class Asset(models.Model):
         configured to control its power, or if the asset is explicitly marked
         as ForgeKey-controlled via interlock_type / lockout_type.
         """
-        if self.interlock_type == self.INTERLOCK_FORGEKEY:
+        if self.interlock_type == self.InterlockType.FORGEKEY:
             return True
-        if self.lockout_type == self.LOCKOUT_FORGEKEY:
+        if self.lockout_type == self.LockoutType.FORGEKEY:
             return True
         try:
             return self.forgekey_devices.exists()
@@ -935,17 +893,11 @@ class AssetProblem(models.Model):
     """
 
     # Problem status choices
-    REPORTED = "reported"
-    IN_PROGRESS = "in_progress"
-    RESOLVED = "resolved"
-    CLOSED = "closed"
-
-    STATUS_CHOICES = [
-        (REPORTED, "Reported"),
-        (IN_PROGRESS, "In Progress"),
-        (RESOLVED, "Resolved"),
-        (CLOSED, "Closed"),
-    ]
+    class Status(models.TextChoices):
+        REPORTED = "reported", "Reported"
+        IN_PROGRESS = "in_progress", "In Progress"
+        RESOLVED = "resolved", "Resolved"
+        CLOSED = "closed", "Closed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     asset = models.ForeignKey(
@@ -981,8 +933,8 @@ class AssetProblem(models.Model):
     )
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default=REPORTED,
+        choices=Status.choices,
+        default=Status.REPORTED,
         help_text="Current status of the problem report",
     )
     resolution_notes = models.TextField(
@@ -1059,23 +1011,17 @@ class AssetDocument(models.Model):
     False so it drops out of the "current" view.
     """
 
-    MANUAL = "manual"
-    CAD_SOURCE = "cad_source"
-    WIRING_DIAGRAM = "wiring_diagram"
-    CUT_SHEET_SPEC = "cut_sheet_spec"
-    CUT_READY_TEMPLATE = "cut_ready_template"
-    PHOTO = "photo"
-    OTHER = "other"
-
-    CATEGORY_CHOICES = [
-        (MANUAL, "Manual / Documentation"),
-        (CAD_SOURCE, "CAD Source"),
-        (WIRING_DIAGRAM, "Wiring Diagram"),
-        (CUT_SHEET_SPEC, "Cut Sheet / Spec"),
-        (CUT_READY_TEMPLATE, "Cut-Ready Template (DXF/SVG/G-code/STL)"),
-        (PHOTO, "Photo"),
-        (OTHER, "Other"),
-    ]
+    class Category(models.TextChoices):
+        MANUAL = "manual", "Manual / Documentation"
+        CAD_SOURCE = "cad_source", "CAD Source"
+        WIRING_DIAGRAM = "wiring_diagram", "Wiring Diagram"
+        CUT_SHEET_SPEC = "cut_sheet_spec", "Cut Sheet / Spec"
+        CUT_READY_TEMPLATE = (
+            "cut_ready_template",
+            "Cut-Ready Template (DXF/SVG/G-code/STL)",
+        )
+        PHOTO = "photo", "Photo"
+        OTHER = "other", "Other"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     asset = models.ForeignKey(
@@ -1093,8 +1039,8 @@ class AssetDocument(models.Model):
     )
     category = models.CharField(
         max_length=20,
-        choices=CATEGORY_CHOICES,
-        default=OTHER,
+        choices=Category.choices,
+        default=Category.OTHER,
         help_text="What kind of document this is",
     )
     title = models.CharField(
@@ -1164,29 +1110,17 @@ class AssetMeter(models.Model):
     source of truth (:class:`AssetMeterReading`).
     """
 
-    RUNTIME_HOURS = "runtime_hours"
-    VOLUME_GALLONS = "volume_gallons"
-    CYCLES = "cycles"
-    KWH = "kwh"
-    GENERIC_COUNT = "generic_count"
+    class MeterType(models.TextChoices):
+        RUNTIME_HOURS = "runtime_hours", "Runtime hours"
+        VOLUME_GALLONS = "volume_gallons", "Volume (gallons)"
+        CYCLES = "cycles", "Cycles"
+        KWH = "kwh", "Energy (kWh)"
+        GENERIC_COUNT = "generic_count", "Generic count"
 
-    METER_TYPE_CHOICES = [
-        (RUNTIME_HOURS, "Runtime hours"),
-        (VOLUME_GALLONS, "Volume (gallons)"),
-        (CYCLES, "Cycles"),
-        (KWH, "Energy (kWh)"),
-        (GENERIC_COUNT, "Generic count"),
-    ]
-
-    SOURCE_AUTO_SESSION = "auto_session"
-    SOURCE_AUTO_TELEMETRY = "auto_telemetry"
-    SOURCE_MANUAL = "manual"
-
-    SOURCE_CHOICES = [
-        (SOURCE_AUTO_SESSION, "Auto — usage sessions"),
-        (SOURCE_AUTO_TELEMETRY, "Auto — telemetry"),
-        (SOURCE_MANUAL, "Manual entry"),
-    ]
+    class Source(models.TextChoices):
+        AUTO_SESSION = "auto_session", "Auto — usage sessions"
+        AUTO_TELEMETRY = "auto_telemetry", "Auto — telemetry"
+        MANUAL = "manual", "Manual entry"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     asset = models.ForeignKey(
@@ -1201,8 +1135,8 @@ class AssetMeter(models.Model):
     )
     meter_type = models.CharField(
         max_length=20,
-        choices=METER_TYPE_CHOICES,
-        default=GENERIC_COUNT,
+        choices=MeterType.choices,
+        default=MeterType.GENERIC_COUNT,
         help_text="What this meter measures",
     )
     unit = models.CharField(
@@ -1212,8 +1146,8 @@ class AssetMeter(models.Model):
     )
     source = models.CharField(
         max_length=20,
-        choices=SOURCE_CHOICES,
-        default=SOURCE_MANUAL,
+        choices=Source.choices,
+        default=Source.MANUAL,
         help_text="How this meter advances — auto rollup or manual entry",
     )
     current_value = models.DecimalField(
@@ -1268,17 +1202,11 @@ class AssetMeterReading(models.Model):
     ``value_after = current_value + d``.
     """
 
-    SOURCE_AUTO_SESSION = "auto_session"
-    SOURCE_AUTO_TELEMETRY = "auto_telemetry"
-    SOURCE_MANUAL = "manual"
-    SOURCE_MANUAL_ADJUST = "manual_adjust"
-
-    SOURCE_CHOICES = [
-        (SOURCE_AUTO_SESSION, "Auto — usage sessions"),
-        (SOURCE_AUTO_TELEMETRY, "Auto — telemetry"),
-        (SOURCE_MANUAL, "Manual entry"),
-        (SOURCE_MANUAL_ADJUST, "Manual correction"),
-    ]
+    class Source(models.TextChoices):
+        AUTO_SESSION = "auto_session", "Auto — usage sessions"
+        AUTO_TELEMETRY = "auto_telemetry", "Auto — telemetry"
+        MANUAL = "manual", "Manual entry"
+        MANUAL_ADJUST = "manual_adjust", "Manual correction"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     meter = models.ForeignKey(
@@ -1289,7 +1217,7 @@ class AssetMeterReading(models.Model):
     )
     source = models.CharField(
         max_length=20,
-        choices=SOURCE_CHOICES,
+        choices=Source.choices,
         help_text="What produced this reading",
     )
     delta = models.DecimalField(

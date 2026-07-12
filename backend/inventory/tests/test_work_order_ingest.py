@@ -179,9 +179,9 @@ class TestApplySubmission:
 
         submission.refresh_from_db()
         wo.refresh_from_db()
-        assert submission.status == WorkOrderSubmission.STATUS_APPLIED
+        assert submission.status == WorkOrderSubmission.Status.APPLIED
         assert submission.work_order_id == wo.id
-        assert wo.status == WorkOrder.STATUS_IN_PROGRESS
+        assert wo.status == WorkOrder.Status.IN_PROGRESS
         assert wo.completed_at is None
         tcs[0].refresh_from_db()
         tcs[1].refresh_from_db()
@@ -205,7 +205,7 @@ class TestApplySubmission:
         apply_submission(submission)
         wo.refresh_from_db()
 
-        assert wo.status == WorkOrder.STATUS_COMPLETED
+        assert wo.status == WorkOrder.Status.COMPLETED
         assert wo.completed_at is not None
         # MaintenanceItem.last_completed_at is stamped.
         wo.maintenance_item.refresh_from_db()
@@ -325,7 +325,7 @@ class TestApplySubmission:
         apply_submission(submission)
         submission.refresh_from_db()
 
-        assert submission.status == WorkOrderSubmission.STATUS_FAILED
+        assert submission.status == WorkOrderSubmission.Status.FAILED
         assert str(wo_id) in submission.parse_error
         assert submission.work_order is None
 
@@ -379,11 +379,11 @@ class TestPostmarkInboundView:
         )
         assert resp.status_code == status.HTTP_200_OK
         body = resp.json()
-        assert body["status"] == WorkOrderSubmission.STATUS_APPLIED
+        assert body["status"] == WorkOrderSubmission.Status.APPLIED
         assert body["work_order_id"] == str(wo.id)
 
         wo.refresh_from_db()
-        assert wo.status == WorkOrder.STATUS_COMPLETED
+        assert wo.status == WorkOrder.Status.COMPLETED
 
     def test_duplicate_message_id_is_idempotent(self, api_client, settings):
         settings.POSTMARK_INBOUND_TOKEN = "correct"

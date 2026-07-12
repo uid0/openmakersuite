@@ -68,7 +68,7 @@ def _completed_pm_with_material(
     )
     wo = WorkOrder.objects.create(
         maintenance_item=mi,
-        status=WorkOrder.STATUS_COMPLETED,
+        status=WorkOrder.Status.COMPLETED,
         completed_at=completed_at,
     )
     material = MaintenanceMaterial.objects.create(
@@ -109,7 +109,7 @@ class TestSuppliesUsedSerialized:
         now = timezone.now()
         _event(
             asset,
-            action=SerializedComponent.ACTION_INSTALL,
+            action=SerializedComponent.Action.INSTALL,
             at=now - timedelta(days=3),
             item_name="Spindle bearing",
             serial="SN-INST",
@@ -117,7 +117,7 @@ class TestSuppliesUsedSerialized:
         )
         _event(
             asset,
-            action=SerializedComponent.ACTION_CONSUME,
+            action=SerializedComponent.Action.CONSUME,
             at=now - timedelta(days=4),
             item_name="Cutting fluid pod",
             serial="SN-CONS",
@@ -134,13 +134,13 @@ class TestSuppliesUsedSerialized:
         assert install["source"] == "serialized"
         assert install["asset_name"] == "Mill"
         assert install["item_name"] == "Spindle bearing"
-        assert install["action"] == "install"
+        assert install["action"] == SerializedComponent.Action.INSTALL
         assert install["action_display"] == "Install"
         assert install["actor"] == user.username
         assert "used_at" in install
 
         consume = by_serial["SN-CONS"]
-        assert consume["action"] == "consume"
+        assert consume["action"] == SerializedComponent.Action.CONSUME
         assert consume["action_display"] == "Consume"
         # No actor recorded on this event.
         assert consume["actor"] is None
@@ -152,7 +152,7 @@ class TestSuppliesUsedSerialized:
         # 45 days ago — outside the default 30-day window.
         _event(
             asset,
-            action=SerializedComponent.ACTION_INSTALL,
+            action=SerializedComponent.Action.INSTALL,
             at=now - timedelta(days=45),
             serial="SN-OLD",
         )
@@ -164,10 +164,10 @@ class TestSuppliesUsedSerialized:
     @pytest.mark.parametrize(
         "excluded_action",
         [
-            SerializedComponent.ACTION_RECEIVE,
-            SerializedComponent.ACTION_REMOVE,
-            SerializedComponent.ACTION_RETIRE,
-            SerializedComponent.ACTION_DISPOSE,
+            SerializedComponent.Action.RECEIVE,
+            SerializedComponent.Action.REMOVE,
+            SerializedComponent.Action.RETIRE,
+            SerializedComponent.Action.DISPOSE,
         ],
     )
     def test_excludes_non_install_consume_actions(self, authenticated_client, excluded_action):
@@ -192,7 +192,7 @@ class TestSuppliesUsedSerialized:
         ComponentUsageEvent.objects.create(
             component=component,
             asset=None,
-            action=SerializedComponent.ACTION_CONSUME,
+            action=SerializedComponent.Action.CONSUME,
             at=now - timedelta(days=1),
         )
 
@@ -269,7 +269,7 @@ class TestSuppliesUsedConsumable:
         )
         wo = WorkOrder.objects.create(
             maintenance_item=mi,
-            status=WorkOrder.STATUS_OPEN,
+            status=WorkOrder.Status.OPEN,
             completed_at=None,
         )
         material = MaintenanceMaterial.objects.create(
@@ -301,7 +301,7 @@ class TestSuppliesUsedConsumable:
         )
         wo = WorkOrder.objects.create(
             maintenance_item=mi,
-            status=WorkOrder.STATUS_COMPLETED,
+            status=WorkOrder.Status.COMPLETED,
             completed_at=timezone.now() - timedelta(days=2),
         )
         WorkOrderMaterialUsage.objects.create(
@@ -330,13 +330,13 @@ class TestSuppliesUsedFilteringAndSorting:
         now = timezone.now()
         _event(
             asset,
-            action=SerializedComponent.ACTION_INSTALL,
+            action=SerializedComponent.Action.INSTALL,
             at=now - timedelta(days=2),
             serial="SN-RECENT",
         )
         _event(
             asset,
-            action=SerializedComponent.ACTION_INSTALL,
+            action=SerializedComponent.Action.INSTALL,
             at=now - timedelta(days=20),
             serial="SN-EARLIER",
         )
@@ -359,19 +359,19 @@ class TestSuppliesUsedFilteringAndSorting:
         # Alpha: a later event and an earlier event (should come out ascending).
         _event(
             alpha,
-            action=SerializedComponent.ACTION_INSTALL,
+            action=SerializedComponent.Action.INSTALL,
             at=now - timedelta(days=2),
             serial="SN-ALPHA-NEW",
         )
         _event(
             alpha,
-            action=SerializedComponent.ACTION_CONSUME,
+            action=SerializedComponent.Action.CONSUME,
             at=now - timedelta(days=8),
             serial="SN-ALPHA-OLD",
         )
         _event(
             beta,
-            action=SerializedComponent.ACTION_INSTALL,
+            action=SerializedComponent.Action.INSTALL,
             at=now - timedelta(days=1),
             serial="SN-BETA",
         )
@@ -395,7 +395,7 @@ class TestSuppliesUsedExport:
         now = timezone.now()
         _event(
             asset,
-            action=SerializedComponent.ACTION_INSTALL,
+            action=SerializedComponent.Action.INSTALL,
             at=now - timedelta(days=3),
             item_name="Bearing",
             serial="SN-EXP",
@@ -437,7 +437,7 @@ class TestSuppliesUsedExport:
 
         serialized = by_source["serialized"]
         assert serialized["serial_number"] == "SN-EXP"
-        assert serialized["action"] == "install"
+        assert serialized["action"] == SerializedComponent.Action.INSTALL
         assert serialized["actor"] == user.username
         # Consumable-only columns are blank on a serialized row.
         assert serialized["quantity"] == ""

@@ -185,7 +185,7 @@ class TestExportOrderAdapterRouting:
         purchase_order = PurchaseOrder.objects.create(
             po_number="PO-2026-0100",
             supplier=supplier,
-            status=PurchaseOrder.DRAFT,
+            status=PurchaseOrder.Status.DRAFT,
             created_by=user,
         )
         item = InventoryItemFactory(name=name, supplier=supplier, supplier_sku=sku)
@@ -200,14 +200,14 @@ class TestExportOrderAdapterRouting:
     def test_amazon_adapter_returns_cart_urls_not_a_file(self, authenticated_client):
         client, user = authenticated_client
         purchase_order = self._po_with_line(
-            user, adapter=Supplier.ADAPTER_AMAZON, sku="B07X1234YZ", qty=2
+            user, adapter=Supplier.OrderingAdapter.AMAZON, sku="B07X1234YZ", qty=2
         )
 
         url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
         response = client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["adapter"] == "amazon"
+        assert response.data["adapter"] == Supplier.OrderingAdapter.AMAZON
         assert response.data["supplier"] == "Adapter Co"
         assert len(response.data["cart_urls"]) == 1
         assert "ASIN.1=B07X1234YZ" in response.data["cart_urls"][0]
@@ -222,7 +222,7 @@ class TestExportOrderAdapterRouting:
         client, user = authenticated_client
         purchase_order = self._po_with_line(
             user,
-            adapter=Supplier.ADAPTER_AMAZON,
+            adapter=Supplier.OrderingAdapter.AMAZON,
             sku="NOT-AN-ASIN",
             name="Bad ASIN Line",
         )
@@ -231,7 +231,7 @@ class TestExportOrderAdapterRouting:
         response = client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["adapter"] == "amazon"
+        assert response.data["adapter"] == Supplier.OrderingAdapter.AMAZON
         # A mis-typed ASIN is surfaced by line name and kept out of any cart.
         assert response.data["invalid_sku"] == ["Bad ASIN Line"]
         assert response.data["cart_urls"] == []
@@ -240,14 +240,14 @@ class TestExportOrderAdapterRouting:
     def test_hdsupply_adapter_returns_part_number_csv(self, authenticated_client):
         client, user = authenticated_client
         purchase_order = self._po_with_line(
-            user, adapter=Supplier.ADAPTER_HDSUPPLY, sku="12345", qty=3
+            user, adapter=Supplier.OrderingAdapter.HDSUPPLY, sku="12345", qty=3
         )
 
         url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
         response = client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["adapter"] == "hdsupply"
+        assert response.data["adapter"] == Supplier.OrderingAdapter.HDSUPPLY
         csv_lines = response.data["csv"].splitlines()
         assert csv_lines[0] == "Part Number,Quantity"
         assert "12345,3" in csv_lines
@@ -261,7 +261,7 @@ class TestExportOrderAdapterRouting:
         client, user = authenticated_client
         purchase_order = self._po_with_line(
             user,
-            adapter=Supplier.ADAPTER_HDSUPPLY,
+            adapter=Supplier.OrderingAdapter.HDSUPPLY,
             sku="ABC-9",
             name="Non-numeric Part",
         )
@@ -270,21 +270,21 @@ class TestExportOrderAdapterRouting:
         response = client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["adapter"] == "hdsupply"
+        assert response.data["adapter"] == Supplier.OrderingAdapter.HDSUPPLY
         assert response.data["invalid_sku"] == ["Non-numeric Part"]
         assert response.data["line_count"] == 0
 
     def test_generic_adapter_returns_part_qty_csv(self, authenticated_client):
         client, user = authenticated_client
         purchase_order = self._po_with_line(
-            user, adapter=Supplier.ADAPTER_NONE, sku="ANY-SKU", qty=4
+            user, adapter=Supplier.OrderingAdapter.NONE, sku="ANY-SKU", qty=4
         )
 
         url = reverse("purchaseorder-export-order", kwargs={"pk": purchase_order.pk})
         response = client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["adapter"] == "none"
+        assert response.data["adapter"] == Supplier.OrderingAdapter.NONE
         csv_lines = response.data["csv"].splitlines()
         assert csv_lines[0] == "part#,qty"
         assert "ANY-SKU,4" in csv_lines
@@ -302,33 +302,33 @@ class TestSupplierOrderingAdapterField:
     def test_defaults_to_none(self):
         supplier = SupplierFactory()
 
-        assert supplier.ordering_adapter == Supplier.ADAPTER_NONE
+        assert supplier.ordering_adapter == Supplier.OrderingAdapter.NONE
 
     def test_choices_cover_the_four_adapters(self):
         field = Supplier._meta.get_field("ordering_adapter")
         choice_values = {value for value, _label in field.choices}
 
         assert choice_values == {
-            Supplier.ADAPTER_NONE,
-            Supplier.ADAPTER_GENERIC_CSV,
-            Supplier.ADAPTER_AMAZON,
-            Supplier.ADAPTER_HDSUPPLY,
+            Supplier.OrderingAdapter.NONE,
+            Supplier.OrderingAdapter.GENERIC_CSV,
+            Supplier.OrderingAdapter.AMAZON,
+            Supplier.OrderingAdapter.HDSUPPLY,
         }
-        assert field.default == Supplier.ADAPTER_NONE
+        assert field.default == Supplier.OrderingAdapter.NONE
 
     def test_serializer_exposes_supplier_ordering_adapter(self, authenticated_client):
         from reorder_queue.serializers import PurchaseOrderSerializer
 
         client, user = authenticated_client
-        supplier = SupplierFactory(ordering_adapter=Supplier.ADAPTER_AMAZON)
+        supplier = SupplierFactory(ordering_adapter=Supplier.OrderingAdapter.AMAZON)
         purchase_order = PurchaseOrder.objects.create(
             po_number="PO-2026-0200",
             supplier=supplier,
-            status=PurchaseOrder.DRAFT,
+            status=PurchaseOrder.Status.DRAFT,
             created_by=user,
         )
 
         data = PurchaseOrderSerializer(purchase_order).data
 
         # The web reads the adapter off the PO without a second request.
-        assert data["supplier_ordering_adapter"] == "amazon"
+        assert data["supplier_ordering_adapter"] == Supplier.OrderingAdapter.AMAZON

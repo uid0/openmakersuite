@@ -42,10 +42,10 @@ class TestAssetPowerFields:
         asset = AssetFactory()
         asset.refresh_from_db()
         assert asset.power_draw_watts is None
-        assert asset.wiring_type == Asset.WIRING_UNKNOWN
+        assert asset.wiring_type == Asset.WiringType.UNKNOWN
         assert asset.has_interlock is False
-        assert asset.interlock_type == Asset.INTERLOCK_UNKNOWN
-        assert asset.lockout_type == Asset.LOCKOUT_UNKNOWN
+        assert asset.interlock_type == Asset.InterlockType.UNKNOWN
+        assert asset.lockout_type == Asset.LockoutType.UNKNOWN
         assert asset.has_network_drop is False
         assert asset.suite == ""
         assert asset.electrical_box == ""
@@ -58,14 +58,14 @@ class TestAssetPowerFields:
     def test_full_power_record_persists(self):
         asset = AssetFactory(
             power_draw_watts=Decimal("1800.00"),
-            wiring_type=Asset.WIRING_240V_PLUG,
+            wiring_type=Asset.WiringType.PLUG_240V,
             suite="North Bay",
             electrical_box="Panel A",
             breaker_location="A-12",
             has_interlock=True,
-            interlock_type=Asset.INTERLOCK_KEY_SWITCH,
+            interlock_type=Asset.InterlockType.KEY_SWITCH,
             interlock_responsible="Wood Shop SIG Lead",
-            lockout_type=Asset.LOCKOUT_BREAKER,
+            lockout_type=Asset.LockoutType.BREAKER,
             lockout_instructions="1. Open panel A. 2. Throw breaker A-12. 3. Apply LOTO tag.",
             lockout_responsible="Logistics on duty",
             has_network_drop=True,
@@ -74,7 +74,7 @@ class TestAssetPowerFields:
         asset.full_clean()
         asset.refresh_from_db()
         assert asset.power_draw_watts == Decimal("1800.00")
-        assert asset.wiring_type == Asset.WIRING_240V_PLUG
+        assert asset.wiring_type == Asset.WiringType.PLUG_240V
         assert asset.has_interlock is True
         assert asset.interlock_responsible == "Wood Shop SIG Lead"
         assert asset.lockout_instructions.startswith("1. Open panel A.")
@@ -90,25 +90,25 @@ class TestAssetPowerSerializer:
     def test_serializer_round_trips_power_fields(self):
         asset = AssetFactory(
             power_draw_watts=Decimal("750.50"),
-            wiring_type=Asset.WIRING_120V_PLUG,
+            wiring_type=Asset.WiringType.PLUG_120V,
             suite="Suite 200",
             electrical_box="Sub-panel B",
             breaker_location="B-7",
             has_interlock=True,
-            interlock_type=Asset.INTERLOCK_E_STOP,
-            lockout_type=Asset.LOCKOUT_PLUG,
+            interlock_type=Asset.InterlockType.E_STOP,
+            lockout_type=Asset.LockoutType.PLUG,
             lockout_instructions="Unplug at outlet O-14, apply plug lockout, tag.",
             has_network_drop=False,
         )
         data = AssetSerializer(asset).data
         assert Decimal(str(data["power_draw_watts"])) == Decimal("750.50")
-        assert data["wiring_type"] == Asset.WIRING_120V_PLUG
+        assert data["wiring_type"] == Asset.WiringType.PLUG_120V
         assert data["suite"] == "Suite 200"
         assert data["electrical_box"] == "Sub-panel B"
         assert data["breaker_location"] == "B-7"
         assert data["has_interlock"] is True
-        assert data["interlock_type"] == Asset.INTERLOCK_E_STOP
-        assert data["lockout_type"] == Asset.LOCKOUT_PLUG
+        assert data["interlock_type"] == Asset.InterlockType.E_STOP
+        assert data["lockout_type"] == Asset.LockoutType.PLUG
         assert "Unplug at outlet O-14" in data["lockout_instructions"]
         assert data["has_network_drop"] is False
         assert data["is_forgekey_managed"] is False
@@ -118,12 +118,12 @@ class TestAssetPowerSerializer:
         payload = {
             "name": asset.name,
             "power_draw_watts": "1200.00",
-            "wiring_type": Asset.WIRING_HARDWIRED,
+            "wiring_type": Asset.WiringType.HARDWIRED,
             "suite": "Main Floor",
             "breaker_location": "Main-3",
             "has_interlock": True,
-            "interlock_type": Asset.INTERLOCK_CONTACTOR,
-            "lockout_type": Asset.LOCKOUT_LOTO,
+            "interlock_type": Asset.InterlockType.CONTACTOR,
+            "lockout_type": Asset.LockoutType.LOTO,
             "lockout_instructions": "LOTO at main breaker.",
         }
         serializer = AssetSerializer(asset, data=payload, partial=True)
@@ -131,9 +131,9 @@ class TestAssetPowerSerializer:
         serializer.save()
         asset.refresh_from_db()
         assert asset.power_draw_watts == Decimal("1200.00")
-        assert asset.wiring_type == Asset.WIRING_HARDWIRED
+        assert asset.wiring_type == Asset.WiringType.HARDWIRED
         assert asset.suite == "Main Floor"
-        assert asset.lockout_type == Asset.LOCKOUT_LOTO
+        assert asset.lockout_type == Asset.LockoutType.LOTO
         assert asset.has_interlock is True
 
 
@@ -144,11 +144,11 @@ class TestAssetPowerSerializer:
 
 class TestIsForgekeyManaged:
     def test_explicit_interlock_type_marks_managed(self):
-        asset = AssetFactory(interlock_type=Asset.INTERLOCK_FORGEKEY)
+        asset = AssetFactory(interlock_type=Asset.InterlockType.FORGEKEY)
         assert asset.is_forgekey_managed is True
 
     def test_explicit_lockout_type_marks_managed(self):
-        asset = AssetFactory(lockout_type=Asset.LOCKOUT_FORGEKEY)
+        asset = AssetFactory(lockout_type=Asset.LockoutType.FORGEKEY)
         assert asset.is_forgekey_managed is True
 
     def test_unmanaged_asset_returns_false(self):
@@ -185,14 +185,14 @@ class TestElectricalRowsHelper:
 
     def test_rows_include_breaker_and_lockout(self):
         asset = AssetFactory(
-            wiring_type=Asset.WIRING_240V_PLUG,
+            wiring_type=Asset.WiringType.PLUG_240V,
             power_draw_watts=Decimal("3000"),
             suite="North Bay",
             electrical_box="Panel A",
             breaker_location="A-12",
             has_interlock=True,
-            interlock_type=Asset.INTERLOCK_KEY_SWITCH,
-            lockout_type=Asset.LOCKOUT_BREAKER,
+            interlock_type=Asset.InterlockType.KEY_SWITCH,
+            lockout_type=Asset.LockoutType.BREAKER,
             lockout_responsible="Logistics",
         )
         rows = _build_electrical_rows(asset)
@@ -213,7 +213,7 @@ class TestElectricalRowsHelper:
         # "Circuit" row.
         from electrical_circuits.models import PowerBreaker, PowerPanel
 
-        asset = AssetFactory(wiring_type=Asset.WIRING_120V_PLUG)
+        asset = AssetFactory(wiring_type=Asset.WiringType.PLUG_120V)
         panel = PowerPanel.objects.create(location=asset.location, name="Panel Z")
         breaker = PowerBreaker.objects.create(panel=panel, position="7", amperage=15)
         # Write-through the compat setter; no breaker_location is set.
@@ -267,11 +267,11 @@ class TestWorkOrderPdfElectricalSection:
         asset = AssetFactory(
             name="CNC Router",
             power_draw_watts=Decimal("2400"),
-            wiring_type=Asset.WIRING_240V_PLUG,
+            wiring_type=Asset.WiringType.PLUG_240V,
             suite="North Bay",
             electrical_box="Panel A",
             breaker_location="A-12",
-            lockout_type=Asset.LOCKOUT_BREAKER,
+            lockout_type=Asset.LockoutType.BREAKER,
             lockout_instructions="LOTO breaker A-12 before service.",
             lockout_responsible="Wood Shop SIG Lead",
         )
@@ -287,10 +287,10 @@ class TestWorkOrderPdfElectricalSection:
     def test_pdf_marks_forgekey_managed_assets(self):
         asset = AssetFactory(
             name="Laser Cutter",
-            wiring_type=Asset.WIRING_240V_PLUG,
+            wiring_type=Asset.WiringType.PLUG_240V,
             breaker_location="B-3",
-            interlock_type=Asset.INTERLOCK_FORGEKEY,
-            lockout_type=Asset.LOCKOUT_FORGEKEY,
+            interlock_type=Asset.InterlockType.FORGEKEY,
+            lockout_type=Asset.LockoutType.FORGEKEY,
         )
         wo = _make_work_order(asset)
         text = _pdf_text(generate_work_order_pdf(wo, base_url="http://example.com"))
@@ -299,12 +299,12 @@ class TestWorkOrderPdfElectricalSection:
     def test_pdf_marks_non_forgekey_asset_with_responsible_party(self):
         asset = AssetFactory(
             name="Old Drill Press",
-            wiring_type=Asset.WIRING_120V_PLUG,
+            wiring_type=Asset.WiringType.PLUG_120V,
             breaker_location="C-7",
             has_interlock=True,
-            interlock_type=Asset.INTERLOCK_KEY_SWITCH,
+            interlock_type=Asset.InterlockType.KEY_SWITCH,
             interlock_responsible="Metal Shop SIG",
-            lockout_type=Asset.LOCKOUT_PLUG,
+            lockout_type=Asset.LockoutType.PLUG,
             lockout_responsible="Metal Shop SIG",
         )
         wo = _make_work_order(asset)

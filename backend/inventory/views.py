@@ -46,6 +46,7 @@ from .models import (
     ItemSupplier,
     Location,
     LocationProblem,
+    MaintenanceAuditEvent,
     MaintenanceItem,
     MaintenanceLog,
     MaintenanceMaterial,
@@ -211,10 +212,12 @@ class SupplierViewSet(viewsets.ModelViewSet):
             purchase_orders = PurchaseOrder.objects.filter(supplier=supplier)
             order_stats = {
                 "total_orders": purchase_orders.count(),
-                "received_orders": purchase_orders.filter(status=PurchaseOrder.RECEIVED).count(),
+                "received_orders": purchase_orders.filter(
+                    status=PurchaseOrder.Status.RECEIVED
+                ).count(),
                 "total_spent": (
                     purchase_orders.filter(
-                        status=PurchaseOrder.RECEIVED, actual_total__isnull=False
+                        status=PurchaseOrder.Status.RECEIVED, actual_total__isnull=False
                     ).aggregate(total=Sum("actual_total"))["total"]
                     or Decimal("0.00")
                 ),
@@ -412,8 +415,8 @@ class LocationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        severity = request.data.get("severity") or LocationProblem.SEVERITY_MEDIUM
-        valid_sev = {choice for choice, _ in LocationProblem.SEVERITY_CHOICES}
+        severity = request.data.get("severity") or LocationProblem.Severity.MEDIUM
+        valid_sev = {choice for choice, _ in LocationProblem.Severity.choices}
         if severity not in valid_sev:
             return Response(
                 {"error": f"severity must be one of {sorted(valid_sev)}"},
@@ -464,8 +467,8 @@ class LocationViewSet(viewsets.ModelViewSet):
             pass
 
         if problem.severity in (
-            LocationProblem.SEVERITY_HIGH,
-            LocationProblem.SEVERITY_URGENT,
+            LocationProblem.Severity.HIGH,
+            LocationProblem.Severity.URGENT,
         ):
             try:
                 from inventory.services.location_problem_alerts import email_logistics_alert
@@ -671,7 +674,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         ownership_type = request.data.get("ownership_type")
         owning_group_id = request.data.get("owning_group")
 
-        if ownership_type == "group" and owning_group_id:
+        if ownership_type == InventoryItem.OwnershipType.GROUP and owning_group_id:
             try:
                 group = Group.objects.get(pk=owning_group_id)
                 if not (
@@ -1057,7 +1060,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         days-since-last-count.
 
         Body: ``counted_qty`` (required int >= 0), ``reason`` (required, from
-        ``StockReconciliation.REASON_CHOICES``), ``skip_reorder`` (optional bool),
+        ``StockReconciliation.ReasonCode.choices``), ``skip_reorder`` (optional bool),
         ``notes`` (optional str).
         """
         item = self.get_object()
@@ -1082,7 +1085,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             )
 
         reason = request.data.get("reason")
-        valid_reasons = {v for v, _ in StockReconciliation.REASON_CHOICES}
+        valid_reasons = {v for v, _ in StockReconciliation.ReasonCode.choices}
         if reason not in valid_reasons:
             return Response(
                 {"detail": ("reason is required; choose from " f"{sorted(valid_reasons)}.")},
@@ -1370,7 +1373,7 @@ class PriceHistoryViewSet(viewsets.ReadOnlyModelViewSet):
         since_date = timezone.now() - timedelta(days=days)
         recent_changes = self.get_queryset().filter(
             recorded_at__gte=since_date,
-            change_type="updated",  # Only actual price updates, not initial records
+            change_type=PriceHistory.ChangeType.UPDATED,  # Only actual price updates, not initial records
         )[
             :50
         ]  # Limit to 50 most recent
@@ -1571,7 +1574,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         ownership_type = request.data.get("ownership_type")
         owning_group_id = request.data.get("owning_group")
 
-        if ownership_type == "group" and owning_group_id:
+        if ownership_type == Asset.OwnershipType.GROUP and owning_group_id:
             # Check if user is admin of the specified group
             from django.contrib.auth.models import Group
 
@@ -1986,7 +1989,7 @@ class AssetViewSet(viewsets.ModelViewSet):
             )
 
         # Check if user can operate assets in Implementing/Testing status
-        if asset.status in [asset.IMPLEMENTING, asset.TESTING]:
+        if asset.status in [asset.Status.IMPLEMENTING, asset.Status.TESTING]:
             if not asset.can_user_operate(user):
                 return Response(
                     {
@@ -2026,7 +2029,7 @@ class AssetViewSet(viewsets.ModelViewSet):
             )
 
         # Check if user can operate assets in Implementing/Testing status
-        if asset.status in [asset.IMPLEMENTING, asset.TESTING]:
+        if asset.status in [asset.Status.IMPLEMENTING, asset.Status.TESTING]:
             if not asset.can_user_operate(user):
                 return Response(
                     {
@@ -2321,11 +2324,11 @@ class AssetViewSet(viewsets.ModelViewSet):
             )
 
         # Update problem status and resolution details
-        new_status = request.data.get("status", AssetProblem.RESOLVED)
-        if new_status not in [AssetProblem.RESOLVED, AssetProblem.CLOSED]:
+        new_status = request.data.get("status", AssetProblem.Status.RESOLVED)
+        if new_status not in [AssetProblem.Status.RESOLVED, AssetProblem.Status.CLOSED]:
             return Response(
                 {
-                    "error": f"Invalid status. Must be '{AssetProblem.RESOLVED}' or '{AssetProblem.CLOSED}'"
+                    "error": f"Invalid status. Must be '{AssetProblem.Status.RESOLVED}' or '{AssetProblem.Status.CLOSED}'"
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -2336,7 +2339,10 @@ class AssetViewSet(viewsets.ModelViewSet):
         )
 
         # Set resolved_at and resolved_by if resolving for the first time
-        if new_status in [AssetProblem.RESOLVED, AssetProblem.CLOSED] and not problem.resolved_at:
+        if (
+            new_status in [AssetProblem.Status.RESOLVED, AssetProblem.Status.CLOSED]
+            and not problem.resolved_at
+        ):
             problem.resolved_at = timezone.now()
             # Set resolved_by using handle or username
             if request.user.is_authenticated:
@@ -2798,7 +2804,7 @@ class AssetMeterViewSet(viewsets.ModelViewSet):
 
         spec_kwargs = {"absolute": value} if is_absolute else {"delta": value}
         spec = ReadingSpec(
-            source=AssetMeterReading.SOURCE_MANUAL,
+            source=AssetMeterReading.Source.MANUAL,
             observed_at=observed_at,
             is_estimated=is_estimated,
             source_ref="manual entry",
@@ -2831,7 +2837,7 @@ class AssetMeterViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         spec = ReadingSpec(
-            source=AssetMeterReading.SOURCE_MANUAL_ADJUST,
+            source=AssetMeterReading.Source.MANUAL_ADJUST,
             observed_at=timezone.now(),
             absolute=target,
             is_estimated=False,
@@ -2934,7 +2940,7 @@ class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
                 assigned_to=request.user if request.user.is_authenticated else None,
             )
             problem.work_order = wo
-            problem.status = LocationProblem.IN_PROGRESS
+            problem.status = LocationProblem.Status.IN_PROGRESS
             problem.save(update_fields=["work_order", "status", "updated_at"])
             self._copy_attachments_to_work_order(problem, wo)
 
@@ -3010,7 +3016,7 @@ class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
                     user=request.user if request.user.is_authenticated else None,
                 )
             problem.third_party_work_order = tpwo
-            problem.status = LocationProblem.IN_PROGRESS
+            problem.status = LocationProblem.Status.IN_PROGRESS
             problem.save(update_fields=["third_party_work_order", "status", "updated_at"])
 
         serializer = LocationProblemSerializer(problem, context={"request": request})
@@ -3020,13 +3026,13 @@ class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
     def resolve(self, request, pk=None):
         """Mark this location problem as resolved or closed."""
         problem = self.get_object()
-        new_status = request.data.get("status", LocationProblem.RESOLVED)
-        if new_status not in (LocationProblem.RESOLVED, LocationProblem.CLOSED):
+        new_status = request.data.get("status", LocationProblem.Status.RESOLVED)
+        if new_status not in (LocationProblem.Status.RESOLVED, LocationProblem.Status.CLOSED):
             return Response(
                 {
                     "error": (
-                        f"status must be '{LocationProblem.RESOLVED}' or "
-                        f"'{LocationProblem.CLOSED}'"
+                        f"status must be '{LocationProblem.Status.RESOLVED}' or "
+                        f"'{LocationProblem.Status.CLOSED}'"
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -3043,7 +3049,7 @@ class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
         problem.save()
 
         record_maintenance_audit_event(
-            action="location_problem_resolve",
+            action=MaintenanceAuditEvent.Action.LOCATION_PROBLEM_RESOLVE,
             actor=request.user,
             location_problem=problem,
             notes=problem.resolution_notes or "",
@@ -3303,9 +3309,9 @@ class FixtureViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
 
         updated_count = FixtureRefillRequest.objects.filter(
-            fixture=fixture, status="pending"
+            fixture=fixture, status=FixtureRefillRequest.Status.PENDING
         ).update(
-            status="completed",
+            status=FixtureRefillRequest.Status.COMPLETED,
             resolved_at=timezone.now(),
             resolved_by=resolved_by,
             # Only update notes if provided
@@ -3359,7 +3365,7 @@ class FixtureRefillRequestViewSet(viewsets.ModelViewSet):
         """Mark a single refill request as completed."""
         refill_request = self.get_object()
 
-        if refill_request.status == "completed":
+        if refill_request.status == FixtureRefillRequest.Status.COMPLETED:
             return Response(
                 {"error": "This request is already completed"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -3367,7 +3373,7 @@ class FixtureRefillRequestViewSet(viewsets.ModelViewSet):
 
         from django.utils import timezone
 
-        refill_request.status = "completed"
+        refill_request.status = FixtureRefillRequest.Status.COMPLETED
         refill_request.resolved_at = timezone.now()
         refill_request.resolved_by = request.user.username if request.user.is_authenticated else ""
         refill_request.notes = request.data.get("notes", refill_request.notes)
@@ -3790,8 +3796,8 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         new_status = request.data.get("status")
         if (
-            new_status == WorkOrder.STATUS_COMPLETED
-            and instance.status != WorkOrder.STATUS_COMPLETED
+            new_status == WorkOrder.Status.COMPLETED
+            and instance.status != WorkOrder.Status.COMPLETED
             and not self._has_complete_validation(instance)
         ):
             return Response(
@@ -3817,7 +3823,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         it if a completed work order is reopened. An already-set timestamp (e.g.
         from the paper-form ingest) is left untouched.
         """
-        if work_order.status == WorkOrder.STATUS_COMPLETED:
+        if work_order.status == WorkOrder.Status.COMPLETED:
             if work_order.completed_at is None:
                 work_order.completed_at = timezone.now()
                 work_order.save(update_fields=["completed_at"])
@@ -3846,7 +3852,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         ``last_completed_at`` only advances forward — a reopen + recomplete
         with an earlier ``wo.completed_at`` doesn't roll the date back.
         """
-        if work_order.status != WorkOrder.STATUS_COMPLETED:
+        if work_order.status != WorkOrder.Status.COMPLETED:
             return
         if not work_order.completed_at:
             return
@@ -3985,7 +3991,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         self._bundle_due_siblings(work_order)
         self._sync_maintenance_item_completion(work_order, actor=self.request.user)
         record_maintenance_audit_event(
-            action="wo_create",
+            action=MaintenanceAuditEvent.Action.WO_CREATE,
             actor=self.request.user,
             work_order=work_order,
             metadata={
@@ -3998,15 +4004,15 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         old_status = serializer.instance.status
         work_order = serializer.save()
         self._sync_completion_timestamp(
-            work_order, was_completed=(old_status == WorkOrder.STATUS_COMPLETED)
+            work_order, was_completed=(old_status == WorkOrder.Status.COMPLETED)
         )
         self._sync_maintenance_item_completion(work_order, actor=self.request.user)
         if (
-            work_order.status == WorkOrder.STATUS_COMPLETED
-            and old_status != WorkOrder.STATUS_COMPLETED
+            work_order.status == WorkOrder.Status.COMPLETED
+            and old_status != WorkOrder.Status.COMPLETED
         ):
             record_maintenance_audit_event(
-                action="wo_complete",
+                action=MaintenanceAuditEvent.Action.WO_COMPLETE,
                 actor=self.request.user,
                 work_order=work_order,
                 metadata={
@@ -4176,8 +4182,8 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         tc.save()
 
         # Update work order status to in_progress if any task is completed
-        if tc.is_completed and work_order.status == WorkOrder.STATUS_OPEN:
-            work_order.status = WorkOrder.STATUS_IN_PROGRESS
+        if tc.is_completed and work_order.status == WorkOrder.Status.OPEN:
+            work_order.status = WorkOrder.Status.IN_PROGRESS
             work_order.save(update_fields=["status", "updated_at"])
 
         return Response(WorkOrderTaskCompletionSerializer(tc).data)
@@ -4226,12 +4232,12 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         submission = WorkOrderSubmission(
             kind=kind,
             source=(
-                WorkOrderSubmission.SOURCE_SCAN if is_scan else WorkOrderSubmission.SOURCE_MANUAL
+                WorkOrderSubmission.Source.SCAN if is_scan else WorkOrderSubmission.Source.MANUAL
             ),
             submitted_by=user,
             from_email=(user.email or "")[:254],
             subject=(upload_name)[:500],
-            status=WorkOrderSubmission.STATUS_RECEIVED,
+            status=WorkOrderSubmission.Status.RECEIVED,
         )
         submission.attachment.save(
             pdf_file.name or "work-order.pdf",
@@ -4363,9 +4369,9 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
         submission.pending_changes = remaining
         submission.status = (
-            WorkOrderSubmission.STATUS_APPLIED
+            WorkOrderSubmission.Status.APPLIED
             if not remaining
-            else WorkOrderSubmission.STATUS_PENDING_REVIEW
+            else WorkOrderSubmission.Status.PENDING_REVIEW
         )
         submission.save(update_fields=["pending_changes", "status"])
 
@@ -4420,8 +4426,8 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             dropped += 1
 
         submission.pending_changes = remaining
-        if not remaining and submission.status == WorkOrderSubmission.STATUS_PENDING_REVIEW:
-            submission.status = WorkOrderSubmission.STATUS_APPLIED
+        if not remaining and submission.status == WorkOrderSubmission.Status.PENDING_REVIEW:
+            submission.status = WorkOrderSubmission.Status.APPLIED
         submission.save(update_fields=["pending_changes", "status"])
 
         return Response(
@@ -4725,7 +4731,7 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
 
                 # Skip if there's already an open/in-progress WO for this item
                 existing = item.work_orders.filter(
-                    status__in=[WorkOrder.STATUS_OPEN, WorkOrder.STATUS_IN_PROGRESS]
+                    status__in=[WorkOrder.Status.OPEN, WorkOrder.Status.IN_PROGRESS]
                 ).exists()
                 if existing:
                     continue
@@ -4820,9 +4826,9 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
         )
 
         open_statuses = [
-            WorkOrder.STATUS_OPEN,
-            WorkOrder.STATUS_IN_PROGRESS,
-            WorkOrder.STATUS_BLOCKED,
+            WorkOrder.Status.OPEN,
+            WorkOrder.Status.IN_PROGRESS,
+            WorkOrder.Status.BLOCKED,
         ]
         unscheduled_qs = (
             WorkOrder.objects.filter(
@@ -4847,7 +4853,7 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
 
         completed_qs = (
             WorkOrder.objects.filter(
-                status=WorkOrder.STATUS_COMPLETED,
+                status=WorkOrder.Status.COMPLETED,
                 completed_at__isnull=False,
             )
             .select_related("maintenance_item")
@@ -4902,7 +4908,7 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
                             days_set.add(d)
                             d += timedelta(days=1)
                     if (
-                        wo.status == WorkOrder.STATUS_COMPLETED
+                        wo.status == WorkOrder.Status.COMPLETED
                         and wo.completed_at is not None
                         and window_start_date <= wo.completed_at.date() <= today
                     ):
@@ -4915,7 +4921,7 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
                                         usage.quantity_planned
                                         * usage.material.estimated_cost_per_unit
                                     )
-            if asset.status == Asset.MAINTENANCE:
+            if asset.status == Asset.Status.MAINTENANCE:
                 days_set.add(today)
             if not days_set and total_cost == 0:
                 continue
@@ -4953,17 +4959,17 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
         a ``kind`` discriminator so the frontend can render appropriate CTAs.
         """
         open_wo_statuses = [
-            WorkOrder.STATUS_OPEN,
-            WorkOrder.STATUS_IN_PROGRESS,
-            WorkOrder.STATUS_BLOCKED,
+            WorkOrder.Status.OPEN,
+            WorkOrder.Status.IN_PROGRESS,
+            WorkOrder.Status.BLOCKED,
         ]
         open_problem_statuses = [
-            AssetProblem.REPORTED,
-            AssetProblem.IN_PROGRESS,
+            AssetProblem.Status.REPORTED,
+            AssetProblem.Status.IN_PROGRESS,
         ]
         open_location_problem_statuses = [
-            LocationProblem.REPORTED,
-            LocationProblem.IN_PROGRESS,
+            LocationProblem.Status.REPORTED,
+            LocationProblem.Status.IN_PROGRESS,
         ]
 
         rows = []
@@ -5059,7 +5065,7 @@ class AssetReportViewSet(viewsets.ViewSet):
         queryset = Asset.objects.values("status").annotate(count=Count("id")).order_by("status")
 
         data = []
-        status_choices = dict(Asset.STATUS_CHOICES)
+        status_choices = dict(Asset.Status.choices)
         for item in queryset:
             data.append(
                 {
@@ -5105,9 +5111,9 @@ class AssetReportViewSet(viewsets.ViewSet):
                 )
 
         # Also check assets that are in maintenance status
-        assets_in_maintenance = Asset.objects.filter(status=Asset.MAINTENANCE).select_related(
-            "category", "location"
-        )
+        assets_in_maintenance = Asset.objects.filter(
+            status=Asset.Status.MAINTENANCE
+        ).select_related("category", "location")
 
         for asset in assets_in_maintenance:
             maintenance_needed.append(
@@ -5265,7 +5271,7 @@ class AssetReportViewSet(viewsets.ViewSet):
                             d += timedelta(days=1)
 
                     if (
-                        wo.status == WorkOrder.STATUS_COMPLETED
+                        wo.status == WorkOrder.Status.COMPLETED
                         and wo.completed_at is not None
                         and window_start <= wo.completed_at.date() <= today
                     ):
@@ -5287,7 +5293,7 @@ class AssetReportViewSet(viewsets.ViewSet):
                     if wo_closed is not None:
                         days_set.add(wo_closed.date())
 
-            if asset.status == Asset.MAINTENANCE:
+            if asset.status == Asset.Status.MAINTENANCE:
                 days_set.add(today)
 
             repair = Decimal("0.00")
@@ -5377,8 +5383,8 @@ class AssetReportViewSet(viewsets.ViewSet):
         events = ComponentUsageEvent.objects.filter(
             asset__isnull=False,
             action__in=[
-                SerializedComponent.ACTION_INSTALL,
-                SerializedComponent.ACTION_CONSUME,
+                SerializedComponent.Action.INSTALL,
+                SerializedComponent.Action.CONSUME,
             ],
             at__date__gte=start_date,
             at__date__lte=end_date,
@@ -5410,7 +5416,7 @@ class AssetReportViewSet(viewsets.ViewSet):
         for asset in assets:
             for mi in asset.maintenance_items.all():
                 for wo in mi.work_orders.all():
-                    if wo.status != WorkOrder.STATUS_COMPLETED or wo.completed_at is None:
+                    if wo.status != WorkOrder.Status.COMPLETED or wo.completed_at is None:
                         continue
                     completed_date = wo.completed_at.date()
                     if not (start_date <= completed_date <= end_date):
@@ -5715,8 +5721,8 @@ def postmark_inbound_work_order(request):
         from_email=(payload.get("FromFull") or {}).get("Email") or payload.get("From") or "",
         subject=subject,
         postmark_message_id=message_id[:200],
-        status=WorkOrderSubmission.STATUS_RECEIVED,
-        source=(WorkOrderSubmission.SOURCE_SCAN if is_scan else WorkOrderSubmission.SOURCE_EMAIL),
+        status=WorkOrderSubmission.Status.RECEIVED,
+        source=(WorkOrderSubmission.Source.SCAN if is_scan else WorkOrderSubmission.Source.EMAIL),
     )
     submission.attachment.save(filename, ContentFile(pdf_bytes), save=False)
     submission.save()
@@ -5933,7 +5939,7 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
             "yes",
         )
 
-        valid_reasons = {v for v, _ in StockReconciliation.REASON_CHOICES}
+        valid_reasons = {v for v, _ in StockReconciliation.ReasonCode.choices}
 
         try:
             decoded = io.TextIOWrapper(file_obj, encoding="utf-8-sig", newline="")
@@ -6436,32 +6442,32 @@ class SerializedComponentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def receive(self, request, pk=None):
         """Accession a received unit into stock (``received`` -> ``in_stock``)."""
-        return self._run_lifecycle_action(request, SerializedComponent.ACTION_RECEIVE)
+        return self._run_lifecycle_action(request, SerializedComponent.Action.RECEIVE)
 
     @action(detail=True, methods=["post"])
     def install(self, request, pk=None):
         """Install the unit into an asset (requires ``asset``)."""
-        return self._run_lifecycle_action(request, SerializedComponent.ACTION_INSTALL)
+        return self._run_lifecycle_action(request, SerializedComponent.Action.INSTALL)
 
     @action(detail=True, methods=["post"])
     def remove(self, request, pk=None):
         """Remove a reusable unit from its asset (``installed`` -> ``removed``)."""
-        return self._run_lifecycle_action(request, SerializedComponent.ACTION_REMOVE)
+        return self._run_lifecycle_action(request, SerializedComponent.Action.REMOVE)
 
     @action(detail=True, methods=["post"])
     def consume(self, request, pk=None):
         """Mark a consumable unit as used up (``installed`` -> ``consumed``)."""
-        return self._run_lifecycle_action(request, SerializedComponent.ACTION_CONSUME)
+        return self._run_lifecycle_action(request, SerializedComponent.Action.CONSUME)
 
     @action(detail=True, methods=["post"])
     def retire(self, request, pk=None):
         """Retire a reusable unit from service (-> ``retired``)."""
-        return self._run_lifecycle_action(request, SerializedComponent.ACTION_RETIRE)
+        return self._run_lifecycle_action(request, SerializedComponent.Action.RETIRE)
 
     @action(detail=True, methods=["post"])
     def dispose(self, request, pk=None):
         """Dispose the unit (requires ``disposal_reason``; -> ``disposed``)."""
-        return self._run_lifecycle_action(request, SerializedComponent.ACTION_DISPOSE)
+        return self._run_lifecycle_action(request, SerializedComponent.Action.DISPOSE)
 
     @action(detail=False, methods=["post"])
     def scan_receive(self, request):
@@ -6518,7 +6524,7 @@ class SerializedComponentViewSet(viewsets.ModelViewSet):
                 },
             )
             if created:
-                component.apply_action(SerializedComponent.ACTION_RECEIVE, actor=actor)
+                component.apply_action(SerializedComponent.Action.RECEIVE, actor=actor)
 
         component.refresh_from_db()
         data = self.get_serializer(component).data

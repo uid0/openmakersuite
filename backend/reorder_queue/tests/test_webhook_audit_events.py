@@ -13,7 +13,7 @@ def _webhook_payload(**overrides):
     payload = {
         "name": "Inventory Alerts",
         "url": "https://example.com/webhooks/inventory",
-        "event_type": WebHook.REORDER_REQUEST_CREATED,
+        "event_type": WebHook.EventType.REORDER_REQUEST_CREATED,
     }
     payload.update(overrides)
     return payload
@@ -23,7 +23,7 @@ def _create_webhook(**overrides):
     defaults = {
         "name": "Inventory Alerts",
         "url": "https://example.com/webhooks/inventory",
-        "event_type": WebHook.REORDER_REQUEST_CREATED,
+        "event_type": WebHook.EventType.REORDER_REQUEST_CREATED,
         "is_active": True,
         "secret": "initial-secret",
     }
@@ -42,7 +42,7 @@ def test_webhook_create_records_audit_event(authenticated_client):
     # serializer's id-key shape (which may be `id` / `uuid` / etc).
     webhook = WebHook.objects.get()
     event = WebhookAuditEvent.objects.get()
-    assert event.action == WebhookAuditEvent.ACTION_WEBHOOK_CREATE
+    assert event.action == WebhookAuditEvent.Action.WEBHOOK_CREATE
     assert event.actor == user
     assert event.webhook == webhook
     assert event.metadata == {
@@ -67,7 +67,7 @@ def test_webhook_update_records_diff(authenticated_client):
 
     assert response.status_code == status.HTTP_200_OK
     event = WebhookAuditEvent.objects.get()
-    assert event.action == WebhookAuditEvent.ACTION_WEBHOOK_UPDATE
+    assert event.action == WebhookAuditEvent.Action.WEBHOOK_UPDATE
     assert event.actor == user
     assert event.webhook == webhook
     assert event.metadata["changes"] == {
@@ -95,12 +95,12 @@ def test_webhook_secret_rotate_emits_distinct_event(authenticated_client):
 
     assert response.status_code == status.HTTP_200_OK
     event = WebhookAuditEvent.objects.get()
-    assert event.action == WebhookAuditEvent.ACTION_WEBHOOK_SECRET_ROTATE
+    assert event.action == WebhookAuditEvent.Action.WEBHOOK_SECRET_ROTATE
     assert "secret" not in event.metadata
     assert "new-secret" not in str(event.metadata)
     assert "new-secret" not in event.notes
     assert not WebhookAuditEvent.objects.filter(
-        action=WebhookAuditEvent.ACTION_WEBHOOK_UPDATE
+        action=WebhookAuditEvent.Action.WEBHOOK_UPDATE
     ).exists()
 
 
@@ -116,7 +116,7 @@ def test_webhook_disable_records_audit(authenticated_client):
 
     assert response.status_code == status.HTTP_200_OK
     event = WebhookAuditEvent.objects.get()
-    assert event.action == WebhookAuditEvent.ACTION_WEBHOOK_DISABLE
+    assert event.action == WebhookAuditEvent.Action.WEBHOOK_DISABLE
     assert event.actor == user
     assert event.webhook == webhook
 
@@ -133,7 +133,7 @@ def test_webhook_enable_records_audit(authenticated_client):
 
     assert response.status_code == status.HTTP_200_OK
     event = WebhookAuditEvent.objects.get()
-    assert event.action == WebhookAuditEvent.ACTION_WEBHOOK_ENABLE
+    assert event.action == WebhookAuditEvent.Action.WEBHOOK_ENABLE
     assert event.actor == user
     assert event.webhook == webhook
 
@@ -154,8 +154,8 @@ def test_webhook_update_does_not_include_is_active_in_diff(authenticated_client)
     assert response.status_code == status.HTTP_200_OK
     assert WebhookAuditEvent.objects.count() == 2
 
-    update_event = WebhookAuditEvent.objects.get(action=WebhookAuditEvent.ACTION_WEBHOOK_UPDATE)
-    disable_event = WebhookAuditEvent.objects.get(action=WebhookAuditEvent.ACTION_WEBHOOK_DISABLE)
+    update_event = WebhookAuditEvent.objects.get(action=WebhookAuditEvent.Action.WEBHOOK_UPDATE)
+    disable_event = WebhookAuditEvent.objects.get(action=WebhookAuditEvent.Action.WEBHOOK_DISABLE)
 
     assert update_event.actor == user
     assert update_event.webhook == webhook
@@ -178,12 +178,12 @@ def test_webhook_delete_records_audit_before_delete(authenticated_client):
 
     assert response.status_code == status.HTTP_204_NO_CONTENT
     event = WebhookAuditEvent.objects.get()
-    assert event.action == WebhookAuditEvent.ACTION_WEBHOOK_DELETE
+    assert event.action == WebhookAuditEvent.Action.WEBHOOK_DELETE
     assert event.actor == user
     assert event.metadata == {
         "name": "Inventory Alerts",
         "url": "https://example.com/webhooks/inventory",
-        "event_type": WebHook.REORDER_REQUEST_CREATED,
+        "event_type": WebHook.EventType.REORDER_REQUEST_CREATED,
     }
     event.refresh_from_db()
     assert event.webhook is None
@@ -193,14 +193,14 @@ def test_diff_audited_fields_excludes_secret():
     before = WebHook(
         name="Inventory Alerts",
         url="https://example.com/webhooks/inventory",
-        event_type=WebHook.REORDER_REQUEST_CREATED,
+        event_type=WebHook.EventType.REORDER_REQUEST_CREATED,
         is_active=True,
         secret="old-secret",
     )
     after = WebHook(
         name="Inventory Alerts",
         url="https://example.com/webhooks/inventory",
-        event_type=WebHook.REORDER_REQUEST_CREATED,
+        event_type=WebHook.EventType.REORDER_REQUEST_CREATED,
         is_active=True,
         secret="new-secret",
     )
@@ -212,11 +212,11 @@ def test_record_event_with_anonymous_actor_creates_row_with_null_actor():
     webhook = _create_webhook()
 
     event = record_event(
-        action=WebhookAuditEvent.ACTION_WEBHOOK_CREATE,
+        action=WebhookAuditEvent.Action.WEBHOOK_CREATE,
         webhook=webhook,
         actor=None,
     )
 
     assert event.actor is None
     assert event.webhook == webhook
-    assert event.action == WebhookAuditEvent.ACTION_WEBHOOK_CREATE
+    assert event.action == WebhookAuditEvent.Action.WEBHOOK_CREATE

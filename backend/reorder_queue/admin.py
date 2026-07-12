@@ -176,15 +176,15 @@ class ReorderRequestAdmin(admin.ModelAdmin):
     @admin.action(description="Approve selected requests")
     def approve_requests(self, request, queryset):
         """Bulk approve selected requests."""
-        updated = queryset.filter(status="pending").update(
-            status="approved", reviewed_by=request.user
+        updated = queryset.filter(status=ReorderRequest.Status.PENDING).update(
+            status=ReorderRequest.Status.APPROVED, reviewed_by=request.user
         )
         self.message_user(request, f"{updated} requests approved.")
 
     @admin.action(description="Cancel selected requests")
     def cancel_requests(self, request, queryset):
         """Bulk cancel selected requests."""
-        updated = queryset.update(status="cancelled", reviewed_by=request.user)
+        updated = queryset.update(status=ReorderRequest.Status.CANCELLED, reviewed_by=request.user)
         self.message_user(request, f"{updated} requests cancelled.")
 
 
@@ -291,7 +291,7 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         days = obj.days_since_ordered
         if days == 0:
             return "Today"
-        elif obj.status in [PurchaseOrder.SENT, PurchaseOrder.CONFIRMED]:
+        elif obj.status in [PurchaseOrder.Status.SENT, PurchaseOrder.Status.CONFIRMED]:
             if days > 30:
                 return format_html(
                     '<span style="color: red; font-weight: bold;">{} days</span>', days
@@ -308,15 +308,17 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
     @admin.action(description="Mark selected orders as sent")
     def mark_as_sent(self, request, queryset):
         """Mark orders as sent to supplier."""
-        updated = queryset.filter(status=PurchaseOrder.DRAFT).update(
-            status=PurchaseOrder.SENT, sent_by=request.user
+        updated = queryset.filter(status=PurchaseOrder.Status.DRAFT).update(
+            status=PurchaseOrder.Status.SENT, sent_by=request.user
         )
         self.message_user(request, f"{updated} orders marked as sent.")
 
     @admin.action(description="Mark selected orders as confirmed")
     def mark_as_confirmed(self, request, queryset):
         """Mark orders as confirmed by supplier."""
-        updated = queryset.filter(status=PurchaseOrder.SENT).update(status=PurchaseOrder.CONFIRMED)
+        updated = queryset.filter(status=PurchaseOrder.Status.SENT).update(
+            status=PurchaseOrder.Status.CONFIRMED
+        )
         self.message_user(request, f"{updated} orders marked as confirmed.")
 
 

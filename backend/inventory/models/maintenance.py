@@ -391,17 +391,11 @@ class WorkOrder(models.Model):
     maintenance history.
     """
 
-    STATUS_OPEN = "open"
-    STATUS_IN_PROGRESS = "in_progress"
-    STATUS_BLOCKED = "blocked"
-    STATUS_COMPLETED = "completed"
-
-    STATUS_CHOICES = [
-        (STATUS_OPEN, "Open"),
-        (STATUS_IN_PROGRESS, "In Progress"),
-        (STATUS_BLOCKED, "Blocked"),
-        (STATUS_COMPLETED, "Completed"),
-    ]
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        IN_PROGRESS = "in_progress", "In Progress"
+        BLOCKED = "blocked", "Blocked"
+        COMPLETED = "completed", "Completed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     maintenance_item = models.ForeignKey(
@@ -429,8 +423,8 @@ class WorkOrder(models.Model):
     )
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default=STATUS_OPEN,
+        choices=Status.choices,
+        default=Status.OPEN,
         help_text="Current status of this work order",
     )
     due_date = models.DateField(
@@ -496,7 +490,7 @@ class WorkOrder(models.Model):
         """Return True if this open work order is past its due date."""
         from django.utils import timezone
 
-        if self.status == self.STATUS_COMPLETED:
+        if self.status == self.Status.COMPLETED:
             return False
         if not self.due_date:
             return False
@@ -777,43 +771,27 @@ class WorkOrderSubmission(models.Model):
     history.
     """
 
-    STATUS_RECEIVED = "received"
-    STATUS_APPLIED = "applied"
-    STATUS_FAILED = "failed"
-    STATUS_PENDING_REVIEW = "pending_review"
+    class Status(models.TextChoices):
+        RECEIVED = "received", "Received"
+        APPLIED = "applied", "Applied"
+        FAILED = "failed", "Failed"
+        PENDING_REVIEW = "pending_review", "Pending review"
 
-    STATUS_CHOICES = [
-        (STATUS_RECEIVED, "Received"),
-        (STATUS_APPLIED, "Applied"),
-        (STATUS_FAILED, "Failed"),
-        (STATUS_PENDING_REVIEW, "Pending review"),
-    ]
+    class Source(models.TextChoices):
+        EMAIL = "email", "Email"
+        MANUAL = "manual", "Manual"
+        SCAN = "scan", "Scan (OMR)"
 
-    SOURCE_EMAIL = "email"
-    SOURCE_MANUAL = "manual"
-    SOURCE_SCAN = "scan"
-
-    SOURCE_CHOICES = [
-        (SOURCE_EMAIL, "Email"),
-        (SOURCE_MANUAL, "Manual"),
-        (SOURCE_SCAN, "Scan (OMR)"),
-    ]
-
-    KIND_PM_COMPLETION = "pm_completion"
-    KIND_THIRD_PARTY_WO = "third_party_wo"
-    KIND_LOCATION_PROBLEM = "location_problem"
-
-    KIND_CHOICES = [
-        (KIND_PM_COMPLETION, "PM completion"),
-        (KIND_THIRD_PARTY_WO, "Third-party WO"),
-        (KIND_LOCATION_PROBLEM, "Location Problem Report"),
-    ]
+    class Kind(models.TextChoices):
+        PM_COMPLETION = "pm_completion", "PM completion"
+        THIRD_PARTY_WO = "third_party_wo", "Third-party WO"
+        LOCATION_PROBLEM = "location_problem", "Location Problem Report"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     kind = models.CharField(
         max_length=20,
-        choices=KIND_CHOICES,
-        default=KIND_PM_COMPLETION,
+        choices=Kind.choices,
+        default=Kind.PM_COMPLETION,
         help_text=(
             "Discriminates which ingest pipeline to run: pm_completion routes to "
             "WorkOrder updates; third_party_wo routes to ThirdPartyWorkOrder."
@@ -852,13 +830,13 @@ class WorkOrderSubmission(models.Model):
     )
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default=STATUS_RECEIVED,
+        choices=Status.choices,
+        default=Status.RECEIVED,
     )
     source = models.CharField(
         max_length=20,
-        choices=SOURCE_CHOICES,
-        default=SOURCE_EMAIL,
+        choices=Source.choices,
+        default=Source.EMAIL,
         help_text="How this submission entered the system (email webhook vs manual upload)",
     )
     submitted_by = models.ForeignKey(
@@ -913,15 +891,10 @@ class MaintenanceAuditEvent(models.Model):
     eventual unified review surface (#359) can join cleanly.
     """
 
-    ACTION_WO_CREATE = "wo_create"
-    ACTION_WO_COMPLETE = "wo_complete"
-    ACTION_LOCATION_PROBLEM_RESOLVE = "location_problem_resolve"
-
-    ACTION_CHOICES = [
-        (ACTION_WO_CREATE, "Work order created"),
-        (ACTION_WO_COMPLETE, "Work order completed"),
-        (ACTION_LOCATION_PROBLEM_RESOLVE, "Location problem resolved"),
-    ]
+    class Action(models.TextChoices):
+        WO_CREATE = "wo_create", "Work order created"
+        WO_COMPLETE = "wo_complete", "Work order completed"
+        LOCATION_PROBLEM_RESOLVE = "location_problem_resolve", "Location problem resolved"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -933,7 +906,7 @@ class MaintenanceAuditEvent(models.Model):
         related_name="maintenance_audit_actions",
         help_text="User who performed the action; null for system-initiated events.",
     )
-    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    action = models.CharField(max_length=32, choices=Action.choices)
     work_order = models.ForeignKey(
         "WorkOrder",
         on_delete=models.SET_NULL,

@@ -112,7 +112,7 @@ class SessionRuntimeAdapter(MeterSourceAdapter):
     re-run is exactly-once.
     """
 
-    source_slug = AssetMeter.SOURCE_AUTO_SESSION
+    source_slug = AssetMeter.Source.AUTO_SESSION
 
     def pull(self, meter: AssetMeter, now: datetime) -> List[ReadingSpec]:
         # Lazy import: inventory must not migrate/import against forgekey at
@@ -138,7 +138,7 @@ class SessionRuntimeAdapter(MeterSourceAdapter):
             # watermark so we don't re-scan them forever.
             return [
                 ReadingSpec(
-                    source=AssetMeterReading.SOURCE_AUTO_SESSION,
+                    source=AssetMeterReading.Source.AUTO_SESSION,
                     observed_at=max_ended,
                     delta=Decimal("0"),
                     is_estimated=False,
@@ -150,7 +150,7 @@ class SessionRuntimeAdapter(MeterSourceAdapter):
         delta_hours = (Decimal(total_seconds) / Decimal(3600)).quantize(Decimal("0.0001"))
         return [
             ReadingSpec(
-                source=AssetMeterReading.SOURCE_AUTO_SESSION,
+                source=AssetMeterReading.Source.AUTO_SESSION,
                 observed_at=max_ended,
                 delta=delta_hours,
                 is_estimated=False,
@@ -169,7 +169,7 @@ class TelemetryCounterAdapter(MeterSourceAdapter):
     :func:`apply_reading` directly, e.g.::
 
         spec = ReadingSpec(
-            source=AssetMeterReading.SOURCE_AUTO_TELEMETRY,
+            source=AssetMeterReading.Source.AUTO_TELEMETRY,
             observed_at=sensor_ts,
             delta=gallons_since_last,          # or absolute=cumulative_counter
             is_estimated=False,
@@ -180,7 +180,7 @@ class TelemetryCounterAdapter(MeterSourceAdapter):
     Nothing is pulled on the schedule, so ``pull()`` returns ``[]``.
     """
 
-    source_slug = AssetMeter.SOURCE_AUTO_TELEMETRY
+    source_slug = AssetMeter.Source.AUTO_TELEMETRY
 
     def pull(self, meter: AssetMeter, now: datetime) -> List[ReadingSpec]:
         return []
@@ -189,15 +189,15 @@ class TelemetryCounterAdapter(MeterSourceAdapter):
 class ManualAdapter(MeterSourceAdapter):
     """manual (PUSH): readings come from the record-reading / adjust API actions."""
 
-    source_slug = AssetMeter.SOURCE_MANUAL
+    source_slug = AssetMeter.Source.MANUAL
 
     def pull(self, meter: AssetMeter, now: datetime) -> List[ReadingSpec]:
         return []
 
 
-register_meter_source(AssetMeter.SOURCE_AUTO_SESSION, SessionRuntimeAdapter())
-register_meter_source(AssetMeter.SOURCE_AUTO_TELEMETRY, TelemetryCounterAdapter())
-register_meter_source(AssetMeter.SOURCE_MANUAL, ManualAdapter())
+register_meter_source(AssetMeter.Source.AUTO_SESSION, SessionRuntimeAdapter())
+register_meter_source(AssetMeter.Source.AUTO_TELEMETRY, TelemetryCounterAdapter())
+register_meter_source(AssetMeter.Source.MANUAL, ManualAdapter())
 
 
 def apply_reading(
@@ -250,7 +250,7 @@ def apply_reading(
             update_fields.append("rollup_watermark_at")
         locked.save(update_fields=update_fields)
 
-        if locked.meter_type == AssetMeter.RUNTIME_HOURS:
+        if locked.meter_type == AssetMeter.MeterType.RUNTIME_HOURS:
             increment = int(delta)
             if increment > 0:
                 Asset.objects.filter(pk=locked.asset_id).update(

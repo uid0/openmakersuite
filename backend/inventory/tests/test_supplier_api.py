@@ -50,15 +50,17 @@ class TestSupplierAPI:
 
     def test_filter_suppliers_by_type(self, api_client):
         """Test filtering suppliers by type."""
-        SupplierFactory(supplier_type=Supplier.LOCAL)
-        SupplierFactory(supplier_type=Supplier.ONLINE)
-        SupplierFactory(supplier_type=Supplier.NATIONAL)
+        SupplierFactory(supplier_type=Supplier.SupplierType.LOCAL)
+        SupplierFactory(supplier_type=Supplier.SupplierType.ONLINE)
+        SupplierFactory(supplier_type=Supplier.SupplierType.NATIONAL)
 
         url = reverse("supplier-list")
-        response = api_client.get(url, {"supplier_type": Supplier.ONLINE})
+        response = api_client.get(url, {"supplier_type": Supplier.SupplierType.ONLINE})
 
         assert response.status_code == status.HTTP_200_OK
-        assert all(s["supplier_type"] == Supplier.ONLINE for s in response.data["results"])
+        assert all(
+            s["supplier_type"] == Supplier.SupplierType.ONLINE for s in response.data["results"]
+        )
 
     def test_search_suppliers(self, api_client):
         """Test searching suppliers by name."""
@@ -75,7 +77,7 @@ class TestSupplierAPI:
     def test_create_supplier_requires_auth(self, api_client):
         """Test creating supplier requires authentication."""
         url = reverse("supplier-list")
-        data = {"name": "New Supplier", "supplier_type": Supplier.ONLINE}
+        data = {"name": "New Supplier", "supplier_type": Supplier.SupplierType.ONLINE}
         response = api_client.post(url, data)
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -86,7 +88,7 @@ class TestSupplierAPI:
         url = reverse("supplier-list")
         data = {
             "name": "New Supplier",
-            "supplier_type": Supplier.ONLINE,
+            "supplier_type": Supplier.SupplierType.ONLINE,
             "website": "https://example.com",
             "account_number": "ACC-123",
             "tax_free_paperwork_filed": True,
@@ -96,7 +98,7 @@ class TestSupplierAPI:
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "New Supplier"
-        assert response.data["supplier_type"] == Supplier.ONLINE
+        assert response.data["supplier_type"] == Supplier.SupplierType.ONLINE
         assert response.data["website"] == "https://example.com"
         assert response.data["account_number"] == "ACC-123"
         assert response.data["tax_free_paperwork_filed"] is True
@@ -192,7 +194,7 @@ class TestSupplierAPI:
             # Create a purchase order
             po = PurchaseOrder.objects.create(
                 supplier=supplier,
-                status=PurchaseOrder.RECEIVED,
+                status=PurchaseOrder.Status.RECEIVED,
                 created_by=user,
                 actual_total=Decimal("100.00"),
             )

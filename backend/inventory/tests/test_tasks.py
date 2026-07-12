@@ -8,6 +8,7 @@ import pytest
 
 from inventory.tasks import generate_index_card, generate_qr_code, update_average_lead_times
 from inventory.tests.factories import InventoryItemFactory
+from reorder_queue.models import ReorderRequest
 from reorder_queue.tests.factories import ReorderRequestFactory
 
 pytestmark = pytest.mark.django_db
@@ -82,7 +83,7 @@ class TestInventoryTasks:
 
         ReorderRequestFactory(
             item=item,
-            status="received",
+            status=ReorderRequest.Status.RECEIVED,
             ordered_at=ordered_date,
             actual_delivery=delivery_date,
         )
@@ -93,7 +94,7 @@ class TestInventoryTasks:
 
         ReorderRequestFactory(
             item=item,
-            status="received",
+            status=ReorderRequest.Status.RECEIVED,
             ordered_at=ordered_date2,
             actual_delivery=delivery_date2,
         )
@@ -119,10 +120,10 @@ class TestInventoryTasks:
         item = InventoryItemFactory(average_lead_time=7)
 
         # Pending request should be ignored
-        ReorderRequestFactory(item=item, status="pending")
+        ReorderRequestFactory(item=item, status=ReorderRequest.Status.PENDING)
 
         # Approved request should be ignored
-        ReorderRequestFactory(item=item, status="approved")
+        ReorderRequestFactory(item=item, status=ReorderRequest.Status.APPROVED)
 
         update_average_lead_times()
 

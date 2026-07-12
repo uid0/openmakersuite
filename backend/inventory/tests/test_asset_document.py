@@ -61,7 +61,7 @@ def _isolated_media(settings, tmp_path):
 def _make_document(asset, **kwargs):
     """Create an AssetDocument row directly (used to seed list/supersede setup)."""
     kwargs.setdefault("title", "Seed doc")
-    kwargs.setdefault("category", AssetDocument.MANUAL)
+    kwargs.setdefault("category", AssetDocument.Category.MANUAL)
     kwargs.setdefault("file", _make_file())
     return AssetDocument.objects.create(asset=asset, **kwargs)
 
@@ -80,7 +80,7 @@ class TestAssetDocumentUpload:
             data={
                 "asset": str(asset.id),
                 "file": _make_file(name="lathe-manual.pdf"),
-                "category": AssetDocument.MANUAL,
+                "category": AssetDocument.Category.MANUAL,
                 "title": "Lathe Manual",
                 "description": "Operator's guide",
             },
@@ -90,7 +90,7 @@ class TestAssetDocumentUpload:
         assert resp.status_code == status.HTTP_201_CREATED, resp.content
         body = resp.json()
         assert body["title"] == "Lathe Manual"
-        assert body["category"] == "manual"
+        assert body["category"] == AssetDocument.Category.MANUAL
         assert body["category_display"] == "Manual / Documentation"
         assert body["version"] == 1
         assert body["is_current"] is True
@@ -120,13 +120,13 @@ class TestAssetDocumentUpload:
                     content=b"0\nSECTION\n2\nHEADER\n",
                     content_type="application/dxf",
                 ),
-                "category": AssetDocument.CUT_READY_TEMPLATE,
+                "category": AssetDocument.Category.CUT_READY_TEMPLATE,
                 "title": "Front panel DXF",
             },
             format="multipart",
         )
         assert resp.status_code == status.HTTP_201_CREATED, resp.content
-        assert resp.json()["category"] == "cut_ready_template"
+        assert resp.json()["category"] == AssetDocument.Category.CUT_READY_TEMPLATE
 
     def test_upload_requires_title_and_file(self):
         asset = AssetFactory()
@@ -153,12 +153,12 @@ class TestAssetDocumentListFilters:
 
     def test_list_filtered_by_category(self):
         asset = AssetFactory()
-        _make_document(asset, title="Manual", category=AssetDocument.MANUAL)
-        _make_document(asset, title="Wiring", category=AssetDocument.WIRING_DIAGRAM)
+        _make_document(asset, title="Manual", category=AssetDocument.Category.MANUAL)
+        _make_document(asset, title="Wiring", category=AssetDocument.Category.WIRING_DIAGRAM)
 
         client = APIClient()
         resp = client.get(
-            LIST_URL, {"asset": str(asset.id), "category": AssetDocument.WIRING_DIAGRAM}
+            LIST_URL, {"asset": str(asset.id), "category": AssetDocument.Category.WIRING_DIAGRAM}
         )
         assert resp.status_code == status.HTTP_200_OK
         results = _results(resp)
@@ -190,7 +190,7 @@ class TestAssetDocumentSupersede:
             data={
                 "asset": str(asset.id),
                 "file": _make_file(name="v1.pdf"),
-                "category": AssetDocument.MANUAL,
+                "category": AssetDocument.Category.MANUAL,
                 "title": "Manual",
             },
             format="multipart",
@@ -210,7 +210,7 @@ class TestAssetDocumentSupersede:
         assert v2["supersedes"] == v1_id
         # Title/category inherited from the prior version when not overridden.
         assert v2["title"] == "Manual"
-        assert v2["category"] == "manual"
+        assert v2["category"] == AssetDocument.Category.MANUAL
 
         v1 = AssetDocument.objects.get(id=v1_id)
         assert v1.is_current is False
@@ -223,7 +223,7 @@ class TestAssetDocumentSupersede:
     def test_create_with_supersedes_bumps_version_and_flips(self):
         """The create endpoint also supports 'upload a new version of <doc>'."""
         asset = AssetFactory()
-        prior = _make_document(asset, title="Manual", category=AssetDocument.MANUAL)
+        prior = _make_document(asset, title="Manual", category=AssetDocument.Category.MANUAL)
         client = APIClient()
         client.force_authenticate(user=_member_user())
 
@@ -232,7 +232,7 @@ class TestAssetDocumentSupersede:
             data={
                 "asset": str(asset.id),
                 "file": _make_file(name="v2.pdf"),
-                "category": AssetDocument.MANUAL,
+                "category": AssetDocument.Category.MANUAL,
                 "title": "Manual v2",
                 "supersedes": str(prior.id),
             },
@@ -274,7 +274,7 @@ class TestAssetDocumentSupersede:
             data={
                 "asset": str(asset_a.id),
                 "file": _make_file(),
-                "category": AssetDocument.MANUAL,
+                "category": AssetDocument.Category.MANUAL,
                 "title": "cross-asset",
                 "supersedes": str(prior_b.id),
             },
@@ -303,7 +303,7 @@ class TestAssetDocumentPermissionsAndDelete:
             data={
                 "asset": str(asset.id),
                 "file": _make_file(),
-                "category": AssetDocument.MANUAL,
+                "category": AssetDocument.Category.MANUAL,
                 "title": "unauth",
             },
             format="multipart",

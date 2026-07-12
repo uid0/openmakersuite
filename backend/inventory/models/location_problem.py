@@ -17,29 +17,17 @@ class LocationProblem(models.Model):
     when work is scheduled.
     """
 
-    REPORTED = "reported"
-    IN_PROGRESS = "in_progress"
-    RESOLVED = "resolved"
-    CLOSED = "closed"
+    class Status(models.TextChoices):
+        REPORTED = "reported", "Reported"
+        IN_PROGRESS = "in_progress", "In Progress"
+        RESOLVED = "resolved", "Resolved"
+        CLOSED = "closed", "Closed"
 
-    STATUS_CHOICES = [
-        (REPORTED, "Reported"),
-        (IN_PROGRESS, "In Progress"),
-        (RESOLVED, "Resolved"),
-        (CLOSED, "Closed"),
-    ]
-
-    SEVERITY_LOW = "low"
-    SEVERITY_MEDIUM = "medium"
-    SEVERITY_HIGH = "high"
-    SEVERITY_URGENT = "urgent"
-
-    SEVERITY_CHOICES = [
-        (SEVERITY_LOW, "Low"),
-        (SEVERITY_MEDIUM, "Medium"),
-        (SEVERITY_HIGH, "High"),
-        (SEVERITY_URGENT, "Urgent"),
-    ]
+    class Severity(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+        URGENT = "urgent", "Urgent"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     location = models.ForeignKey(
@@ -56,13 +44,13 @@ class LocationProblem(models.Model):
     description = models.TextField(help_text="Description of the problem or issue")
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default=REPORTED,
+        choices=Status.choices,
+        default=Status.REPORTED,
     )
     severity = models.CharField(
         max_length=10,
-        choices=SEVERITY_CHOICES,
-        default=SEVERITY_MEDIUM,
+        choices=Severity.choices,
+        default=Severity.MEDIUM,
     )
     photo = models.ImageField(
         upload_to="location_problems/%Y/%m/",

@@ -17,7 +17,7 @@ def _complete_wo(asset, completed_at: datetime):
     item = MaintenanceItem.objects.create(asset=asset, title="Service", interval_days=30)
     return WorkOrder.objects.create(
         maintenance_item=item,
-        status=WorkOrder.STATUS_COMPLETED,
+        status=WorkOrder.Status.COMPLETED,
         completed_at=completed_at,
         due_date=completed_at.date(),
     )

@@ -34,7 +34,7 @@ User = get_user_model()
 pytestmark = pytest.mark.django_db
 
 
-def _wo_payload(*, status="open"):
+def _wo_payload(*, status=WorkOrder.Status.OPEN):
     asset = AssetFactory()
     item = MaintenanceItem.objects.create(
         asset=asset,
@@ -100,7 +100,7 @@ class TestWorkOrderViewSetPermissions:
         )
         resp = self._client(_user("volunteer")).patch(
             f"/api/inventory/work-orders/{wo.id}/",
-            data={"status": "in_progress"},
+            data={"status": WorkOrder.Status.IN_PROGRESS},
             format="json",
         )
         assert resp.status_code == 403

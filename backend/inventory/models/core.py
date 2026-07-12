@@ -81,42 +81,31 @@ class Supplier(models.Model):
     """
 
     # Supplier type choices
-    LOCAL = "local"
-    ONLINE = "online"
-    NATIONAL = "national"
-
-    SUPPLIER_TYPE_CHOICES = [
-        (LOCAL, "Local"),
-        (ONLINE, "Online"),
-        (NATIONAL, "National"),
-    ]
+    class SupplierType(models.TextChoices):
+        LOCAL = "local", "Local"
+        ONLINE = "online", "Online"
+        NATIONAL = "national", "National"
 
     # Ordering adapter — selects the artifact the order-pad export emits for this
     # supplier (op-svpq). ``none``/``generic_csv`` produce the vendor-agnostic
     # part#,qty pad; ``amazon`` produces an add-to-cart URL; ``hdsupply`` produces
     # a Part Number,Quantity CSV for HD Supply's Saved-List / Quick Order pad.
-    ADAPTER_NONE = "none"
-    ADAPTER_GENERIC_CSV = "generic_csv"
-    ADAPTER_AMAZON = "amazon"
-    ADAPTER_HDSUPPLY = "hdsupply"
-
-    ORDERING_ADAPTER_CHOICES = [
-        (ADAPTER_NONE, "None (generic part#,qty pad)"),
-        (ADAPTER_GENERIC_CSV, "Generic CSV (part#,qty pad)"),
-        (ADAPTER_AMAZON, "Amazon (add-to-cart URL)"),
-        (ADAPTER_HDSUPPLY, "HD Supply (Part#,Qty CSV)"),
-    ]
+    class OrderingAdapter(models.TextChoices):
+        NONE = "none", "None (generic part#,qty pad)"
+        GENERIC_CSV = "generic_csv", "Generic CSV (part#,qty pad)"
+        AMAZON = "amazon", "Amazon (add-to-cart URL)"
+        HDSUPPLY = "hdsupply", "HD Supply (Part#,Qty CSV)"
 
     name = models.CharField(max_length=200)
     supplier_type = models.CharField(
         max_length=20,
-        choices=SUPPLIER_TYPE_CHOICES,
+        choices=SupplierType.choices,
         help_text="Classification of supplier by distribution type",
     )
     ordering_adapter = models.CharField(
         max_length=20,
-        choices=ORDERING_ADAPTER_CHOICES,
-        default=ADAPTER_NONE,
+        choices=OrderingAdapter.choices,
+        default=OrderingAdapter.NONE,
         help_text=(
             "How the order-pad export builds an order for this supplier: a "
             "generic part#,qty pad, an Amazon add-to-cart URL, or an HD Supply "
@@ -341,20 +330,15 @@ class InventoryItem(models.Model):
     )
 
     # Ownership - can be owned by User, Group (SIG), or Space (makerspace itself)
-    OWNERSHIP_TYPE_USER = "user"
-    OWNERSHIP_TYPE_GROUP = "group"
-    OWNERSHIP_TYPE_SPACE = "space"
-
-    OWNERSHIP_TYPE_CHOICES = [
-        (OWNERSHIP_TYPE_USER, "User"),
-        (OWNERSHIP_TYPE_GROUP, "Group"),
-        (OWNERSHIP_TYPE_SPACE, "Space"),
-    ]
+    class OwnershipType(models.TextChoices):
+        USER = "user", "User"
+        GROUP = "group", "Group"
+        SPACE = "space", "Space"
 
     ownership_type = models.CharField(
         max_length=10,
-        choices=OWNERSHIP_TYPE_CHOICES,
-        default=OWNERSHIP_TYPE_SPACE,
+        choices=OwnershipType.choices,
+        default=OwnershipType.SPACE,
         help_text="Type of ownership for this inventory item",
     )
     owning_user = models.ForeignKey(
@@ -378,13 +362,9 @@ class InventoryItem(models.Model):
     # Aggregate stock (current_stock) still applies; when is_serialized is set,
     # individual physical units are additionally tracked as SerializedComponent
     # records that move through a lifecycle branched on serial_tracking_mode.
-    SERIAL_TRACKING_CONSUMABLE = "consumable"
-    SERIAL_TRACKING_REUSABLE = "reusable"
-
-    SERIAL_TRACKING_MODE_CHOICES = [
-        (SERIAL_TRACKING_CONSUMABLE, "Consumable"),
-        (SERIAL_TRACKING_REUSABLE, "Reusable"),
-    ]
+    class SerialTrackingMode(models.TextChoices):
+        CONSUMABLE = "consumable", "Consumable"
+        REUSABLE = "reusable", "Reusable"
 
     is_serialized = models.BooleanField(
         default=False,
@@ -392,8 +372,8 @@ class InventoryItem(models.Model):
     )
     serial_tracking_mode = models.CharField(
         max_length=20,
-        choices=SERIAL_TRACKING_MODE_CHOICES,
-        default=SERIAL_TRACKING_CONSUMABLE,
+        choices=SerialTrackingMode.choices,
+        default=SerialTrackingMode.CONSUMABLE,
         help_text=(
             "Consumable components are used up "
             "(received -> in_stock -> installed -> consumed -> disposed); "
@@ -948,11 +928,10 @@ class PriceHistory(models.Model):
     allowing for trend analysis and price tracking over time.
     """
 
-    CHANGE_TYPE_CHOICES = [
-        ("created", "Initial Price"),
-        ("updated", "Price Update"),
-        ("supplier_changed", "Supplier Info Changed"),
-    ]
+    class ChangeType(models.TextChoices):
+        CREATED = "created", "Initial Price"
+        UPDATED = "updated", "Price Update"
+        SUPPLIER_CHANGED = "supplier_changed", "Supplier Info Changed"
 
     item_supplier = models.ForeignKey(
         "ItemSupplier", on_delete=models.CASCADE, related_name="price_history"
@@ -977,8 +956,8 @@ class PriceHistory(models.Model):
     )
     change_type = models.CharField(
         max_length=20,
-        choices=CHANGE_TYPE_CHOICES,
-        default="updated",
+        choices=ChangeType.choices,
+        default=ChangeType.UPDATED,
         help_text="Type of change that triggered this history record",
     )
     recorded_at = models.DateTimeField(auto_now_add=True)
@@ -1043,23 +1022,14 @@ class StockReconciliation(models.Model):
     are new rows with reason='miscounted', never edits to existing rows.
     """
 
-    REASON_LOST = "lost"
-    REASON_DAMAGED = "damaged"
-    REASON_MISCOUNTED = "miscounted"
-    REASON_USED_WITHOUT_SCAN = "used_without_scan"
-    REASON_FOUND = "found"
-    REASON_VISION_SUPPLY_CHECK = "vision_supply_check"
-    REASON_OTHER = "other"
-
-    REASON_CHOICES = [
-        (REASON_LOST, "Lost"),
-        (REASON_DAMAGED, "Damaged"),
-        (REASON_MISCOUNTED, "Miscounted"),
-        (REASON_USED_WITHOUT_SCAN, "Used without scanning"),
-        (REASON_FOUND, "Found (positive delta)"),
-        (REASON_VISION_SUPPLY_CHECK, "Vision supply check"),
-        (REASON_OTHER, "Other"),
-    ]
+    class ReasonCode(models.TextChoices):
+        LOST = "lost", "Lost"
+        DAMAGED = "damaged", "Damaged"
+        MISCOUNTED = "miscounted", "Miscounted"
+        USED_WITHOUT_SCAN = "used_without_scan", "Used without scanning"
+        FOUND = "found", "Found (positive delta)"
+        VISION_SUPPLY_CHECK = "vision_supply_check", "Vision supply check"
+        OTHER = "other", "Other"
 
     item = models.ForeignKey(
         "InventoryItem",
@@ -1069,7 +1039,7 @@ class StockReconciliation(models.Model):
     projected_count = models.IntegerField(help_text="current_stock at the time of reconciliation")
     actual_count = models.IntegerField(help_text="Physically counted quantity")
     delta = models.IntegerField(help_text="actual_count - projected_count (signed)")
-    reason = models.CharField(max_length=32, choices=REASON_CHOICES)
+    reason = models.CharField(max_length=32, choices=ReasonCode.choices)
     notes = models.TextField(blank=True)
     reconciled_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -1119,58 +1089,41 @@ class SerializedComponent(models.Model):
     """
 
     # Lifecycle status choices
-    RECEIVED = "received"
-    IN_STOCK = "in_stock"
-    INSTALLED = "installed"
-    REMOVED = "removed"
-    CONSUMED = "consumed"
-    RETIRED = "retired"
-    DISPOSED = "disposed"
-
-    STATUS_CHOICES = [
-        (RECEIVED, "Received"),
-        (IN_STOCK, "In Stock"),
-        (INSTALLED, "Installed"),
-        (REMOVED, "Removed"),
-        (CONSUMED, "Consumed"),
-        (RETIRED, "Retired"),
-        (DISPOSED, "Disposed"),
-    ]
+    class Status(models.TextChoices):
+        RECEIVED = "received", "Received"
+        IN_STOCK = "in_stock", "In Stock"
+        INSTALLED = "installed", "Installed"
+        REMOVED = "removed", "Removed"
+        CONSUMED = "consumed", "Consumed"
+        RETIRED = "retired", "Retired"
+        DISPOSED = "disposed", "Disposed"
 
     # Lifecycle action choices (also used by ComponentUsageEvent.action)
-    ACTION_RECEIVE = "receive"
-    ACTION_INSTALL = "install"
-    ACTION_REMOVE = "remove"
-    ACTION_CONSUME = "consume"
-    ACTION_RETIRE = "retire"
-    ACTION_DISPOSE = "dispose"
-
-    ACTION_CHOICES = [
-        (ACTION_RECEIVE, "Receive"),
-        (ACTION_INSTALL, "Install"),
-        (ACTION_REMOVE, "Remove"),
-        (ACTION_CONSUME, "Consume"),
-        (ACTION_RETIRE, "Retire"),
-        (ACTION_DISPOSE, "Dispose"),
-    ]
+    class Action(models.TextChoices):
+        RECEIVE = "receive", "Receive"
+        INSTALL = "install", "Install"
+        REMOVE = "remove", "Remove"
+        CONSUME = "consume", "Consume"
+        RETIRE = "retire", "Retire"
+        DISPOSE = "dispose", "Dispose"
 
     # (current_status, action) -> resulting_status, keyed by tracking mode.
     _TRANSITIONS = {
-        InventoryItem.SERIAL_TRACKING_CONSUMABLE: {
-            (RECEIVED, ACTION_RECEIVE): IN_STOCK,
-            (IN_STOCK, ACTION_INSTALL): INSTALLED,
-            (INSTALLED, ACTION_CONSUME): CONSUMED,
-            (CONSUMED, ACTION_DISPOSE): DISPOSED,
+        InventoryItem.SerialTrackingMode.CONSUMABLE: {
+            (Status.RECEIVED, Action.RECEIVE): Status.IN_STOCK,
+            (Status.IN_STOCK, Action.INSTALL): Status.INSTALLED,
+            (Status.INSTALLED, Action.CONSUME): Status.CONSUMED,
+            (Status.CONSUMED, Action.DISPOSE): Status.DISPOSED,
         },
-        InventoryItem.SERIAL_TRACKING_REUSABLE: {
-            (RECEIVED, ACTION_RECEIVE): IN_STOCK,
-            (IN_STOCK, ACTION_INSTALL): INSTALLED,
-            (INSTALLED, ACTION_REMOVE): REMOVED,
-            (REMOVED, ACTION_INSTALL): INSTALLED,
-            (IN_STOCK, ACTION_RETIRE): RETIRED,
-            (INSTALLED, ACTION_RETIRE): RETIRED,
-            (REMOVED, ACTION_RETIRE): RETIRED,
-            (RETIRED, ACTION_DISPOSE): DISPOSED,
+        InventoryItem.SerialTrackingMode.REUSABLE: {
+            (Status.RECEIVED, Action.RECEIVE): Status.IN_STOCK,
+            (Status.IN_STOCK, Action.INSTALL): Status.INSTALLED,
+            (Status.INSTALLED, Action.REMOVE): Status.REMOVED,
+            (Status.REMOVED, Action.INSTALL): Status.INSTALLED,
+            (Status.IN_STOCK, Action.RETIRE): Status.RETIRED,
+            (Status.INSTALLED, Action.RETIRE): Status.RETIRED,
+            (Status.REMOVED, Action.RETIRE): Status.RETIRED,
+            (Status.RETIRED, Action.DISPOSE): Status.DISPOSED,
         },
     }
 
@@ -1201,8 +1154,8 @@ class SerializedComponent(models.Model):
     )
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default=RECEIVED,
+        choices=Status.choices,
+        default=Status.RECEIVED,
         help_text="Current lifecycle status of this unit",
     )
     installed_in_asset = models.ForeignKey(
@@ -1314,25 +1267,25 @@ class SerializedComponent(models.Model):
         now = at or timezone.now()
         event_asset = None
 
-        if action == self.ACTION_RECEIVE:
+        if action == self.Action.RECEIVE:
             if not self.received_at:
                 self.received_at = now
-        elif action == self.ACTION_INSTALL:
+        elif action == self.Action.INSTALL:
             if asset is None:
                 raise ValidationError("An asset is required to install a component.")
             self.installed_in_asset = asset
             self.installed_at = now
             event_asset = asset
-        elif action == self.ACTION_REMOVE:
+        elif action == self.Action.REMOVE:
             event_asset = self.installed_in_asset
             self.installed_in_asset = None
-        elif action == self.ACTION_CONSUME:
+        elif action == self.Action.CONSUME:
             event_asset = self.installed_in_asset
             self.installed_in_asset = None
-        elif action == self.ACTION_RETIRE:
+        elif action == self.Action.RETIRE:
             event_asset = self.installed_in_asset
             self.installed_in_asset = None
-        elif action == self.ACTION_DISPOSE:
+        elif action == self.Action.DISPOSE:
             if not disposal_reason:
                 raise ValidationError("A disposal reason is required to dispose a component.")
             self.disposal_reason = disposal_reason
@@ -1379,7 +1332,7 @@ class ComponentUsageEvent(models.Model):
     )
     action = models.CharField(
         max_length=20,
-        choices=SerializedComponent.ACTION_CHOICES,
+        choices=SerializedComponent.Action.choices,
         help_text="The lifecycle action performed",
     )
     at = models.DateTimeField(

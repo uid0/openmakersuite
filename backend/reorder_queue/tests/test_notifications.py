@@ -174,7 +174,7 @@ class TestSignalIntegration:
         ReorderRequest.objects.create(
             item=sig_item,
             quantity=2,
-            status=ReorderRequest.APPROVED,
+            status=ReorderRequest.Status.APPROVED,
             requested_by="Automation",
         )
 

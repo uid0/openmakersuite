@@ -82,7 +82,7 @@ class SupplierSerializer(serializers.ModelSerializer):
             from reorder_queue.models import PurchaseOrder
 
             result = PurchaseOrder.objects.filter(
-                supplier=obj, status=PurchaseOrder.RECEIVED, actual_total__isnull=False
+                supplier=obj, status=PurchaseOrder.Status.RECEIVED, actual_total__isnull=False
             ).aggregate(total=Sum("actual_total"))["total"] or Decimal("0.00")
             return str(result)
         except (ImportError, TypeError):
@@ -1190,7 +1190,7 @@ class AssetSerializer(serializers.ModelSerializer):
 
     def get_owning_group_name(self, obj):
         """Return owning group name, or 'Logistics' if owned by space."""
-        if obj.ownership_type == obj.OWNERSHIP_TYPE_SPACE:
+        if obj.ownership_type == obj.OwnershipType.SPACE:
             return "Logistics"
         if obj.owning_group:
             return obj.owning_group.name
@@ -1198,7 +1198,7 @@ class AssetSerializer(serializers.ModelSerializer):
 
     def get_owning_user_name(self, obj):
         """Return owning user name, or 'COO' if owned by space."""
-        if obj.ownership_type == obj.OWNERSHIP_TYPE_SPACE:
+        if obj.ownership_type == obj.OwnershipType.SPACE:
             return "COO"
         if obj.owning_user:
             return obj.owning_user.username
@@ -1221,7 +1221,7 @@ class AssetSerializer(serializers.ModelSerializer):
             return True
 
         # Check if user can operate assets in Implementing/Testing status
-        if obj.status in [obj.IMPLEMENTING, obj.TESTING]:
+        if obj.status in [obj.Status.IMPLEMENTING, obj.Status.TESTING]:
             return obj.can_user_operate(user)
 
         # Check if user's groups are in groups_can_enable
@@ -2092,7 +2092,7 @@ class StockReconciliationRowSerializer(serializers.Serializer):
 
     item_id = serializers.UUIDField()
     actual_count = serializers.IntegerField(min_value=0)
-    reason = serializers.ChoiceField(choices=StockReconciliation.REASON_CHOICES)
+    reason = serializers.ChoiceField(choices=StockReconciliation.ReasonCode.choices)
     notes = serializers.CharField(required=False, allow_blank=True, default="")
     skip_reorder = serializers.BooleanField(required=False, default=False)
 

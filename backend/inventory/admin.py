@@ -1719,8 +1719,8 @@ class AssetProblemAdmin(admin.ModelAdmin):
         from django.utils import timezone
 
         count = 0
-        for problem in queryset.filter(status=AssetProblem.REPORTED):
-            problem.status = AssetProblem.RESOLVED
+        for problem in queryset.filter(status=AssetProblem.Status.REPORTED):
+            problem.status = AssetProblem.Status.RESOLVED
             problem.resolved_at = timezone.now()
             problem.save()
             count += 1
@@ -1734,7 +1734,7 @@ class AssetProblemAdmin(admin.ModelAdmin):
     @admin.action(description="Mark selected as closed")
     def mark_closed(self, request, queryset):
         """Mark selected problems as closed."""
-        count = queryset.update(status=AssetProblem.CLOSED)
+        count = queryset.update(status=AssetProblem.Status.CLOSED)
         self.message_user(
             request,
             f"{count} problem(s) marked as closed.",

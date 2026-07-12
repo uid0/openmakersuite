@@ -53,13 +53,13 @@ DEFAULT_WINDOW_DAYS = 90
 
 # Statuses that mean a unit has permanently left the usable pool, per mode.
 _DEPLETED_STATUSES = {
-    InventoryItem.SERIAL_TRACKING_CONSUMABLE: {
-        SerializedComponent.CONSUMED,
-        SerializedComponent.DISPOSED,
+    InventoryItem.SerialTrackingMode.CONSUMABLE: {
+        SerializedComponent.Status.CONSUMED,
+        SerializedComponent.Status.DISPOSED,
     },
-    InventoryItem.SERIAL_TRACKING_REUSABLE: {
-        SerializedComponent.RETIRED,
-        SerializedComponent.DISPOSED,
+    InventoryItem.SerialTrackingMode.REUSABLE: {
+        SerializedComponent.Status.RETIRED,
+        SerializedComponent.Status.DISPOSED,
     },
 }
 
@@ -68,10 +68,10 @@ _DEPLETED_STATUSES = {
 # depletion already happened at ``consume`` — counting ``dispose`` too would
 # double-count a single unit, so consumables only count ``consume``.
 _DEPLETING_ACTIONS = {
-    InventoryItem.SERIAL_TRACKING_CONSUMABLE: [SerializedComponent.ACTION_CONSUME],
-    InventoryItem.SERIAL_TRACKING_REUSABLE: [
-        SerializedComponent.ACTION_RETIRE,
-        SerializedComponent.ACTION_DISPOSE,
+    InventoryItem.SerialTrackingMode.CONSUMABLE: [SerializedComponent.Action.CONSUME],
+    InventoryItem.SerialTrackingMode.REUSABLE: [
+        SerializedComponent.Action.RETIRE,
+        SerializedComponent.Action.DISPOSE,
     ],
 }
 
@@ -145,7 +145,7 @@ def _stock_split_by_item(items: list[InventoryItem]) -> dict[Any, dict[str, int]
         depleted = _DEPLETED_STATUSES.get(item.serial_tracking_mode, set())
         per_status = counts.get(item.id, {})
         on_hand = sum(n for status, n in per_status.items() if status not in depleted)
-        installed = per_status.get(SerializedComponent.INSTALLED, 0)
+        installed = per_status.get(SerializedComponent.Status.INSTALLED, 0)
         split[item.id] = {
             "on_hand": on_hand,
             "installed": installed,
@@ -170,16 +170,16 @@ def _depletion_counts(items: list[InventoryItem], window_start, now) -> dict[Any
     inside the same window from counting twice.
     """
     consumable_ids = [
-        i.id for i in items if i.serial_tracking_mode == InventoryItem.SERIAL_TRACKING_CONSUMABLE
+        i.id for i in items if i.serial_tracking_mode == InventoryItem.SerialTrackingMode.CONSUMABLE
     ]
     reusable_ids = [
-        i.id for i in items if i.serial_tracking_mode == InventoryItem.SERIAL_TRACKING_REUSABLE
+        i.id for i in items if i.serial_tracking_mode == InventoryItem.SerialTrackingMode.REUSABLE
     ]
 
     depleted: dict[Any, int] = {}
     for item_ids, mode in (
-        (consumable_ids, InventoryItem.SERIAL_TRACKING_CONSUMABLE),
-        (reusable_ids, InventoryItem.SERIAL_TRACKING_REUSABLE),
+        (consumable_ids, InventoryItem.SerialTrackingMode.CONSUMABLE),
+        (reusable_ids, InventoryItem.SerialTrackingMode.REUSABLE),
     ):
         if not item_ids:
             continue

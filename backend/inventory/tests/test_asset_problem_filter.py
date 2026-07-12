@@ -48,10 +48,10 @@ class TestAssetProblemFiltering:
     def test_filter_by_status(self):
         """``?status=`` narrows to problems in that status."""
         asset = AssetFactory()
-        reported = AssetProblemFactory(asset=asset, status=AssetProblem.REPORTED)
-        resolved = AssetProblemFactory(asset=asset, status=AssetProblem.RESOLVED)
+        reported = AssetProblemFactory(asset=asset, status=AssetProblem.Status.REPORTED)
+        resolved = AssetProblemFactory(asset=asset, status=AssetProblem.Status.RESOLVED)
 
-        resp = APIClient().get(LIST_URL, {"status": AssetProblem.RESOLVED})
+        resp = APIClient().get(LIST_URL, {"status": AssetProblem.Status.RESOLVED})
 
         ids = _ids(resp)
         assert str(resolved.id) in ids
@@ -74,12 +74,12 @@ class TestAssetProblemFiltering:
         """Filters combine: ``?asset=A&status=reported`` intersects both."""
         asset_a = AssetFactory()
         asset_b = AssetFactory()
-        target = AssetProblemFactory(asset=asset_a, status=AssetProblem.REPORTED)
-        AssetProblemFactory(asset=asset_a, status=AssetProblem.RESOLVED)
-        AssetProblemFactory(asset=asset_b, status=AssetProblem.REPORTED)
+        target = AssetProblemFactory(asset=asset_a, status=AssetProblem.Status.REPORTED)
+        AssetProblemFactory(asset=asset_a, status=AssetProblem.Status.RESOLVED)
+        AssetProblemFactory(asset=asset_b, status=AssetProblem.Status.REPORTED)
 
         resp = APIClient().get(
-            LIST_URL, {"asset": str(asset_a.id), "status": AssetProblem.REPORTED}
+            LIST_URL, {"asset": str(asset_a.id), "status": AssetProblem.Status.REPORTED}
         )
 
         ids = _ids(resp)

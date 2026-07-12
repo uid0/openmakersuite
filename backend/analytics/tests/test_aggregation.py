@@ -49,7 +49,7 @@ def _make_completed_wo(
     return WorkOrder.objects.create(
         maintenance_item=item,
         due_date=completed_at.date(),
-        status=WorkOrder.STATUS_COMPLETED,
+        status=WorkOrder.Status.COMPLETED,
         completed_at=completed_at,
         estimated_external_cost=estimated_external_cost,
         assigned_to=assigned_to,
@@ -132,7 +132,7 @@ class TestValueSummary:
         item = MaintenanceItem.objects.create(asset=asset, title="X", interval_days=30)
         WorkOrder.objects.create(
             maintenance_item=item,
-            status=WorkOrder.STATUS_OPEN,
+            status=WorkOrder.Status.OPEN,
             completed_at=_aware(date(2026, 4, 15)),
             estimated_external_cost=Decimal("999.00"),
         )

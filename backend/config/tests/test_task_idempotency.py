@@ -92,7 +92,7 @@ class TestWebhookPayloadIsDeduplicatable:
         WebHook.objects.create(
             name="dedup target",
             url="https://example.com/hook",
-            event_type=WebHook.REORDER_REQUEST_CREATED,
+            event_type=WebHook.EventType.REORDER_REQUEST_CREATED,
             is_active=True,
         )
 
@@ -107,8 +107,8 @@ class TestWebhookPayloadIsDeduplicatable:
             "data": {"id": 42, "item_name": "rags"},
         }
 
-        send_webhook_notification.run(WebHook.REORDER_REQUEST_CREATED, payload)
-        send_webhook_notification.run(WebHook.REORDER_REQUEST_CREATED, payload)
+        send_webhook_notification.run(WebHook.EventType.REORDER_REQUEST_CREATED, payload)
+        send_webhook_notification.run(WebHook.EventType.REORDER_REQUEST_CREATED, payload)
 
         assert mock_post.call_count == 2
         bodies = [call.kwargs.get("data") for call in mock_post.call_args_list]
@@ -126,12 +126,12 @@ class TestWebhookPayloadIsDeduplicatable:
         webhook = WebHook.objects.create(
             name="deactivated",
             url="https://example.com/hook",
-            event_type=WebHook.REORDER_REQUEST_CREATED,
+            event_type=WebHook.EventType.REORDER_REQUEST_CREATED,
             is_active=False,
         )
 
         send_webhook_notification.run(
-            WebHook.REORDER_REQUEST_CREATED, {"event": "x", "data": {"id": 1}}
+            WebHook.EventType.REORDER_REQUEST_CREATED, {"event": "x", "data": {"id": 1}}
         )
         webhook.refresh_from_db()
         assert webhook.success_count == 0

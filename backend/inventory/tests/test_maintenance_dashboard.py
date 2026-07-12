@@ -19,7 +19,7 @@ URL = "/api/inventory/maintenance/dashboard/"
 def _completed_wo(maintenance_item, completed_at, *, created_at=None):
     wo = WorkOrder.objects.create(
         maintenance_item=maintenance_item,
-        status=WorkOrder.STATUS_COMPLETED,
+        status=WorkOrder.Status.COMPLETED,
         completed_at=completed_at,
     )
     if created_at is not None:
@@ -105,14 +105,14 @@ class TestMaintenanceDashboard:
         )
         open_wo = WorkOrder.objects.create(
             maintenance_item=unscheduled_item,
-            status=WorkOrder.STATUS_OPEN,
+            status=WorkOrder.Status.OPEN,
         )
         # A completed WO should NOT show as unscheduled.
         _completed_wo(unscheduled_item, completed_at=timezone.now())
         # An open WO on a scheduled item should NOT show in unscheduled.
         WorkOrder.objects.create(
             maintenance_item=scheduled_item,
-            status=WorkOrder.STATUS_OPEN,
+            status=WorkOrder.Status.OPEN,
         )
 
         response = client.get(URL)
@@ -124,7 +124,7 @@ class TestMaintenanceDashboard:
         assert row["workorder_id"] == str(open_wo.id)
         assert row["asset_name"] == "Mill-B"
         assert row["problem"] == "Belt replacement"
-        assert row["status"] == WorkOrder.STATUS_OPEN
+        assert row["status"] == WorkOrder.Status.OPEN
 
     def test_cost_per_period_buckets_match_completed_at(self, authenticated_client):
         """today ⊆ this_week ⊆ this_month ⊆ this_year ⊆ all_time, anchored on

@@ -27,7 +27,7 @@ class TestPurchaseOrderAuditEvents:
         client.force_authenticate(user=user)
         return client
 
-    def _make_po(self, user, *, supplier=None, status=PurchaseOrder.DRAFT):
+    def _make_po(self, user, *, supplier=None, status=PurchaseOrder.Status.DRAFT):
         if supplier is None:
             supplier = SupplierFactory()
         return PurchaseOrder.objects.create(
@@ -76,7 +76,7 @@ class TestPurchaseOrderAuditEvents:
         assert response.status_code == status.HTTP_201_CREATED, response.data
 
         event = PurchaseOrderAuditEvent.objects.get()
-        assert event.action == PurchaseOrderAuditEvent.ACTION_PO_CREATE
+        assert event.action == PurchaseOrderAuditEvent.Action.PO_CREATE
         assert event.actor == user
         assert event.purchase_order_id == response.data["id"]
         assert event.metadata["po_number"]
@@ -95,10 +95,10 @@ class TestPurchaseOrderAuditEvents:
         assert response.status_code == status.HTTP_200_OK
 
         po.refresh_from_db()
-        assert po.status == PurchaseOrder.VOIDED
+        assert po.status == PurchaseOrder.Status.VOIDED
 
         event = PurchaseOrderAuditEvent.objects.get()
-        assert event.action == PurchaseOrderAuditEvent.ACTION_PO_VOID
+        assert event.action == PurchaseOrderAuditEvent.Action.PO_VOID
         assert event.actor == user
         assert event.purchase_order == po
         assert event.notes == "wrong supplier"
@@ -106,7 +106,7 @@ class TestPurchaseOrderAuditEvents:
     def test_po_void_already_voided_no_audit(self):
         user = UserFactory(is_staff=True)
         client = self._client_for(user)
-        po = self._make_po(user, status=PurchaseOrder.VOIDED)
+        po = self._make_po(user, status=PurchaseOrder.Status.VOIDED)
 
         response = client.post(
             reverse("purchaseorder-void", kwargs={"pk": po.pk}),
@@ -147,7 +147,7 @@ class TestPurchaseOrderAuditEvents:
         assert response.status_code == status.HTTP_200_OK
 
         event = PurchaseOrderAuditEvent.objects.get()
-        assert event.action == PurchaseOrderAuditEvent.ACTION_PO_LINE_VOID
+        assert event.action == PurchaseOrderAuditEvent.Action.PO_LINE_VOID
         assert event.actor == user
         assert event.line_item == item
         assert event.purchase_order == po
@@ -156,7 +156,7 @@ class TestPurchaseOrderAuditEvents:
     def test_po_mark_delivered_records_audit_event(self):
         user = UserFactory()
         client = self._client_for(user)
-        po = self._make_po(user, status=PurchaseOrder.SENT)
+        po = self._make_po(user, status=PurchaseOrder.Status.SENT)
         self._make_line_item(po, quantity=4, quantity_received=0)
         delivery_date = timezone.now().date().isoformat()
 
@@ -175,7 +175,7 @@ class TestPurchaseOrderAuditEvents:
 
         po.refresh_from_db()
         event = PurchaseOrderAuditEvent.objects.get()
-        assert event.action == PurchaseOrderAuditEvent.ACTION_PO_MARK_DELIVERED
+        assert event.action == PurchaseOrderAuditEvent.Action.PO_MARK_DELIVERED
         assert event.actor == user
         assert event.purchase_order == po
         assert event.notes == "left at dock"
@@ -204,7 +204,7 @@ class TestPurchaseOrderAuditEvents:
         assert response.status_code == status.HTTP_201_CREATED, response.data
 
         event = PurchaseOrderAuditEvent.objects.get()
-        assert event.action == PurchaseOrderAuditEvent.ACTION_ATTACHMENT_ADD
+        assert event.action == PurchaseOrderAuditEvent.Action.ATTACHMENT_ADD
         assert event.actor == user
         assert event.purchase_order == po
         assert event.attachment is not None
@@ -227,7 +227,7 @@ class TestPurchaseOrderAuditEvents:
         assert response.status_code == status.HTTP_204_NO_CONTENT
 
         event = PurchaseOrderAuditEvent.objects.get()
-        assert event.action == PurchaseOrderAuditEvent.ACTION_ATTACHMENT_REMOVE
+        assert event.action == PurchaseOrderAuditEvent.Action.ATTACHMENT_REMOVE
         assert event.actor == user
         assert event.purchase_order == po
         assert event.attachment is None
@@ -238,7 +238,7 @@ class TestPurchaseOrderAuditEvents:
         po = self._make_po(user)
 
         event = record_event(
-            action=PurchaseOrderAuditEvent.ACTION_PO_CREATE,
+            action=PurchaseOrderAuditEvent.Action.PO_CREATE,
             actor=None,
             purchase_order=po,
         )
@@ -252,7 +252,7 @@ class TestPurchaseOrderAuditEvents:
         item = self._make_line_item(po)
 
         event = record_event(
-            action=PurchaseOrderAuditEvent.ACTION_PO_LINE_VOID,
+            action=PurchaseOrderAuditEvent.Action.PO_LINE_VOID,
             actor=user,
             line_item=item,
         )
@@ -266,7 +266,7 @@ class TestPurchaseOrderAuditEvents:
         attachment = self._make_attachment(po, user)
 
         event = record_event(
-            action=PurchaseOrderAuditEvent.ACTION_ATTACHMENT_ADD,
+            action=PurchaseOrderAuditEvent.Action.ATTACHMENT_ADD,
             actor=user,
             attachment=attachment,
         )

@@ -110,8 +110,12 @@ class ReorderRequest(models.Model):
     @property
     def estimated_cost(self) -> Optional[Decimal]:
         """Calculate estimated cost based on item unit cost."""
-        if self.item.unit_cost:
-            return self.quantity * self.item.unit_cost
+        # Read the item's primary unit cost once: ``item.unit_cost`` resolves the
+        # primary supplier, so reading it twice used to double the (now cached,
+        # prefetch-friendly) lookup on every row of a reorder list (issue #882).
+        unit_cost = self.item.unit_cost
+        if unit_cost:
+            return self.quantity * unit_cost
         return None
 
     @property

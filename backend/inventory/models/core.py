@@ -12,6 +12,7 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone
+from django.utils.functional import cached_property
 from django.utils.text import slugify
 
 from imagekit.models import ImageSpecField
@@ -475,10 +476,19 @@ class InventoryItem(models.Model):
 
     @property
     def lowest_unit_cost(self) -> Optional[Decimal]:
-        """Get the lowest unit cost from all suppliers."""
+        """Get the lowest unit cost from all suppliers.
+
+        Reads from ``item_suppliers.all()`` and filters the nulls out in Python
+        so a caller that prefetched ``item_suppliers`` (e.g. the list endpoint,
+        which serialises ``total_value``) hits the prefetch cache instead of
+        firing a per-row ``filter(unit_cost__isnull=False)`` query — the same
+        N+1 fix applied to :meth:`primary_item_supplier` (issue #882). The value
+        is unchanged: the minimum non-null unit cost across all suppliers.
+        """
         costs = [
             item_supplier.unit_cost
-            for item_supplier in self.item_suppliers.filter(unit_cost__isnull=False)
+            for item_supplier in self.item_suppliers.all()
+            if item_supplier.unit_cost is not None
         ]
         return min(costs) if costs else None
 
@@ -512,16 +522,27 @@ class InventoryItem(models.Model):
         link = self.primary_item_supplier
         return link.supplier if link else None
 
-    @property
+    @cached_property
     def primary_item_supplier(self) -> Optional["ItemSupplier"]:
-        """Return the preferred ItemSupplier relationship if available."""
+        """Preferred supplier relationship for this item — prefetch-friendly.
 
-        item_supplier = (
-            self.item_suppliers.select_related("supplier").filter(is_primary=True).first()
-        )
-        if item_supplier:
-            return item_supplier
-        return self.item_suppliers.select_related("supplier").first()
+        Delegates to the named :mod:`inventory.services.supplier_selection`
+        service (issue #882) so the selection lives in one place rather than a
+        hidden model query. The chosen row is byte-for-byte the one the previous
+        ``filter(is_primary=True).first() or first()`` returned — the supplier
+        flagged primary with the lowest unit cost, or the cheapest supplier when
+        none is primary — because the service resolves it from
+        ``item_suppliers``' ``Meta.ordering`` (``["-is_primary", "unit_cost"]``).
+
+        The result rides an ``item_suppliers`` prefetch when the caller set one
+        up (the list/detail/reorder read paths all do), so serialising the seven
+        flat compat fields across a page costs ZERO extra queries instead of an
+        N+1. It is memoised per instance via ``cached_property`` so reading all
+        seven flats touches the database at most once.
+        """
+        from inventory.services.supplier_selection import primary_item_supplier
+
+        return primary_item_supplier(self)
 
     @property
     def supplier(self) -> Optional[Supplier]:

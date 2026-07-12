@@ -25,6 +25,7 @@ from .models import (
     Fixture,
     FixtureRefillRequest,
     InventoryItem,
+    InventorySafetyProfile,
     ItemSupplier,
     Location,
     LocationProblem,
@@ -449,6 +450,25 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     # Case-based reordering fields
     current_cases = serializers.FloatField(read_only=True)
 
+    # Hazmat writable fields. These moved off InventoryItem onto the 1:1
+    # InventorySafetyProfile (#885), so they are declared explicitly here (they
+    # are no longer model fields). On read they resolve through the item's
+    # compat properties (profile value, or the historical default); on write
+    # they are popped and written through to the profile in create()/update().
+    # Types/validators mirror the original model fields exactly.
+    is_hazardous = serializers.BooleanField(required=False)
+    msds_url = serializers.URLField(required=False, allow_blank=True, max_length=200)
+    nfpa_health_hazard = serializers.IntegerField(
+        required=False, allow_null=True, min_value=0, max_value=4
+    )
+    nfpa_fire_hazard = serializers.IntegerField(
+        required=False, allow_null=True, min_value=0, max_value=4
+    )
+    nfpa_instability_hazard = serializers.IntegerField(
+        required=False, allow_null=True, min_value=0, max_value=4
+    )
+    nfpa_special_hazards = serializers.CharField(required=False, allow_blank=True, max_length=20)
+
     # Hazmat calculated fields
     nfpa_fire_diamond_display = serializers.ReadOnlyField()
     hazmat_compliance_status = serializers.ReadOnlyField()
@@ -595,6 +615,53 @@ class InventoryItemSerializer(serializers.ModelSerializer):
                 "reviewed_at": active_request.reviewed_at,
             }
         return None
+
+    # ── Hazmat write-through to InventorySafetyProfile (#885) ────────────────
+    # The flat hazmat keys are persisted on the item's 1:1 safety profile. Keep
+    # the external contract identical: writes are create-on-first-write (a row
+    # is only made when the payload carries non-default data) and
+    # partial-update-safe (a PATCH that omits a field leaves it untouched).
+    HAZMAT_WRITE_FIELDS = (
+        "is_hazardous",
+        "msds_url",
+        "nfpa_health_hazard",
+        "nfpa_fire_hazard",
+        "nfpa_instability_hazard",
+        "nfpa_special_hazards",
+    )
+
+    def _pop_hazmat(self, validated_data):
+        return {
+            field: validated_data.pop(field)
+            for field in self.HAZMAT_WRITE_FIELDS
+            if field in validated_data
+        }
+
+    def _apply_hazmat(self, instance, hazmat):
+        if not hazmat:
+            return
+        profile = instance._get_safety_profile()
+        if profile is None:
+            profile = InventorySafetyProfile(item=instance)
+        for field, value in hazmat.items():
+            setattr(profile, field, value)
+        # Persist when a row already exists (so un-setting a value sticks) or
+        # when the incoming data is non-default (create-on-first-write).
+        if profile.pk or profile.has_hazmat_data():
+            profile.save()
+            instance.safety_profile = profile
+
+    def create(self, validated_data):
+        hazmat = self._pop_hazmat(validated_data)
+        instance = super().create(validated_data)
+        self._apply_hazmat(instance, hazmat)
+        return instance
+
+    def update(self, instance, validated_data):
+        hazmat = self._pop_hazmat(validated_data)
+        instance = super().update(instance, validated_data)
+        self._apply_hazmat(instance, hazmat)
+        return instance
 
 
 class InventoryItemDetailSerializer(InventoryItemSerializer):

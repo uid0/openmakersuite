@@ -493,7 +493,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     """API endpoint for inventory items."""
 
     queryset = (
-        InventoryItem.objects.select_related("category", "location")
+        InventoryItem.objects.select_related("category", "location", "safety_profile")
         .prefetch_related("item_suppliers__supplier")
         .all()
     )
@@ -525,7 +525,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = (
-            InventoryItem.objects.select_related("category", "location")
+            InventoryItem.objects.select_related("category", "location", "safety_profile")
             .prefetch_related("item_suppliers__supplier")
             .all()
         )

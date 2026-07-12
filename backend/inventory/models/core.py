@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from django.conf import settings
 from django.contrib.auth.models import Group
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone
@@ -281,53 +281,11 @@ class InventoryItem(models.Model):
         help_text="Timestamp of the most recent cycle count",
     )
 
-    # Hazardous Materials Information
-    is_hazardous = models.BooleanField(
-        default=False,
-        help_text="Check if this item is classified as a hazardous material",
-    )
-    msds_url = models.URLField(
-        blank=True,
-        verbose_name="Material Safety Data Sheet URL",
-        help_text="Link to the Material Safety Data Sheet (MSDS) or Safety Data Sheet (SDS)",
-    )
-    msds_file = models.FileField(
-        upload_to="inventory/msds/",
-        blank=True,
-        null=True,
-        verbose_name="MSDS/SDS File Upload",
-        help_text="Upload the Material Safety Data Sheet (MSDS/SDS) PDF or document file",
-    )
-
-    # NFPA Fire Diamond (National Fire Protection Association)
-    # Scale: 0 = Minimal, 1 = Slight, 2 = Moderate, 3 = High, 4 = Extreme
-    nfpa_health_hazard = models.PositiveSmallIntegerField(
-        null=True,
-        blank=True,
-        validators=[MaxValueValidator(4)],
-        verbose_name="NFPA Health Hazard",
-        help_text="Health hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
-    )
-    nfpa_fire_hazard = models.PositiveSmallIntegerField(
-        null=True,
-        blank=True,
-        validators=[MaxValueValidator(4)],
-        verbose_name="NFPA Fire Hazard",
-        help_text="Fire hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
-    )
-    nfpa_instability_hazard = models.PositiveSmallIntegerField(
-        null=True,
-        blank=True,
-        validators=[MaxValueValidator(4)],
-        verbose_name="NFPA Instability Hazard",
-        help_text="Instability/Reactivity hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
-    )
-    nfpa_special_hazards = models.CharField(
-        max_length=20,
-        blank=True,
-        verbose_name="NFPA Special Hazards",
-        help_text="Special hazard symbols (e.g., W=Water Reactive, OX=Oxidizer, COR=Corrosive, ALK=Alkali, ACID=Acid, BIO=Biohazard, POI=Poison, RAD=Radioactive)",
-    )
+    # Hazardous-material / NFPA safety data moved to the 1:1
+    # ``InventorySafetyProfile`` in #885. Read/write compat accessors below
+    # (``is_hazardous``, ``msds_url``, ``msds_file``, ``nfpa_*``) preserve the
+    # historical ``item.<field>`` API, the flat serializer keys, and the admin
+    # surface without a column on this (overwhelmingly non-hazardous) table.
 
     # Ownership - can be owned by User, Group (SIG), or Space (makerspace itself)
     class OwnershipType(models.TextChoices):
@@ -423,12 +381,31 @@ class InventoryItem(models.Model):
         # Save first to get an ID
         super().save(*args, **kwargs)
 
+        # Flush any hazmat writes that were staged while this item was unsaved
+        # (e.g. ``InventoryItem.objects.create(is_hazardous=True, ...)`` routes
+        # the compat-setter kwargs through ``__init__`` before a PK exists).
+        self._flush_pending_hazmat()
+
         # Trigger async image download after save
         if should_download_image:
             # Import here to avoid circular imports
             from ..tasks import download_image_from_url
 
             download_image_from_url.delay(str(self.id), self.image_url)
+
+    def clean(self) -> None:
+        """Validate the attached/persisted safety profile as part of the item.
+
+        The hazmat fields live on ``InventorySafetyProfile`` now, so
+        ``InventoryItem.full_clean()`` would otherwise skip their validators
+        (NFPA 0-4 range, MSDS URL format, special-hazards length). Delegating to
+        the profile keeps ``item.full_clean()`` enforcing them exactly as when
+        the columns lived here.
+        """
+        super().clean()
+        profile = self._working_safety_profile()
+        if profile is not None:
+            profile.full_clean(exclude=["item"], validate_unique=False, validate_constraints=False)
 
     @property
     def current_cases(self) -> float:
@@ -636,6 +613,123 @@ class InventoryItem(models.Model):
         link = self.primary_item_supplier
         return link.quantity_per_package if link else None
 
+    # ── InventorySafetyProfile compatibility layer (#885) ────────────────────
+    #
+    # The hazmat/NFPA fields moved to the 1:1 ``InventorySafetyProfile``. These
+    # accessors preserve the historical ``item.<field>`` read/write API so
+    # existing callers, the serializer, and the admin keep working unchanged.
+    #
+    # * Getters tolerate a missing profile row (return the field default).
+    # * Setters stage the write in-memory (exactly as assigning a model field
+    #   was in-memory until ``save()``); ``save()`` flushes the staged writes to
+    #   the profile. Staging — rather than writing through immediately — means
+    #   ``item.field = value; item.full_clean()`` still validates *before* any
+    #   DB write (e.g. an over-length value raises ``ValidationError`` from
+    #   ``full_clean`` rather than a ``DataError`` from a premature save), and
+    #   ``InventoryItem.objects.create(is_hazardous=True, ...)`` — which Django
+    #   routes through ``__init__`` before a PK exists — works unchanged. A row
+    #   is only materialised when the staged data is non-default (lazy profile).
+    # ─────────────────────────────────────────────────────────────────────────
+    def _get_safety_profile(self) -> Optional["InventorySafetyProfile"]:
+        """Return the 1:1 safety-profile row, or ``None`` if absent."""
+        try:
+            return self.safety_profile
+        except ObjectDoesNotExist:
+            return None
+
+    def _read_safety_field(self, field: str, default: Any) -> Any:
+        pending = self.__dict__.get("_pending_hazmat")
+        if pending is not None and field in pending:
+            return pending[field]
+        profile = self._get_safety_profile()
+        return getattr(profile, field) if profile is not None else default
+
+    def _write_safety_field(self, field: str, value: Any) -> None:
+        # Stage in-memory; flushed to the profile by ``save()``.
+        self.__dict__.setdefault("_pending_hazmat", {})[field] = value
+
+    def _working_safety_profile(self) -> Optional["InventorySafetyProfile"]:
+        """The profile to validate in ``clean()`` — pending writes + any row."""
+        profile = self._get_safety_profile()
+        pending = self.__dict__.get("_pending_hazmat")
+        if not pending:
+            return profile
+        if profile is None:
+            profile = InventorySafetyProfile()
+        for field, value in pending.items():
+            setattr(profile, field, value)
+        return profile
+
+    def _flush_pending_hazmat(self) -> None:
+        """Persist writes staged before the item had a PK (see ``save()``)."""
+        pending = self.__dict__.pop("_pending_hazmat", None)
+        if not pending:
+            return
+        profile = self._get_safety_profile()
+        if profile is None:
+            profile = InventorySafetyProfile(item=self)
+        for field, value in pending.items():
+            setattr(profile, field, value)
+        # Stay lazy: only materialise a brand-new row when it carries real data.
+        if profile.pk or profile.has_hazmat_data():
+            profile.item = self
+            profile.save()
+            self.safety_profile = profile
+
+    @property
+    def is_hazardous(self) -> bool:
+        return self._read_safety_field("is_hazardous", False)
+
+    @is_hazardous.setter
+    def is_hazardous(self, value: bool) -> None:
+        self._write_safety_field("is_hazardous", value)
+
+    @property
+    def msds_url(self) -> str:
+        return self._read_safety_field("msds_url", "")
+
+    @msds_url.setter
+    def msds_url(self, value: str) -> None:
+        self._write_safety_field("msds_url", value)
+
+    @property
+    def msds_file(self) -> Any:
+        # Read-only compat: the MSDS file is edited on the profile via the admin
+        # inline (it is not part of the writable serializer surface).
+        return self._read_safety_field("msds_file", None)
+
+    @property
+    def nfpa_health_hazard(self) -> Optional[int]:
+        return self._read_safety_field("nfpa_health_hazard", None)
+
+    @nfpa_health_hazard.setter
+    def nfpa_health_hazard(self, value: Optional[int]) -> None:
+        self._write_safety_field("nfpa_health_hazard", value)
+
+    @property
+    def nfpa_fire_hazard(self) -> Optional[int]:
+        return self._read_safety_field("nfpa_fire_hazard", None)
+
+    @nfpa_fire_hazard.setter
+    def nfpa_fire_hazard(self, value: Optional[int]) -> None:
+        self._write_safety_field("nfpa_fire_hazard", value)
+
+    @property
+    def nfpa_instability_hazard(self) -> Optional[int]:
+        return self._read_safety_field("nfpa_instability_hazard", None)
+
+    @nfpa_instability_hazard.setter
+    def nfpa_instability_hazard(self, value: Optional[int]) -> None:
+        self._write_safety_field("nfpa_instability_hazard", value)
+
+    @property
+    def nfpa_special_hazards(self) -> str:
+        return self._read_safety_field("nfpa_special_hazards", "")
+
+    @nfpa_special_hazards.setter
+    def nfpa_special_hazards(self, value: str) -> None:
+        self._write_safety_field("nfpa_special_hazards", value)
+
     # Hazardous Materials Helper Methods
 
     @property
@@ -713,6 +807,104 @@ class InventoryItem(models.Model):
             return f"{level} - {level_map[level]}"
 
         return "Not specified"
+
+
+class InventorySafetyProfile(models.Model):
+    """Hazardous-material / NFPA safety data for a single inventory item (1:1).
+
+    Split off :class:`InventoryItem` in issue #885. The hazmat/NFPA columns used
+    to hang directly on the item; the vast majority of catalog items are not
+    hazardous, so keeping this data on a dedicated 1:1 profile lets ordinary
+    catalog reads ignore it entirely. Only items with non-default hazmat data
+    get a row — :class:`InventoryItem` exposes read/write compat accessors
+    (``item.is_hazardous`` etc.) that fall back to the field defaults when no
+    profile row exists, so the public model + API surface is unchanged.
+
+    The fields below are moved verbatim from ``InventoryItem`` (same names,
+    types, defaults, validators) so the historical values migrate 1:1.
+    """
+
+    item = models.OneToOneField(
+        "InventoryItem",
+        on_delete=models.CASCADE,
+        related_name="safety_profile",
+        help_text="Inventory item these safety details belong to.",
+    )
+
+    is_hazardous = models.BooleanField(
+        default=False,
+        help_text="Check if this item is classified as a hazardous material",
+    )
+    msds_url = models.URLField(
+        blank=True,
+        verbose_name="Material Safety Data Sheet URL",
+        help_text="Link to the Material Safety Data Sheet (MSDS) or Safety Data Sheet (SDS)",
+    )
+    msds_file = models.FileField(
+        upload_to="inventory/msds/",
+        blank=True,
+        null=True,
+        verbose_name="MSDS/SDS File Upload",
+        help_text="Upload the Material Safety Data Sheet (MSDS/SDS) PDF or document file",
+    )
+
+    # NFPA Fire Diamond (National Fire Protection Association)
+    # Scale: 0 = Minimal, 1 = Slight, 2 = Moderate, 3 = High, 4 = Extreme
+    nfpa_health_hazard = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(4)],
+        verbose_name="NFPA Health Hazard",
+        help_text="Health hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+    )
+    nfpa_fire_hazard = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(4)],
+        verbose_name="NFPA Fire Hazard",
+        help_text="Fire hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+    )
+    nfpa_instability_hazard = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(4)],
+        verbose_name="NFPA Instability Hazard",
+        help_text="Instability/Reactivity hazard rating (0-4): 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
+    )
+    nfpa_special_hazards = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="NFPA Special Hazards",
+        help_text="Special hazard symbols (e.g., W=Water Reactive, OX=Oxidizer, COR=Corrosive, ALK=Alkali, ACID=Acid, BIO=Biohazard, POI=Poison, RAD=Radioactive)",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Inventory safety profile"
+        verbose_name_plural = "Inventory safety profiles"
+
+    def __str__(self) -> str:
+        return f"Safety profile for {self.item}"
+
+    def has_hazmat_data(self) -> bool:
+        """Whether this profile carries any non-default hazmat data.
+
+        Used to keep the profile *lazy*: a row is only worth persisting when at
+        least one field differs from its default. ``nfpa_* == 0`` is real data
+        (minimal-hazard rating), so it is checked with ``is not None`` rather
+        than truthiness.
+        """
+        return bool(
+            self.is_hazardous
+            or self.msds_url
+            or self.msds_file
+            or self.nfpa_health_hazard is not None
+            or self.nfpa_fire_hazard is not None
+            or self.nfpa_instability_hazard is not None
+            or self.nfpa_special_hazards
+        )
 
 
 class ItemSupplier(models.Model):

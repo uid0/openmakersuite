@@ -530,17 +530,13 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             .all()
         )
 
-        # Filter by SIG ownership for SIG admins
-        user = self.request.user
-        if user.is_authenticated and not (user.is_superuser or user.is_staff):
-            from membership.utils import get_user_managed_sigs, is_logistics_member
+        # Filter by SIG ownership (list policy: staff/super/Logistics and
+        # regular users see everything; SIG admins see only their SIGs' items).
+        from membership.services import OwnershipVisibility, scope_queryset_by_ownership
 
-            # Logistics can see everything
-            if not is_logistics_member(user):
-                # SIG admins can only see inventory items owned by their SIGs
-                user_sigs = get_user_managed_sigs(user)
-                if user_sigs.exists():
-                    queryset = queryset.filter(owning_group__in=user_sigs)
+        queryset = scope_queryset_by_ownership(
+            queryset, self.request.user, policy=OwnershipVisibility.LIST
+        )
 
         # Filter by category if specified
         category = self.request.query_params.get("category")
@@ -668,7 +664,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
         from django.contrib.auth.models import Group
 
-        from membership.utils import is_logistics_member, is_sig_admin
+        from membership.services import can_assign_to_owning_group
 
         # Check ownership_type if provided
         ownership_type = request.data.get("ownership_type")
@@ -677,12 +673,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         if ownership_type == InventoryItem.OwnershipType.GROUP and owning_group_id:
             try:
                 group = Group.objects.get(pk=owning_group_id)
-                if not (
-                    user.is_superuser
-                    or user.is_staff
-                    or is_logistics_member(user)
-                    or is_sig_admin(user, group)
-                ):
+                if not can_assign_to_owning_group(user, group):
                     return Response(
                         {
                             "detail": "You do not have permission to create inventory items for this SIG."
@@ -729,7 +720,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
         from django.contrib.auth.models import Group
 
-        from membership.utils import can_manage_sig_inventory, is_logistics_member, is_sig_admin
+        from membership.services import can_assign_to_owning_group, can_manage_sig_inventory
 
         if not can_manage_sig_inventory(user, item):
             return Response(
@@ -743,12 +734,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             if owning_group_id:
                 try:
                     group = Group.objects.get(pk=owning_group_id)
-                    if not (
-                        user.is_superuser
-                        or user.is_staff
-                        or is_logistics_member(user)
-                        or is_sig_admin(user, group)
-                    ):
+                    if not can_assign_to_owning_group(user, group):
                         return Response(
                             {
                                 "detail": "You do not have permission to assign inventory items to this SIG."
@@ -1412,23 +1398,14 @@ class AssetViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
 
-        # Filter by SIG ownership for SIG admins
-        user = self.request.user
+        # Filter by SIG ownership (list policy: staff/super/Logistics and
+        # regular users see all assets — including space-owned; SIG admins see
+        # only assets owned by their SIGs).
+        from membership.services import OwnershipVisibility, scope_queryset_by_ownership
 
-        # Superusers and staff can see all assets (no filtering applied)
-        if user.is_authenticated and not (user.is_superuser or user.is_staff):
-            from membership.utils import get_user_managed_sigs, is_logistics_member
-
-            # Logistics can see everything
-            if not is_logistics_member(user):
-                # SIG admins can only see assets owned by their SIGs
-                # Regular users (non-SIG admins) can see all assets including space-owned
-                user_sigs = get_user_managed_sigs(user)
-                if user_sigs.exists():
-                    # SIG admin: only show assets owned by their SIGs
-                    queryset = queryset.filter(owning_group__in=user_sigs)
-                # If user_sigs doesn't exist, user is a regular authenticated user
-                # and should see all assets (no filtering needed)
+        queryset = scope_queryset_by_ownership(
+            queryset, self.request.user, policy=OwnershipVisibility.LIST
+        )
 
         # Filter by category if specified
         category = self.request.query_params.get("category")
@@ -1568,8 +1545,6 @@ class AssetViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        from membership.utils import is_logistics_member
-
         # Check ownership_type if provided
         ownership_type = request.data.get("ownership_type")
         owning_group_id = request.data.get("owning_group")
@@ -1578,16 +1553,11 @@ class AssetViewSet(viewsets.ModelViewSet):
             # Check if user is admin of the specified group
             from django.contrib.auth.models import Group
 
-            from membership.utils import is_sig_admin
+            from membership.services import can_assign_to_owning_group
 
             try:
                 group = Group.objects.get(pk=owning_group_id)
-                if not (
-                    user.is_superuser
-                    or user.is_staff
-                    or is_logistics_member(user)
-                    or is_sig_admin(user, group)
-                ):
+                if not can_assign_to_owning_group(user, group):
                     return Response(
                         {"detail": "You do not have permission to create assets for this SIG."},
                         status=status.HTTP_403_FORBIDDEN,
@@ -1611,7 +1581,7 @@ class AssetViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        from membership.utils import can_manage_sig_asset
+        from membership.services import can_manage_sig_asset
 
         if not can_manage_sig_asset(user, asset):
             return Response(
@@ -1625,16 +1595,11 @@ class AssetViewSet(viewsets.ModelViewSet):
             if owning_group_id:
                 from django.contrib.auth.models import Group
 
-                from membership.utils import is_logistics_member, is_sig_admin
+                from membership.services import can_assign_to_owning_group
 
                 try:
                     group = Group.objects.get(pk=owning_group_id)
-                    if not (
-                        user.is_superuser
-                        or user.is_staff
-                        or is_logistics_member(user)
-                        or is_sig_admin(user, group)
-                    ):
+                    if not can_assign_to_owning_group(user, group):
                         return Response(
                             {"detail": "You do not have permission to assign assets to this SIG."},
                             status=status.HTTP_403_FORBIDDEN,

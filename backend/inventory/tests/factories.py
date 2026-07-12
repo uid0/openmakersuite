@@ -121,6 +121,22 @@ class InventoryItemFactory(DjangoModelFactory):
         is_primary = kwargs.pop("is_primary", True)
         item_supplier_kwargs = kwargs.pop("item_supplier_kwargs", {})
 
+        # Hazmat/NFPA fields moved to the 1:1 InventorySafetyProfile (#885).
+        # They are still accepted as ``InventoryItemFactory(is_hazardous=True,
+        # ...)`` kwargs and routed into that profile after the item is saved. A
+        # row is only created when a non-default value is requested, so plain
+        # items stay profile-free (matching production + the lazy design).
+        hazmat_defaults = {
+            "is_hazardous": False,
+            "msds_url": "",
+            "msds_file": None,
+            "nfpa_health_hazard": None,
+            "nfpa_fire_hazard": None,
+            "nfpa_instability_hazard": None,
+            "nfpa_special_hazards": "",
+        }
+        hazmat_data = {key: kwargs.pop(key) for key in hazmat_defaults if key in kwargs}
+
         if location_value is None:
             location = None if location_provided else LocationFactory()
         elif isinstance(location_value, Location):
@@ -134,6 +150,17 @@ class InventoryItemFactory(DjangoModelFactory):
         kwargs["location"] = location
 
         item = super()._create(model_class, *args, **kwargs)
+
+        # Materialise the safety profile only when non-default hazmat data was
+        # requested (compare each field to its own default so ``nfpa_* == 0``
+        # counts as data rather than being swallowed by ``0 == False``).
+        if any(hazmat_data[key] != hazmat_defaults[key] for key in hazmat_data):
+            from inventory.models import InventorySafetyProfile
+
+            profile, _ = InventorySafetyProfile.objects.update_or_create(
+                item=item, defaults=hazmat_data
+            )
+            item.safety_profile = profile
 
         if supplier is None:
             supplier = SupplierFactory()

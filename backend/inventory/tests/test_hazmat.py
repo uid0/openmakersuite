@@ -322,29 +322,27 @@ class TestHazmatAdminInterface(TestCase):
             username="admin", email="admin@test.com", password="adminpass"
         )
 
-    def test_hazmat_fieldset_exists(self):
-        """Test that hazmat fieldset is included in admin."""
-        fieldsets = self.admin.fieldsets
+    def test_hazmat_inline_exists(self):
+        """Hazmat fields are edited via the InventorySafetyProfile inline (#885).
 
-        # Find Hazardous Materials fieldset
-        hazmat_fieldset = None
-        for name, options in fieldsets:
-            if name == "Hazardous Materials":
-                hazmat_fieldset = options
-                break
+        They moved off ``InventoryItem`` onto the 1:1 ``InventorySafetyProfile``,
+        so the old "Hazardous Materials" fieldset is replaced by a StackedInline
+        that keeps every field — including the admin-only ``msds_file`` upload —
+        editable on the item page.
+        """
+        from inventory.admin import InventorySafetyProfileInline
 
-        self.assertIsNotNone(hazmat_fieldset)
+        self.assertIn(InventorySafetyProfileInline, self.admin.inlines)
 
-        # Check that hazmat fields are included
-        hazmat_fields = hazmat_fieldset["fields"]
-        self.assertIn("is_hazardous", hazmat_fields)
-        self.assertIn("msds_url", hazmat_fields)
-        self.assertIn("nfpa_health_hazard", hazmat_fields)
-        self.assertIn("nfpa_fire_hazard", hazmat_fields)
-        self.assertIn("nfpa_instability_hazard", hazmat_fields)
-        self.assertIn("nfpa_special_hazards", hazmat_fields)
-        self.assertIn("nfpa_fire_diamond_display", hazmat_fields)
-        self.assertIn("hazmat_compliance_status", hazmat_fields)
+        # Check that hazmat fields are editable on the inline
+        inline_fields = InventorySafetyProfileInline.fields
+        self.assertIn("is_hazardous", inline_fields)
+        self.assertIn("msds_url", inline_fields)
+        self.assertIn("msds_file", inline_fields)
+        self.assertIn("nfpa_health_hazard", inline_fields)
+        self.assertIn("nfpa_fire_hazard", inline_fields)
+        self.assertIn("nfpa_instability_hazard", inline_fields)
+        self.assertIn("nfpa_special_hazards", inline_fields)
 
     def test_hazmat_status_icon_non_hazardous(self):
         """Test hazmat status icon for non-hazardous items."""
@@ -420,9 +418,9 @@ class TestHazmatAdminInterface(TestCase):
         self.assertIn("color: #28a745", result)  # Green color for complete
 
     def test_hazmat_filter_in_list_filter(self):
-        """Test that hazmat filter is available in admin list."""
+        """Test that hazmat filter is available in admin list (via the profile)."""
         list_filters = self.admin.list_filter
-        self.assertIn("is_hazardous", list_filters)
+        self.assertIn("safety_profile__is_hazardous", list_filters)
 
     def test_hazmat_readonly_fields(self):
         """Test that calculated hazmat fields are readonly."""

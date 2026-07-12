@@ -26,6 +26,7 @@ from .models import (
     Category,
     ComponentUsageEvent,
     InventoryItem,
+    InventorySafetyProfile,
     ItemSupplier,
     Location,
     LocationProblem,
@@ -367,6 +368,31 @@ class SerializedComponentInline(admin.TabularInline):
     show_change_link = True
 
 
+class InventorySafetyProfileInline(admin.StackedInline):
+    """Edit the item's hazmat / NFPA safety profile inline on the item page.
+
+    The hazardous-material fields (is_hazardous, MSDS URL + file upload, and the
+    NFPA Fire Diamond ratings) moved off ``InventoryItem`` into the 1:1
+    ``InventorySafetyProfile`` in #885. This inline keeps them — including the
+    admin-only ``msds_file`` upload — editable where admins expect them.
+    """
+
+    model = InventorySafetyProfile
+    can_delete = True
+    extra = 0
+    fields = (
+        "is_hazardous",
+        "msds_url",
+        "msds_file",
+        "nfpa_health_hazard",
+        "nfpa_fire_hazard",
+        "nfpa_instability_hazard",
+        "nfpa_special_hazards",
+    )
+    verbose_name = "Hazardous materials"
+    verbose_name_plural = "Hazardous materials"
+
+
 @admin.register(InventoryItem)
 class InventoryItemAdmin(admin.ModelAdmin):
     list_display = [
@@ -394,7 +420,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "is_retired",
         "is_requestable",
         "is_serialized",
-        "is_hazardous",
+        "safety_profile__is_hazardous",
         "use_case_based_reorder",
     ]
     search_fields = ["name", "sku", "description"]
@@ -413,7 +439,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "hazmat_compliance_status",
         "index_card_preview",
     ]
-    inlines = [ItemSupplierInline, SerializedComponentInline]
+    inlines = [ItemSupplierInline, SerializedComponentInline, InventorySafetyProfileInline]
     fieldsets = (
         (
             "Basic Information",
@@ -463,23 +489,10 @@ class InventoryItemAdmin(admin.ModelAdmin):
                 "Use 'reorder_instruction' to customize the text shown on index cards (e.g., 'Reorder when last case is opened').",
             },
         ),
-        (
-            "Hazardous Materials",
-            {
-                "fields": (
-                    "is_hazardous",
-                    "msds_url",
-                    "msds_file",
-                    "nfpa_health_hazard",
-                    "nfpa_fire_hazard",
-                    "nfpa_instability_hazard",
-                    "nfpa_special_hazards",
-                    "nfpa_fire_diamond_display",
-                    "hazmat_compliance_status",
-                ),
-                "description": "Safety information for hazardous materials. Provide either an MSDS URL or upload the file directly. NFPA ratings: 0=Minimal, 1=Slight, 2=Moderate, 3=High, 4=Extreme",
-            },
-        ),
+        # Hazardous-material fields moved to the ``InventorySafetyProfile``
+        # inline above (#885); the computed ``nfpa_fire_diamond_display`` /
+        # ``hazmat_compliance_status`` display methods remain in
+        # ``readonly_fields`` for reuse.
         (
             "Frontend Links",
             {"fields": ("api_link", "reorder_link", "index_card_preview")},

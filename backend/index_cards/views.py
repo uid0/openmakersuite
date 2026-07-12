@@ -46,7 +46,14 @@ class IndexCardBatchGenerateView(APIView):
 
         validated_ids = serializer.validated_data["item_ids"]
         item_ids: List[str] = [str(value) for value in validated_ids]
-        items = list(InventoryItem.objects.filter(id__in=validated_ids))
+        # Prefetch each item's suppliers so the renderer's per-card lead-time
+        # reads (``item.average_lead_time`` and ``_get_longest_lead_time``) hit
+        # the cache instead of firing a query per card (issue #882).
+        items = list(
+            InventoryItem.objects.filter(id__in=validated_ids).prefetch_related(
+                "item_suppliers__supplier"
+            )
+        )
 
         if len(items) != len(validated_ids):
             missing = set(item_ids) - {str(item.id) for item in items}

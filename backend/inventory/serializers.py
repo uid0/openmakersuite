@@ -420,7 +420,16 @@ class SupplierDetailSerializer(SupplierSerializer):
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):
-    # Primary supplier fields (for backward compatibility)
+    # Primary-supplier compat fields (issue #882). ``supplier_name`` here and the
+    # flat ``supplier_sku`` / ``supplier_url`` / ``unit_cost`` / ``package_cost``
+    # / ``quantity_per_package`` / ``average_lead_time`` keys listed in
+    # ``Meta.fields`` are READ-ONLY legacy accessors for the item's primary
+    # supplier, superseded by the ``suppliers[]`` array (below) and the
+    # ``/metrics/`` (``?with_metrics=1``) endpoint. They are retained because
+    # ScanTTY's detail screen reads all of them and the web reads four; a future
+    # hard-removal needs coordinated ScanTTY + web changes. They resolve through
+    # the prefetch-friendly ``InventoryItem.primary_item_supplier`` so serialising
+    # a page no longer costs a query per row.
     supplier_name = serializers.SerializerMethodField()
     category_name = serializers.CharField(source="category.name", read_only=True)
 

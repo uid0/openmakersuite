@@ -267,3 +267,42 @@ class TestListMetricsQueryBudget:
             api_client.get(_list_url(with_metrics=True))
         assert len(ctx.captured_queries) > base_6  # opt-in strictly adds queries
         assert base_2 <= base_6  # sanity: default path still serves the list
+
+
+def _supplier_query_count(api_client, url):
+    """Number of captured queries that read the ItemSupplier table."""
+    with CaptureQueriesContext(connection) as ctx:
+        response = api_client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+    return sum(1 for q in ctx.captured_queries if "inventory_itemsupplier" in q["sql"])
+
+
+class TestDefaultListSupplierQueryBudget:
+    """Regression guard for the primary-supplier compat-field N+1 (issue #882)."""
+
+    def test_supplier_compat_fields_do_not_add_a_query_per_row(self, api_client):
+        """The seven flat primary-supplier compat fields are served from the list
+        viewset's ``item_suppliers`` prefetch, not a per-row query.
+
+        Before the prefetch-friendly ``primary_item_supplier`` (and the matching
+        ``lowest_unit_cost`` fix behind ``total_value``), serialising the flat
+        compat fields fired several ItemSupplier queries PER item, so a page of 6
+        cost far more supplier queries than a page of 2. Now a single prefetch
+        serves the whole page: the ItemSupplier query count is constant — and
+        equal to one — regardless of page size.
+        """
+        for i in range(2):
+            InventoryItemFactory(image=None, name=f"supbudget-a-{i}")
+        # Warm one-time caches (content types, etc.) so the counts are stable.
+        _supplier_query_count(api_client, _list_url())
+        sup_2 = _supplier_query_count(api_client, _list_url())
+
+        for i in range(4):  # grow the page from 2 to 6 items
+            InventoryItemFactory(image=None, name=f"supbudget-b-{i}")
+        sup_6 = _supplier_query_count(api_client, _list_url())
+
+        # The heart of the regression: the supplier-table query count does NOT
+        # grow with the number of rows — an N+1 would make sup_6 > sup_2 ...
+        assert sup_2 == sup_6, (sup_2, sup_6)
+        # ... and it is a single prefetch query, not a per-row handful.
+        assert sup_6 == 1, sup_6

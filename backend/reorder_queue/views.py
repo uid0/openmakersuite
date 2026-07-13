@@ -436,17 +436,17 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
                 "-priority", "requested_at"
             )
 
-            # Filter by SIG ownership for SIG admins
-            user = request.user
-            if user.is_authenticated and not (user.is_superuser or user.is_staff):
-                from membership.utils import get_user_managed_sigs, is_logistics_member
+            # Filter by SIG ownership (list policy: staff/super/Logistics and
+            # regular users see all pending requests; SIG admins see only
+            # requests for their SIGs' inventory).
+            from membership.services import OwnershipVisibility, scope_queryset_by_ownership
 
-                # Logistics can see everything
-                if not is_logistics_member(user):
-                    # SIG admins can only see requests for their SIG's inventory
-                    user_sigs = get_user_managed_sigs(user)
-                    if user_sigs.exists():
-                        pending = pending.filter(item__owning_group__in=user_sigs)
+            pending = scope_queryset_by_ownership(
+                pending,
+                request.user,
+                policy=OwnershipVisibility.LIST,
+                field="item__owning_group",
+            )
 
             serializer = self.get_serializer(pending, many=True)
             return Response(serializer.data)

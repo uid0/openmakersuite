@@ -16,6 +16,8 @@ from django.utils import timezone
 from imagekit.models import ImageSpecField
 from imagekit.processors import ResizeToFit
 
+from .ownership import OwnableModel
+
 
 class AssetTagSequence(models.Model):
     """Atomic per-year counter backing the ``DMS-YYANNNSS`` asset tag.
@@ -78,7 +80,7 @@ class AssetTagSequence(models.Model):
             return f"{year % 100:02d}{seq.alpha}{seq.number:03d}"
 
 
-class Asset(models.Model):
+class Asset(OwnableModel):
     """
     Track individual hard assets in the makerspace.
 
@@ -434,34 +436,9 @@ class Asset(models.Model):
         help_text="Notes about the asset's condition, maintenance history, etc.",
     )
 
-    # Ownership - can be owned by User, Group, or Space (makerspace itself)
-    class OwnershipType(models.TextChoices):
-        USER = "user", "User"
-        GROUP = "group", "Group"
-        SPACE = "space", "Space"
-
-    ownership_type = models.CharField(
-        max_length=10,
-        choices=OwnershipType.choices,
-        default=OwnershipType.SPACE,
-        help_text="Type of ownership for this asset",
-    )
-    owning_user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="owned_assets",
-        help_text="User that owns this asset (if applicable)",
-    )
-    owning_group = models.ForeignKey(
-        Group,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="owned_assets",
-        help_text="Group that owns this asset (if applicable)",
-    )
+    # Ownership (ownership_type / owning_user / owning_group + OwnershipType)
+    # is contributed by the shared ``OwnableModel`` abstract base (#881).
+    # ``groups_can_enable`` below is Asset-only and stays here.
     groups_can_enable = models.ManyToManyField(
         Group,
         blank=True,
@@ -571,28 +548,9 @@ class Asset(models.Model):
             return delta.days
         return None
 
-    def is_user_admin(self, user) -> bool:
-        """Check if user is a system admin (staff or superuser)."""
-        return user.is_authenticated and (user.is_staff or user.is_superuser)
-
-    def is_user_in_logistics(self, user) -> bool:
-        """Check if user is in the Logistics group."""
-        if not user.is_authenticated:
-            return False
-        try:
-            logistics_group = Group.objects.get(name="Logistics")
-            return logistics_group in user.groups.all()
-        except Group.DoesNotExist:
-            return False
-
-    def is_user_group_admin(self, user) -> bool:
-        """Check if user is a SIG admin for the asset's owning group."""
-        if not user.is_authenticated or not self.owning_group:
-            return False
-        # Use the permission utility to check SIG admin status
-        from membership.utils import is_sig_admin
-
-        return is_sig_admin(user, self.owning_group)
+    # ``is_user_admin`` / ``is_user_in_logistics`` / ``is_user_group_admin`` are
+    # inherited from ``OwnableModel`` (they delegate to ``membership.services``).
+    # ``can_user_operate`` below is Asset-specific and stays here.
 
     def can_user_operate(self, user) -> bool:
         """

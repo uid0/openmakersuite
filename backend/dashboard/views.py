@@ -420,18 +420,13 @@ def get_low_stock_data(request):
             is_active=True, is_retired=False, current_stock__lte=F("minimum_stock")
         ).select_related("category", "location")
 
-        # Apply SIG filtering if user is not staff/logistics
-        user = request.user
-        if user.is_authenticated and not (user.is_superuser or user.is_staff):
-            from membership.utils import get_user_managed_sigs, is_logistics_member
+        # Apply SIG filtering (dashboard policy: SIG admins see their SIGs'
+        # items; regular users see space-owned items only).
+        from membership.services import OwnershipVisibility, scope_queryset_by_ownership
 
-            if not is_logistics_member(user):
-                user_sigs = get_user_managed_sigs(user)
-                if user_sigs.exists():
-                    items_query = items_query.filter(owning_group__in=user_sigs)
-                else:
-                    # Regular users see space-owned items only
-                    items_query = items_query.filter(owning_group__isnull=True)
+        items_query = scope_queryset_by_ownership(
+            items_query, request.user, policy=OwnershipVisibility.RESTRICTED
+        )
 
         items = items_query.order_by("current_stock")[:50].values(
             "id",
@@ -472,17 +467,16 @@ def get_pending_reorders_data(request):
             "item", "item__category", "item__location", "reviewed_by"
         )
 
-        # Apply SIG filtering
-        user = request.user
-        if user.is_authenticated and not (user.is_superuser or user.is_staff):
-            from membership.utils import get_user_managed_sigs, is_logistics_member
+        # Apply SIG filtering (dashboard policy: SIG admins see their SIGs'
+        # requests; regular users see requests for space-owned items only).
+        from membership.services import OwnershipVisibility, scope_queryset_by_ownership
 
-            if not is_logistics_member(user):
-                user_sigs = get_user_managed_sigs(user)
-                if user_sigs.exists():
-                    pending = pending.filter(item__owning_group__in=user_sigs)
-                else:
-                    pending = pending.filter(item__owning_group__isnull=True)
+        pending = scope_queryset_by_ownership(
+            pending,
+            request.user,
+            policy=OwnershipVisibility.RESTRICTED,
+            field="item__owning_group",
+        )
 
         pending = pending.order_by("-priority", "requested_at")[:50]
 
@@ -530,17 +524,16 @@ def get_asset_problems_data(request):
             status__in=["reported", "in_progress"]
         ).select_related("asset", "part")
 
-        # Apply SIG filtering
-        user = request.user
-        if user.is_authenticated and not (user.is_superuser or user.is_staff):
-            from membership.utils import get_user_managed_sigs, is_logistics_member
+        # Apply SIG filtering (dashboard policy: SIG admins see their SIGs'
+        # problems; regular users see problems for space-owned assets only).
+        from membership.services import OwnershipVisibility, scope_queryset_by_ownership
 
-            if not is_logistics_member(user):
-                user_sigs = get_user_managed_sigs(user)
-                if user_sigs.exists():
-                    problems = problems.filter(asset__owning_group__in=user_sigs)
-                else:
-                    problems = problems.filter(asset__owning_group__isnull=True)
+        problems = scope_queryset_by_ownership(
+            problems,
+            request.user,
+            policy=OwnershipVisibility.RESTRICTED,
+            field="asset__owning_group",
+        )
 
         problems = problems.order_by("-created_at")[:50]
 

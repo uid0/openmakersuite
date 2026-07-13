@@ -7,7 +7,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Optional
 
 from django.conf import settings
-from django.contrib.auth.models import Group
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
@@ -17,6 +16,8 @@ from django.utils.text import slugify
 
 from imagekit.models import ImageSpecField
 from imagekit.processors import ResizeToFit
+
+from .ownership import OwnableModel
 
 if TYPE_CHECKING:
     from inventory.models.asset import Asset
@@ -175,7 +176,7 @@ class Category(models.Model):
         return self.name
 
 
-class InventoryItem(models.Model):
+class InventoryItem(OwnableModel):
     """
     Core inventory item model.
 
@@ -288,34 +289,8 @@ class InventoryItem(models.Model):
     # historical ``item.<field>`` API, the flat serializer keys, and the admin
     # surface without a column on this (overwhelmingly non-hazardous) table.
 
-    # Ownership - can be owned by User, Group (SIG), or Space (makerspace itself)
-    class OwnershipType(models.TextChoices):
-        USER = "user", "User"
-        GROUP = "group", "Group"
-        SPACE = "space", "Space"
-
-    ownership_type = models.CharField(
-        max_length=10,
-        choices=OwnershipType.choices,
-        default=OwnershipType.SPACE,
-        help_text="Type of ownership for this inventory item",
-    )
-    owning_user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="owned_inventory_items",
-        help_text="User that owns this inventory item (if applicable)",
-    )
-    owning_group = models.ForeignKey(
-        Group,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="owned_inventory_items",
-        help_text="Group (SIG) that owns this inventory item (if applicable)",
-    )
+    # Ownership (ownership_type / owning_user / owning_group + OwnershipType)
+    # is contributed by the shared ``OwnableModel`` abstract base (#881).
 
     # Serialized-component tracking (EufyMake serial/lot tracking).
     # Aggregate stock (current_stock) still applies; when is_serialized is set,
@@ -564,28 +539,8 @@ class InventoryItem(models.Model):
         link = self.primary_item_supplier
         return link.supplier_url if link else None
 
-    def is_user_admin(self, user) -> bool:
-        """Check if user is a system admin (staff or superuser)."""
-        return user.is_authenticated and (user.is_staff or user.is_superuser)
-
-    def is_user_in_logistics(self, user) -> bool:
-        """Check if user is in the Logistics group."""
-        if not user.is_authenticated:
-            return False
-        try:
-            logistics_group = Group.objects.get(name="Logistics")
-            return logistics_group in user.groups.all()
-        except Group.DoesNotExist:
-            return False
-
-    def is_user_group_admin(self, user) -> bool:
-        """Check if user is a SIG admin for the item's owning group."""
-        if not user.is_authenticated or not self.owning_group:
-            return False
-        # Use the permission utility to check SIG admin status
-        from membership.utils import is_sig_admin
-
-        return is_sig_admin(user, self.owning_group)
+    # ``is_user_admin`` / ``is_user_in_logistics`` / ``is_user_group_admin`` are
+    # inherited from ``OwnableModel`` (they delegate to ``membership.services``).
 
     def can_user_modify(self, user) -> bool:
         """

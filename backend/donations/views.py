@@ -51,7 +51,17 @@ class DonationViewSet(viewsets.ModelViewSet):
         status_filter = self.request.query_params.get("status")
         if status_filter:
             queryset = queryset.filter(status=status_filter)
-        return queryset.select_related("received_by", "reviewed_by").prefetch_related("items")
+        queryset = queryset.select_related("received_by", "reviewed_by")
+        if self.action == "list":
+            # DonationListSerializer reads items only for total_items /
+            # total_quantity; the existing "items" prefetch covers that.
+            queryset = queryset.prefetch_related("items")
+        else:
+            # DonationSerializer (detail) nests items -> DonationItemSerializer,
+            # whose remaining_quantity sums each item's dispositions.all();
+            # prefetch them too so the nested render stays flat (issue #890).
+            queryset = queryset.prefetch_related("items", "items__dispositions")
+        return queryset
 
     def perform_create(self, serializer):
         donation = serializer.save()
@@ -278,7 +288,12 @@ class DonationItemViewSet(viewsets.ModelViewSet):
         donation_id = self.request.query_params.get("donation")
         if donation_id:
             queryset = queryset.filter(donation_id=donation_id)
-        return queryset.select_related("donation", "asset", "inventory_item")
+        # DonationItemSerializer.remaining_quantity (and is_fully_disposed) sum
+        # dispositions.all(); prefetch them so the list stays flat instead of
+        # one query per row (issue #890). Byte-identical — reads from cache.
+        return queryset.select_related("donation", "asset", "inventory_item").prefetch_related(
+            "dispositions"
+        )
 
     @action(detail=True, methods=["post"])
     def generate_qr_code(self, request, pk=None):

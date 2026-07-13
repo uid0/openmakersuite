@@ -525,9 +525,41 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         return InventoryItemSerializer
 
     def get_queryset(self):
+        # Two order-preserving Prefetches kill the default-list reorder_requests
+        # N+1 (issue #890). Each mirrors its accessor's exact filter + order so
+        # the cached [0]/bool() reads in inventory/models/core.py are
+        # byte-identical to the live queries they replace:
+        #   * _active_reorder_requests -> get_active_reorder_request /
+        #     has_pending_reorder / reorder_status  (status in pending/approved/
+        #     ordered, ordered by -requested_at)
+        #   * _ordered_reorder_requests -> get_expected_delivery_date, which
+        #     orders by -ordered_at (the ORDERING TRAP: sharing one prefetch
+        #     would silently return the wrong row).
+        # Each Prefetch is a single query regardless of page size (2 total).
+        # ReorderRequest is imported locally to avoid a circular import.
+        from django.db.models import Prefetch
+
+        from reorder_queue.models import ReorderRequest
+
         queryset = (
             InventoryItem.objects.select_related("category", "location", "safety_profile")
-            .prefetch_related("item_suppliers__supplier")
+            .prefetch_related(
+                "item_suppliers__supplier",
+                Prefetch(
+                    "reorder_requests",
+                    queryset=ReorderRequest.objects.filter(
+                        status__in=["pending", "approved", "ordered"]
+                    ).order_by("-requested_at"),
+                    to_attr="_active_reorder_requests",
+                ),
+                Prefetch(
+                    "reorder_requests",
+                    queryset=ReorderRequest.objects.filter(status="ordered").order_by(
+                        "-ordered_at"
+                    ),
+                    to_attr="_ordered_reorder_requests",
+                ),
+            )
             .all()
         )
 
@@ -3180,6 +3212,23 @@ class FixtureViewSet(viewsets.ModelViewSet):
             queryset = queryset.prefetch_related(
                 "refill_requests__requested_user",
                 "refill_requests__resolved_user",
+            )
+        elif self.action == "list":
+            # FixtureSerializer.pending_requests_count would otherwise fire a
+            # per-row PENDING .count() (the fixture-list N+1, issue #890).
+            # Prefetch the PENDING subset into a to_attr the property reads via
+            # len(); a same-named annotate would be shadowed by the property.
+            # One query regardless of page size.
+            from django.db.models import Prefetch
+
+            queryset = queryset.prefetch_related(
+                Prefetch(
+                    "refill_requests",
+                    queryset=FixtureRefillRequest.objects.filter(
+                        status=FixtureRefillRequest.Status.PENDING
+                    ),
+                    to_attr="_pending_refill_requests",
+                )
             )
 
         # Filter by location if specified

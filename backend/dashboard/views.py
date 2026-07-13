@@ -254,8 +254,15 @@ def get_inventory_summary(request):
             .count()
         )
 
-        # Total inventory value
-        total_value = sum(item.total_value for item in items_query)
+        # Total inventory value. total_value -> lowest_unit_cost reads
+        # item_suppliers.all(), so prefetch it for THIS unpaginated sum only
+        # (a fresh clone; the count-only reuses of items_query stay untouched)
+        # to avoid a per-item supplier query — the N+1 the property fix in #882
+        # made cacheable. Value-identical; not a Sum annotate (null-cost /
+        # Decimal("0") / rounding would differ). Issue #890.
+        total_value = sum(
+            item.total_value for item in items_query.prefetch_related("item_suppliers")
+        )
 
         # Recently added items (last 30 days)
         thirty_days_ago = timezone.now() - timedelta(days=30)

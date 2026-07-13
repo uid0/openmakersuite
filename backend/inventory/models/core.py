@@ -403,7 +403,13 @@ class InventoryItem(OwnableModel):
 
     @property
     def needs_reorder(self) -> bool:
-        """Check if item stock is below minimum and needs reordering."""
+        """Check if item stock is below minimum and needs reordering.
+
+        Pure stock math — despite the name it never touches ``reorder_requests``,
+        so it is prefetch-safe and is intentionally NOT part of the
+        ``reorder_requests`` N+1 fix (issue #890). Do not add a reorder-request
+        query here.
+        """
         # Retired items are phased out: never flagged for reorder, regardless of
         # stock level. This is the central chokepoint for every property-based
         # low-stock surface (reorder_status, low_stock action, serializer
@@ -419,7 +425,18 @@ class InventoryItem(OwnableModel):
             return self.current_stock <= self.minimum_stock
 
     def get_active_reorder_request(self):
-        """Get the most recent active (pending/approved/ordered) reorder request for this item."""
+        """Get the most recent active (pending/approved/ordered) reorder request for this item.
+
+        When the list view has prefetched ``_active_reorder_requests`` (a
+        ``Prefetch(to_attr=...)`` mirroring this exact filter + ``-requested_at``
+        order — see ``InventoryItemViewSet.get_queryset``), read the first
+        element of that cached list to avoid a per-row query (the
+        ``reorder_requests`` N+1, issue #890). Falls back to the live ORM query
+        when not prefetched (detail retrieve, admin, tasks) so the returned row
+        is identical either way.
+        """
+        if hasattr(self, "_active_reorder_requests"):
+            return self._active_reorder_requests[0] if self._active_reorder_requests else None
         return (
             self.reorder_requests.filter(status__in=["pending", "approved", "ordered"])
             .order_by("-requested_at")
@@ -427,14 +444,34 @@ class InventoryItem(OwnableModel):
         )
 
     def has_pending_reorder(self) -> bool:
-        """Check if item has any pending, approved, or ordered reorder requests."""
+        """Check if item has any pending, approved, or ordered reorder requests.
+
+        Reads the prefetched ``_active_reorder_requests`` list when present (see
+        :meth:`get_active_reorder_request`) to avoid the ``reorder_requests``
+        N+1; otherwise falls back to a live ``.exists()`` query.
+        """
+        if hasattr(self, "_active_reorder_requests"):
+            return bool(self._active_reorder_requests)
         return self.reorder_requests.filter(status__in=["pending", "approved", "ordered"]).exists()
 
     def get_expected_delivery_date(self):
-        """Calculate expected delivery date for ordered items."""
-        ordered_request = (
-            self.reorder_requests.filter(status="ordered").order_by("-ordered_at").first()
-        )
+        """Calculate expected delivery date for ordered items.
+
+        ⚠️ Orders by ``-ordered_at`` (NOT the ``-requested_at`` used by the
+        active-request accessors), so the list view prefetches a SEPARATE
+        ``_ordered_reorder_requests`` list with that exact filter + order. Read
+        it when present, else fall back to the live query. Sharing a single
+        prefetch with :meth:`get_active_reorder_request` would silently return
+        the wrong row (issue #890 ordering trap).
+        """
+        if hasattr(self, "_ordered_reorder_requests"):
+            ordered_request = (
+                self._ordered_reorder_requests[0] if self._ordered_reorder_requests else None
+            )
+        else:
+            ordered_request = (
+                self.reorder_requests.filter(status="ordered").order_by("-ordered_at").first()
+            )
         if ordered_request and ordered_request.ordered_at and self.average_lead_time:
             from datetime import timedelta
 
@@ -1137,7 +1174,19 @@ class PriceHistory(models.Model):
 
     @property
     def price_change_percentage(self) -> Optional[Decimal]:
-        """Calculate percentage change from previous record."""
+        """Calculate percentage change from previous record.
+
+        Single-instance-preferred and NOT prefetch-safe: it runs a
+        self-referential ``recorded_at__lt`` prior-row lookup, so rendering it
+        across a list (``PriceHistorySerializer`` list / ``PriceHistoryAdmin``)
+        is one query per row. A ``Window(Lag("unit_cost"), partition_by=
+        item_supplier, order_by=recorded_at)`` annotation would move it DB-side,
+        but is intentionally NOT applied (issue #890): ``Lag`` ordered by
+        ``recorded_at`` treats an equal-``recorded_at`` neighbour as the prior
+        row, whereas the strict ``recorded_at__lt`` filter here excludes it — a
+        non-byte-identical tie edge. Prefer small/paginated result sets, or add
+        the annotation deliberately if a tie-behaviour change is acceptable.
+        """
         previous = PriceHistory.objects.filter(
             item_supplier=self.item_supplier, recorded_at__lt=self.recorded_at
         ).first()

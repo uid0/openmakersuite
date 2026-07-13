@@ -9,6 +9,7 @@ from rest_framework import serializers
 # related querysets here. Safe at module top: serializers import only after all
 # app models are loaded, so there is no import cycle.
 from electrical_circuits.models import Disconnect, PowerBreaker
+from membership.actor import actor_display
 
 from .models import (
     Asset,
@@ -1795,6 +1796,17 @@ class FixtureRefillRequestSerializer(serializers.ModelSerializer):
     # Calculated fields
     time_to_resolve = serializers.ReadOnlyField()
 
+    # Actor-identity convention (#888). The legacy requested_by/resolved_by
+    # strings stay as read-only display outputs (the *_name half of the pair —
+    # the frontend and FixtureDetailSerializer.recent_refill_requests read them).
+    # The *_actor fields collapse the (user, name) pair through actor_display;
+    # the *_username fields expose the raw auth username when the FK is set.
+    # All four are additive and read-only — no request-body contract changes.
+    requested_actor = serializers.SerializerMethodField()
+    resolved_actor = serializers.SerializerMethodField()
+    requested_username = serializers.SerializerMethodField()
+    resolved_username = serializers.SerializerMethodField()
+
     class Meta:
         model = FixtureRefillRequest
         fields = [
@@ -1807,12 +1819,41 @@ class FixtureRefillRequestSerializer(serializers.ModelSerializer):
             "status",
             "requested_at",
             "requested_by",
+            "requested_actor",
+            "requested_username",
             "resolved_at",
             "resolved_by",
+            "resolved_actor",
+            "resolved_username",
             "notes",
             "time_to_resolve",
         ]
-        read_only_fields = ["requested_at", "resolved_at", "time_to_resolve"]
+        read_only_fields = [
+            "requested_at",
+            "requested_by",
+            "resolved_at",
+            "resolved_by",
+            "time_to_resolve",
+        ]
+
+    def get_requested_actor(self, obj) -> str:
+        """Collapsed display name for the requester (never null — an anonymous
+        scan reads as "Anonymous")."""
+        return actor_display(obj.requested_user, obj.requested_by)
+
+    def get_resolved_actor(self, obj):
+        """Collapsed display name for the resolver, or None while unresolved."""
+        if obj.resolved_user_id is None and not obj.resolved_by:
+            return None
+        return actor_display(obj.resolved_user, obj.resolved_by)
+
+    def get_requested_username(self, obj):
+        """Raw auth username of the requester, or None if anonymous/system."""
+        return obj.requested_user.username if obj.requested_user_id else None
+
+    def get_resolved_username(self, obj):
+        """Raw auth username of the resolver, or None if anonymous/unresolved."""
+        return obj.resolved_user.username if obj.resolved_user_id else None
 
 
 class FixtureDetailSerializer(FixtureSerializer):

@@ -19,20 +19,45 @@ User = get_user_model()
 class TestSiteSettingsModel:
     """Test SiteSettings model."""
 
-    def test_singleton_get_or_create(self, db):
-        """Test that get() returns the same instance."""
-        settings1 = SiteSettings.get()
-        settings2 = SiteSettings.get()
+    def test_singleton_get_singleton_creates_and_reuses(self, db):
+        """get_singleton() creates the row once and returns it on subsequent calls."""
+        settings1 = SiteSettings.objects.get_singleton()
+        settings2 = SiteSettings.objects.get_singleton()
         assert settings1.pk == settings2.pk
         assert SiteSettings.objects.count() == 1
 
+    def test_get_delegates_to_get_singleton(self, db):
+        """The .get() compatibility wrapper returns the same singleton row."""
+        via_get = SiteSettings.get()
+        via_manager = SiteSettings.objects.get_singleton()
+        assert via_get.pk == via_manager.pk
+        assert SiteSettings.objects.count() == 1
+
     def test_singleton_prevent_multiple_instances(self, db):
-        """Test that only one instance can exist."""
-        SiteSettings.get()  # Create first instance
+        """Only one instance may exist — a second fails validation."""
+        SiteSettings.objects.get_singleton()  # Create first instance
 
         # Try to create another instance directly
         with pytest.raises(ValidationError):
             SiteSettings().full_clean()
+
+    def test_saving_second_new_instance_raises_instead_of_redirecting(self, db):
+        """Saving a *new* second instance raises rather than silently redirecting.
+
+        The old save() copied fields onto the existing row when a second
+        instance was saved; that surprising redirect was removed (gh #887,
+        AC-3). The existing row must be left untouched.
+        """
+        first = SiteSettings.objects.get_singleton()
+        first.site_name = "Original"
+        first.save()
+
+        with pytest.raises(ValidationError):
+            SiteSettings(site_name="Second").save()
+
+        assert SiteSettings.objects.count() == 1
+        first.refresh_from_db()
+        assert first.site_name == "Original"
 
     def test_default_values(self, db):
         """Test default values for SiteSettings."""
@@ -50,15 +75,16 @@ class TestSiteSettingsModel:
         assert str(settings) == "Site Settings for Test Makerspace"
 
     def test_update_existing_instance(self, db):
-        """Test that updating an existing instance works."""
-        settings = SiteSettings.get()
+        """Fetch → mutate → save keeps the same row (no new instance)."""
+        settings = SiteSettings.objects.get_singleton()
         settings.site_name = "Updated Name"
         settings.save()
 
         # Get again and verify update
-        updated = SiteSettings.get()
+        updated = SiteSettings.objects.get_singleton()
         assert updated.site_name == "Updated Name"
         assert updated.pk == settings.pk
+        assert SiteSettings.objects.count() == 1
 
 
 @pytest.mark.integration

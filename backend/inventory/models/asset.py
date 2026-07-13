@@ -10,7 +10,7 @@ from django.conf import settings
 from django.contrib.auth.models import Group
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import MinValueValidator, RegexValidator
-from django.db import IntegrityError, models, transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from imagekit.models import ImageSpecField
@@ -503,18 +503,15 @@ class Asset(OwnableModel):
         received) and falls back to the current year when unset. The per-year
         counter guarantees uniqueness, but we still retry on the off chance a
         backfilled tag collides with the freshly allocated one.
-        """
-        if not self.asset_tag:
-            from ..services.asset_tag_id import generate_asset_tag
 
-            year = self.date_received.year if self.date_received else timezone.now().year
-            for _ in range(10):
-                candidate = generate_asset_tag(year)
-                if not Asset.objects.filter(asset_tag=candidate).exists():
-                    self.asset_tag = candidate
-                    break
-            else:  # pragma: no cover - only if 10 consecutive allocations collide
-                raise IntegrityError("Could not allocate a unique asset tag")
+        The empty-guard + retry/allocate logic lives in
+        :func:`inventory.services.asset_tag_id.assign_asset_tag` (gh #887); this
+        override stays a thin delegator so bare ``Asset(...).save()`` callers
+        keep getting a tag on first save.
+        """
+        from ..services.asset_tag_id import assign_asset_tag
+
+        assign_asset_tag(self)
 
         super().save(*args, **kwargs)
 

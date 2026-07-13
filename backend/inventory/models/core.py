@@ -346,13 +346,21 @@ class InventoryItem(OwnableModel):
         return self.name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate SKU and trigger async image download if needed."""
-        # Auto-generate SKU if not provided
-        if not self.sku:
-            self.sku = generate_sku()
+        """Persist the item, delegating SKU + image-download side effects to services.
 
-        # Track if we need to download image (before save)
-        should_download_image = self.image_url and not self.image
+        The workflow lives in :mod:`inventory.services.items` so this override
+        stays a thin delegator (gh #887): :func:`assign_sku` keeps the
+        synchronous SKU invariant (the SKU is in the create response), and
+        :func:`schedule_image_download` enqueues the async fetch on
+        ``transaction.on_commit`` — fixing a race where the task could run
+        before the row committed (or for a rolled-back row).
+        """
+        from ..services.items import assign_sku, schedule_image_download, should_download_image
+
+        assign_sku(self)
+
+        # Decide before saving; neither field changes during super().save().
+        needs_image_download = should_download_image(self)
 
         # Save first to get an ID
         super().save(*args, **kwargs)
@@ -362,12 +370,8 @@ class InventoryItem(OwnableModel):
         # the compat-setter kwargs through ``__init__`` before a PK exists).
         self._flush_pending_hazmat()
 
-        # Trigger async image download after save
-        if should_download_image:
-            # Import here to avoid circular imports
-            from ..tasks import download_image_from_url
-
-            download_image_from_url.delay(str(self.id), self.image_url)
+        if needs_image_download:
+            schedule_image_download(self)
 
     def clean(self) -> None:
         """Validate the attached/persisted safety profile as part of the item.
@@ -1039,13 +1043,20 @@ class ItemSupplier(models.Model):
         return None
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """
-        Ensure only one primary supplier per item and auto-calculate unit cost.
+        """Derive cost fields, then delegate the primary-flag + price-history side effects.
+
+        Cost derivation (``unit_cost``/``package_cost``) is a pure local
+        invariant and stays here. The single-primary enforcement and
+        :class:`PriceHistory` write are grouped into one ``transaction.atomic``
+        block and delegated to :mod:`inventory.services.suppliers` (gh #887,
+        AC-2) so a failure can't leave a demoted sibling without the save, or a
+        saved row without its history entry. Order is preserved exactly:
+        demote siblings, snapshot the pre-save pricing, save, then record.
 
         If package_cost is provided, calculate unit_cost automatically.
         If only unit_cost is provided (backward compatibility), calculate package_cost.
         """
-        # Auto-calculate unit cost from package cost
+        # Auto-calculate unit cost from package cost (local invariant)
         if self.package_cost is not None and self.quantity_per_package > 0:
             self.unit_cost = self.package_cost / self.quantity_per_package
         # Backward compatibility: if only unit_cost is provided, calculate package_cost
@@ -1056,36 +1067,18 @@ class ItemSupplier(models.Model):
         ):
             self.package_cost = self.unit_cost * self.quantity_per_package
 
-        if self.is_primary:
-            # Remove primary flag from other suppliers for this item
-            ItemSupplier.objects.filter(item=self.item, is_primary=True).exclude(pk=self.pk).update(
-                is_primary=False
-            )
-        # Check if this is a new record or if pricing has changed
+        from ..services.suppliers import (
+            enforce_single_primary,
+            pricing_changed,
+            record_price_history,
+        )
+
         is_new = self.pk is None
-        price_changed = False
-
-        if not is_new:
-            # Get the old values from the database
-            old_instance = ItemSupplier.objects.get(pk=self.pk)
-            price_changed = (
-                old_instance.unit_cost != self.unit_cost
-                or old_instance.package_cost != self.package_cost
-                or old_instance.quantity_per_package != self.quantity_per_package
-            )
-
-        super().save(*args, **kwargs)
-
-        # Create price history record if this is new or if pricing changed
-        if is_new or price_changed:
-            change_type = "created" if is_new else "updated"
-            PriceHistory.objects.create(
-                item_supplier=self,
-                unit_cost=self.unit_cost,
-                package_cost=self.package_cost,
-                quantity_per_package=self.quantity_per_package,
-                change_type=change_type,
-            )
+        with transaction.atomic():
+            enforce_single_primary(self)
+            price_changed = pricing_changed(self)
+            super().save(*args, **kwargs)
+            record_price_history(self, is_new=is_new, price_changed=price_changed)
 
 
 class PriceHistory(models.Model):

@@ -4,11 +4,18 @@ Serializers for checklist models.
 
 from rest_framework import serializers
 
+from inventory.models import count_present_targets
+from inventory.serializer_fields import TypedTargetField
+
 from .models import Checklist, ChecklistCompletion, ChecklistStep, ChecklistStepCompletion
 
 
 class ChecklistStepSerializer(serializers.ModelSerializer):
     """Serializer for checklist steps."""
+
+    # Additive typed-target summary (#884): the flat asset/location/inventory_item
+    # PK fields are unchanged; this exposes {target_type, target_id} alongside.
+    target = TypedTargetField()
 
     class Meta:
         model = ChecklistStep
@@ -19,6 +26,7 @@ class ChecklistStepSerializer(serializers.ModelSerializer):
             "asset",
             "location",
             "inventory_item",
+            "target",
             "required",
             "requires_photo",
             "notes",
@@ -85,6 +93,9 @@ class ChecklistStepCompletionSerializer(serializers.ModelSerializer):
     scanned_asset_name = serializers.CharField(source="scanned_asset.name", read_only=True)
     scanned_location_name = serializers.CharField(source="scanned_location.name", read_only=True)
     scanned_item_name = serializers.CharField(source="scanned_item.name", read_only=True)
+    # Additive typed-target summary (#884): the flat scanned_* PK + _name fields
+    # are unchanged; this exposes {target_type, target_id} for what was scanned.
+    scanned_target = TypedTargetField(object_attr="scanned_target", type_attr="scanned_target_type")
     photo_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -101,6 +112,7 @@ class ChecklistStepCompletionSerializer(serializers.ModelSerializer):
             "scanned_location_name",
             "scanned_item",
             "scanned_item_name",
+            "scanned_target",
             "notes",
             "photo_url",
             "photo_caption",
@@ -197,12 +209,10 @@ class ChecklistStepScanSerializer(serializers.Serializer):
 
     def validate(self, data):
         """Validate that exactly one of asset_id, location_id, or item_id is provided."""
-        count = sum(
-            [
-                bool(data.get("asset_id")),
-                bool(data.get("location_id")),
-                bool(data.get("item_id")),
-            ]
+        # Same exactly-one primitive as TypedTargetModel.clean() (#884), so the
+        # scan-input rule and the model rule can't drift apart.
+        count = count_present_targets(
+            [data.get("asset_id"), data.get("location_id"), data.get("item_id")]
         )
         if count != 1:
             raise serializers.ValidationError(

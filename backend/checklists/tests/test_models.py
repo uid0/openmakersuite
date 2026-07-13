@@ -7,7 +7,12 @@ from django.core.exceptions import ValidationError
 
 import pytest
 
-from checklists.models import Checklist, ChecklistCompletion, ChecklistStep
+from checklists.models import (
+    Checklist,
+    ChecklistCompletion,
+    ChecklistStep,
+    ChecklistStepCompletion,
+)
 from checklists.tests.factories import (
     ChecklistCompletionFactory,
     ChecklistFactory,
@@ -17,6 +22,11 @@ from checklists.tests.factories import (
 from inventory.tests.factories import AssetFactory, InventoryItemFactory, LocationFactory
 
 User = get_user_model()
+
+# These tests exercise factories (DB writes); enable DB access for the module,
+# matching the reorder_queue/inventory test suites. (Pre-existing: the checklists
+# app was absent from pytest.ini testpaths so these never ran in CI.)
+pytestmark = pytest.mark.django_db
 
 
 @pytest.mark.unit
@@ -140,6 +150,37 @@ class TestChecklistStepModel:
         assert steps[1] == step2
         assert steps[2] == step3
 
+    def test_target_accessor_returns_set_target_and_token(self):
+        """.target / .target_type (#884) expose the single set FK + its scanner token."""
+        asset = AssetFactory()
+        step = ChecklistStepFactory(asset=asset, location=None, inventory_item=None)
+        assert step.target == asset
+        assert step.target_type == "asset"
+
+        location = LocationFactory()
+        step2 = ChecklistStep.objects.create(
+            checklist=ChecklistFactory(),
+            step_number=1,
+            name="s",
+            asset=None,
+            location=location,
+            inventory_item=None,
+        )
+        assert step2.target == location
+        assert step2.target_type == "location"
+
+        item = InventoryItemFactory()
+        step3 = ChecklistStep.objects.create(
+            checklist=ChecklistFactory(),
+            step_number=1,
+            name="s",
+            asset=None,
+            location=None,
+            inventory_item=item,
+        )
+        assert step3.target == item
+        assert step3.target_type == "inventory_item"
+
 
 @pytest.mark.unit
 class TestChecklistCompletionModel:
@@ -198,3 +239,23 @@ class TestChecklistStepCompletionModel:
         step_completion = ChecklistStepCompletionFactory(completion=completion, step=step)
         assert "Step" in str(step_completion)
         assert "John" in str(step_completion)
+
+    def test_scanned_target_accessor(self):
+        """.scanned_target / .scanned_target_type (#884) mirror the mixin accessor."""
+        step = ChecklistStepFactory()  # asset by default -> factory scans that asset
+        completion = ChecklistCompletionFactory(checklist=step.checklist)
+        step_completion = ChecklistStepCompletionFactory(completion=completion, step=step)
+        assert step_completion.scanned_target == step.asset
+        assert step_completion.scanned_target_type == "asset"
+
+    def test_scanned_target_none_when_nothing_scanned(self):
+        """SET_NULL fields can all be null; the accessor returns None (no constraint).
+
+        Built directly (not via the factory, whose post_generation hook back-fills
+        scanned_asset from the step) so all three scanned FKs stay null.
+        """
+        step = ChecklistStepFactory()
+        completion = ChecklistCompletionFactory(checklist=step.checklist)
+        step_completion = ChecklistStepCompletion.objects.create(completion=completion, step=step)
+        assert step_completion.scanned_target is None
+        assert step_completion.scanned_target_type is None

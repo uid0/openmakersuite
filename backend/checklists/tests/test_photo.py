@@ -16,6 +16,11 @@ from checklists.tests.factories import (
     ChecklistStepFactory,
 )
 
+# Photo-upload tests write through factories + endpoints; enable DB access for
+# the module, matching the reorder_queue/inventory test suites. (Pre-existing:
+# the checklists app was absent from pytest.ini testpaths so these never ran in CI.)
+pytestmark = pytest.mark.django_db
+
 
 def _make_image_file(name="photo.jpg"):
     """Create a small in-memory JPEG suitable for ImageField uploads."""

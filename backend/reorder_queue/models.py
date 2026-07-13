@@ -13,6 +13,7 @@ from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
+from django.utils.functional import cached_property
 
 from config.observability_redaction import redact
 from inventory.models import InventoryItem, ItemSupplier, Supplier
@@ -245,19 +246,55 @@ class PurchaseOrder(models.Model):
     def __str__(self) -> str:
         return f"PO #{self.po_number} - {self.supplier.name} ({self.status})"
 
+    @cached_property
+    def _line_item_totals(self) -> dict:
+        """Compute all PO-level line-item aggregates in a single pass (#883).
+
+        The list serializer, ``pending_orders``, and the admin changelist read
+        several of the calculated fields below; deriving them together here (and
+        caching per instance) collapses what were 5-6 separate loops over the
+        prefetched line items into one. Values are identical to the standalone
+        properties they back, including the voided-line exclusion.
+
+        Cached per instance: the receive/void workflows read these aggregates
+        only AFTER their line-item mutations (never before), so a stale
+        pre-mutation read cannot occur — matching prior behaviour.
+        """
+        active_count = 0
+        total_quantity = 0
+        total_received_quantity = 0
+        voided_estimated_total = Decimal("0.00")
+        all_fully_received = True
+        for item in self.items.all():
+            # total_received_quantity counts every line, voided or not.
+            if item.quantity_received is not None:
+                total_received_quantity += item.quantity_received
+            # is_fully_received is all() over every line, voided or not.
+            if not item.is_fully_received:
+                all_fully_received = False
+            if item.is_voided:
+                voided_estimated_total += item.estimated_cost
+            else:
+                active_count += 1
+                if item.quantity_ordered is not None:
+                    total_quantity += item.quantity_ordered
+        return {
+            "total_items": active_count,
+            "total_quantity": total_quantity,
+            "total_received_quantity": total_received_quantity,
+            "voided_estimated_total": voided_estimated_total,
+            "is_fully_received": all_fully_received,
+        }
+
     @property
     def total_items(self) -> int:
         """Total number of distinct non-voided items in this order."""
-        return sum(1 for item in self.items.all() if not item.is_voided)
+        return self._line_item_totals["total_items"]
 
     @property
     def total_quantity(self) -> int:
         """Total quantity of non-voided items ordered."""
-        return sum(
-            item.quantity_ordered
-            for item in self.items.all()
-            if not item.is_voided and item.quantity_ordered is not None
-        )
+        return self._line_item_totals["total_quantity"]
 
     @property
     def effective_estimated_total(self) -> Decimal:
@@ -266,12 +303,8 @@ class PurchaseOrder(models.Model):
         Voided lines are subtracted from the stored ``estimated_total`` so the
         displayed cost reflects only items the supplier is actually fulfilling.
         """
-        voided_total = sum(
-            (item.estimated_cost for item in self.items.all() if item.is_voided),
-            start=Decimal("0.00"),
-        )
         base = self.estimated_total or Decimal("0.00")
-        adjusted = base - voided_total
+        adjusted = base - self._line_item_totals["voided_estimated_total"]
         if adjusted < Decimal("0.00"):
             return Decimal("0.00")
         return adjusted
@@ -279,21 +312,17 @@ class PurchaseOrder(models.Model):
     @property
     def has_active_items(self) -> bool:
         """Whether any line item on this PO is not voided."""
-        return any(not item.is_voided for item in self.items.all())
+        return self._line_item_totals["total_items"] > 0
 
     @property
     def total_received_quantity(self) -> int:
         """Total quantity of all items received."""
-        return sum(
-            item.quantity_received
-            for item in self.items.all()
-            if item.quantity_received is not None
-        )
+        return self._line_item_totals["total_received_quantity"]
 
     @property
     def is_fully_received(self) -> bool:
         """Check if all ordered items have been fully received."""
-        return all(item.is_fully_received for item in self.items.all())
+        return self._line_item_totals["is_fully_received"]
 
     @property
     def days_since_ordered(self) -> int:

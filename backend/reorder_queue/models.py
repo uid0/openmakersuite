@@ -16,7 +16,7 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 
 from config.observability_redaction import redact
-from inventory.models import InventoryItem, ItemSupplier, Supplier
+from inventory.models import InventoryItem, ItemSupplier, Supplier, TargetField, TypedTargetModel
 
 User = get_user_model()
 
@@ -376,7 +376,20 @@ class PurchaseOrder(models.Model):
                     raise
 
 
-class PurchaseOrderItem(models.Model):
+# Ordered typed-target slots for a PO line (#884). Unlike ChecklistStep this is
+# an *at-most-one FK + freeform fallback* variant (item_supplier XOR asset, or a
+# freeform description) — NOT strict exactly-one — so it reuses the accessor only
+# and keeps its own hand-written CheckConstraint below. The inventory_item slot's
+# target object lives one hop away, at item_supplier.item. Order matches the
+# legacy get_item_type priority: item_supplier, then asset, then description.
+_PO_ITEM_TARGETS = (
+    TargetField("inventory_item", "item_supplier", value="item_supplier.item"),
+    TargetField("asset", "asset"),
+    TargetField("freeform", "description", has_object=False),
+)
+
+
+class PurchaseOrderItem(TypedTargetModel):
     """
     Line item within a purchase order.
 
@@ -388,6 +401,11 @@ class PurchaseOrderItem(models.Model):
     - An asset (via asset)
     - A freeform item (via description, when neither item_supplier nor asset is set)
     """
+
+    TARGET_FIELDS = _PO_ITEM_TARGETS
+    # No TARGET_MODE: this is at-most-one + freeform, enforced by the existing
+    # ``purchase_order_item_must_have_item_or_asset`` CheckConstraint, not the
+    # mixin's exactly-one clean().
 
     purchase_order = models.ForeignKey(
         PurchaseOrder, on_delete=models.CASCADE, related_name="items"
@@ -504,25 +522,23 @@ class PurchaseOrderItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        if self.item_supplier:
-            return f"{self.item_supplier.item.name} - {self.quantity_ordered} units"
-        elif self.asset:
-            return f"{self.asset.name} - {self.quantity_ordered} units"
-        return f"Purchase Order Item - {self.quantity_ordered} units"
+        # Route the three-way label through the typed-target accessor (#884):
+        # inventory_item -> item.name, asset -> asset.name, freeform -> generic.
+        target = self.target
+        label = target.name if target is not None else "Purchase Order Item"
+        return f"{label} - {self.quantity_ordered} units"
 
     @property
     def item(self) -> Optional[InventoryItem]:
         """Convenience property to access the inventory item (if applicable)."""
-        if self.item_supplier:
-            return self.item_supplier.item
-        return None
+        return self.target if self.target_type == "inventory_item" else None
 
     @property
     def supplier(self) -> Optional[Supplier]:
         """Convenience property to access the supplier."""
-        if self.item_supplier:
+        if self.target_type == "inventory_item":
             return self.item_supplier.supplier
-        elif self.asset and self.asset.manufacturer:
+        if self.target_type == "asset":
             return self.asset.manufacturer
         return None
 

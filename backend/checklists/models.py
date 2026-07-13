@@ -9,6 +9,8 @@ from django.contrib.auth.models import Group
 from django.db import models
 from django.utils import timezone
 
+from inventory.models import TargetField, TypedTargetModel
+
 
 class Checklist(models.Model):
     """
@@ -58,13 +60,29 @@ class Checklist(models.Model):
         return f"{self.name} ({self.sig.name})"
 
 
-class ChecklistStep(models.Model):
+# Ordered typed-target slots for a checklist step. Tokens are
+# ``scanner.resolvers``-aligned so ``step.target_type`` speaks the same
+# vocabulary as the scan dispatcher. Reused below by the ``Meta``
+# ``CheckConstraint`` so field names have a single source of truth.
+_CHECKLIST_STEP_TARGETS = (
+    TargetField("asset", "asset"),
+    TargetField("location", "location"),
+    TargetField("inventory_item", "inventory_item"),
+)
+
+
+class ChecklistStep(TypedTargetModel):
     """
     Individual step in a checklist.
 
     Each step can be associated with an asset, location, or inventory item
-    that needs to be scanned to complete the step.
+    that needs to be scanned to complete the step. Exactly one of those targets
+    must be set — enforced by :class:`~inventory.models.typed_target.TypedTargetModel`
+    at both the ``clean()`` layer and (as of #884) a DB ``CheckConstraint``.
     """
+
+    TARGET_FIELDS = _CHECKLIST_STEP_TARGETS
+    TARGET_MODE = "exactly_one"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     checklist = models.ForeignKey(Checklist, on_delete=models.CASCADE, related_name="steps")
@@ -107,26 +125,20 @@ class ChecklistStep(models.Model):
         indexes = [
             models.Index(fields=["checklist", "step_number"]),
         ]
+        constraints = [
+            # DB last-line-of-defence for the exactly-one invariant (#884).
+            # Previously enforced only in Python ``clean()``; all existing rows
+            # already satisfy it, so this is additive with no backfill.
+            TypedTargetModel.exactly_one_constraint(
+                "checklist_step_exactly_one_target", _CHECKLIST_STEP_TARGETS
+            ),
+        ]
 
     def __str__(self):
         return f"{self.checklist.name} - Step {self.step_number}: {self.name}"
 
-    def clean(self):
-        """Validate that exactly one of asset, location, or inventory_item is set."""
-        from django.core.exceptions import ValidationError
-
-        count = sum(
-            [
-                bool(self.asset),
-                bool(self.location),
-                bool(self.inventory_item),
-            ]
-        )
-        if count != 1:
-            raise ValidationError("Exactly one of asset, location, or inventory_item must be set.")
-
     def save(self, *args, **kwargs):
-        """Call clean before saving."""
+        """Enforce the exactly-one target rule (inherited ``clean``) on save."""
         self.clean()
         super().save(*args, **kwargs)
 
@@ -191,13 +203,26 @@ class ChecklistCompletion(models.Model):
         self.save(update_fields=["status", "completed_at"])
 
 
-class ChecklistStepCompletion(models.Model):
+# Read-only typed-target slots for what was scanned when completing a step (#884).
+# Tokens are scanner.resolvers-aligned. NO exactly-one enforcement: the FKs are
+# SET_NULL, so a completion may legitimately end up with all three null.
+_STEP_COMPLETION_TARGETS = (
+    TargetField("asset", "scanned_asset"),
+    TargetField("location", "scanned_location"),
+    TargetField("inventory_item", "scanned_item"),
+)
+
+
+class ChecklistStepCompletion(TypedTargetModel):
     """
     Record of completing a specific step in a checklist.
 
     Stores which asset/location/item was scanned, when it was scanned,
     and any notes from the user.
     """
+
+    TARGET_FIELDS = _STEP_COMPLETION_TARGETS
+    # No TARGET_MODE: scanned_* FKs are SET_NULL and can all be null.
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     completion = models.ForeignKey(
@@ -248,3 +273,13 @@ class ChecklistStepCompletion(models.Model):
 
     def __str__(self):
         return f"{self.completion.checklist.name} - Step {self.step.step_number} by {self.completion.user or self.completion.user_name or 'Anonymous'}"
+
+    @property
+    def scanned_target(self):
+        """The single scanned object (asset/location/item), or ``None``."""
+        return self.target
+
+    @property
+    def scanned_target_type(self):
+        """scanner.resolvers token for the scanned object, or ``None``."""
+        return self.target_type

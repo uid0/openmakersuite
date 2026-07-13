@@ -140,21 +140,19 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
 
     def get_asset_details(self, obj):
         """Return asset details if this is an asset purchase."""
-        if obj.asset:
+        # Route through the typed-target accessor (#884): obj.target is the Asset
+        # when target_type == "asset".
+        if obj.target_type == "asset":
             from inventory.serializers import AssetSerializer
 
-            return AssetSerializer(obj.asset).data
+            return AssetSerializer(obj.target).data
         return None
 
     def get_item_type(self, obj):
         """Return whether this is an inventory item, asset, or freeform."""
-        if obj.item_supplier:
-            return "inventory_item"
-        elif obj.asset:
-            return "asset"
-        elif obj.description:
-            return "freeform"
-        return None
+        # Backed by the typed-target accessor (#884): returns
+        # inventory_item / asset / freeform (or None if nothing is set).
+        return obj.target_type
 
 
 class PurchaseOrderAttachmentSerializer(serializers.ModelSerializer):

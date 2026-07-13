@@ -13,7 +13,7 @@ import uuid
 from django.db import models
 from django.utils import timezone
 
-from inventory.models import Location
+from inventory.models import Location, TargetField, TypedTargetModel
 
 
 class LocationCheckIn(models.Model):
@@ -208,11 +208,28 @@ class SecurityReport(models.Model):
         return f"{report_type_display} for {self.location.name} by {user_str}"
 
 
-class LocationTask(models.Model):
+# Typed-target ("origin") slots for what created a task (#884). This is an
+# AT-MOST-ONE (zero-or-one) variant, NOT exactly-one: a task auto-created from
+# feedback has created_from_feedback, one from a security report has
+# created_from_security_report, and a *manually* created task has NEITHER. So
+# there is deliberately NO CheckConstraint / clean() here — the mixin is used for
+# the symmetric read accessor (.origin / .origin_type) only. Tokens describe the
+# provenance and are not scanner.resolvers targets (these origins aren't scanned).
+_LOCATION_TASK_ORIGINS = (
+    TargetField("feedback", "created_from_feedback"),
+    TargetField("security_report", "created_from_security_report"),
+)
+
+
+class LocationTask(TypedTargetModel):
     """
     Tasks created from negative feedback or security reports.
     Volunteers can complete these tasks.
     """
+
+    TARGET_FIELDS = _LOCATION_TASK_ORIGINS
+    # No TARGET_MODE: origins are zero-or-one (manual tasks have neither), so the
+    # exactly-one abstraction cannot apply. See _LOCATION_TASK_ORIGINS above.
 
     STATUS_CHOICES = [
         ("pending", "Pending"),
@@ -301,3 +318,14 @@ class LocationTask(models.Model):
         self.completed_by = user
         self.completed_at = timezone.now()
         self.save(update_fields=["status", "completed_by", "completed_at"])
+
+    @property
+    def origin(self):
+        """The feedback/security-report this task was created from, or ``None``
+        for a manually created task."""
+        return self.target
+
+    @property
+    def origin_type(self):
+        """``"feedback"`` / ``"security_report"``, or ``None`` (manual task)."""
+        return self.target_type

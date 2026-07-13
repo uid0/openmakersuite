@@ -10,11 +10,67 @@ from django.utils import timezone
 import pytest
 from freezegun import freeze_time
 
-from inventory.tests.factories import InventoryItemFactory, ItemSupplierFactory, SupplierFactory
+from inventory.tests.factories import (
+    AssetFactory,
+    InventoryItemFactory,
+    ItemSupplierFactory,
+    SupplierFactory,
+)
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
 from reorder_queue.tests.factories import ReorderRequestFactory, UserFactory
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.mark.unit
+class TestPurchaseOrderItemTypedTarget:
+    """PurchaseOrderItem's at-most-one + freeform typed-target accessor (#884).
+
+    Behaviour-preserving: .item / .supplier / __str__ now route through
+    .target / .target_type but must keep their exact legacy results.
+    """
+
+    def test_inventory_item_line(self):
+        item_supplier = ItemSupplierFactory()
+        line = PurchaseOrderItem(item_supplier=item_supplier, quantity_ordered=3)
+        assert line.target_type == "inventory_item"
+        assert line.target == item_supplier.item
+        assert line.item == item_supplier.item
+        assert line.supplier == item_supplier.supplier
+        assert str(line) == f"{item_supplier.item.name} - 3 units"
+
+    def test_asset_line(self):
+        supplier = SupplierFactory()
+        asset = AssetFactory(manufacturer=supplier)
+        line = PurchaseOrderItem(asset=asset, quantity_ordered=2)
+        assert line.target_type == "asset"
+        assert line.target == asset
+        assert line.item is None
+        assert line.supplier == supplier
+        assert str(line) == f"{asset.name} - 2 units"
+
+    def test_asset_line_without_manufacturer_has_no_supplier(self):
+        asset = AssetFactory(manufacturer=None)
+        line = PurchaseOrderItem(asset=asset, quantity_ordered=1)
+        assert line.target_type == "asset"
+        assert line.supplier is None
+
+    def test_freeform_line(self):
+        line = PurchaseOrderItem(description="Custom bracket", quantity_ordered=5)
+        assert line.target_type == "freeform"
+        assert line.target is None
+        assert line.item is None
+        assert line.supplier is None
+        assert str(line) == "Purchase Order Item - 5 units"
+
+    def test_item_supplier_takes_priority_over_description(self):
+        """Legacy get_item_type priority: item_supplier wins even if a
+        description co-exists (allowed by the constraint)."""
+        item_supplier = ItemSupplierFactory()
+        line = PurchaseOrderItem(
+            item_supplier=item_supplier, description="note", quantity_ordered=1
+        )
+        assert line.target_type == "inventory_item"
 
 
 @pytest.mark.unit

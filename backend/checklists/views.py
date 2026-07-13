@@ -322,34 +322,34 @@ class ChecklistCompletionViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Verify the scanned item matches the step
-        if step.asset_id:
+        # Verify the scanned item matches the step. Branch on the typed-target
+        # accessor (#884) rather than hand-written asset/location/item FK checks;
+        # the scan-input triplet keeps its asset_id/item_id (UUID) vs location_id
+        # (int) asymmetry.
+        scanned_asset = None
+        scanned_location = None
+        scanned_item = None
+        if step.target_type == "asset":
             if not asset_id or str(step.asset_id) != str(asset_id):
                 return Response(
                     {"detail": "Scanned asset does not match this step."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             scanned_asset = Asset.objects.get(id=asset_id)
-            scanned_location = None
-            scanned_item = None
-        elif step.location_id:
+        elif step.target_type == "location":
             if not location_id or step.location_id != location_id:
                 return Response(
                     {"detail": "Scanned location does not match this step."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             scanned_location = Location.objects.get(id=location_id)
-            scanned_asset = None
-            scanned_item = None
-        elif step.inventory_item_id:
+        elif step.target_type == "inventory_item":
             if not item_id or str(step.inventory_item_id) != str(item_id):
                 return Response(
                     {"detail": "Scanned item does not match this step."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             scanned_item = InventoryItem.objects.get(id=item_id)
-            scanned_asset = None
-            scanned_location = None
         else:
             return Response(
                 {"detail": "Step has no associated asset, location, or item."},

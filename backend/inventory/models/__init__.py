@@ -54,6 +54,11 @@ from .maintenance import (  # noqa: F401
     WorkOrderTaskCompletion,
     WorkOrderValidation,
 )
+from .typed_target import (  # noqa: F401
+    TargetField,
+    TypedTargetModel,
+    count_present_targets,
+)
 
 __all__ = [
     "generate_sku",
@@ -96,4 +101,7 @@ __all__ = [
     "MaintenanceRecord",
     "Fixture",
     "FixtureRefillRequest",
+    "TargetField",
+    "TypedTargetModel",
+    "count_present_targets",
 ]

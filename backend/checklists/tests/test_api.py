@@ -17,6 +17,11 @@ from inventory.tests.factories import AssetFactory, InventoryItemFactory, Locati
 
 User = get_user_model()
 
+# These tests exercise factories + endpoints that hit the DB; enable DB access
+# for the module, matching the reorder_queue/inventory test suites. (Pre-existing:
+# the checklists app was absent from pytest.ini testpaths so these never ran in CI.)
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.integration
 class TestChecklistAPI:
@@ -101,6 +106,26 @@ class TestChecklistAPI:
         assert response.data["name"] == checklist.name
         assert len(response.data["steps"]) == 3
 
+    def test_checklist_detail_step_exposes_additive_target(self, api_client):
+        """#884: step payload keeps flat asset/location/inventory_item AND adds a
+        {target_type, target_id} summary."""
+        asset = AssetFactory()
+        checklist = ChecklistFactory(is_public=True, is_active=True)
+        ChecklistStepFactory(checklist=checklist, asset=asset)
+
+        url = f"/api/checklists/checklists/{checklist.id}/detail/"
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        step_data = response.data["steps"][0]
+        # legacy flat fields intact
+        assert str(step_data["asset"]) == str(asset.id)
+        assert step_data["location"] is None
+        assert step_data["inventory_item"] is None
+        # additive typed-target summary
+        assert step_data["target"]["target_type"] == "asset"
+        assert str(step_data["target"]["target_id"]) == str(asset.id)
+
     def test_get_checklist_detail_private_requires_auth(self, api_client):
         """Test getting private checklist detail requires authentication."""
         checklist = ChecklistFactory(is_public=False, is_active=True)
@@ -118,7 +143,9 @@ class TestChecklistAPI:
         response = api_client.post(url, {"user_name": "John Doe"})
 
         assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["checklist"] == str(checklist.id)
+        # `checklist` is a PK-related field: DRF returns the raw UUID pk, so
+        # normalise both sides to str for the comparison.
+        assert str(response.data["checklist"]) == str(checklist.id)
         assert response.data["user_name"] == "John Doe"
         assert response.data["status"] == "in_progress"
 
@@ -232,8 +259,28 @@ class TestChecklistCompletionAPI:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data["step_completions"]) == 1
         step_completion = response.data["step_completions"][0]
-        assert step_completion["step"] == str(step.id)
-        assert step_completion["scanned_asset"] == str(asset.id)
+        # PK-related fields render as raw UUID pks; normalise to str to compare.
+        assert str(step_completion["step"]) == str(step.id)
+        assert str(step_completion["scanned_asset"]) == str(asset.id)
+
+    def test_scan_step_exposes_additive_scanned_target(self, api_client):
+        """#884: scan response keeps flat scanned_* fields AND adds a
+        {target_type, target_id} summary for what was scanned."""
+        asset = AssetFactory()
+        checklist = ChecklistFactory(is_public=True, is_active=True)
+        step = ChecklistStepFactory(checklist=checklist, asset=asset)
+        completion = ChecklistCompletionFactory(checklist=checklist, user=None, user_name="John")
+
+        url = f"/api/checklists/completions/{completion.id}/scan/"
+        response = api_client.post(url, {"step_id": str(step.id), "asset_id": str(asset.id)})
+
+        assert response.status_code == status.HTTP_200_OK
+        step_completion = response.data["step_completions"][0]
+        # legacy flat field intact (PK-related field renders as the raw UUID pk)
+        assert str(step_completion["scanned_asset"]) == str(asset.id)
+        # additive typed-target summary
+        assert step_completion["scanned_target"]["target_type"] == "asset"
+        assert str(step_completion["scanned_target"]["target_id"]) == str(asset.id)
 
     def test_scan_step_location(self, api_client):
         """Test scanning a step with a location."""

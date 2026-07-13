@@ -332,6 +332,20 @@
   border-color: #dc2626 !important;
 }
 
+/* Hide native number-input spin buttons (cases / units / cost) for cleaner
+   numeric entry. Scoped to the PO form's table inputs so it does not affect
+   number inputs elsewhere in the app. */
+.items-table input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.items-table input[type="number"]::-webkit-inner-spin-button,
+.items-table input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* Subtotals */
 .subtotal-label {
   text-align: right !important;
@@ -561,6 +575,25 @@
   margin-top: 2px;
 }
 
+/* Paired unit / case cost entry for case-packed items. Editing either field
+   live-derives the other; the per-unit value stays the source of truth. */
+.case-cost-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.case-cost-group .case-cost-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.case-cost-label {
+  font-size: 11px;
+  color: #475569;
+}
+
 /* Dark mode support */
 @media (prefers-color-scheme: dark) {
   .case-help-text {
@@ -570,7 +603,8 @@
   }
 
   .case-qty-label,
-  .case-qty-summary {
+  .case-qty-summary,
+  .case-cost-label {
     color: #cbd5e1;
   }
 

@@ -51,6 +51,31 @@ describe('PurchaseOrderFormPage', () => {
     localStorage.setItem('token', 'test-token');
   });
 
+  // Render the form, load a single-item supplier, and select it so the line
+  // item (and its cost fields) are on screen.
+  const renderWithItem = async (item: api.ReorderDataItem) => {
+    (api.purchaseOrderAPI.getReorderData as jest.Mock).mockResolvedValue({
+      data: { suppliers: [{ ...mockSupplier, items: [item] }] },
+    });
+    (api.purchaseOrderAPI.createOrder as jest.Mock).mockResolvedValue({
+      data: { id: 42, po_number: 'PO-2024-0042', supplier: 1, status: 'draft' },
+    });
+
+    render(
+      <MemoryRouter>
+        <PurchaseOrderFormPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Supplier')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Test Supplier').closest('button')!);
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+  };
+
   test('displays loading state initially', async () => {
     (api.purchaseOrderAPI.getReorderData as jest.Mock).mockReturnValue(
       new Promise(() => {})
@@ -220,6 +245,118 @@ describe('PurchaseOrderFormPage', () => {
     expect(call.items[0].item_supplier_id).toBe(1);
     expect(call.items[0].quantity).toBe(144);
     expect(call.items[0].order_in_packages).toBe(6);
+  });
+
+  describe('case-cost entry (show both, edit either)', () => {
+    // QPP=12, unit $2.50, case $30.00 — clean division for exact assertions.
+    const caseCostItem: api.ReorderDataItem = {
+      ...mockItem,
+      quantity_per_package: 12,
+      suggested_quantity: 12,
+      unit_cost: '2.50',
+      package_cost: '30.00',
+    };
+
+    test('case-packed item shows both cost fields, prefilled from supplier unit/package cost', async () => {
+      await renderWithItem(caseCostItem);
+
+      const unitInput = screen.getByLabelText(/cost per unit for test item/i) as HTMLInputElement;
+      const caseInput = screen.getByLabelText(/cost per case for test item/i) as HTMLInputElement;
+
+      // Both prefilled (as placeholders) from the supplier's saved costs.
+      expect(unitInput).toHaveAttribute('placeholder', '2.50');
+      expect(caseInput).toHaveAttribute('placeholder', '30.00');
+      // No user override yet.
+      expect(unitInput.value).toBe('');
+      expect(caseInput.value).toBe('');
+    });
+
+    test('editing case cost live-derives unit cost (case / qpp)', async () => {
+      await renderWithItem(caseCostItem);
+
+      const unitInput = screen.getByLabelText(/cost per unit for test item/i) as HTMLInputElement;
+      const caseInput = screen.getByLabelText(/cost per case for test item/i) as HTMLInputElement;
+
+      fireEvent.change(caseInput, { target: { value: '36' } });
+
+      expect(caseInput.value).toBe('36');
+      expect(unitInput.value).toBe('3'); // 36 / 12
+    });
+
+    test('editing unit cost live-derives case cost (unit × qpp)', async () => {
+      await renderWithItem(caseCostItem);
+
+      const unitInput = screen.getByLabelText(/cost per unit for test item/i) as HTMLInputElement;
+      const caseInput = screen.getByLabelText(/cost per case for test item/i) as HTMLInputElement;
+
+      fireEvent.change(unitInput, { target: { value: '3' } });
+
+      expect(unitInput.value).toBe('3');
+      expect(caseInput.value).toBe('36'); // 3 × 12
+    });
+
+    test('submit sends the derived per-unit unit_cost after editing the case cost', async () => {
+      await renderWithItem(caseCostItem);
+
+      const caseInput = screen.getByLabelText(/cost per case for test item/i) as HTMLInputElement;
+      fireEvent.change(caseInput, { target: { value: '36' } });
+
+      fireEvent.click(screen.getByRole('button', { name: /create purchase order/i }));
+
+      await waitFor(() => {
+        expect(api.purchaseOrderAPI.createOrder).toHaveBeenCalled();
+      });
+      const call = (api.purchaseOrderAPI.createOrder as jest.Mock).mock.calls[0][0];
+      // Backend contract is unchanged: per-unit cost only.
+      expect(call.items[0].unit_cost).toBe(3); // 36 / 12
+      expect(call.items[0]).not.toHaveProperty('case_cost');
+      expect(call.items[0]).not.toHaveProperty('package_cost');
+    });
+
+    test('non-clean division keeps full per-unit precision (no cent drift)', async () => {
+      const oddItem: api.ReorderDataItem = {
+        ...mockItem,
+        quantity_per_package: 3,
+        suggested_quantity: 3,
+        unit_cost: '3.00',
+        package_cost: '9.00',
+      };
+      await renderWithItem(oddItem);
+
+      const unitInput = screen.getByLabelText(/cost per unit for test item/i) as HTMLInputElement;
+      const caseInput = screen.getByLabelText(/cost per case for test item/i) as HTMLInputElement;
+
+      // $10 / 3 units = 3.333333 (not rounded to 3.33, which would drift to $9.99).
+      fireEvent.change(caseInput, { target: { value: '10' } });
+      expect(unitInput.value).toBe('3.333333');
+      // The derived per-unit value is not a whole cent; the field must not be
+      // step-invalid, or a real browser would block form submission on click.
+      expect(unitInput.checkValidity()).toBe(true);
+
+      fireEvent.click(screen.getByRole('button', { name: /create purchase order/i }));
+      await waitFor(() => {
+        expect(api.purchaseOrderAPI.createOrder).toHaveBeenCalled();
+      });
+      const call = (api.purchaseOrderAPI.createOrder as jest.Mock).mock.calls[0][0];
+      expect(call.items[0].unit_cost).toBe(3.333333);
+    });
+
+    test('non-case item (qpp=1) shows a single unit-cost field', async () => {
+      const singleUnitItem: api.ReorderDataItem = {
+        ...mockItem,
+        quantity_per_package: 1,
+        suggested_quantity: 5,
+        unit_cost: '4.00',
+        package_cost: null,
+      };
+      await renderWithItem(singleUnitItem);
+
+      // Single unit-cost field, no paired case cost.
+      expect(screen.getByLabelText(/unit cost for test item/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/cost per case for test item/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/cost \/ case/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/cost \/ unit/i)).not.toBeInTheDocument();
+    });
   });
 
   test('handles API error gracefully', async () => {

@@ -103,6 +103,12 @@ class DonationAdmin(admin.ModelAdmin):
         ),
     )
 
+    def get_queryset(self, request):
+        # total_items (items.count()) and total_quantity (items.all()) render on
+        # the changelist; prefetch items so both read from the reverse-FK cache
+        # instead of firing 2 queries per row (issue #890). Byte-identical.
+        return super().get_queryset(request).prefetch_related("items")
+
     @admin.action(description="Generate donation items from estimated count")
     def generate_items_from_estimate(self, request, queryset):
         """Generate DonationItem instances based on estimated_number_of_items."""
@@ -571,6 +577,12 @@ class DonationItemAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+    def get_queryset(self, request):
+        # remaining_quantity (list_display) sums dispositions.all() per row;
+        # prefetch them so the changelist reads from cache instead of firing one
+        # query per row (issue #890). Byte-identical.
+        return super().get_queryset(request).prefetch_related("dispositions")
 
 
 @admin.register(Disposition)

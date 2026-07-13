@@ -190,7 +190,15 @@ class Donation(models.Model):
 
     @property
     def items_processed(self) -> int:
-        """Number of items that have been fully processed (have dispositions)."""
+        """Number of items that have been fully processed (have dispositions).
+
+        NOT prefetch-safe: iterates ``self.items.all()`` and, per item, calls
+        ``dispositions.exists()`` plus ``is_fully_disposed`` (another
+        ``dispositions.all()`` sum) — an N+1 landmine. Left as-is (issue #890)
+        because it is currently rendered nowhere (no serializer / admin /
+        dashboard / report references it). If it is ever surfaced on a list,
+        prefetch ``items__dispositions`` on that queryset first.
+        """
         return sum(
             1 for item in self.items.all() if item.dispositions.exists() and item.is_fully_disposed
         )

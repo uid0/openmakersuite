@@ -61,7 +61,17 @@ class Fixture(models.Model):
 
     @property
     def pending_requests_count(self) -> int:
-        """Count of pending refill requests for this fixture."""
+        """Count of pending refill requests for this fixture.
+
+        Reads the prefetched ``_pending_refill_requests`` list when the list
+        view supplied it (a ``Prefetch(to_attr=...)`` pre-filtered to PENDING —
+        see ``FixtureViewSet.get_queryset``) to avoid a per-row ``.count()``
+        query (the fixture-list N+1, issue #890); otherwise falls back to the
+        live count. ``to_attr`` is used rather than a same-named ``annotate``
+        because this property would shadow the annotation.
+        """
+        if hasattr(self, "_pending_refill_requests"):
+            return len(self._pending_refill_requests)
         return self.refill_requests.filter(status=FixtureRefillRequest.Status.PENDING).count()
 
 

@@ -242,6 +242,12 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
     ]
     date_hierarchy = "order_date"
 
+    def get_queryset(self, request):
+        # Prefetch line items so the changelist's total_items column (and any
+        # other line-item aggregate) reads from cache instead of one query per
+        # row (#883).
+        return super().get_queryset(request).prefetch_related("items")
+
     inlines = [PurchaseOrderItemInline]
 
     fieldsets = (
@@ -414,6 +420,11 @@ class OrderDeliveryAdmin(admin.ModelAdmin):
         "updated_at",
     ]
     date_hierarchy = "delivery_date"
+
+    def get_queryset(self, request):
+        # Prefetch delivery items so the changelist's total_quantity_received
+        # column reads from cache instead of one query per row (#883).
+        return super().get_queryset(request).prefetch_related("items")
 
     inlines = [DeliveryItemInline]
 

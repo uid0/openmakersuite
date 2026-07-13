@@ -21,6 +21,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from inventory.models import InventoryItem, Supplier
 
+from . import services
 from .audit import record_event as record_audit_event
 from .models import (
     DeliveryItem,
@@ -222,102 +223,6 @@ def build_amazon_cart(lines):
         "missing_sku": missing_sku,
         "invalid_sku": invalid_sku,
     }
-
-
-def _create_lead_time_log(po_item, delivery_date):
-    """Create a LeadTimeLog entry when a PO item is fully received.
-
-    No-op if the PO was never sent or if the item has no item_supplier
-    (e.g. asset-only lines).
-    """
-    purchase_order = po_item.purchase_order
-
-    if not purchase_order.sent_at or not po_item.item_supplier:
-        return
-
-    order_date = purchase_order.sent_at
-    actual_delivery_date = delivery_date.date() if hasattr(delivery_date, "date") else delivery_date
-
-    estimated_lead_time = po_item.item_supplier.average_lead_time or 14
-    actual_lead_time = LeadTimeLog.calculate_business_days(order_date, actual_delivery_date)
-
-    LeadTimeLog.objects.create(
-        item_supplier=po_item.item_supplier,
-        purchase_order=purchase_order,
-        order_date=order_date,
-        expected_delivery_date=purchase_order.expected_delivery_date
-        or (order_date.date() + timedelta(days=estimated_lead_time)),
-        actual_delivery_date=actual_delivery_date,
-        estimated_lead_time_days=estimated_lead_time,
-        actual_lead_time_days=actual_lead_time,
-        quantity_ordered=po_item.quantity_ordered,
-        quantity_received=po_item.quantity_received,
-    )
-
-
-def _apply_po_receipt(
-    purchase_order,
-    line_quantities,
-    *,
-    received_by,
-    delivery_datetime,
-    tracking_number="",
-    carrier="",
-    receipt_notes="",
-):
-    """Record a receipt of specific quantities against PO line items.
-
-    Creates a single :class:`OrderDelivery` plus one :class:`DeliveryItem` per
-    ``(po_item, quantity)`` pair, increments each line's received quantity and
-    the linked inventory stock, advances the PO status, and writes a
-    :class:`LeadTimeLog` for any line that becomes fully received.
-
-    Shared by ``mark_delivered`` (which passes every pending quantity) and the
-    per-item ``receive`` action so receipt side effects stay consistent (DRY).
-    The delivery is flagged ``is_complete`` when this receipt leaves the whole
-    PO fully received — for ``mark_delivered`` that is always the case, matching
-    its previous behaviour.
-
-    Callers are responsible for validating ``line_quantities`` and for wrapping
-    the call in a transaction. Returns the created :class:`OrderDelivery`.
-    """
-    delivery = OrderDelivery.objects.create(
-        purchase_order=purchase_order,
-        delivery_date=delivery_datetime,
-        tracking_number=tracking_number,
-        carrier=carrier,
-        received_by=received_by,
-        receipt_notes=receipt_notes,
-    )
-
-    for po_item, quantity in line_quantities:
-        DeliveryItem.objects.create(
-            delivery=delivery,
-            purchase_order_item=po_item,
-            quantity_received=quantity,
-        )
-
-        po_item.quantity_received += quantity
-        po_item.save()
-
-        inventory_item = po_item.item
-        if inventory_item is not None:
-            inventory_item.current_stock += quantity
-            inventory_item.save()
-
-        if po_item.is_fully_received:
-            _create_lead_time_log(po_item, delivery.delivery_date)
-
-    if purchase_order.is_fully_received:
-        purchase_order.status = PurchaseOrder.Status.RECEIVED
-    else:
-        purchase_order.status = PurchaseOrder.Status.PARTIALLY_RECEIVED
-    purchase_order.save()
-
-    delivery.is_complete = purchase_order.is_fully_received
-    delivery.save(update_fields=["is_complete"])
-
-    return delivery
 
 
 class ReorderRequestViewSet(viewsets.ModelViewSet):
@@ -775,21 +680,17 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         Shared by the manual ``send_to_supplier`` action and the automatic
         sales-order-number trigger so both paths stay consistent: status -> SENT,
-        ``sent_by``/``sent_at`` stamped, a ``po_send`` audit event recorded, and
-        the linked reorder requests synced. Callers own the DRAFT precondition.
+        ``sent_by``/``sent_at`` stamped, the linked reorder requests synced (both
+        via :func:`services.mark_sent`), and a ``po_send`` audit event recorded.
+        Callers own the DRAFT precondition.
         """
-        purchase_order.status = PurchaseOrder.Status.SENT
-        purchase_order.sent_by = user
-        purchase_order.sent_at = timezone.now()
-        purchase_order.save()
+        services.mark_sent(purchase_order, user)
         record_audit_event(
             action=PurchaseOrderAuditEvent.Action.PO_SEND,
             actor=user,
             purchase_order=purchase_order,
             metadata={"po_number": purchase_order.po_number},
         )
-        # Keep linked reorder requests in step with the PO going out.
-        self._update_reorder_requests_from_po(purchase_order)
 
     @action(detail=False, methods=["post"])
     def create_optimized_order(self, request):
@@ -1160,80 +1061,6 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         return base_quantity
 
-    def _update_reorder_requests_from_po(self, purchase_order):
-        """
-        Update associated ReorderRequest objects when a PurchaseOrder is finalized.
-
-        Updates requests with:
-        - order_number (PO number)
-        - actual_cost (from PO line items)
-        - estimated_delivery (calculated from expected_delivery_date or lead time)
-        - ordered_at (when PO was sent)
-        - status = "ordered"
-        """
-        # Find all inventory items in this PO
-        po_items = purchase_order.items.filter(item_supplier__isnull=False).select_related(
-            "item_supplier__item"
-        )
-
-        for po_item in po_items:
-            item = po_item.item_supplier.item
-
-            # Find active reorder requests for this item (pending or approved)
-            active_requests = ReorderRequest.objects.filter(
-                item=item,
-                status__in=[ReorderRequest.Status.PENDING, ReorderRequest.Status.APPROVED],
-            )
-
-            # Calculate estimated delivery date
-            estimated_delivery = None
-            if purchase_order.expected_delivery_date:
-                estimated_delivery = purchase_order.expected_delivery_date
-            elif po_item.item_supplier.average_lead_time:
-                # Calculate from lead time in business days
-                order_date = (
-                    purchase_order.sent_at.date()
-                    if purchase_order.sent_at
-                    else timezone.now().date()
-                )
-                lead_time_days = po_item.item_supplier.average_lead_time
-                estimated_delivery = self._add_business_days(order_date, lead_time_days)
-
-            # Update each active request
-            for reorder_request in active_requests:
-                reorder_request.status = ReorderRequest.Status.ORDERED
-                reorder_request.order_number = purchase_order.po_number
-                reorder_request.ordered_at = purchase_order.sent_at or timezone.now()
-                reorder_request.estimated_delivery = estimated_delivery
-
-                # Set actual cost if not already set
-                if not reorder_request.actual_cost:
-                    # Calculate cost per unit from PO
-                    if po_item.quantity_ordered > 0 and po_item.unit_cost_ordered:
-                        cost_per_unit = po_item.unit_cost_ordered
-                        reorder_request.actual_cost = cost_per_unit * reorder_request.quantity
-                    else:
-                        # Fallback to estimated cost from line item
-                        reorder_request.actual_cost = po_item.estimated_cost
-
-                reorder_request.save()
-
-    def _add_business_days(self, start_date, business_days):
-        """Add business days to a date (excluding weekends)."""
-        if isinstance(start_date, timezone.datetime):
-            start_date = start_date.date()
-
-        current_date = start_date
-        days_added = 0
-
-        while days_added < business_days:
-            current_date += timedelta(days=1)
-            # Monday = 0, Sunday = 6
-            if current_date.weekday() < 5:  # Monday to Friday
-                days_added += 1
-
-        return current_date
-
     @action(detail=True, methods=["post"])
     def send_to_supplier(self, request, pk=None):
         """Mark purchase order as sent to supplier."""
@@ -1261,9 +1088,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        purchase_order.status = PurchaseOrder.Status.CONFIRMED
-        purchase_order.expected_delivery_date = request.data.get("expected_delivery_date")
-        purchase_order.save()
+        services.confirm_order(purchase_order, request.data.get("expected_delivery_date"))
 
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)
@@ -1378,16 +1203,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             datetime.combine(data["delivery_date"], datetime.min.time())
         )
 
-        with transaction.atomic():
-            _apply_po_receipt(
-                purchase_order,
-                [(po_item, po_item.quantity_pending) for po_item in pending_items],
-                received_by=request.user,
-                delivery_datetime=delivery_datetime,
-                tracking_number=data.get("tracking_number", ""),
-                carrier=data.get("carrier", ""),
-                receipt_notes=data.get("receipt_notes", ""),
-            )
+        services.mark_delivered_receipt(
+            purchase_order,
+            received_by=request.user,
+            delivery_datetime=delivery_datetime,
+            tracking_number=data.get("tracking_number", ""),
+            carrier=data.get("carrier", ""),
+            receipt_notes=data.get("receipt_notes", ""),
+        )
 
         record_audit_event(
             action=PurchaseOrderAuditEvent.Action.PO_MARK_DELIVERED,
@@ -1483,16 +1306,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         else:
             delivery_datetime = timezone.now()
 
-        with transaction.atomic():
-            _apply_po_receipt(
-                purchase_order,
-                resolved_lines,
-                received_by=request.user,
-                delivery_datetime=delivery_datetime,
-                tracking_number=data.get("tracking_number", ""),
-                carrier=data.get("carrier", ""),
-                receipt_notes=data.get("receipt_notes", ""),
-            )
+        services.receive_delivery(
+            purchase_order,
+            resolved_lines,
+            received_by=request.user,
+            delivery_datetime=delivery_datetime,
+            tracking_number=data.get("tracking_number", ""),
+            carrier=data.get("carrier", ""),
+            receipt_notes=data.get("receipt_notes", ""),
+        )
 
         record_audit_event(
             action=PurchaseOrderAuditEvent.Action.PO_RECEIVE_ITEMS,
@@ -1645,19 +1467,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Void the line item
-        line_item.is_voided = True
-        line_item.voided_at = timezone.now()
-        line_item.voided_by = request.user
-        line_item.void_reason = request.data.get("reason", "Item discontinued by supplier")
-
-        # If this is an item_supplier relationship, mark it as discontinued
-        if line_item.item_supplier:
-            line_item.item_supplier.is_discontinued = True
-            line_item.item_supplier.is_active = False
-            line_item.item_supplier.save()
-
-        line_item.save()
+        # Void the line item (marks the linked item_supplier discontinued too)
+        reason = request.data.get("reason", "Item discontinued by supplier")
+        services.void_line_item(line_item, request.user, reason)
 
         record_audit_event(
             action=PurchaseOrderAuditEvent.Action.PO_LINE_VOID,
@@ -1707,22 +1519,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        now = timezone.now()
         reason = request.data.get("reason", "")
 
-        with transaction.atomic():
-            purchase_order.status = PurchaseOrder.Status.VOIDED
-            purchase_order.voided_at = now
-            purchase_order.voided_by = user
-            purchase_order.void_reason = reason
-            purchase_order.save()
-
-            purchase_order.items.filter(is_voided=False).update(
-                is_voided=True,
-                voided_at=now,
-                voided_by=user,
-                void_reason="PO voided",
-            )
+        services.void_po(purchase_order, user, reason)
 
         record_audit_event(
             action=PurchaseOrderAuditEvent.Action.PO_VOID,
@@ -1897,7 +1696,18 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def scan_barcode(self, request):
-        """Process barcode scan for order receipt."""
+        """Process barcode scan for order receipt.
+
+        NOTE (#883): this is a SEPARATE receive path from
+        :func:`services.receive_delivery` (used by ``receive``/``mark-delivered``)
+        and is intentionally left inline. Its behaviour diverges in ways that do
+        not parameterize cleanly: it upserts one delivery per day
+        (``get_or_create`` on ``delivery_date``) instead of always creating a new
+        delivery, it records scan-specific ``DeliveryItem`` fields
+        (``scanned_upc``/``scanned_at``/``scanned_by``/damage/expiry), it never
+        sets ``delivery.is_complete``, and it records NO audit event. Kept as-is
+        to preserve exact behaviour; flagged here as a future de-duplication.
+        """
         serializer = BarcodeReceiptSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -2017,7 +1827,7 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
 
     def _create_lead_time_log(self, po_item, delivery_date):
         """Create a lead time log entry when an item is fully received."""
-        _create_lead_time_log(po_item, delivery_date)
+        services.create_lead_time_log(po_item, delivery_date)
 
     @action(detail=False, methods=["get"])
     def pending_orders(self, request):

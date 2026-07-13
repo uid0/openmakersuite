@@ -23,6 +23,9 @@ interface SelectedItem extends ReorderDataItem {
   quantity: number;
   cases: number;
   unit_cost_override?: string;
+  // Per-case cost, kept in sync with unit_cost_override (case = unit × qpp).
+  // Display/edit convenience only — submit always uses the per-unit value.
+  case_cost_override?: string;
   expected_shipment_date?: string;
 }
 
@@ -38,6 +41,15 @@ interface FreeformItem {
   quantity: number;
   unit_cost: string;
 }
+
+// Normalize a derived cost to a clean string, stripping IEEE-754 float noise
+// (e.g. 39.959999999999994 -> "39.96") without cent-level rounding. Six
+// decimals is well beyond cents, so paired unit/case costs stay consistent
+// even when the case size doesn't divide evenly (avoids cent drift on submit).
+const formatCostValue = (value: number): string => {
+  if (!Number.isFinite(value)) return '';
+  return String(parseFloat(value.toFixed(6)));
+};
 
 const PurchaseOrderFormPage: React.FC = () => {
   const navigate = useNavigate();
@@ -181,13 +193,50 @@ const PurchaseOrderFormPage: React.FC = () => {
     );
   };
 
-  // Update item price override
-  const updateItemPrice = (itemSupplierId: number, unitCostOverride: string) => {
+  // Update the per-unit cost override. For case-packed items, keep the paired
+  // case-cost field in sync (case = unit × qpp). The per-unit value the user
+  // typed is stored verbatim (full precision) and remains the source of truth
+  // for submit.
+  const updateItemUnitCost = (itemSupplierId: number, unitCostOverride: string) => {
     setSelectedItems((prev) =>
-      prev.map((item) =>
-        item.item_supplier_id === itemSupplierId ? { ...item, unit_cost_override: unitCostOverride } : item
-      )
+      prev.map((item) => {
+        if (item.item_supplier_id !== itemSupplierId) return item;
+        const qpp = item.quantity_per_package || 1;
+        const parsed = parseFloat(unitCostOverride);
+        const caseCost =
+          unitCostOverride.trim() === '' || Number.isNaN(parsed)
+            ? ''
+            : formatCostValue(parsed * qpp);
+        return { ...item, unit_cost_override: unitCostOverride, case_cost_override: caseCost };
+      })
     );
+  };
+
+  // Update the per-case cost. Derives the per-unit cost (unit = case / qpp) at
+  // full precision — the per-unit value is what submit sends, so no cent drift
+  // is introduced by rounding the case cost to display precision.
+  const updateItemCaseCost = (itemSupplierId: number, caseCostOverride: string) => {
+    setSelectedItems((prev) =>
+      prev.map((item) => {
+        if (item.item_supplier_id !== itemSupplierId) return item;
+        const qpp = item.quantity_per_package || 1;
+        const parsed = parseFloat(caseCostOverride);
+        const unitCost =
+          caseCostOverride.trim() === '' || Number.isNaN(parsed)
+            ? ''
+            : formatCostValue(parsed / qpp);
+        return { ...item, case_cost_override: caseCostOverride, unit_cost_override: unitCost };
+      })
+    );
+  };
+
+  // Per-case cost placeholder: the supplier's saved package cost when present,
+  // otherwise derived from the saved unit cost (unit × qpp).
+  const caseCostPlaceholderFor = (item: SelectedItem): string => {
+    if (item.package_cost != null && item.package_cost !== '') return item.package_cost;
+    const qpp = item.quantity_per_package || 1;
+    const unit = parseFloat(item.unit_cost || '0');
+    return Number.isNaN(unit) ? '' : formatCostValue(unit * qpp);
   };
 
   // Update item expected shipment date
@@ -704,17 +753,63 @@ const PurchaseOrderFormPage: React.FC = () => {
                             )}
                           </td>
                           <td className="col-cost">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              placeholder={item.unit_cost}
-                              value={item.unit_cost_override || ''}
-                              onChange={(e) => updateItemPrice(item.item_supplier_id, e.target.value)}
-                              disabled={!item.selected}
-                              className="input-cost"
-                              title="Cost per individual unit (we use this for inventory valuation; total = unit cost × units ordered)."
-                            />
+                            {item.quantity_per_package > 1 ? (
+                              <div className="case-cost-group">
+                                {/*
+                                  step="any" (not 0.01) on both inputs: a case cost that
+                                  doesn't divide evenly by qpp derives a sub-cent per-unit
+                                  value (kept at full precision on purpose). step="0.01"
+                                  would mark that field :invalid and block form submission.
+                                */}
+                                <label className="case-cost-field">
+                                  <span className="case-cost-label">Cost / unit</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    placeholder={item.unit_cost}
+                                    value={item.unit_cost_override || ''}
+                                    onChange={(e) =>
+                                      updateItemUnitCost(item.item_supplier_id, e.target.value)
+                                    }
+                                    disabled={!item.selected}
+                                    className="input-cost"
+                                    aria-label={`Cost per unit for ${item.item_name}`}
+                                    title="Cost per individual unit (used for inventory valuation; line total = unit cost × units ordered). Editing this updates cost per case."
+                                  />
+                                </label>
+                                <label className="case-cost-field">
+                                  <span className="case-cost-label">Cost / case</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    placeholder={caseCostPlaceholderFor(item)}
+                                    value={item.case_cost_override || ''}
+                                    onChange={(e) =>
+                                      updateItemCaseCost(item.item_supplier_id, e.target.value)
+                                    }
+                                    disabled={!item.selected}
+                                    className="input-cost"
+                                    aria-label={`Cost per case for ${item.item_name}`}
+                                    title="Cost per case (= unit cost × units per case). Editing this updates cost per unit."
+                                  />
+                                </label>
+                              </div>
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder={item.unit_cost}
+                                value={item.unit_cost_override || ''}
+                                onChange={(e) => updateItemUnitCost(item.item_supplier_id, e.target.value)}
+                                disabled={!item.selected}
+                                className="input-cost"
+                                aria-label={`Unit cost for ${item.item_name}`}
+                                title="Cost per individual unit (we use this for inventory valuation; total = unit cost × units ordered)."
+                              />
+                            )}
                           </td>
                           <td className="col-lead">{item.lead_time_days} days</td>
                           <td className="col-shipment">

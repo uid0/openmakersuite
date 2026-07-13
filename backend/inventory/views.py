@@ -26,6 +26,7 @@ from rest_framework.permissions import (
 from rest_framework.response import Response
 
 from config.api_errors import ErrorCode, error_response
+from membership.actor import actor_display
 from membership.permissions import IsAuthenticatedOrStaffSigAdminWrite, IsStaffOrSigAdmin
 
 from .audit import record_event as record_maintenance_audit_event
@@ -3173,6 +3174,14 @@ class FixtureViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
 
+        if self.action == "retrieve":
+            # FixtureDetailSerializer.recent_refill_requests reads each request's
+            # actor FKs (#888) — prefetch them so the detail view stays flat.
+            queryset = queryset.prefetch_related(
+                "refill_requests__requested_user",
+                "refill_requests__resolved_user",
+            )
+
         # Filter by location if specified
         location = self.request.query_params.get("location")
         if location:
@@ -3231,15 +3240,23 @@ class FixtureViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Get username from request if authenticated
+        # Actor identity (#888): link the auth user when signed in, else leave
+        # the FK null for an anonymous kiosk scan (this endpoint stays AllowAny).
+        # The paired requested_by string holds the display name (handle/username)
+        # or stays blank for an anonymous scan — unchanged behaviour.
+        requested_user = None
         requested_by = ""
         if request.user and request.user.is_authenticated:
-            requested_by = request.user.username
+            requested_user = request.user
+            requested_by = actor_display(request.user)
 
         # Create the refill request
         notes = request.data.get("notes", "")
         refill_request = FixtureRefillRequest.objects.create(
-            fixture=fixture, requested_by=requested_by, notes=notes
+            fixture=fixture,
+            requested_user=requested_user,
+            requested_by=requested_by,
+            notes=notes,
         )
 
         # Send webhook notification
@@ -3266,8 +3283,9 @@ class FixtureViewSet(viewsets.ModelViewSet):
         """
         fixture = self.get_object()
 
-        # Get the user who is resolving
-        resolved_by = request.user.username if request.user.is_authenticated else ""
+        # Actor identity (#888): record the resolver's auth link + display name.
+        resolved_user = request.user if request.user.is_authenticated else None
+        resolved_by = actor_display(request.user) if request.user.is_authenticated else ""
         notes = request.data.get("notes", "")
 
         # Update all pending requests
@@ -3278,6 +3296,7 @@ class FixtureViewSet(viewsets.ModelViewSet):
         ).update(
             status=FixtureRefillRequest.Status.COMPLETED,
             resolved_at=timezone.now(),
+            resolved_user=resolved_user,
             resolved_by=resolved_by,
             # Only update notes if provided
             notes=notes if notes else F("notes"),
@@ -3295,7 +3314,13 @@ class FixtureRefillRequestViewSet(viewsets.ModelViewSet):
     """API endpoint for fixture refill requests."""
 
     queryset = FixtureRefillRequest.objects.select_related(
-        "fixture", "fixture__location", "fixture__refill_item"
+        "fixture",
+        "fixture__location",
+        "fixture__refill_item",
+        # Actor FKs (#888) are read by the serializer's *_actor / *_username
+        # fields — join them to keep the list endpoint free of per-row lookups.
+        "requested_user",
+        "resolved_user",
     ).all()
     serializer_class = FixtureRefillRequestSerializer
 
@@ -3325,6 +3350,25 @@ class FixtureRefillRequestViewSet(viewsets.ModelViewSet):
 
         return queryset.order_by("-requested_at")
 
+    def perform_create(self, serializer):
+        """Stamp the requesting actor on create (#888).
+
+        Signed-in users get the FK + their handle/username display name; the
+        create endpoint stays AllowAny, so an anonymous kiosk caller keeps a
+        null FK and whatever display name they supplied in the request body.
+        requested_by is read-only on the serializer now, so the anon name is
+        read straight from request.data here — unchanged behaviour for the
+        legacy string.
+        """
+        user = self.request.user
+        if user and user.is_authenticated:
+            serializer.save(requested_user=user, requested_by=actor_display(user))
+        else:
+            serializer.save(
+                requested_user=None,
+                requested_by=self.request.data.get("requested_by", ""),
+            )
+
     @action(detail=True, methods=["post"])
     def resolve(self, request, pk=None):
         """Mark a single refill request as completed."""
@@ -3340,7 +3384,13 @@ class FixtureRefillRequestViewSet(viewsets.ModelViewSet):
 
         refill_request.status = FixtureRefillRequest.Status.COMPLETED
         refill_request.resolved_at = timezone.now()
-        refill_request.resolved_by = request.user.username if request.user.is_authenticated else ""
+        # Actor identity (#888): auth link + display name for the resolver.
+        if request.user.is_authenticated:
+            refill_request.resolved_user = request.user
+            refill_request.resolved_by = actor_display(request.user)
+        else:
+            refill_request.resolved_user = None
+            refill_request.resolved_by = ""
         refill_request.notes = request.data.get("notes", refill_request.notes)
         refill_request.save()
 

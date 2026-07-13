@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
+from django.conf import settings
 from django.db import models
 
 
@@ -91,18 +92,40 @@ class FixtureRefillRequest(models.Model):
         help_text="Current status of this refill request",
     )
     requested_at = models.DateTimeField(auto_now_add=True)
+    # Actor-identity convention (#888, see membership.actor): ``requested_user``
+    # is the auth link (null = anonymous / system / unrecoverable) and the
+    # legacy ``requested_by`` string is the paired ``*_name`` half.
+    requested_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fixture_refill_requests_made",
+        help_text="Authenticated user who requested this refill (null if anonymous/system)",
+    )
     requested_by = models.CharField(
         max_length=200,
         blank=True,
-        help_text="Username or identifier of person who reported this (optional)",
+        help_text="Display name of person who reported this (anon-supplied, or the "
+        "authenticated user's handle/username); the *_name half of requested_user",
     )
     resolved_at = models.DateTimeField(
         null=True, blank=True, help_text="When this request was resolved"
     )
+    # Paired with the legacy ``resolved_by`` string, same convention as above.
+    resolved_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fixture_refill_requests_resolved",
+        help_text="Authenticated user who resolved this request (null if anonymous/system)",
+    )
     resolved_by = models.CharField(
         max_length=200,
         blank=True,
-        help_text="Username of person who resolved this request",
+        help_text="Display name of person who resolved this request; the *_name "
+        "half of resolved_user",
     )
     notes = models.TextField(blank=True, help_text="Additional notes about this request")
 

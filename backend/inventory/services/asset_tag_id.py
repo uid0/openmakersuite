@@ -23,6 +23,13 @@ safe to call from anywhere (serializers, admin, scanners).
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
+
+from django.db import IntegrityError
+from django.utils import timezone
+
+if TYPE_CHECKING:
+    from inventory.models.asset import Asset
 
 # Prefix that every asset tag carries.
 TAG_PREFIX = "DMS-"
@@ -104,6 +111,39 @@ def generate_asset_tag(year: int) -> str:
     return compose_asset_tag(core)
 
 
+def assign_asset_tag(asset: "Asset", *, max_retries: int = 10) -> str:
+    """Assign a unique asset tag to ``asset`` when it does not already have one.
+
+    Returns the tag. A no-op — and never a regeneration — when
+    ``asset.asset_tag`` is already set, so an existing tag survives repeated
+    saves. The received year drives the ``YY`` segment (see
+    :func:`generate_asset_tag`) and falls back to the current year when
+    ``date_received`` is unset.
+
+    The atomic per-year sequence already guarantees uniqueness, but we still
+    retry on the off chance a freshly allocated tag collides with a backfilled
+    one; after ``max_retries`` consecutive collisions we raise
+    :class:`~django.db.IntegrityError`.
+
+    Extracted from ``Asset.save()`` (gh #887) so bare ``Asset(...).save()``
+    callers (admin duplicate action, ``epaper_preview`` command) keep getting a
+    tag generated synchronously on first save.
+    """
+    if asset.asset_tag:
+        return asset.asset_tag
+
+    from inventory.models import Asset
+
+    year = asset.date_received.year if asset.date_received else timezone.now().year
+    for _ in range(max_retries):
+        candidate = generate_asset_tag(year)
+        if not Asset.objects.filter(asset_tag=candidate).exists():
+            asset.asset_tag = candidate
+            return asset.asset_tag
+    # pragma: no cover - only if max_retries consecutive allocations collide
+    raise IntegrityError("Could not allocate a unique asset tag")
+
+
 __all__ = [
     "TAG_PREFIX",
     "CHECKSUM_LEN",
@@ -111,4 +151,5 @@ __all__ = [
     "validate_asset_tag",
     "compose_asset_tag",
     "generate_asset_tag",
+    "assign_asset_tag",
 ]

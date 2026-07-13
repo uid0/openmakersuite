@@ -390,3 +390,32 @@ class TestPurchaseOrderAggregates:
         po = PurchaseOrder.objects.get(pk=po.pk)
         assert po.has_active_items is False
         assert po.total_items == 0
+
+
+class TestNextPoNumber:
+    """next_po_number — the ``PO-YYYY-NNNN`` composition extracted from save() (#887).
+
+    ``PurchaseOrder.auto_generate_po_number`` delegates to this helper while the
+    method + save() retry loop stay on the model (the concurrency patch seam).
+    """
+
+    def test_first_number_for_year(self):
+        assert services.next_po_number(2099) == "PO-2099-0001"
+
+    def test_increments_from_latest(self):
+        PurchaseOrder.objects.create(
+            created_by=UserFactory(), supplier=SupplierFactory(), po_number="PO-2099-0007"
+        )
+        assert services.next_po_number(2099) == "PO-2099-0008"
+
+    def test_unparseable_counter_falls_back_to_one(self):
+        PurchaseOrder.objects.create(
+            created_by=UserFactory(), supplier=SupplierFactory(), po_number="PO-2099-BAD"
+        )
+        assert services.next_po_number(2099) == "PO-2099-0001"
+
+    def test_scoped_to_year(self):
+        PurchaseOrder.objects.create(
+            created_by=UserFactory(), supplier=SupplierFactory(), po_number="PO-2098-0042"
+        )
+        assert services.next_po_number(2099) == "PO-2099-0001"

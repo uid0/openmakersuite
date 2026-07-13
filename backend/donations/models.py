@@ -165,24 +165,17 @@ class Donation(models.Model):
         return f"Donation from {self.donor_name} ({self.date_received})"
 
     def save(self, *args, **kwargs):
-        """Auto-generate donation number if not provided."""
+        """Auto-generate donation number if not provided.
+
+        The ``DON-YYYY-NNN`` composition is delegated to
+        :func:`donations.services.numbering.next_donation_number` (gh #887); the
+        received-year selection stays here since it reads ``self.date_received``.
+        """
         if not self.donation_number:
-            # Generate a donation number like DON-2024-001
+            from .services.numbering import next_donation_number
+
             year = self.date_received.year if self.date_received else timezone.now().year
-            last_donation = (
-                Donation.objects.filter(donation_number__startswith=f"DON-{year}-")
-                .order_by("-donation_number")
-                .first()
-            )
-            if last_donation and last_donation.donation_number:
-                try:
-                    last_num = int(last_donation.donation_number.split("-")[-1])
-                    next_num = last_num + 1
-                except (ValueError, IndexError):
-                    next_num = 1
-            else:
-                next_num = 1
-            self.donation_number = f"DON-{year}-{next_num:03d}"
+            self.donation_number = next_donation_number(year)
         super().save(*args, **kwargs)
 
     @property

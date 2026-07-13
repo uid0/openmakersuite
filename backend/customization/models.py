@@ -9,12 +9,30 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 
+class SiteSettingsManager(models.Manager):
+    """Manager exposing the explicit singleton accessor for :class:`SiteSettings`."""
+
+    def get_singleton(self) -> "SiteSettings":
+        """Return the single settings row, creating it with defaults on first access.
+
+        This is the explicit creation path for the singleton (gh #887). It
+        replaces the old ``save()`` field-copy redirect: creating the row is no
+        longer a surprising side effect of saving a second instance — callers
+        ask for the singleton and always get exactly one row back.
+        """
+        obj = self.first()
+        if obj is None:
+            obj = self.create()
+        return obj
+
+
 class SiteSettings(models.Model):
     """
     Site-wide customization settings.
 
     This is a singleton model - only one instance should exist.
-    Use SiteSettings.get() to get or create the single instance.
+    Use ``SiteSettings.objects.get_singleton()`` (or the ``SiteSettings.get()``
+    compatibility wrapper) to get or create the single instance.
     """
 
     # Basic branding
@@ -137,6 +155,8 @@ class SiteSettings(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = SiteSettingsManager()
+
     class Meta:
         verbose_name = "Site Settings"
         verbose_name_plural = "Site Settings"
@@ -155,26 +175,26 @@ class SiteSettings(models.Model):
                 )
 
     def save(self, *args, **kwargs):
-        """Override save to ensure singleton pattern."""
+        """Validate (which enforces the singleton via ``clean()``) then persist.
+
+        The old override redirected a second-instance save onto the existing
+        row by copying fields — a surprising side effect. Singleton *creation*
+        now lives in :meth:`SiteSettingsManager.get_singleton`; ``save()`` just
+        validates and writes. ``clean()`` still raises on a second instance, so
+        the one-row guarantee is preserved (gh #887, AC-3).
+        """
         self.full_clean()
-        # If this is the first instance, allow it
-        if not SiteSettings.objects.exists() or self.pk:
-            super().save(*args, **kwargs)
-        else:
-            # If another instance exists, update it instead
-            existing = SiteSettings.objects.first()
-            for field in self._meta.fields:
-                if field.name not in ["id", "created_at", "updated_at"]:
-                    setattr(existing, field.name, getattr(self, field.name))
-            existing.save(*args, **kwargs)
+        super().save(*args, **kwargs)
 
     @classmethod
     def get(cls):
-        """Get or create the single SiteSettings instance."""
-        obj = cls.objects.first()
-        if not obj:
-            obj = cls.objects.create()
-        return obj
+        """Get or create the single SiteSettings instance.
+
+        Thin compatibility wrapper over
+        :meth:`SiteSettingsManager.get_singleton` so existing callers keep
+        working unchanged.
+        """
+        return cls.objects.get_singleton()
 
 
 class SiteSettingsAuditEvent(models.Model):

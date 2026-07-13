@@ -338,26 +338,17 @@ class PurchaseOrder(models.Model):
         return total
 
     def auto_generate_po_number(self) -> str:
-        """Auto-generate a PO number if not set."""
+        """Auto-generate a PO number if not set.
+
+        Delegates the ``PO-YYYY-NNNN`` composition to
+        :func:`reorder_queue.services.numbering.next_po_number` (gh #887) but
+        stays an instance method: the concurrency test patches it, and
+        ``save()`` calls it once per retry attempt on uniqueness collisions.
+        """
         if not self.po_number:
-            # Format: PO-YYYY-NNNN
-            year = timezone.now().year
-            last_po = (
-                PurchaseOrder.objects.filter(po_number__startswith=f"PO-{year}-")
-                .order_by("-po_number")
-                .first()
-            )
+            from .services.numbering import next_po_number
 
-            if last_po:
-                try:
-                    last_num = int(last_po.po_number.split("-")[-1])
-                    next_num = last_num + 1
-                except (ValueError, IndexError):
-                    next_num = 1
-            else:
-                next_num = 1
-
-            self.po_number = f"PO-{year}-{next_num:04d}"
+            self.po_number = next_po_number(timezone.now().year)
         return self.po_number
 
     def save(self, *args, **kwargs) -> None:

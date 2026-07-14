@@ -60,7 +60,7 @@ django-anymail[postmark]==15.0
 sentry-sdk[django,celery]==2.64.0
 
 # Testing and Code Coverage
-coverage==7.15.0
+coverage==7.15.1
 pytest==9.1.1
 pytest-django==4.12.0
 pytest-cov==7.1.0

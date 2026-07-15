@@ -43,6 +43,7 @@ from .models import (
     Supplier,
     UsageLog,
     WorkOrder,
+    WorkOrderLotoCompletion,
     WorkOrderMaterialUsage,
     WorkOrderPhoto,
     WorkOrderSubmission,
@@ -1978,6 +1979,23 @@ class WorkOrderMaterialUsageInline(admin.TabularInline):
     readonly_fields = ["material_name", "quantity_planned", "unit", "applied_quantity"]
 
 
+class WorkOrderLotoCompletionInline(admin.TabularInline):
+    model = WorkOrderLotoCompletion
+    extra = 0
+    fields = [
+        "source_label",
+        "isolation_point",
+        "required_devices",
+        "is_completed",
+        "completed_by",
+        "completed_at",
+        "notes",
+    ]
+    # The denormalized descriptive fields are fixed at WO generation; only the
+    # completion state / note are edited here.
+    readonly_fields = ["source_label", "isolation_point", "required_devices", "completed_at"]
+
+
 class WorkOrderPhotoInline(admin.TabularInline):
     model = WorkOrderPhoto
     extra = 0
@@ -2005,7 +2023,12 @@ class WorkOrderAdmin(admin.ModelAdmin):
         "notes",
     ]
     readonly_fields = ["short_id", "is_overdue", "created_at", "updated_at"]
-    inlines = [WorkOrderTaskCompletionInline, WorkOrderMaterialUsageInline, WorkOrderPhotoInline]
+    inlines = [
+        WorkOrderTaskCompletionInline,
+        WorkOrderLotoCompletionInline,
+        WorkOrderMaterialUsageInline,
+        WorkOrderPhotoInline,
+    ]
 
 
 @admin.register(WorkOrderSubmission)

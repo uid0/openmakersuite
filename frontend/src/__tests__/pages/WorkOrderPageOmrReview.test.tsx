@@ -50,9 +50,11 @@ const scanWorkOrder = (overrides: Partial<WorkOrder> = {}): WorkOrder =>
     completed_by_name: null,
     completed_at: null,
     notes: '',
+    loto_completion_note: '',
     is_overdue: false,
     task_completions: [],
     material_usage: [],
+    loto_completions: [],
     photos: [],
     submissions: [
       {

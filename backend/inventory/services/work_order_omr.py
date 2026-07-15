@@ -44,15 +44,18 @@ except Exception as exc:  # noqa: BLE001 - any import failure means "no reader"
 
 
 def dynamic_target_ids(work_order: "WorkOrder") -> list[str]:
-    """The mark target-ids that vary per work order (tasks + materials).
+    """The mark target-ids that vary per work order (tasks + materials + LOTO).
 
     Mirrors the checkbox field names ``generate_work_order_pdf`` draws exactly:
-    one ``task_<uuid>`` per task completion, and either ``material_<uuid>`` per
-    usage row or — when a legacy WO has no usage rows — ``materialspec_<id>``
-    per maintenance-item material. The fixed completion marks
+    one ``task_<uuid>`` per task completion, either ``material_<uuid>`` per usage
+    row or — when a legacy WO has no usage rows — ``materialspec_<id>`` per
+    maintenance-item material, and one ``loto_<uuid>`` per LOTO completion
+    (energy source). The fixed completion marks
     (``work_complete``/``result_pass``/``result_fail``/``tech_initials``/
     ``tech_date``) are constant across every form and so are excluded from the
-    drift signature.
+    drift signature. Including the ``loto_`` ids makes the signature sensitive to
+    a changed energy-source set, so a scan of a sheet printed before the change
+    is refused rather than mis-applied.
     """
     ids = [f"task_{tc.id}" for tc in work_order.task_completions.all()]
 
@@ -61,6 +64,8 @@ def dynamic_target_ids(work_order: "WorkOrder") -> list[str]:
         ids += [f"material_{mu.id}" for mu in material_usage]
     else:
         ids += [f"materialspec_{mat.id}" for mat in work_order.maintenance_item.materials.all()]
+
+    ids += [f"loto_{lc.id}" for lc in work_order.loto_completions.all()]
     return ids
 
 

@@ -310,11 +310,12 @@ def apply_submission(submission: WorkOrderSubmission) -> WorkOrderSubmission:
     finally:
         submission.attachment.close()
 
-    # OMR scan path (bead-2): a flatbed scan of a printed PM work-order form.
-    # The interactive AcroForm layer is gone, so marks are recovered by
-    # computer vision and — per the 0.999 bar — almost everything routes to
-    # human review. Only PM-completion scans use OMR; 3PWO/LOCPROB keep their
-    # existing QR/text handlers.
+    # OMR scan path (bead-2): a scan of a printed PM work-order form. The
+    # interactive AcroForm layer is gone, so marks are recovered by computer
+    # vision and split by the two-axis auto-apply policy (registration adequacy
+    # × fill confidence): a confidently-filled mark on an adequately-registered
+    # scan applies, everything else routes to human review. Only PM-completion
+    # scans use OMR; 3PWO/LOCPROB keep their existing QR/text handlers.
     if (
         submission.source == WorkOrderSubmission.Source.SCAN
         and submission.kind == WorkOrderSubmission.Kind.PM_COMPLETION
@@ -478,7 +479,7 @@ OMR_FIXED_MARK_LABELS = {
 
 
 def looks_like_scan(raw_bytes: bytes, *, is_image: bool = False) -> bool:
-    """Decide whether an inbound attachment is a flatbed scan (vs born-digital).
+    """Decide whether an inbound attachment is a scan (vs born-digital).
 
     An image attachment is always a scan. A PDF is a scan when its interactive
     AcroForm layer is gone (no ``work_order_id`` field) but it still carries an
@@ -603,7 +604,7 @@ def omr_confirm_completion(
         maintenance_item=item,
         completed_by=user if (user and getattr(user, "is_authenticated", False)) else None,
         notes=(
-            f"Completed via reviewed flatbed scan "
+            f"Completed via reviewed scan "
             f"(submission {submission.id}, WO {work_order.short_id})."
         ),
     )
@@ -633,16 +634,19 @@ def _omr_review(
 
 @transaction.atomic
 def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> WorkOrderSubmission:
-    """Read marks off a flatbed OMR scan and stage them for human review.
+    """Read marks off an OMR scan and stage them for human review.
 
-    Marks at confidence ≥ 0.999 pre-check their task/material box; everything
-    else queues to ``pending_changes``. The work order is NEVER auto-advanced
+    Auto-apply is two-axis (``auto_apply_or_queue``): a mark pre-checks its
+    task/material box only when the scan registered adequately
+    (``registration_confidence >= OMR_REG_MIN``) AND the box is confidently
+    filled; every ambiguous fill, and every mark on an inadequately-registered
+    scan, queues to ``pending_changes``. The work order is NEVER auto-advanced
     to COMPLETED here — that transition is gated behind an explicit human
     confirm on the review screen (design rule: never auto-close from a scan).
     """
     from inventory.services.work_order_cv import auto_apply_or_queue
     from inventory.services.work_order_omr import (
-        OMR_AUTO_APPLY_THRESHOLD,
+        OMR_REG_MIN,
         compute_template_version,
         detections_from_result,
         read_omr_scan,
@@ -696,10 +700,14 @@ def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> 
         )
 
     detections = detections_from_result(result)
-    auto, queue = auto_apply_or_queue(detections, threshold=OMR_AUTO_APPLY_THRESHOLD)
+    auto, queue = auto_apply_or_queue(
+        detections,
+        registration_confidence=result.registration_confidence,
+        reg_min=OMR_REG_MIN,
+    )
 
     now = timezone.now()
-    note = "Pre-checked from flatbed scan (OMR, pending confirmation)."
+    note = "Pre-checked from scan (OMR, pending confirmation)."
     task_titles = {str(tc.id): tc.task_title for tc in work_order.task_completions.all()}
     material_names = {str(mu.id): mu.material_name for mu in work_order.material_usage.all()}
 

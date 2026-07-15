@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import io
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from django.conf import settings
@@ -58,6 +58,13 @@ class Detection:
     ``target_id`` is the AcroForm field name (e.g. ``"task_<uuid>"``) when
     the detection maps to a known checkbox; otherwise ``None`` for free-form
     detections like signatures.
+
+    ``fill_ratio`` / ``confident_checked`` are populated only on the OMR
+    (scan-to-complete) path by ``detections_from_result``: the mark's measured
+    fill fraction and whether that fill sits cleanly in the "checked" band.
+    They drive the two-axis OMR auto-apply decision in ``auto_apply_or_queue``
+    and stay at their inert defaults (``0.0`` / ``False``) on the born-digital
+    signature/OCR path, which splits purely on ``confidence``.
     """
 
     kind: str
@@ -65,9 +72,22 @@ class Detection:
     value: object
     confidence: float
     label: str = ""
+    fill_ratio: float = 0.0
+    confident_checked: bool = False
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        # Wire shape for the born-digital CV pending-review queue
+        # (``work_order_ingest`` serialises queued detections with this). The
+        # OMR-only ``fill_ratio`` / ``confident_checked`` scoring fields are
+        # deliberately excluded — they are an internal auto-apply signal, not
+        # part of this payload.
+        return {
+            "kind": self.kind,
+            "target_id": self.target_id,
+            "value": self.value,
+            "confidence": self.confidence,
+            "label": self.label,
+        }
 
 
 def detect_filled_checkbox(image_bytes: bytes) -> tuple[bool, float]:
@@ -198,16 +218,50 @@ def ocr_handwritten(image_bytes: bytes) -> tuple[str, float]:
 def auto_apply_or_queue(
     detections: Iterable[Detection],
     threshold: Optional[float] = None,
+    *,
+    registration_confidence: Optional[float] = None,
+    reg_min: Optional[float] = None,
 ) -> tuple[list[Detection], list[Detection]]:
-    """Split detections into (auto_apply, queue_for_review) by confidence.
+    """Split detections into ``(auto_apply, queue_for_review)``.
 
     Used by the ingest pipeline to decide which CV-derived changes commit
-    silently and which surface in the digital WO's pending-review panel.
+    silently and which surface in the digital WO's pending-review panel. Two
+    policies share this splitter; both keep the ``(auto, queue)`` shape.
+
+    **OMR two-axis** — selected when ``registration_confidence`` is supplied
+    (the scan-to-complete path). A mark auto-applies IFF the scan registered
+    well enough (``registration_confidence >= reg_min``) AND its fill is
+    confidently CHECKED (``det.confident_checked``). Fill-confidence and
+    registration quality are thus independent axes: a solidly-ticked box on an
+    ordinary (skewed, 4-corner) scan records automatically, while any ambiguous
+    fill — or *every* mark on an inadequately-registered scan (a 3-corner affine
+    read is hard-capped at 0.7, so ``reg_min > 0.7`` sends it wholesale to
+    review) — routes to ``pending_changes``. ``reg_min`` defaults to
+    ``OMR_REG_MIN``.
+
+    **Single-axis confidence** — the default (born-digital signature/OCR path).
+    A detection auto-applies when ``det.confidence >= threshold`` (defaults to
+    ``confidence_threshold()``), a standalone certainty rather than an OMR
+    fill × registration product.
     """
-    if threshold is None:
-        threshold = confidence_threshold()
     auto: list[Detection] = []
     queue: list[Detection] = []
+
+    if registration_confidence is not None:
+        if reg_min is None:
+            from inventory.services.work_order_omr import OMR_REG_MIN
+
+            reg_min = OMR_REG_MIN
+        registration_adequate = registration_confidence >= reg_min
+        for det in detections:
+            if registration_adequate and det.confident_checked:
+                auto.append(det)
+            else:
+                queue.append(det)
+        return auto, queue
+
+    if threshold is None:
+        threshold = confidence_threshold()
     for det in detections:
         if det.confidence >= threshold:
             auto.append(det)

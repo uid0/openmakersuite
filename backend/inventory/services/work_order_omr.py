@@ -111,22 +111,24 @@ def build_and_persist_omr_template(
 # bead-2: the scan reader
 # ---------------------------------------------------------------------------
 #
-# Given a flatbed scan of a printed OMR form and the WO's persisted
+# Given a scan of a printed OMR form and the WO's persisted
 # :class:`WorkOrderOmrTemplate` snapshot, recover the 4 corner fiducials, warp
 # the scan into template space, and threshold every ``regions_json`` region so
-# each mark becomes a ``(marked, confidence)`` read. Registration quality
-# multiplies down every region's confidence — a poorly-aligned scan drags the
-# whole page under the auto-apply bar and routes it to human review.
+# each mark becomes a ``(marked, confidence, fill_ratio)`` read. The scan-level
+# ``registration_confidence`` and each mark's fill are then weighed as two
+# independent axes at auto-apply time (``work_order_cv.auto_apply_or_queue``):
+# an inadequately-registered scan routes wholesale to review, while a
+# well-registered one auto-applies only its confidently-filled marks.
 
 # Canonical warp resolution (dpi). 200dpi keeps a 10pt checkbox ~28px wide —
 # comfortably above the threshold floor — without ballooning the warp buffer.
 CANON_DPI = 200
 
-# Only a near-perfect fiducial quad may auto-apply: with the 0.999 confidence
-# bar, registration and per-region confidence *multiply*, so registration must
-# round to 1.0 for a clean scan or nothing could ever clear the bar. A quad
-# this rectangular is geometrically aligned; subpixel marker-center jitter on a
-# genuinely-square scan should not, by itself, force review.
+# A near-perfect fiducial quad snaps its registration confidence to exactly 1.0.
+# A quad this rectangular is geometrically aligned; subpixel marker-center
+# jitter on a genuinely-square scan should not drag ``registration_confidence``
+# toward the ``OMR_REG_MIN`` auto-apply floor, nor pull the per-region displayed
+# confidence (which still scales by this score) off a clean 1.0.
 _REG_SNAP_TO_ONE = 0.997
 
 # Fraction of each region rect trimmed on every side before thresholding, so
@@ -220,9 +222,11 @@ def _rectangularity(centers: dict) -> float:
 
     1.0 for an axis-aligned rectangle (a flat, square-on scan); it falls off
     with shear (skew) and keystoning (perspective), and collapses toward 0 for
-    a grossly misdetected / non-convex quad. This is the key robustness lever:
-    the score multiplies every region's confidence, so a warped scan can never
-    clear the 0.999 bar and routes wholesale to review.
+    a grossly misdetected / non-convex quad. It is the scan's
+    ``registration_confidence`` — the registration axis of the auto-apply
+    decision: a read below ``OMR_REG_MIN`` (in particular any 3-corner affine
+    read, hard-capped at 0.7) routes wholesale to review, independent of how
+    confidently any individual box is filled.
     """
     try:
         p = {c: np.asarray(centers[c], dtype=np.float64) for c in ("tl", "tr", "br", "bl")}
@@ -392,8 +396,8 @@ def _register_and_warp(gray, fiducials: dict, page_w_pt: float, page_h_pt: float
         dpts = np.array([dst[c] for c in present], dtype=np.float32)
         matrix = cv2.getAffineTransform(src, dpts)
         warp = cv2.warpAffine(gray, matrix, (w_px, h_px), borderValue=255, flags=cv2.INTER_LINEAR)
-        # An affine model cannot correct keystoning; cap confidence hard so a
-        # 3-corner read can never clear the 0.999 bar (always routes to review).
+        # An affine model cannot correct keystoning; cap confidence at 0.7 so a
+        # 3-corner read stays below OMR_REG_MIN and always routes to review.
         return warp, 0.7, None
 
     return None, 0.0, "could not align form: fewer than 3 corner fiducials detected"
@@ -515,13 +519,18 @@ def detections_from_result(result: OmrReadResult) -> list:
     """Convert an :class:`OmrReadResult` into ``work_order_cv.Detection`` rows.
 
     Only *marked* regions and *uncertain* reads are emitted — a confidently
-    blank checkbox is a no-op and would only clutter the review queue. The
-    caller splits these on the 0.999 bar via ``auto_apply_or_queue``.
+    blank checkbox is a no-op and would only clutter the review queue. Each
+    detection carries its ``fill_ratio`` and a ``confident_checked`` flag (the
+    mark is present AND its fill sits cleanly in the "on" band); the caller
+    pairs that per-mark fill-confidence with the scan-level
+    ``registration_confidence`` in ``auto_apply_or_queue`` to decide auto-apply
+    vs review.
     """
     from inventory.services.work_order_cv import Detection
 
     detections: list = []
     for read in result.reads:
+        on = _INK_ON if read.kind == "ink" else _CHECK_ON
         off = _INK_OFF if read.kind == "ink" else _CHECK_OFF
         if not read.marked and read.fill_ratio <= off:
             continue  # clearly empty box — a no-op that would only clutter review
@@ -532,12 +541,19 @@ def detections_from_result(result: OmrReadResult) -> list:
                 value=bool(read.marked),
                 confidence=float(read.confidence),
                 label="",
+                fill_ratio=float(read.fill_ratio),
+                confident_checked=bool(read.marked and read.fill_ratio >= on),
             )
         )
     return detections
 
 
-# The scan auto-apply bar (Ian, 07-08): a mark commits silently ONLY at
-# confidence >= 0.999; everything below routes to human review. Deliberately
-# near-1.0 so, in practice, almost every scanned mark is confirmed by a person.
-OMR_AUTO_APPLY_THRESHOLD = 0.999
+# Scan auto-apply policy (Ian, 07-14 — revises the 07-08 flatbed-only 0.999
+# bar). Auto-apply is two-axis (see ``work_order_cv.auto_apply_or_queue``): a
+# mark commits silently only when the scan registered adequately AND its box is
+# confidently filled. ``OMR_REG_MIN`` is the registration floor for the
+# "adequate" half. It MUST stay above the 0.7 three-corner affine cap
+# (``_register_and_warp``) so any read with fewer than 4 recovered fiducials
+# always routes to human review; a clean or ordinarily-skewed 4-corner scan
+# clears it, and only then do its confidently-checked marks auto-apply.
+OMR_REG_MIN = 0.8

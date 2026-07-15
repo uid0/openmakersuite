@@ -1,8 +1,11 @@
-"""Tests for the OMR scan reader + scan-ingestion pipeline (op-6pc8, bead-2).
+"""Tests for the OMR scan reader + scan-ingestion pipeline (op-6pc8, bead-2;
+two-axis auto-apply revised in op-f034).
 
 bead-1 printed the form + fiducials and persisted a region map; this reader
-aligns a *scan*, thresholds each mark, and — per Ian's 0.999 confidence bar —
-routes almost everything to human review and NEVER auto-closes a work order.
+aligns a *scan*, thresholds each mark, and applies the two-axis auto-apply
+policy — a mark records automatically only when the scan registered adequately
+(``registration_confidence >= OMR_REG_MIN``) AND the box is confidently filled,
+otherwise it routes to human review — and NEVER auto-closes a work order.
 
 The synthetic harness renders fiducials + checkboxes + a QR directly into
 canonical template space (there is no PDF rasterizer in the venv), stamps known
@@ -29,14 +32,19 @@ from inventory.models import (
     MaintenanceLog,
     MaintenanceTask,
     WorkOrder,
+    WorkOrderMaterialUsage,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
 )
 from inventory.services import work_order_omr as omr
+from inventory.services.work_order_cv import Detection, auto_apply_or_queue
 from inventory.services.work_order_ingest import apply_submission
 from inventory.services.work_order_omr import (
-    OMR_AUTO_APPLY_THRESHOLD,
+    OMR_REG_MIN,
+    OmrReadResult,
+    OmrRegionRead,
     build_and_persist_omr_template,
+    detections_from_result,
     read_omr_scan,
 )
 from inventory.tests.test_work_order_omr import (
@@ -183,9 +191,10 @@ class TestReader:
         assert by_id[tasks[0]].marked is True
         assert by_id[tasks[1]].marked is True
         assert by_id[tasks[2]].marked is False
-        # the two clear marks clear the auto-apply bar; the blank does not read.
-        assert by_id[tasks[0]].confidence >= OMR_AUTO_APPLY_THRESHOLD
-        assert by_id[tasks[1]].confidence >= OMR_AUTO_APPLY_THRESHOLD
+        # the two clear marks are confidently CHECKED (fill in the on-band);
+        # the blank does not read at all.
+        assert by_id[tasks[0]].fill_ratio >= omr._CHECK_ON
+        assert by_id[tasks[1]].fill_ratio >= omr._CHECK_ON
 
     def test_marginal_mark_is_uncertain(self):
         wo = _make_work_order(num_tasks=2)
@@ -193,9 +202,16 @@ class TestReader:
         tasks = _task_target_ids(template)
         result = read_omr_scan(_synth_scan(template, marks={tasks[0]: "marginal"}), template)
         by_id = {r.target_id: r for r in result.reads}
-        assert by_id[tasks[0]].confidence < OMR_AUTO_APPLY_THRESHOLD
+        # a marginal mark lands in the ambiguous band — above "off" (so it still
+        # surfaces for review) but below the "on" bar, so it is NOT confidently
+        # CHECKED and will never auto-apply, regardless of registration.
+        assert omr._CHECK_OFF < by_id[tasks[0]].fill_ratio < omr._CHECK_ON
 
-    def test_skew_drags_all_reads_below_bar(self):
+    def test_ordinary_skewed_4corner_scan_is_adequate_for_auto_apply(self):
+        # The decisive op-f034 behaviour change: an ordinary hand-fed skewed scan
+        # is NOT flatbed-perfect (reg < 1.0) yet still registers adequately off
+        # its 4 corners (reg >= OMR_REG_MIN), so its solidly-filled boxes qualify
+        # for auto-apply — the retired 0.999 bar wrongly queued exactly these.
         wo = _make_work_order(num_tasks=3)
         template = _persisted(wo)
         tasks = _task_target_ids(template)
@@ -206,9 +222,25 @@ class TestReader:
             _synth_scan(template, marks={t: "full" for t in tasks}, warp_dst=warp_dst),
             template,
         )
-        assert result.ok  # still aligned (4 fiducials) — just not confidently
-        assert result.registration_confidence < OMR_AUTO_APPLY_THRESHOLD
-        assert all(r.confidence < OMR_AUTO_APPLY_THRESHOLD for r in result.reads)
+        assert result.ok  # aligned off 4 fiducials
+        # adequate for auto-apply, but demonstrably not a flatbed-perfect scan.
+        assert OMR_REG_MIN <= result.registration_confidence < 1.0
+        marks = [r for r in result.reads if r.target_id in tasks]
+        assert marks and all(r.fill_ratio >= omr._CHECK_ON for r in marks)
+
+    def test_three_corner_read_is_inadequate(self):
+        # Exactly one corner missing → affine fallback hard-capped at 0.7, which
+        # sits below OMR_REG_MIN so the whole page routes to review even though
+        # the box is solidly filled.
+        wo = _make_work_order(num_tasks=2)
+        template = _persisted(wo)
+        tasks = _task_target_ids(template)
+        result = read_omr_scan(
+            _synth_scan(template, marks={tasks[0]: "full"}, drop_fiducials=("tl",)), template
+        )
+        assert result.ok  # 3 corners still align (affine)
+        assert result.registration_confidence == pytest.approx(0.7)
+        assert result.registration_confidence < OMR_REG_MIN
 
     def test_brightness_gradient_still_reads_marks(self):
         wo = _make_work_order(num_tasks=2)
@@ -219,7 +251,7 @@ class TestReader:
         )
         by_id = {r.target_id: r for r in result.reads}
         assert by_id[tasks[0]].marked is True
-        assert by_id[tasks[0]].confidence >= OMR_AUTO_APPLY_THRESHOLD
+        assert by_id[tasks[0]].fill_ratio >= omr._CHECK_ON
 
     def test_missing_fiducials_fail_registration(self):
         wo = _make_work_order(num_tasks=2)
@@ -254,7 +286,10 @@ class TestScanIngestion:
         assert tasks[0] in by_id
         assert by_id[tasks[0]]["auto_applied"] is True
         assert by_id[tasks[0]]["crop_url"].endswith(f"/mark-crop/{tasks[0]}/")
-        assert by_id[tasks[0]]["confidence"] >= OMR_AUTO_APPLY_THRESHOLD
+        # auto-applied because registration was adequate AND the fill was
+        # confidently in the "on" band (a clean scan → high displayed confidence).
+        assert by_id[tasks[0]]["confidence"] >= 0.9
+        assert sub.parsed_fields["registration_confidence"] >= OMR_REG_MIN
 
     def test_scan_never_auto_closes_work_order(self):
         wo = _make_work_order(num_tasks=2, all_required=True)
@@ -313,7 +348,9 @@ class TestScanIngestion:
         by_id = {c["target_id"]: c for c in sub.pending_changes}
         assert tasks[0] in by_id
         assert by_id[tasks[0]]["auto_applied"] is False
-        assert by_id[tasks[0]]["confidence"] < OMR_AUTO_APPLY_THRESHOLD
+        # queued on the FILL axis: registration was adequate (a clean scan), but
+        # the ambiguous fill is not confidently CHECKED, so it never auto-applies.
+        assert sub.parsed_fields["registration_confidence"] >= OMR_REG_MIN
 
     def test_template_version_mismatch_routes_to_review(self):
         wo = _make_work_order(num_tasks=2)
@@ -369,6 +406,95 @@ class TestScanIngestion:
         sub.refresh_from_db()
         assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
         assert "align" in sub.parse_error.lower()
+
+    def test_ordinary_skewed_scan_auto_applies_solid_marks(self):
+        # End-to-end headline regression (op-f034): a solidly-ticked box on an
+        # ordinary skewed (non-flatbed) 4-corner scan now records automatically,
+        # advancing OPEN → IN_PROGRESS — the retired 0.999 bar queued these.
+        wo = _make_work_order(num_tasks=3)
+        template = _persisted(wo)
+        tasks = _task_target_ids(template)
+        w = int(round(template.page_w_pt / 72.0 * DPI))
+        h = int(round(template.page_h_pt / 72.0 * DPI))
+        warp_dst = np.float32([[40, 30], [w - 20, 70], [w - 60, h - 40], [30, h - 25]])
+        scan = _synth_scan(template, wo_id=wo.id, marks={tasks[0]: "full"}, warp_dst=warp_dst)
+        sub = _submission_for(wo, scan)
+        apply_submission(sub)
+        sub.refresh_from_db()
+        wo.refresh_from_db()
+
+        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
+        assert OMR_REG_MIN <= sub.parsed_fields["registration_confidence"] < 1.0
+        tc0 = WorkOrderTaskCompletion.objects.get(id=tasks[0][len("task_") :])
+        assert tc0.is_completed is True  # auto-applied despite the skew
+        by_id = {c["target_id"]: c for c in sub.pending_changes}
+        assert by_id[tasks[0]]["auto_applied"] is True
+        assert wo.status == WorkOrder.Status.IN_PROGRESS  # progressed, never COMPLETED
+
+    def test_three_corner_scan_queues_all_marks(self):
+        # A 3-corner (affine, reg 0.7) scan is inadequate: even a solid mark
+        # routes to review, nothing is applied, and the WO stays OPEN.
+        wo = _make_work_order(num_tasks=2)
+        template = _persisted(wo)
+        tasks = _task_target_ids(template)
+        scan = _synth_scan(template, wo_id=wo.id, marks={tasks[0]: "full"}, drop_fiducials=("tl",))
+        sub = _submission_for(wo, scan)
+        apply_submission(sub)
+        sub.refresh_from_db()
+        wo.refresh_from_db()
+
+        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
+        assert sub.parsed_fields["registration_confidence"] < OMR_REG_MIN
+        tc0 = WorkOrderTaskCompletion.objects.get(id=tasks[0][len("task_") :])
+        assert tc0.is_completed is False  # inadequate registration → queued
+        by_id = {c["target_id"]: c for c in sub.pending_changes}
+        assert tasks[0] in by_id
+        assert by_id[tasks[0]]["auto_applied"] is False
+        assert wo.status == WorkOrder.Status.OPEN  # nothing applied
+
+    def test_two_axis_matrix_through_apply(self, monkeypatch):
+        # Craft reads (registration + fill controlled directly) to drive every
+        # branch through _apply_omr_submission in one pass: solid task + solid
+        # material auto-apply on an adequately-registered scan; an ambiguous-fill
+        # task queues. WO advances OPEN → IN_PROGRESS but is NEVER COMPLETED.
+        wo = _make_wo_with_materials(num_tasks=2, num_materials=1)
+        template = _persisted(wo)
+        tasks = _task_target_ids(template)
+        mu = wo.material_usage.first()
+        material_tid = f"material_{mu.id}"
+
+        crafted = OmrReadResult(
+            ok=True,
+            registration_confidence=0.9,  # adequate (>= OMR_REG_MIN)
+            recovered_work_order_id=str(wo.id),
+            reads=[
+                OmrRegionRead(tasks[0], "checkbox", True, 0.9, 1.0),  # solid → auto
+                OmrRegionRead(tasks[1], "checkbox", True, 0.6, 0.15),  # ambiguous → queue
+                OmrRegionRead(material_tid, "checkbox", True, 0.9, 1.0),  # solid → auto
+            ],
+            canonical_size=(100, 100),
+        )
+        monkeypatch.setattr(omr, "read_omr_scan", lambda *a, **k: crafted)
+
+        sub = _submission_for(wo, _synth_scan(template, wo_id=wo.id))
+        apply_submission(sub)
+        sub.refresh_from_db()
+        wo.refresh_from_db()
+
+        assert WorkOrderTaskCompletion.objects.get(id=tasks[0][len("task_") :]).is_completed is True
+        assert WorkOrderMaterialUsage.objects.get(id=mu.id).was_used is True
+        assert (
+            WorkOrderTaskCompletion.objects.get(id=tasks[1][len("task_") :]).is_completed is False
+        )
+
+        by_id = {c["target_id"]: c for c in sub.pending_changes}
+        assert by_id[tasks[0]]["auto_applied"] is True
+        assert by_id[material_tid]["auto_applied"] is True
+        assert by_id[tasks[1]]["auto_applied"] is False
+
+        assert wo.status == WorkOrder.Status.IN_PROGRESS
+        assert wo.completed_at is None
+        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
 
 
 # ---------------------------------------------------------------------------
@@ -436,3 +562,77 @@ class TestReviewFlow:
         # one row applied, one still queued → stays in review
         assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
         assert len(sub.pending_changes) == 1
+
+
+# ---------------------------------------------------------------------------
+# two-axis auto-apply decision (op-f034) — pure unit, no CV/DB
+# ---------------------------------------------------------------------------
+class TestAutoApplyPolicy:
+    """The registration × fill-confidence split in ``auto_apply_or_queue`` and
+    the ``confident_checked`` flag ``detections_from_result`` derives."""
+
+    def _det(self, *, confident_checked, value=True, fill_ratio=1.0):
+        return Detection(
+            kind="checkbox",
+            target_id="task_x",
+            value=value,
+            confidence=0.5,  # irrelevant under the OMR two-axis policy
+            fill_ratio=fill_ratio,
+            confident_checked=confident_checked,
+        )
+
+    def test_reg_min_above_three_corner_cap(self):
+        # 3-corner affine reads are hard-capped at 0.7; the floor must exceed it
+        # so those reads always route to review.
+        assert OMR_REG_MIN > 0.7
+
+    def test_solid_fill_adequate_registration_auto_applies(self):
+        det = self._det(confident_checked=True)
+        auto, queue = auto_apply_or_queue([det], registration_confidence=0.85, reg_min=OMR_REG_MIN)
+        assert auto == [det]
+        assert queue == []
+
+    def test_solid_fill_three_corner_registration_queues(self):
+        det = self._det(confident_checked=True)
+        auto, queue = auto_apply_or_queue([det], registration_confidence=0.7, reg_min=OMR_REG_MIN)
+        assert auto == []
+        assert queue == [det]
+
+    def test_ambiguous_fill_adequate_registration_queues(self):
+        det = self._det(confident_checked=False, fill_ratio=0.15)
+        auto, queue = auto_apply_or_queue([det], registration_confidence=0.99, reg_min=OMR_REG_MIN)
+        assert auto == []
+        assert queue == [det]
+
+    def test_reg_min_defaults_to_omr_reg_min(self):
+        # Exactly at the floor is adequate (>=); reg_min falls back to OMR_REG_MIN.
+        det = self._det(confident_checked=True)
+        auto, _queue = auto_apply_or_queue([det], registration_confidence=OMR_REG_MIN)
+        assert auto == [det]
+
+    def test_single_axis_confidence_path_is_unchanged(self):
+        # Without ``registration_confidence`` the born-digital confidence split
+        # still applies and ``confident_checked`` is ignored.
+        hi = Detection(kind="signature", target_id=None, value=True, confidence=0.95)
+        lo = Detection(kind="handwritten", target_id=None, value="x", confidence=0.4)
+        auto, queue = auto_apply_or_queue([hi, lo], threshold=0.7)
+        assert auto == [hi]
+        assert queue == [lo]
+
+    def test_detections_from_result_flags_confident_checked_and_drops_empty(self):
+        result = OmrReadResult(
+            ok=True,
+            registration_confidence=1.0,
+            reads=[
+                OmrRegionRead("task_solid", "checkbox", True, 1.0, 0.90),  # confident checked
+                OmrRegionRead("task_amb", "checkbox", True, 0.6, 0.15),  # ambiguous
+                OmrRegionRead("task_blank", "checkbox", False, 0.98, 0.01),  # confident empty
+                OmrRegionRead("tech_initials", "ink", True, 1.0, 0.09),  # ink, confident
+            ],
+        )
+        dets = {d.target_id: d for d in detections_from_result(result)}
+        assert "task_blank" not in dets  # confidently-empty box dropped as a no-op
+        assert dets["task_solid"].confident_checked is True
+        assert dets["task_solid"].fill_ratio == pytest.approx(0.90)
+        assert dets["task_amb"].confident_checked is False
+        assert dets["tech_initials"].confident_checked is True  # 0.09 >= _INK_ON (0.05)

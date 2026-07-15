@@ -4410,7 +4410,9 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             confidence = change.get("confidence", 0.0) or 0.0
             if kind in ("checkbox", "ink"):
                 # Accepting a scanned mark = confirm the task/material is done.
-                omr_apply_mark(work_order, change.get("target_id") or "", marked=True)
+                omr_apply_mark(
+                    work_order, change.get("target_id") or "", marked=True, actor=request.user
+                )
                 applied_count += 1
             elif kind == "signature":
                 notes_to_add.append(
@@ -4489,7 +4491,9 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 continue
             # Undo an auto-applied pre-check so a rejected read leaves no mark.
             if change.get("auto_applied") and change.get("kind") in ("checkbox", "ink"):
-                omr_apply_mark(work_order, change.get("target_id") or "", marked=False)
+                omr_apply_mark(
+                    work_order, change.get("target_id") or "", marked=False, actor=request.user
+                )
             dropped += 1
 
         submission.pending_changes = remaining
@@ -4628,10 +4632,24 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["patch"], url_path="materials/(?P<material_id>[^/.]+)/toggle")
     def toggle_material(self, request, pk=None, material_id=None):
-        """Toggle whether a material was used in this work order."""
+        """Toggle whether a material was used, syncing inventory stock.
+
+        Marking a material used (``was_used`` false → true) decrements the
+        linked inventory item's stock by ``quantity_used`` and writes a
+        UsageLog row; un-marking it reverses both. Idempotent and reversible —
+        see :func:`inventory.services.work_order_material_usage.apply_material_usage`.
+
+        Body: ``was_used`` (required bool) plus an optional ``quantity_used``
+        (the consumed amount). ``quantity_used`` is only editable while no
+        decrement is applied — un-mark the material first to change it.
+        """
+        from .services.work_order_material_usage import apply_material_usage
+
         work_order = self.get_object()
         try:
-            usage = work_order.material_usage.get(id=material_id)
+            usage = work_order.material_usage.select_related("material__inventory_item").get(
+                id=material_id
+            )
         except WorkOrderMaterialUsage.DoesNotExist:
             return Response(
                 {"detail": "Material usage record not found."},
@@ -4643,8 +4661,28 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 {"detail": "was_used is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        usage.was_used = bool(was_used)
-        usage.save(update_fields=["was_used"])
+
+        raw_qty = request.data.get("quantity_used")
+        if raw_qty is not None:
+            try:
+                new_qty = Decimal(str(raw_qty))
+            except (InvalidOperation, ValueError, TypeError):
+                return Response(
+                    {"detail": "quantity_used must be a number."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if new_qty < 0:
+                return Response(
+                    {"detail": "quantity_used cannot be negative."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # Only editable before the decrement is applied — changing the
+            # amount after stock has moved would desync the reversal.
+            if usage.applied_quantity is None:
+                usage.quantity_used = new_qty
+                usage.save(update_fields=["quantity_used"])
+
+        apply_material_usage(usage, was_used=bool(was_used), actor=request.user)
         return Response(WorkOrderMaterialUsageSerializer(usage).data)
 
 
@@ -4839,6 +4877,7 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                     material=mat,
                     material_name=mat.name,
                     quantity_planned=mat.quantity,
+                    quantity_used=mat.quantity,
                     unit=mat.unit,
                 )
 
@@ -4887,6 +4926,7 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                         material=mat,
                         material_name=mat.name,
                         quantity_planned=mat.quantity,
+                        quantity_used=mat.quantity,
                         unit=mat.unit,
                     )
                 created.append(str(wo.id))

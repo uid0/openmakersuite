@@ -1920,7 +1920,14 @@ class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):
 
 
 class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
-    """Serializer for material usage tracking within a work order."""
+    """Serializer for material usage tracking within a work order.
+
+    ``quantity_used`` is writable (the consumed amount that drives the inventory
+    decrement); ``applied_quantity`` and ``stock_applied`` expose the decrement
+    state read-only so the UI can show what was drawn from stock.
+    """
+
+    stock_applied = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = WorkOrderMaterialUsage
@@ -1930,11 +1937,20 @@ class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
             "material",
             "material_name",
             "quantity_planned",
+            "quantity_used",
             "unit",
             "was_used",
+            "applied_quantity",
+            "stock_applied",
             "created_at",
         ]
-        read_only_fields = ["created_at", "material_name", "quantity_planned", "unit"]
+        read_only_fields = [
+            "created_at",
+            "material_name",
+            "quantity_planned",
+            "unit",
+            "applied_quantity",
+        ]
 
 
 class WorkOrderPhotoSerializer(serializers.ModelSerializer):

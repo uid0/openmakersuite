@@ -44,6 +44,7 @@ from django.utils import timezone
 from pypdf import PdfReader
 
 from ..models import MaintenanceLog, WorkOrder, WorkOrderMaterialUsage, WorkOrderSubmission
+from .work_order_material_usage import apply_material_usage
 
 logger = logging.getLogger(__name__)
 
@@ -380,15 +381,17 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
             tc.save(update_fields=["is_completed", "completed_at", "notes"])
             applied_tasks += 1
 
-    # Apply material usage (only false → true).
-    material_qs = WorkOrderMaterialUsage.objects.filter(
+    # Apply material usage (only false → true). Routes through the shared
+    # helper so a used material decrements its linked inventory item and logs
+    # usage (idempotent + reversible), exactly like the manual/OMR paths.
+    material_qs = WorkOrderMaterialUsage.objects.select_related("material__inventory_item").filter(
         work_order=work_order,
         id__in=parsed["material_checks"].keys(),
     )
     for mu in material_qs:
         if parsed["material_checks"].get(str(mu.id)) and not mu.was_used:
-            mu.was_used = True
-            mu.save(update_fields=["was_used"])
+            mu.work_order = work_order  # prime FK cache for the usage note
+            apply_material_usage(mu, was_used=True, source_note="emailed paper work order")
 
     # Attach PDF to the work order's maintenance history.
     if not work_order.completed_scan:
@@ -546,13 +549,18 @@ def _omr_label(target_id: str, task_titles: dict, material_names: dict) -> str:
 
 
 def omr_apply_mark(
-    work_order: WorkOrder, target_id: str, *, marked: bool, now=None, note: str = ""
+    work_order: WorkOrder, target_id: str, *, marked: bool, now=None, note: str = "", actor=None
 ) -> int:
     """Apply (or undo) a single task/material mark. Returns 1 if state changed.
 
     Fixed completion marks (``work_complete`` etc.) carry no task/material
     state and are intentionally a no-op here — WO closure is a separate,
     human-confirmed step.
+
+    A material mark routes through :func:`apply_material_usage`, so accepting a
+    scanned "used" mark decrements the linked inventory item and logs usage, and
+    rejecting/undoing it reverses both. ``actor`` (the reviewing user, when
+    present) is attributed on the usage log.
     """
     now = now or timezone.now()
     if target_id.startswith("task_"):
@@ -566,13 +574,15 @@ def omr_apply_mark(
         tc.save(update_fields=["is_completed", "completed_at", "notes"])
         return 1
     if target_id.startswith("material_"):
-        mu = WorkOrderMaterialUsage.objects.filter(
-            work_order=work_order, id=target_id[len("material_") :]
-        ).first()
+        mu = (
+            WorkOrderMaterialUsage.objects.select_related("material__inventory_item")
+            .filter(work_order=work_order, id=target_id[len("material_") :])
+            .first()
+        )
         if mu is None or mu.was_used == marked:
             return 0
-        mu.was_used = marked
-        mu.save(update_fields=["was_used"])
+        mu.work_order = work_order  # prime FK cache for the usage note
+        apply_material_usage(mu, was_used=marked, actor=actor, source_note=note)
         return 1
     return 0
 

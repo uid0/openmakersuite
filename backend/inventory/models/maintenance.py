@@ -451,6 +451,14 @@ class WorkOrder(models.Model):
         help_text="When this work order was marked complete",
     )
     notes = models.TextField(blank=True, help_text="Notes about this work order")
+    loto_completion_note = models.TextField(
+        blank=True,
+        help_text=(
+            "Free-text lockout/tagout completion note recorded web-side. The "
+            "structured per-energy-source boxes (WorkOrderLotoCompletion) are the "
+            "OMR-readable half; this is the free-text half of 'LOTO = both'."
+        ),
+    )
     estimated_external_cost = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -644,6 +652,83 @@ class WorkOrderMaterialUsage(models.Model):
     def stock_applied(self) -> bool:
         """True when a stock decrement is currently applied for this usage."""
         return self.applied_quantity is not None
+
+
+class WorkOrderLotoCompletion(models.Model):
+    """
+    Tracks lockout/tagout (LOTO) of one energy source within a work order.
+
+    Mirrors :class:`WorkOrderTaskCompletion`: one row per
+    ``loto.AssetEnergySource`` on the WO's asset, created when a WorkOrder is
+    generated so a scanned-back paper form has rows to apply marks against. The
+    descriptive fields are denormalized at creation time (preserved even if the
+    energy source is later edited or deleted) so the printed sheet and the
+    persisted record stay in agreement — the ``loto_<id>`` OMR checkbox is keyed
+    on this row's ``id``.
+
+    This is the STRUCTURED half of "LOTO = both": the free-text half is
+    ``WorkOrder.lockout_instructions`` (printed as a reference paragraph) plus
+    ``WorkOrder.loto_completion_note`` (recorded web-side).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        "WorkOrder",
+        on_delete=models.CASCADE,
+        related_name="loto_completions",
+        help_text="The work order this LOTO completion belongs to",
+    )
+    energy_source = models.ForeignKey(
+        "loto.AssetEnergySource",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_order_completions",
+        help_text="The energy source (null if it was deleted after WO creation)",
+    )
+    source_type = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Denormalized energy-source type code (preserved if source deleted)",
+    )
+    source_label = models.CharField(
+        max_length=200,
+        help_text="Denormalized human label, e.g. 'Electrical (240V)'",
+    )
+    isolation_point = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Denormalized isolation point (where to lock out)",
+    )
+    required_devices = models.CharField(
+        max_length=300,
+        blank=True,
+        help_text="Denormalized comma-joined list of required lockout devices",
+    )
+    is_completed = models.BooleanField(
+        default=False,
+        help_text="Whether this energy source has been isolated / locked out",
+    )
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="completed_work_order_loto",
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["source_type", "source_label"]
+        indexes = [
+            models.Index(fields=["work_order", "is_completed"], name="wolc_wo_completed_idx"),
+        ]
+
+    def __str__(self) -> str:
+        status = "✓" if self.is_completed else "○"
+        return f"{status} {self.source_label} (WO {self.work_order.short_id})"
 
 
 class WorkOrderPhoto(models.Model):

@@ -41,6 +41,7 @@ from .models import (
     Supplier,
     UsageLog,
     WorkOrder,
+    WorkOrderLotoCompletion,
     WorkOrderMaterialUsage,
     WorkOrderPhoto,
     WorkOrderSubmission,
@@ -1953,6 +1954,49 @@ class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
         ]
 
 
+class WorkOrderLotoCompletionSerializer(serializers.ModelSerializer):
+    """Serializer for per-energy-source LOTO completion within a work order.
+
+    The denormalized descriptive fields (``source_type``/``source_label``/
+    ``isolation_point``/``required_devices``) and ``energy_source`` are read-only
+    — they are fixed at WO generation. Only ``is_completed`` / ``notes`` are
+    writable (via the ``complete_loto`` action)."""
+
+    completed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WorkOrderLotoCompletion
+        fields = [
+            "id",
+            "work_order",
+            "energy_source",
+            "source_type",
+            "source_label",
+            "isolation_point",
+            "required_devices",
+            "is_completed",
+            "completed_by",
+            "completed_by_name",
+            "completed_at",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = [
+            "created_at",
+            "completed_by_name",
+            "energy_source",
+            "source_type",
+            "source_label",
+            "isolation_point",
+            "required_devices",
+        ]
+
+    def get_completed_by_name(self, obj):
+        if obj.completed_by:
+            return obj.completed_by.get_full_name() or obj.completed_by.username
+        return None
+
+
 class WorkOrderPhotoSerializer(serializers.ModelSerializer):
     """Serializer for photos attached to a work order."""
 
@@ -2083,6 +2127,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     is_overdue = serializers.ReadOnlyField()
     task_completions = WorkOrderTaskCompletionSerializer(many=True, read_only=True)
     material_usage = WorkOrderMaterialUsageSerializer(many=True, read_only=True)
+    loto_completions = WorkOrderLotoCompletionSerializer(many=True, read_only=True)
     photos = WorkOrderPhotoSerializer(many=True, read_only=True)
     submissions = serializers.SerializerMethodField()
     pending_review_count = serializers.SerializerMethodField()
@@ -2108,9 +2153,11 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "completed_by_name",
             "completed_at",
             "notes",
+            "loto_completion_note",
             "is_overdue",
             "task_completions",
             "material_usage",
+            "loto_completions",
             "photos",
             "submissions",
             "pending_review_count",
@@ -2128,6 +2175,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "updated_at",
             "task_completions",
             "material_usage",
+            "loto_completions",
             "photos",
             "submissions",
             "pending_review_count",

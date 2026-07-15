@@ -676,6 +676,25 @@ export interface WorkOrderMaterialUsage {
   created_at: string;
 }
 
+export interface WorkOrderLotoCompletion {
+  id: string;
+  work_order: string;
+  energy_source: number | null;
+  /** Denormalized energy-source type code (preserved if source deleted). */
+  source_type: string;
+  /** Denormalized human label, e.g. 'Electrical (240V)'. */
+  source_label: string;
+  isolation_point: string;
+  /** Comma-joined list of required lockout devices. */
+  required_devices: string;
+  is_completed: boolean;
+  completed_by: number | null;
+  completed_by_name: string | null;
+  completed_at: string | null;
+  notes: string;
+  created_at: string;
+}
+
 export interface WorkOrderPhoto {
   id: string;
   work_order: string;
@@ -799,9 +818,12 @@ export interface WorkOrder {
   completed_by_name: string;
   completed_at: string | null;
   notes: string;
+  /** Free-text LOTO completion note (structured boxes are loto_completions). */
+  loto_completion_note: string;
   is_overdue: boolean;
   task_completions: WorkOrderTaskCompletion[];
   material_usage: WorkOrderMaterialUsage[];
+  loto_completions: WorkOrderLotoCompletion[];
   photos: WorkOrderPhoto[];
   submissions: WorkOrderSubmission[];
   electrical?: WorkOrderElectricalContext;

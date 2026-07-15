@@ -204,6 +204,9 @@ const WorkOrderPage: React.FC = () => {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [notes, setNotes] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
+  const [togglingLoto, setTogglingLoto] = useState<string | null>(null);
+  const [lotoNote, setLotoNote] = useState('');
+  const [savingLotoNote, setSavingLotoNote] = useState(false);
   const resetPhotoRef = useRef<() => void>(null);
 
   // AC-3: validation prompt state.
@@ -226,6 +229,7 @@ const WorkOrderPage: React.FC = () => {
       const res = await workOrderAPI.getWorkOrder(id);
       setWorkOrder(res.data);
       setNotes(res.data.notes || '');
+      setLotoNote(res.data.loto_completion_note || '');
     } catch {
       notifications.show({
         title: 'Error',
@@ -482,6 +486,48 @@ const WorkOrderPage: React.FC = () => {
     }
   };
 
+  const handleToggleLoto = async (lotoCompletionId: string, isCompleted: boolean) => {
+    if (!workOrder) return;
+    setTogglingLoto(lotoCompletionId);
+    try {
+      await workOrderAPI.completeLoto(workOrder.id, lotoCompletionId, { is_completed: isCompleted });
+      await loadWorkOrder();
+    } catch {
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to update lockout/tagout.',
+        color: 'red',
+      });
+    } finally {
+      setTogglingLoto(null);
+    }
+  };
+
+  const handleSaveLotoNote = async () => {
+    if (!workOrder) return;
+    setSavingLotoNote(true);
+    try {
+      const res = await workOrderAPI.updateWorkOrder(workOrder.id, {
+        loto_completion_note: lotoNote,
+      });
+      setWorkOrder(res.data);
+      notifications.show({
+        title: 'LOTO note saved',
+        message: 'Lockout/tagout completion note updated.',
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch {
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to save LOTO note.',
+        color: 'red',
+      });
+    } finally {
+      setSavingLotoNote(false);
+    }
+  };
+
   const handlePhotoUpload = async (file: File | null) => {
     if (!file || !workOrder) return;
     setUploadingPhoto(true);
@@ -548,6 +594,11 @@ const WorkOrderPage: React.FC = () => {
   const completedTasks = workOrder.task_completions.filter((t) => t.is_completed).length;
   const totalTasks = workOrder.task_completions.length;
   const allTasksDone = totalTasks > 0 && completedTasks === totalTasks;
+  // Defensive default: the list endpoint's WorkOrder shape omits loto_completions
+  // (detail-only), so never assume the array is present.
+  const lotoCompletions = workOrder.loto_completions ?? [];
+  const completedLoto = lotoCompletions.filter((l) => l.is_completed).length;
+  const totalLoto = lotoCompletions.length;
 
   return (
     <WorkspacePage
@@ -715,9 +766,98 @@ const WorkOrderPage: React.FC = () => {
               </Box>
             )}
           </Stack>
-        ) : (
+        ) : totalLoto === 0 ? (
           <Text size="sm" c="dimmed">No LOTO required for this asset.</Text>
+        ) : null}
+
+        {/* Structured per-energy-source lockout checklist. These are the boxes
+            printed on the paper work order (loto_<id>) and read back by scan;
+            the tech can also tick them here. Visible whenever the asset has
+            recorded energy sources, independent of the free-text lockout_type. */}
+        {totalLoto > 0 && (
+          <Box mt={workOrder.loto?.is_required ? 'md' : 0}>
+            <Group justify="space-between" mb={6}>
+              <Text size="xs" c="dimmed" fw={600}>
+                Energy sources to isolate
+              </Text>
+              <Text size="xs" c={completedLoto === totalLoto ? 'green' : 'dimmed'} fw={600}>
+                {completedLoto}/{totalLoto}
+              </Text>
+            </Group>
+            <Stack gap="xs">
+              {lotoCompletions.map((lc) => (
+                <Box
+                  key={lc.id}
+                  p="sm"
+                  style={{
+                    borderRadius: 8,
+                    backgroundColor: lc.is_completed ? '#f0fff4' : '#fff4e0',
+                    border: `1px solid ${lc.is_completed ? '#69db7c' : '#ffd8a8'}`,
+                    opacity: togglingLoto === lc.id ? 0.6 : 1,
+                  }}
+                >
+                  <Group gap="md" align="flex-start" wrap="nowrap">
+                    <Checkbox
+                      checked={lc.is_completed}
+                      onChange={(e) => handleToggleLoto(lc.id, e.currentTarget.checked)}
+                      disabled={togglingLoto === lc.id}
+                      size="lg"
+                      mt={2}
+                    />
+                    <Box style={{ flex: 1 }}>
+                      <Text
+                        fw={lc.is_completed ? 400 : 600}
+                        size="sm"
+                        td={lc.is_completed ? 'line-through' : 'none'}
+                        c={lc.is_completed ? 'dimmed' : 'inherit'}
+                      >
+                        {lc.source_label}
+                      </Text>
+                      {lc.isolation_point && (
+                        <Text size="xs" c="dimmed">Isolate at: {lc.isolation_point}</Text>
+                      )}
+                      {lc.required_devices && (
+                        <Text size="xs" c="dimmed">Devices: {lc.required_devices}</Text>
+                      )}
+                      {lc.is_completed && lc.completed_at && (
+                        <Text size="xs" c="green">
+                          ✓ {lc.completed_by_name || 'Locked out'} ·{' '}
+                          {new Date(lc.completed_at).toLocaleString()}
+                        </Text>
+                      )}
+                    </Box>
+                  </Group>
+                </Box>
+              ))}
+            </Stack>
+          </Box>
         )}
+
+        {/* Free-text LOTO completion note — the "both": structured boxes above
+            plus this free-text half (recorded web-side, not OMR'd). */}
+        <Box mt="md">
+          <Text size="xs" c="dimmed" fw={600} mb={4}>
+            Lockout/tagout completion note
+          </Text>
+          <Textarea
+            value={lotoNote}
+            onChange={(e) => setLotoNote(e.currentTarget.value)}
+            placeholder="Notes on how the asset was locked out / verified de-energized…"
+            autosize
+            minRows={2}
+            maxRows={6}
+            mb="xs"
+          />
+          <Button
+            size="xs"
+            variant="light"
+            onClick={handleSaveLotoNote}
+            loading={savingLotoNote}
+            leftSection={<IconCheck size={14} />}
+          >
+            Save LOTO note
+          </Button>
+        </Box>
       </Card>
 
       {/* Pending review — CV-detected (email) or OMR scan marks (bead-2). */}

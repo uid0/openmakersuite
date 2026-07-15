@@ -250,6 +250,7 @@ def parse_work_order_pdf(pdf_bytes: bytes) -> dict:
                              a method succeeded on its first try)
         task_checks:         {task_completion_id: bool}
         material_checks:     {material_usage_id: bool}
+        loto_checks:         {loto_completion_id: bool}
     """
     reader = PdfReader(io.BytesIO(pdf_bytes))
 
@@ -257,6 +258,7 @@ def parse_work_order_pdf(pdf_bytes: bytes) -> dict:
 
     task_checks: dict[str, bool] = {}
     material_checks: dict[str, bool] = {}
+    loto_checks: dict[str, bool] = {}
 
     fields = reader.get_fields() or {}
     for name, field in fields.items():
@@ -269,12 +271,15 @@ def parse_work_order_pdf(pdf_bytes: bytes) -> dict:
             task_checks[name[len("task_") :]] = checked
         elif name.startswith("material_"):
             material_checks[name[len("material_") :]] = checked
+        elif name.startswith("loto_"):
+            loto_checks[name[len("loto_") :]] = checked
 
     return {
         "work_order_id": work_order_id,
         "extraction_errors": extraction_errors,
         "task_checks": task_checks,
         "material_checks": material_checks,
+        "loto_checks": loto_checks,
     }
 
 
@@ -392,6 +397,19 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
         if parsed["material_checks"].get(str(mu.id)) and not mu.was_used:
             mu.work_order = work_order  # prime FK cache for the usage note
             apply_material_usage(mu, was_used=True, source_note="emailed paper work order")
+
+    # Apply LOTO energy-source completions (only false → true). Structured safety
+    # data only — deliberately NOT part of the WO-completion gate below (that
+    # stays required-tasks-based). Mirrors the task/material paths for a
+    # digitally-filled form emailed in (the scan path uses omr_apply_mark).
+    loto_checks = parsed.get("loto_checks") or {}
+    loto_qs = work_order.loto_completions.filter(id__in=loto_checks.keys())
+    for lc in loto_qs:
+        if loto_checks.get(str(lc.id)) and not lc.is_completed:
+            lc.is_completed = True
+            lc.completed_at = now
+            lc.notes = (lc.notes + "\n" + completion_note).strip() if lc.notes else completion_note
+            lc.save(update_fields=["is_completed", "completed_at", "notes"])
 
     # Attach PDF to the work order's maintenance history.
     if not work_order.completed_scan:
@@ -536,7 +554,10 @@ def _omr_scan_inputs(raw_bytes: bytes) -> "Tuple[Optional[str], Optional[str], O
     return wo_id, id_err, raw_bytes
 
 
-def _omr_label(target_id: str, task_titles: dict, material_names: dict) -> str:
+def _omr_label(
+    target_id: str, task_titles: dict, material_names: dict, loto_labels: Optional[dict] = None
+) -> str:
+    loto_labels = loto_labels or {}
     if target_id in OMR_FIXED_MARK_LABELS:
         return OMR_FIXED_MARK_LABELS[target_id]
     if target_id.startswith("task_"):
@@ -545,6 +566,9 @@ def _omr_label(target_id: str, task_titles: dict, material_names: dict) -> str:
         return material_names.get(target_id[len("material_") :], target_id)
     if target_id.startswith("materialspec_"):
         return f"Material {target_id[len('materialspec_') :]}"
+    if target_id.startswith("loto_"):
+        label = loto_labels.get(target_id[len("loto_") :])
+        return f"LOTO: {label}" if label else target_id
     return target_id
 
 
@@ -583,6 +607,22 @@ def omr_apply_mark(
             return 0
         mu.work_order = work_order  # prime FK cache for the usage note
         apply_material_usage(mu, was_used=marked, actor=actor, source_note=note)
+        return 1
+    if target_id.startswith("loto_"):
+        # LOTO energy-source completion. Rides the SAME two-axis auto-apply gate
+        # as tasks (a confidently-filled box on a well-registered scan; anything
+        # in doubt is queued upstream in ``auto_apply_or_queue``) — this only
+        # flips the structured checkbox datum, never closes the WO. Mirrors the
+        # task branch exactly, including leaving ``completed_by`` unattributed
+        # (a scan can't know who did the work).
+        lc = work_order.loto_completions.filter(id=target_id[len("loto_") :]).first()
+        if lc is None or lc.is_completed == marked:
+            return 0
+        lc.is_completed = marked
+        lc.completed_at = now if marked else None
+        if marked and note:
+            lc.notes = (lc.notes + "\n" + note).strip() if lc.notes else note
+        lc.save(update_fields=["is_completed", "completed_at", "notes"])
         return 1
     return 0
 
@@ -765,6 +805,7 @@ def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> 
     note = "Pre-checked from scan (OMR, pending confirmation)."
     task_titles = {str(tc.id): tc.task_title for tc in work_order.task_completions.all()}
     material_names = {str(mu.id): mu.material_name for mu in work_order.material_usage.all()}
+    loto_labels = {str(lc.id): lc.source_label for lc in work_order.loto_completions.all()}
 
     applied = 0
     for det in auto:
@@ -786,7 +827,7 @@ def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> 
                 "target_id": det.target_id,
                 "value": bool(det.value),
                 "confidence": round(float(det.confidence), 4),
-                "label": _omr_label(det.target_id, task_titles, material_names),
+                "label": _omr_label(det.target_id, task_titles, material_names, loto_labels),
                 "crop_url": f"{base}{det.target_id}/",
                 "auto_applied": auto_applied,
             }

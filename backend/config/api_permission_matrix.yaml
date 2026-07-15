@@ -1747,6 +1747,9 @@ views:
       apply_pending_changes:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
+      complete_loto:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
       complete_task:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite

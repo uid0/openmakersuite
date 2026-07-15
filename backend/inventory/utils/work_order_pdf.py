@@ -577,6 +577,60 @@ def generate_work_order_pdf(
             story.append(circuits_table)
         story.append(Spacer(1, 8))
 
+    # ── Lockout / Tagout energy-source checklist (OMR-readable) ───────────────
+    # One checkbox per energy source on the asset, keyed ``loto_<completion id>``
+    # and drawn exactly like a task box so a scanned copy reads it back the same
+    # way. The tech isolates + locks out each source, then checks its box. The
+    # free-text "Lockout Procedure" paragraph above stays the human-readable
+    # reference (handwriting isn't OMR'd). Rows are the WorkOrderLotoCompletion
+    # set materialized at WO generation — absent (no boxes) when the asset has no
+    # recorded energy sources, which is not an error.
+    loto_completions = list(work_order.loto_completions.all())
+    if loto_completions:
+        story.append(Paragraph("Lockout / Tagout — Isolate Each Energy Source", subheading_style))
+        story.append(
+            Paragraph(
+                "<font size='7' color='#666666'>Lock out and verify each energy "
+                "source is de-energized before servicing, then check its box.</font>",
+                small_style,
+            )
+        )
+        loto_header = [
+            Paragraph("✓", label_style),
+            Paragraph("Energy Source", label_style),
+            Paragraph("Isolation Point", label_style),
+            Paragraph("Lockout Devices", label_style),
+        ]
+        loto_rows = [loto_header]
+        for lc in loto_completions:
+            loto_rows.append(
+                [
+                    AcroCheckbox(name=f"loto_{lc.id}", collector=region_collector),
+                    Paragraph(lc.source_label, normal_style),
+                    Paragraph(lc.isolation_point or "—", small_style),
+                    Paragraph(lc.required_devices or "—", small_style),
+                ]
+            )
+        loto_table = Table(
+            loto_rows,
+            colWidths=[0.3 * inch, 2.2 * inch, 2.5 * inch, 2.2 * inch],
+        )
+        loto_table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#fff4e0")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("PADDING", (0, 0), (-1, -1), 4),
+                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                ]
+            )
+        )
+        story.append(loto_table)
+        story.append(Spacer(1, 8))
+
     # ── Task description ──────────────────────────────────────────────────────
     if item.description:
         story.append(Paragraph("Task Description", subheading_style))

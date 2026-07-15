@@ -59,6 +59,7 @@ from .models import (
     Supplier,
     UsageLog,
     WorkOrder,
+    WorkOrderLotoCompletion,
     WorkOrderMaterialUsage,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
@@ -99,6 +100,7 @@ from .serializers import (
     SupplierSerializer,
     UsageLogSerializer,
     WorkOrderListSerializer,
+    WorkOrderLotoCompletionSerializer,
     WorkOrderMaterialUsageSerializer,
     WorkOrderPhotoSerializer,
     WorkOrderSerializer,
@@ -3817,6 +3819,8 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             "task_completions__completed_by",
             "task_completions__task",
             "material_usage__material",
+            "loto_completions__completed_by",
+            "loto_completions__energy_source",
             "photos__uploaded_by",
             "maintenance_item__materials",
             # op-o6rs: feed the pending-review badge (pending_review_count) from
@@ -4050,6 +4054,11 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         work_order = serializer.save()
+        # Materialize per-energy-source LOTO completion rows so any created WO
+        # (not just the generate_work_order path) can be printed + scanned back.
+        from .services.work_order_loto import create_loto_completions
+
+        create_loto_completions(work_order)
         self._sync_completion_timestamp(work_order, was_completed=False)
         # Roll same-asset PMs due within PM_AUTO_BUNDLE_DUE_WITHIN_DAYS
         # BEFORE the completion cascade, so a new WO that lands in
@@ -4254,6 +4263,49 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             work_order.save(update_fields=["status", "updated_at"])
 
         return Response(WorkOrderTaskCompletionSerializer(tc).data)
+
+    @action(detail=True, methods=["patch"], url_path="loto/(?P<loto_id>[^/.]+)/complete")
+    def complete_loto(self, request, pk=None, loto_id=None):
+        """Toggle lockout/tagout of one energy source within this work order.
+
+        Structured safety data only: like task completions, this records that an
+        energy source was isolated — it never closes the work order (completion
+        stays a required-tasks gate + human confirm).
+        """
+        work_order = self.get_object()
+        try:
+            lc = work_order.loto_completions.get(id=loto_id)
+        except WorkOrderLotoCompletion.DoesNotExist:
+            return Response(
+                {"detail": "LOTO completion record not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        is_completed = request.data.get("is_completed")
+        if is_completed is None:
+            return Response(
+                {"detail": "is_completed is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        lc.is_completed = bool(is_completed)
+        if lc.is_completed and not lc.completed_at:
+            lc.completed_at = timezone.now()
+            lc.completed_by = request.user
+        elif not lc.is_completed:
+            lc.completed_at = None
+            lc.completed_by = None
+        if "notes" in request.data:
+            lc.notes = request.data["notes"]
+        lc.save()
+
+        # Locking out a source is part of doing the work — mirror task toggling
+        # and advance OPEN → IN_PROGRESS (but never to COMPLETED).
+        if lc.is_completed and work_order.status == WorkOrder.Status.OPEN:
+            work_order.status = WorkOrder.Status.IN_PROGRESS
+            work_order.save(update_fields=["status", "updated_at"])
+
+        return Response(WorkOrderLotoCompletionSerializer(lc).data)
 
     @action(
         detail=False,
@@ -4881,12 +4933,20 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                     unit=mat.unit,
                 )
 
+            # Create a LOTO completion row per energy source on the asset so a
+            # scanned-back paper form has rows to apply loto_<id> marks against.
+            from .services.work_order_loto import create_loto_completions
+
+            create_loto_completions(wo)
+
         serializer = WorkOrderSerializer(wo, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
     def generate_work_orders_bulk(self, request):
         """Generate work orders for all overdue or due-this-week maintenance items."""
+        from .services.work_order_loto import create_loto_completions
+
         now = timezone.now()
         week_out = now + timedelta(days=7)
         created = []
@@ -4929,6 +4989,7 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                         quantity_used=mat.quantity,
                         unit=mat.unit,
                     )
+                create_loto_completions(wo)
                 created.append(str(wo.id))
 
         return Response(

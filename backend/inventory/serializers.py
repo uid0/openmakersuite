@@ -2040,6 +2040,21 @@ class WorkOrderValidationSerializer(serializers.ModelSerializer):
         return None
 
 
+def _pending_review_count(work_order) -> int:
+    """Count a WO's PENDING_REVIEW submissions from the prefetched cache.
+
+    Reads ``work_order.submissions.all()`` with no filter/order override so it
+    hits the ``prefetch_related("submissions")`` cache on the list/detail
+    queryset instead of firing a query per row (N+1). Drives the "N scanned
+    marks to review" badge on the WO list rows + detail header (op-o6rs).
+    """
+    return sum(
+        1
+        for s in work_order.submissions.all()
+        if s.status == WorkOrderSubmission.Status.PENDING_REVIEW
+    )
+
+
 class WorkOrderSerializer(serializers.ModelSerializer):
     """Full serializer for a work order, including nested completions and photos."""
 
@@ -2054,6 +2069,8 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     material_usage = WorkOrderMaterialUsageSerializer(many=True, read_only=True)
     photos = WorkOrderPhotoSerializer(many=True, read_only=True)
     submissions = serializers.SerializerMethodField()
+    pending_review_count = serializers.SerializerMethodField()
+    has_pending_review = serializers.SerializerMethodField()
     electrical = serializers.SerializerMethodField()
     loto = serializers.SerializerMethodField()
     validation = serializers.SerializerMethodField()
@@ -2080,6 +2097,8 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "material_usage",
             "photos",
             "submissions",
+            "pending_review_count",
+            "has_pending_review",
             "electrical",
             "loto",
             "validation",
@@ -2095,10 +2114,18 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "material_usage",
             "photos",
             "submissions",
+            "pending_review_count",
+            "has_pending_review",
             "electrical",
             "loto",
             "validation",
         ]
+
+    def get_pending_review_count(self, obj):
+        return _pending_review_count(obj)
+
+    def get_has_pending_review(self, obj):
+        return _pending_review_count(obj) > 0
 
     def get_submissions(self, obj):
         qs = obj.submissions.all().order_by("-received_at")
@@ -2137,6 +2164,8 @@ class WorkOrderListSerializer(serializers.ModelSerializer):
     is_overdue = serializers.ReadOnlyField()
     task_completion_count = serializers.SerializerMethodField()
     task_total_count = serializers.SerializerMethodField()
+    pending_review_count = serializers.SerializerMethodField()
+    has_pending_review = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkOrder
@@ -2155,6 +2184,8 @@ class WorkOrderListSerializer(serializers.ModelSerializer):
             "completed_at",
             "task_completion_count",
             "task_total_count",
+            "pending_review_count",
+            "has_pending_review",
             "created_at",
             "updated_at",
         ]
@@ -2164,6 +2195,12 @@ class WorkOrderListSerializer(serializers.ModelSerializer):
 
     def get_task_total_count(self, obj):
         return obj.task_completions.count()
+
+    def get_pending_review_count(self, obj):
+        return _pending_review_count(obj)
+
+    def get_has_pending_review(self, obj):
+        return _pending_review_count(obj) > 0
 
 
 class StockReconciliationSerializer(serializers.ModelSerializer):

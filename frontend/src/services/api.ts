@@ -1379,6 +1379,14 @@ export const workOrderAPI = {
       { responseType: 'blob' },
     ),
 
+  // op-o6rs: authed PNG of the FULL scanned page so the reviewer can verify the
+  // detected marks against the actual paper form (returns a Blob for object-URL).
+  getScanImage: (workOrderId: string, submissionId: string) =>
+    api.get(
+      `/inventory/work-orders/${workOrderId}/submissions/${submissionId}/scan-image/`,
+      { responseType: 'blob' },
+    ),
+
   getDueThisWeek: () =>
     api.get<MaintenanceItem[]>('/inventory/maintenance-items/due_this_week/'),
 

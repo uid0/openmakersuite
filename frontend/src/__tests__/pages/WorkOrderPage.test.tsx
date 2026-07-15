@@ -18,7 +18,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import WorkOrderPage from '../../pages/WorkOrderPage';
 import { workOrderAPI } from '../../services/api';
-import { WorkOrder } from '../../types';
+import { WorkOrder, WorkOrderMaterialUsage } from '../../types';
 import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
@@ -215,5 +215,73 @@ describe('WorkOrderPage resilience (#457 R4)', () => {
       'http://localhost:8000/api/inventory/work-orders/wo-1/pdf/',
     );
     expect(mockWorkOrderAPI.getPdfUrl).toHaveBeenCalledWith('wo-1');
+  });
+});
+
+describe('WorkOrderPage material usage → inventory decrement (op-uh8z)', () => {
+  const buildMaterial = (
+    overrides: Partial<WorkOrderMaterialUsage> = {},
+  ): WorkOrderMaterialUsage => ({
+    id: 'mu-1',
+    work_order: 'wo-1',
+    material: 'm-1',
+    material_name: 'Air filter',
+    quantity_planned: '2.00',
+    quantity_used: '2.00',
+    unit: 'ea',
+    was_used: false,
+    applied_quantity: null,
+    stock_applied: false,
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  });
+
+  it('sends the quantity used when a material is checked off as used', async () => {
+    mockWorkOrderAPI.getWorkOrder.mockResolvedValue(
+      okResponse(buildWorkOrder({ material_usage: [buildMaterial()] })),
+    );
+    mockWorkOrderAPI.toggleMaterial.mockResolvedValue(okResponse({}));
+
+    renderPage();
+
+    const checkbox = await screen.findByRole('checkbox', { name: /air filter/i });
+    fireEvent.click(checkbox);
+
+    // Checking the box records the material as used AND carries the quantity,
+    // which the backend decrements from the linked inventory item.
+    await waitFor(() => {
+      expect(mockWorkOrderAPI.toggleMaterial).toHaveBeenCalledWith(
+        'wo-1',
+        'mu-1',
+        true,
+        '2.00',
+      );
+    });
+  });
+
+  it('shows the decremented-from-stock state and hides the quantity input once applied', async () => {
+    mockWorkOrderAPI.getWorkOrder.mockResolvedValue(
+      okResponse(
+        buildWorkOrder({
+          material_usage: [
+            buildMaterial({
+              was_used: true,
+              quantity_used: '3.00',
+              applied_quantity: 3,
+              stock_applied: true,
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText(/3 from stock/i)).toBeInTheDocument();
+    expect(screen.getByText(/usage logged/i)).toBeInTheDocument();
+    // The quantity input is locked away once the decrement is applied.
+    expect(
+      screen.queryByRole('spinbutton', { name: /qty used/i }),
+    ).not.toBeInTheDocument();
   });
 });

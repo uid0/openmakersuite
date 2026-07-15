@@ -12,6 +12,7 @@ import {
   Image,
   Loader,
   Modal,
+  NumberInput,
   Select,
   Stack,
   Text,
@@ -197,6 +198,9 @@ const WorkOrderPage: React.FC = () => {
   const [savingStatus, setSavingStatus] = useState(false);
   const [togglingTask, setTogglingTask] = useState<string | null>(null);
   const [togglingMaterial, setTogglingMaterial] = useState<string | null>(null);
+  // Per-row "quantity used" edits, keyed by material-usage id. Seeded from the
+  // row's quantity_used and sent when the material is checked off as used.
+  const [materialQty, setMaterialQty] = useState<Record<string, number | string>>({});
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [notes, setNotes] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
@@ -434,11 +438,15 @@ const WorkOrderPage: React.FC = () => {
     }
   };
 
-  const handleToggleMaterial = async (materialUsageId: string, wasUsed: boolean) => {
+  const handleToggleMaterial = async (
+    materialUsageId: string,
+    wasUsed: boolean,
+    quantityUsed?: number | string
+  ) => {
     if (!workOrder) return;
     setTogglingMaterial(materialUsageId);
     try {
-      await workOrderAPI.toggleMaterial(workOrder.id, materialUsageId, wasUsed);
+      await workOrderAPI.toggleMaterial(workOrder.id, materialUsageId, wasUsed, quantityUsed);
       await loadWorkOrder();
     } catch {
       notifications.show({
@@ -1039,10 +1047,17 @@ const WorkOrderPage: React.FC = () => {
                   opacity: togglingMaterial === mu.id ? 0.6 : 1,
                 }}
               >
-                <Group gap="md" wrap="nowrap">
+                <Group gap="md" wrap="nowrap" justify="space-between" align="flex-start">
                   <Checkbox
                     checked={mu.was_used}
-                    onChange={(e) => handleToggleMaterial(mu.id, e.currentTarget.checked)}
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
+                      handleToggleMaterial(
+                        mu.id,
+                        checked,
+                        checked ? (materialQty[mu.id] ?? mu.quantity_used) : undefined
+                      );
+                    }}
                     disabled={togglingMaterial === mu.id}
                     size="lg"
                     label={
@@ -1056,12 +1071,38 @@ const WorkOrderPage: React.FC = () => {
                           {mu.material_name}
                         </Text>
                         <Text size="xs" c="dimmed">
-                          {mu.quantity_planned}
+                          Planned: {mu.quantity_planned}
                           {mu.unit ? ` ${mu.unit}` : ''}
                         </Text>
                       </Box>
                     }
                   />
+                  {mu.stock_applied ? (
+                    <Stack gap={0} align="flex-end">
+                      <Text
+                        size="xs"
+                        c="teal.7"
+                        fw={600}
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        −{mu.applied_quantity} from stock
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        usage logged
+                      </Text>
+                    </Stack>
+                  ) : (
+                    <NumberInput
+                      size="xs"
+                      label="Qty used"
+                      value={materialQty[mu.id] ?? Number(mu.quantity_used)}
+                      onChange={(v) => setMaterialQty((prev) => ({ ...prev, [mu.id]: v }))}
+                      min={0}
+                      step={1}
+                      disabled={togglingMaterial === mu.id}
+                      style={{ maxWidth: 110 }}
+                    />
+                  )}
                 </Group>
               </Box>
             ))}

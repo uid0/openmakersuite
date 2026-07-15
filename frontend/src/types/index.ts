@@ -665,8 +665,14 @@ export interface WorkOrderMaterialUsage {
   material: string | null;
   material_name: string;
   quantity_planned: string;
+  /** Quantity actually consumed; drives the inventory decrement when used. */
+  quantity_used: string;
   unit: string;
   was_used: boolean;
+  /** Whole stock units decremented from the linked item; null when not applied. */
+  applied_quantity: number | null;
+  /** True when a stock decrement is currently applied for this usage. */
+  stock_applied: boolean;
   created_at: string;
 }
 

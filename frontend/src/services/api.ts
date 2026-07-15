@@ -1321,10 +1321,17 @@ export const workOrderAPI = {
       data
     ),
 
-  toggleMaterial: (workOrderId: string, materialUsageId: string, wasUsed: boolean) =>
+  toggleMaterial: (
+    workOrderId: string,
+    materialUsageId: string,
+    wasUsed: boolean,
+    quantityUsed?: number | string
+  ) =>
     api.patch(
       `/inventory/work-orders/${workOrderId}/materials/${materialUsageId}/toggle/`,
-      { was_used: wasUsed }
+      quantityUsed === undefined
+        ? { was_used: wasUsed }
+        : { was_used: wasUsed, quantity_used: quantityUsed }
     ),
 
   addPhoto: (workOrderId: string, formData: FormData) =>

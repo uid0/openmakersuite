@@ -590,10 +590,46 @@ class WorkOrderMaterialUsage(models.Model):
         default=Decimal("1.00"),
         help_text="Planned quantity from the maintenance item spec",
     )
+    quantity_used = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("1.00"),
+        help_text=(
+            "Quantity actually consumed. When this row is marked used and the "
+            "material links to an inventory item, the item's stock is decremented "
+            "by this amount (rounded to whole stock units) and a UsageLog row is "
+            "written. Defaults to the planned quantity."
+        ),
+    )
     unit = models.CharField(max_length=50, blank=True)
     was_used = models.BooleanField(
         default=False,
         help_text="Whether this material was actually used",
+    )
+    # --- Inventory-decrement tracking (PR3, op-uh8z) -------------------------
+    # ``applied_quantity`` is the idempotency guard AND the exact amount to
+    # restore on reversal: it holds the whole number of stock units decremented
+    # from the linked inventory item, or ``None`` when no decrement is currently
+    # applied (fresh row, reversed row, or a flag-only material with no inventory
+    # link). ``usage_log`` points at the UsageLog written for the decrement so it
+    # can be voided (deleted) when the row is un-used.
+    applied_quantity = models.IntegerField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Whole stock units decremented from the linked inventory item for "
+            "this usage; null when no decrement is currently applied. Reversal "
+            "restores exactly this amount."
+        ),
+    )
+    usage_log = models.ForeignKey(
+        "UsageLog",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="UsageLog row written when stock was decremented; voided on reversal.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -603,6 +639,11 @@ class WorkOrderMaterialUsage(models.Model):
     def __str__(self) -> str:
         status = "used" if self.was_used else "not used"
         return f"{self.material_name} ({status}) — WO {self.work_order.short_id}"
+
+    @property
+    def stock_applied(self) -> bool:
+        """True when a stock decrement is currently applied for this usage."""
+        return self.applied_quantity is not None
 
 
 class WorkOrderPhoto(models.Model):

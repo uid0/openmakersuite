@@ -1965,8 +1965,17 @@ class WorkOrderTaskCompletionInline(admin.TabularInline):
 class WorkOrderMaterialUsageInline(admin.TabularInline):
     model = WorkOrderMaterialUsage
     extra = 0
-    fields = ["material_name", "quantity_planned", "unit", "was_used"]
-    readonly_fields = ["material_name", "quantity_planned", "unit"]
+    fields = [
+        "material_name",
+        "quantity_planned",
+        "quantity_used",
+        "unit",
+        "was_used",
+        "applied_quantity",
+    ]
+    # ``applied_quantity`` (whole stock units decremented) is read-only audit
+    # state managed by the material-usage service, not edited by hand here.
+    readonly_fields = ["material_name", "quantity_planned", "unit", "applied_quantity"]
 
 
 class WorkOrderPhotoInline(admin.TabularInline):

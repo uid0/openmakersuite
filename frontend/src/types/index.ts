@@ -803,10 +803,6 @@ export interface WorkOrder {
   validation?: WorkOrderValidationRecord | null;
   task_completion_count?: number;
   task_total_count?: number;
-  // op-o6rs: number of submissions still awaiting human review (drives the
-  // per-WO "scanned — needs review" badge on the list row + detail header).
-  pending_review_count?: number;
-  has_pending_review?: boolean;
   created_at: string;
   updated_at: string;
 }

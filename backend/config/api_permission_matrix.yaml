@@ -1777,9 +1777,6 @@ views:
       retrieve:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
-      scan_image:
-        permission_classes:
-        - IsAuthenticated
       toggle_material:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite

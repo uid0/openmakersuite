@@ -18,11 +18,7 @@ from __future__ import annotations
 
 import io
 
-from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.db import connection
-from django.test.utils import CaptureQueriesContext
-from django.utils.crypto import get_random_string
 
 import cv2
 import numpy as np
@@ -56,11 +52,8 @@ from inventory.tests.test_work_order_omr import (
     _make_work_order,
     _staff_client,
 )
-from notifications.models import Notification
 
 pytestmark = pytest.mark.django_db
-
-User = get_user_model()
 
 DPI = omr.CANON_DPI
 FID_SIZE_PT = 30.0
@@ -528,22 +521,6 @@ class TestReviewFlow:
         assert resp["Content-Type"] == "image/png"
         assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"
 
-    def test_scan_image_endpoint_returns_full_page_png(self):
-        # op-o6rs: the reviewer verifies the marks against the whole paper form,
-        # so the endpoint renders the full scanned page (not a per-mark crop).
-        wo, sub, _tasks = self._staged()
-        client, _user = _staff_client()
-        resp = client.get(f"/api/inventory/work-orders/{wo.id}/submissions/{sub.id}/scan-image/")
-        assert resp.status_code == status.HTTP_200_OK
-        assert resp["Content-Type"] == "image/png"
-        assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"
-
-    def test_scan_image_endpoint_404s_unknown_submission(self):
-        wo, _sub, _tasks = self._staged()
-        client, _user = _staff_client()
-        resp = client.get(f"/api/inventory/work-orders/{wo.id}/submissions/{wo.id}/scan-image/")
-        assert resp.status_code == status.HTTP_404_NOT_FOUND
-
     def test_per_row_reject_undoes_autoapply(self):
         wo, sub, tasks = self._staged(mark_count=1)
         tc0 = WorkOrderTaskCompletion.objects.get(id=tasks[0][len("task_") :])
@@ -659,180 +636,3 @@ class TestAutoApplyPolicy:
         assert dets["task_solid"].fill_ratio == pytest.approx(0.90)
         assert dets["task_amb"].confident_checked is False
         assert dets["tech_initials"].confident_checked is True  # 0.09 >= _INK_ON (0.05)
-
-
-# ---------------------------------------------------------------------------
-# scan-in notification (op-o6rs): a scan landing in review notifies app-wide
-# ---------------------------------------------------------------------------
-NOTIFY_TITLE = "Work order scanned — needs review"
-
-
-class TestScanNotification:
-    """A SCAN → PENDING_REVIEW ingest fans out exactly one app-wide notification
-    (one row per staff user, not duplicated across the pipeline's several
-    saves); the degraded ``_omr_review`` path notifies too; the ``_omr_fail``
-    hard-failure path does not; and a notification failure never breaks ingest.
-    """
-
-    def _staff(self, n=2):
-        return [
-            User.objects.create_user(
-                username=f"staff_{i}_{get_random_string(5)}",
-                email=f"staff{i}@example.com",
-                password=get_random_string(24),
-                is_staff=True,
-                is_active=True,
-            )
-            for i in range(n)
-        ]
-
-    def test_clean_scan_notifies_admins_exactly_once(self, django_capture_on_commit_callbacks):
-        staff = self._staff(2)
-        wo = _make_work_order(num_tasks=3)
-        template = _persisted(wo)
-        tasks = _task_target_ids(template)
-        scan = _synth_scan(template, wo_id=wo.id, marks={tasks[0]: "full"})
-        sub = _submission_for(wo, scan)
-
-        with django_capture_on_commit_callbacks(execute=True) as callbacks:
-            apply_submission(sub)
-
-        # exactly one on_commit hook despite the pipeline's several saves
-        assert len(callbacks) == 1
-        notes = Notification.objects.filter(title=NOTIFY_TITLE)
-        # one row per staff user — not duplicated
-        assert notes.count() == len(staff)
-        n = notes.first()
-        assert n.type == "warning"
-        assert n.action_url == f"/maintenance/work-orders/{wo.id}"
-        assert n.metadata["work_order_id"] == str(wo.id)
-        assert n.metadata["submission_id"] == str(sub.id)
-        assert n.metadata["kind"] == "work_order_scanned"
-
-    def test_notification_is_deferred_until_commit(self, django_capture_on_commit_callbacks):
-        # No notification exists until the ingest transaction actually commits —
-        # a rolled-back ingest must never notify (on_commit, not inline).
-        self._staff(1)
-        wo = _make_work_order(num_tasks=2)
-        template = _persisted(wo)
-        scan = _synth_scan(template, wo_id=wo.id, marks={_task_target_ids(template)[0]: "full"})
-        sub = _submission_for(wo, scan)
-
-        with django_capture_on_commit_callbacks(execute=False):
-            apply_submission(sub)
-            # inside the block the commit hasn't run yet
-            assert not Notification.objects.filter(title=NOTIFY_TITLE).exists()
-
-    def test_degraded_scan_notifies(self, django_capture_on_commit_callbacks):
-        staff = self._staff(1)
-        wo = _make_work_order(num_tasks=2)
-        template = _persisted(wo)
-        scan = _synth_scan(template, wo_id=wo.id, marks={_task_target_ids(template)[0]: "full"})
-        wo.omr_templates.all().delete()  # no template on file → _omr_review path
-        sub = _submission_for(wo, scan)
-
-        with django_capture_on_commit_callbacks(execute=True):
-            apply_submission(sub)
-        sub.refresh_from_db()
-
-        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
-        assert Notification.objects.filter(title=NOTIFY_TITLE, user__in=staff).count() == len(staff)
-
-    def test_failed_scan_does_not_notify(self, django_capture_on_commit_callbacks):
-        import uuid
-
-        self._staff(1)
-        wo = _make_work_order(num_tasks=2)
-        template = _persisted(wo)
-        scan = _synth_scan(template, wo_id=uuid.uuid4(), marks={})  # unresolvable WO id
-        sub = _submission_for(wo, scan)
-
-        with django_capture_on_commit_callbacks(execute=True):
-            apply_submission(sub)
-        sub.refresh_from_db()
-
-        assert sub.status == WorkOrderSubmission.Status.FAILED
-        assert not Notification.objects.filter(title=NOTIFY_TITLE).exists()
-
-    def test_notification_failure_does_not_break_ingest(
-        self, monkeypatch, django_capture_on_commit_callbacks
-    ):
-        self._staff(1)
-        wo = _make_work_order(num_tasks=2)
-        template = _persisted(wo)
-        scan = _synth_scan(template, wo_id=wo.id, marks={_task_target_ids(template)[0]: "full"})
-        sub = _submission_for(wo, scan)
-
-        def _boom(*a, **k):
-            raise RuntimeError("notification backend down")
-
-        # notify_admins is imported lazily inside the hook; patch it at source.
-        monkeypatch.setattr("notifications.services.notify_admins", _boom)
-
-        with django_capture_on_commit_callbacks(execute=True):
-            apply_submission(sub)
-        sub.refresh_from_db()
-
-        # ingest still succeeded even though the notification blew up
-        assert sub.status == WorkOrderSubmission.Status.PENDING_REVIEW
-        assert not Notification.objects.filter(title=NOTIFY_TITLE).exists()
-
-
-# ---------------------------------------------------------------------------
-# per-WO pending-review badge (op-o6rs): serializer field + prefetch (no N+1)
-# ---------------------------------------------------------------------------
-class TestPendingReviewBadge:
-    def _sub(self, wo, status_value):
-        return WorkOrderSubmission.objects.create(
-            work_order=wo,
-            kind=WorkOrderSubmission.Kind.PM_COMPLETION,
-            source=WorkOrderSubmission.Source.SCAN,
-            status=status_value,
-        )
-
-    def test_list_row_exposes_pending_review_count(self):
-        wo = _make_work_order(num_tasks=1)
-        self._sub(wo, WorkOrderSubmission.Status.PENDING_REVIEW)
-        self._sub(wo, WorkOrderSubmission.Status.APPLIED)  # not counted
-        client, _user = _staff_client()
-        resp = client.get("/api/inventory/work-orders/")
-        assert resp.status_code == status.HTTP_200_OK
-        row = next(r for r in resp.data["results"] if r["id"] == str(wo.id))
-        assert row["pending_review_count"] == 1
-        assert row["has_pending_review"] is True
-
-    def test_detail_header_exposes_pending_review_count(self):
-        wo = _make_work_order(num_tasks=1)
-        self._sub(wo, WorkOrderSubmission.Status.PENDING_REVIEW)
-        client, _user = _staff_client()
-        resp = client.get(f"/api/inventory/work-orders/{wo.id}/")
-        assert resp.status_code == status.HTTP_200_OK
-        assert resp.data["pending_review_count"] == 1
-        assert resp.data["has_pending_review"] is True
-
-    def test_no_pending_review_reads_zero(self):
-        wo = _make_work_order(num_tasks=1)
-        self._sub(wo, WorkOrderSubmission.Status.APPLIED)
-        client, _user = _staff_client()
-        resp = client.get(f"/api/inventory/work-orders/{wo.id}/")
-        assert resp.data["pending_review_count"] == 0
-        assert resp.data["has_pending_review"] is False
-
-    def test_pending_review_count_has_no_nplus1(self):
-        # Submissions are prefetched, so listing WOs that each carry submissions
-        # costs the same number of queries as listing WOs with none — the count
-        # never fires a per-row query.
-        client, _user = _staff_client()
-
-        def _list_queries(n_subs_each):
-            WorkOrder.objects.all().delete()
-            for _ in range(3):
-                wo = _make_work_order(num_tasks=1)
-                for _ in range(n_subs_each):
-                    self._sub(wo, WorkOrderSubmission.Status.PENDING_REVIEW)
-            with CaptureQueriesContext(connection) as ctx:
-                resp = client.get("/api/inventory/work-orders/")
-                assert resp.status_code == status.HTTP_200_OK
-            return len(ctx.captured_queries)
-
-        assert _list_queries(0) == _list_queries(2)

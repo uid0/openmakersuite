@@ -611,49 +611,6 @@ def omr_confirm_completion(
     return True
 
 
-def _notify_wo_scanned(
-    submission: WorkOrderSubmission, work_order: Optional[WorkOrder], *, degraded: bool
-) -> None:
-    """Fire an app-wide "a scan needs review" notification for a scanned-in WO.
-
-    Registered via ``transaction.on_commit`` at each terminal PENDING_REVIEW
-    save (the clean read at the end of ``_apply_omr_submission`` and the
-    degraded ``_omr_review`` path) so it fires exactly once per ingest and only
-    after the ingest actually commits — never on a rolled-back atomic block, and
-    never from ``_omr_fail`` (a hard failure is out of scope). Wrapped so a
-    notification failure can never break ingest (precedent: ``inventory/views``
-    ``add_photo``). Consumers: the existing header bell / notification centre,
-    which polls; the ``action_url`` deep-links to the WO review screen.
-    """
-    if work_order is None:
-        return
-    try:
-        from notifications.services import notify_admins
-
-        count = len(submission.pending_changes or [])
-        if degraded:
-            message = (
-                f"{work_order.short_id} scanned in but could not be read cleanly "
-                "— open it to review by hand."
-            )
-        else:
-            noun = "mark" if count == 1 else "marks"
-            message = f"{work_order.short_id} scanned in — {count} {noun} to confirm."
-        notify_admins(
-            type="warning",
-            title="Work order scanned — needs review",
-            message=message,
-            action_url=f"/maintenance/work-orders/{work_order.id}",
-            metadata={
-                "work_order_id": str(work_order.id),
-                "submission_id": str(submission.id),
-                "kind": "work_order_scanned",
-            },
-        )
-    except Exception:  # noqa: BLE001 - a notification must never break ingest
-        logger.exception("Failed to emit scan-in notification for submission %s", submission.id)
-
-
 def _omr_fail(submission: WorkOrderSubmission, message: str) -> WorkOrderSubmission:
     """Unrecoverable scan (no WO id / WO missing): mark FAILED."""
     submission.status = WorkOrderSubmission.Status.FAILED
@@ -672,8 +629,6 @@ def _omr_review(
     submission.parse_error = message
     submission.pending_changes = []
     submission.save(update_fields=["status", "parse_error", "work_order", "pending_changes"])
-    # Degraded scans still need a human — surface them app-wide too (op-o6rs).
-    transaction.on_commit(lambda: _notify_wo_scanned(submission, work_order, degraded=True))
     return submission
 
 
@@ -798,9 +753,6 @@ def _apply_omr_submission(submission: WorkOrderSubmission, raw_bytes: bytes) -> 
     submission.save(
         update_fields=["status", "work_order", "parsed_fields", "parse_error", "pending_changes"]
     )
-    # A scanned WO is back and awaiting a human confirm — notify app-wide once
-    # the atomic ingest commits (op-o6rs). on_commit avoids notifying on rollback.
-    transaction.on_commit(lambda: _notify_wo_scanned(submission, work_order, degraded=False))
     return submission
 
 

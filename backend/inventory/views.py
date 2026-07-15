@@ -3819,9 +3819,6 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             "material_usage__material",
             "photos__uploaded_by",
             "maintenance_item__materials",
-            # op-o6rs: feed the pending-review badge (pending_review_count) from
-            # a single prefetch instead of a per-row submissions query (N+1).
-            "submissions",
         )
         .all()
     )
@@ -4559,71 +4556,6 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             )
         response = HttpResponse(png, content_type="image/png")
         response["Content-Disposition"] = f'inline; filename="omr-{target_id}.png"'
-        return response
-
-    @action(
-        detail=True,
-        methods=["get"],
-        url_path="submissions/(?P<submission_id>[^/.]+)/scan-image",
-        permission_classes=[IsAuthenticated],
-    )
-    def scan_image(self, request, pk=None, submission_id=None):
-        """Serve the full scanned page as a PNG for paper-form verification.
-
-        op-o6rs: the per-mark ``mark_crop`` shows only a 72×44 warp of one box;
-        to verify the marks against the actual paper the reviewer needs to see
-        the whole page. Pulls the embedded page image out of the submission's
-        raw scan (falling back to the WO's ``completed_scan``) — no PDF
-        rasteriser in the venv, so we read the embedded image the same way
-        ``mark_crop`` does — and normalises it to PNG for a stable content-type.
-        Authenticated read-only: rendering the page can never mutate state.
-        """
-        from PIL import Image
-
-        from .services.work_order_ingest import _omr_scan_inputs
-
-        work_order = self.get_object()
-        try:
-            submission = work_order.submissions.get(id=submission_id)
-        except WorkOrderSubmission.DoesNotExist:
-            return Response(
-                {"detail": "Submission not found for this work order."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        source = submission.attachment or work_order.completed_scan
-        if not source:
-            return Response(
-                {"detail": "No scanned page available for this submission."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        source.open("rb")
-        try:
-            raw_bytes = source.read()
-        finally:
-            source.close()
-
-        _wo_id, _err, image_bytes = _omr_scan_inputs(raw_bytes)
-        if image_bytes is None:
-            return Response(
-                {"detail": "No scanned page image available for this submission."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        try:
-            with Image.open(io.BytesIO(image_bytes)) as img:
-                buf = io.BytesIO()
-                img.convert("RGB").save(buf, format="PNG")
-            png = buf.getvalue()
-        except Exception:  # noqa: BLE001 - unreadable/odd embedded image
-            return Response(
-                {"detail": "Could not render the scanned page."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        response = HttpResponse(png, content_type="image/png")
-        response["Content-Disposition"] = f'inline; filename="wo-scan-{submission_id}.png"'
         return response
 
     @action(detail=True, methods=["patch"], url_path="materials/(?P<material_id>[^/.]+)/toggle")

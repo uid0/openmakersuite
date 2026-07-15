@@ -18,7 +18,6 @@ import {
   Textarea,
   Title,
   Tooltip,
-  UnstyledButton,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
@@ -61,7 +60,7 @@ const STATUS_COLORS: Record<WorkOrderStatus, string> = {
 // OMR bead-2: a small warped crop of one scanned mark so the reviewer can
 // eyeball the ink. The crop endpoint is authenticated, so we fetch the PNG as
 // a blob (Bearer token) and render it from an object URL rather than a bare
-// <img src> (which would send no auth header). op-o6rs: click to zoom.
+// <img src> (which would send no auth header).
 const OmrMarkCrop: React.FC<{
   workOrderId: string;
   submissionId: string;
@@ -69,7 +68,6 @@ const OmrMarkCrop: React.FC<{
 }> = ({ workOrderId, submissionId, targetId }) => {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const [zoomed, setZoomed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,99 +91,15 @@ const OmrMarkCrop: React.FC<{
   if (failed) return null;
   if (!url) return <Loader size="xs" />;
   return (
-    <>
-      <UnstyledButton
-        onClick={() => setZoomed(true)}
-        aria-label={`Zoom scanned mark ${targetId}`}
-        style={{ flexShrink: 0, lineHeight: 0 }}
-      >
-        <Image
-          src={url}
-          alt={`Scanned mark ${targetId}`}
-          w={72}
-          h={44}
-          fit="contain"
-          radius="sm"
-          style={{ border: '1px solid #dee2e6', backgroundColor: '#fff', cursor: 'zoom-in' }}
-        />
-      </UnstyledButton>
-      <Modal
-        opened={zoomed}
-        onClose={() => setZoomed(false)}
-        size="lg"
-        title="Scanned mark"
-        centered
-      >
-        <Image src={url} alt={`Scanned mark ${targetId} (enlarged)`} fit="contain" />
-      </Modal>
-    </>
-  );
-};
-
-// op-o6rs: the FULL scanned page, so the reviewer verifies the detected marks
-// against the actual paper form. Same authed-blob → object-URL pattern as the
-// per-mark crop; click to open a full-size lightbox. The getScanImage call is
-// wrapped in Promise.resolve so an auto-mocked api (tests) that returns
-// undefined degrades to "no image" instead of throwing.
-const OmrScanImage: React.FC<{
-  workOrderId: string;
-  submissionId: string;
-}> = ({ workOrderId, submissionId }) => {
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [zoomed, setZoomed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    Promise.resolve(workOrderAPI.getScanImage(workOrderId, submissionId))
-      .then((res) => {
-        if (cancelled) return;
-        const blob = (res as { data?: Blob } | undefined)?.data;
-        if (!blob) {
-          setFailed(true);
-          return;
-        }
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [workOrderId, submissionId]);
-
-  if (failed) return null;
-  if (!url) return <Loader size="sm" />;
-  return (
-    <>
-      <UnstyledButton
-        onClick={() => setZoomed(true)}
-        aria-label="Zoom scanned page"
-        style={{ width: '100%', lineHeight: 0 }}
-      >
-        <Image
-          src={url}
-          alt="Scanned work order page"
-          fit="contain"
-          radius="sm"
-          mah={320}
-          style={{ border: '1px solid #dee2e6', backgroundColor: '#fff', cursor: 'zoom-in' }}
-        />
-      </UnstyledButton>
-      <Modal
-        opened={zoomed}
-        onClose={() => setZoomed(false)}
-        size="xl"
-        title="Scanned work order page"
-        centered
-      >
-        <Image src={url} alt="Scanned work order page (enlarged)" fit="contain" />
-      </Modal>
-    </>
+    <Image
+      src={url}
+      alt={`Scanned mark ${targetId}`}
+      w={72}
+      h={44}
+      fit="contain"
+      radius="sm"
+      style={{ border: '1px solid #dee2e6', backgroundColor: '#fff', flexShrink: 0 }}
+    />
   );
 };
 
@@ -568,11 +482,6 @@ const WorkOrderPage: React.FC = () => {
                   </Group>
                 </Badge>
               )}
-              {(workOrder.pending_review_count ?? 0) > 0 && (
-                <Badge color="orange" variant="filled" size="sm" leftSection={<IconScan size={12} />}>
-                  {workOrder.pending_review_count} to review
-                </Badge>
-              )}
             </Group>
             <Text fw={600} size="sm" truncate>{workOrder.maintenance_item_title}</Text>
             <Text size="xs" c="dimmed">
@@ -757,16 +666,6 @@ const WorkOrderPage: React.FC = () => {
                       >
                         {sub.parse_error}
                       </Alert>
-                    )}
-
-                    {/* op-o6rs: the full scanned page for paper-form verification. */}
-                    {isScan && (
-                      <Box mb="sm">
-                        <Text size="xs" c="dimmed" mb={4}>
-                          Scanned form — verify the marks below against the paper (click to zoom):
-                        </Text>
-                        <OmrScanImage workOrderId={workOrder.id} submissionId={sub.id} />
-                      </Box>
                     )}
 
                     <Stack gap={6} mb="sm">

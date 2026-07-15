@@ -99,8 +99,6 @@ beforeEach(() => {
   (URL as unknown as { createObjectURL: () => string }).createObjectURL = vi.fn(() => 'blob:mock');
   (URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = vi.fn();
   mockWorkOrderAPI.getMarkCrop.mockResolvedValue(okResponse(new Blob(['png'])));
-  // op-o6rs: the review panel also fetches the full scanned page (authed blob).
-  mockWorkOrderAPI.getScanImage.mockResolvedValue(okResponse(new Blob(['png'])));
   mockWorkOrderAPI.applyPendingChanges.mockResolvedValue(okResponse({ work_order_completed: false }));
   mockWorkOrderAPI.discardPendingChanges.mockResolvedValue(okResponse({}));
 });
@@ -116,20 +114,6 @@ describe('OMR scan review (bead-2)', () => {
     expect(screen.getByText('Lubricate bearings')).toBeInTheDocument();
     // the high-confidence mark shows it was pre-checked
     expect(screen.getByText(/marked · pre-checked/i)).toBeInTheDocument();
-  });
-
-  it('shows the full scanned page for paper-form verification', async () => {
-    mockWorkOrderAPI.getWorkOrder.mockResolvedValue(okResponse(scanWorkOrder()));
-    renderPage();
-
-    // the whole scanned page is rendered (not just the per-mark crops) and is
-    // sourced from the authed scan-image endpoint.
-    expect(
-      await screen.findByRole('img', { name: /scanned work order page/i }),
-    ).toBeInTheDocument();
-    await waitFor(() => {
-      expect(mockWorkOrderAPI.getScanImage).toHaveBeenCalledWith('wo-1', 'sub-1');
-    });
   });
 
   it('accepts a single mark via its per-row button', async () => {

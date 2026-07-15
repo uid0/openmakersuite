@@ -29,7 +29,6 @@ import {
   IconFileText,
   IconPlus,
   IconRefresh,
-  IconScan,
   IconUpload,
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -179,18 +178,6 @@ const WorkOrderRow: React.FC<{ wo: WorkOrder }> = ({ wo }) => {
             </Badge>
             {wo.is_overdue && (
               <Badge color="red" size="xs">Overdue</Badge>
-            )}
-            {(wo.pending_review_count ?? 0) > 0 && (
-              <Tooltip label={`${wo.pending_review_count} scanned submission(s) awaiting review`}>
-                <Badge
-                  color="orange"
-                  size="xs"
-                  variant="filled"
-                  leftSection={<IconScan size={10} />}
-                >
-                  {wo.pending_review_count} to review
-                </Badge>
-              </Tooltip>
             )}
           </Group>
           <Text size="xs" c="dimmed" truncate>

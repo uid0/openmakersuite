@@ -1152,6 +1152,9 @@ views:
       assets_by_status:
         permission_classes:
         - IsAuthenticated
+      cost_recovery:
+        permission_classes:
+        - IsAuthenticated
       export:
         permission_classes:
         - IsAuthenticated

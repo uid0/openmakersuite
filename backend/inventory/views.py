@@ -23,6 +23,7 @@ from rest_framework.permissions import (
     IsAuthenticated,
     IsAuthenticatedOrReadOnly,
 )
+from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 
 from config.api_errors import ErrorCode, error_response
@@ -5285,6 +5286,32 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
         return Response({"results": rows, "count": len(rows)})
 
 
+class _CostRecoveryCSVRenderer(BaseRenderer):
+    """Passthrough renderer registering the ``csv`` format for content negotiation.
+
+    ``AssetReportViewSet.cost_recovery`` returns a fully-formed ``HttpResponse``
+    for the CSV/PDF formats, so ``render`` is never invoked — these renderers
+    exist only so DRF accepts ``?format=csv`` / ``?format=pdf`` (its reserved
+    format query param) instead of 404-ing on an unregistered format.
+    """
+
+    media_type = "text/csv"
+    format = "csv"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data
+
+
+class _CostRecoveryPDFRenderer(BaseRenderer):
+    """Passthrough renderer registering the ``pdf`` format (see CSV renderer)."""
+
+    media_type = "application/pdf"
+    format = "pdf"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data
+
+
 class AssetReportViewSet(viewsets.ViewSet):
     """API endpoint for asset reports."""
 
@@ -5684,6 +5711,377 @@ class AssetReportViewSet(viewsets.ViewSet):
             row["used_at"] = row["used_at"].isoformat()
 
         return Response(rows)
+
+    @staticmethod
+    def _cost_recovery_selection(request):
+        """Parse and validate the asset/category selection for cost_recovery.
+
+        ``asset_ids`` (Asset UUIDs) and ``category_ids`` (integer Category PKs)
+        are each accepted as repeated params and/or comma-joined lists. At
+        least one asset or category must be supplied. Returns
+        ``(asset_ids, category_ids)`` as validated lists (UUID strings / ints).
+        Raises DRF ValidationError on malformed ids or an empty selection.
+        """
+        import uuid
+
+        def _collect(param):
+            values = []
+            for chunk in request.query_params.getlist(param):
+                values.extend(piece.strip() for piece in chunk.split(",") if piece.strip())
+            return values
+
+        raw_asset_ids = _collect("asset_ids")
+        raw_category_ids = _collect("category_ids")
+
+        if not raw_asset_ids and not raw_category_ids:
+            raise serializers.ValidationError(
+                "Select at least one asset (asset_ids) or category (category_ids)."
+            )
+
+        asset_ids = []
+        for value in raw_asset_ids:
+            try:
+                asset_ids.append(str(uuid.UUID(value)))
+            except (ValueError, AttributeError, TypeError):
+                raise serializers.ValidationError({"asset_ids": f"Invalid asset id: {value!r}."})
+
+        category_ids = []
+        for value in raw_category_ids:
+            try:
+                category_ids.append(int(value))
+            except (ValueError, TypeError):
+                raise serializers.ValidationError(
+                    {"category_ids": f"Invalid category id: {value!r}."}
+                )
+
+        return asset_ids, category_ids
+
+    @staticmethod
+    def _cost_recovery_window(request):
+        """Resolve the cost_recovery reporting window.
+
+        Either a ``period`` preset (``past_week``/``past_month``/``past_year`` —
+        trailing windows of 7/30/365 days ending today) OR an explicit
+        ``start_date`` & ``end_date`` pair (``YYYY-MM-DD``). Returns
+        ``(start_date, end_date, period_label)`` where ``period_label`` is the
+        preset name, or ``None`` for a custom range. Raises DRF ValidationError
+        on malformed or missing input.
+        """
+        from datetime import datetime
+
+        presets = {
+            "past_week": timedelta(days=7),
+            "past_month": timedelta(days=30),
+            "past_year": timedelta(days=365),
+        }
+        today = timezone.now().date()
+
+        period = request.query_params.get("period")
+        if period:
+            span = presets.get(period)
+            if span is None:
+                raise serializers.ValidationError(
+                    {"period": "Must be one of past_week, past_month, past_year."}
+                )
+            return today - span, today, period
+
+        start_str = request.query_params.get("start_date")
+        end_str = request.query_params.get("end_date")
+        if start_str and end_str:
+            try:
+                start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+                end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+            except ValueError:
+                raise serializers.ValidationError(
+                    {"start_date": "start_date and end_date must be YYYY-MM-DD."}
+                )
+            if start_date > end_date:
+                raise serializers.ValidationError(
+                    {"start_date": "start_date must not be after end_date."}
+                )
+            return start_date, end_date, None
+
+        raise serializers.ValidationError(
+            "Provide either 'period' (past_week/past_month/past_year) or both "
+            "'start_date' and 'end_date' (YYYY-MM-DD)."
+        )
+
+    @staticmethod
+    def _pm_estimated_cost(maintenance_item, work_order):
+        """Estimated cost of one completed internal PM work order.
+
+        Mirrors the ``tco`` cost walk: a scheduled task (``interval_days`` set)
+        contributes its ``MaintenanceItem.estimated_cost``; an unscheduled or
+        one-off task contributes the sum of its used materials
+        (``quantity_planned * material.estimated_cost_per_unit``). Internal PM
+        has no actual-cost source, so this feeds the Estimated column only.
+        """
+        if maintenance_item.interval_days is not None:
+            return maintenance_item.estimated_cost or Decimal("0.00")
+        total = Decimal("0.00")
+        for usage in work_order.material_usage.all():
+            if usage.was_used and usage.material is not None:
+                total += usage.quantity_planned * usage.material.estimated_cost_per_unit
+        return total
+
+    @staticmethod
+    def _cost_recovery_csv(asset_blocks):
+        """Flat one-row-per-service CSV for the cost-recovery report.
+
+        Every selected asset appears; an asset with no in-window services emits
+        a single row with the service columns left blank.
+        """
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="asset_cost_recovery.csv"'
+        fieldnames = [
+            "asset_tag",
+            "serial_number",
+            "status",
+            "date_received",
+            "service_date",
+            "source",
+            "description",
+            "estimated_cost",
+            "actual_cost",
+        ]
+        writer = csv.DictWriter(response, fieldnames=fieldnames)
+        writer.writeheader()
+        for block in asset_blocks:
+            base = {
+                "asset_tag": block["asset_tag"],
+                "serial_number": block["serial_number"],
+                "status": block["status"],
+                "date_received": (
+                    block["date_received"].isoformat() if block["date_received"] else ""
+                ),
+            }
+            services = block["services"]
+            if not services:
+                writer.writerow(
+                    {
+                        **base,
+                        "service_date": "",
+                        "source": "",
+                        "description": "",
+                        "estimated_cost": "",
+                        "actual_cost": "",
+                    }
+                )
+                continue
+            for svc in services:
+                writer.writerow(
+                    {
+                        **base,
+                        "service_date": svc["date"].isoformat(),
+                        "source": svc["source"],
+                        "description": svc["description"],
+                        "estimated_cost": (
+                            "" if svc["estimated_cost"] is None else f'{svc["estimated_cost"]:.2f}'
+                        ),
+                        "actual_cost": (
+                            "" if svc["actual_cost"] is None else f'{svc["actual_cost"]:.2f}'
+                        ),
+                    }
+                )
+        return response
+
+    @action(
+        detail=False,
+        methods=["get"],
+        renderer_classes=[JSONRenderer, _CostRecoveryCSVRenderer, _CostRecoveryPDFRenderer],
+    )
+    def cost_recovery(self, request):
+        """Per-asset cost-recovery statement billed to the landlord.
+
+        Select assets/categories + a period and get, per asset, an itemized
+        service history with Estimated (internal) and Actual (vendor-invoice /
+        recorded) cost columns. The Actual total is the recoverable amount.
+
+        Query params:
+        - Selection (>=1 required): ``asset_ids`` (Asset UUIDs) and/or
+          ``category_ids`` (integer Category PKs); each repeatable and/or
+          comma-joined. Categories expand to ``category.assets`` and the union
+          is de-duped.
+        - Period (one of): ``period`` in {past_week, past_month, past_year}
+          (trailing window ending today) OR ``start_date`` & ``end_date``
+          (YYYY-MM-DD).
+        - ``format`` in {json (default), csv, pdf}.
+
+        Service sources:
+        - ``pm`` — completed internal WorkOrders (estimated only; actual null).
+        - ``vendor`` — closed ThirdPartyWorkOrder allocations to the asset
+          (actual = allocated_cost; the recoverable spend).
+        - ``manual`` — MaintenanceRecord rows (actual = recorded cost).
+        """
+        from django.db.models import Prefetch
+
+        from maintenance_orders.models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAsset
+
+        from .serializers import AssetCostRecoveryReportSerializer
+
+        asset_ids, category_ids = self._cost_recovery_selection(request)
+        start_date, end_date, period_label = self._cost_recovery_window(request)
+
+        # ``format`` is DRF's reserved content-negotiation query param; the
+        # action-scoped renderers above register json/csv/pdf so it negotiates
+        # cleanly (an unknown format 404s in negotiation before we get here).
+        fmt = request.accepted_renderer.format
+
+        # Resolve the selected asset set: explicit ids UNION category expansion.
+        selected_ids = set(asset_ids)
+        if category_ids:
+            selected_ids.update(
+                str(pk)
+                for pk in Asset.objects.filter(category_id__in=category_ids).values_list(
+                    "id", flat=True
+                )
+            )
+
+        # Window-scoped prefetch querysets — one pass per source, no N+1.
+        pm_wo_qs = WorkOrder.objects.filter(
+            status=WorkOrder.Status.COMPLETED,
+            completed_at__date__gte=start_date,
+            completed_at__date__lte=end_date,
+        ).prefetch_related("material_usage__material")
+        vendor_link_qs = ThirdPartyWorkOrderAsset.objects.select_related(
+            "work_order", "work_order__vendor"
+        ).filter(
+            work_order__status=ThirdPartyWorkOrder.STATUS_CLOSED,
+            work_order__closed_at__date__gte=start_date,
+            work_order__closed_at__date__lte=end_date,
+        )
+        manual_qs = MaintenanceRecord.objects.select_related("vendor").filter(
+            completed_on__gte=start_date,
+            completed_on__lte=end_date,
+        )
+
+        assets = (
+            Asset.objects.filter(id__in=selected_ids)
+            .select_related("category")
+            .prefetch_related(
+                Prefetch("maintenance_items__work_orders", queryset=pm_wo_qs),
+                Prefetch(
+                    "third_party_work_order_links",
+                    queryset=vendor_link_qs,
+                    to_attr="_cr_vendor_links",
+                ),
+                Prefetch("maintenance_records", queryset=manual_qs, to_attr="_cr_manual_records"),
+            )
+            .order_by("name")
+        )
+
+        asset_blocks = []
+        grand_estimated = Decimal("0.00")
+        grand_actual = Decimal("0.00")
+        service_count = 0
+
+        for asset in assets:
+            services = []
+            # Internal PM — estimated only (no actual-cost source).
+            for mi in asset.maintenance_items.all():
+                for wo in mi.work_orders.all():
+                    services.append(
+                        {
+                            "date": wo.completed_at.date(),
+                            "source": "pm",
+                            "description": mi.title,
+                            "estimated_cost": self._pm_estimated_cost(mi, wo),
+                            "actual_cost": None,
+                        }
+                    )
+            # Vendor — actual = per-asset allocated_cost (the recoverable spend).
+            for link in getattr(asset, "_cr_vendor_links", []):
+                wo = link.work_order
+                vendor_name = wo.vendor.name if wo.vendor_id else ""
+                description = f"{wo.title} ({vendor_name})" if vendor_name else wo.title
+                services.append(
+                    {
+                        "date": wo.closed_at.date(),
+                        "source": "vendor",
+                        "description": description,
+                        "estimated_cost": None,
+                        "actual_cost": link.allocated_cost,
+                    }
+                )
+            # Manual — actual = recorded cost (may be null when unknown).
+            for record in getattr(asset, "_cr_manual_records", []):
+                vendor_name = record.vendor.name if record.vendor_id else ""
+                description = f"{record.title} ({vendor_name})" if vendor_name else record.title
+                services.append(
+                    {
+                        "date": record.completed_on,
+                        "source": "manual",
+                        "description": description,
+                        "estimated_cost": None,
+                        "actual_cost": record.cost,
+                    }
+                )
+
+            services.sort(key=lambda s: s["date"])
+            subtotal_estimated = sum(
+                (s["estimated_cost"] or Decimal("0.00") for s in services), Decimal("0.00")
+            )
+            subtotal_actual = sum(
+                (s["actual_cost"] or Decimal("0.00") for s in services), Decimal("0.00")
+            )
+            grand_estimated += subtotal_estimated
+            grand_actual += subtotal_actual
+            service_count += len(services)
+
+            asset_blocks.append(
+                {
+                    "asset_id": str(asset.id),
+                    "asset_tag": asset.asset_tag or "",
+                    "name": asset.name,
+                    "serial_number": asset.serial_number or "",
+                    "date_received": asset.date_received,
+                    "status": asset.status,
+                    "status_display": asset.get_status_display(),
+                    "category": asset.category.name if asset.category_id else None,
+                    "services": services,
+                    "subtotal_estimated": subtotal_estimated,
+                    "subtotal_actual": subtotal_actual,
+                }
+            )
+
+        if fmt == "csv":
+            return self._cost_recovery_csv(asset_blocks)
+
+        if fmt == "pdf":
+            from .utils.cost_recovery_pdf import generate_cost_recovery_pdf
+
+            report = {
+                "period": period_label,
+                "start_date": start_date,
+                "end_date": end_date,
+                "generated_at": timezone.now(),
+                "asset_ids": asset_ids,
+                "category_ids": category_ids,
+                "asset_count": len(asset_blocks),
+                "service_count": service_count,
+                "grand_total_estimated": grand_estimated,
+                "grand_total_actual": grand_actual,
+                "assets": asset_blocks,
+            }
+            pdf_bytes = generate_cost_recovery_pdf(report)
+            response = HttpResponse(pdf_bytes, content_type="application/pdf")
+            response["Content-Disposition"] = 'attachment; filename="asset_cost_recovery.pdf"'
+            return response
+
+        # JSON (default). Decimals render as strings for parity with tco.
+        payload = {
+            "period": period_label,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "asset_ids": asset_ids,
+            "category_ids": category_ids,
+            "asset_count": len(asset_blocks),
+            "service_count": service_count,
+            "grand_total_estimated": f"{grand_estimated:.2f}",
+            "grand_total_actual": f"{grand_actual:.2f}",
+            "assets": AssetCostRecoveryReportSerializer(asset_blocks, many=True).data,
+        }
+        return Response(payload)
 
     @action(detail=False, methods=["get"])
     def export(self, request):

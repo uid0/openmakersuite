@@ -2337,6 +2337,43 @@ class AssetTcoReportSerializer(serializers.Serializer):
     total_maintenance_cost_90d = serializers.DecimalField(max_digits=12, decimal_places=2)
 
 
+class AssetCostRecoveryServiceSerializer(serializers.Serializer):
+    """One itemized service line in the asset cost-recovery statement.
+
+    ``estimated_cost`` is the internal estimate (present for internal PM,
+    null for vendor/manual work that has no per-asset estimate).
+    ``actual_cost`` is the vendor-invoice / recorded actual (present for
+    vendor and manual work, null for internal PM which carries no actual).
+    The recoverable amount is the sum of the ``actual_cost`` column.
+    """
+
+    date = serializers.DateField()
+    source = serializers.ChoiceField(choices=["pm", "vendor", "manual"])
+    description = serializers.CharField(allow_blank=True)
+    estimated_cost = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
+    actual_cost = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
+
+
+class AssetCostRecoveryReportSerializer(serializers.Serializer):
+    """One asset block in the cost-recovery statement: asset info + services.
+
+    ``subtotal_actual`` is the recoverable amount for this asset; the report's
+    ``grand_total_actual`` is the recoverable total billed to the landlord.
+    """
+
+    asset_id = serializers.UUIDField()
+    asset_tag = serializers.CharField(allow_blank=True)
+    name = serializers.CharField()
+    serial_number = serializers.CharField(allow_blank=True)
+    date_received = serializers.DateField(allow_null=True)
+    status = serializers.CharField()
+    status_display = serializers.CharField()
+    category = serializers.CharField(allow_null=True, allow_blank=True)
+    services = AssetCostRecoveryServiceSerializer(many=True)
+    subtotal_estimated = serializers.DecimalField(max_digits=12, decimal_places=2)
+    subtotal_actual = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
 class LocationReconcileItemSerializer(serializers.ModelSerializer):
     """Single item row in the location reconcile grid payload."""
 

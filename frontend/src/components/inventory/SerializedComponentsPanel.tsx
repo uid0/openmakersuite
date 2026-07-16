@@ -221,7 +221,15 @@ const SerializedComponentsPanel: React.FC<Props> = ({
       if (assets.length === 0) {
         setAssetsLoading(true);
         try {
-          const res = await assetsAPI.listAssets({ page_size: 500, is_active: true });
+          // Scope the picker to assets this unit's item is a consumable/part
+          // for (AssetPart), not every asset — an ink cartridge only installs
+          // into its printers (op-sk0s). All units in this panel share one
+          // item, so the fetched list is reused across installs.
+          const res = await assetsAPI.listAssets({
+            page_size: 500,
+            is_active: true,
+            consumable_for_item: unit.item,
+          });
           setAssets(res.data.results ?? []);
         } catch {
           setAssets([]);
@@ -614,10 +622,19 @@ const SerializedComponentsPanel: React.FC<Props> = ({
             value={selectedAssetId}
             onChange={setSelectedAssetId}
             searchable
-            disabled={assetsLoading}
+            disabled={assetsLoading || assetOptions.length === 0}
             nothingFoundMessage="No assets found"
             data-testid="serialized-install-asset"
           />
+          {/* Compatibility is defined via AssetPart: an empty list means the
+              item isn't registered as a part of any asset yet. Explain that and
+              point to the fix instead of showing a bare, unusable dropdown. */}
+          {!assetsLoading && assetOptions.length === 0 && (
+            <Alert color="yellow" variant="light" data-testid="serialized-install-empty-hint">
+              No compatible assets. This item isn&apos;t listed as a part of any asset yet —
+              add it as a part first (Asset → Parts), then it will appear here.
+            </Alert>
+          )}
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setInstallUnit(null)}>
               Cancel

@@ -15,8 +15,8 @@ generators, achieved here by not emitting characters outside that range.
 import io
 from datetime import date, datetime
 from decimal import Decimal
+from html import escape
 from typing import Optional
-from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -64,7 +64,7 @@ def _para(text, style) -> Paragraph:
     """Wrap free text in a Paragraph, XML-escaping first so an ``&``/``<``/``>``
     in an asset name, vendor name, or description can't break reportlab's
     paragraph parser."""
-    return Paragraph(escape(str(text)), style)
+    return Paragraph(escape(str(text), quote=False), style)
 
 
 def _period_display(report: dict) -> str:

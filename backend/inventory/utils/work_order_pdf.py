@@ -108,6 +108,17 @@ class AcroCheckbox(Flowable):
         self._kind = kind
 
     def draw(self) -> None:
+        # The interactive AcroForm widget border does not render on a flat
+        # (printed or scanned) sheet — poppler and most printers drop the widget
+        # appearance — which leaves the tech no visible box to mark. Draw an
+        # explicit box in the content stream so the checkbox is always visible
+        # on paper; the AcroForm field below remains for the digital path and
+        # the OMR reader thresholds this same rect.
+        self.canv.saveState()
+        self.canv.setLineWidth(0.75)
+        self.canv.setStrokeColor(colors.black)
+        self.canv.rect(0, 0, self.size, self.size, stroke=1, fill=0)
+        self.canv.restoreState()
         self.canv.acroForm.checkbox(
             name=self.name,
             x=0,
@@ -813,29 +824,22 @@ def generate_work_order_pdf(
                 small_style,
             )
         )
-        omr_rows = [
+        # Result checkboxes (work complete / pass / fail). Each AcroCheckbox now
+        # prints its own visible box, so this row reads as three labelled marks.
+        omr_check_table = Table(
             [
-                AcroCheckbox(name="work_complete", collector=region_collector),
-                Paragraph("Work complete", label_style),
-                AcroCheckbox(name="result_pass", collector=region_collector),
-                Paragraph("Pass", label_style),
-                AcroCheckbox(name="result_fail", collector=region_collector),
-                Paragraph("Fail", label_style),
+                [
+                    AcroCheckbox(name="work_complete", collector=region_collector),
+                    Paragraph("Work complete", label_style),
+                    AcroCheckbox(name="result_pass", collector=region_collector),
+                    Paragraph("Pass", label_style),
+                    AcroCheckbox(name="result_fail", collector=region_collector),
+                    Paragraph("Fail", label_style),
+                ]
             ],
-            [
-                Paragraph("Tech initials:", label_style),
-                InkRegion("tech_initials", 1.1 * inch, 0.3 * inch, collector=region_collector),
-                Paragraph("Date:", label_style),
-                InkRegion("tech_date", 1.1 * inch, 0.3 * inch, collector=region_collector),
-                "",
-                "",
-            ],
-        ]
-        omr_table = Table(
-            omr_rows,
             colWidths=[0.3 * inch, 1.3 * inch, 0.3 * inch, 1.3 * inch, 0.3 * inch, 1.3 * inch],
         )
-        omr_table.setStyle(
+        omr_check_table.setStyle(
             TableStyle(
                 [
                     ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -844,11 +848,37 @@ def generate_work_order_pdf(
                     ("ALIGN", (0, 0), (0, 0), "CENTER"),
                     ("ALIGN", (2, 0), (2, 0), "CENTER"),
                     ("ALIGN", (4, 0), (4, 0), "CENTER"),
-                    ("SPAN", (4, 1), (5, 1)),
                 ]
             )
         )
-        story.append(omr_table)
+        story.append(omr_check_table)
+        # Tech initials + date get their own table: in the checkbox-column
+        # widths above these labels were crushed into a 0.3" column and wrapped
+        # one character per line. Here the label columns are wide enough to read.
+        omr_signoff_table = Table(
+            [
+                [
+                    Paragraph("Tech initials:", label_style),
+                    InkRegion("tech_initials", 1.1 * inch, 0.3 * inch, collector=region_collector),
+                    Paragraph("Date:", label_style),
+                    InkRegion("tech_date", 1.1 * inch, 0.3 * inch, collector=region_collector),
+                ]
+            ],
+            colWidths=[1.2 * inch, 1.4 * inch, 0.7 * inch, 1.4 * inch],
+        )
+        omr_signoff_table.setStyle(
+            TableStyle(
+                [
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(omr_signoff_table)
         story.append(Spacer(1, 4))
 
     # Notes lines

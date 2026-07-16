@@ -1206,6 +1206,48 @@ export interface AssetSuppliesUsed {
   estimated_cost?: string | null;
 }
 
+// Asset cost-recovery statement (reports/assets/cost_recovery). Mirrors the
+// merged backend serializers exactly (inventory/serializers.py:
+// AssetCostRecoveryServiceSerializer / AssetCostRecoveryReportSerializer). All
+// money fields are DRF DecimalField values, serialized as strings.
+export interface AssetCostRecoveryService {
+  date: string; // YYYY-MM-DD
+  source: 'pm' | 'vendor' | 'manual';
+  description: string;
+  // Internal PM carries an estimate but no actual; vendor/manual carry the
+  // actual (recoverable) but no estimate — hence each may be null.
+  estimated_cost: string | null;
+  actual_cost: string | null;
+}
+
+export interface AssetCostRecoveryAsset {
+  asset_id: string;
+  asset_tag: string;
+  name: string;
+  serial_number: string;
+  date_received: string | null; // "date installed" on the statement
+  status: string;
+  status_display: string;
+  category: string | null;
+  services: AssetCostRecoveryService[];
+  subtotal_estimated: string;
+  subtotal_actual: string; // recoverable amount for this asset
+}
+
+export interface AssetCostRecoveryReport {
+  // Echo of the request window/selection.
+  period: 'past_week' | 'past_month' | 'past_year' | null;
+  start_date: string;
+  end_date: string;
+  asset_ids: string[];
+  category_ids: number[];
+  asset_count: number;
+  service_count: number;
+  grand_total_estimated: string;
+  grand_total_actual: string; // recoverable total billed to the landlord
+  assets: AssetCostRecoveryAsset[];
+}
+
 // Dashboard Widget Types
 export type WidgetType = 'low_stock' | 'pending_reorders' | 'asset_problems' | 'qr_scans' | 'deliveries';
 

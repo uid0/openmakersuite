@@ -10,6 +10,7 @@ import WorkspaceLayout from './components/WorkspaceLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AuditFeedPage from './pages/AuditFeedPage';
 import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
+import AssetCostRecoveryPage from './pages/AssetCostRecoveryPage';
 import AssetDetailPage from './pages/AssetDetailPage';
 import AssetFormPage from './pages/AssetFormPage';
 import MaintenanceItemFormPage from './pages/MaintenanceItemFormPage';
@@ -379,6 +380,7 @@ function AppContent() {
           <Route path="/reports/inventory" element={<WorkspaceLayout><InventoryReportPage /></WorkspaceLayout>} />
           <Route path="/reports/purchasing" element={<WorkspaceLayout><PurchasingReportPage /></WorkspaceLayout>} />
           <Route path="/reports/assets" element={<WorkspaceLayout><AssetReportPage /></WorkspaceLayout>} />
+          <Route path="/reports/cost-recovery" element={<WorkspaceLayout><AssetCostRecoveryPage /></WorkspaceLayout>} />
 
           {/* Settings Workspace */}
           <Route path="/settings" element={<WorkspaceLayout><SettingsOverviewPage /></WorkspaceLayout>} />

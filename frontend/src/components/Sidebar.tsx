@@ -156,6 +156,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
         { path: '/reports/inventory', label: 'Inventory Report', icon: '📦', requiresAuth: true },
         { path: '/reports/purchasing', label: 'Purchasing Report', icon: '🛒', requiresAuth: true },
         { path: '/reports/assets', label: 'Asset Report', icon: '🏢', requiresAuth: true },
+        { path: '/reports/cost-recovery', label: 'Cost Recovery', icon: '💰', requiresAuth: true },
       ],
     },
     {

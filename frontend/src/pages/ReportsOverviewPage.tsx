@@ -6,6 +6,7 @@
 import {
   IconChartBar,
   IconReportAnalytics,
+  IconReportMoney,
   IconShoppingCart,
   IconStack,
 } from '@tabler/icons-react';
@@ -56,6 +57,14 @@ const ReportsOverviewPage: React.FC = () => (
       icon={<IconReportAnalytics size={22} stroke={1.8} />}
       eyebrow="Operational"
       testId="reports-overview-card-/reports/assets"
+    />
+    <CapabilityCard
+      to="/reports/cost-recovery"
+      title="Cost recovery report"
+      description="Per-asset service statement with the vendor-invoice total recoverable from the landlord. Exports a CSV and a landlord-ready PDF."
+      icon={<IconReportMoney size={22} stroke={1.8} />}
+      eyebrow="Operational"
+      testId="reports-overview-card-/reports/cost-recovery"
     />
   </WorkspaceLanding>
 );

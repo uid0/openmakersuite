@@ -21,8 +21,8 @@ safety>=3.0.0
 typer[all]>=0.9.0
 
 # Type Checking
-mypy==2.2.0
-django-stubs==6.0.6
+mypy==2.3.0
+django-stubs==6.0.7
 djangorestframework-stubs==3.17.0
 
 # Enhanced Testing

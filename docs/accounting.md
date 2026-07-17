@@ -1,9 +1,11 @@
 # Accounting ledger (architecture)
 
 OMS's accounting subsystem is a **double-entry ledger** built on
-[django-hordak](https://django-hordak.readthedocs.io/) `2.0.0`. Phase 1 (this
-document) is the **engine only**: the `accounting` app, the chart of accounts, and
-a service layer. No domain code writes to the ledger yet — that is Phase 2.
+[django-hordak](https://django-hordak.readthedocs.io/) `2.0.0`. Phase 1 is the
+**engine**: the `accounting` app, the chart of accounts, and a service layer.
+Phase 2 wires domain events onto it through **adapters**; the first — charging a
+committee for supplies on consume — is documented under
+[Committee chargeback](#committee-chargeback--charge-on-consume-phase-2) below.
 
 See [`backend/accounting/README.md`](../backend/accounting/README.md) for the model
 map, the `post_entry`/`reverse_entry`/`trial_balance` service API, and the chart of
@@ -94,8 +96,77 @@ view-backed money columns. USD-only `choices` keep it stable across future
 > re-run `makemigrations --check`), because a new upstream `0055+` could collide
 > with ours.
 
+## Committee chargeback — charge on consume (Phase 2)
+
+The first domain event wired into the ledger. When inventory is consumed **for a
+committee** through the existing `InventoryItem` `log_usage` action, OMS snapshots
+the cost and posts a balanced journal entry in the **same DB transaction** as the
+stock decrement:
+
+```
+DR 5100 Committee supplies expense   (dimension: sig = the committee)
+CR 1300 Inventory — Supplies on hand
+```
+
+The committee is an `auth.Group` recorded as the debit line's **SIG dimension**
+(via the Phase-1 `LegDimension` side-table) — *not* an account per committee. The
+cost is an **expense**; settlement / period-close is a later bead.
+
+### The adapter (`accounting/adapters.py`)
+
+Callers never hardcode account codes or hand-write legs. They call one adapter:
+
+```python
+from accounting.adapters import post_supply_consumption
+
+txn = post_supply_consumption(
+    committee=group,              # auth.Group -> debit line's SIG dimension
+    amount=total_cost,            # positive USD Decimal
+    source_ref=f"usage:{usage_log.pk}",
+    item=item,                    # only used to describe the entry
+    created_by=request.user,
+)
+```
+
+It wraps `accounting.services.post_entry` with the fixed **5100 / 1300** mapping
+and `source_type=SourceType.SIG_CHARGE`. It is deliberately reusable by the later
+serialized-consume and work-order material-usage charge paths, which share the
+same mapping. (No reversal helper yet — `log_usage` has no undo; a
+consumption-reversal flow is a future bead.)
+
+### Snapshot + idempotency
+
+- **Snapshot at consume time.** `UsageLog` grew `unit_cost` (a copy of
+  `item.unit_cost`), `total_cost` (`unit_cost × quantity_used`), `charged_by`, and
+  `charged_group`, plus a `ledger_transaction` FK to the posted entry. The cost is
+  copied so a *later* supplier price change never rewrites the books — mirroring
+  the ledger's own append-only history. The cost/actor snapshot is taken on every
+  consume, even when no committee is charged (harmless record-keeping).
+- **Idempotent** on `source_ref=f"usage:{usage_log.pk}"`: because each `UsageLog`
+  has a unique pk, replaying a post for the same log returns the original
+  transaction instead of double-charging (enforced by `EntryMeta`'s partial-unique
+  `(source_type, source_ref)`).
+
+### The no-cost warning
+
+`item.unit_cost` is derived from the primary supplier and can be `None`. If a
+committee is given but there is **no cost on file** (`total_cost` null or `≤ 0`),
+the committee is still recorded on the `UsageLog` (with `unit_cost = None`) but
+**nothing is posted** to the ledger, and the response carries a `warning`:
+
+> committee recorded, but the item has no unit cost — nothing posted to the ledger
+
+### Permissions & backward compatibility
+
+`log_usage` is public (`AllowAny`). Passing `charged_group` **additionally**
+requires the caller be staff or an admin of the item's owning group; an
+unauthorized or anonymous caller who supplies a committee gets `403`. With **no**
+`charged_group` the endpoint behaves exactly as before — same stock math, same
+(public) permissions, no ledger entry.
+
 ## Out of scope (Phase 2+)
 
-Committee statement report; posting cost + SIG onto the consumption path
-(`log_usage` / `UsageLog`); settlement / period-close; PO / vendor / donation /
-asset adapters; any web frontend; any ScanTTY change.
+Web committee-picker UI + ScanTTY consume-and-charge flow; the committee statement
+report; settlement / period-close; PO / vendor / donation / asset adapters;
+serialized-consume + work-order material-usage charge paths (they will reuse
+`post_supply_consumption`).

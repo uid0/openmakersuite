@@ -137,7 +137,18 @@ class UsageLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = UsageLog
         fields = "__all__"
-        read_only_fields = ["usage_date"]
+        # The committee-chargeback fields are populated server-side by the
+        # ``log_usage`` action (which snapshots cost and posts the ledger entry);
+        # they are read-only here so the generic usage-log CRUD endpoint cannot
+        # set them out of band and leave the ledger inconsistent.
+        read_only_fields = [
+            "usage_date",
+            "charged_group",
+            "unit_cost",
+            "total_cost",
+            "charged_by",
+            "ledger_transaction",
+        ]
 
 
 class PriceHistorySerializer(serializers.ModelSerializer):

@@ -1056,20 +1056,105 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def log_usage(self, request, pk=None):
-        """Log usage of an item."""
+        """Log usage/consumption of an item, optionally charging a committee.
+
+        Body:
+        - ``quantity`` (int, default 1): units consumed.
+        - ``notes`` (str, optional).
+        - ``charged_group`` (``auth.Group`` id, optional): when given, the
+          committee is charged for the consumption. A snapshot of the item's cost
+          is taken and a balanced ``SIG_CHARGE`` journal entry (DR 5100 Committee
+          supplies expense / CR 1300 Inventory) is posted to the accounting
+          ledger in the SAME transaction as the stock decrement (see
+          ``accounting.adapters.post_supply_consumption``).
+
+        Charging a committee additionally requires the caller be staff or an
+        admin of the item's owning group. With no ``charged_group`` the endpoint
+        behaves exactly as before (unchanged behaviour and permissions). If a
+        committee is given but the item has no unit cost on file, the committee is
+        recorded but nothing is posted and a ``warning`` is returned.
+        """
+        from django.contrib.auth.models import Group
+
+        from accounting.adapters import post_supply_consumption
+
         item = self.get_object()
-        quantity = request.data.get("quantity", 1)
+        try:
+            quantity = int(request.data.get("quantity", 1))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "quantity must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         notes = request.data.get("notes", "")
 
-        # Create usage log
-        usage_log = UsageLog.objects.create(item=item, quantity_used=quantity, notes=notes)
+        # Optional committee chargeback. Posting money is gated tighter than
+        # plain usage logging, so check the charge permission before touching the
+        # (public) log_usage flow, then resolve the committee.
+        group = None
+        raw_group = request.data.get("charged_group")
+        if raw_group not in (None, ""):
+            if not _user_can_charge_item(request.user, item):
+                return Response(
+                    {"detail": "You do not have permission to charge a committee for this item."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            try:
+                group = Group.objects.get(pk=raw_group)
+            except (Group.DoesNotExist, ValueError, TypeError):
+                return Response(
+                    {"detail": "charged_group is not a valid group."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        # Update stock
-        if item.current_stock >= quantity:
-            item.current_stock -= quantity
-            item.save()
+        warning = None
+        with transaction.atomic():
+            # Snapshot cost + actor at consume time. Recorded even when no
+            # committee is charged (harmless record-keeping); later price changes
+            # must never rewrite this history (mirrors the ledger's snapshotting).
+            unit_cost = item.unit_cost  # Optional[Decimal] (primary-supplier derived)
+            total_cost = unit_cost * quantity if unit_cost is not None else None
+            charged_by = request.user if request.user.is_authenticated else None
 
-        return Response(UsageLogSerializer(usage_log).data)
+            usage_log = UsageLog.objects.create(
+                item=item,
+                quantity_used=quantity,
+                notes=notes,
+                charged_group=group,
+                unit_cost=unit_cost,
+                total_cost=total_cost,
+                charged_by=charged_by,
+            )
+
+            # Update stock (unchanged: never drive stock below 0 here).
+            if item.current_stock >= quantity:
+                item.current_stock -= quantity
+                item.save()
+
+            # Post the SIG_CHARGE only when a committee is charged AND there is a
+            # positive cost to post. No cost on file -> record the committee but
+            # post nothing, and surface a warning.
+            if group is not None:
+                if total_cost is not None and total_cost > 0:
+                    txn = post_supply_consumption(
+                        committee=group,
+                        amount=total_cost,
+                        source_ref=f"usage:{usage_log.pk}",
+                        item=item,
+                        created_by=charged_by,
+                    )
+                    usage_log.ledger_transaction = txn
+                    usage_log.save(update_fields=["ledger_transaction"])
+                else:
+                    warning = (
+                        "committee recorded, but the item has no unit cost — "
+                        "nothing posted to the ledger"
+                    )
+
+        data = UsageLogSerializer(usage_log).data
+        if warning:
+            data = {**data, "warning": warning}
+        return Response(data)
 
     @action(detail=True, methods=["post"], url_path="cycle-count")
     def cycle_count(self, request, pk=None):
@@ -6398,6 +6483,26 @@ def postmark_inbound_work_order(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+def _user_can_charge_item(user, item):
+    """Return True if `user` may charge a committee for consuming `item`.
+
+    Charging posts money to the accounting ledger, so it is gated tighter than
+    plain usage logging (which is public): staff, superusers, and SIG admins of
+    the item's owning_group are allowed. Kept intentionally simple for the
+    Phase-2 first cut — tighten later.
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+    from membership.utils import is_sig_admin
+
+    group = getattr(item, "owning_group", None)
+    if group is None:
+        return False
+    return is_sig_admin(user, group)
 
 
 def _user_can_reconcile_item(user, item):

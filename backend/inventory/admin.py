@@ -882,10 +882,27 @@ class PriceHistoryAdmin(admin.ModelAdmin):
 
 @admin.register(UsageLog)
 class UsageLogAdmin(admin.ModelAdmin):
-    list_display = ["item", "quantity_used", "usage_date"]
-    list_filter = ["usage_date", "item"]
+    list_display = [
+        "item",
+        "quantity_used",
+        "usage_date",
+        "charged_group",
+        "unit_cost",
+        "total_cost",
+        "charged_by",
+        "ledger_transaction",
+    ]
+    list_filter = ["usage_date", "charged_group", "item"]
     search_fields = ["item__name", "notes"]
-    readonly_fields = ["usage_date"]
+    # Cost/actor/ledger fields are snapshots written by the log_usage flow — the
+    # ledger is append-only, so they are never hand-edited in admin.
+    readonly_fields = [
+        "usage_date",
+        "unit_cost",
+        "total_cost",
+        "charged_by",
+        "ledger_transaction",
+    ]
     date_hierarchy = "usage_date"
 
 

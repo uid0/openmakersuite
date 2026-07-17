@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderLotoCompletion, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderLotoCompletion, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -2026,6 +2026,46 @@ export const notificationsAPI = {
 // Date range params type for reports
 type DateRangeParams = { start_date?: string; end_date?: string };
 
+export type CostRecoveryPeriod = 'past_week' | 'past_month' | 'past_year';
+
+// Selection + window for the asset cost-recovery report. Supply at least one
+// of asset_ids / category_ids, and exactly one of period OR start_date+end_date.
+export interface CostRecoveryParams {
+  asset_ids?: string[];
+  category_ids?: number[];
+  period?: CostRecoveryPeriod;
+  start_date?: string; // YYYY-MM-DD
+  end_date?: string; // YYYY-MM-DD
+}
+
+// Build the flat query object for the cost_recovery endpoint. The backend
+// accepts asset_ids / category_ids as comma-joined lists (it splits on ","),
+// which avoids axios's bracketed array serialization (asset_ids[]=) that the
+// endpoint would not read. Empty selections/windows are omitted so the caller
+// controls exactly which params are sent.
+const buildCostRecoveryQuery = (
+  params: CostRecoveryParams,
+  format?: 'csv' | 'pdf',
+): Record<string, string> => {
+  const query: Record<string, string> = {};
+  if (params.asset_ids && params.asset_ids.length > 0) {
+    query.asset_ids = params.asset_ids.join(',');
+  }
+  if (params.category_ids && params.category_ids.length > 0) {
+    query.category_ids = params.category_ids.join(',');
+  }
+  if (params.period) {
+    query.period = params.period;
+  } else if (params.start_date && params.end_date) {
+    query.start_date = params.start_date;
+    query.end_date = params.end_date;
+  }
+  if (format) {
+    query.format = format;
+  }
+  return query;
+};
+
 // Reports API
 export const reportsAPI = {
   // Inventory Reports
@@ -2085,6 +2125,29 @@ export const reportsAPI = {
 
   getAssetSuppliesUsed: (params?: DateRangeParams) =>
     api.get('/inventory/reports/assets/supplies_used/', { params }),
+
+  // Asset cost-recovery statement (landlord-billable). JSON for on-screen
+  // rendering; blob download for the server-generated CSV / landlord PDF.
+  getAssetCostRecovery: (params: CostRecoveryParams) =>
+    api.get<AssetCostRecoveryReport>('/inventory/reports/assets/cost_recovery/', {
+      params: buildCostRecoveryQuery(params),
+    }),
+
+  // Fetch the CSV/PDF as a blob so the request carries the Authorization
+  // header (and gets the interceptor's 401 refresh) rather than relying on the
+  // session cookie of a raw <a href> navigation.
+  downloadAssetCostRecovery: (params: CostRecoveryParams, format: 'csv' | 'pdf') =>
+    api.get('/inventory/reports/assets/cost_recovery/', {
+      params: buildCostRecoveryQuery(params, format),
+      responseType: 'blob',
+    }),
+
+  // Build the shareable download URL (same params + ?format=) for callers that
+  // want a direct link rather than a blob fetch.
+  getAssetCostRecoveryUrl: (params: CostRecoveryParams, format: 'csv' | 'pdf') => {
+    const search = new URLSearchParams(buildCostRecoveryQuery(params, format));
+    return `${API_BASE_URL}/inventory/reports/assets/cost_recovery/?${search.toString()}`;
+  },
 
   exportAssetReport: (type: 'assets_by_status' | 'maintenance_due' | 'utilization' | 'tco', params?: DateRangeParams) =>
     api.get('/inventory/reports/assets/export/', {

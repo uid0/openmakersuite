@@ -102,6 +102,7 @@ const ENTRIES: RouteEntry[] = [
   { path: 'reports/inventory', label: 'Inventory Report' },
   { path: 'reports/purchasing', label: 'Purchasing Report' },
   { path: 'reports/assets', label: 'Asset Report' },
+  { path: 'reports/cost-recovery', label: 'Cost Recovery Report' },
 
   { path: 'analytics', label: 'Analytics Pulse' },
 

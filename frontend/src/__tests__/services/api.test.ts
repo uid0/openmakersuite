@@ -939,6 +939,71 @@ describe('API Service', () => {
       expect(response.data[0].source).toBe('serialized');
       expect(response.data[0].serial_number).toBe('SN-1001');
     });
+
+    test('getAssetCostRecovery comma-joins asset/category ids and echoes the report', async () => {
+      mock.onGet('/inventory/reports/assets/cost_recovery/').reply((config) => {
+        // Comma-joined so the backend getlist() reads them (axios would
+        // otherwise emit asset_ids[]=…, which the endpoint ignores).
+        expect(config.params).toEqual({
+          asset_ids: 'a1,a2',
+          category_ids: '3',
+          period: 'past_month',
+        });
+        return [
+          200,
+          {
+            period: 'past_month',
+            start_date: '2026-06-16',
+            end_date: '2026-07-16',
+            asset_ids: ['a1', 'a2'],
+            category_ids: [3],
+            asset_count: 1,
+            service_count: 1,
+            grand_total_estimated: '0.00',
+            grand_total_actual: '250.00',
+            assets: [],
+          },
+        ];
+      });
+
+      const response = await reportsAPI.getAssetCostRecovery({
+        asset_ids: ['a1', 'a2'],
+        category_ids: [3],
+        period: 'past_month',
+      });
+
+      expect(response.data.grand_total_actual).toBe('250.00');
+    });
+
+    test('downloadAssetCostRecovery requests the format as a blob', async () => {
+      mock.onGet('/inventory/reports/assets/cost_recovery/').reply((config) => {
+        expect(config.params).toEqual({ asset_ids: 'a1', period: 'past_month', format: 'csv' });
+        expect(config.responseType).toBe('blob');
+        return [200, 'asset_tag,actual_cost\n'];
+      });
+
+      const response = await reportsAPI.downloadAssetCostRecovery(
+        { asset_ids: ['a1'], period: 'past_month' },
+        'csv',
+      );
+
+      expect(response.status).toBe(200);
+    });
+
+    test('getAssetCostRecoveryUrl builds a shareable download URL with the same params', () => {
+      const url = reportsAPI.getAssetCostRecoveryUrl(
+        { asset_ids: ['a1', 'a2'], category_ids: [3], start_date: '2026-01-01', end_date: '2026-03-31' },
+        'pdf',
+      );
+      const decoded = decodeURIComponent(url);
+
+      expect(url).toContain('/inventory/reports/assets/cost_recovery/');
+      expect(url).toContain('format=pdf');
+      expect(decoded).toContain('asset_ids=a1,a2');
+      expect(decoded).toContain('category_ids=3');
+      expect(decoded).toContain('start_date=2026-01-01');
+      expect(decoded).toContain('end_date=2026-03-31');
+    });
   });
 
   describe('resolveApiBaseUrl (deployment-configurable API base URL)', () => {

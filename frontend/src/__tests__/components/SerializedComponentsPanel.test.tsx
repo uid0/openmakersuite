@@ -275,4 +275,59 @@ describe('SerializedComponentsPanel', () => {
     );
     expect(await screen.findByText('Disposed')).toBeInTheDocument();
   });
+
+  it('scopes the install picker to assets the unit item is a part for', async () => {
+    // A unit ready to install (offers the `install` action).
+    mockAPI.list.mockResolvedValue(
+      listResponse([
+        buildUnit({
+          status: 'in_stock',
+          status_display: 'In Stock',
+          available_actions: ['install'],
+        }),
+      ]),
+    );
+    mockAssets.listAssets.mockResolvedValue({
+      data: {
+        count: 1,
+        next: null,
+        previous: null,
+        results: [{ id: 'asset-1', name: 'UV Printer', asset_tag: 'AST-1' }],
+      },
+    } as never);
+
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('serialized-action-install-unit-1'));
+
+    // The picker asks only for assets this unit's item is a consumable/part for.
+    await waitFor(() =>
+      expect(mockAssets.listAssets).toHaveBeenCalledWith(
+        expect.objectContaining({ consumable_for_item: ITEM_ID }),
+      ),
+    );
+    // No empty-state hint when compatible assets exist.
+    expect(screen.queryByTestId('serialized-install-empty-hint')).not.toBeInTheDocument();
+  });
+
+  it('shows an empty-state hint when the item has no compatible assets', async () => {
+    mockAPI.list.mockResolvedValue(
+      listResponse([
+        buildUnit({
+          status: 'in_stock',
+          status_display: 'In Stock',
+          available_actions: ['install'],
+        }),
+      ]),
+    );
+    // No AssetPart links → the picker comes back empty.
+    mockAssets.listAssets.mockResolvedValue({
+      data: { count: 0, next: null, previous: null, results: [] },
+    } as never);
+
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('serialized-action-install-unit-1'));
+
+    // Instead of a bare empty dropdown, the user gets a friendly next step.
+    expect(await screen.findByTestId('serialized-install-empty-hint')).toBeInTheDocument();
+  });
 });

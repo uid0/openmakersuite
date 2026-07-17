@@ -489,6 +489,10 @@ export const assetsAPI = {
     search?: string;
     owning_group?: number;
     inventory_item?: string;
+    // Restrict to assets that use this inventory item as a consumable/part
+    // (AssetPart through-model) — scopes the serialized-component install
+    // picker to compatible assets only (op-sk0s).
+    consumable_for_item?: string;
     manufacturer?: number;
     is_active?: boolean;
     date_received_after?: string;

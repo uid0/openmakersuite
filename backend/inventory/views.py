@@ -4,6 +4,7 @@ Views for inventory API.
 
 import csv
 import io
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -1462,6 +1463,20 @@ class AssetViewSet(viewsets.ModelViewSet):
         inventory_item = self.request.query_params.get("inventory_item")
         if inventory_item:
             queryset = queryset.filter(inventory_item_id=inventory_item)
+
+        # Filter to assets that use a given inventory item as a consumable/part
+        # (AssetPart through-model). Drives the serialized-component install
+        # picker: a serialized unit installs only into assets its item is a
+        # part for (e.g. an ink cartridge → only its printers) (op-sk0s). Ignore
+        # a blank/non-UUID value gracefully rather than 500 on a bad filter.
+        consumable_for_item = self.request.query_params.get("consumable_for_item")
+        if consumable_for_item:
+            try:
+                uuid.UUID(str(consumable_for_item))
+            except (ValueError, TypeError):
+                pass  # Not a valid item id — ignore the filter.
+            else:
+                queryset = queryset.filter(asset_parts__part_id=consumable_for_item).distinct()
 
         # Filter by manufacturer if specified
         manufacturer = self.request.query_params.get("manufacturer")

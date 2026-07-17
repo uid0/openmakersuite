@@ -145,6 +145,16 @@ INSTALLED_APPS = [
     "bms",
     "storage_vision",
     "interlocks",
+    # Accounting ledger (Phase 1). django-hordak is the double-entry engine;
+    # mptt backs its account tree and djmoney supplies the Money columns on
+    # hordak.Leg. `accounting` (OMS-native side-tables + services) MUST load
+    # last so its models can reference hordak's. hordak is Postgres-only — see
+    # accounting/checks.py for the guard that turns a sqlite DB into a clear
+    # system-check error instead of a cryptic mid-migration crash.
+    "mptt",
+    "djmoney",
+    "hordak",
+    "accounting",
 ]
 
 MIDDLEWARE = [
@@ -191,6 +201,47 @@ DATABASES = {
         conn_max_age=config("DJANGO_CONN_MAX_AGE", default=600, cast=int),
     )
 }
+
+# ---------------------------------------------------------------------------
+# Accounting ledger (django-hordak) — single currency, USD, 2 decimal places.
+# ---------------------------------------------------------------------------
+# hordak reads these at import time (see hordak/defaults.py). We run a single
+# currency (USD): djmoney's CURRENCIES allow-list, hordak's internal/default
+# currency, and every seeded account all point at USD.
+#
+# HORDAK_MAX_DIGITS is 20 (hordak's own shipped width), NOT the 13 originally
+# scoped: hordak's Leg credit/debit columns back a DB view (hordak_leg_view),
+# and PostgreSQL forbids altering the type of a column a view depends on, so
+# narrowing them to 13 would require dropping and recreating hordak's views in
+# a migration we own — disproportionate risk. numeric(20, 2) amply covers USD
+# amounts at 2 decimal places.
+DEFAULT_CURRENCY = "USD"
+CURRENCIES = ("USD",)
+HORDAK_INTERNAL_CURRENCY = "USD"
+HORDAK_DECIMAL_PLACES = 2
+HORDAK_MAX_DIGITS = 20
+
+# hordak 2.0.0 ships migrations whose Leg money columns were frozen against a
+# different django-money / py-moneyed / babel than this repo pins: its shipped
+# currency column carries a 2024 full-currency `choices` list and an EUR
+# default, while the installed model renders a USD-only `choices` list
+# (CURRENCIES) and USD default (HORDAK_INTERNAL_CURRENCY). That mismatch is
+# INHERENT to installing hordak here and would fail CI's `makemigrations
+# --check` drift gate the instant hordak is in INSTALLED_APPS. We cannot commit
+# a migration into the pip-installed hordak package, so we redirect hordak's
+# migration module to a first-party package that extends its __path__ to still
+# discover hordak's shipped 0001..0054 AND our single reconciliation migration
+# (0055). That migration only changes Django field state (choices/default —
+# no DDL), and USD-only choices keep it stable across future djmoney/babel
+# bumps. See config/hordak_migrations/__init__.py and docs/accounting.md.
+# hordak is pinned (==2.0.0); a version bump must revisit this shim.
+MIGRATION_MODULES = {"hordak": "config.hordak_migrations"}
+
+# NOTE: hordak requires PostgreSQL. The sqlite default on DATABASES above is
+# retained for non-accounting local tooling, but `accounting/checks.py`
+# registers a system check that fails `migrate`/`runserver`/`check` with a
+# clear message when the default connection is sqlite, rather than letting
+# hordak's 0002_check_leg_trigger raise a cryptic NotImplementedError.
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [

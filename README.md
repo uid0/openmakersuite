@@ -35,7 +35,7 @@ With that said, there are a few things that Open Maker Suite isn't:
 ### Backend
 
 - **Django**: Python web framework with REST API
-- **PostgreSQL**: Primary database
+- **PostgreSQL**: Primary database (required — no sqlite fallback; see `docs/accounting.md`)
 - **Redis**: Caching and background tasks
 - **Celery**: Asynchronous task processing
 - **Docker**: Containerization
@@ -80,7 +80,10 @@ cp .env.example .env
 Edit `.env` with your settings:
 
 ```bash
-# Database
+# Database — PostgreSQL is REQUIRED. The accounting ledger (django-hordak) uses
+# Postgres-only features, so the old bare-sqlite dev path is no longer
+# supported; `manage.py check` fails fast with a clear message on sqlite.
+# See docs/accounting.md.
 DATABASE_URL=postgresql://postgres:password@db:5432/makerspace_inventory
 
 # Django

@@ -6,6 +6,17 @@
 # drifts from the actual URL conf — update both the YAML and the
 # Markdown matrix in the same PR that changes permission_classes.
 views:
+  accounting.views.AccountViewSet:
+    actions:
+      list:
+        permission_classes:
+        - IsAdminUser
+      retrieve:
+        permission_classes:
+        - IsAdminUser
+  accounting.views.TrialBalanceView:
+    permission_classes:
+    - IsAdminUser
   analytics.views.AnalyticsPulseView:
     permission_classes:
     - IsAnalyticsViewer

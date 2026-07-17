@@ -78,6 +78,7 @@ urlpatterns = [
     path("api/project-storage/", include("project_storage.urls")),
     path("api/storage-vision/", include("storage_vision.urls")),
     path("api/interlocks/", include("interlocks.urls")),
+    path("api/accounting/", include("accounting.urls")),
     # Flower proxy (superuser only)
     path("flower/", include("config.flower_urls")),
 ]

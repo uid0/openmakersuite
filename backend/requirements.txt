@@ -59,6 +59,17 @@ django-anymail[postmark]==15.0
 # `config/settings.py` and is a no-op unless SENTRY_DSN is set.
 sentry-sdk[django,celery]==2.64.0
 
+# Accounting ledger — double-entry engine (accounting app, Phase 1).
+# django-hordak is the ledger core; it requires PostgreSQL (balance-enforcing
+# triggers + balance views are Postgres-only). django-money/py-moneyed supply
+# the MoneyField columns on hordak.Leg; django-mptt backs the account tree.
+# hordak pulls django-import-export/django-extensions/tablib transitively —
+# those are libraries, not INSTALLED_APPS. Pins resolve on Django 6.0 / Py3.13.
+django-hordak==2.0.0
+django-money==3.6.1
+py-moneyed==3.0
+django-mptt==0.18.0
+
 # Testing and Code Coverage
 coverage==7.15.1
 pytest==9.1.1

@@ -238,6 +238,26 @@ export interface UsageLog {
   notes: string;
 }
 
+// Log-usage / consume payload (op-27wa). `charged_group` is a SIG/Group id;
+// when set the backend posts a committee charge on the ledger (Bead 1, #920).
+export interface LogUsageRequest {
+  quantity: number;
+  notes?: string;
+  charged_group?: number;
+}
+
+// Response from POST /inventory/items/{id}/log_usage/: the UsageLog plus the
+// accounting outcome. Money fields are decimal strings; all are nullable when
+// no committee was charged. `warning` is set when the committee was recorded
+// but the item has no unit cost, so nothing was posted to the ledger.
+export interface LogUsageResponse extends UsageLog {
+  charged_group: number | null;
+  unit_cost: string | null;
+  total_cost: string | null;
+  ledger_transaction: number | null;
+  warning?: string;
+}
+
 export type ReorderStatus = 'pending' | 'approved' | 'ordered' | 'received' | 'cancelled';
 export type ReorderPriority = 'low' | 'normal' | 'high' | 'urgent';
 

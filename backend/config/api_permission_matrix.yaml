@@ -17,6 +17,9 @@ views:
   accounting.views.CommitteeSettlementView:
     permission_classes:
     - IsAdminUser
+  accounting.views.CommitteeStatementView:
+    permission_classes:
+    - IsAuthenticated
   accounting.views.TrialBalanceView:
     permission_classes:
     - IsAdminUser

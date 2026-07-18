@@ -164,9 +164,75 @@ unauthorized or anonymous caller who supplies a committee gets `403`. With **no*
 `charged_group` the endpoint behaves exactly as before — same stock math, same
 (public) permissions, no ledger entry.
 
+## Committee statement report (Phase 2)
+
+The treasurer-readable payoff over the ledger: given a committee (SIG) and a date
+range, produce its **statement** — every ledger line attributed to that committee,
+with a running balance and period totals — as on-screen **JSON + CSV + PDF**. It
+mirrors the asset [cost-recovery report](../backend/inventory/views.py) in
+structure (a pure builder, passthrough renderers so `?format=` negotiates, a flat
+CSV writer, a reportlab PDF).
+
+### The builder (`accounting/reports.py`)
+
+```python
+from accounting.reports import committee_statement
+
+report = committee_statement(
+    committee=group,           # auth.Group (SIG)
+    start=start_date,          # inclusive date bounds
+    end=end_date,
+    period="past_month",       # optional preset label; None for a custom range
+)
+```
+
+It queries `LegDimension.objects.filter(sig=committee, leg__transaction__date__range=(start, end))`
+(`select_related` down to the leg's account, transaction, and `EntryMeta`), orders
+by date, and emits one row per ledger line:
+
+```
+{date, source_type, account_code, account_name, description,
+ debit, credit, amount, running_balance}
+```
+
+`amount` is the signed net effect on the committee (a **debit increases** the
+balance, a **credit decreases** it) and `running_balance` accumulates it. Money is
+raw `Decimal` in the builder; the API stringifies it (the JSON contract is decimal
+strings), and the CSV/PDF format it.
+
+### Totals, bucketed by source type
+
+`totals` is `{consumed, purchased, settled, net}`:
+
+- **`consumed`** — the `SIG_CHARGE` lines (Bead 1). This is the only bucket that
+  populates today.
+- **`purchased`** (`PO_RECEIPT`) / **`settled`** (`SETTLEMENT`) — forward-compatible
+  and computed **now**, so they light up automatically once Beads 4–5 post those
+  committee-attributed entries. Until then they are `0.00`.
+- **`net`** — the ending running balance across **all** attributed lines. Because it
+  is the running balance (not `consumed + purchased + settled`), it also nets out a
+  `REVERSAL` of a charge: `consumed` stays gross, `net` reflects the reversal.
+
+### The endpoint
+
+`GET /api/accounting/committee-statement/`:
+
+- `committee` (required) — the `auth.Group` id. Missing/invalid → **400**; unknown
+  → **404**.
+- Period: either `period` in `{past_week, past_month, past_year}` (trailing window
+  ending today) **or** `start` & `end` (`YYYY-MM-DD`). Neither → 400.
+- `format` in `{json (default), csv, pdf}` — DRF content-negotiated via the reserved
+  `?format=` query param against passthrough renderers (an unknown format 404s in
+  negotiation, the same pattern the cost-recovery report uses).
+
+**Permissions.** Authenticated; **staff/superuser** may read any committee; a
+non-staff user must be an **admin of the requested committee**
+(`membership.services.is_owning_group_admin`) — this is a *per-committee* gate, so
+an admin of SIG X cannot read SIG Y's statement. Otherwise **403**.
+
 ## Out of scope (Phase 2+)
 
-Web committee-picker UI + ScanTTY consume-and-charge flow; the committee statement
-report; settlement / period-close; PO / vendor / donation / asset adapters;
-serialized-consume + work-order material-usage charge paths (they will reuse
-`post_supply_consumption`).
+Web committee-picker UI + ScanTTY consume-and-charge flow; the **web statement
+page** (a follow-on bead, mirroring the cost-recovery generator page); settlement /
+period-close; PO / vendor / donation / asset adapters; serialized-consume +
+work-order material-usage charge paths (they will reuse `post_supply_consumption`).

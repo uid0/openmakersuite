@@ -1207,12 +1207,66 @@ class UsageLog(models.Model):
     - Calculate reorder predictions based on consumption patterns
     - Estimate lead times for reordering
     - Track item usage history
+
+    Committee chargeback (accounting Phase 2): when supplies are consumed *for a
+    committee* the log also records who was charged (``charged_group``), a
+    snapshot of the item's cost at consume time (``unit_cost`` / ``total_cost`` —
+    later price changes must not rewrite history), the acting user
+    (``charged_by``), and a link to the posted ``SIG_CHARGE`` journal entry
+    (``ledger_transaction``). The cost/actor snapshot is taken on every consume;
+    ``charged_group`` and ``ledger_transaction`` are populated only when a
+    committee is charged. See ``accounting.adapters.post_supply_consumption`` and
+    ``docs/accounting.md``.
     """
 
     item = models.ForeignKey("InventoryItem", on_delete=models.CASCADE, related_name="usage_logs")
     quantity_used = models.PositiveIntegerField(validators=[MinValueValidator(1)])
     usage_date = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)
+
+    # Committee chargeback (accounting Phase 2). PROTECT on ``charged_group``:
+    # a committee with charge history must not be silently deletable (mirrors
+    # ``accounting.LegDimension.sig``). ``unit_cost``/``total_cost`` are snapshots
+    # taken at consume time; ``total_cost`` is null when the item has no cost on
+    # file. ``ledger_transaction`` is null when nothing was posted.
+    charged_group = models.ForeignKey(
+        "auth.Group",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="charged_usage_logs",
+        help_text="The committee (SIG) charged for this consumption, if any.",
+    )
+    unit_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Snapshot of the item's unit cost at consume time (may be unknown).",
+    )
+    total_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Snapshot of unit_cost x quantity_used at consume time (null when cost unknown).",
+    )
+    charged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="The user who recorded this consumption.",
+    )
+    ledger_transaction = models.ForeignKey(
+        "hordak.Transaction",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="The posted SIG_CHARGE journal entry, if a committee was charged.",
+    )
 
     class Meta:
         ordering = ["-usage_date"]

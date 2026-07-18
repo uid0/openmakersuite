@@ -214,6 +214,31 @@ def reverse_entry(
     )
 
 
+def committee_balance(committee, *, account_code="5100", as_of=None) -> Decimal:
+    """Return a committee's net outstanding balance on ``account_code`` (2dp).
+
+    A committee (an ``auth.Group``) accumulates expense as ``SIG_CHARGE`` debits
+    on account ``5100`` (recorded via each line's
+    :class:`~accounting.models.LegDimension` ``sig`` dimension). This helper is
+    the net (debit − credit) of every ledger leg tagged ``sig=committee`` on
+    ``account_code``, optionally limited to transactions dated on or before
+    ``as_of``.
+
+    A positive result is outstanding expense the committee has yet to settle; a
+    settlement (CR 5100) or a charge reversal drives it back toward ``0.00``.
+    Returns ``Decimal("0.00")`` when the committee has no attributed legs.
+    """
+    legs = Leg.objects.filter(
+        dimension__sig=committee,
+        account__code=str(account_code),
+    )
+    if as_of is not None:
+        legs = legs.filter(transaction__date__lte=as_of)
+    credits, debits = legs.sum_to_debit_and_credit()
+    net = debits[CURRENCY].amount - credits[CURRENCY].amount
+    return net.quantize(_CENTS)
+
+
 def type_word(account: Account) -> str:
     """Human account-type word ('asset', 'liability', ...) or '' for a child."""
     if not account.type:

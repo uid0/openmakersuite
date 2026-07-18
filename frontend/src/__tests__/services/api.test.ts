@@ -98,17 +98,30 @@ describe('API Service', () => {
       expect(response.data).toEqual({ qr: 'data' });
     });
 
-    test('logUsage logs item usage', async () => {
+    test('logUsage logs item usage with an optional committee charge', async () => {
       const mockResponse = {
         id: 1,
         item: 'test-id',
         quantity_used: 5,
+        charged_group: 7,
+        unit_cost: '2.50',
+        total_cost: '12.50',
+        ledger_transaction: 42,
       };
 
-      mock.onPost('/inventory/items/test-id/log_usage/').reply(200, mockResponse);
+      let captured: unknown;
+      mock.onPost('/inventory/items/test-id/log_usage/').reply((config) => {
+        captured = JSON.parse(config.data);
+        return [200, mockResponse];
+      });
 
-      const response = await inventoryAPI.logUsage('test-id', 5, 'Test notes');
+      const response = await inventoryAPI.logUsage('test-id', {
+        quantity: 5,
+        notes: 'Test notes',
+        charged_group: 7,
+      });
 
+      expect(captured).toEqual({ quantity: 5, notes: 'Test notes', charged_group: 7 });
       expect(response.data).toEqual(mockResponse);
     });
 

@@ -4,6 +4,7 @@
  */
 import {
     ActionIcon,
+    Alert,
     Badge,
     Button,
     Card,
@@ -21,7 +22,7 @@ import {
     Textarea,
     Title,
 } from '@mantine/core';
-import { IconArchive, IconArchiveOff, IconClipboardCheck, IconEdit, IconQrcode } from '@tabler/icons-react';
+import { IconArchive, IconArchiveOff, IconClipboardCheck, IconEdit, IconPackageExport, IconQrcode } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -31,8 +32,8 @@ import WorkspacePage from '../components/landing/WorkspacePage';
 import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { useNotifications } from '../hooks/useNotifications';
-import { assetsAPI, CycleCountPayload, inventoryAPI, reorderAPI } from '../services/api';
-import { Asset, InventoryItem, InventoryItemMetrics, ReorderRequest, UsageLog } from '../types';
+import { assetsAPI, CycleCountPayload, inventoryAPI, reorderAPI, sigAPI } from '../services/api';
+import { Asset, InventoryItem, InventoryItemMetrics, ReorderRequest, SIG, UsageLog } from '../types';
 import { showError } from '../utils/dialogs';
 
 // Cycle-count reason options (op-c7y4). Mirrors the reconciliation grid's
@@ -163,6 +164,161 @@ const CycleCountModal: React.FC<CycleCountModalProps> = ({
   );
 };
 
+interface LogUsageModalProps {
+  itemId: string;
+  itemName: string;
+  unitCost: string | null;
+  opened: boolean;
+  onClose: () => void;
+  onLogged: () => void;
+}
+
+/**
+ * Modal for recording stock consumption ("Use / Log Usage", op-27wa) with an
+ * optional committee (SIG) charge. When a committee is selected and the item
+ * has a unit cost the backend posts a charge to the ledger (Bead 1, #920);
+ * with no unit cost the committee is recorded but nothing is charged. On
+ * success it reloads the parent item so stock + the usage-logs tab refresh.
+ */
+const LogUsageModal: React.FC<LogUsageModalProps> = ({
+  itemId,
+  itemName,
+  unitCost,
+  opened,
+  onClose,
+  onLogged,
+}) => {
+  const notifications = useNotifications();
+  const [quantity, setQuantity] = useState<number | ''>(1);
+  const [chargedGroup, setChargedGroup] = useState<number | null>(null);
+  const [notes, setNotes] = useState('');
+  const [sigs, setSigs] = useState<SIG[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+
+  // Re-seed the form and (re)load the committees the user can charge each time
+  // the modal opens. A failed SIG fetch degrades to "no committees" rather than
+  // blocking a plain (uncharged) usage log.
+  useEffect(() => {
+    if (!opened) return;
+    setQuantity(1);
+    setChargedGroup(null);
+    setNotes('');
+    setPermissionError(null);
+    sigAPI
+      .listMySIGs()
+      .then((res) => setSigs(res.data.results || []))
+      .catch(() => setSigs([]));
+  }, [opened]);
+
+  const sigOptions = sigs.map((sig) => ({ value: String(sig.id), label: sig.name }));
+  const qty = quantity === '' ? 0 : quantity;
+  // Only meaningful when a committee is selected; mirrors the backend's
+  // snapshot of unit_cost × quantity at consume time. Keyed off unitCost (not
+  // qty) so clearing the quantity field shows $0.00 rather than the wrong
+  // "no unit cost" hint.
+  const projectedCharge = unitCost != null ? (parseFloat(unitCost) * qty).toFixed(2) : null;
+
+  const handleSubmit = async () => {
+    if (quantity === '' || quantity < 1) {
+      notifications.showWarning('Quantity required', 'Enter a whole number of 1 or more.');
+      return;
+    }
+    setSubmitting(true);
+    setPermissionError(null);
+    try {
+      const { data } = await inventoryAPI.logUsage(itemId, {
+        quantity,
+        notes: notes || undefined,
+        charged_group: chargedGroup ?? undefined,
+      });
+      if (data.warning) {
+        // Committee recorded but no unit cost → nothing posted. Non-error tone.
+        notifications.showWarning('Committee recorded', data.warning);
+      } else if (data.ledger_transaction && data.total_cost) {
+        const committee = sigs.find((s) => s.id === data.charged_group)?.name ?? 'the committee';
+        notifications.showSuccess(
+          'Usage logged',
+          `Charged $${parseFloat(data.total_cost).toFixed(2)} to ${committee}.`
+        );
+      } else {
+        notifications.showSuccess('Usage logged', `Recorded ${data.quantity_used} used.`);
+      }
+      onLogged();
+      onClose();
+    } catch (err) {
+      const response = (err as { response?: { status?: number; data?: { detail?: string } } })?.response;
+      if (response?.status === 403) {
+        setPermissionError("You don't have permission to charge this committee for this item.");
+      } else {
+        const detail = response?.data?.detail;
+        notifications.showError('Log usage failed', detail || 'Please try again.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal opened={opened} onClose={onClose} title={`Use / Log Usage — ${itemName}`} centered>
+      <Stack gap="md">
+        <NumberInput
+          label="Quantity used"
+          description="Units consumed from stock"
+          value={quantity}
+          onChange={(v) => setQuantity(v === '' ? '' : Number(v))}
+          min={1}
+          allowDecimal={false}
+          allowNegative={false}
+          required
+          data-testid="log-usage-qty"
+        />
+        <Select
+          label="Charge committee"
+          description="Optional — post this consumption to a committee (SIG)"
+          placeholder="Select a committee (optional)"
+          data={sigOptions}
+          value={chargedGroup !== null ? String(chargedGroup) : null}
+          onChange={(v) => setChargedGroup(v ? Number(v) : null)}
+          searchable
+          clearable
+          data-testid="log-usage-committee"
+        />
+        {chargedGroup !== null &&
+          (unitCost != null ? (
+            <Text size="sm" data-testid="log-usage-projected">
+              Projected charge: <strong>${projectedCharge}</strong>
+            </Text>
+          ) : (
+            <Text size="sm" c="dimmed" data-testid="log-usage-no-cost">
+              No unit cost on file — the committee will be recorded but nothing is charged.
+            </Text>
+          ))}
+        <Textarea
+          label="Notes"
+          placeholder="Optional context for this usage"
+          value={notes}
+          onChange={(e) => setNotes(e.currentTarget.value)}
+          data-testid="log-usage-notes"
+        />
+        {permissionError && (
+          <Alert color="red" data-testid="log-usage-error">
+            {permissionError}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} loading={submitting} data-testid="log-usage-submit">
+            Log Usage
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+};
+
 const InventoryItemDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -175,6 +331,7 @@ const InventoryItemDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string | null>('overview');
   const [cycleCountOpen, setCycleCountOpen] = useState(false);
+  const [logUsageOpen, setLogUsageOpen] = useState(false);
   const [retiring, setRetiring] = useState(false);
 
   useEffect(() => {
@@ -311,6 +468,14 @@ const InventoryItemDetailPage: React.FC = () => {
               data-testid="cycle-count-button"
             >
               Cycle Count
+            </Button>
+            <Button
+              variant="default"
+              leftSection={<IconPackageExport size={16} />}
+              onClick={() => setLogUsageOpen(true)}
+              data-testid="log-usage-button"
+            >
+              Use / Log Usage
             </Button>
             <Button
               variant="default"
@@ -683,6 +848,15 @@ const InventoryItemDetailPage: React.FC = () => {
         opened={cycleCountOpen}
         onClose={() => setCycleCountOpen(false)}
         onCounted={loadData}
+      />
+
+      <LogUsageModal
+        itemId={item.id}
+        itemName={item.name}
+        unitCost={item.unit_cost}
+        opened={logUsageOpen}
+        onClose={() => setLogUsageOpen(false)}
+        onLogged={loadData}
       />
     </WorkspacePage>
   );

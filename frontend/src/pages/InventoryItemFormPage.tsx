@@ -62,6 +62,7 @@ const InventoryItemFormPage: React.FC = () => {
       use_case_based_reorder: false,
       minimum_cases: null,
       reorder_cases: null,
+      reorder_alerts_enabled: false,
       category: null,
       location: null,
       shelf_position: '',
@@ -131,6 +132,7 @@ const InventoryItemFormPage: React.FC = () => {
         use_case_based_reorder: item.use_case_based_reorder,
         minimum_cases: item.minimum_cases || null,
         reorder_cases: item.reorder_cases || null,
+        reorder_alerts_enabled: item.reorder_alerts_enabled ?? false,
         category: item.category,
         location: item.location ? String(item.location) : null,
         shelf_position: (item as any).shelf_position || '',
@@ -386,6 +388,17 @@ const InventoryItemFormPage: React.FC = () => {
                           />
                         </>
                       )}
+                    </div>
+                    <div>
+                      <Switch
+                        label="Watch for reorder alerts"
+                        description="Include this item in the nightly demand forecast's reorder alerts — for supplies that run out on a schedule (toilet paper, paper towels, trash bags)."
+                        checked={watch('reorder_alerts_enabled')}
+                        onChange={(e) =>
+                          setValue('reorder_alerts_enabled', e.currentTarget.checked)
+                        }
+                        data-testid="item-reorder-alerts-enabled"
+                      />
                     </div>
                   </>
                 ),

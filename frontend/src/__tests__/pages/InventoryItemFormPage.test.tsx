@@ -700,4 +700,94 @@ describe('InventoryItemFormPage', () => {
     const formData = (api.inventoryAPI.updateItem as jest.Mock).mock.calls[0][1] as FormData;
     expect(formData.get('is_retired')).toBe('true');
   });
+
+  // ---- op-3: reorder-alerts opt-in toggle ----
+
+  it('renders the reorder-alerts switch, off by default', async () => {
+    renderCreatePage();
+
+    const toggle = (await screen.findByTestId(
+      'item-reorder-alerts-enabled'
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(screen.getByLabelText(/Watch for reorder alerts/i)).toBeInTheDocument();
+  });
+
+  it('sends reorder_alerts_enabled=false by default', async () => {
+    (api.inventoryAPI.createItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, id: 'new-id' },
+    });
+
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/Name/i).length).toBeGreaterThan(0);
+    });
+    fillRequiredFields();
+    fireEvent.click(screen.getByText('Create Item'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.createItem).toHaveBeenCalled();
+    });
+
+    const formData = (api.inventoryAPI.createItem as jest.Mock).mock.calls[0][0] as FormData;
+    expect(formData.get('reorder_alerts_enabled')).toBe('false');
+  });
+
+  it('includes reorder_alerts_enabled=true in the create payload when toggled on', async () => {
+    (api.inventoryAPI.createItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, id: 'new-id' },
+    });
+
+    renderCreatePage();
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/Name/i).length).toBeGreaterThan(0);
+    });
+    fillRequiredFields();
+
+    fireEvent.click(screen.getByTestId('item-reorder-alerts-enabled'));
+    fireEvent.click(screen.getByText('Create Item'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.createItem).toHaveBeenCalled();
+    });
+
+    const formData = (api.inventoryAPI.createItem as jest.Mock).mock.calls[0][0] as FormData;
+    expect(formData.get('reorder_alerts_enabled')).toBe('true');
+  });
+
+  it('hydrates reorder_alerts_enabled in edit mode and includes it on update', async () => {
+    (api.inventoryAPI.getItem as jest.Mock).mockResolvedValue({
+      data: { ...mockItem, reorder_alerts_enabled: true },
+    });
+    (api.inventoryAPI.updateItem as jest.Mock).mockResolvedValue({ data: mockItem });
+
+    render(
+      <MantineProvider env="test">
+        <MemoryRouter initialEntries={['/inventory/items/test-id/edit']}>
+          <Routes>
+            <Route path="/inventory/items/:id/edit" element={<InventoryItemFormPage />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider>
+    );
+
+    // The switch hydrates on from the fetched item.
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Test Item')).toBeInTheDocument();
+    });
+    expect(
+      (screen.getByTestId('item-reorder-alerts-enabled') as HTMLInputElement).checked
+    ).toBe(true);
+
+    fireEvent.click(screen.getByText('Save Changes'));
+
+    await waitFor(() => {
+      expect(api.inventoryAPI.updateItem).toHaveBeenCalled();
+    });
+
+    const formData = (api.inventoryAPI.updateItem as jest.Mock).mock.calls[0][1] as FormData;
+    expect(formData.get('reorder_alerts_enabled')).toBe('true');
+  });
 });

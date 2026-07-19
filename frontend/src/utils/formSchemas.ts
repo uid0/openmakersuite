@@ -70,6 +70,9 @@ export const inventoryItemSchema = z
 
     // Case-based reordering
     use_case_based_reorder: z.boolean().default(false),
+    // Opt-in for ML reorder alerts (op-3). Like `is_retired`, it must be in
+    // the schema or the resolver strips it from the submit payload.
+    reorder_alerts_enabled: z.boolean().default(false),
     minimum_cases: z
       .number()
       .int()

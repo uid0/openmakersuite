@@ -35,6 +35,7 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import DemandForecastPanel from '../components/inventory/DemandForecastPanel';
 import SerializedForecastPanel from '../components/inventory/SerializedForecastPanel';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { inventoryAPI } from '../services/api';
@@ -261,6 +262,7 @@ const InventoryOverviewPage: React.FC = () => {
           aria-label="Search inventory"
         />
       )}
+      <DemandForecastPanel title="Demand forecast" onSelectItem={goItem} />
       {hasSerialized && (
         <SerializedForecastPanel
           title="Serialized-component forecast"

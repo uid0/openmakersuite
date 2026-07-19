@@ -164,6 +164,62 @@ unauthorized or anonymous caller who supplies a committee gets `403`. With **no*
 `charged_group` the endpoint behaves exactly as before — same stock math, same
 (public) permissions, no ledger entry.
 
+## PO receipt → committee purchasing (Phase 2)
+
+The mirror bookend of the chargeback. When inventory is received against a
+purchase order through `receive_delivery` (the `receive` / `mark-delivered`
+actions), OMS posts a balanced entry **for each received line whose item is owned
+by a committee**, in the **same DB transaction** as the stock increment:
+
+```
+DR 1300 Inventory — Supplies on hand   (dimension: sig = the committee)
+CR 2000 Accounts Payable
+```
+
+The committee is `item.owning_group` (an `auth.Group`) recorded as the debit
+line's **SIG dimension**. The amount is `quantity × unit_cost`, where
+`unit_cost = po_item.unit_cost_actual or po_item.unit_cost_ordered` — the actual
+charged cost wins over the ordered estimate when known. This is the *purchasing*
+side of a committee's tab: receiving **fills** on-hand supplies (and incurs a
+payable), while consuming later **draws them down** as an expense (the 5100/1300
+chargeback above). Vendor payment (DR 2000 / CR Cash) is a future bead — there is
+no Cash account in v1.
+
+### The adapter (`accounting/adapters.py`)
+
+```python
+from accounting.adapters import post_po_receipt
+
+txn = post_po_receipt(
+    committee=item.owning_group,          # auth.Group -> debit line's SIG dimension
+    amount=quantity * unit_cost,          # positive USD Decimal
+    source_ref=f"po_receipt:{delivery_item.id}",
+    item=item,                            # only used to describe the entry
+    created_by=received_by,
+)
+```
+
+It wraps `accounting.services.post_entry` with the fixed **1300 / 2000** mapping
+and `source_type=SourceType.PO_RECEIPT`. `receive_delivery` imports it **lazily**
+(a local import inside the function) to avoid any `reorder_queue` ↔ `accounting`
+import cycle.
+
+### Idempotency & backward compatibility
+
+- **Idempotent** on `source_ref=f"po_receipt:{delivery_item.id}"`: every receipt
+  mints exactly one `DeliveryItem`, so its pk keys the entry — re-driving the
+  same receipt returns the original transaction instead of double-posting
+  (enforced by `EntryMeta`'s partial-unique `(source_type, source_ref)`).
+- **Backward compatible.** A line whose item has **no owning committee**
+  (`owning_group` is null) or **no unit cost** (the resolved actual-or-ordered
+  cost is zero) posts nothing — the stock increment and every other receipt side
+  effect behave exactly as before. Only committee-owned, priced lines touch the
+  ledger.
+
+## Out of scope (Phase 2+)
+
+Web committee-picker UI + ScanTTY consume-and-charge flow; the committee statement
+report; settlement / period-close; vendor / donation / asset adapters;
 ## Committee settlement / period-close (Phase 2)
 
 The privileged "reset a committee's expenses" — reframed as an **append-only

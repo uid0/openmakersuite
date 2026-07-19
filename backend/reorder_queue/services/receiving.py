@@ -83,7 +83,7 @@ def receive_delivery(
         )
 
         for po_item, quantity in line_quantities:
-            DeliveryItem.objects.create(
+            delivery_item = DeliveryItem.objects.create(
                 delivery=delivery,
                 purchase_order_item=po_item,
                 quantity_received=quantity,
@@ -96,6 +96,25 @@ def receive_delivery(
             if inventory_item is not None:
                 inventory_item.current_stock += quantity
                 inventory_item.save()
+
+                # Committee-owned purchasing hits the ledger (Phase 2 · Bead 5):
+                # DR 1300 Inventory (dim=committee) / CR 2000 Accounts Payable
+                # for quantity × unit cost, in this same receive transaction. An
+                # item with no owning committee or no unit cost posts nothing, so
+                # ordinary receives behave exactly as before. Local import avoids
+                # a reorder_queue <-> accounting import cycle.
+                if inventory_item.owning_group_id:
+                    unit_cost = po_item.unit_cost_actual or po_item.unit_cost_ordered
+                    if unit_cost:
+                        from accounting.adapters import post_po_receipt
+
+                        post_po_receipt(
+                            committee=inventory_item.owning_group,
+                            amount=quantity * unit_cost,
+                            source_ref=f"po_receipt:{delivery_item.id}",
+                            item=inventory_item,
+                            created_by=received_by,
+                        )
 
             if po_item.is_fully_received:
                 create_lead_time_log(po_item, delivery.delivery_date)

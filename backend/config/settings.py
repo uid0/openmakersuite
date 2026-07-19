@@ -691,6 +691,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "inventory.tasks.roll_up_meters",
         "schedule": 900.0,
     },
+    # Nightly at 04:00 UTC — rebuild the ML demand forecast for every
+    # non-serialized item (op-2) and emit a reorder-alert digest for opted-in
+    # items that are due. Runs after the 02:00 backup + 03:30 vision prune so
+    # it reads a settled DB. See inventory.tasks.generate_demand_forecasts.
+    "inventory-demand-forecast-nightly": {
+        "task": "inventory.tasks.generate_demand_forecasts",
+        "schedule": crontab(minute=0, hour=4),
+    },
 }
 
 # Backups (R-03). Output volume and retention window for the

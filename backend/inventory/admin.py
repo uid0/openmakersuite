@@ -25,6 +25,7 @@ from .models import (
     AssetTagSequence,
     Category,
     ComponentUsageEvent,
+    DemandForecast,
     InventoryItem,
     InventorySafetyProfile,
     ItemSupplier,
@@ -406,6 +407,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "last_counted_at",
         "needs_reorder",
         "use_case_based_reorder",
+        "reorder_alerts_enabled",
         "is_active",
         "is_retired",
         "is_requestable",
@@ -421,6 +423,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "is_retired",
         "is_requestable",
         "is_serialized",
+        "reorder_alerts_enabled",
         "safety_profile__is_hazardous",
         "use_case_based_reorder",
     ]
@@ -462,7 +465,15 @@ class InventoryItemAdmin(admin.ModelAdmin):
         ("Images", {"fields": ("image", "image_url", "thumbnail", "qr_code")}),
         (
             "Stock Information",
-            {"fields": ("current_stock", "minimum_stock", "reorder_quantity", "last_counted_at")},
+            {
+                "fields": (
+                    "current_stock",
+                    "minimum_stock",
+                    "reorder_quantity",
+                    "reorder_alerts_enabled",
+                    "last_counted_at",
+                )
+            },
         ),
         (
             "Serial Tracking",
@@ -904,6 +915,32 @@ class UsageLogAdmin(admin.ModelAdmin):
         "ledger_transaction",
     ]
     date_hierarchy = "usage_date"
+
+
+@admin.register(DemandForecast)
+class DemandForecastAdmin(admin.ModelAdmin):
+    """Read-only view of stored ML demand-forecast rows.
+
+    Rows are written by the nightly forecasting task, never by hand, so adding is
+    disabled and every field is read-only. Kept in admin for inspection/audit of
+    what the forecaster produced.
+    """
+
+    list_display = [
+        "item",
+        "generated_at",
+        "method",
+        "needs_reorder",
+        "predictive_reorder_point",
+        "days_until_stockout",
+    ]
+    list_filter = ["method", "needs_reorder"]
+    search_fields = ["item__name", "item__sku"]
+    date_hierarchy = "generated_at"
+    readonly_fields = [field.name for field in DemandForecast._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(AssetTagSequence)

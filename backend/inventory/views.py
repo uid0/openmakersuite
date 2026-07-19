@@ -3764,6 +3764,49 @@ class InventoryReportViewSet(viewsets.ViewSet):
         return Response(data)
 
     @action(detail=False, methods=["get"])
+    def demand_forecast(self, request):
+        """ML demand-forecast report for non-serialized inventory items.
+
+        Returns the latest stored :class:`~inventory.models.DemandForecast` row
+        per active, non-retired, non-serialized item that has a forecast,
+        most-urgent first (reorder-flagged, then soonest stockout). Reads
+        *stored* rows only -- until the nightly forecasting task populates the
+        table this returns ``[]``.
+
+        Query params:
+            ``low_stock_only`` -- when truthy, only items whose
+            ``needs_reorder`` flag is set are returned.
+        """
+        from inventory.serializers import DemandForecastSerializer
+        from inventory.services.demand_forecast import latest_demand_forecasts
+
+        low_stock_only = str(request.query_params.get("low_stock_only", "")).lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+        forecasts = latest_demand_forecasts(low_stock_only=low_stock_only)
+        serializer = DemandForecastSerializer(forecasts, many=True, context={"request": request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def reorder_alerts(self, request):
+        """Predictive reorder-alert notify set.
+
+        Returns the latest forecast row for every item that opted in
+        (``reorder_alerts_enabled=True``) AND is due to reorder
+        (``needs_reorder=True``), most-urgent first. Reads *stored* rows only --
+        returns ``[]`` until the forecasting task has run.
+        """
+        from inventory.serializers import DemandForecastSerializer
+        from inventory.services.demand_forecast import reorder_alert_forecasts
+
+        forecasts = reorder_alert_forecasts()
+        serializer = DemandForecastSerializer(forecasts, many=True, context={"request": request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
     def export(self, request):
         """Export inventory report data as CSV."""
         import csv

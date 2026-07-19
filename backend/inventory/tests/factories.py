@@ -6,6 +6,7 @@ import itertools
 from io import BytesIO
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 
 import factory
 from factory import Faker, SubFactory
@@ -18,6 +19,7 @@ from inventory.models import (
     AssetPart,
     AssetProblem,
     Category,
+    DemandForecast,
     Fixture,
     InventoryItem,
     ItemSupplier,
@@ -233,6 +235,28 @@ class UsageLogFactory(DjangoModelFactory):
     item = SubFactory(InventoryItemFactory)
     quantity_used = Faker("random_int", min=1, max=10)
     notes = Faker("text", max_nb_chars=100)
+
+
+class DemandForecastFactory(DjangoModelFactory):
+    """Factory for creating DemandForecast rows (as the nightly task would)."""
+
+    class Meta:
+        model = DemandForecast
+
+    item = SubFactory(InventoryItemFactory)
+    generated_at = factory.LazyFunction(timezone.now)
+    horizon_days = 14
+    predicted_daily_demand = 2.0
+    horizon_demand = 28.0
+    horizon_demand_upper = 35.0
+    available_at_generation = 40
+    days_until_stockout = 20.0
+    predictive_reorder_point = 30
+    needs_reorder = False
+    lead_time_days = 7
+    safety_stock = 5
+    method = DemandForecast.Method.PROPHET
+    model_version = "prophet-1"
 
 
 class FixtureFactory(DjangoModelFactory):

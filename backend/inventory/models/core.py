@@ -270,6 +270,14 @@ class InventoryItem(OwnableModel):
         "If empty, will show default text based on stock levels.",
     )
 
+    # Per-item opt-in for ML demand-forecast reorder alerts. Default OFF; the
+    # nightly forecasting task only surfaces flagged items in the
+    # ``reorder_alerts`` notify set (see ``inventory.models.DemandForecast``).
+    reorder_alerts_enabled = models.BooleanField(
+        default=False,
+        help_text="Watch this item for ML reorder alerts",
+    )
+
     # QR code data
     qr_code = models.ImageField(upload_to="inventory/qrcodes/", blank=True, null=True)
     last_scanned_at = models.DateTimeField(

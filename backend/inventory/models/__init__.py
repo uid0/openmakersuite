@@ -34,6 +34,9 @@ from .fixtures import (  # noqa: F401
     Fixture,
     FixtureRefillRequest,
 )
+from .forecasting import (  # noqa: F401
+    DemandForecast,
+)
 from .location_problem import (  # noqa: F401
     LocationProblem,
 )
@@ -103,6 +106,7 @@ __all__ = [
     "MaintenanceRecord",
     "Fixture",
     "FixtureRefillRequest",
+    "DemandForecast",
     "TargetField",
     "TypedTargetModel",
     "count_present_targets",

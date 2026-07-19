@@ -23,6 +23,7 @@ from .models import (
     AssetReservation,
     Category,
     ComponentUsageEvent,
+    DemandForecast,
     Fixture,
     FixtureRefillRequest,
     InventoryItem,
@@ -523,6 +524,9 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "reorder_cases",
             "current_cases",
             "reorder_instruction",
+            # ML demand-forecast opt-in (read+write; default OFF). The "ping me"
+            # toggle that puts an item into the reorder_alerts notify set.
+            "reorder_alerts_enabled",
             "supplier_name",
             "supplier_sku",
             "supplier_url",
@@ -755,6 +759,50 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
             }
 
         return {"trend": "no_data", "change_percentage": None}
+
+
+class DemandForecastSerializer(serializers.ModelSerializer):
+    """Read serializer for a stored :class:`~inventory.models.DemandForecast` row.
+
+    Exposes every stored field plus the item's ``item_name`` / ``sku`` /
+    ``category_name`` (mirroring the ``serialized_forecast`` row payload) so the
+    ``demand_forecast`` / ``reorder_alerts`` report actions return a
+    self-describing row. Read-only in practice -- rows are written by the
+    forecasting task, never through the API.
+    """
+
+    item_name = serializers.CharField(source="item.name", read_only=True)
+    sku = serializers.CharField(source="item.sku", read_only=True)
+    # allow_null so an uncategorised item still emits ``category_name: null``
+    # (mirrors the serialized_forecast payload) instead of dropping the key when
+    # ``item.category`` is None.
+    category_name = serializers.CharField(
+        source="item.category.name", read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = DemandForecast
+        fields = [
+            "id",
+            "item",
+            "item_name",
+            "sku",
+            "category_name",
+            "generated_at",
+            "horizon_days",
+            "predicted_daily_demand",
+            "horizon_demand",
+            "horizon_demand_upper",
+            "available_at_generation",
+            "days_until_stockout",
+            "projected_stockout_date",
+            "predictive_reorder_point",
+            "needs_reorder",
+            "lead_time_days",
+            "safety_stock",
+            "method",
+            "model_version",
+        ]
 
 
 class InventoryMetricsSerializer(serializers.Serializer):

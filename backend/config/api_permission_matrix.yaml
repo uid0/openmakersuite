@@ -1451,7 +1451,13 @@ views:
         - IsAuthenticated
   inventory.views.InventoryReportViewSet:
     actions:
+      demand_forecast:
+        permission_classes:
+        - IsAuthenticated
       export:
+        permission_classes:
+        - IsAuthenticated
+      reorder_alerts:
         permission_classes:
         - IsAuthenticated
       reorder_frequency:

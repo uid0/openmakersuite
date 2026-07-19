@@ -1,15 +1,18 @@
 """DRF surface for the accounting ledger.
 
 The chart-of-accounts + trial-balance reads are staff-only (``IsAdminUser``) —
-we deliberately do NOT expose hordak's own URLs/UI. Phase 2 adds the first
-committee-scoped read: :class:`CommitteeStatementView`, where a committee's own
-SIG admin (not just staff) can pull that committee's statement.
+we deliberately do NOT expose hordak's own URLs/UI. Phase 2 adds committee-scoped
+endpoints: :class:`CommitteeStatementView` (a committee's own SIG admin, not just
+staff, can read that committee's statement) and the one *write* endpoint,
+:class:`CommitteeSettlementView` (committee settlement / period-close, staff-only).
 """
 
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from django.contrib.auth.models import Group
 from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
@@ -25,14 +28,22 @@ from rest_framework.views import APIView
 
 from membership.services import is_owning_group_admin
 
+from .adapters import ACCOUNT_COMMITTEE_SUPPLIES_EXPENSE, settle_committee
 from .reports import (
     CommitteeStatementCSVRenderer,
     CommitteeStatementPDFRenderer,
     committee_statement,
     committee_statement_csv,
 )
-from .serializers import AccountSerializer, CommitteeStatementReportSerializer
-from .services import trial_balance
+from .serializers import (
+    AccountSerializer,
+    CommitteeSettlementRequestSerializer,
+    CommitteeSettlementResponseSerializer,
+    CommitteeStatementReportSerializer,
+)
+from .services import committee_balance, trial_balance
+
+_CENTS = Decimal("0.01")
 
 
 class AccountViewSet(viewsets.ReadOnlyModelViewSet):
@@ -73,6 +84,58 @@ class TrialBalanceView(APIView):
                     status=400,
                 )
         return Response(_serialize_trial_balance(trial_balance(as_of=as_of)))
+
+
+class CommitteeSettlementView(APIView):
+    """Settle (period-close) a committee's outstanding balance. **Staff only.**
+
+    ``POST /api/accounting/committee-settlement/`` posts one append-only
+    ``SETTLEMENT`` entry that zeroes the committee's **5100** balance (CR 5100 /
+    DR 3000 absorbed, or DR 1200 when ``reimbursed``). This is the
+    destructive-feeling close, so it is ``IsAdminUser`` (staff/superuser) — a
+    SIG admin may *view* its statement but not settle. Nothing is ever edited or
+    deleted; a mistaken settlement is corrected with a reversal.
+    """
+
+    permission_classes = [IsAdminUser]
+
+    @extend_schema(
+        request=CommitteeSettlementRequestSerializer,
+        responses=CommitteeSettlementResponseSerializer,
+    )
+    def post(self, request):
+        serializer = CommitteeSettlementRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        committee = get_object_or_404(Group, pk=data["committee"])
+        as_of = data.get("as_of")
+        reimbursed = data.get("reimbursed", False)
+        note = data.get("note", "")
+
+        txn = settle_committee(
+            committee=committee,
+            as_of=as_of,
+            reimbursed=reimbursed,
+            created_by=request.user,
+            note=note,
+        )
+        new_balance = committee_balance(committee, as_of=as_of)
+
+        body = {
+            "reimbursed": reimbursed,
+            "new_balance": str(new_balance),
+            "committee": {"id": committee.id, "name": committee.name},
+        }
+        if txn is None:
+            body["settled_amount"] = "0.00"
+            body["transaction"] = None
+            body["detail"] = "Nothing to settle — the committee balance is already 0.00."
+        else:
+            settled_leg = txn.legs.get(account__code=ACCOUNT_COMMITTEE_SUPPLIES_EXPENSE)
+            body["settled_amount"] = str(settled_leg.credit.amount.quantize(_CENTS))
+            body["transaction"] = str(txn.uuid)
+        return Response(body)
 
 
 def _serialize_trial_balance(report: dict) -> dict:

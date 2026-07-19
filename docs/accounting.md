@@ -164,6 +164,83 @@ unauthorized or anonymous caller who supplies a committee gets `403`. With **no*
 `charged_group` the endpoint behaves exactly as before — same stock math, same
 (public) permissions, no ledger entry.
 
+## Committee settlement / period-close (Phase 2)
+
+The privileged "reset a committee's expenses" — reframed as an **append-only
+settlement**. It never edits or deletes the accumulated `SIG_CHARGE` entries;
+instead it snapshots the committee's outstanding balance, posts one closing
+`SETTLEMENT` entry that zeroes it, and starts the next period at zero, with the
+full charge history preserved.
+
+### The balance (`accounting/services.py`)
+
+A committee's **outstanding balance** is the net (debit − credit) of every ledger
+leg tagged `sig = committee` on account **5100**:
+
+```python
+from accounting.services import committee_balance
+
+owed = committee_balance(group)                    # all-time, account 5100
+owed = committee_balance(group, as_of=some_date)   # only entries dated <= some_date
+```
+
+Charges (`DR 5100`) push it up; a settlement (`CR 5100`) or a charge reversal
+(`CR 5100`, via `reverse_entry`) push it back toward `0.00`.
+
+### The settlement (`accounting/adapters.py`)
+
+```python
+from accounting.adapters import settle_committee
+
+txn = settle_committee(
+    committee=group,        # auth.Group to close out
+    as_of=None,             # optional close date; defaults to today
+    reimbursed=False,       # absorb (default) vs. record a receivable
+    created_by=request.user,
+    note="Q2 close",
+)                           # -> Transaction, or None when nothing to settle
+```
+
+It computes `balance = committee_balance(committee, as_of=as_of)` and posts one
+balanced entry with the committee dimension on **both** legs:
+
+```
+CR 5100 Committee supplies expense   [sig = committee]   (removes the accrued expense)
+DR <offset>                          [sig = committee]
+    offset = 3000 Net assets / Fund balance   (absorbed — the default), or
+             1200 Accounts Receivable         (reimbursed=True — records they owe)
+```
+
+After it posts, `committee_balance(committee, as_of=as_of)` is `0.00` and the
+trial balance still balances (the DR offset equals the CR on 5100). A
+**reimbursed** close stops at Accounts Receivable — there is no Cash account in
+v1, so the actual cash receipt is a later concern.
+
+- **Nothing to settle** → returns `None`; no empty entry is written.
+- **Idempotent per committee + close date** (`source_ref="settle:<id>:<date>"`):
+  re-running the same close does not double-post. A committee is settled **once
+  per date** — a charge that lands after that date's settlement is closed on the
+  next settlement date.
+- **Corrections are append-only.** A mistaken settlement is fixed with
+  `accounting.services.reverse_entry` (Phase 1), never by editing the entry.
+
+### The endpoint & permissions
+
+`POST /api/accounting/committee-settlement/` (`CommitteeSettlementView`) —
+**staff/superuser only** (`IsAdminUser`). This is the destructive-feeling close,
+so a SIG admin may *view* its statement but **not** settle. Body: `committee`
+(Group id, required), optional `as_of` (date), `reimbursed` (bool), `note` (str).
+Response: `{settled_amount, reimbursed, transaction, new_balance, committee}`;
+when the balance is already zero it returns `200` with `settled_amount "0.00"`,
+`transaction: null`, and a `detail` note (a no-op close is fine, not an error).
+
+## Out of scope (Phase 2+)
+
+Web "settle" button (a later bead); ScanTTY (a privileged financial close is not a
+TUI flow); the actual cash receipt of a reimbursement (no Cash account in v1 —
+reimbursed stops at AR); PO / vendor / donation / asset adapters;
+serialized-consume + work-order material-usage charge paths (they will reuse
+`post_supply_consumption`).
 ## Committee statement report (Phase 2)
 
 The treasurer-readable payoff over the ledger: given a committee (SIG) and a date

@@ -23,13 +23,16 @@ from django.db import models
 class DemandForecast(models.Model):
     """A single forecast run's demand projection for one inventory item.
 
-    Populated by the forecasting task (not this bead); read by the API. The
-    ``method`` records how the projection was produced -- Prophet when enough
-    history exists, otherwise a statistical fallback.
+    Populated by the forecasting task (op-2); read by the API. The ``method``
+    records how the projection was produced -- a seasonal Holt-Winters smoother
+    when enough history exists, otherwise a statistical run-rate fallback.
+    ``PROPHET`` is retained for a future engine swap (see
+    :mod:`inventory.services.demand_forecast_engine`).
     """
 
     class Method(models.TextChoices):
         PROPHET = "prophet", "Prophet"
+        HOLTWINTERS = "holtwinters", "Holt-Winters seasonal"
         FALLBACK = "fallback", "Statistical fallback"
 
     item = models.ForeignKey(

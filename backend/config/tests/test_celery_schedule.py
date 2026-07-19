@@ -65,6 +65,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "inventory.tasks.roll_up_meters",
         900.0,  # every 15 min — asset meter rollup (EAM bead-1)
     ),
+    "inventory-demand-forecast-nightly": (
+        "inventory.tasks.generate_demand_forecasts",
+        crontab(minute=0, hour=4),  # 04:00 UTC daily — ML demand forecast (op-2)
+    ),
 }
 
 

@@ -877,18 +877,23 @@ export interface SerializedForecastRow {
   needs_reorder: boolean;
 }
 
-// How a demand forecast was produced. `holtwinters` is the seasonal smoother
-// used when an item has enough usage history; `fallback` is the statistical
-// run-rate used when it does not. `prophet` is reserved for a future engine
-// swap and is not emitted today.
-export type DemandForecastMethod = 'prophet' | 'holtwinters' | 'fallback';
+// How a demand forecast was produced. `restock_interval` means the item had
+// enough purchase history to average a buying cadence from; when it did not,
+// the row is `insufficient_history` and carries no cadence at all. The other
+// three are the retired v1 usage-rate methods — historical rows only, kept so
+// pre-v2 rows still resolve a display label.
+export type DemandForecastMethod =
+  | 'restock_interval'
+  | 'insufficient_history'
+  | 'prophet'
+  | 'holtwinters'
+  | 'fallback';
 
 // One stored forecast row (the latest run) for a non-serialized item, from
 // InventoryReportViewSet.demand_forecast / .reorder_alerts (op-1 storage,
-// op-2 nightly engine). Every value is a snapshot taken at generation time —
-// later stock movements never rewrite a row, so `available_at_generation` can
-// lag the item's live stock. Rows only exist once the nightly task has run;
-// both endpoints return [] until then.
+// op-2 nightly engine, v2 restock-interval model). Every value is a snapshot
+// taken at generation time — later purchases never rewrite a row. Rows only
+// exist once the nightly task has run; both endpoints return [] until then.
 export interface DemandForecastRow {
   // The forecast row's own id; `item` is the inventory item's UUID.
   id: number;
@@ -897,20 +902,35 @@ export interface DemandForecastRow {
   sku: string;
   category_name: string | null;
   generated_at: string;
+
+  // --- restock-interval signal (v2) — how often this item actually gets
+  // bought, and therefore when it is due to be bought again. All of these are
+  // null/0 on an `insufficient_history` row (under two purchase events there
+  // is no gap to average), so never render them as a number without checking.
+  avg_interval_days: number | null;
+  interval_samples: number;
+  last_restock_date: string | null;
+  predicted_next_reorder_date: string | null;
+  // Days from generation to the predicted date; negative when overdue.
+  days_until_due: number | null;
+
+  // --- retired v1 usage-rate projection. The backend still emits these keys,
+  // written 0/null on every current row, so they stay typed but are not
+  // rendered anywhere. Do not build new UI on them.
   horizon_days: number;
-  // Mean predicted demand per day, and its sum over the horizon. `_upper` is
-  // the upper prediction band — the gap between it and `horizon_demand` is
-  // what becomes safety stock.
   predicted_daily_demand: number;
   horizon_demand: number;
   horizon_demand_upper: number;
-  available_at_generation: number;
   days_until_stockout: number | null;
   projected_stockout_date: string | null;
   predictive_reorder_point: number;
+  safety_stock: number;
+
+  // --- decision + provenance (both generations). `available_at_generation` is
+  // informational under the interval model — it does not drive needs_reorder.
+  available_at_generation: number;
   needs_reorder: boolean;
   lead_time_days: number | null;
-  safety_stock: number;
   method: DemandForecastMethod;
   model_version: string;
 }
@@ -2120,9 +2140,11 @@ export const reportsAPI = {
       { params },
     ),
 
-  // ML demand forecast for non-serialized items — the latest stored row per
-  // item, most-urgent first. `low_stock_only` narrows it to rows flagged
-  // `needs_reorder`. Returns [] until the nightly forecasting task has run.
+  // Restock-cadence forecast for non-serialized items — the latest stored row
+  // per item, already sorted most-urgent first (flagged rows, then soonest
+  // due, nulls last), so render the response order as-is. `low_stock_only`
+  // narrows it to rows flagged `needs_reorder`. Returns [] until the nightly
+  // forecasting task has run.
   getDemandForecast: (params?: { low_stock_only?: boolean }) =>
     api.get<DemandForecastRow[]>(
       '/inventory/reports/inventory/demand_forecast/',

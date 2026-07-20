@@ -1,16 +1,24 @@
 /**
- * DemandForecastPanel — ML demand forecast + predictive reorder alerts for
- * *non-serialized* inventory items (op-3). Sibling of
- * <SerializedForecastPanel>, which does the same job for serialized
- * components; this one reads the rows the nightly forecasting task stores
- * (op-1 storage, op-2 engine) rather than computing anything client-side.
+ * DemandForecastPanel — restock-cadence forecast + predictive reorder alerts
+ * for *non-serialized* inventory items. Sibling of <SerializedForecastPanel>,
+ * which does the same job for serialized components; this one reads the rows
+ * the nightly forecasting task stores rather than computing anything
+ * client-side.
+ *
+ * The v2 model answers **"when is this due to be bought again"**, not "how much
+ * will be used": cadence is the mean gap between purchase events, the due date
+ * is last restock + cadence, and an item is flagged when that date falls inside
+ * the supplier lead time. The retired v1 usage-rate columns (avg/day, stockout,
+ * reorder point) are deliberately gone — the backend still sends those keys but
+ * writes them 0/null, so rendering them would only show zeroes.
  *
  * Two surfaces in one panel:
  *  - a reorder-alerts banner atop the table — the daily "pings" for items
  *    someone opted in via the item form's "Watch for reorder alerts" switch
  *    *and* that the forecast says are due;
- *  - the forecast table itself, most-urgent first (the backend sorts), with a
- *    "Due to reorder only" switch feeding `low_stock_only`.
+ *  - the forecast table itself, most-urgent first (the backend sorts; rows are
+ *    rendered in response order), with a "Due to reorder only" switch feeding
+ *    `low_stock_only`.
  *
  * Both endpoints return [] until the nightly task has run, so the empty state
  * says so rather than implying nothing needs reordering.
@@ -30,6 +38,7 @@ import { IconBellRinging } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useState } from 'react';
 
 import { DemandForecastMethod, DemandForecastRow, reportsAPI } from '../../services/api';
+import { formatDateOnly } from '../../utils/dates';
 import { extractErrorMessage } from '../../utils/extractErrorMessage';
 
 interface Props {
@@ -41,22 +50,39 @@ interface Props {
 }
 
 const METHOD_LABELS: Record<DemandForecastMethod, string> = {
+  restock_interval: 'Restock-interval',
+  insufficient_history: 'Insufficient history',
+  // Retired v1 (usage-rate) methods — pre-v2 rows only.
   prophet: 'Prophet',
   holtwinters: 'Holt-Winters',
   fallback: 'Fallback',
 };
 
-// Holt-Winters means the item had enough history for the seasonal model;
-// fallback is a plain run-rate, so it gets a quieter badge.
+// A cadence the model could actually measure gets a live badge; everything
+// else — no history yet, or a retired v1 row — stays quiet.
 const METHOD_COLORS: Record<DemandForecastMethod, string> = {
-  prophet: 'grape',
-  holtwinters: 'blue',
+  restock_interval: 'blue',
+  insufficient_history: 'gray',
+  prophet: 'gray',
+  holtwinters: 'gray',
   fallback: 'gray',
 };
 
-const fmtDays = (n: number | null): string => (n === null ? '—' : `${n} d`);
+/** Mean days between purchases, e.g. "~48d". Null under two purchase events. */
+const fmtCadence = (days: number | null): string =>
+  days === null ? '—' : `~${Math.round(days)}d`;
 
-const fmtRate = (n: number): string => n.toFixed(2);
+/**
+ * Humanise `days_until_due` for the due column and the alert lines. Mirrors the
+ * backend digest's phrasing so the in-app alert and this panel read alike.
+ */
+const fmtDue = (days: number | null): string => {
+  if (days === null) return '—';
+  const whole = Math.round(days);
+  if (whole < 0) return `overdue ${-whole}d`;
+  if (whole === 0) return 'due today';
+  return `due in ${whole}d`;
+};
 
 const DemandForecastPanel: React.FC<Props> = ({
   defaultLowStockOnly = false,
@@ -129,7 +155,8 @@ const DemandForecastPanel: React.FC<Props> = ({
           data-testid="demand-forecast-alerts"
         >
           <Text size="sm" mb={4}>
-            Watched items the forecast says are due to reorder now.
+            {alerts.length} watched item{alerts.length === 1 ? ' is' : 's are'} due to
+            reorder, based on how often they are normally bought.
           </Text>
           {alerts.map((alert) => (
             <Text
@@ -139,10 +166,9 @@ const DemandForecastPanel: React.FC<Props> = ({
               onClick={onSelectItem ? () => onSelectItem(alert.item) : undefined}
               style={{ cursor: onSelectItem ? 'pointer' : undefined }}
             >
-              <b>{alert.item_name}</b> — {alert.available_at_generation} left,
-              reorder at {alert.predictive_reorder_point}
-              {alert.days_until_stockout !== null &&
-                ` (out in ${alert.days_until_stockout} d)`}
+              <b>{alert.item_name}</b> — {fmtDue(alert.days_until_due)}
+              {alert.predicted_next_reorder_date &&
+                ` (due ${formatDateOnly(alert.predicted_next_reorder_date)})`}
             </Text>
           ))}
         </Alert>
@@ -160,7 +186,7 @@ const DemandForecastPanel: React.FC<Props> = ({
         <Text c="dimmed" data-testid="demand-forecast-empty">
           {lowStockOnly
             ? 'No forecasted items are due to reorder.'
-            : 'No demand forecast yet — it is generated nightly once items have usage history.'}
+            : 'No demand forecast yet — it is generated nightly from how often items are purchased.'}
         </Text>
       ) : (
         <Table.ScrollContainer minWidth={800}>
@@ -169,58 +195,79 @@ const DemandForecastPanel: React.FC<Props> = ({
               <Table.Tr>
                 <Table.Th>Item</Table.Th>
                 <Table.Th>Method</Table.Th>
-                <Table.Th ta="right">Avg/day</Table.Th>
-                <Table.Th ta="right">Stockout</Table.Th>
-                <Table.Th ta="right">Reorder pt</Table.Th>
-                <Table.Th ta="right">Available</Table.Th>
+                <Table.Th ta="right">Cadence</Table.Th>
+                <Table.Th>Last restock</Table.Th>
+                <Table.Th>Next due</Table.Th>
+                <Table.Th>Days until due</Table.Th>
                 <Table.Th>Status</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {rows.map((row) => (
-                <Table.Tr
-                  key={row.id}
-                  data-testid={`demand-forecast-row-${row.item}`}
-                  onClick={onSelectItem ? () => onSelectItem(row.item) : undefined}
-                  style={{
-                    cursor: onSelectItem ? 'pointer' : undefined,
-                    background: row.needs_reorder
-                      ? 'var(--mantine-color-orange-0)'
-                      : undefined,
-                  }}
-                >
-                  <Table.Td>
-                    <Text fw={500} lineClamp={1}>
-                      {row.item_name}
-                    </Text>
-                    <Text size="xs" c="dimmed">
-                      {row.sku || 'no SKU'}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge color={METHOD_COLORS[row.method] ?? 'gray'} variant="light">
-                      {METHOD_LABELS[row.method] ?? row.method}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td ta="right">{fmtRate(row.predicted_daily_demand)}</Table.Td>
-                  <Table.Td ta="right">{fmtDays(row.days_until_stockout)}</Table.Td>
-                  <Table.Td ta="right">{row.predictive_reorder_point}</Table.Td>
-                  <Table.Td ta="right" fw={600}>
-                    {row.available_at_generation}
-                  </Table.Td>
-                  <Table.Td>
-                    {row.needs_reorder ? (
-                      <Badge color="orange" variant="filled">
-                        Reorder
+              {rows.map((row) => {
+                // No measured cadence: say why rather than print a bogus number,
+                // and withhold the green all-clear — the model has no opinion.
+                const noHistory = row.method === 'insufficient_history';
+                return (
+                  <Table.Tr
+                    key={row.id}
+                    data-testid={`demand-forecast-row-${row.item}`}
+                    onClick={onSelectItem ? () => onSelectItem(row.item) : undefined}
+                    style={{
+                      cursor: onSelectItem ? 'pointer' : undefined,
+                      background: row.needs_reorder
+                        ? 'var(--mantine-color-orange-0)'
+                        : undefined,
+                    }}
+                  >
+                    <Table.Td>
+                      <Text fw={500} lineClamp={1} c={noHistory ? 'dimmed' : undefined}>
+                        {row.item_name}
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        {row.sku || 'no SKU'}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge color={METHOD_COLORS[row.method] ?? 'gray'} variant="light">
+                        {METHOD_LABELS[row.method] ?? row.method}
                       </Badge>
+                    </Table.Td>
+                    {noHistory ? (
+                      <Table.Td colSpan={4}>
+                        <Text size="sm" c="dimmed">
+                          Not enough purchase history yet
+                        </Text>
+                      </Table.Td>
                     ) : (
-                      <Badge color="green" variant="light">
-                        OK
-                      </Badge>
+                      <>
+                        <Table.Td ta="right">{fmtCadence(row.avg_interval_days)}</Table.Td>
+                        <Table.Td>{formatDateOnly(row.last_restock_date)}</Table.Td>
+                        <Table.Td>
+                          {formatDateOnly(row.predicted_next_reorder_date)}
+                        </Table.Td>
+                        <Table.Td fw={row.needs_reorder ? 600 : undefined}>
+                          {fmtDue(row.days_until_due)}
+                        </Table.Td>
+                      </>
                     )}
-                  </Table.Td>
-                </Table.Tr>
-              ))}
+                    <Table.Td>
+                      {noHistory ? (
+                        <Badge color="gray" variant="light">
+                          Unknown
+                        </Badge>
+                      ) : row.needs_reorder ? (
+                        <Badge color="orange" variant="filled">
+                          Reorder
+                        </Badge>
+                      ) : (
+                        <Badge color="green" variant="light">
+                          OK
+                        </Badge>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              })}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
@@ -228,8 +275,9 @@ const DemandForecastPanel: React.FC<Props> = ({
 
       {!loading && !error && rows.length > 0 && (
         <Text size="xs" c="dimmed" mt="xs" data-testid="demand-forecast-legend">
-          Reorder is driven by <b>available</b> stock versus the demand predicted
-          over the lead time, snapshotted when the forecast ran.
+          Cadence is the average gap between purchases of an item. It is due when{' '}
+          <b>last restock + cadence</b> falls inside the supplier lead time,
+          snapshotted when the forecast ran.
         </Text>
       )}
     </Paper>

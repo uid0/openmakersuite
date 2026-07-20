@@ -36,6 +36,7 @@ from .models import (
     MaintenanceMaterial,
     MaintenanceRecord,
     MaintenanceTask,
+    MaintenanceTool,
     PriceHistory,
     SerializedComponent,
     StockReconciliation,
@@ -1725,6 +1726,46 @@ class MaintenanceMaterialSerializer(serializers.ModelSerializer):
         }
 
 
+class MaintenanceToolSerializer(serializers.ModelSerializer):
+    """Serializer for tools needed to perform a maintenance task.
+
+    Mirrors its consumable sibling :class:`MaintenanceMaterialSerializer`
+    field-for-field in style. The field names are a pinned contract: ScanTTY
+    decodes this exact payload to print the tool list on the e-paper work
+    order, so do not rename them.
+    """
+
+    inventory_item_detail = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MaintenanceTool
+        fields = [
+            "id",
+            "maintenance_item",
+            "inventory_item",
+            "inventory_item_detail",
+            "name",
+            "quantity",
+            "location_hint",
+            "is_required",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = ["id", "inventory_item_detail", "created_at"]
+
+    def get_inventory_item_detail(self, obj):
+        item = obj.inventory_item
+        if item is None:
+            return None
+        return {
+            "id": str(item.id),
+            "name": item.name,
+            "current_stock": item.current_stock,
+            "minimum_stock": item.minimum_stock,
+            "reorder_quantity": item.reorder_quantity,
+        }
+
+
 class MaintenanceTaskSerializer(serializers.ModelSerializer):
     """Serializer for ordered sub-task steps within a maintenance item."""
 
@@ -1748,6 +1789,7 @@ class MaintenanceItemSerializer(serializers.ModelSerializer):
     asset_name = serializers.CharField(source="asset.name", read_only=True)
     asset_tag = serializers.CharField(source="asset.asset_tag", read_only=True)
     materials = MaintenanceMaterialSerializer(many=True, read_only=True)
+    tools = MaintenanceToolSerializer(many=True, read_only=True)
     tasks = MaintenanceTaskSerializer(many=True, read_only=True)
     is_overdue = serializers.ReadOnlyField()
     days_overdue = serializers.ReadOnlyField()
@@ -1772,6 +1814,7 @@ class MaintenanceItemSerializer(serializers.ModelSerializer):
             "days_overdue",
             "next_due_at",
             "materials",
+            "tools",
             "tasks",
             "created_at",
             "updated_at",
@@ -2201,6 +2244,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     material_usage = WorkOrderMaterialUsageSerializer(many=True, read_only=True)
     loto_completions = WorkOrderLotoCompletionSerializer(many=True, read_only=True)
     photos = WorkOrderPhotoSerializer(many=True, read_only=True)
+    tools = serializers.SerializerMethodField()
     submissions = serializers.SerializerMethodField()
     pending_review_count = serializers.SerializerMethodField()
     has_pending_review = serializers.SerializerMethodField()
@@ -2231,6 +2275,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "material_usage",
             "loto_completions",
             "photos",
+            "tools",
             "submissions",
             "pending_review_count",
             "has_pending_review",
@@ -2249,6 +2294,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "material_usage",
             "loto_completions",
             "photos",
+            "tools",
             "submissions",
             "pending_review_count",
             "has_pending_review",
@@ -2271,6 +2317,36 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         if obj.assigned_to:
             return obj.assigned_to.get_full_name() or obj.assigned_to.username
         return None
+
+    def get_tools(self, obj):
+        """Tools the tech needs to gather before starting, required ones first.
+
+        A flat reference list (no OMR checkbox — nothing here is scanned back)
+        carried on every work order so the web detail page and the printed PDF
+        can show "what to grab" up front. Pinned payload keys — ScanTTY decodes
+        these. Sorted in Python off ``.all()`` so the
+        ``maintenance_item__tools`` prefetch is used instead of firing a query
+        per row; an ``order_by()`` here would bypass that cache.
+
+        Only the primary ``maintenance_item``'s tools: work orders that bundle
+        ``additional_maintenance_items`` keep the up-front list short and
+        unambiguous.
+        """
+        tools = sorted(
+            obj.maintenance_item.tools.all(),
+            key=lambda tool: (not tool.is_required, tool.name),
+        )
+        return [
+            {
+                "id": str(tool.id),
+                "name": tool.name,
+                "quantity": tool.quantity,
+                "location_hint": tool.location_hint,
+                "is_required": tool.is_required,
+                "notes": tool.notes,
+            }
+            for tool in tools
+        ]
 
     def get_electrical(self, obj):
         from .services.work_order_context import build_electrical_context

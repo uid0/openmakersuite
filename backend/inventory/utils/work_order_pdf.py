@@ -4,12 +4,14 @@ PDF generation for preventive maintenance work orders.
 Generates a printable work order form that includes:
 - Asset summary (name, tag, location, purchase info)
 - QR code linking to the digital work order
+- Tools required (reference list, printed up front with the lockout info)
 - Materials checklist
 - Task step checklist
 - Completion sign-off fields
 """
 
 import io
+from html import escape
 from typing import TYPE_CHECKING, Optional
 
 import qrcode
@@ -488,6 +490,66 @@ def generate_work_order_pdf(
         )
     )
     story.append(asset_table)
+    story.append(Spacer(1, 8))
+
+    # ── Job prep: tools to gather ─────────────────────────────────────────────
+    # Printed up front — right after the asset and immediately before the
+    # power/lockout safety block — so the tech gathers what they need and reads
+    # the LOTO reference *before* walking to the machine. Reference only: no
+    # AcroCheckbox, so this section adds nothing to ``region_collector`` and
+    # leaves the OMR target ids / template drift signature untouched.
+    story.append(Paragraph("Tools Required", subheading_style))
+    tools = sorted(
+        item.tools.all(),
+        key=lambda tool: (not tool.is_required, tool.name),
+    )
+    if tools:
+        tool_rows = [
+            [
+                Paragraph("Tool", label_style),
+                Paragraph("Qty", label_style),
+                Paragraph("Location", label_style),
+                Paragraph("Required", label_style),
+            ]
+        ]
+        for tool in tools:
+            # Tool text is operator-entered and lands in a reportlab Paragraph,
+            # which parses a mini-XML dialect — escape it. ``html.escape`` (not
+            # ``xml.sax.saxutils.escape``, which trips bandit B406).
+            location = tool.location_hint or (
+                tool.inventory_item.location.name
+                if tool.inventory_item and tool.inventory_item.location
+                else ""
+            )
+            tool_rows.append(
+                [
+                    Paragraph(escape(tool.name, quote=False), normal_style),
+                    str(tool.quantity),
+                    Paragraph(escape(location, quote=False) or "—", small_style),
+                    "REQ" if tool.is_required else "—",
+                ]
+            )
+        tools_table = Table(
+            tool_rows,
+            colWidths=[2.6 * inch, 0.6 * inch, 2.9 * inch, 1.1 * inch],
+        )
+        tools_table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("PADDING", (0, 0), (-1, -1), 4),
+                    ("ALIGN", (1, 0), (1, -1), "CENTER"),
+                    ("ALIGN", (3, 0), (3, -1), "CENTER"),
+                ]
+            )
+        )
+        story.append(tools_table)
+    else:
+        story.append(Paragraph("No tools specified.", small_style))
     story.append(Spacer(1, 8))
 
     # ── Electrical / Lockout safety section ───────────────────────────────────

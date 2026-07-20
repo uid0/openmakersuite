@@ -33,6 +33,7 @@ from .views import (
     MaintenanceMaterialViewSet,
     MaintenanceRecordViewSet,
     MaintenanceTaskViewSet,
+    MaintenanceToolViewSet,
     PriceHistoryViewSet,
     SerializedComponentViewSet,
     SupplierViewSet,
@@ -66,6 +67,7 @@ router.register(r"maintenance-materials", MaintenanceMaterialViewSet)
 router.register(r"maintenance-logs", MaintenanceLogViewSet)
 router.register(r"maintenance-records", MaintenanceRecordViewSet, basename="maintenance-record")
 router.register(r"maintenance-tasks", MaintenanceTaskViewSet)
+router.register(r"maintenance-tools", MaintenanceToolViewSet)
 router.register(r"work-orders", WorkOrderViewSet)
 router.register(
     r"serialized-components", SerializedComponentViewSet, basename="serialized-component"

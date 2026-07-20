@@ -35,6 +35,7 @@ import {
   IconRobot,
   IconScan,
   IconTag,
+  IconTool,
   IconUpload,
 } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -599,6 +600,8 @@ const WorkOrderPage: React.FC = () => {
   const lotoCompletions = workOrder.loto_completions ?? [];
   const completedLoto = lotoCompletions.filter((l) => l.is_completed).length;
   const totalLoto = lotoCompletions.length;
+  // Already ordered required-first by the serializer; older payloads omit it.
+  const tools = workOrder.tools ?? [];
 
   return (
     <WorkspacePage
@@ -671,6 +674,53 @@ const WorkOrderPage: React.FC = () => {
           size="md"
           mt="xs"
         />
+      </Card>
+
+      {/* op-67q5: what to grab, up front — directly above the electrical /
+          lockout cards, mirroring the printed work order's running order so
+          paper and screen read the same way. Reference only (no checkboxes):
+          nothing here is scanned back off the paper form. */}
+      <Card withBorder p="md" radius="md" mb="md" mt="md">
+        <Group mb="sm" gap="xs">
+          <IconTool size={18} />
+          <Title order={5}>Tools Required</Title>
+        </Group>
+        {tools.length > 0 ? (
+          <Stack gap="xs">
+            {tools.map((tool) => (
+              <Group key={tool.id} gap="xs" wrap="nowrap" align="flex-start">
+                <Text size="sm" fw={500} style={{ flex: 1, minWidth: 0 }}>
+                  {tool.name}
+                  {tool.quantity > 1 && (
+                    <Text span size="sm" c="dimmed">
+                      {' '}
+                      ×{tool.quantity}
+                    </Text>
+                  )}
+                  {tool.location_hint && (
+                    <Text size="xs" c="dimmed">
+                      {tool.location_hint}
+                    </Text>
+                  )}
+                  {tool.notes && (
+                    <Text size="xs" c="dimmed">
+                      {tool.notes}
+                    </Text>
+                  )}
+                </Text>
+                {tool.is_required && (
+                  <Badge color="orange" variant="light" size="sm">
+                    Required
+                  </Badge>
+                )}
+              </Group>
+            ))}
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">
+            No tools specified.
+          </Text>
+        )}
       </Card>
 
       {/* AC-1 Electrical info — present even when empty so the section is

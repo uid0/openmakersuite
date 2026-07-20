@@ -3765,17 +3765,18 @@ class InventoryReportViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"])
     def demand_forecast(self, request):
-        """ML demand-forecast report for non-serialized inventory items.
+        """Restock-interval demand-forecast report for non-serialized items.
 
         Returns the latest stored :class:`~inventory.models.DemandForecast` row
         per active, non-retired, non-serialized item that has a forecast,
-        most-urgent first (reorder-flagged, then soonest stockout). Reads
-        *stored* rows only -- until the nightly forecasting task populates the
-        table this returns ``[]``.
+        most-urgent first (reorder-flagged, then soonest due). Reads *stored*
+        rows only -- until the nightly forecasting task populates the table this
+        returns ``[]``.
 
         Query params:
             ``low_stock_only`` -- when truthy, only items whose
-            ``needs_reorder`` flag is set are returned.
+            ``needs_reorder`` flag is set (due within their lead time) are
+            returned.
         """
         from inventory.serializers import DemandForecastSerializer
         from inventory.services.demand_forecast import latest_demand_forecasts

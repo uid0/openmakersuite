@@ -1,10 +1,12 @@
-"""Tests for the ML demand-forecast foundation (op-1).
+"""Tests for the demand-forecast storage + read side.
 
 Covers the storage model (``DemandForecast``), the ``reorder_alerts_enabled``
 opt-in field (read+write on the item API), and the read-only ``demand_forecast``
 / ``reorder_alerts`` report actions. Those actions read STORED rows and return
-``[]`` until a later forecasting task populates the table -- the empty state is
-part of the contract and is asserted here.
+``[]`` until the forecasting task populates the table -- the empty state is part
+of the contract and is asserted here. Urgency ordering is by ``days_until_due``
+(the restock-interval signal); see ``test_demand_forecast_engine`` for how those
+values are produced.
 """
 
 from datetime import timedelta
@@ -31,6 +33,13 @@ EXPECTED_ROW_KEYS = {
     "sku",
     "category_name",
     "generated_at",
+    # Restock-interval signal.
+    "avg_interval_days",
+    "interval_samples",
+    "last_restock_date",
+    "predicted_next_reorder_date",
+    "days_until_due",
+    # Retired v1 quantity projection (still emitted, 0/null on current rows).
     "horizon_days",
     "predicted_daily_demand",
     "horizon_demand",
@@ -117,17 +126,17 @@ class TestDemandForecastEndpoint:
     def test_populated_shape_and_urgency_ordering(self, authenticated_client):
         client, _ = authenticated_client
         # Distinct items (SubFactory) so all four are eligible + latest.
-        flagged_soon = DemandForecastFactory(needs_reorder=True, days_until_stockout=2.0)
-        flagged_later = DemandForecastFactory(needs_reorder=True, days_until_stockout=9.0)
-        flagged_null = DemandForecastFactory(needs_reorder=True, days_until_stockout=None)
-        not_flagged = DemandForecastFactory(needs_reorder=False, days_until_stockout=1.0)
+        flagged_soon = DemandForecastFactory(needs_reorder=True, days_until_due=2.0)
+        flagged_later = DemandForecastFactory(needs_reorder=True, days_until_due=9.0)
+        flagged_null = DemandForecastFactory(needs_reorder=True, days_until_due=None)
+        not_flagged = DemandForecastFactory(needs_reorder=False, days_until_due=1.0)
 
         resp = client.get(DEMAND_FORECAST_URL)
         assert resp.status_code == status.HTTP_200_OK
         assert len(resp.data) == 4
 
-        # Most-urgent first: reorder-flagged desc, then days_until_stockout asc
-        # (nulls last). not_flagged sorts last despite the soonest stockout.
+        # Most-urgent first: reorder-flagged desc, then days_until_due asc
+        # (nulls last). not_flagged sorts last despite being due soonest.
         order = [str(r["item"]) for r in resp.data]
         assert order == [
             str(flagged_soon.item_id),
@@ -146,8 +155,8 @@ class TestDemandForecastEndpoint:
 
     def test_low_stock_only_filters_to_needs_reorder(self, authenticated_client):
         client, _ = authenticated_client
-        flagged = DemandForecastFactory(needs_reorder=True, days_until_stockout=2.0)
-        DemandForecastFactory(needs_reorder=False, days_until_stockout=1.0)
+        flagged = DemandForecastFactory(needs_reorder=True, days_until_due=2.0)
+        DemandForecastFactory(needs_reorder=False, days_until_due=1.0)
 
         resp = client.get(DEMAND_FORECAST_URL, {"low_stock_only": "1"})
         assert resp.status_code == status.HTTP_200_OK
@@ -208,7 +217,7 @@ class TestReorderAlertsEndpoint:
         flagged_due = DemandForecastFactory(
             item=InventoryItemFactory(reorder_alerts_enabled=True),
             needs_reorder=True,
-            days_until_stockout=3.0,
+            days_until_due=3.0,
         )
         # flagged but NOT due -> excluded
         DemandForecastFactory(

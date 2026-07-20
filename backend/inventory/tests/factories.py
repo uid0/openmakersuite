@@ -3,6 +3,7 @@ Factory classes for generating test data for inventory models.
 """
 
 import itertools
+from datetime import timedelta
 from io import BytesIO
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -238,25 +239,44 @@ class UsageLogFactory(DjangoModelFactory):
 
 
 class DemandForecastFactory(DjangoModelFactory):
-    """Factory for creating DemandForecast rows (as the nightly task would)."""
+    """Factory for creating DemandForecast rows (as the nightly task would).
+
+    Produces a restock-interval row: the retired v1 quantity fields are written
+    as ``0``/``None``, exactly as the current engine writes them.
+    """
 
     class Meta:
         model = DemandForecast
 
     item = SubFactory(InventoryItemFactory)
     generated_at = factory.LazyFunction(timezone.now)
-    horizon_days = 14
-    predicted_daily_demand = 2.0
-    horizon_demand = 28.0
-    horizon_demand_upper = 35.0
-    available_at_generation = 40
-    days_until_stockout = 20.0
-    predictive_reorder_point = 30
+    avg_interval_days = 30.0
+    interval_samples = 3
+    last_restock_date = factory.LazyFunction(lambda: timezone.now().date())
+    # Derived like the engine does, so overriding either input keeps the row
+    # self-consistent; None on either input means no date can be predicted.
+    predicted_next_reorder_date = factory.LazyAttribute(
+        lambda o: (
+            o.last_restock_date + timedelta(days=round(o.avg_interval_days))
+            if o.last_restock_date and o.avg_interval_days is not None
+            else None
+        )
+    )
+    days_until_due = 30.0
     needs_reorder = False
+    available_at_generation = 40
     lead_time_days = 7
-    safety_stock = 5
-    method = DemandForecast.Method.PROPHET
-    model_version = "prophet-1"
+    method = DemandForecast.Method.RESTOCK_INTERVAL
+    model_version = "interval-1"
+
+    # Retired v1 quantity projection.
+    horizon_days = 0
+    predicted_daily_demand = 0.0
+    horizon_demand = 0.0
+    horizon_demand_upper = 0.0
+    days_until_stockout = None
+    predictive_reorder_point = 0
+    safety_stock = 0
 
 
 class FixtureFactory(DjangoModelFactory):

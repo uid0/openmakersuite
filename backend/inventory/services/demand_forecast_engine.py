@@ -1,109 +1,67 @@
-"""Demand-forecast *engine* for non-serialized inventory items (op-2).
+"""Demand-forecast *engine* for non-serialized inventory items.
 
-This is the write side of the ML demand forecast. op-1 shipped the storage
-model (:class:`inventory.models.DemandForecast`) and the read-only API; this
-module turns raw consumption history into the numbers those rows hold, and the
+This is the write side of the demand forecast: it turns purchase history into
+the numbers a :class:`~inventory.models.DemandForecast` row holds, and the
 nightly ``inventory.tasks.generate_demand_forecasts`` task persists one row per
 item per run.
 
+The model is **restock interval**, not usage rate: predict *when* to buy an
+item again from the average time between the times it was actually bought.
 Two pure, unit-testable stages:
 
-1. :func:`build_daily_consumption_series` — reconstructs a regular daily
-   consumption series for one item from :class:`~inventory.models.UsageLog`
-   **plus** shrinkage recorded in
-   :class:`~inventory.models.StockReconciliation` (usage alone undercounts).
-2. :func:`forecast_item` — projects that series over the reorder horizon and
-   derives the predictive reorder point / safety stock / stockout date.
+1. :func:`build_restock_events` — the item's purchase-event dates, from
+   :class:`~reorder_queue.models.PurchaseOrder` history.
+2. :func:`forecast_item_by_interval` — averages the gaps between those dates
+   and projects the next one, flagging the item when that date falls inside
+   the supplier lead time.
 
-The projection is chosen by history length:
+Why intervals and not consumption
+---------------------------------
+v1 of this engine reconstructed a daily consumption series from ``UsageLog``
+(plus ``StockReconciliation`` shrinkage) and projected it with a seasonal
+smoother. On real data that model had nothing to stand on: **0 of 53**
+non-serialized items had a single ``UsageLog`` row — nobody scans usage — so
+the series was driven entirely by sporadic stock corrections. One item came out
+at 1818 units/day with a reorder point of 40,233, off the back of a −19k
+reconciliation.
 
-* **< ``MIN_HISTORY_DAYS``** — a trailing run-rate ("fallback"), mirroring
-  :func:`inventory.services.component_forecast.build_component_forecast`'s
-  ``avg_daily_use``.
-* **otherwise** — an additive Holt-Winters seasonal smoother with a weekly
-  period (:func:`_predict_future`), which is the single *swap seam* for the
-  forecasting model.
+Purchase history is the signal that *is* reliably recorded, because every
+restock goes through a purchase order: 10" paper towel bought 6 times at a
+~48-day cadence, coreless TP 4 times at ~78 days, kitchen paper towel 3 times
+at ~29 days. Those are exactly the recurring consumables the alerts exist for,
+and the cadence is what a stockroom actually acts on ("this is about due
+again"), so the engine models that directly.
 
-Model choice — why not Prophet here
------------------------------------
-op-2 was specced as a Prophet engine, with statsmodels Holt-Winters named as
-the sanctioned swap "if prophet fights Docker" (the interface is swappable by
-design). Both fight *this* image: the backend runs on ``python:3.14-slim``,
-where the only pandas with a cp314 wheel is the 3.0 line — and **both**
-``prophet==1.1.7`` and ``statsmodels==0.14.5`` break on pandas 3.0 (prophet:
-``crosstab`` reindex; statsmodels: ``deprecate_kwarg`` import). Pinning
-``pandas<3`` fixes both but has no cp314 wheel (source-build on 3.14), and
-prophet additionally needs a ``cmdstanpy`` pin and adds ~312 MB. So the shipped
-advanced tier is an additive Holt-Winters implemented on the **standard
-library** (``method="holtwinters"`` — the bead's sanctioned label): no pandas,
-no Stan, cp314-clean, zero image bloat, and deterministic (so tests need not
-mock it). Dropping in real Prophet/statsmodels later is a one-function change
-in :func:`_predict_future` once they support pandas 3 (or the base image moves
-back to 3.13); the downstream reorder math in :func:`forecast_item` is
-model-agnostic.
+Signal choice: ``PurchaseOrder.order_date`` (when we ordered) rather than
+receipt (``DeliveryItem.scanned_at`` / ``OrderDelivery.delivery_date``).
+Ordering is the decision this forecast is trying to reproduce, and every PO has
+an order date whereas receipts depend on scan discipline. Receipt-based
+intervals remain a possible refinement if delivery data ever gets denser.
 """
 
 from __future__ import annotations
 
-import math
 import statistics
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Iterable, List, Optional
 
-from django.db.models import Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
-
-from inventory.models import StockReconciliation, UsageLog
 
 if TYPE_CHECKING:  # pragma: no cover
     from inventory.models import InventoryItem
 
 # --- tuning constants -------------------------------------------------------
 
-# Trailing window the nightly task feeds the builder (one year of history).
-TRAILING_WINDOW_DAYS = 365
-
-# Below this much *usable* history the seasonal smoother can't be trusted, so
-# we fall back to a trailing run-rate. 60 days ~= 8 weekly cycles.
-MIN_HISTORY_DAYS = 60
-
-# Buffer added to the lead time to set the projection horizon: cover the
-# reorder lead time plus a week of slack.
-SAFETY_BUFFER_DAYS = 7
-
-# Weekly seasonality — most maker-space consumption is day-of-week driven.
-SEASONAL_PERIOD_DAYS = 7
-
-# One-sided z for the upper prediction band that drives safety stock. 1.2816 is
-# the ~90th percentile of the standard normal, i.e. the upper edge of an 80%
-# central interval — matching Prophet's default ``interval_width=0.8`` so the
-# safety-stock semantics are stable if the model is later swapped.
-UNCERTAINTY_Z = 1.2816
-
-# Holt-Winters additive smoothing coefficients. The trend term is intentionally
-# omitted (flat level) because consumables don't trend unbounded — this mirrors
-# the ``growth="flat"`` choice Prophet would have used here.
-_HW_ALPHA = 0.3  # level
-_HW_GAMMA = 0.3  # seasonal
-
-# StockReconciliation reasons whose negative delta is *consumption* (not a
-# counting correction or a positive "found"). FOUND / MISCOUNTED / positive
-# deltas are excluded — they are stock movements, not demand.
-SHRINKAGE_REASONS = (
-    StockReconciliation.ReasonCode.USED_WITHOUT_SCAN,
-    StockReconciliation.ReasonCode.LOST,
-    StockReconciliation.ReasonCode.DAMAGED,
-)
+# Fewer purchase events than this and there is no gap to average, so no cadence
+# can be inferred. Two events = one gap = the minimum usable history.
+MIN_RESTOCK_EVENTS = 2
 
 # Method labels (mirror inventory.models.DemandForecast.Method).
-METHOD_HOLTWINTERS = "holtwinters"
-METHOD_FALLBACK = "fallback"
-MODEL_VERSION = "holtwinters-1"
-
-
-DailyPoint = Tuple[date, float]
+METHOD_RESTOCK_INTERVAL = "restock_interval"
+METHOD_INSUFFICIENT_HISTORY = "insufficient_history"
+MODEL_VERSION = "interval-1"
 
 
 @dataclass
@@ -111,278 +69,157 @@ class ForecastResult:
     """The per-item projection, ready to persist as a ``DemandForecast`` row.
 
     Field names line up 1:1 with the model so the task can splat this into
-    ``DemandForecast.objects.create(**...)`` without a translation layer.
+    ``DemandForecast.objects.create(**...)`` without a translation layer. The
+    retired v1 quantity fields default to ``0``/``None`` here — the interval
+    model does not predict quantities, and the columns are kept only so
+    historical rows and existing API consumers stay readable.
     """
 
     method: str
     model_version: str
-    horizon_days: int
-    predicted_daily_demand: float
-    horizon_demand: float
-    horizon_demand_upper: float
-    available_at_generation: int
-    safety_stock: int
-    predictive_reorder_point: int
+    avg_interval_days: Optional[float]
+    interval_samples: int
+    last_restock_date: Optional[date]
+    predicted_next_reorder_date: Optional[date]
+    days_until_due: Optional[float]
     needs_reorder: bool
-    days_until_stockout: Optional[float]
-    projected_stockout_date: Optional[date]
+    available_at_generation: int
     lead_time_days: Optional[int]
 
+    # Retired v1 quantity projection — written as 0/NULL by this engine.
+    horizon_days: int = 0
+    predicted_daily_demand: float = 0.0
+    horizon_demand: float = 0.0
+    horizon_demand_upper: float = 0.0
+    safety_stock: int = 0
+    predictive_reorder_point: int = 0
+    days_until_stockout: Optional[float] = None
+    projected_stockout_date: Optional[date] = None
 
-# --- stage 1: consumption series -------------------------------------------
+
+# --- stage 1: restock events ------------------------------------------------
 
 
-def build_daily_consumption_series(
-    item: "InventoryItem", *, start: date, end: date
-) -> List[DailyPoint]:
-    """Reconstruct a regular daily consumption series for ``item``.
+def build_restock_events(item: "InventoryItem", *, end: date) -> List[date]:
+    """The dates ``item`` was purchased, ascending, one per day.
 
-    Consumption on a day is the sum of:
+    Walks the item's purchase-order line items
+    (``PurchaseOrderItem.item_supplier.item``) and collects their order dates,
+    deduplicated per day: what the cadence measures is *shopping trips*, not
+    paperwork, so restocking the item twice on one day (a second order, or a
+    top-up from a different supplier) counts once.
 
-    * ``UsageLog.quantity_used`` logged that day, and
-    * shrinkage — the magnitude of *negative* ``StockReconciliation.delta``
-      rows whose reason is in :data:`SHRINKAGE_REASONS` (used-without-scan,
-      lost, damaged). Positive deltas and FOUND/MISCOUNTED are stock movements,
-      not demand, and are excluded.
-
-    Every calendar day in ``[start, end]`` with no activity is **zero-filled**
-    (the smoother needs a regular series), then the leading run of zeros before
-    the item's first real usage is **trimmed** (don't train on days the item
-    effectively didn't exist yet).
+    Cancelled and voided purchase orders are excluded — an order that was never
+    placed is not a restock, and counting it would stretch the measured gaps
+    around it.
 
     Args:
         item: the inventory item.
-        start: first calendar day to consider (inclusive).
-        end: last calendar day to consider (inclusive).
+        end: last calendar day to consider (inclusive); orders after it are
+            ignored so a run can be reproduced as of a past date.
 
     Returns:
-        ``[(date, quantity), ...]`` in ascending date order, zero-filled and
-        leading-zero-trimmed. Empty when the item had no consumption at all in
-        the window.
+        Ascending, deduplicated ``date`` list — possibly empty.
     """
-    if end < start:
-        return []
+    # Imported lazily so this module has no import-time dependency on the
+    # reorder_queue app (mirrors how the rest of inventory references it).
+    from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 
-    by_day: dict[date, float] = {}
-
-    usage_rows = (
-        UsageLog.objects.filter(item=item, usage_date__date__gte=start, usage_date__date__lte=end)
-        .annotate(day=TruncDate("usage_date"))
-        .values("day")
-        .annotate(total=Sum("quantity_used"))
-    )
-    for row in usage_rows:
-        if row["day"] is None:
-            continue
-        by_day[row["day"]] = by_day.get(row["day"], 0.0) + float(row["total"] or 0)
-
-    shrink_rows = (
-        StockReconciliation.objects.filter(
-            item=item,
-            delta__lt=0,
-            reason__in=SHRINKAGE_REASONS,
-            reconciled_at__date__gte=start,
-            reconciled_at__date__lte=end,
+    days = (
+        PurchaseOrderItem.objects.filter(item_supplier__item=item)
+        .exclude(
+            purchase_order__status__in=(
+                PurchaseOrder.Status.CANCELLED,
+                PurchaseOrder.Status.VOIDED,
+            )
         )
-        .annotate(day=TruncDate("reconciled_at"))
-        .values("day")
-        .annotate(total=Sum("delta"))
+        .annotate(day=TruncDate("purchase_order__order_date"))
+        .filter(day__lte=end)
+        .values_list("day", flat=True)
+        .distinct()
     )
-    for row in shrink_rows:
-        if row["day"] is None:
-            continue
-        # total is negative (sum of negative deltas); its magnitude is demand.
-        by_day[row["day"]] = by_day.get(row["day"], 0.0) + float(-(row["total"] or 0))
-
-    # Zero-fill the whole calendar range.
-    series: List[DailyPoint] = []
-    day = start
-    step = timedelta(days=1)
-    while day <= end:
-        series.append((day, by_day.get(day, 0.0)))
-        day += step
-
-    # Trim the leading zero-run (before the first day with real consumption).
-    first = next((i for i, (_, qty) in enumerate(series) if qty > 0), None)
-    if first is None:
-        return []
-    return series[first:]
+    return sorted(day for day in days if day is not None)
 
 
 # --- stage 2: forecast ------------------------------------------------------
 
 
-def horizon_days_for(lead_time_days: Optional[float]) -> int:
-    """Projection horizon = lead time + :data:`SAFETY_BUFFER_DAYS`, min 1 day."""
-    lead = int(math.ceil(lead_time_days)) if lead_time_days and lead_time_days > 0 else 0
-    return max(1, lead + SAFETY_BUFFER_DAYS)
-
-
-def forecast_item(
-    item: "InventoryItem",
-    series: Sequence[DailyPoint],
-    horizon_days: int,
+def forecast_item_by_interval(
+    item: Optional["InventoryItem"],
+    events: Iterable[date],
     *,
+    now=None,
     lead_time_days: Optional[float] = None,
     available: Optional[int] = None,
-    now=None,
 ) -> ForecastResult:
-    """Project ``series`` over ``horizon_days`` into a :class:`ForecastResult`.
+    """Average the gaps between ``events`` and project the next purchase.
 
-    The model tier is picked by *usable* history length (``len(series)`` — the
-    series is already leading-zero-trimmed): a seasonal Holt-Winters smoother
-    when there are at least :data:`MIN_HISTORY_DAYS` days, otherwise a trailing
-    run-rate fallback. Both produce a per-day ``yhat`` / ``yhat_upper`` pair;
-    the reorder math below is identical either way:
-
-    * ``safety_stock = ceil(horizon_demand_upper - horizon_demand)`` — the
-      prediction-band width over the horizon, so a noisier item carries more
-      buffer.
-    * ``predictive_reorder_point = ceil(horizon_demand + safety_stock)``.
-    * ``needs_reorder`` when available stock is at/below that point.
-    * ``days_until_stockout = available / predicted_daily_demand`` (when demand
-      is positive) and the matching ``projected_stockout_date``.
+    With at least :data:`MIN_RESTOCK_EVENTS` events the cadence is the mean gap
+    between consecutive purchase dates; the item is due one cadence after its
+    last purchase, and is **flagged** once that due date is within the supplier
+    lead time — order now and it lands about when it is needed. With fewer
+    events there is no gap to average, so the row records
+    ``insufficient_history`` and flags nothing (guessing a cadence from a single
+    purchase would be noise, and a false alert costs more than a missing one).
 
     Args:
-        item: the item (used for ``current_stock`` when ``available`` is None).
-        series: leading-zero-trimmed daily ``(date, qty)`` points.
-        horizon_days: projection window; see :func:`horizon_days_for`.
-        lead_time_days: resolved lead time, stored on the row for context.
-        available: on-hand stock at generation (defaults to
-            ``item.current_stock``).
-        now: reference time for the stockout date (defaults to ``timezone.now``).
+        item: the inventory item; only read for ``current_stock`` when
+            ``available`` is not given, so pure tests may pass ``None``.
+        events: purchase dates from :func:`build_restock_events` (re-sorted and
+            deduplicated defensively).
+        now: reference time for ``days_until_due`` (defaults to
+            ``timezone.now``).
+        lead_time_days: resolved supplier lead time; the flag threshold.
+        available: on-hand stock snapshot (defaults to ``item.current_stock``).
 
     Returns:
         A :class:`ForecastResult` ready to persist.
     """
     now = now or timezone.now()
-    available = int(item.current_stock if available is None else available)
-    horizon_days = max(1, int(horizon_days))
-
-    quantities = [float(qty) for _, qty in series]
-
-    if len(quantities) >= MIN_HISTORY_DAYS:
-        method = METHOD_HOLTWINTERS
-        model_version = MODEL_VERSION
-        yhat, yhat_upper = _predict_future(series, horizon_days)
-        predicted_daily_demand = _mean([max(v, 0.0) for v in yhat]) if yhat else 0.0
-        horizon_demand = sum(max(v, 0.0) for v in yhat)
-        horizon_demand_upper = sum(max(v, 0.0) for v in yhat_upper)
+    if available is None:
+        available = int(item.current_stock) if item is not None else 0
     else:
-        method = METHOD_FALLBACK
-        model_version = ""
-        predicted_daily_demand, horizon_demand, horizon_demand_upper = _forecast_fallback(
-            quantities, horizon_days
-        )
-
-    safety_stock = max(0, int(math.ceil(horizon_demand_upper - horizon_demand)))
-    predictive_reorder_point = int(math.ceil(horizon_demand + safety_stock))
-    needs_reorder = available <= predictive_reorder_point
-
-    if predicted_daily_demand > 0:
-        days_until_stockout = round(available / predicted_daily_demand, 1)
-        projected_stockout_date = (now + timedelta(days=available / predicted_daily_demand)).date()
-    else:
-        days_until_stockout = None
-        projected_stockout_date = None
-
+        available = int(available)
     stored_lead = int(round(lead_time_days)) if lead_time_days is not None else None
 
+    ordered = sorted(set(events))
+    # Gaps, not events: n purchases describe n-1 intervals.
+    interval_samples = max(0, len(ordered) - 1)
+    # A lone purchase is still the last known restock, so report it even though
+    # no cadence can be derived from it.
+    last_restock_date = ordered[-1] if ordered else None
+
+    if len(ordered) < MIN_RESTOCK_EVENTS:
+        return ForecastResult(
+            method=METHOD_INSUFFICIENT_HISTORY,
+            model_version="",
+            avg_interval_days=None,
+            interval_samples=interval_samples,
+            last_restock_date=last_restock_date,
+            predicted_next_reorder_date=None,
+            days_until_due=None,
+            needs_reorder=False,
+            available_at_generation=available,
+            lead_time_days=stored_lead,
+        )
+
+    gaps = [(later - earlier).days for earlier, later in zip(ordered, ordered[1:])]
+    avg_interval_days = statistics.fmean(gaps)
+    # Round to the nearest whole day rather than truncating: date arithmetic
+    # drops the fractional part, which would bias every prediction early.
+    predicted_next_reorder_date = last_restock_date + timedelta(days=round(avg_interval_days))
+    days_until_due = float((predicted_next_reorder_date - now.date()).days)
+    needs_reorder = days_until_due <= (lead_time_days or 0)
+
     return ForecastResult(
-        method=method,
-        model_version=model_version,
-        horizon_days=horizon_days,
-        predicted_daily_demand=round(predicted_daily_demand, 4),
-        horizon_demand=round(horizon_demand, 4),
-        horizon_demand_upper=round(horizon_demand_upper, 4),
-        available_at_generation=available,
-        safety_stock=safety_stock,
-        predictive_reorder_point=predictive_reorder_point,
+        method=METHOD_RESTOCK_INTERVAL,
+        model_version=MODEL_VERSION,
+        avg_interval_days=round(avg_interval_days, 4),
+        interval_samples=interval_samples,
+        last_restock_date=last_restock_date,
+        predicted_next_reorder_date=predicted_next_reorder_date,
+        days_until_due=days_until_due,
         needs_reorder=needs_reorder,
-        days_until_stockout=days_until_stockout,
-        projected_stockout_date=projected_stockout_date,
+        available_at_generation=available,
         lead_time_days=stored_lead,
     )
-
-
-def _forecast_fallback(
-    quantities: Sequence[float], horizon_days: int
-) -> Tuple[float, float, float]:
-    """Trailing run-rate projection for thin history.
-
-    Mean daily demand over the (short) series, with an upper band from the
-    daily standard deviation grown over the horizon (``σ·√H``) — the same
-    uncertainty→safety-stock idea as the seasonal path, without needing a
-    model. Returns ``(predicted_daily_demand, horizon_demand,
-    horizon_demand_upper)``.
-    """
-    if not quantities:
-        return 0.0, 0.0, 0.0
-    mean = _mean(quantities)
-    std = statistics.pstdev(quantities) if len(quantities) >= 2 else 0.0
-    horizon_demand = mean * horizon_days
-    horizon_demand_upper = horizon_demand + UNCERTAINTY_Z * std * math.sqrt(horizon_days)
-    return mean, horizon_demand, horizon_demand_upper
-
-
-def _predict_future(
-    series: Sequence[DailyPoint], horizon_days: int
-) -> Tuple[List[float], List[float]]:
-    """The forecasting-model **swap seam**: fit and project ``horizon_days`` ahead.
-
-    Returns ``(yhat, yhat_upper)`` — two lists of length ``horizon_days`` — the
-    per-day point forecast and its upper prediction band. This is the *only*
-    function that knows the model. To adopt real Prophet or statsmodels later,
-    replace this body (return the same pair) and flip
-    :data:`METHOD_HOLTWINTERS` / :data:`MODEL_VERSION`; nothing else changes.
-
-    Default: additive Holt-Winters seasonal exponential smoothing with a weekly
-    period and no trend term (flat level — consumables don't trend unbounded).
-    The upper band is the point forecast plus ``UNCERTAINTY_Z × σ`` where ``σ``
-    is the in-sample one-step residual standard deviation. Pure standard
-    library (no pandas/numpy), so it is deterministic and cp314-clean.
-    """
-    quantities = [float(qty) for _, qty in series]
-    n = len(quantities)
-    period = SEASONAL_PERIOD_DAYS
-
-    # Not enough for a seasonal fit (shouldn't happen — caller gates at
-    # MIN_HISTORY_DAYS >> 2*period — but stay safe): flat mean forecast.
-    if n < 2 * period:
-        mean = _mean(quantities) if quantities else 0.0
-        std = statistics.pstdev(quantities) if n >= 2 else 0.0
-        band = UNCERTAINTY_Z * std
-        return [mean] * horizon_days, [mean + band] * horizon_days
-
-    # Seasonal init: level = mean of first full season; seasonal deviations
-    # from that level.
-    level = _mean(quantities[:period])
-    seasonal = [quantities[i] - level for i in range(period)]
-
-    residuals: List[float] = []
-    for t in range(period, n):
-        season = seasonal[t - period]
-        prediction = level + season  # one-step-ahead, flat level
-        residuals.append(quantities[t] - prediction)
-        # Update level and this position's seasonal component.
-        new_level = _HW_ALPHA * (quantities[t] - season) + (1 - _HW_ALPHA) * level
-        seasonal.append(_HW_GAMMA * (quantities[t] - new_level) + (1 - _HW_GAMMA) * season)
-        level = new_level
-
-    resid_std = statistics.pstdev(residuals) if len(residuals) >= 2 else 0.0
-    band = UNCERTAINTY_Z * resid_std
-
-    # Project: flat level + the continuing weekly seasonal pattern. seasonal now
-    # has length n; its last ``period`` entries are the most recent cycle.
-    yhat: List[float] = []
-    yhat_upper: List[float] = []
-    for h in range(horizon_days):
-        season = seasonal[len(seasonal) - period + (h % period)]
-        point = level + season
-        yhat.append(point)
-        yhat_upper.append(point + band)
-    return yhat, yhat_upper
-
-
-def _mean(values: Sequence[float]) -> float:
-    return sum(values) / len(values) if values else 0.0

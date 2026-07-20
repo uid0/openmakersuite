@@ -23,8 +23,8 @@ import { FormLayout } from '../components/forms/FormLayout';
 import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormTextarea } from '../components/forms/FormTextarea';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { maintenanceAPI } from '../services/api';
-import { MaintenanceMaterial } from '../types';
+import { maintenanceAPI, maintenanceToolAPI } from '../services/api';
+import { MaintenanceMaterial, MaintenanceTool } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import { MaintenanceItemFormData, maintenanceItemFormSchema } from '../utils/formSchemas';
 
@@ -37,6 +37,26 @@ interface PendingMaterial {
   estimated_cost_per_unit: number;
   notes: string;
 }
+
+/** A tool row being edited. Persisted rows carry `id`; new ones only `localId`. */
+interface PendingTool {
+  localId: string;
+  id?: string;
+  name: string;
+  quantity: number;
+  location_hint: string;
+  is_required: boolean;
+  notes: string;
+}
+
+const EMPTY_TOOL: PendingTool = {
+  localId: '',
+  name: '',
+  quantity: 1,
+  location_hint: '',
+  is_required: true,
+  notes: '',
+};
 
 const MaintenanceItemFormPage: React.FC = () => {
   const { assetId, id } = useParams<{ assetId: string; id: string }>();
@@ -56,6 +76,9 @@ const MaintenanceItemFormPage: React.FC = () => {
     estimated_cost_per_unit: 0,
     notes: '',
   });
+  const [tools, setTools] = useState<PendingTool[]>([]);
+  const [originalToolIds, setOriginalToolIds] = useState<string[]>([]);
+  const [newTool, setNewTool] = useState<PendingTool>(EMPTY_TOOL);
 
   const { control, handleSubmit, reset, setValue } = useForm<MaintenanceItemFormData>({
     // v5 resolvers infer the schema's Zod *input* type (fields with `.default()`
@@ -106,6 +129,17 @@ const MaintenanceItemFormPage: React.FC = () => {
       }));
       setMaterials(loaded);
       setOriginalMaterialIds(loaded.map((m: PendingMaterial) => m.id!).filter(Boolean));
+      const loadedTools = (item.tools ?? []).map((t: MaintenanceTool) => ({
+        localId: t.id,
+        id: t.id,
+        name: t.name,
+        quantity: t.quantity,
+        location_hint: t.location_hint,
+        is_required: t.is_required,
+        notes: t.notes,
+      }));
+      setTools(loadedTools);
+      setOriginalToolIds(loadedTools.map((t: PendingTool) => t.id!).filter(Boolean));
     } catch (err) {
       console.error('Error loading maintenance item:', err);
       setError('Failed to load maintenance item.');
@@ -122,6 +156,16 @@ const MaintenanceItemFormPage: React.FC = () => {
 
   const removeMaterial = (index: number) => {
     setMaterials(materials.filter((_, i) => i !== index));
+  };
+
+  const addTool = () => {
+    if (!newTool.name.trim()) return;
+    setTools([...tools, { ...newTool, localId: crypto.randomUUID() }]);
+    setNewTool(EMPTY_TOOL);
+  };
+
+  const removeTool = (index: number) => {
+    setTools(tools.filter((_, i) => i !== index));
   };
 
   const onSubmit = async (data: MaintenanceItemFormData) => {
@@ -144,6 +188,10 @@ const MaintenanceItemFormPage: React.FC = () => {
         const keepIds = materials.filter((m) => m.id).map((m) => m.id!);
         const toDelete = originalMaterialIds.filter((eid) => !keepIds.includes(eid));
         await Promise.all(toDelete.map((mid) => maintenanceAPI.deleteMaterial(mid)));
+
+        const keepToolIds = tools.filter((t) => t.id).map((t) => t.id!);
+        const toolsToDelete = originalToolIds.filter((eid) => !keepToolIds.includes(eid));
+        await Promise.all(toolsToDelete.map((tid) => maintenanceToolAPI.delete(tid)));
       } else {
         const response = await maintenanceAPI.createItem(apiPayload);
         savedItemId = response.data.id;
@@ -159,6 +207,20 @@ const MaintenanceItemFormPage: React.FC = () => {
             unit: m.unit,
             estimated_cost_per_unit: String(m.estimated_cost_per_unit),
             notes: m.notes,
+          })
+        )
+      );
+
+      const newTools = tools.filter((t) => !t.id);
+      await Promise.all(
+        newTools.map((t) =>
+          maintenanceToolAPI.create({
+            maintenance_item: savedItemId,
+            name: t.name,
+            quantity: t.quantity,
+            location_hint: t.location_hint,
+            is_required: t.is_required,
+            notes: t.notes,
           })
         )
       );
@@ -352,6 +414,96 @@ const MaintenanceItemFormPage: React.FC = () => {
                   variant="light"
                 >
                   Add
+                </Button>
+              </Group>
+            </Paper>
+          </Stack>
+
+          {/* Tools are gathered and returned (materials get consumed). They
+              print at the top of the work order next to the lockout info so
+              the tech collects everything before walking to the machine. */}
+          <Divider my="md" label="Tools" labelPosition="left" />
+          <Stack gap="sm">
+            {tools.length > 0 && (
+              <Table striped withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Tool</Table.Th>
+                    <Table.Th>Qty</Table.Th>
+                    <Table.Th>Location</Table.Th>
+                    <Table.Th>Required</Table.Th>
+                    <Table.Th></Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {tools.map((t, i) => (
+                    <Table.Tr key={t.localId}>
+                      <Table.Td>{t.name}</Table.Td>
+                      <Table.Td>{t.quantity}</Table.Td>
+                      <Table.Td>{t.location_hint || '—'}</Table.Td>
+                      <Table.Td>{t.is_required ? 'Required' : 'Optional'}</Table.Td>
+                      <Table.Td>
+                        <ActionIcon
+                          color="red"
+                          variant="subtle"
+                          onClick={() => removeTool(i)}
+                          aria-label="Remove tool"
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            )}
+
+            <Paper p="sm" withBorder>
+              <Text size="sm" fw={500} mb="xs">
+                Add Tool
+              </Text>
+              <Group align="flex-end" gap="xs">
+                <TextInput
+                  label="Tool"
+                  value={newTool.name}
+                  onChange={(e) => setNewTool({ ...newTool, name: e.target.value })}
+                  placeholder="e.g. Torque wrench"
+                  style={{ flex: 2 }}
+                />
+                <NumberInput
+                  label="Qty"
+                  value={newTool.quantity}
+                  onChange={(v) => setNewTool({ ...newTool, quantity: Number(v) || 1 })}
+                  min={1}
+                  step={1}
+                  style={{ flex: 1 }}
+                />
+                <TextInput
+                  label="Location"
+                  value={newTool.location_hint}
+                  onChange={(e) => setNewTool({ ...newTool, location_hint: e.target.value })}
+                  placeholder="Tool crib, drawer 3"
+                  style={{ flex: 2 }}
+                />
+                <TextInput
+                  label="Notes"
+                  value={newTool.notes}
+                  onChange={(e) => setNewTool({ ...newTool, notes: e.target.value })}
+                  placeholder="Optional"
+                  style={{ flex: 2 }}
+                />
+                <Switch
+                  label="Required"
+                  checked={newTool.is_required}
+                  onChange={(e) => setNewTool({ ...newTool, is_required: e.currentTarget.checked })}
+                />
+                <Button
+                  leftSection={<IconPlus size={16} />}
+                  onClick={addTool}
+                  disabled={!newTool.name.trim()}
+                  variant="light"
+                >
+                  Add Tool
                 </Button>
               </Group>
             </Paper>

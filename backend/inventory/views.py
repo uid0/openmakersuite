@@ -55,6 +55,7 @@ from .models import (
     MaintenanceMaterial,
     MaintenanceRecord,
     MaintenanceTask,
+    MaintenanceTool,
     PriceHistory,
     SerializedComponent,
     StockReconciliation,
@@ -94,6 +95,7 @@ from .serializers import (
     MaintenanceMaterialSerializer,
     MaintenanceRecordSerializer,
     MaintenanceTaskSerializer,
+    MaintenanceToolSerializer,
     PriceHistorySerializer,
     SerializedComponentSerializer,
     StockReconciliationBatchSerializer,
@@ -3915,6 +3917,23 @@ class MaintenanceMaterialViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+class MaintenanceToolViewSet(viewsets.ModelViewSet):
+    """API endpoint for maintenance tools (what to grab before starting)."""
+
+    queryset = MaintenanceTool.objects.select_related(
+        "maintenance_item__asset", "inventory_item"
+    ).all()
+    serializer_class = MaintenanceToolSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        maintenance_item = self.request.query_params.get("maintenance_item")
+        if maintenance_item:
+            queryset = queryset.filter(maintenance_item_id=maintenance_item)
+        return queryset
+
+
 class MaintenanceLogViewSet(viewsets.ReadOnlyModelViewSet):
     """API endpoint for maintenance completion logs (read-only list/detail)."""
 
@@ -3968,6 +3987,9 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             "loto_completions__energy_source",
             "photos__uploaded_by",
             "maintenance_item__materials",
+            # op-67q5: feed WorkOrderSerializer.get_tools (the up-front "Tools
+            # Required" list) from one prefetch instead of a query per row.
+            "maintenance_item__tools",
             # op-o6rs: feed the pending-review badge (pending_review_count) from
             # a single prefetch instead of a per-row submissions query (N+1).
             "submissions",
@@ -4887,7 +4909,9 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
     """API endpoint for asset maintenance items (PM tasks)."""
 
     queryset = (
-        MaintenanceItem.objects.prefetch_related("materials", "tasks").select_related("asset").all()
+        MaintenanceItem.objects.prefetch_related("materials", "tools", "tasks")
+        .select_related("asset")
+        .all()
     )
     serializer_class = MaintenanceItemSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]

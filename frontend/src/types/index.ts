@@ -607,6 +607,35 @@ export interface MaintenanceMaterial {
   created_at: string;
 }
 
+/**
+ * A tool the maintainer must gather before starting a PM task — as opposed to
+ * a {@link MaintenanceMaterial}, which gets consumed. Field names are a pinned
+ * API contract (ScanTTY decodes the same payload); do not rename them.
+ */
+export interface MaintenanceTool {
+  id: string;
+  maintenance_item: string;
+  inventory_item: string | null;
+  inventory_item_detail: MaintenanceMaterialInventoryDetail | null;
+  name: string;
+  /** Whole units — the backend field is a PositiveIntegerField. */
+  quantity: number;
+  location_hint: string;
+  is_required: boolean;
+  notes: string;
+  created_at: string;
+}
+
+/**
+ * The trimmed tool shape a work order carries for display + print. The WO
+ * serializer deliberately omits the template-side keys (`maintenance_item`,
+ * `inventory_item*`, `created_at`) — this Pick keeps the two in step.
+ */
+export type WorkOrderTool = Pick<
+  MaintenanceTool,
+  'id' | 'name' | 'quantity' | 'location_hint' | 'is_required' | 'notes'
+>;
+
 export interface LowStockAlert {
   material_id: string;
   item_id: string;
@@ -637,6 +666,7 @@ export interface MaintenanceItem {
   days_overdue: number | null;
   next_due_at: string | null;
   materials: MaintenanceMaterial[];
+  tools?: MaintenanceTool[];
   tasks: MaintenanceTask[];
   created_at: string;
   updated_at: string;
@@ -849,6 +879,8 @@ export interface WorkOrder {
   material_usage: WorkOrderMaterialUsage[];
   loto_completions: WorkOrderLotoCompletion[];
   photos: WorkOrderPhoto[];
+  /** op-67q5: tools to gather, required first — reference only, no OMR box. */
+  tools?: WorkOrderTool[];
   submissions: WorkOrderSubmission[];
   electrical?: WorkOrderElectricalContext;
   loto?: WorkOrderLotoContext;

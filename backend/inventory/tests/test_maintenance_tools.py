@@ -276,6 +276,18 @@ class TestWorkOrderSerializerTools:
             "Zip ties",
         ]
 
+    def test_name_ordering_ignores_case(self):
+        """Case-folded, so ``wrench`` does not sort after every capitalized name."""
+        item = _make_item()
+        for name in ("zip ties", "Allen key", "wrench"):
+            MaintenanceTool.objects.create(maintenance_item=item, name=name)
+        wo = WorkOrder.objects.create(maintenance_item=item)
+        assert [t["name"] for t in WorkOrderSerializer(wo).data["tools"]] == [
+            "Allen key",
+            "wrench",
+            "zip ties",
+        ]
+
     def test_empty_when_the_template_defines_no_tools(self):
         wo = WorkOrder.objects.create(maintenance_item=_make_item())
         assert WorkOrderSerializer(wo).data["tools"] == []
@@ -364,6 +376,22 @@ class TestWorkOrderPdfToolsSection:
         MaintenanceTool.objects.create(maintenance_item=item, name="Multimeter", inventory_item=inv)
         text = _pdf_text(generate_work_order_pdf(self._work_order(item), base_url="http://x"))
         assert "Bay 4" in text
+
+    def test_printed_list_matches_the_digital_one(self):
+        """Parity: both surfaces read the same builder, so neither can drift."""
+        item = _make_item()
+        MaintenanceTool.objects.create(maintenance_item=item, name="zip ties", is_required=False)
+        MaintenanceTool.objects.create(maintenance_item=item, name="Torque wrench")
+        MaintenanceTool.objects.create(maintenance_item=item, name="Allen key")
+        wo = self._work_order(item)
+
+        digital = [t["name"] for t in WorkOrderSerializer(wo).data["tools"]]
+        text = _pdf_text(generate_work_order_pdf(wo, base_url="http://x"))
+        printed_positions = [text.index(name) for name in digital]
+
+        assert digital == ["Allen key", "Torque wrench", "zip ties"]
+        # Every digital tool is printed, in the same order.
+        assert printed_positions == sorted(printed_positions)
 
     def test_renders_a_placeholder_when_no_tools_are_specified(self):
         text = _pdf_text(generate_work_order_pdf(self._work_order(), base_url="http://x"))

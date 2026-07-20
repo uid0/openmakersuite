@@ -2322,31 +2322,13 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         """Tools the tech needs to gather before starting, required ones first.
 
         A flat reference list (no OMR checkbox — nothing here is scanned back)
-        carried on every work order so the web detail page and the printed PDF
-        can show "what to grab" up front. Pinned payload keys — ScanTTY decodes
-        these. Sorted in Python off ``.all()`` so the
-        ``maintenance_item__tools`` prefetch is used instead of firing a query
-        per row; an ``order_by()`` here would bypass that cache.
-
-        Only the primary ``maintenance_item``'s tools: work orders that bundle
-        ``additional_maintenance_items`` keep the up-front list short and
-        unambiguous.
+        carried on every work order so the web detail page can show "what to
+        grab" up front. Built by the same helper the printed form uses, so the
+        two surfaces cannot drift.
         """
-        tools = sorted(
-            obj.maintenance_item.tools.all(),
-            key=lambda tool: (not tool.is_required, tool.name),
-        )
-        return [
-            {
-                "id": str(tool.id),
-                "name": tool.name,
-                "quantity": tool.quantity,
-                "location_hint": tool.location_hint,
-                "is_required": tool.is_required,
-                "notes": tool.notes,
-            }
-            for tool in tools
-        ]
+        from .services.work_order_context import build_tools_context
+
+        return build_tools_context(obj.maintenance_item)
 
     def get_electrical(self, obj):
         from .services.work_order_context import build_electrical_context

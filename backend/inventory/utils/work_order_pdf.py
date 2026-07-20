@@ -498,11 +498,10 @@ def generate_work_order_pdf(
     # the LOTO reference *before* walking to the machine. Reference only: no
     # AcroCheckbox, so this section adds nothing to ``region_collector`` and
     # leaves the OMR target ids / template drift signature untouched.
+    from inventory.services.work_order_context import sorted_maintenance_tools
+
     story.append(Paragraph("Tools Required", subheading_style))
-    tools = sorted(
-        item.tools.all(),
-        key=lambda tool: (not tool.is_required, tool.name),
-    )
+    tools = sorted_maintenance_tools(item)
     if tools:
         tool_rows = [
             [

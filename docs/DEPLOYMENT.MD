@@ -126,30 +126,43 @@ docker-compose -f docker-compose.prod.yml exec backend python manage.py createsu
 
 ## SSL/HTTPS Setup
 
-### Using Let's Encrypt (Recommended)
+Let's Encrypt is built into the `nginx` container — there is **no** manual
+certbot step and **no** hand-editing of cert paths. Set two env vars in `.env`
+and the container issues, installs, and renews the certificate automatically:
 
-1. Install certbot on your server:
 ```bash
-apt-get install certbot
+LETSENCRYPT_EMAIL=admin@oms.example.com        # ACME account / expiry notices
+LETSENCRYPT_DOMAINS=oms.example.com www.oms.example.com   # SAN list; first is canonical
 ```
 
-2. Get certificate:
-```bash
-certbot certonly --standalone -d dallas.openmakersuite.net
-```
+Prerequisites: DNS for each domain must resolve to this host, and ports 80/443
+must be reachable (the http-01 challenge is served from `/.well-known/acme-challenge/`).
 
-3. Copy certificates to nginx directory:
-```bash
-mkdir -p nginx/ssl
-cp /etc/letsencrypt/live/dallas.openmakersuite.net/fullchain.pem nginx/ssl/cert.pem
-cp /etc/letsencrypt/live/dallas.openmakersuite.net/privkey.pem nginx/ssl/key.pem
-```
+How it works (`nginx/docker-entrypoint.d/10-letsencrypt.sh`):
 
-4. Uncomment HTTPS server block in `nginx/conf.d/default.conf`
+1. On start, nginx serves a self-signed **bootstrap** cert (kept in
+   `/etc/letsencrypt/bootstrap/`, outside certbot's namespace) so it can come up
+   and serve the ACME challenge before a real cert exists.
+2. certbot requests the certificate under a fixed `--cert-name` (the canonical
+   domain) into `/etc/letsencrypt/live/<domain>/`.
+3. A deploy hook points the stable path nginx actually reads —
+   `/etc/letsencrypt/nginx/{fullchain,privkey}.pem` (symlinks) — at the live
+   lineage and reloads nginx.
+4. A daily cron (`certbot renew`) renews within 30 days of expiry; the same
+   deploy hook re-points the symlinks and reloads nginx. **Renewals never
+   require a redeploy or config edit** — nginx follows the live lineage by
+   symlink instead of a pinned `-00NN` number.
 
-5. Restart nginx:
+Everything persists in the `letsencrypt_certs` Docker volume, so certificates
+survive container rebuilds and `deploy.sh` runs.
+
+To verify:
 ```bash
-docker-compose -f docker-compose.prod.yml restart nginx
+# Which lineage nginx is serving right now:
+docker compose -f docker-compose.prod.yml exec nginx \
+    readlink -f /etc/letsencrypt/nginx/fullchain.pem
+# certbot's view of managed certs + expiry:
+docker compose -f docker-compose.prod.yml exec nginx certbot certificates
 ```
 
 ## Troubleshooting

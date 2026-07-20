@@ -29,8 +29,11 @@ server {
     listen 443 ssl http2;
     server_name ${LETSENCRYPT_DOMAINS};
 
-    ssl_certificate /etc/letsencrypt/live/${DOMAIN}-0001/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}-0001/privkey.pem;
+    # Stable path maintained by docker-entrypoint.d/10-letsencrypt.sh — symlinks
+    # that always point at the current Let's Encrypt lineage (never a pinned
+    # -00NN number), so renewals require no config edit or hand redeploy.
+    ssl_certificate /etc/letsencrypt/nginx/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/nginx/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;

@@ -18,8 +18,10 @@ server {
 
     # Server cert (the public LE chain) — same as :443; devices verify
     # they're talking to the real OMS before presenting their own cert.
-    ssl_certificate /etc/letsencrypt/live/${DOMAIN}-0001/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}-0001/privkey.pem;
+    # Stable symlinks maintained by docker-entrypoint.d/10-letsencrypt.sh
+    # (follows the live lineage; never a pinned -00NN number).
+    ssl_certificate /etc/letsencrypt/nginx/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/nginx/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;

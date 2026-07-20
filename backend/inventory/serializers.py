@@ -769,6 +769,10 @@ class DemandForecastSerializer(serializers.ModelSerializer):
     ``demand_forecast`` / ``reorder_alerts`` report actions return a
     self-describing row. Read-only in practice -- rows are written by the
     forecasting task, never through the API.
+
+    The restock-interval fields carry the live signal; the retired v1 quantity
+    fields are still emitted (as ``0``/``null`` on current rows) so existing
+    consumers keep their keys until they are relabelled.
     """
 
     item_name = serializers.CharField(source="item.name", read_only=True)
@@ -789,17 +793,26 @@ class DemandForecastSerializer(serializers.ModelSerializer):
             "sku",
             "category_name",
             "generated_at",
+            # Restock-interval signal (v2).
+            "avg_interval_days",
+            "interval_samples",
+            "last_restock_date",
+            "predicted_next_reorder_date",
+            "days_until_due",
+            # Retired v1 quantity projection -- 0/null on v2 rows, kept so
+            # existing consumers don't lose keys mid-flight.
             "horizon_days",
             "predicted_daily_demand",
             "horizon_demand",
             "horizon_demand_upper",
-            "available_at_generation",
             "days_until_stockout",
             "projected_stockout_date",
             "predictive_reorder_point",
+            "safety_stock",
+            # Decision + provenance.
+            "available_at_generation",
             "needs_reorder",
             "lead_time_days",
-            "safety_stock",
             "method",
             "model_version",
         ]

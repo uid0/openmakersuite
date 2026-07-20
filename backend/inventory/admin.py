@@ -919,7 +919,7 @@ class UsageLogAdmin(admin.ModelAdmin):
 
 @admin.register(DemandForecast)
 class DemandForecastAdmin(admin.ModelAdmin):
-    """Read-only view of stored ML demand-forecast rows.
+    """Read-only view of stored demand-forecast rows.
 
     Rows are written by the nightly forecasting task, never by hand, so adding is
     disabled and every field is read-only. Kept in admin for inspection/audit of
@@ -931,8 +931,9 @@ class DemandForecastAdmin(admin.ModelAdmin):
         "generated_at",
         "method",
         "needs_reorder",
-        "predictive_reorder_point",
-        "days_until_stockout",
+        "avg_interval_days",
+        "predicted_next_reorder_date",
+        "days_until_due",
     ]
     list_filter = ["method", "needs_reorder"]
     search_fields = ["item__name", "item__sku"]

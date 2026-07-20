@@ -3,10 +3,12 @@
  * Refactored in nav-cohesion PR2 to use the shared <WorkspaceLanding>
  * + <CapabilityCard> primitives so it matches the homepage rhythm.
  */
+import { Stack } from '@mantine/core';
 import { IconClipboardList, IconPlus, IconReceipt } from '@tabler/icons-react';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import DemandForecastPanel from '../components/inventory/DemandForecastPanel';
 import SerializedForecastPanel from '../components/inventory/SerializedForecastPanel';
 import CapabilityCard from '../components/landing/CapabilityCard';
 import WorkspaceLanding from '../components/landing/WorkspaceLanding';
@@ -23,11 +25,18 @@ const PurchasingOverviewPage: React.FC = () => {
         'Manage purchase orders, reorder requests, and the public transparency ledger.',
     }}
     footer={
-      <SerializedForecastPanel
-        title="Serialized components to reorder"
-        defaultLowStockOnly
-        onSelectItem={(itemId) => navigate(`/inventory/items/${itemId}`)}
-      />
+      <Stack gap="md">
+        <DemandForecastPanel
+          title="Supplies to reorder"
+          defaultLowStockOnly
+          onSelectItem={(itemId) => navigate(`/inventory/items/${itemId}`)}
+        />
+        <SerializedForecastPanel
+          title="Serialized components to reorder"
+          defaultLowStockOnly
+          onSelectItem={(itemId) => navigate(`/inventory/items/${itemId}`)}
+        />
+      </Stack>
     }
   >
     <CapabilityCard

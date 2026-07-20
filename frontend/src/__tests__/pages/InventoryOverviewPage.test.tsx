@@ -9,7 +9,7 @@ import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import InventoryOverviewPage from '../../pages/InventoryOverviewPage';
-import { inventoryAPI } from '../../services/api';
+import { inventoryAPI, reportsAPI } from '../../services/api';
 
 vi.mock('../../services/api', async () => {
   const actual = await vi.importActual('../../services/api');
@@ -20,10 +20,17 @@ vi.mock('../../services/api', async () => {
       listItems: jest.fn(),
       listCategories: jest.fn(),
     },
+    // The page mounts <DemandForecastPanel>, which reads these on mount (op-3).
+    reportsAPI: {
+      ...(actual as any).reportsAPI,
+      getDemandForecast: jest.fn(),
+      getReorderAlerts: jest.fn(),
+    },
   };
 });
 
 const mockInv = inventoryAPI as jest.Mocked<typeof inventoryAPI>;
+const mockReports = reportsAPI as jest.Mocked<typeof reportsAPI>;
 
 const buildItem = (overrides: Partial<any> = {}) => ({
   id: 'item-1',
@@ -50,6 +57,8 @@ const renderPage = () =>
 describe('InventoryOverviewPage search', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockReports.getDemandForecast.mockResolvedValue({ data: [] } as any);
+    mockReports.getReorderAlerts.mockResolvedValue({ data: [] } as any);
     mockInv.listCategories.mockResolvedValue({
       data: { results: [{ id: 1, name: 'Fasteners' }] },
     } as any);

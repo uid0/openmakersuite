@@ -151,6 +151,10 @@ export interface InventoryItem {
   // set by the retire/unretire actions.
   is_retired: boolean;
   retired_at: string | null;
+  // Per-item opt-in for ML reorder alerts (op-1). Writable from the item form:
+  // when on, the nightly demand forecast surfaces this item in the
+  // `reorder_alerts` notify set once it is due to reorder.
+  reorder_alerts_enabled: boolean;
   notes: string;
   needs_reorder: boolean;
   total_value: string;

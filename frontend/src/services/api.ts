@@ -877,6 +877,44 @@ export interface SerializedForecastRow {
   needs_reorder: boolean;
 }
 
+// How a demand forecast was produced. `holtwinters` is the seasonal smoother
+// used when an item has enough usage history; `fallback` is the statistical
+// run-rate used when it does not. `prophet` is reserved for a future engine
+// swap and is not emitted today.
+export type DemandForecastMethod = 'prophet' | 'holtwinters' | 'fallback';
+
+// One stored forecast row (the latest run) for a non-serialized item, from
+// InventoryReportViewSet.demand_forecast / .reorder_alerts (op-1 storage,
+// op-2 nightly engine). Every value is a snapshot taken at generation time —
+// later stock movements never rewrite a row, so `available_at_generation` can
+// lag the item's live stock. Rows only exist once the nightly task has run;
+// both endpoints return [] until then.
+export interface DemandForecastRow {
+  // The forecast row's own id; `item` is the inventory item's UUID.
+  id: number;
+  item: string;
+  item_name: string;
+  sku: string;
+  category_name: string | null;
+  generated_at: string;
+  horizon_days: number;
+  // Mean predicted demand per day, and its sum over the horizon. `_upper` is
+  // the upper prediction band — the gap between it and `horizon_demand` is
+  // what becomes safety stock.
+  predicted_daily_demand: number;
+  horizon_demand: number;
+  horizon_demand_upper: number;
+  available_at_generation: number;
+  days_until_stockout: number | null;
+  projected_stockout_date: string | null;
+  predictive_reorder_point: number;
+  needs_reorder: boolean;
+  lead_time_days: number | null;
+  safety_stock: number;
+  method: DemandForecastMethod;
+  model_version: string;
+}
+
 // Asset Maintenance History (oms-0xxlp2)
 export interface MaintenanceHistoryRow {
   id: string;
@@ -2081,6 +2119,20 @@ export const reportsAPI = {
       '/inventory/reports/inventory/serialized_forecast/',
       { params },
     ),
+
+  // ML demand forecast for non-serialized items — the latest stored row per
+  // item, most-urgent first. `low_stock_only` narrows it to rows flagged
+  // `needs_reorder`. Returns [] until the nightly forecasting task has run.
+  getDemandForecast: (params?: { low_stock_only?: boolean }) =>
+    api.get<DemandForecastRow[]>(
+      '/inventory/reports/inventory/demand_forecast/',
+      { params },
+    ),
+
+  // The predictive reorder-alert notify set: items whose owner opted in
+  // (`reorder_alerts_enabled`) *and* that the forecast says are due.
+  getReorderAlerts: () =>
+    api.get<DemandForecastRow[]>('/inventory/reports/inventory/reorder_alerts/'),
 
   exportInventoryReport: (type: 'stock_by_category' | 'reorder_frequency' | 'value_by_location', params?: DateRangeParams) =>
     api.get('/inventory/reports/inventory/export/', {

@@ -193,6 +193,16 @@ services:
     # --max-tasks-per-child mirrors the gunicorn --max-requests recycle so
     # per-task leaks in MQTT publish, image processing, etc. are bounded.
     command: celery -A config worker -l info --max-tasks-per-child=200
+    # celery reuses oms-backend:local, whose Dockerfile.prod bakes an HTTP
+    # liveness HEALTHCHECK (urlopen http://localhost:8000/api/health/livez/).
+    # A worker runs no web server, so that probe can never succeed and the
+    # container is reported perpetually "unhealthy" (op-cz8, same root cause as
+    # mqtt_consumer). Disable the inherited probe; the worker self-heals via the
+    # restart: unless-stopped policy below. (A real liveness check would ping the
+    # worker — deploy/helm uses `celery -A config inspect ping` — but a compose
+    # heartbeat check is tracked separately; the bogus web probe is the bug here.)
+    healthcheck:
+      disable: true
     deploy:
       resources:
         limits:
@@ -366,6 +376,13 @@ services:
       celery -A config beat -l info
       --schedule=/app/.beat-state/celerybeat-schedule
       --pidfile=/app/.beat-state/celerybeat.pid
+    # Beat reuses oms-backend:local and its baked-in HTTP livez HEALTHCHECK, but
+    # runs no web server — so the inherited probe is perpetually "unhealthy"
+    # (op-cz8, same as celery / mqtt_consumer). Disable it; beat is PID 1 here,
+    # so if the scheduler dies the container exits and restart: unless-stopped
+    # brings it back.
+    healthcheck:
+      disable: true
     deploy:
       resources:
         limits:

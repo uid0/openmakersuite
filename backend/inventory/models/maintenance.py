@@ -370,6 +370,18 @@ class MaintenanceTask(models.Model):
         default=True,
         help_text="Required steps must be completed before the work order can close",
     )
+    reference_image = models.ImageField(
+        upload_to="maintenance_task_reference/%Y/%m/",
+        null=True,
+        blank=True,
+        help_text=(
+            "Instructional photo for this step — 'here is what this should look "
+            "like'. Defined once on the template, printed next to the step on the "
+            "work-order form and shown on the digital work order. This is the "
+            "reference half; the photo a tech takes while performing the work is "
+            "an evidence WorkOrderPhoto linked to the step's completion row."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -736,6 +748,13 @@ class WorkOrderPhoto(models.Model):
     A photo attached to a work order by a technician.
 
     Used for documenting wear, damage, or completed work.
+
+    A photo can optionally be pinned to a single step (``task_completion``) —
+    the *evidence* half of the per-step photo pair: "here is what I did". Photos
+    left unpinned (``task_completion=NULL``) are work-order-level, which is what
+    every photo taken before per-step evidence existed is. Evidence photos are
+    electronic only: they are captured after the sheet is printed, so they never
+    appear on the PDF (only the step's reference image does).
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -744,6 +763,17 @@ class WorkOrderPhoto(models.Model):
         on_delete=models.CASCADE,
         related_name="photos",
         help_text="The work order this photo belongs to",
+    )
+    task_completion = models.ForeignKey(
+        "WorkOrderTaskCompletion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="evidence_photos",
+        help_text=(
+            "The step this photo documents. Null for work-order-level photos "
+            "(and for photos whose step row was deleted)."
+        ),
     )
     image = models.ImageField(
         upload_to="work_order_photos/%Y/%m/",

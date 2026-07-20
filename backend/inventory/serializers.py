@@ -1767,7 +1767,14 @@ class MaintenanceToolSerializer(serializers.ModelSerializer):
 
 
 class MaintenanceTaskSerializer(serializers.ModelSerializer):
-    """Serializer for ordered sub-task steps within a maintenance item."""
+    """Serializer for ordered sub-task steps within a maintenance item.
+
+    ``reference_image`` is the step's instructional photo: write it as a
+    multipart file, read it back as an absolute ``reference_image_url``. The
+    field names are a pinned contract — ScanTTY decodes these exact keys.
+    """
+
+    reference_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = MaintenanceTask
@@ -1778,9 +1785,25 @@ class MaintenanceTaskSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "is_required",
+            "reference_image",
+            "reference_image_url",
             "created_at",
         ]
-        read_only_fields = ["created_at"]
+        read_only_fields = ["created_at", "reference_image_url"]
+        extra_kwargs = {
+            # File in, URL out: the raw storage path is never useful to a
+            # client, and making it write-only keeps the read contract to the
+            # single absolute ``reference_image_url``. ``allow_null`` so an
+            # editor can clear the photo off a step.
+            "reference_image": {"write_only": True, "required": False, "allow_null": True},
+        }
+
+    def get_reference_image_url(self, obj):
+        """Absolute URL of this step's reference photo, or None."""
+        request = self.context.get("request")
+        if obj.reference_image and request:
+            return request.build_absolute_uri(obj.reference_image.url)
+        return None
 
 
 class MaintenanceItemSerializer(serializers.ModelSerializer):
@@ -2006,10 +2029,46 @@ class FixtureDetailSerializer(FixtureSerializer):
         return data
 
 
+class WorkOrderEvidencePhotoSerializer(serializers.ModelSerializer):
+    """The trimmed photo shape a *step* carries — "here is what I did".
+
+    Nested under :class:`WorkOrderTaskCompletionSerializer`, so the work-order
+    keys the parent already carries (``work_order``, ``task_completion``) are
+    omitted. Pinned contract: ScanTTY decodes these exact five keys.
+    """
+
+    uploaded_by_name = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WorkOrderPhoto
+        fields = ["id", "image_url", "caption", "uploaded_at", "uploaded_by_name"]
+        read_only_fields = fields
+
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by:
+            return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
+        return None
+
+    def get_image_url(self, obj):
+        request = self.context.get("request")
+        if obj.image and request:
+            return request.build_absolute_uri(obj.image.url)
+        return None
+
+
 class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):
-    """Serializer for task completion records within a work order."""
+    """Serializer for task completion records within a work order.
+
+    Carries both halves of the per-step photo pair, read-only: the template
+    step's ``task_reference_image_url`` ("what this should look like", set once
+    on the MaintenanceTask) and the ``evidence_photos`` a tech attached to this
+    specific step while doing the work.
+    """
 
     completed_by_name = serializers.SerializerMethodField()
+    task_reference_image_url = serializers.SerializerMethodField()
+    evidence_photos = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkOrderTaskCompletion
@@ -2025,14 +2084,44 @@ class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):
             "completed_by_name",
             "completed_at",
             "notes",
+            "task_reference_image_url",
+            "evidence_photos",
             "created_at",
         ]
-        read_only_fields = ["created_at", "completed_by_name", "task_title", "task_order"]
+        read_only_fields = [
+            "created_at",
+            "completed_by_name",
+            "task_title",
+            "task_order",
+            "task_reference_image_url",
+            "evidence_photos",
+        ]
 
     def get_completed_by_name(self, obj):
         if obj.completed_by:
             return obj.completed_by.get_full_name() or obj.completed_by.username
         return None
+
+    def get_task_reference_image_url(self, obj):
+        """The template step's reference photo, or None.
+
+        ``task`` is nullable (the step can be deleted after the WO is cut), so
+        this degrades to None rather than raising. Reads through the
+        ``task_completions__task`` select_related/prefetch the viewset sets up.
+        """
+        task = obj.task
+        if task is None or not task.reference_image:
+            return None
+        request = self.context.get("request")
+        if request is None:
+            return None
+        return request.build_absolute_uri(task.reference_image.url)
+
+    def get_evidence_photos(self, obj):
+        """Photos pinned to this step. Uses ``.all()`` so a prefetch applies."""
+        return WorkOrderEvidencePhotoSerializer(
+            obj.evidence_photos.all(), many=True, context=self.context
+        ).data
 
 
 class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
@@ -2113,7 +2202,12 @@ class WorkOrderLotoCompletionSerializer(serializers.ModelSerializer):
 
 
 class WorkOrderPhotoSerializer(serializers.ModelSerializer):
-    """Serializer for photos attached to a work order."""
+    """Serializer for photos attached to a work order.
+
+    ``task_completion`` is writable so a photo can be pinned to one step
+    (evidence). It is null for work-order-level photos. The ``add_photo``
+    action is what enforces that the step belongs to the same work order.
+    """
 
     uploaded_by_name = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
@@ -2123,6 +2217,7 @@ class WorkOrderPhotoSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "work_order",
+            "task_completion",
             "image",
             "image_url",
             "caption",

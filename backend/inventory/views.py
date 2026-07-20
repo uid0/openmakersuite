@@ -3955,11 +3955,17 @@ class MaintenanceLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class MaintenanceTaskViewSet(viewsets.ModelViewSet):
-    """API endpoint for maintenance task steps (line items within a MaintenanceItem)."""
+    """API endpoint for maintenance task steps (line items within a MaintenanceItem).
+
+    Multipart is enabled because a step carries a ``reference_image`` (the
+    instructional photo the template editor uploads per step); JSON still works
+    for the image-less fields.
+    """
 
     queryset = MaintenanceTask.objects.select_related("maintenance_item__asset").all()
     serializer_class = MaintenanceTaskSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -3982,6 +3988,9 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         .prefetch_related(
             "task_completions__completed_by",
             "task_completions__task",
+            # op-syov: the per-step evidence gallery. Without this the WO detail
+            # serializer runs one photo query per step (plus one per uploader).
+            "task_completions__evidence_photos__uploaded_by",
             "material_usage__material",
             "loto_completions__completed_by",
             "loto_completions__energy_source",
@@ -4386,12 +4395,37 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def add_photo(self, request, pk=None):
-        """Upload a photo to this work order."""
+        """Upload a photo to this work order.
+
+        Pass an optional ``task_completion`` (a step id on *this* work order) to
+        pin the photo to that step as evidence — "here is what I did". Omitted
+        (or blank), the photo stays work-order-level, which is the behaviour
+        every existing caller gets.
+        """
         work_order = self.get_object()
+
+        task_completion = None
+        raw_tc = request.data.get("task_completion")
+        # Multipart posts a blank string for an unset field; treat that as absent.
+        if raw_tc not in (None, "", "null"):
+            try:
+                task_completion = work_order.task_completions.get(id=raw_tc)
+            except (WorkOrderTaskCompletion.DoesNotExist, DjangoValidationError, ValueError):
+                # Belongs to another work order, or is not a step id at all —
+                # either way it is not this WO's to pin a photo to.
+                return Response(
+                    {"task_completion": ["No such task step on this work order."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         serializer = WorkOrderPhotoSerializer(data=request.data, context={"request": request})
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        serializer.save(work_order=work_order, uploaded_by=request.user)
+        serializer.save(
+            work_order=work_order,
+            uploaded_by=request.user,
+            task_completion=task_completion,
+        )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["patch"], url_path="tasks/(?P<task_id>[^/.]+)/complete")

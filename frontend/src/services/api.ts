@@ -1342,6 +1342,27 @@ export interface MaintenanceDashboardData {
   };
 }
 
+/**
+ * A step carries an optional `reference_image` File, which has to go up as
+ * multipart. Everything else is happy as JSON, so only the payloads that
+ * actually carry a File get converted — that keeps the wire format (and the
+ * request logs) unchanged for plain title/order edits.
+ */
+const taskRequest = (data: Partial<MaintenanceTask>) => {
+  if (!(data.reference_image instanceof File)) {
+    return { body: data as unknown as Record<string, unknown>, config: undefined };
+  }
+  const formData = new FormData();
+  Object.entries(data).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    formData.append(key, value instanceof File ? value : String(value));
+  });
+  return {
+    body: formData as unknown as Record<string, unknown>,
+    config: { headers: { 'Content-Type': 'multipart/form-data' } },
+  };
+};
+
 // Maintenance Task API (sub-task steps within a MaintenanceItem)
 export const maintenanceTaskAPI = {
   listTasks: (maintenanceItemId: string) =>
@@ -1349,11 +1370,15 @@ export const maintenanceTaskAPI = {
       params: { maintenance_item: maintenanceItemId },
     }),
 
-  createTask: (data: Partial<MaintenanceTask>) =>
-    api.post<MaintenanceTask>('/inventory/maintenance-tasks/', data),
+  createTask: (data: Partial<MaintenanceTask>) => {
+    const { body, config } = taskRequest(data);
+    return api.post<MaintenanceTask>('/inventory/maintenance-tasks/', body, config);
+  },
 
-  updateTask: (id: string, data: Partial<MaintenanceTask>) =>
-    api.patch<MaintenanceTask>(`/inventory/maintenance-tasks/${id}/`, data),
+  updateTask: (id: string, data: Partial<MaintenanceTask>) => {
+    const { body, config } = taskRequest(data);
+    return api.patch<MaintenanceTask>(`/inventory/maintenance-tasks/${id}/`, body, config);
+  },
 
   deleteTask: (id: string) => api.delete(`/inventory/maintenance-tasks/${id}/`),
 };

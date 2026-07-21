@@ -191,6 +191,79 @@ const OmrScanImage: React.FC<{
   );
 };
 
+// op-syov: a step's reference photo — the instructional shot set on the PM
+// template ("what this should look like"). Same click-to-zoom lightbox as the
+// OMR crops, but the image is a plain media URL, so no blob fetch is needed.
+const StepReferencePhoto: React.FC<{ url: string; stepTitle: string }> = ({ url, stepTitle }) => {
+  const [zoomed, setZoomed] = useState(false);
+  return (
+    <>
+      <UnstyledButton
+        onClick={() => setZoomed(true)}
+        aria-label={`Zoom reference photo for ${stepTitle}`}
+        style={{ flexShrink: 0, lineHeight: 0 }}
+      >
+        <Image
+          src={url}
+          alt={`Reference photo for ${stepTitle}`}
+          w={72}
+          h={54}
+          fit="cover"
+          radius="sm"
+          style={{ border: '1px solid #dee2e6', backgroundColor: '#fff', cursor: 'zoom-in' }}
+        />
+      </UnstyledButton>
+      <Modal
+        opened={zoomed}
+        onClose={() => setZoomed(false)}
+        size="lg"
+        title={`Reference photo — ${stepTitle}`}
+        centered
+      >
+        <Image src={url} alt={`Reference photo for ${stepTitle} (enlarged)`} fit="contain" />
+      </Modal>
+    </>
+  );
+};
+
+// op-syov: the per-step evidence picker. Owns its own `resetRef` so re-picking
+// the same file — the natural thing to do after a failed upload — fires
+// onChange again instead of silently doing nothing.
+const StepEvidenceUpload: React.FC<{
+  stepTitle: string;
+  uploading: boolean;
+  onPick: (file: File) => Promise<void>;
+}> = ({ stepTitle, uploading, onPick }) => {
+  const resetRef = useRef<() => void>(null);
+
+  const handleChange = async (file: File | null) => {
+    if (!file) return;
+    try {
+      await onPick(file);
+    } finally {
+      resetRef.current?.();
+    }
+  };
+
+  return (
+    <FileButton resetRef={resetRef} onChange={handleChange} accept="image/*">
+      {(props) => (
+        <Button
+          {...props}
+          size="compact-xs"
+          variant="subtle"
+          mt="xs"
+          leftSection={<IconCamera size={14} />}
+          loading={uploading}
+          aria-label={`Add photo to ${stepTitle}`}
+        >
+          Add photo
+        </Button>
+      )}
+    </FileButton>
+  );
+};
+
 const WorkOrderPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -203,6 +276,8 @@ const WorkOrderPage: React.FC = () => {
   // row's quantity_used and sent when the material is checked off as used.
   const [materialQty, setMaterialQty] = useState<Record<string, number | string>>({});
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // Which step's evidence photo is currently uploading (null = none).
+  const [uploadingStepPhoto, setUploadingStepPhoto] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
   const [togglingLoto, setTogglingLoto] = useState<string | null>(null);
@@ -553,6 +628,36 @@ const WorkOrderPage: React.FC = () => {
     } finally {
       setUploadingPhoto(false);
       resetPhotoRef.current?.();
+    }
+  };
+
+  // op-syov: evidence — the photo a tech takes *while doing a step*. Same
+  // add_photo endpoint as the work-order gallery, with the step id attached so
+  // it files itself under that step instead of the general pile.
+  const handleStepPhotoUpload = async (taskCompletionId: string, file: File) => {
+    if (!workOrder) return;
+    setUploadingStepPhoto(taskCompletionId);
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append('work_order', workOrder.id);
+      formData.append('task_completion', taskCompletionId);
+      await workOrderAPI.addPhoto(workOrder.id, formData);
+      await loadWorkOrder();
+      notifications.show({
+        title: 'Photo Uploaded',
+        message: 'Photo added to this step.',
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch {
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to upload photo.',
+        color: 'red',
+      });
+    } finally {
+      setUploadingStepPhoto(null);
     }
   };
 
@@ -1142,7 +1247,40 @@ const WorkOrderPage: React.FC = () => {
                         {tc.notes}
                       </Text>
                     )}
+                    {/* Evidence the tech attached to this step: "here is what
+                        I did". The reference photo alongside the row is the
+                        other half: what the step should look like. */}
+                    {(tc.evidence_photos ?? []).length > 0 && (
+                      <Group gap="xs" wrap="wrap" mt="xs">
+                        {(tc.evidence_photos ?? []).map((photo) => (
+                          <Image
+                            key={photo.id}
+                            src={photo.image_url ?? undefined}
+                            w={64}
+                            h={48}
+                            fit="cover"
+                            radius="sm"
+                            alt={photo.caption || `Photo of ${tc.task_title}`}
+                            style={{ cursor: 'pointer', border: '1px solid #dee2e6' }}
+                            onClick={() =>
+                              photo.image_url && window.open(photo.image_url, '_blank')
+                            }
+                          />
+                        ))}
+                      </Group>
+                    )}
+                    <StepEvidenceUpload
+                      stepTitle={tc.task_title}
+                      uploading={uploadingStepPhoto === tc.id}
+                      onPick={(file) => handleStepPhotoUpload(tc.id, file)}
+                    />
                   </Box>
+                  {tc.task_reference_image_url && (
+                    <StepReferencePhoto
+                      url={tc.task_reference_image_url}
+                      stepTitle={tc.task_title}
+                    />
+                  )}
                 </Group>
               </Box>
             ))}

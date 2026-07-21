@@ -693,6 +693,14 @@ export interface MaintenanceTask {
   title: string;
   description: string;
   is_required: boolean;
+  /**
+   * The step's instructional photo — "what this should look like". Write-only
+   * on the API (send the File as multipart); read it back through
+   * `reference_image_url`.
+   */
+  reference_image?: File | null;
+  /** Absolute URL of the reference photo, null when the step has none. */
+  reference_image_url?: string | null;
   created_at: string;
 }
 
@@ -710,8 +718,25 @@ export interface WorkOrderTaskCompletion {
   completed_by_name: string | null;
   completed_at: string | null;
   notes: string;
+  /**
+   * The template step's reference photo, read through `task.reference_image`.
+   * Null when the step has no photo or the template row was deleted.
+   */
+  task_reference_image_url?: string | null;
+  /** Photos the tech pinned to this step while doing the work. */
+  evidence_photos?: WorkOrderEvidencePhoto[];
   created_at: string;
 }
+
+/**
+ * The trimmed photo shape a *step* carries. The nested serializer omits the
+ * keys the parent step already implies (`work_order`, `task_completion`) — this
+ * Pick keeps the two in step, same as `WorkOrderTool` does for tools.
+ */
+export type WorkOrderEvidencePhoto = Pick<
+  WorkOrderPhoto,
+  'id' | 'image_url' | 'caption' | 'uploaded_at' | 'uploaded_by_name'
+>;
 
 export interface WorkOrderMaterialUsage {
   id: string;
@@ -752,6 +777,11 @@ export interface WorkOrderLotoCompletion {
 export interface WorkOrderPhoto {
   id: string;
   work_order: string;
+  /**
+   * The step this photo documents (evidence), or null for a work-order-level
+   * photo. Set at upload time by posting `task_completion` to `add_photo`.
+   */
+  task_completion?: string | null;
   image: string;
   image_url: string | null;
   caption: string;

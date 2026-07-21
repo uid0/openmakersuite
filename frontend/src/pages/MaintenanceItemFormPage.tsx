@@ -4,7 +4,9 @@ import {
   Alert,
   Button,
   Divider,
+  FileButton,
   Group,
+  Image,
   NumberInput,
   Paper,
   Stack,
@@ -14,7 +16,7 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import { IconAlertCircle, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconAlertCircle, IconCamera, IconPlus, IconTrash } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Resolver, useForm, useWatch } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -23,8 +25,8 @@ import { FormLayout } from '../components/forms/FormLayout';
 import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormTextarea } from '../components/forms/FormTextarea';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { maintenanceAPI, maintenanceToolAPI } from '../services/api';
-import { MaintenanceMaterial, MaintenanceTool } from '../types';
+import { maintenanceAPI, maintenanceTaskAPI, maintenanceToolAPI } from '../services/api';
+import { MaintenanceMaterial, MaintenanceTask, MaintenanceTool } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import { MaintenanceItemFormData, maintenanceItemFormSchema } from '../utils/formSchemas';
 
@@ -58,6 +60,32 @@ const EMPTY_TOOL: PendingTool = {
   notes: '',
 };
 
+/**
+ * A task-step row being edited. Persisted rows carry `id`; new ones only
+ * `localId`. `referenceFile` is a photo picked in this session (uploaded on
+ * save); `referenceUrl` is the one already on the server.
+ */
+interface PendingTask {
+  localId: string;
+  id?: string;
+  title: string;
+  description: string;
+  is_required: boolean;
+  /** Position the row was loaded at, so an unmoved row is not re-saved. */
+  savedOrder?: number;
+  referenceFile: File | null;
+  referenceUrl?: string | null;
+}
+
+const EMPTY_TASK: PendingTask = {
+  localId: '',
+  title: '',
+  description: '',
+  is_required: true,
+  referenceFile: null,
+  referenceUrl: null,
+};
+
 const MaintenanceItemFormPage: React.FC = () => {
   const { assetId, id } = useParams<{ assetId: string; id: string }>();
   const navigate = useNavigate();
@@ -79,6 +107,9 @@ const MaintenanceItemFormPage: React.FC = () => {
   const [tools, setTools] = useState<PendingTool[]>([]);
   const [originalToolIds, setOriginalToolIds] = useState<string[]>([]);
   const [newTool, setNewTool] = useState<PendingTool>(EMPTY_TOOL);
+  const [tasks, setTasks] = useState<PendingTask[]>([]);
+  const [originalTaskIds, setOriginalTaskIds] = useState<string[]>([]);
+  const [newTask, setNewTask] = useState<PendingTask>(EMPTY_TASK);
 
   const { control, handleSubmit, reset, setValue } = useForm<MaintenanceItemFormData>({
     // v5 resolvers infer the schema's Zod *input* type (fields with `.default()`
@@ -140,6 +171,21 @@ const MaintenanceItemFormPage: React.FC = () => {
       }));
       setTools(loadedTools);
       setOriginalToolIds(loadedTools.map((t: PendingTool) => t.id!).filter(Boolean));
+      // `savedOrder` is the server's own value, not the row index: a template
+      // whose steps are stored 0/5/9 renumbers to 0/1/2 on the next save
+      // instead of silently interleaving a newly added step.
+      const loadedTasks = (item.tasks ?? []).map((t: MaintenanceTask) => ({
+        localId: t.id,
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        is_required: t.is_required,
+        savedOrder: t.order,
+        referenceFile: null,
+        referenceUrl: t.reference_image_url ?? null,
+      }));
+      setTasks(loadedTasks);
+      setOriginalTaskIds(loadedTasks.map((t: PendingTask) => t.id!).filter(Boolean));
     } catch (err) {
       console.error('Error loading maintenance item:', err);
       setError('Failed to load maintenance item.');
@@ -168,6 +214,22 @@ const MaintenanceItemFormPage: React.FC = () => {
     setTools(tools.filter((_, i) => i !== index));
   };
 
+  const addTask = () => {
+    if (!newTask.title.trim()) return;
+    setTasks([...tasks, { ...newTask, localId: crypto.randomUUID() }]);
+    setNewTask(EMPTY_TASK);
+  };
+
+  const removeTask = (index: number) => {
+    setTasks(tasks.filter((_, i) => i !== index));
+  };
+
+  /** Attach (or replace) the reference photo on an already-added step row. */
+  const setTaskPhoto = (index: number, file: File | null) => {
+    if (!file) return;
+    setTasks(tasks.map((t, i) => (i === index ? { ...t, referenceFile: file } : t)));
+  };
+
   const onSubmit = async (data: MaintenanceItemFormData) => {
     if (!assetId) return;
     try {
@@ -192,6 +254,24 @@ const MaintenanceItemFormPage: React.FC = () => {
         const keepToolIds = tools.filter((t) => t.id).map((t) => t.id!);
         const toolsToDelete = originalToolIds.filter((eid) => !keepToolIds.includes(eid));
         await Promise.all(toolsToDelete.map((tid) => maintenanceToolAPI.delete(tid)));
+
+        const keepTaskIds = tasks.filter((t) => t.id).map((t) => t.id!);
+        const tasksToDelete = originalTaskIds.filter((eid) => !keepTaskIds.includes(eid));
+        await Promise.all(tasksToDelete.map((tid) => maintenanceTaskAPI.deleteTask(tid)));
+
+        // Only touch surviving steps that actually changed: a new position
+        // (rows are ordered by where they sit in the table) or a new photo.
+        await Promise.all(
+          tasks.map((t, index) => {
+            if (!t.id) return null;
+            const movedTo = t.savedOrder === index ? null : index;
+            if (movedTo === null && !t.referenceFile) return null;
+            return maintenanceTaskAPI.updateTask(t.id, {
+              ...(movedTo === null ? {} : { order: movedTo }),
+              ...(t.referenceFile ? { reference_image: t.referenceFile } : {}),
+            });
+          })
+        );
       } else {
         const response = await maintenanceAPI.createItem(apiPayload);
         savedItemId = response.data.id;
@@ -222,6 +302,23 @@ const MaintenanceItemFormPage: React.FC = () => {
             is_required: t.is_required,
             notes: t.notes,
           })
+        )
+      );
+
+      // Steps are ordered by their position in the table; a step's reference
+      // photo rides along as multipart on the create.
+      await Promise.all(
+        tasks.map((t, index) =>
+          t.id
+            ? null
+            : maintenanceTaskAPI.createTask({
+                maintenance_item: savedItemId,
+                order: index,
+                title: t.title,
+                description: t.description,
+                is_required: t.is_required,
+                ...(t.referenceFile ? { reference_image: t.referenceFile } : {}),
+              })
         )
       );
 
@@ -504,6 +601,133 @@ const MaintenanceItemFormPage: React.FC = () => {
                   variant="light"
                 >
                   Add Tool
+                </Button>
+              </Group>
+            </Paper>
+          </Stack>
+
+          {/* Task steps are the numbered checklist the work order prints (and
+              scans back). Each step can carry a reference photo — the
+              instructional "this is what it should look like" shot that prints
+              next to the step and shows on the digital work order. */}
+          <Divider my="md" label="Task Steps" labelPosition="left" />
+          <Stack gap="sm">
+            {tasks.length > 0 && (
+              <Table striped withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>#</Table.Th>
+                    <Table.Th>Step</Table.Th>
+                    <Table.Th>Details</Table.Th>
+                    <Table.Th>Required</Table.Th>
+                    <Table.Th>Reference photo</Table.Th>
+                    <Table.Th></Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {tasks.map((t, i) => (
+                    <Table.Tr key={t.localId}>
+                      <Table.Td>{i + 1}</Table.Td>
+                      <Table.Td>{t.title}</Table.Td>
+                      <Table.Td>{t.description || '—'}</Table.Td>
+                      <Table.Td>{t.is_required ? 'Required' : 'Optional'}</Table.Td>
+                      <Table.Td>
+                        <Group gap="xs" wrap="nowrap">
+                          {t.referenceFile ? (
+                            <Text size="xs" c="dimmed" truncate maw={140}>
+                              {t.referenceFile.name}
+                            </Text>
+                          ) : t.referenceUrl ? (
+                            <Image
+                              src={t.referenceUrl}
+                              alt={`Reference photo for ${t.title}`}
+                              w={48}
+                              h={36}
+                              fit="cover"
+                              radius="sm"
+                            />
+                          ) : (
+                            <Text size="xs" c="dimmed">
+                              None
+                            </Text>
+                          )}
+                          <FileButton onChange={(file) => setTaskPhoto(i, file)} accept="image/*">
+                            {(props) => (
+                              <Button
+                                {...props}
+                                size="compact-xs"
+                                variant="light"
+                                leftSection={<IconCamera size={14} />}
+                                aria-label={`Photo for step ${i + 1}`}
+                              >
+                                {t.referenceFile || t.referenceUrl ? 'Replace' : 'Photo'}
+                              </Button>
+                            )}
+                          </FileButton>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <ActionIcon
+                          color="red"
+                          variant="subtle"
+                          onClick={() => removeTask(i)}
+                          aria-label="Remove step"
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            )}
+
+            <Paper p="sm" withBorder>
+              <Text size="sm" fw={500} mb="xs">
+                Add Step
+              </Text>
+              <Group align="flex-end" gap="xs">
+                <TextInput
+                  label="Step"
+                  value={newTask.title}
+                  onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                  placeholder="e.g. Disconnect power"
+                  style={{ flex: 2 }}
+                />
+                <TextInput
+                  label="Details"
+                  value={newTask.description}
+                  onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+                  placeholder="What the tech does in this step"
+                  style={{ flex: 3 }}
+                />
+                <Switch
+                  label="Required"
+                  checked={newTask.is_required}
+                  onChange={(e) => setNewTask({ ...newTask, is_required: e.currentTarget.checked })}
+                />
+                <FileButton
+                  onChange={(file) => setNewTask({ ...newTask, referenceFile: file })}
+                  accept="image/*"
+                >
+                  {(props) => (
+                    <Button
+                      {...props}
+                      variant="light"
+                      leftSection={<IconCamera size={16} />}
+                      aria-label="Reference photo for new step"
+                    >
+                      {newTask.referenceFile ? newTask.referenceFile.name : 'Reference Photo'}
+                    </Button>
+                  )}
+                </FileButton>
+                <Button
+                  leftSection={<IconPlus size={16} />}
+                  onClick={addTask}
+                  disabled={!newTask.title.trim()}
+                  variant="light"
+                >
+                  Add Step
                 </Button>
               </Group>
             </Paper>

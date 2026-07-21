@@ -15,6 +15,7 @@ from html import escape
 from typing import TYPE_CHECKING, Optional
 
 import qrcode
+from PIL import Image as PILImage
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -39,6 +40,18 @@ from fiducials.services.apriltag_render import (
 
 if TYPE_CHECKING:
     from inventory.models import WorkOrder
+
+# ── Per-step reference photo (op-syov) ───────────────────────────────────────
+# The box a step's instructional photo is fitted into on the printed form.
+# 1.2in wide keeps the step column readable at print size; the height cap stops
+# a portrait photo from stretching one row down the page. The photo is scaled to
+# fit inside the box with its aspect ratio intact — it is never cropped and
+# never spills past the box.
+STEP_PHOTO_MAX_WIDTH = 1.2 * inch
+STEP_PHOTO_MAX_HEIGHT = 1.2 * inch
+# Pixels per inch the embedded thumbnail is rendered at — 300 is laser-printer
+# sharp for a 1.2in box and keeps the file small enough to email.
+STEP_PHOTO_DPI = 300
 
 # ── OMR (scan-to-complete) form geometry ─────────────────────────────────────
 # The OMR variant of the work-order form adds 4 corner AprilTag fiducials and
@@ -310,6 +323,61 @@ def _build_electrical_rows(asset) -> list:
     if loto["lockout_responsible"]:
         rows.append(["Lockout Responsible", loto["lockout_responsible"]])
     return rows
+
+
+def _make_reference_thumbnail(
+    task,
+    max_width: float = STEP_PHOTO_MAX_WIDTH,
+    max_height: float = STEP_PHOTO_MAX_HEIGHT,
+) -> Optional[Image]:
+    """Aspect-preserved thumbnail of a step's reference photo, or None.
+
+    "Reference" is the instructional photo set on the template step — what the
+    step should look like — so it is printed on the blank form. Evidence photos
+    (taken while doing the work) are deliberately *not* printed: they do not
+    exist yet when the sheet comes off the printer.
+
+    Returns None whenever the image cannot be turned into a flowable — no step
+    row, no image set, or the underlying file is gone/unreadable (deleted media,
+    remote storage hiccup). A missing photo must never take the form down.
+    """
+    if task is None or not getattr(task, "reference_image", None):
+        return None
+    try:
+        task.reference_image.open("rb")
+        try:
+            data = task.reference_image.read()
+        finally:
+            task.reference_image.close()
+        # Downsample to print resolution before embedding. A phone photo is
+        # several MB and thousands of pixels wide; at 1.2in on paper none of
+        # that survives the printer, and embedding the original would make a
+        # form with a handful of step photos too big to email around.
+        with PILImage.open(io.BytesIO(data)) as source:
+            if source.mode in ("RGBA", "LA", "P"):
+                # Flatten transparency onto white, or a PNG with an alpha
+                # channel prints as a black square on paper.
+                rgba = source.convert("RGBA")
+                thumb = PILImage.new("RGB", rgba.size, (255, 255, 255))
+                thumb.paste(rgba, mask=rgba.split()[-1])
+            else:
+                thumb = source.convert("RGB")
+            thumb.thumbnail(
+                (
+                    round(max_width / inch * STEP_PHOTO_DPI),
+                    round(max_height / inch * STEP_PHOTO_DPI),
+                )
+            )
+            width, height = thumb.size
+            if not width or not height:
+                return None
+            buf = io.BytesIO()
+            thumb.save(buf, format="JPEG", quality=85)
+        buf.seek(0)
+        scale = min(max_width / width, max_height / height)
+        return Image(buf, width=width * scale, height=height * scale)
+    except Exception:  # noqa: BLE001 - any unreadable image just prints as blank
+        return None
 
 
 def _make_qr_image(url: str, size_inches: float = 1.5) -> Image:
@@ -781,31 +849,52 @@ def generate_work_order_pdf(
         story.append(Spacer(1, 8))
 
     # ── Task steps checklist ──────────────────────────────────────────────────
-    task_completions = list(work_order.task_completions.order_by("task_order", "task_title"))
+    # ``task`` is select_related because each step may carry a reference photo
+    # (op-syov) that is read straight off the template row.
+    task_completions = list(
+        work_order.task_completions.select_related("task").order_by("task_order", "task_title")
+    )
 
     if task_completions:
+        # One thumbnail per step, built once. The Photo column only appears when
+        # at least one step actually has a reference image, so a form with no
+        # step photos keeps exactly the layout it had before.
+        thumbnails = [_make_reference_thumbnail(tc.task) for tc in task_completions]
+        has_photos = any(thumb is not None for thumb in thumbnails)
+
         story.append(Paragraph("Task Steps", subheading_style))
         task_header = [
             Paragraph("✓", label_style),
             Paragraph("#", label_style),
             Paragraph("Step", label_style),
-            Paragraph("Req.", label_style),
         ]
+        if has_photos:
+            task_header.append(Paragraph("Photo", label_style))
+        task_header.append(Paragraph("Req.", label_style))
+
         task_rows = [task_header]
-        for i, tc in enumerate(task_completions, start=1):
+        for i, (tc, thumb) in enumerate(zip(task_completions, thumbnails), start=1):
             req_marker = "✱" if tc.is_required else ""
-            task_rows.append(
-                [
-                    AcroCheckbox(name=f"task_{tc.id}", collector=region_collector),
-                    str(i),
-                    Paragraph(tc.task_title, normal_style),
-                    req_marker,
-                ]
-            )
-        task_table = Table(
-            task_rows,
-            colWidths=[0.3 * inch, 0.4 * inch, 6.0 * inch, 0.5 * inch],
-        )
+            # Step titles are operator-entered and land in a reportlab
+            # Paragraph (a mini-XML dialect) — escape via ``html.escape``, not
+            # ``xml.sax.saxutils.escape`` (bandit B406).
+            row = [
+                AcroCheckbox(name=f"task_{tc.id}", collector=region_collector),
+                str(i),
+                Paragraph(escape(tc.task_title, quote=False), normal_style),
+            ]
+            if has_photos:
+                row.append(thumb if thumb is not None else "")
+            row.append(req_marker)
+            task_rows.append(row)
+
+        if has_photos:
+            col_widths = [0.3 * inch, 0.4 * inch, 4.6 * inch, 1.4 * inch, 0.5 * inch]
+            req_col = 4
+        else:
+            col_widths = [0.3 * inch, 0.4 * inch, 6.0 * inch, 0.5 * inch]
+            req_col = 3
+        task_table = Table(task_rows, colWidths=col_widths)
         task_table.setStyle(
             TableStyle(
                 [
@@ -816,7 +905,7 @@ def generate_work_order_pdf(
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("PADDING", (0, 0), (-1, -1), 4),
                     ("ALIGN", (0, 0), (0, -1), "CENTER"),
-                    ("ALIGN", (3, 0), (3, -1), "CENTER"),
+                    ("ALIGN", (req_col, 0), (req_col, -1), "CENTER"),
                 ]
             )
         )

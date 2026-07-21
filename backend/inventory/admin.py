@@ -1934,7 +1934,9 @@ class MaintenanceToolInline(admin.TabularInline):
 class MaintenanceTaskInline(admin.TabularInline):
     model = MaintenanceTask
     extra = 1
-    fields = ["order", "title", "description", "is_required"]
+    # ``reference_image`` is the step's instructional photo — the one that
+    # prints next to the step on the work-order form.
+    fields = ["order", "title", "description", "is_required", "reference_image"]
     ordering = ["order"]
 
 
@@ -2054,8 +2056,11 @@ class WorkOrderLotoCompletionInline(admin.TabularInline):
 class WorkOrderPhotoInline(admin.TabularInline):
     model = WorkOrderPhoto
     extra = 0
-    fields = ["image", "caption", "uploaded_by", "uploaded_at"]
-    readonly_fields = ["uploaded_at"]
+    # ``task_completion`` shows which step a photo documents (blank = a
+    # work-order-level photo). Read-only here: pinning happens at upload time
+    # through the add_photo action, which checks the step is on this WO.
+    fields = ["image", "caption", "task_completion", "uploaded_by", "uploaded_at"]
+    readonly_fields = ["uploaded_at", "task_completion"]
 
 
 @admin.register(WorkOrder)

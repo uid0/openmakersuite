@@ -874,6 +874,45 @@ export interface WorkOrderLotoContext {
   is_empty: boolean;
 }
 
+/**
+ * op-pzae: an older version of a reference document, from the backend's walk
+ * of the `AssetDocument.supersedes` chain (newest-first).
+ */
+export interface ReferenceDocumentRevision {
+  id: string;
+  version: number;
+  /** Absolute URL, or null when the row outlived its file. */
+  file_url: string | null;
+  uploaded_at: string | null;
+}
+
+/** A current document in the asset's library, with its revision history. */
+export interface ReferenceDocument {
+  id: string;
+  category: string;
+  category_display: string;
+  title: string;
+  version: number;
+  file_url: string | null;
+  uploaded_at: string | null;
+  revisions: ReferenceDocumentRevision[];
+}
+
+export interface ReferenceLink {
+  label: string;
+  url: string;
+}
+
+/**
+ * Docs a tech can reach while performing/signing the work order — the asset's
+ * current documents (manual first) plus its quick links. Read-only projection
+ * of the existing document library; the work order stores no links of its own.
+ */
+export interface ReferenceDocuments {
+  documents: ReferenceDocument[];
+  links: ReferenceLink[];
+}
+
 export interface WorkOrderValidationRecord {
   id: string;
   work_order: string;
@@ -915,6 +954,8 @@ export interface WorkOrder {
   electrical?: WorkOrderElectricalContext;
   loto?: WorkOrderLotoContext;
   validation?: WorkOrderValidationRecord | null;
+  /** op-pzae: manual / revision history / reference links, shown at sign-off. */
+  reference_documents?: ReferenceDocuments;
   task_completion_count?: number;
   task_total_count?: number;
   // op-o6rs: number of submissions still awaiting human review (drives the

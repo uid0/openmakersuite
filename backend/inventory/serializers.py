@@ -2346,6 +2346,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     electrical = serializers.SerializerMethodField()
     loto = serializers.SerializerMethodField()
     validation = serializers.SerializerMethodField()
+    reference_documents = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkOrder
@@ -2377,6 +2378,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "electrical",
             "loto",
             "validation",
+            "reference_documents",
             "created_at",
             "updated_at",
         ]
@@ -2396,6 +2398,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "electrical",
             "loto",
             "validation",
+            "reference_documents",
         ]
 
     def get_pending_review_count(self, obj):
@@ -2440,6 +2443,20 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         if latest is None:
             return None
         return WorkOrderValidationSerializer(latest, context=self.context).data
+
+    def get_reference_documents(self, obj):
+        """Manual / revision history / reference links for the sign-off surface.
+
+        Read-only projection of the asset's existing document library — no new
+        link fields on the work order. Detail-only: the list view has no room
+        for it and would pay the prefetch for nothing.
+        """
+        from .services.work_order_context import build_reference_documents_context
+
+        return build_reference_documents_context(
+            obj.maintenance_item.asset,
+            request=self.context.get("request"),
+        )
 
 
 class WorkOrderListSerializer(serializers.ModelSerializer):

@@ -394,13 +394,90 @@ class MaintenanceTask(models.Model):
         return f"{self.maintenance_item.title} — Step {self.order}: {self.title}"
 
 
-class WorkOrder(models.Model):
+class ElapsedTimerModel(models.Model):
+    """Accumulator + current-segment stopwatch shared by work orders and steps.
+
+    Two pieces of state rather than a single ``started_at``/``ended_at`` pair
+    (the :class:`forgekey.models.DeviceUsage` shape):
+
+    - ``elapsed_seconds`` — time already *committed*, i.e. every segment that
+      has been paused.
+    - ``timing_since`` — when the segment currently running began, or null.
+
+    Live elapsed is therefore ``elapsed_seconds + (now - timing_since)``. The
+    accumulator is what makes pause/resume work: a tech can walk away from a
+    job mid-way, come back an hour later, and the clock picks up instead of
+    counting the gap as work. The server owns all of it — a browser only ticks
+    a display over these numbers — so the total survives a reload and reads the
+    same from a second device.
+    """
+
+    elapsed_seconds = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            "Committed time in seconds. Excludes the segment currently running "
+            "— read the serializer's live value for the running total."
+        ),
+    )
+    is_timing = models.BooleanField(
+        default=False,
+        help_text="Whether the stopwatch is running right now.",
+    )
+    timing_since = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Start of the segment currently running (null while paused).",
+    )
+
+    class Meta:
+        abstract = True
+
+    #: Fields ``start_timer`` / ``pause_timer`` may touch, for ``update_fields``.
+    TIMER_FIELDS = ("elapsed_seconds", "is_timing", "timing_since")
+
+    def live_elapsed_seconds(self, *, now=None) -> int:
+        """Seconds on the clock, including any segment still running."""
+        total = self.elapsed_seconds or 0
+        if self.is_timing and self.timing_since:
+            now = now or timezone.now()
+            total += max(0, int((now - self.timing_since).total_seconds()))
+        return total
+
+    def start_timer(self, *, now=None) -> bool:
+        """Open a segment. Idempotent — returns False if already running."""
+        if self.is_timing:
+            return False
+        self.is_timing = True
+        self.timing_since = now or timezone.now()
+        return True
+
+    def pause_timer(self, *, now=None) -> bool:
+        """Commit the running segment. Idempotent — False if already paused."""
+        if not self.is_timing:
+            return False
+        if self.timing_since:
+            now = now or timezone.now()
+            self.elapsed_seconds = (self.elapsed_seconds or 0) + max(
+                0, int((now - self.timing_since).total_seconds())
+            )
+        self.is_timing = False
+        self.timing_since = None
+        return True
+
+
+class WorkOrder(ElapsedTimerModel):
     """
     A scheduled or generated work order for a preventive maintenance item.
 
     Work orders can be printed as PDF forms for non-technical users or
     completed digitally by technical users. Both paths feed back into the
     maintenance history.
+
+    Digitally-completed work orders also carry a stopwatch
+    (:class:`ElapsedTimerModel`): the WO-level total is wall-time-on-job, and
+    each :class:`WorkOrderTaskCompletion` keeps its own so actual step
+    durations can be compared against
+    :attr:`MaintenanceItem.estimated_time_minutes`.
     """
 
     class Status(models.TextChoices):
@@ -456,6 +533,14 @@ class WorkOrder(models.Model):
         max_length=200,
         blank=True,
         help_text="Name of person who completed the work (for paper form tracking)",
+    )
+    started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "When work first started on this order (the first time the timer "
+            "was started). Never reset by a later pause/resume."
+        ),
     )
     completed_at = models.DateTimeField(
         null=True,
@@ -521,13 +606,33 @@ class WorkOrder(models.Model):
         """Return a short human-readable identifier for this work order."""
         return f"WO-{str(self.id)[:8].upper()}"
 
+    #: ``started_at`` rides along because ``start_timer`` stamps it.
+    TIMER_FIELDS = ElapsedTimerModel.TIMER_FIELDS + ("started_at",)
 
-class WorkOrderTaskCompletion(models.Model):
+    def start_timer(self, *, now=None) -> bool:
+        """Start the clock, stamping ``started_at`` the very first time.
+
+        ``started_at`` is *when work began*, not when the current segment
+        began — a resume after lunch must not move it.
+        """
+        now = now or timezone.now()
+        started = super().start_timer(now=now)
+        if started and self.started_at is None:
+            self.started_at = now
+        return started
+
+
+class WorkOrderTaskCompletion(ElapsedTimerModel):
     """
     Tracks completion of an individual task step within a work order.
 
     Created for each MaintenanceTask when a WorkOrder is generated,
     allowing granular tracking of which steps have been completed.
+
+    Also carries its own stopwatch (:class:`ElapsedTimerModel`). Only one step
+    per work order may run at a time — starting one pauses whichever other step
+    was running — so the per-step totals partition the work rather than
+    overlapping.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

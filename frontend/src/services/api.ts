@@ -1428,6 +1428,20 @@ export const workOrderAPI = {
       data
     ),
 
+  // op-m3so: the work-order stopwatch. Server-authoritative — the page only
+  // ticks a display over `elapsed_seconds`/`is_timing`, so a reload (or a
+  // second device) shows the same total. Both calls are idempotent.
+  timer: (workOrderId: string, action: 'start' | 'pause') =>
+    api.post<WorkOrder>(`/inventory/work-orders/${workOrderId}/timer/`, { action }),
+
+  // Per-step clock. Starting one step pauses whichever other step was running,
+  // so reload the work order afterwards to pick that up.
+  taskTimer: (workOrderId: string, taskCompletionId: string, action: 'start' | 'pause') =>
+    api.post<WorkOrderTaskCompletion>(
+      `/inventory/work-orders/${workOrderId}/tasks/${taskCompletionId}/timer/`,
+      { action }
+    ),
+
   toggleMaterial: (
     workOrderId: string,
     materialUsageId: string,

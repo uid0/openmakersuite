@@ -41,6 +41,7 @@ from .location_problem import (  # noqa: F401
     LocationProblem,
 )
 from .maintenance import (  # noqa: F401
+    ElapsedTimerModel,
     MaintenanceAuditEvent,
     MaintenanceItem,
     MaintenanceLog,
@@ -94,6 +95,7 @@ __all__ = [
     "MaintenanceLog",
     "MaintenanceLogPhoto",
     "MaintenanceTask",
+    "ElapsedTimerModel",
     "WorkOrder",
     "WorkOrderTaskCompletion",
     "WorkOrderLotoCompletion",

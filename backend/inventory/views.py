@@ -4084,6 +4084,21 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             work_order.save(update_fields=["completed_at"])
 
     @staticmethod
+    def _finalize_timers(work_order) -> None:
+        """Stop the stopwatch(es) when a work order closes.
+
+        Runs between the completed_at stamp and the MaintenanceLog write so the
+        accumulated total is final before ``_sync_maintenance_item_completion``
+        reads it. A non-completed save is a no-op — pausing on every PATCH would
+        stop the clock every time a tech edits a note.
+        """
+        if work_order.status != WorkOrder.Status.COMPLETED:
+            return
+        from .services.work_order_timer import finalize_work_order_timers
+
+        finalize_work_order_timers(work_order)
+
+    @staticmethod
     def _sync_maintenance_item_completion(work_order, *, actor=None) -> None:
         """Bubble a WO completion up to its MaintenanceItem.
 
@@ -4103,7 +4118,13 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
         ``last_completed_at`` only advances forward — a reopen + recomplete
         with an earlier ``wo.completed_at`` doesn't roll the date back.
+
+        op-m3so: the log also picks up ``time_spent_minutes`` from the work
+        order's stopwatch — see ``apply_elapsed_to_log`` for the precedence
+        (anything already on the log wins).
         """
+        from .services.work_order_timer import apply_elapsed_to_log
+
         if work_order.status != WorkOrder.Status.COMPLETED:
             return
         if not work_order.completed_at:
@@ -4124,10 +4145,10 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                     item_ids.append(bundled_id)
 
         for item_id in item_ids:
-            existing = MaintenanceLog.objects.filter(
+            log = MaintenanceLog.objects.filter(
                 work_order=work_order, maintenance_item_id=item_id
             ).first()
-            if existing is None:
+            if log is None:
                 log = MaintenanceLog.objects.create(
                     maintenance_item_id=item_id,
                     work_order=work_order,
@@ -4143,6 +4164,13 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 MaintenanceLog.objects.filter(pk=log.pk).update(
                     completed_at=work_order.completed_at
                 )
+
+            # The stopwatch measures the whole visit, so it cannot be split
+            # across bundled siblings — it lands on the PRIMARY item's log only.
+            # Writing the same minutes to every bundled log would double-count
+            # them the moment anyone sums time spent per asset.
+            if item_id == work_order.maintenance_item_id:
+                apply_elapsed_to_log(log, work_order)
 
             item = MaintenanceItem.objects.filter(pk=item_id).first()
             if item is None:
@@ -4246,6 +4274,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         # status=completed (rare, but possible via paper-form ingest)
         # also closes every bundled sibling.
         self._bundle_due_siblings(work_order)
+        self._finalize_timers(work_order)
         self._sync_maintenance_item_completion(work_order, actor=self.request.user)
         record_maintenance_audit_event(
             action=MaintenanceAuditEvent.Action.WO_CREATE,
@@ -4263,6 +4292,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         self._sync_completion_timestamp(
             work_order, was_completed=(old_status == WorkOrder.Status.COMPLETED)
         )
+        self._finalize_timers(work_order)
         self._sync_maintenance_item_completion(work_order, actor=self.request.user)
         if (
             work_order.status == WorkOrder.Status.COMPLETED
@@ -4461,6 +4491,11 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             tc.completed_by = None
         if "notes" in request.data:
             tc.notes = request.data["notes"]
+        # Ticking a step off means you stopped doing it — the step's stopwatch
+        # follows the checkbox so nobody has to remember two taps. Reopening a
+        # step deliberately does NOT resume it; that's an explicit start.
+        if tc.is_completed:
+            tc.pause_timer()
         tc.save()
 
         # Update work order status to in_progress if any task is completed
@@ -4469,6 +4504,62 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             work_order.save(update_fields=["status", "updated_at"])
 
         return Response(WorkOrderTaskCompletionSerializer(tc).data)
+
+    @action(detail=True, methods=["post"], url_path="timer")
+    def timer(self, request, pk=None):
+        """Start or pause this work order's stopwatch.
+
+        Body: ``{"action": "start" | "pause"}``. Idempotent — starting a running
+        clock (or pausing a stopped one) returns 200 with ``changed: false`` and
+        touches nothing, so a double-tap or a retry can't corrupt the total.
+
+        WO elapsed is wall-time-on-job: it covers setup, LOTO and cleanup, not
+        just the sum of the steps. Starting it also stamps ``started_at`` the
+        first time, which is never moved by a later resume.
+        """
+        from .services.work_order_timer import apply_timer_action
+
+        work_order = self.get_object()
+        try:
+            changed = apply_timer_action(work_order, request.data.get("action"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = WorkOrderSerializer(work_order, context={"request": request}).data
+        return Response({**data, "changed": changed})
+
+    @action(detail=True, methods=["post"], url_path="tasks/(?P<task_id>[^/.]+)/timer")
+    def task_timer(self, request, pk=None, task_id=None):
+        """Start or pause the stopwatch on one step of this work order.
+
+        Body: ``{"action": "start" | "pause"}``, same idempotency as
+        :meth:`timer`. Only one step per work order runs at a time — starting
+        this one pauses whichever other step was running, so the per-step totals
+        partition the work instead of overlapping.
+        """
+        from .services.work_order_timer import apply_timer_action
+
+        work_order = self.get_object()
+        try:
+            tc = work_order.task_completions.get(id=task_id)
+        except WorkOrderTaskCompletion.DoesNotExist:
+            return Response(
+                {"detail": "Task completion record not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            changed = apply_timer_action(tc, request.data.get("action"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Doing the work is what moves a WO off OPEN, mirroring complete_task.
+        if changed and work_order.status == WorkOrder.Status.OPEN:
+            work_order.status = WorkOrder.Status.IN_PROGRESS
+            work_order.save(update_fields=["status", "updated_at"])
+
+        data = WorkOrderTaskCompletionSerializer(tc, context={"request": request}).data
+        return Response({**data, "changed": changed})
 
     @action(detail=True, methods=["patch"], url_path="loto/(?P<loto_id>[^/.]+)/complete")
     def complete_loto(self, request, pk=None, loto_id=None):

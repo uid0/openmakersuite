@@ -1829,6 +1829,12 @@ views:
       scan_image:
         permission_classes:
         - IsAuthenticated
+      task_timer:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      timer:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
       toggle_material:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite

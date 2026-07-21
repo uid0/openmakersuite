@@ -400,6 +400,32 @@ def _make_qr_image(url: str, size_inches: float = 1.5) -> Image:
     return Image(buf, width=size, height=size)
 
 
+#: The blank write-in rule used by the narrow sign-off cells.
+SIGNOFF_WRITE_IN = "_" * 20
+
+
+def _time_spent_cell(work_order: "WorkOrder", item) -> str:
+    """The sign-off "Time Spent (min)" cell — a write-in rule, or the actual.
+
+    A blank form keeps the rule to write on: sheets are printed before the job
+    starts, when nothing is on the clock. Once the work order is *closed* with a
+    recorded total the sheet is a record rather than a form, so it prints the
+    measured minutes next to the template's estimate — the comparison the timer
+    exists to produce. A closed work order that was never timed (paper-only, or
+    a scan) still gets the rule.
+    """
+    from inventory.models import WorkOrder as WorkOrderModel
+    from inventory.services.work_order_timer import recorded_minutes
+
+    if work_order.status != WorkOrderModel.Status.COMPLETED:
+        return SIGNOFF_WRITE_IN
+    minutes = recorded_minutes(work_order)
+    if minutes is None:
+        return SIGNOFF_WRITE_IN
+    estimate = item.estimated_time_minutes if item else None
+    return f"{minutes} min (est {estimate})" if estimate else f"{minutes} min"
+
+
 def generate_work_order_pdf(
     work_order: "WorkOrder",
     base_url: str = "",
@@ -962,18 +988,24 @@ def generate_work_order_pdf(
     # ── Sign-off section ──────────────────────────────────────────────────────
     story.append(Paragraph("Work Order Sign-Off", subheading_style))
 
+    # A blank form keeps the paper write-in — most sheets are printed before
+    # anyone starts, and nothing is on the clock yet. Once the WO is closed with
+    # a recorded total, print the actual next to the template's estimate: that
+    # comparison is the whole point of timing the job (op-m3so).
+    time_spent_value = _time_spent_cell(work_order, item)
+
     signoff_data = [
         [
             Paragraph("Completed By (print name):", label_style),
             "_" * 40,
             Paragraph("Date Completed:", label_style),
-            "_" * 20,
+            SIGNOFF_WRITE_IN,
         ],
         [
             Paragraph("Signature:", label_style),
             "_" * 40,
             Paragraph("Time Spent (min):", label_style),
-            "_" * 20,
+            time_spent_value,
         ],
         [
             Paragraph("Notes / Observations:", label_style),

@@ -643,14 +643,22 @@ def omr_confirm_completion(
         return False
     if work_order.status == WorkOrder.Status.COMPLETED:
         return False
+    from inventory.services.work_order_timer import (
+        apply_elapsed_to_log,
+        finalize_work_order_timers,
+    )
+
     now = timezone.now()
     work_order.status = WorkOrder.Status.COMPLETED
     work_order.completed_at = now
     work_order.save(update_fields=["status", "completed_at", "updated_at"])
+    # A WO started on-screen and closed off a scanned sheet must not be left
+    # with a clock running — same finalize the digital completion path uses.
+    finalize_work_order_timers(work_order, now=now)
     item = work_order.maintenance_item
     item.last_completed_at = now
     item.save(update_fields=["last_completed_at"])
-    MaintenanceLog.objects.create(
+    log = MaintenanceLog.objects.create(
         maintenance_item=item,
         completed_by=user if (user and getattr(user, "is_authenticated", False)) else None,
         notes=(
@@ -658,6 +666,7 @@ def omr_confirm_completion(
             f"(submission {submission.id}, WO {work_order.short_id})."
         ),
     )
+    apply_elapsed_to_log(log, work_order)
     return True
 
 

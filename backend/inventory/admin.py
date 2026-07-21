@@ -2015,9 +2015,21 @@ class WorkOrderTaskCompletionInline(admin.TabularInline):
         "is_completed",
         "completed_by",
         "completed_at",
+        "elapsed_seconds",
+        "is_timing",
         "notes",
     ]
-    readonly_fields = ["task_order", "task_title", "is_required", "completed_at"]
+    # The stopwatch columns are shown for support ("why does this step say 4
+    # hours?") but never edited here — the timer endpoints own them, and a hand
+    # edit would silently desync ``elapsed_seconds`` from ``timing_since``.
+    readonly_fields = [
+        "task_order",
+        "task_title",
+        "is_required",
+        "completed_at",
+        "elapsed_seconds",
+        "is_timing",
+    ]
 
 
 class WorkOrderMaterialUsageInline(admin.TabularInline):
@@ -2073,16 +2085,36 @@ class WorkOrderAdmin(admin.ModelAdmin):
         "assigned_to",
         "completed_by_name",
         "is_overdue",
+        "elapsed_minutes",
         "created_at",
     ]
-    list_filter = ["status", "due_date"]
+    list_filter = ["status", "due_date", "is_timing"]
     search_fields = [
         "maintenance_item__title",
         "maintenance_item__asset__name",
         "completed_by_name",
         "notes",
     ]
-    readonly_fields = ["short_id", "is_overdue", "created_at", "updated_at"]
+    # Stopwatch state is server-owned (the timer endpoints), so it is visible
+    # here for support but not editable — see WorkOrderTaskCompletionInline.
+    readonly_fields = [
+        "short_id",
+        "is_overdue",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "elapsed_seconds",
+        "is_timing",
+        "timing_since",
+    ]
+
+    @admin.display(description="Time on job", ordering="elapsed_seconds")
+    def elapsed_minutes(self, obj):
+        """Committed minutes, with a marker while the clock is still running."""
+        if not obj.elapsed_seconds and not obj.is_timing:
+            return "—"
+        return f"{round((obj.elapsed_seconds or 0) / 60)} min{' ⏱' if obj.is_timing else ''}"
+
     inlines = [
         WorkOrderTaskCompletionInline,
         WorkOrderLotoCompletionInline,

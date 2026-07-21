@@ -2064,11 +2064,15 @@ class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):
     step's ``task_reference_image_url`` ("what this should look like", set once
     on the MaintenanceTask) and the ``evidence_photos`` a tech attached to this
     specific step while doing the work.
+
+    ``elapsed_seconds`` is the step's stopwatch, reported LIVE — see
+    :meth:`get_elapsed_seconds`.
     """
 
     completed_by_name = serializers.SerializerMethodField()
     task_reference_image_url = serializers.SerializerMethodField()
     evidence_photos = serializers.SerializerMethodField()
+    elapsed_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkOrderTaskCompletion
@@ -2086,6 +2090,8 @@ class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):
             "notes",
             "task_reference_image_url",
             "evidence_photos",
+            "elapsed_seconds",
+            "is_timing",
             "created_at",
         ]
         read_only_fields = [
@@ -2095,6 +2101,8 @@ class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):
             "task_order",
             "task_reference_image_url",
             "evidence_photos",
+            "elapsed_seconds",
+            "is_timing",
         ]
 
     def get_completed_by_name(self, obj):
@@ -2122,6 +2130,15 @@ class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):
         return WorkOrderEvidencePhotoSerializer(
             obj.evidence_photos.all(), many=True, context=self.context
         ).data
+
+    def get_elapsed_seconds(self, obj):
+        """Whole seconds on this step's clock, INCLUDING a running segment.
+
+        The stored column holds only committed time; while ``is_timing`` is true
+        the segment in flight is added here. Clients tick a display over this
+        value — they never own the total.
+        """
+        return obj.live_elapsed_seconds()
 
 
 class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
@@ -2332,9 +2349,15 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     asset_name = serializers.CharField(source="maintenance_item.asset.name", read_only=True)
     asset_tag = serializers.CharField(source="maintenance_item.asset.asset_tag", read_only=True)
     asset_id = serializers.UUIDField(source="maintenance_item.asset.id", read_only=True)
+    # The template's guess, carried alongside the stopwatch so the UI (and the
+    # printed sign-off) can put actual next to estimate without a second fetch.
+    estimated_time_minutes = serializers.IntegerField(
+        source="maintenance_item.estimated_time_minutes", read_only=True
+    )
     assigned_to_name = serializers.SerializerMethodField()
     short_id = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
+    elapsed_seconds = serializers.SerializerMethodField()
     task_completions = WorkOrderTaskCompletionSerializer(many=True, read_only=True)
     material_usage = WorkOrderMaterialUsageSerializer(many=True, read_only=True)
     loto_completions = WorkOrderLotoCompletionSerializer(many=True, read_only=True)
@@ -2358,12 +2381,16 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "asset_name",
             "asset_tag",
             "asset_id",
+            "estimated_time_minutes",
             "status",
             "due_date",
             "assigned_to",
             "assigned_to_name",
             "completed_by_name",
+            "started_at",
             "completed_at",
+            "elapsed_seconds",
+            "is_timing",
             "notes",
             "loto_completion_note",
             "is_overdue",
@@ -2387,6 +2414,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "is_overdue",
             "created_at",
             "updated_at",
+            "started_at",
+            "elapsed_seconds",
+            "is_timing",
             "task_completions",
             "material_usage",
             "loto_completions",
@@ -2415,6 +2445,16 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         if obj.assigned_to:
             return obj.assigned_to.get_full_name() or obj.assigned_to.username
         return None
+
+    def get_elapsed_seconds(self, obj):
+        """Whole seconds on the work-order clock, INCLUDING a running segment.
+
+        The stored column holds only committed time; while ``is_timing`` is true
+        the segment in flight is added here, so a client that just re-fetches
+        (or reloads) sees the true running total without doing arithmetic on
+        ``timing_since``. Compare against ``estimated_time_minutes``.
+        """
+        return obj.live_elapsed_seconds()
 
     def get_tools(self, obj):
         """Tools the tech needs to gather before starting, required ones first.

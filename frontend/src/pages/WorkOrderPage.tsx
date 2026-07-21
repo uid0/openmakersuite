@@ -33,8 +33,11 @@ import {
   IconFileText,
   IconLock,
   IconPhoto,
+  IconPlayerPause,
+  IconPlayerPlay,
   IconRobot,
   IconScan,
+  IconStopwatch,
   IconTag,
   IconTool,
   IconUpload,
@@ -59,6 +62,138 @@ const STATUS_COLORS: Record<WorkOrderStatus, string> = {
   in_progress: 'yellow',
   blocked: 'red',
   completed: 'green',
+};
+
+// ── Elapsed timer (op-m3so) ─────────────────────────────────────────────────
+// The server owns the total: `elapsed_seconds` already includes whatever
+// segment is currently running. These helpers only *display* it — they never
+// accumulate into a value that gets sent back.
+
+/** `MM:SS`, or `H:MM:SS` once a job passes the hour mark. */
+export const formatElapsed = (totalSeconds: number): string => {
+  const total = Math.max(0, Math.floor(totalSeconds || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(seconds).padStart(2, '0');
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+};
+
+/** "18m / est 30m" — the comparison the timer exists to produce. */
+export const formatElapsedSummary = (
+  totalSeconds: number,
+  estimateMinutes?: number | null,
+): string => {
+  const minutes = Math.round(Math.max(0, totalSeconds || 0) / 60);
+  return estimateMinutes ? `${minutes}m / est ${estimateMinutes}m` : `${minutes}m on job`;
+};
+
+/**
+ * Tick a local display forward from the server's total while the clock runs.
+ *
+ * Re-anchors on every fresh server value, so a reload or another device's
+ * pause always wins over the local count. The interval is cleared when the
+ * clock stops or the row unmounts — a leaked one fails the suite.
+ */
+const useTickingSeconds = (serverSeconds: number, running: boolean): number => {
+  const [seconds, setSeconds] = useState(serverSeconds);
+  useEffect(() => {
+    setSeconds(serverSeconds);
+    if (!running) return undefined;
+    const id = setInterval(() => setSeconds((prev) => prev + 1), 1000);
+    return () => clearInterval(id);
+  }, [serverSeconds, running]);
+  return seconds;
+};
+
+/** The work-order stopwatch: running clock, actual-vs-estimate, start/pause. */
+const WorkOrderTimer: React.FC<{
+  elapsedSeconds: number;
+  isTiming: boolean;
+  estimateMinutes?: number | null;
+  completed: boolean;
+  busy: boolean;
+  onToggle: (action: 'start' | 'pause') => void;
+}> = ({ elapsedSeconds, isTiming, estimateMinutes, completed, busy, onToggle }) => {
+  const seconds = useTickingSeconds(elapsedSeconds, isTiming);
+  return (
+    <Group justify="space-between" wrap="nowrap" mt="md" data-testid="wo-timer">
+      <Group gap="xs" wrap="nowrap">
+        <IconStopwatch size={20} color={isTiming ? '#2f9e44' : undefined} />
+        <Box>
+          <Text
+            fw={700}
+            size="xl"
+            ff="monospace"
+            c={isTiming ? 'green' : undefined}
+            data-testid="wo-timer-clock"
+          >
+            {formatElapsed(seconds)}
+          </Text>
+          <Text size="xs" c="dimmed" data-testid="wo-timer-summary">
+            {formatElapsedSummary(seconds, estimateMinutes)}
+          </Text>
+        </Box>
+      </Group>
+      <Tooltip
+        label="The total was recorded when this work order was completed."
+        disabled={!completed}
+      >
+        <Box>
+          <Button
+            variant={isTiming ? 'filled' : 'light'}
+            color={isTiming ? 'orange' : 'green'}
+            leftSection={isTiming ? <IconPlayerPause size={16} /> : <IconPlayerPlay size={16} />}
+            onClick={() => onToggle(isTiming ? 'pause' : 'start')}
+            loading={busy}
+            disabled={completed}
+          >
+            {isTiming ? 'Pause' : 'Start'}
+          </Button>
+        </Box>
+      </Tooltip>
+    </Group>
+  );
+};
+
+/**
+ * One step's stopwatch. Only one step runs at a time server-side, so starting
+ * this one stops whichever other step was running.
+ */
+const StepTimer: React.FC<{
+  stepTitle: string;
+  elapsedSeconds: number;
+  isTiming: boolean;
+  locked: boolean;
+  busy: boolean;
+  onToggle: (action: 'start' | 'pause') => void;
+}> = ({ stepTitle, elapsedSeconds, isTiming, locked, busy, onToggle }) => {
+  const seconds = useTickingSeconds(elapsedSeconds, isTiming);
+  // A finished step keeps its number on show but loses the control — the clock
+  // stopped when the box was ticked, and restarting it would misreport the step.
+  if (locked && seconds <= 0) return null;
+  return (
+    <Group gap={6} wrap="nowrap">
+      {!locked && (
+        <ActionIcon
+          variant={isTiming ? 'filled' : 'light'}
+          color={isTiming ? 'orange' : 'green'}
+          size="md"
+          loading={busy}
+          onClick={() => onToggle(isTiming ? 'pause' : 'start')}
+          aria-label={`${isTiming ? 'Pause' : 'Start'} timer for ${stepTitle}`}
+        >
+          {isTiming ? <IconPlayerPause size={16} /> : <IconPlayerPlay size={16} />}
+        </ActionIcon>
+      )}
+      {(seconds > 0 || isTiming) && (
+        <Text size="xs" ff="monospace" c={isTiming ? 'green' : 'dimmed'}>
+          {formatElapsed(seconds)}
+        </Text>
+      )}
+    </Group>
+  );
 };
 
 // OMR bead-2: a small warped crop of one scanned mark so the reviewer can
@@ -287,6 +422,9 @@ const WorkOrderPage: React.FC = () => {
   const resetPhotoRef = useRef<() => void>(null);
   // op-pzae: which reference document has its revision history expanded.
   const [openRevisions, setOpenRevisions] = useState<Record<string, boolean>>({});
+  // op-m3so: in-flight timer calls (WO-level, and which step).
+  const [timerBusy, setTimerBusy] = useState(false);
+  const [timingStep, setTimingStep] = useState<string | null>(null);
 
   // AC-3: validation prompt state.
   const [validationOpen, setValidationOpen] = useState(false);
@@ -503,6 +641,48 @@ const WorkOrderPage: React.FC = () => {
   // never closes a work order on its own.
   const handleConfirmComplete = (submissionId: string) =>
     handleApplyPending(submissionId, { confirm_complete: true });
+
+  // op-m3so: the work-order stopwatch. The response is the refreshed work
+  // order, so a start/pause needs no second round trip.
+  const handleTimer = async (action: 'start' | 'pause') => {
+    if (!workOrder) return;
+    setTimerBusy(true);
+    try {
+      const res = await workOrderAPI.timer(workOrder.id, action);
+      if (res?.data) {
+        setWorkOrder(res.data);
+      } else {
+        await loadWorkOrder();
+      }
+    } catch {
+      notifications.show({
+        title: 'Error',
+        message: `Failed to ${action} the timer.`,
+        color: 'red',
+      });
+    } finally {
+      setTimerBusy(false);
+    }
+  };
+
+  const handleStepTimer = async (taskCompletionId: string, action: 'start' | 'pause') => {
+    if (!workOrder) return;
+    setTimingStep(taskCompletionId);
+    try {
+      await workOrderAPI.taskTimer(workOrder.id, taskCompletionId, action);
+      // Starting a step pauses whichever other step was running, so reload the
+      // whole checklist rather than patching this one row.
+      await loadWorkOrder();
+    } catch {
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to update the step timer.',
+        color: 'red',
+      });
+    } finally {
+      setTimingStep(null);
+    }
+  };
 
   const handleToggleTask = async (taskCompletionId: string, isCompleted: boolean) => {
     if (!workOrder) return;
@@ -784,6 +964,18 @@ const WorkOrderPage: React.FC = () => {
           disabled={savingStatus}
           size="md"
           mt="xs"
+        />
+
+        {/* op-m3so: time on job, right at the top where a tech will reach for
+            it. The clock ticks locally but the total is the server's — closing
+            the work order records it against the template's estimate. */}
+        <WorkOrderTimer
+          elapsedSeconds={workOrder.elapsed_seconds ?? 0}
+          isTiming={workOrder.is_timing ?? false}
+          estimateMinutes={workOrder.estimated_time_minutes}
+          completed={workOrder.status === 'completed'}
+          busy={timerBusy}
+          onToggle={handleTimer}
         />
       </Card>
 
@@ -1281,6 +1473,14 @@ const WorkOrderPage: React.FC = () => {
                       onPick={(file) => handleStepPhotoUpload(tc.id, file)}
                     />
                   </Box>
+                  <StepTimer
+                    stepTitle={tc.task_title}
+                    elapsedSeconds={tc.elapsed_seconds ?? 0}
+                    isTiming={tc.is_timing ?? false}
+                    locked={tc.is_completed || workOrder.status === 'completed'}
+                    busy={timingStep === tc.id}
+                    onToggle={(action) => handleStepTimer(tc.id, action)}
+                  />
                   {tc.task_reference_image_url && (
                     <StepReferencePhoto
                       url={tc.task_reference_image_url}

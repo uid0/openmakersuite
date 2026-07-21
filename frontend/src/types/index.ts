@@ -725,6 +725,14 @@ export interface WorkOrderTaskCompletion {
   task_reference_image_url?: string | null;
   /** Photos the tech pinned to this step while doing the work. */
   evidence_photos?: WorkOrderEvidencePhoto[];
+  /**
+   * Seconds on this step's stopwatch, LIVE: the server adds any segment still
+   * running, so this is the running total at fetch time — tick a display over
+   * it, never accumulate into it.
+   */
+  elapsed_seconds?: number;
+  /** Whether this step's stopwatch is running right now. */
+  is_timing?: boolean;
   created_at: string;
 }
 
@@ -939,7 +947,18 @@ export interface WorkOrder {
   assigned_to: number | null;
   assigned_to_name: string | null;
   completed_by_name: string;
+  /** When work first started (first timer start) — not moved by a later resume. */
+  started_at?: string | null;
   completed_at: string | null;
+  /**
+   * Seconds on the work-order stopwatch, LIVE (includes a running segment).
+   * Wall-time-on-job: setup and cleanup too, so it exceeds the sum of the steps.
+   */
+  elapsed_seconds?: number;
+  /** Whether the work-order stopwatch is running right now. */
+  is_timing?: boolean;
+  /** The template's estimate, for the actual-vs-estimate comparison. */
+  estimated_time_minutes?: number | null;
   notes: string;
   /** Free-text LOTO completion note (structured boxes are loto_completions). */
   loto_completion_note: string;

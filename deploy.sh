@@ -119,6 +119,16 @@ echo "📝 Using GIT_HASH=$GIT_HASH for build..."
 export GIT_HASH
 $COMPOSE build --no-cache frontend
 $COMPOSE build --no-cache backend
+# nginx bakes in certbot + the Let's Encrypt entrypoint
+# (nginx/docker-entrypoint.d/10-letsencrypt.sh) and the server template.
+# Historically it was NOT rebuilt here — only `restart`ed below — so changes to
+# nginx/Dockerfile, the entrypoint, or the template never reached prod. That is
+# why the #934 cert-lineage fix (stop pinning live/<domain>-00NN; follow the
+# live lineage via /etc/letsencrypt/nginx symlinks) stayed undeployed and TLS
+# certs kept needing manual resets every deploy. Build it so the `up -d` below
+# recreates the container from the freshly-built image. nginx is a locally-built
+# compose service (build: context: ./nginx), same mechanism as the two above.
+$COMPOSE build --no-cache nginx
 
 # Start only the database + redis so we can run migrations against the target DB
 # BEFORE the backend container starts serving traffic. This prevents the class of

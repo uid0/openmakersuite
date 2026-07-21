@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Alert,
+  Anchor,
   Badge,
   Box,
   Button,
@@ -284,6 +285,8 @@ const WorkOrderPage: React.FC = () => {
   const [lotoNote, setLotoNote] = useState('');
   const [savingLotoNote, setSavingLotoNote] = useState(false);
   const resetPhotoRef = useRef<() => void>(null);
+  // op-pzae: which reference document has its revision history expanded.
+  const [openRevisions, setOpenRevisions] = useState<Record<string, boolean>>({});
 
   // AC-3: validation prompt state.
   const [validationOpen, setValidationOpen] = useState(false);
@@ -707,6 +710,9 @@ const WorkOrderPage: React.FC = () => {
   const totalLoto = lotoCompletions.length;
   // Already ordered required-first by the serializer; older payloads omit it.
   const tools = workOrder.tools ?? [];
+  // op-pzae: detail-only, and absent from payloads printed before it shipped.
+  const referenceDocuments = workOrder.reference_documents?.documents ?? [];
+  const referenceLinks = workOrder.reference_documents?.links ?? [];
 
   return (
     <WorkspacePage
@@ -1515,6 +1521,110 @@ const WorkOrderPage: React.FC = () => {
               </Box>
             ))}
           </Group>
+        )}
+      </Card>
+
+      {/* op-pzae: manual / revision history / reference links, at the point of
+          sign-off — whoever performs and signs the job should be able to reach
+          the docs without hunting for them. Reuses the asset's document library
+          (the work order stores no links of its own), and mirrors the block the
+          printed form puts above its sign-off box: both read one builder. */}
+      <Card withBorder p="md" radius="md" mb="md">
+        <Group mb="sm" gap="xs">
+          <IconFileText size={18} />
+          <Title order={5}>Documentation &amp; References</Title>
+        </Group>
+        {referenceDocuments.length > 0 || referenceLinks.length > 0 ? (
+          <Stack gap="sm">
+            {referenceDocuments.map((doc) => (
+              <Box key={doc.id}>
+                <Group gap="xs" wrap="nowrap" align="center">
+                  <Box style={{ flex: 1, minWidth: 0 }}>
+                    {doc.file_url ? (
+                      <Anchor
+                        href={doc.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        size="sm"
+                        fw={500}
+                      >
+                        {doc.title}
+                      </Anchor>
+                    ) : (
+                      <Text size="sm" fw={500}>
+                        {doc.title}
+                      </Text>
+                    )}
+                  </Box>
+                  <Badge color="gray" variant="light" size="sm">
+                    {doc.category_display}
+                  </Badge>
+                  <Badge color="blue" variant="light" size="sm">
+                    rev {doc.version}
+                  </Badge>
+                </Group>
+                {doc.revisions.length > 0 && (
+                  <Box mt={4}>
+                    <UnstyledButton
+                      onClick={() =>
+                        setOpenRevisions((prev) => ({ ...prev, [doc.id]: !prev[doc.id] }))
+                      }
+                    >
+                      <Text size="xs" c="dimmed" td="underline">
+                        {openRevisions[doc.id]
+                          ? 'Hide revision history'
+                          : `Revision history (${doc.revisions.length})`}
+                      </Text>
+                    </UnstyledButton>
+                    {openRevisions[doc.id] && (
+                      <Stack gap={2} mt={4} pl="sm">
+                        {doc.revisions.map((rev) => (
+                          <Text key={rev.id} size="xs" c="dimmed">
+                            rev {rev.version}
+                            {rev.uploaded_at
+                              ? ` · ${new Date(rev.uploaded_at).toLocaleDateString()}`
+                              : ''}
+                            {rev.file_url && (
+                              <>
+                                {' · '}
+                                <Anchor
+                                  href={rev.file_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  size="xs"
+                                >
+                                  Open
+                                </Anchor>
+                              </>
+                            )}
+                          </Text>
+                        ))}
+                      </Stack>
+                    )}
+                  </Box>
+                )}
+              </Box>
+            ))}
+            {referenceLinks.length > 0 && (
+              <Stack gap={2}>
+                {referenceLinks.map((link) => (
+                  <Anchor
+                    key={link.label}
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    size="sm"
+                  >
+                    {link.label}
+                  </Anchor>
+                ))}
+              </Stack>
+            )}
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">
+            No linked documents.
+          </Text>
         )}
       </Card>
 

@@ -920,6 +920,45 @@ def generate_work_order_pdf(
 
     story.append(HRFlowable(width="100%", thickness=1, color=colors.black))
 
+    # ── Documentation & references ────────────────────────────────────────────
+    # Printed immediately above the sign-off block: whoever performs and signs
+    # the job should be able to reach the manual — and know which revision is
+    # current — without hunting for it. Text only (it's paper), sourced from the
+    # same builder the digital work order reads so the two cannot drift.
+    # Reference only: no AcroCheckbox, so the OMR target ids are untouched.
+    from inventory.services.work_order_context import build_reference_documents_context
+
+    references = build_reference_documents_context(asset, base_url=base_url)
+    story.append(Paragraph("Documentation &amp; References", subheading_style))
+    if references["documents"] or references["links"]:
+        # NB: not ``doc`` — that name is the SimpleDocTemplate being built.
+        for reference in references["documents"]:
+            # Titles are operator-entered and land in a reportlab Paragraph,
+            # which parses a mini-XML dialect — escape via ``html.escape``, not
+            # ``xml.sax.saxutils.escape`` (bandit B406).
+            line = (
+                f"<b>{escape(reference['title'], quote=False)}</b> — "
+                f"{escape(reference['category_display'], quote=False)} "
+                f"(rev {reference['version']})"
+            )
+            if reference["revisions"]:
+                prior = ", ".join(f"rev {rev['version']}" for rev in reference["revisions"])
+                line += f" <font color='#666666'>(supersedes {prior})</font>"
+            story.append(Paragraph(line, small_style))
+            if reference["file_url"]:
+                story.append(Paragraph(escape(reference["file_url"], quote=False), small_style))
+        for link in references["links"]:
+            story.append(
+                Paragraph(
+                    f"<b>{escape(link['label'], quote=False)}:</b> "
+                    f"{escape(link['url'], quote=False)}",
+                    small_style,
+                )
+            )
+    else:
+        story.append(Paragraph("No linked documents.", small_style))
+    story.append(Spacer(1, 6))
+
     # ── Sign-off section ──────────────────────────────────────────────────────
     story.append(Paragraph("Work Order Sign-Off", subheading_style))
 

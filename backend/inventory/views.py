@@ -4002,6 +4002,11 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             # op-o6rs: feed the pending-review badge (pending_review_count) from
             # a single prefetch instead of a per-row submissions query (N+1).
             "submissions",
+            # op-pzae: feed WorkOrderSerializer.reference_documents. One query
+            # for the asset's whole document library — the revision chains are
+            # then walked in Python off this cache, so a deep supersedes chain
+            # costs nothing extra.
+            "maintenance_item__asset__documents",
         )
         .all()
     )

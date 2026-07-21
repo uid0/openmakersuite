@@ -28,6 +28,10 @@ the digital view shows the empty-state messages required by AC-1 / AC-2):
             "is_empty":              bool          # True iff is_required False
         },
         "tools": list[ToolDict]                    # required-first, then name
+        "reference_documents": {                   # asset doc library + quick links
+            "documents": list[DocumentDict],
+            "links":     list[{"label", "url"}],
+        }
     }
 """
 
@@ -37,6 +41,11 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from inventory.models import Asset, MaintenanceItem, MaintenanceTool, WorkOrder
+
+# A ``supersedes`` chain is linear in practice (each upload points at the one
+# version it replaced), but the FK is unconstrained — cap the walk so bad data
+# can never spin the renderer.
+MAX_REVISION_DEPTH = 20
 
 
 def _build_electrical_rows(asset: "Asset") -> list[list[str]]:
@@ -239,6 +248,141 @@ def build_electrical_context(asset: "Asset") -> dict[str, Any]:
     }
 
 
+def _absolute_url(url: str, request=None, base_url: str = "") -> str:
+    """Absolutize a media URL for whichever surface is rendering.
+
+    The API has a request to build against (mirroring
+    ``WorkOrderPhotoSerializer.image_url``); the printed form only knows the
+    deployment's ``base_url``. Storage backends that already hand back an
+    absolute URL (S3 and friends) are left alone by both paths —
+    ``build_absolute_uri`` returns a fully-qualified location unchanged.
+    """
+    if not url:
+        return ""
+    if request is not None:
+        return request.build_absolute_uri(url)
+    if base_url and url.startswith("/"):
+        return f"{base_url.rstrip('/')}{url}"
+    return url
+
+
+def _file_url(field_file, request=None, base_url: str = "") -> str | None:
+    """Absolute URL for a FileField, or None when there is no usable file.
+
+    A row can outlive its file (storage pruned, bad import); ``.url`` raises
+    for those, and neither the work-order page nor the printed form should
+    500 over a missing manual.
+    """
+    if not field_file:
+        return None
+    try:
+        url = field_file.url
+    except (ValueError, NotImplementedError):  # pragma: no cover — storage-dependent
+        return None
+    return _absolute_url(url, request=request, base_url=base_url) or None
+
+
+def _revision_chain(document, by_id: dict) -> list:
+    """Older versions behind ``document``, newest-first.
+
+    Walks ``supersedes`` through ``by_id`` — a map of the asset's documents
+    that the caller built from one prefetched queryset — so a chain of any
+    length still costs zero extra queries. A link that points outside the
+    asset (only reachable by editing around ``AssetDocumentSerializer``'s
+    same-asset check) ends the walk rather than firing a lazy fetch.
+    """
+    revisions: list = []
+    seen = {document.id}
+    prior_id = document.supersedes_id
+    while prior_id and len(revisions) < MAX_REVISION_DEPTH:
+        prior = by_id.get(prior_id)
+        if prior is None or prior.id in seen:
+            break
+        seen.add(prior.id)
+        revisions.append(prior)
+        prior_id = prior.supersedes_id
+    return revisions
+
+
+def _asset_links(asset: "Asset", *, request=None, base_url: str = "") -> list[dict[str, str]]:
+    """The asset's quick links that are actually set (blank ones are omitted)."""
+    links: list[dict[str, str]] = []
+
+    manual_url = _file_url(asset.manual_pdf, request=request, base_url=base_url)
+    if manual_url:
+        links.append({"label": "Manual (PDF)", "url": manual_url})
+    if asset.product_url:
+        links.append({"label": "Product / documentation page", "url": asset.product_url})
+    if asset.wiki_page_url:
+        links.append({"label": "Wiki", "url": asset.wiki_page_url})
+
+    return links
+
+
+def build_reference_documents_context(
+    asset: "Asset",
+    *,
+    request=None,
+    base_url: str = "",
+) -> dict[str, Any]:
+    """Docs a tech can reach while performing/signing the work order.
+
+    Reuses the per-asset document library (``AssetDocument``) rather than
+    inventing work-order link fields: "revision history" is that model's
+    ``supersedes`` chain, so uploading a new manual keeps the old one reachable
+    without anybody re-attaching it. Only ``is_current`` documents head the
+    list; superseded ones appear as each document's ``revisions``.
+
+    Keys are a pinned contract — ScanTTY decodes this payload — so do not
+    rename them. Reads ``asset.documents.all()`` unfiltered/unordered so the
+    ``maintenance_item__asset__documents`` prefetch is used instead of a query
+    per work order.
+    """
+    from inventory.models import AssetDocument
+
+    documents = list(asset.documents.all())
+    by_id = {doc.id: doc for doc in documents}
+
+    def sort_key(doc) -> tuple:
+        # The manual is what someone reaches for first; everything else falls
+        # back to a stable category/title order.
+        return (
+            doc.category != AssetDocument.Category.MANUAL,
+            doc.category or "",
+            doc.title.casefold(),
+            doc.title,
+        )
+
+    current = sorted((doc for doc in documents if doc.is_current), key=sort_key)
+
+    return {
+        "documents": [
+            {
+                "id": str(doc.id),
+                "category": doc.category,
+                "category_display": doc.get_category_display(),
+                "title": doc.title,
+                "version": doc.version,
+                "file_url": _file_url(doc.file, request=request, base_url=base_url),
+                "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
+                "revisions": [
+                    {
+                        "id": str(prior.id),
+                        "version": prior.version,
+                        "file_url": _file_url(prior.file, request=request, base_url=base_url),
+                        "uploaded_at": (
+                            prior.uploaded_at.isoformat() if prior.uploaded_at else None
+                        ),
+                    }
+                    for prior in _revision_chain(doc, by_id)
+                ],
+            }
+            for doc in current
+        ],
+        "links": _asset_links(asset, request=request, base_url=base_url),
+    }
+
+
 def build_work_order_context(work_order: "WorkOrder") -> dict[str, Any]:
     """Single source of truth for digital + PDF feature parity."""
     asset = work_order.maintenance_item.asset
@@ -246,4 +390,5 @@ def build_work_order_context(work_order: "WorkOrder") -> dict[str, Any]:
         "electrical": build_electrical_context(asset),
         "loto": build_loto_context(asset),
         "tools": build_tools_context(work_order.maintenance_item),
+        "reference_documents": build_reference_documents_context(asset),
     }

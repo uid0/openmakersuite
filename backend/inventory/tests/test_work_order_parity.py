@@ -486,7 +486,7 @@ def test_pdf_and_serializer_share_the_same_context_builder():
     wo = _build_wo(asset=asset)
 
     ctx = build_work_order_context(wo)
-    assert set(ctx.keys()) == {"electrical", "loto", "tools"}
+    assert set(ctx.keys()) == {"electrical", "loto", "tools", "reference_documents"}
 
     # Re-derive the PDF row set through its public helper and confirm every
     # asset-level row from the shared electrical context appears.

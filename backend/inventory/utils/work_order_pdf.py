@@ -509,7 +509,10 @@ def generate_work_order_pdf(
             qr_image,
         ],
         [
-            Paragraph(work_order.display_title, subheading_style),
+            # Operator-entered (a PM title, an asset name, or a problem
+            # description) and headed for a reportlab Paragraph, which parses a
+            # mini-XML dialect — escape it like every other such string here.
+            Paragraph(escape(work_order.display_title, quote=False), subheading_style),
             Paragraph(
                 "<font size='7' color='#666666'>Scan to open digital version</font>",
                 small_style,

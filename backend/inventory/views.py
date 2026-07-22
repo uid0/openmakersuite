@@ -5989,9 +5989,9 @@ class AssetReportViewSet(viewsets.ViewSet):
                 }
             )
 
-        # Consumable usage: materials marked used on a completed PM work order.
-        # Reuse tco's asset -> maintenance_items -> work_orders -> material_usage
-        # prefetch traversal to avoid N+1.
+        # Consumable usage: materials marked used on a completed internal work
+        # order, preventive or corrective. Same prefetch traversal tco uses, so
+        # this stays a fixed number of queries.
         assets = prefetch_asset_work_orders(
             Asset.objects.all(),
             WorkOrder.objects.prefetch_related("material_usage__material"),

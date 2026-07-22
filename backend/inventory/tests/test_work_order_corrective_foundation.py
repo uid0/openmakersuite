@@ -12,12 +12,12 @@ silently omitted the row, so these tests are the regression net for the whole
 refactor. The preventive path is asserted alongside where the two must agree.
 """
 
-from datetime import date, timedelta
+import importlib
+from datetime import timedelta
 from decimal import Decimal
 
+from django.apps import apps
 from django.contrib.auth import get_user_model
-from django.db import connection
-from django.db.migrations.executor import MigrationExecutor
 from django.utils import timezone
 
 import pytest
@@ -443,36 +443,48 @@ class TestReports:
 # ─────────────────────────────────────────────────────────────────────────────
 # Data migration
 # ─────────────────────────────────────────────────────────────────────────────
-START = [("inventory", "0098_drop_assetproblem_orphan_columns")]
-END = [("inventory", "0099_work_order_nullable_item_direct_asset")]
+class TestMigrationBackfill:
+    """The 0099 backfill, run against the live registry.
 
+    Deliberately *not* driven through ``MigrationExecutor``: rewinding the graph
+    needs ``transaction=True``, and that marker's post-test flush deletes
+    migration-seeded rows (the accounting chart of accounts) for every test that
+    runs after it in the same session. The backfill query is the part worth
+    testing, and calling it directly exercises exactly that.
+    """
 
-def _migrate(targets):
-    executor = MigrationExecutor(connection)
-    executor.migrate(targets)
-    executor.loader.build_graph()
-    return executor
+    @staticmethod
+    def _backfill():
+        migration = importlib.import_module(
+            "inventory.migrations.0099_work_order_nullable_item_direct_asset"
+        )
+        migration.backfill_work_order_asset(apps, None)
 
+    def test_a_pre_migration_row_ends_up_on_its_templates_asset(self):
+        wo = _preventive_wo()
+        expected_asset_id = wo.asset_id
+        # The pre-migration state: the column exists but was never populated.
+        WorkOrder.objects.filter(pk=wo.pk).update(asset=None)
 
-@pytest.mark.django_db(transaction=True)
-def test_migration_backfills_asset_from_the_template():
-    """Rows written before the FK existed must come out pointing at their asset."""
-    executor = _migrate(START)
-    old_apps = executor.loader.project_state(START).apps
-    try:
-        Asset = old_apps.get_model("inventory", "Asset")
-        MaintenanceItemModel = old_apps.get_model("inventory", "MaintenanceItem")
-        WorkOrderModel = old_apps.get_model("inventory", "WorkOrder")
+        self._backfill()
 
-        asset = Asset.objects.create(name="Legacy Mill", status="active")
-        item = MaintenanceItemModel.objects.create(asset=asset, title="Legacy PM", interval_days=30)
-        wo = WorkOrderModel.objects.create(maintenance_item=item, due_date=date.today())
+        assert WorkOrder.objects.get(pk=wo.pk).asset_id == expected_asset_id
 
-        _migrate(END)
+    def test_an_already_populated_row_is_left_alone(self):
+        """Idempotent: re-running must not reassign a work order's asset."""
+        other_asset = AssetFactory()
+        wo = _preventive_wo()
+        WorkOrder.objects.filter(pk=wo.pk).update(asset=other_asset)
 
-        migrated = WorkOrder.objects.get(pk=wo.pk)
-        assert migrated.asset_id == asset.id
-        assert migrated.maintenance_item_id == item.id
-    finally:
-        # Always leave the graph at HEAD, even if an assertion above blew up.
-        _migrate(END)
+        self._backfill()
+
+        assert WorkOrder.objects.get(pk=wo.pk).asset_id == other_asset.id
+
+    def test_a_template_less_row_is_skipped(self):
+        """Nothing to derive from — and no crash trying."""
+        wo = _corrective_wo()
+        WorkOrder.objects.filter(pk=wo.pk).update(asset=None)
+
+        self._backfill()
+
+        assert WorkOrder.objects.get(pk=wo.pk).asset_id is None

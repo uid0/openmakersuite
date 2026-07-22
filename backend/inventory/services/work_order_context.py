@@ -170,28 +170,37 @@ def build_loto_context(asset: "Asset") -> dict[str, Any]:
     }
 
 
-def sorted_maintenance_tools(maintenance_item: "MaintenanceItem") -> list["MaintenanceTool"]:
+def sorted_maintenance_tools(
+    maintenance_item: "MaintenanceItem | None",
+) -> list["MaintenanceTool"]:
     """A PM template's tools in display order: required first, then by name.
 
     Sorted in Python off ``.all()`` so a ``tools`` prefetch is used rather than
     a query per work order — an ``order_by()`` here would bypass that cache.
     Case-folded so ``Wrench`` and ``wrench`` sort together (a DB collation would
     do the same); the raw name breaks ties so the order is total.
+
+    Corrective work has no template, hence no tool list — ``None`` yields ``[]``.
     """
+    if maintenance_item is None:
+        return []
     return sorted(
         maintenance_item.tools.all(),
         key=lambda tool: (not tool.is_required, tool.name.casefold(), tool.name),
     )
 
 
-def build_tools_context(maintenance_item: "MaintenanceItem") -> list[dict[str, Any]]:
+def build_tools_context(maintenance_item: "MaintenanceItem | None") -> list[dict[str, Any]]:
     """The tool list both the WO detail page and the printed form render.
 
     Keys are a pinned contract — ScanTTY decodes this payload for the e-paper
     work order, so do not rename them. Only the primary maintenance item's
     tools: work orders that bundle ``additional_maintenance_items`` keep the
-    up-front list short and unambiguous.
+    up-front list short and unambiguous. Empty for a template-less (corrective)
+    work order.
     """
+    if maintenance_item is None:
+        return []
     return [
         {
             "id": str(tool.id),
@@ -385,7 +394,7 @@ def build_reference_documents_context(
 
 def build_work_order_context(work_order: "WorkOrder") -> dict[str, Any]:
     """Single source of truth for digital + PDF feature parity."""
-    asset = work_order.maintenance_item.asset
+    asset = work_order.asset
     return {
         "electrical": build_electrical_context(asset),
         "loto": build_loto_context(asset),

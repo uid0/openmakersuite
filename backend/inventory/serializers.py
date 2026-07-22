@@ -2345,15 +2345,17 @@ def _pending_review_count(work_order) -> int:
 class WorkOrderSerializer(serializers.ModelSerializer):
     """Full serializer for a work order, including nested completions and photos."""
 
-    maintenance_item_title = serializers.CharField(source="maintenance_item.title", read_only=True)
-    asset_name = serializers.CharField(source="maintenance_item.asset.name", read_only=True)
-    asset_tag = serializers.CharField(source="maintenance_item.asset.asset_tag", read_only=True)
-    asset_id = serializers.UUIDField(source="maintenance_item.asset.id", read_only=True)
+    # Asset fields read the work order's own FK, not the PM template's: a
+    # corrective work order has no template and would otherwise lose its asset.
+    maintenance_item_title = serializers.SerializerMethodField()
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    asset_tag = serializers.CharField(source="asset.asset_tag", read_only=True)
+    asset_id = serializers.UUIDField(source="asset.id", read_only=True)
     # The template's guess, carried alongside the stopwatch so the UI (and the
     # printed sign-off) can put actual next to estimate without a second fetch.
-    estimated_time_minutes = serializers.IntegerField(
-        source="maintenance_item.estimated_time_minutes", read_only=True
-    )
+    # Null for corrective work: nothing estimated it.
+    estimated_time_minutes = serializers.SerializerMethodField()
+    display_title = serializers.ReadOnlyField()
     assigned_to_name = serializers.SerializerMethodField()
     short_id = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
@@ -2378,6 +2380,8 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "short_id",
             "maintenance_item",
             "maintenance_item_title",
+            "display_title",
+            "asset",
             "asset_name",
             "asset_tag",
             "asset_id",
@@ -2411,6 +2415,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "short_id",
+            "display_title",
             "is_overdue",
             "created_at",
             "updated_at",
@@ -2430,6 +2435,33 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "validation",
             "reference_documents",
         ]
+
+    def validate(self, attrs):
+        """A work order is always *for* something — a PM template or an asset.
+
+        ``maintenance_item`` became nullable so corrective work orders can
+        exist; without this a POST that names neither would quietly create a
+        work order attached to nothing, which nothing downstream can render.
+        """
+        if self.instance is None:
+            item = attrs.get("maintenance_item")
+            asset = attrs.get("asset")
+            if item is None and asset is None:
+                raise serializers.ValidationError(
+                    "Provide either a maintenance_item (preventive) or an asset (corrective)."
+                )
+        return attrs
+
+    def get_maintenance_item_title(self, obj):
+        """The PM template's title, or None for corrective work.
+
+        Not ``display_title``: this key means "which template", and a caller
+        distinguishing preventive from corrective work reads it as such.
+        """
+        return obj.maintenance_item.title if obj.maintenance_item_id else None
+
+    def get_estimated_time_minutes(self, obj):
+        return obj.maintenance_item.estimated_time_minutes if obj.maintenance_item_id else None
 
     def get_pending_review_count(self, obj):
         return _pending_review_count(obj)
@@ -2471,12 +2503,12 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     def get_electrical(self, obj):
         from .services.work_order_context import build_electrical_context
 
-        return build_electrical_context(obj.maintenance_item.asset)
+        return build_electrical_context(obj.asset)
 
     def get_loto(self, obj):
         from .services.work_order_context import build_loto_context
 
-        return build_loto_context(obj.maintenance_item.asset)
+        return build_loto_context(obj.asset)
 
     def get_validation(self, obj):
         latest = obj.validations.order_by("-validated_at").first()
@@ -2494,7 +2526,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         from .services.work_order_context import build_reference_documents_context
 
         return build_reference_documents_context(
-            obj.maintenance_item.asset,
+            obj.asset,
             request=self.context.get("request"),
         )
 
@@ -2502,10 +2534,11 @@ class WorkOrderSerializer(serializers.ModelSerializer):
 class WorkOrderListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for work order list views."""
 
-    maintenance_item_title = serializers.CharField(source="maintenance_item.title", read_only=True)
-    asset_name = serializers.CharField(source="maintenance_item.asset.name", read_only=True)
-    asset_tag = serializers.CharField(source="maintenance_item.asset.asset_tag", read_only=True)
-    asset_id = serializers.UUIDField(source="maintenance_item.asset.id", read_only=True)
+    maintenance_item_title = serializers.SerializerMethodField()
+    asset_name = serializers.CharField(source="asset.name", read_only=True)
+    asset_tag = serializers.CharField(source="asset.asset_tag", read_only=True)
+    asset_id = serializers.UUIDField(source="asset.id", read_only=True)
+    display_title = serializers.ReadOnlyField()
     short_id = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
     task_completion_count = serializers.SerializerMethodField()
@@ -2520,6 +2553,8 @@ class WorkOrderListSerializer(serializers.ModelSerializer):
             "short_id",
             "maintenance_item",
             "maintenance_item_title",
+            "display_title",
+            "asset",
             "asset_name",
             "asset_tag",
             "asset_id",
@@ -2535,6 +2570,9 @@ class WorkOrderListSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_maintenance_item_title(self, obj):
+        return obj.maintenance_item.title if obj.maintenance_item_id else None
 
     def get_task_completion_count(self, obj):
         return obj.task_completions.filter(is_completed=True).count()

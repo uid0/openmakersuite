@@ -3039,6 +3039,7 @@ class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
         with transaction.atomic():
             wo = WorkOrder.objects.create(
                 maintenance_item=mi,
+                asset=mi.asset,
                 notes=problem.description,
                 assigned_to=request.user if request.user.is_authenticated else None,
             )
@@ -3983,6 +3984,11 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             "maintenance_item__asset__location",
             "maintenance_item__asset__manufacturer",
             "maintenance_item__asset__category",
+            # The work order's own asset — the one every serializer field and
+            # context builder reads, and the only one a corrective WO has.
+            "asset__location",
+            "asset__manufacturer",
+            "asset__category",
             "assigned_to",
         )
         .prefetch_related(
@@ -4007,6 +4013,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             # then walked in Python off this cache, so a deep supersedes chain
             # costs nothing extra.
             "maintenance_item__asset__documents",
+            "asset__documents",
         )
         .all()
     )
@@ -4028,7 +4035,10 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(maintenance_item_id=maintenance_item)
         asset = self.request.query_params.get("asset")
         if asset:
-            queryset = queryset.filter(maintenance_item__asset_id=asset)
+            # Both sides of the union: a bare ``maintenance_item__asset_id=``
+            # is an INNER JOIN through the (now nullable) template, which would
+            # silently drop every corrective work order on this asset.
+            queryset = queryset.filter(Q(maintenance_item__asset_id=asset) | Q(asset_id=asset))
         wo_status = self.request.query_params.get("status")
         if wo_status:
             queryset = queryset.filter(status=wo_status)
@@ -4281,7 +4291,10 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             actor=self.request.user,
             work_order=work_order,
             metadata={
-                "maintenance_item_id": str(work_order.maintenance_item_id),
+                "maintenance_item_id": (
+                    str(work_order.maintenance_item_id) if work_order.maintenance_item_id else None
+                ),
+                "asset_id": str(work_order.asset_id) if work_order.asset_id else None,
                 "due_date": work_order.due_date.isoformat() if work_order.due_date else None,
             },
         )
@@ -5205,6 +5218,7 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
             )
             wo = WorkOrder.objects.create(
                 maintenance_item=item,
+                asset=item.asset,
                 due_date=due_date,
                 notes=request.data.get("notes", ""),
             )
@@ -5269,6 +5283,7 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                 due_date = next_due.date() if next_due else now.date()
                 wo = WorkOrder.objects.create(
                     maintenance_item=item,
+                    asset=item.asset,
                     due_date=due_date,
                 )
                 for task in item.tasks.order_by("order", "title"):
@@ -5313,7 +5328,10 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
         filter on completed_at; the by_asset rollup uses the trailing 90 days
         and reports days_in_maintenance_90d the same way TCO does.
         """
-        from django.db.models import Prefetch
+        from .services.work_order_reports import (
+            iter_asset_work_orders,
+            prefetch_asset_work_orders,
+        )
 
         now = timezone.now()
         today = now.date()
@@ -5362,21 +5380,26 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
             WorkOrder.Status.IN_PROGRESS,
             WorkOrder.Status.BLOCKED,
         ]
+        # "Unscheduled" = open work that isn't on a recurring interval: a
+        # one-off PM (template with no ``interval_days``) or a corrective work
+        # order, which has no template at all. The template-less arm is spelled
+        # out rather than left to join promotion — this must not depend on how
+        # the ORM chooses to join a nullable FK.
         unscheduled_qs = (
-            WorkOrder.objects.filter(
-                status__in=open_statuses,
-                maintenance_item__interval_days__isnull=True,
+            WorkOrder.objects.filter(status__in=open_statuses)
+            .filter(
+                Q(maintenance_item__isnull=True) | Q(maintenance_item__interval_days__isnull=True)
             )
-            .select_related("maintenance_item__asset")
+            .select_related("maintenance_item", "asset")
             .order_by("created_at")
         )
         unscheduled = [
             {
                 "workorder_id": str(wo.id),
                 "short_id": wo.short_id,
-                "asset_id": str(wo.maintenance_item.asset_id),
-                "asset_name": wo.maintenance_item.asset.name,
-                "problem": wo.maintenance_item.title,
+                "asset_id": str(wo.asset_id) if wo.asset_id else None,
+                "asset_name": wo.asset.name if wo.asset_id else "",
+                "problem": wo.display_title,
                 "opened_at": wo.created_at.isoformat(),
                 "status": wo.status,
             }
@@ -5403,7 +5426,9 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
 
         for wo in completed_qs:
             mi = wo.maintenance_item
-            if mi.interval_days is not None:
+            # No template means no estimate to draw on: cost such a work order
+            # from the materials actually used, same as a one-off PM.
+            if mi is not None and mi.interval_days is not None:
                 cost = mi.estimated_cost or Decimal("0.00")
             else:
                 cost = Decimal("0.00")
@@ -5418,41 +5443,37 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
                 if completed_date >= start:
                     per_period[key] += cost
 
-        assets = Asset.objects.all().prefetch_related(
-            Prefetch(
-                "maintenance_items__work_orders",
-                queryset=WorkOrder.objects.prefetch_related("material_usage__material"),
-            )
+        assets = prefetch_asset_work_orders(
+            Asset.objects.all(),
+            WorkOrder.objects.prefetch_related("material_usage__material"),
         )
         by_asset = []
         for asset in assets:
             days_set: set = set()
             total_cost = Decimal("0.00")
-            for mi in asset.maintenance_items.all():
-                for wo in mi.work_orders.all():
-                    wo_start = wo.created_at.date()
-                    wo_end = wo.completed_at.date() if wo.completed_at else today
-                    span_start = max(wo_start, window_start_date)
-                    span_end = min(wo_end, today)
-                    if span_start <= span_end:
-                        d = span_start
-                        while d <= span_end:
-                            days_set.add(d)
-                            d += timedelta(days=1)
-                    if (
-                        wo.status == WorkOrder.Status.COMPLETED
-                        and wo.completed_at is not None
-                        and window_start_date <= wo.completed_at.date() <= today
-                    ):
-                        if mi.interval_days is not None:
-                            total_cost += mi.estimated_cost or Decimal("0.00")
-                        else:
-                            for usage in wo.material_usage.all():
-                                if usage.was_used and usage.material is not None:
-                                    total_cost += (
-                                        usage.quantity_planned
-                                        * usage.material.estimated_cost_per_unit
-                                    )
+            for wo, mi in iter_asset_work_orders(asset):
+                wo_start = wo.created_at.date()
+                wo_end = wo.completed_at.date() if wo.completed_at else today
+                span_start = max(wo_start, window_start_date)
+                span_end = min(wo_end, today)
+                if span_start <= span_end:
+                    d = span_start
+                    while d <= span_end:
+                        days_set.add(d)
+                        d += timedelta(days=1)
+                if (
+                    wo.status == WorkOrder.Status.COMPLETED
+                    and wo.completed_at is not None
+                    and window_start_date <= wo.completed_at.date() <= today
+                ):
+                    if mi is not None and mi.interval_days is not None:
+                        total_cost += mi.estimated_cost or Decimal("0.00")
+                    else:
+                        for usage in wo.material_usage.all():
+                            if usage.was_used and usage.material is not None:
+                                total_cost += (
+                                    usage.quantity_planned * usage.material.estimated_cost_per_unit
+                                )
             if asset.status == Asset.Status.MAINTENANCE:
                 days_set.add(today)
             if not days_set and total_cost == 0:
@@ -5508,7 +5529,7 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
 
         for wo in (
             WorkOrder.objects.filter(status__in=open_wo_statuses)
-            .select_related("maintenance_item__asset")
+            .select_related("maintenance_item", "asset")
             .order_by("-created_at")
         ):
             rows.append(
@@ -5516,11 +5537,11 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
                     "kind": "work_order",
                     "id": str(wo.id),
                     "short_id": wo.short_id,
-                    "title": wo.maintenance_item.title,
+                    "title": wo.display_title,
                     "status": wo.status,
                     "status_display": wo.get_status_display(),
-                    "asset_id": str(wo.maintenance_item.asset_id),
-                    "asset_name": wo.maintenance_item.asset.name,
+                    "asset_id": str(wo.asset_id) if wo.asset_id else None,
+                    "asset_name": wo.asset.name if wo.asset_id else "",
                     "location_id": None,
                     "location_name": None,
                     "severity": None,
@@ -5788,6 +5809,10 @@ class AssetReportViewSet(viewsets.ViewSet):
         from maintenance_orders.models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAsset
 
         from .serializers import AssetTcoReportSerializer
+        from .services.work_order_reports import (
+            iter_asset_work_orders,
+            prefetch_asset_work_orders,
+        )
 
         today = timezone.now().date()
         window_start = today - timedelta(days=90)
@@ -5798,11 +5823,10 @@ class AssetReportViewSet(viewsets.ViewSet):
             work_order__closed_at__date__lte=today,
         )
 
-        assets = Asset.objects.all().prefetch_related(
-            Prefetch(
-                "maintenance_items__work_orders",
-                queryset=WorkOrder.objects.prefetch_related("material_usage__material"),
-            ),
+        assets = prefetch_asset_work_orders(
+            Asset.objects.all(),
+            WorkOrder.objects.prefetch_related("material_usage__material"),
+        ).prefetch_related(
             Prefetch(
                 "third_party_work_order_links",
                 queryset=vendor_link_qs,
@@ -5816,32 +5840,32 @@ class AssetReportViewSet(viewsets.ViewSet):
             scheduled = Decimal("0.00")
             unscheduled = Decimal("0.00")
 
-            for mi in asset.maintenance_items.all():
-                for wo in mi.work_orders.all():
-                    wo_start = wo.created_at.date()
-                    wo_end = wo.completed_at.date() if wo.completed_at else today
-                    span_start = max(wo_start, window_start)
-                    span_end = min(wo_end, today)
-                    if span_start <= span_end:
-                        d = span_start
-                        while d <= span_end:
-                            days_set.add(d)
-                            d += timedelta(days=1)
+            for wo, mi in iter_asset_work_orders(asset):
+                wo_start = wo.created_at.date()
+                wo_end = wo.completed_at.date() if wo.completed_at else today
+                span_start = max(wo_start, window_start)
+                span_end = min(wo_end, today)
+                if span_start <= span_end:
+                    d = span_start
+                    while d <= span_end:
+                        days_set.add(d)
+                        d += timedelta(days=1)
 
-                    if (
-                        wo.status == WorkOrder.Status.COMPLETED
-                        and wo.completed_at is not None
-                        and window_start <= wo.completed_at.date() <= today
-                    ):
-                        if mi.interval_days is not None:
-                            scheduled += mi.estimated_cost or Decimal("0.00")
-                        else:
-                            for usage in wo.material_usage.all():
-                                if usage.was_used and usage.material is not None:
-                                    unscheduled += (
-                                        usage.quantity_planned
-                                        * usage.material.estimated_cost_per_unit
-                                    )
+                if (
+                    wo.status == WorkOrder.Status.COMPLETED
+                    and wo.completed_at is not None
+                    and window_start <= wo.completed_at.date() <= today
+                ):
+                    # Corrective work has no template estimate, so it costs
+                    # like a one-off PM: the materials it actually consumed.
+                    if mi is not None and mi.interval_days is not None:
+                        scheduled += mi.estimated_cost or Decimal("0.00")
+                    else:
+                        for usage in wo.material_usage.all():
+                            if usage.was_used and usage.material is not None:
+                                unscheduled += (
+                                    usage.quantity_planned * usage.material.estimated_cost_per_unit
+                                )
 
             vendor = Decimal("0.00")
             for link in getattr(asset, "_tco_vendor_links", []):
@@ -5929,7 +5953,10 @@ class AssetReportViewSet(viewsets.ViewSet):
         Query params ``start_date``/``end_date`` (``YYYY-MM-DD``) default to the
         last 30 days. Rows are sorted by ``asset_name`` then ``used_at``.
         """
-        from django.db.models import Prefetch
+        from .services.work_order_reports import (
+            iter_asset_work_orders,
+            prefetch_asset_work_orders,
+        )
 
         start_date, end_date = self._supplies_window(request)
 
@@ -5965,43 +5992,40 @@ class AssetReportViewSet(viewsets.ViewSet):
         # Consumable usage: materials marked used on a completed PM work order.
         # Reuse tco's asset -> maintenance_items -> work_orders -> material_usage
         # prefetch traversal to avoid N+1.
-        assets = Asset.objects.all().prefetch_related(
-            Prefetch(
-                "maintenance_items__work_orders",
-                queryset=WorkOrder.objects.prefetch_related("material_usage__material"),
-            ),
+        assets = prefetch_asset_work_orders(
+            Asset.objects.all(),
+            WorkOrder.objects.prefetch_related("material_usage__material"),
         )
         for asset in assets:
-            for mi in asset.maintenance_items.all():
-                for wo in mi.work_orders.all():
-                    if wo.status != WorkOrder.Status.COMPLETED or wo.completed_at is None:
+            for wo, _mi in iter_asset_work_orders(asset):
+                if wo.status != WorkOrder.Status.COMPLETED or wo.completed_at is None:
+                    continue
+                completed_date = wo.completed_at.date()
+                if not (start_date <= completed_date <= end_date):
+                    continue
+                for usage in wo.material_usage.all():
+                    if not usage.was_used:
                         continue
-                    completed_date = wo.completed_at.date()
-                    if not (start_date <= completed_date <= end_date):
-                        continue
-                    for usage in wo.material_usage.all():
-                        if not usage.was_used:
-                            continue
-                        estimated_cost = None
-                        if usage.material is not None:
-                            estimated_cost = str(
-                                (
-                                    usage.quantity_planned * usage.material.estimated_cost_per_unit
-                                ).quantize(Decimal("0.01"))
-                            )
-                        rows.append(
-                            {
-                                "asset_id": str(asset.id),
-                                "asset_name": asset.name,
-                                "source": "consumable",
-                                "item_name": usage.material_name,
-                                "quantity": str(usage.quantity_planned),
-                                "unit": usage.unit,
-                                "used_at": wo.completed_at,
-                                "work_order_id": str(wo.id),
-                                "estimated_cost": estimated_cost,
-                            }
+                    estimated_cost = None
+                    if usage.material is not None:
+                        estimated_cost = str(
+                            (
+                                usage.quantity_planned * usage.material.estimated_cost_per_unit
+                            ).quantize(Decimal("0.01"))
                         )
+                    rows.append(
+                        {
+                            "asset_id": str(asset.id),
+                            "asset_name": asset.name,
+                            "source": "consumable",
+                            "item_name": usage.material_name,
+                            "quantity": str(usage.quantity_planned),
+                            "unit": usage.unit,
+                            "used_at": wo.completed_at,
+                            "work_order_id": str(wo.id),
+                            "estimated_cost": estimated_cost,
+                        }
+                    )
 
         # Sort on the aware datetimes, then serialize used_at to ISO-8601.
         rows.sort(key=lambda r: (r["asset_name"], r["used_at"]))
@@ -6113,8 +6137,11 @@ class AssetReportViewSet(viewsets.ViewSet):
         one-off task contributes the sum of its used materials
         (``quantity_planned * material.estimated_cost_per_unit``). Internal PM
         has no actual-cost source, so this feeds the Estimated column only.
+
+        A corrective work order has no template to estimate from
+        (``maintenance_item is None``), so it costs like a one-off: materials.
         """
-        if maintenance_item.interval_days is not None:
+        if maintenance_item is not None and maintenance_item.interval_days is not None:
             return maintenance_item.estimated_cost or Decimal("0.00")
         total = Decimal("0.00")
         for usage in work_order.material_usage.all():
@@ -6216,6 +6243,10 @@ class AssetReportViewSet(viewsets.ViewSet):
         from maintenance_orders.models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAsset
 
         from .serializers import AssetCostRecoveryReportSerializer
+        from .services.work_order_reports import (
+            iter_asset_work_orders,
+            prefetch_asset_work_orders,
+        )
 
         asset_ids, category_ids = self._cost_recovery_selection(request)
         start_date, end_date, period_label = self._cost_recovery_window(request)
@@ -6254,10 +6285,11 @@ class AssetReportViewSet(viewsets.ViewSet):
         )
 
         assets = (
-            Asset.objects.filter(id__in=selected_ids)
-            .select_related("category")
+            prefetch_asset_work_orders(
+                Asset.objects.filter(id__in=selected_ids).select_related("category"),
+                pm_wo_qs,
+            )
             .prefetch_related(
-                Prefetch("maintenance_items__work_orders", queryset=pm_wo_qs),
                 Prefetch(
                     "third_party_work_order_links",
                     queryset=vendor_link_qs,
@@ -6275,18 +6307,18 @@ class AssetReportViewSet(viewsets.ViewSet):
 
         for asset in assets:
             services = []
-            # Internal PM — estimated only (no actual-cost source).
-            for mi in asset.maintenance_items.all():
-                for wo in mi.work_orders.all():
-                    services.append(
-                        {
-                            "date": wo.completed_at.date(),
-                            "source": "pm",
-                            "description": mi.title,
-                            "estimated_cost": self._pm_estimated_cost(mi, wo),
-                            "actual_cost": None,
-                        }
-                    )
+            # Internal work — estimated only (no actual-cost source). Covers
+            # both preventive (from a template) and corrective work orders.
+            for wo, mi in iter_asset_work_orders(asset):
+                services.append(
+                    {
+                        "date": wo.completed_at.date(),
+                        "source": "pm",
+                        "description": wo.display_title,
+                        "estimated_cost": self._pm_estimated_cost(mi, wo),
+                        "actual_cost": None,
+                    }
+                )
             # Vendor — actual = per-asset allocated_cost (the recoverable spend).
             for link in getattr(asset, "_cr_vendor_links", []):
                 wo = link.work_order

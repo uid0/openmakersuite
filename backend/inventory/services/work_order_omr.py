@@ -62,7 +62,10 @@ def dynamic_target_ids(work_order: "WorkOrder") -> list[str]:
     material_usage = list(work_order.material_usage.all())
     if material_usage:
         ids += [f"material_{mu.id}" for mu in material_usage]
-    else:
+    elif work_order.maintenance_item_id:
+        # Legacy fallback only: a work order with no usage rows borrows its PM
+        # template's material spec. Corrective work orders have no template,
+        # so they simply print no material boxes.
         ids += [f"materialspec_{mat.id}" for mat in work_order.maintenance_item.materials.all()]
 
     ids += [f"loto_{lc.id}" for lc in work_order.loto_completions.all()]

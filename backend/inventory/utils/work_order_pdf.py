@@ -489,8 +489,11 @@ def generate_work_order_pdf(
         fontName="Helvetica-Bold",
     )
 
+    # ``item`` is None for a corrective work order — every template-derived
+    # block below is guarded. The asset always exists, and comes off the work
+    # order directly rather than through the template.
     item = work_order.maintenance_item
-    asset = item.asset
+    asset = work_order.asset
 
     # ── Header row: title + QR code ──────────────────────────────────────────
     digital_url = f"{base_url}/maintenance/work-orders/{work_order.id}"
@@ -506,7 +509,7 @@ def generate_work_order_pdf(
             qr_image,
         ],
         [
-            Paragraph(item.title, subheading_style),
+            Paragraph(work_order.display_title, subheading_style),
             Paragraph(
                 "<font size='7' color='#666666'>Scan to open digital version</font>",
                 small_style,
@@ -798,19 +801,21 @@ def generate_work_order_pdf(
         story.append(Spacer(1, 8))
 
     # ── Task description ──────────────────────────────────────────────────────
-    if item.description:
+    if item and item.description:
         story.append(Paragraph("Task Description", subheading_style))
         story.append(Paragraph(item.description, normal_style))
         story.append(Spacer(1, 4))
 
     # ── Estimated time/cost ───────────────────────────────────────────────────
+    # All three come off the PM template; corrective work has no estimate.
     meta_parts = []
-    if item.estimated_time_minutes:
-        meta_parts.append(f"Est. Time: {item.estimated_time_minutes} min")
-    if item.estimated_cost:
-        meta_parts.append(f"Est. Cost: ${item.estimated_cost:.2f}")
-    if item.interval_days:
-        meta_parts.append(f"Interval: every {item.interval_days} days")
+    if item:
+        if item.estimated_time_minutes:
+            meta_parts.append(f"Est. Time: {item.estimated_time_minutes} min")
+        if item.estimated_cost:
+            meta_parts.append(f"Est. Cost: ${item.estimated_cost:.2f}")
+        if item.interval_days:
+            meta_parts.append(f"Interval: every {item.interval_days} days")
     if meta_parts:
         story.append(Paragraph("  |  ".join(meta_parts), small_style))
         story.append(Spacer(1, 4))
@@ -827,11 +832,13 @@ def generate_work_order_pdf(
             (f"material_{mu.id}", mu.material_name, mu.quantity_planned, mu.unit, "")
             for mu in material_usage_rows
         ]
-    else:
+    elif item:
         material_checklist = [
             (f"materialspec_{mat.id}", mat.name, mat.quantity, mat.unit, mat.notes or "")
             for mat in item.materials.all()
         ]
+    else:
+        material_checklist = []
 
     if material_checklist:
         story.append(Paragraph("Materials Required", subheading_style))
@@ -938,7 +945,7 @@ def generate_work_order_pdf(
         story.append(task_table)
         story.append(Paragraph("✱ = Required step", small_style))
         story.append(Spacer(1, 8))
-    elif item.instructions:
+    elif item and item.instructions:
         # Fall back to instructions text if no structured tasks
         story.append(Paragraph("Instructions", subheading_style))
         story.append(Paragraph(item.instructions, normal_style))

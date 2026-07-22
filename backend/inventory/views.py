@@ -5941,10 +5941,10 @@ class AssetReportViewSet(viewsets.ViewSet):
           windowed by the event timestamp ``at``. Extra keys: ``serial_number``,
           ``action``, ``action_display``, ``actor``.
         - ``source == "consumable"`` — a bulk maintenance material actually used
-          while closing a preventive-maintenance work order. Sourced from
-          ``WorkOrderMaterialUsage`` rows with ``was_used=True``, reached via
-          ``asset -> maintenance_items -> work_orders -> material_usage`` and
-          windowed by the work order's ``completed_at`` date (the same field
+          while closing an internal work order, preventive or corrective.
+          Sourced from ``WorkOrderMaterialUsage`` rows with ``was_used=True``,
+          reached via ``iter_asset_work_orders`` (both the PM-template path and
+          the direct asset FK) and windowed by the ``completed_at`` date (the same field
           ``tco`` uses). Extra keys: ``quantity`` (planned qty), ``unit``,
           ``work_order_id``, ``estimated_cost`` (``quantity`` ×
           ``material.estimated_cost_per_unit``; null if the material was

@@ -1742,11 +1742,22 @@ class AssetProblemAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Promotion",
+            {
+                "fields": (
+                    "work_order",
+                    "third_party_work_order",
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
             "Resolution",
             {
                 "fields": (
                     "resolution_notes",
                     "resolved_at",
+                    "resolved_by",
                 )
             },
         ),

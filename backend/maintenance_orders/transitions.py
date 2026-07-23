@@ -24,6 +24,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from inventory.services.problem_auto_resolve import resolve_problems_for_work_order
 from membership.utils import is_logistics_member, is_sig_admin
 
 from .models import (
@@ -592,6 +593,9 @@ def close_work_order(wo: ThirdPartyWorkOrder, *, user) -> ThirdPartyWorkOrder:
             "warranty_recovery": wo.warranty_recovery,
         },
     )
+    # A problem report promoted to this vendor WO is tracked by it, and a
+    # closed WO is the only completion signal the vendor workflow has.
+    resolve_problems_for_work_order(wo, actor=user, notes=wo.notes or "")
     if wo.warranty_recovery:
         _create_warranty_recovery_task(wo, user=user)
     _emit_closure_notifications(wo)

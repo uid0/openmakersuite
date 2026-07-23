@@ -111,6 +111,7 @@ from .serializers import (
     WorkOrderTaskCompletionSerializer,
     WorkOrderValidationSerializer,
 )
+from .services.problem_auto_resolve import resolve_problems_for_work_order
 
 
 class SupplierViewSet(viewsets.ModelViewSet):
@@ -2651,11 +2652,14 @@ class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):
     """API endpoint for asset problem reports.
 
     Read-only here; problems are created via Asset.report_problem. This viewset
-    exposes detail GET plus the upload-photo action so reporters can attach
-    images to a freshly-created problem report.
+    exposes detail GET, the upload-photo action so reporters can attach images
+    to a freshly-created problem report, and the promote/resolve actions that
+    turn a report into real work and close it out.
     """
 
-    queryset = AssetProblem.objects.select_related("asset", "part").prefetch_related("photos")
+    queryset = AssetProblem.objects.select_related(
+        "asset", "part", "work_order", "third_party_work_order"
+    ).prefetch_related("photos")
     serializer_class = AssetProblemSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
@@ -2721,6 +2725,164 @@ class AssetProblemViewSet(viewsets.ReadOnlyModelViewSet):
         uploaded_by = user if (user and user.is_authenticated) else None
         serializer.save(problem=problem, uploaded_by=uploaded_by)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="promote-standard",
+        permission_classes=[IsAuthenticated],
+    )
+    def promote_to_standard_work_order(self, request, pk=None):
+        """Promote this AssetProblem to an in-house corrective WorkOrder.
+
+        No MaintenanceItem picker, unlike the LocationProblem sibling: a
+        corrective work order anchors directly to the problem's asset
+        (``maintenance_item=None``), which is exactly what the nullable-item
+        foundation exists for. The reporter's description becomes the work
+        order's notes and their photos are copied onto it.
+        """
+        from .services.problem_promotion import copy_to_work_order_photo
+        from .services.work_order_loto import create_loto_completions
+
+        problem = self.get_object()
+        if problem.work_order_id:
+            return Response(
+                {"error": "Already promoted to a standard work order."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user if request.user.is_authenticated else None
+        with transaction.atomic():
+            wo = WorkOrder.objects.create(
+                maintenance_item=None,
+                asset=problem.asset,
+                notes=problem.description,
+                assigned_to=user,
+            )
+            # Materialize the per-energy-source LOTO rows so a corrective WO
+            # prints and scans back exactly like a generated PM one.
+            create_loto_completions(wo)
+            problem.work_order = wo
+            problem.status = AssetProblem.Status.IN_PROGRESS
+            problem.save(update_fields=["work_order", "status", "updated_at"])
+            for photo in problem.photos.all():
+                if not photo.image:
+                    continue
+                copy_to_work_order_photo(
+                    photo.image,
+                    wo,
+                    caption=photo.caption or f"From AssetProblem {problem.id}",
+                    filename_hint=f"asset-problem-{problem.id}",
+                )
+
+        serializer = AssetProblemSerializer(problem, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="promote-third-party",
+        permission_classes=[IsAuthenticated],
+    )
+    def promote_to_third_party_work_order(self, request, pk=None):
+        """Promote this AssetProblem to a vendor ThirdPartyWorkOrder.
+
+        Required: ``vendor`` (uuid) and ``title`` — a vendor WO is a purchase,
+        so it needs a human-written scope line rather than the raw report text.
+        The description rides along in ``notes``, the asset (and its location)
+        are pre-filled, and the reporter's photos are copied to attachments.
+        """
+        from maintenance_orders.models import ThirdPartyWorkOrder, ThirdPartyWorkOrderAttachment
+        from vendors.models import Vendor
+
+        from .services.problem_promotion import copy_to_tpwo_attachment
+
+        problem = self.get_object()
+        if problem.third_party_work_order_id:
+            return Response(
+                {"error": "Already promoted to a third-party work order."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        vendor_id = request.data.get("vendor")
+        title = (request.data.get("title") or "").strip()
+        if not vendor_id or not title:
+            return Response(
+                {"error": "vendor and title are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            vendor = Vendor.objects.get(id=vendor_id)
+        except (Vendor.DoesNotExist, DjangoValidationError, ValueError):
+            # DjangoValidationError covers a malformed uuid, which would
+            # otherwise 500 out of the queryset rather than 404.
+            return Response(
+                {"error": "Vendor not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        work_type = request.data.get("work_type") or ThirdPartyWorkOrder.WORK_TYPE_STANDARD
+        user = request.user if request.user.is_authenticated else None
+
+        with transaction.atomic():
+            tpwo = ThirdPartyWorkOrder.objects.create(
+                title=title,
+                asset=problem.asset,
+                location=problem.asset.location,
+                vendor=vendor,
+                work_type=work_type,
+                notes=problem.description,
+                opened_by=user,
+            )
+            problem.third_party_work_order = tpwo
+            problem.status = AssetProblem.Status.IN_PROGRESS
+            problem.save(update_fields=["third_party_work_order", "status", "updated_at"])
+            for photo in problem.photos.all():
+                if not photo.image:
+                    continue
+                copy_to_tpwo_attachment(
+                    photo.image,
+                    tpwo,
+                    kind=ThirdPartyWorkOrderAttachment.KIND_PHOTO,
+                    caption=photo.caption or f"Reporter photo from AssetProblem {problem.id}",
+                    filename_hint="asset-problem-photo",
+                    user=user,
+                )
+
+        serializer = AssetProblemSerializer(problem, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def resolve(self, request, pk=None):
+        """Mark this asset problem resolved or closed.
+
+        Same stamp as ``AssetViewSet.resolve_problem``, reachable from the
+        problem itself so web and ScanTTY don't need the asset in hand.
+        """
+        problem = self.get_object()
+        new_status = request.data.get("status", AssetProblem.Status.RESOLVED)
+        if new_status not in (AssetProblem.Status.RESOLVED, AssetProblem.Status.CLOSED):
+            return Response(
+                {
+                    "error": (
+                        f"status must be '{AssetProblem.Status.RESOLVED}' or "
+                        f"'{AssetProblem.Status.CLOSED}'"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        problem.status = new_status
+        problem.resolution_notes = request.data.get(
+            "resolution_notes", problem.resolution_notes or ""
+        )
+        if not problem.resolved_at:
+            problem.resolved_at = timezone.now()
+            problem.resolved_by = actor_display(request.user)
+        problem.save()
+
+        serializer = AssetProblemSerializer(problem, context={"request": request})
+        return Response(serializer.data)
 
 
 class AssetDocumentViewSet(viewsets.ModelViewSet):
@@ -3169,50 +3331,29 @@ class LocationProblemViewSet(viewsets.ReadOnlyModelViewSet):
     @staticmethod
     def _copy_attachments_to_work_order(problem, work_order):
         """Copy a problem's photo to a PM WorkOrder via WorkOrderPhoto."""
-        from .models import WorkOrderPhoto
+        from .services.problem_promotion import copy_to_work_order_photo
 
         if problem.photo:
-            wop = WorkOrderPhoto(
-                work_order=work_order,
+            copy_to_work_order_photo(
+                problem.photo,
+                work_order,
                 caption=f"From LocationProblem {problem.id}",
+                filename_hint=f"location-problem-{problem.id}",
             )
-            problem.photo.open("rb")
-            try:
-                from django.core.files.base import ContentFile
-
-                wop.image.save(
-                    f"location-problem-{problem.id}.jpg",
-                    ContentFile(problem.photo.read()),
-                    save=False,
-                )
-            finally:
-                problem.photo.close()
-            wop.save()
 
     @staticmethod
     def _copy_to_tpwo_attachment(file_field, tpwo, *, kind, caption, filename_hint, user):
-        from django.core.files.base import ContentFile
+        """Copy one of a problem's files to a TPWO attachment."""
+        from .services.problem_promotion import copy_to_tpwo_attachment
 
-        from maintenance_orders.models import ThirdPartyWorkOrderAttachment
-
-        file_field.open("rb")
-        try:
-            data = file_field.read()
-        finally:
-            file_field.close()
-        attachment = ThirdPartyWorkOrderAttachment(
-            work_order=tpwo,
+        copy_to_tpwo_attachment(
+            file_field,
+            tpwo,
             kind=kind,
             caption=caption,
-            uploaded_by=user,
+            filename_hint=filename_hint,
+            user=user,
         )
-        ext = file_field.name.rsplit(".", 1)[-1] if "." in file_field.name else "bin"
-        attachment.file.save(
-            f"{filename_hint}-{tpwo.short_id}.{ext}",
-            ContentFile(data),
-            save=False,
-        )
-        attachment.save()
 
 
 class AssetPartViewSet(viewsets.ModelViewSet):
@@ -4311,6 +4452,13 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             work_order.status == WorkOrder.Status.COMPLETED
             and old_status != WorkOrder.Status.COMPLETED
         ):
+            # A problem promoted to this work order is tracked by it — finishing
+            # the work is what resolves the report.
+            resolve_problems_for_work_order(
+                work_order,
+                actor=self.request.user,
+                notes=work_order.notes or "",
+            )
             record_maintenance_audit_event(
                 action=MaintenanceAuditEvent.Action.WO_COMPLETE,
                 actor=self.request.user,
@@ -5530,6 +5678,8 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
         for wo in (
             WorkOrder.objects.filter(status__in=open_wo_statuses)
             .select_related("maintenance_item", "asset")
+            # display_title falls back to the promoted report on a corrective WO
+            .prefetch_related("asset_problems")
             .order_by("-created_at")
         ):
             rows.append(
@@ -5550,9 +5700,14 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
                 }
             )
 
-        # AssetProblem has no FK to WorkOrder, so we surface every open report.
+        # A promoted problem is already in this feed as its work order, so only
+        # un-promoted reports appear here (same rule as LocationProblem below).
         for ap in (
-            AssetProblem.objects.filter(status__in=open_problem_statuses)
+            AssetProblem.objects.filter(
+                status__in=open_problem_statuses,
+                work_order__isnull=True,
+                third_party_work_order__isnull=True,
+            )
             .select_related("asset")
             .order_by("-created_at")
         ):

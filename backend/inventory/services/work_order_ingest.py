@@ -44,6 +44,7 @@ from django.utils import timezone
 from pypdf import PdfReader
 
 from ..models import MaintenanceLog, WorkOrder, WorkOrderMaterialUsage, WorkOrderSubmission
+from .problem_auto_resolve import resolve_problems_for_work_order
 from .work_order_material_usage import apply_material_usage
 
 logger = logging.getLogger(__name__)
@@ -435,6 +436,9 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
     work_order.save()
 
     if wo_became_complete:
+        # Whatever problem report this work order was promoted from closes with
+        # it — a form mailed in completes the work just as the screen does.
+        resolve_problems_for_work_order(work_order, notes=work_order.notes or "")
         # Corrective work orders have no PM template to advance, and
         # ``MaintenanceLog.maintenance_item`` is non-nullable — there is no log
         # to write for them. The work order's own completion stamp is the record.
@@ -659,6 +663,8 @@ def omr_confirm_completion(
     # A WO started on-screen and closed off a scanned sheet must not be left
     # with a clock running — same finalize the digital completion path uses.
     finalize_work_order_timers(work_order, now=now)
+    # Same as the digital path: the report this work order came from closes too.
+    resolve_problems_for_work_order(work_order, actor=user, notes=work_order.notes or "")
     # No PM template on a corrective work order, and no MaintenanceLog either:
     # the log's ``maintenance_item`` is non-nullable, so there is nothing to
     # write. The elapsed time stays on the work order itself.

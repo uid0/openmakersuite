@@ -1100,6 +1100,8 @@ class AssetSerializer(serializers.ModelSerializer):
             "donor_name",
             "acquisition_display",
             "age_in_days",
+            # Cost recovery (landlord billing)
+            "is_cost_recoverable",
             # Product info
             "product_url",
             "wiki_page_url",
@@ -2770,10 +2772,18 @@ class AssetTcoReportSerializer(serializers.Serializer):
 class AssetCostRecoveryServiceSerializer(serializers.Serializer):
     """One itemized service line in the asset cost-recovery statement.
 
-    ``estimated_cost`` is the internal estimate (present for internal PM,
-    null for vendor/manual work that has no per-asset estimate).
-    ``actual_cost`` is the vendor-invoice / recorded actual (present for
-    vendor and manual work, null for internal PM which carries no actual).
+    Three cost columns, and the split between them is the point of the report:
+
+    * ``estimated_cost`` — the internal estimate (present for internal PM, null
+      for vendor/manual work that has no per-asset estimate).
+    * ``internal_cost`` — what in-house work *really* cost: the captured
+      material actuals where they exist, the estimate otherwise. Informational
+      on every asset, recoverable on none by itself. Null for vendor/manual
+      rows, which are not in-house work.
+    * ``actual_cost`` — the landlord-billable column: the vendor invoice /
+      recorded actual, plus in-house actuals **only on an asset flagged
+      ``is_cost_recoverable``**.
+
     The recoverable amount is the sum of the ``actual_cost`` column.
     """
 
@@ -2781,6 +2791,7 @@ class AssetCostRecoveryServiceSerializer(serializers.Serializer):
     source = serializers.ChoiceField(choices=["pm", "vendor", "manual"])
     description = serializers.CharField(allow_blank=True)
     estimated_cost = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
+    internal_cost = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
     actual_cost = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
 
 
@@ -2789,6 +2800,8 @@ class AssetCostRecoveryReportSerializer(serializers.Serializer):
 
     ``subtotal_actual`` is the recoverable amount for this asset; the report's
     ``grand_total_actual`` is the recoverable total billed to the landlord.
+    ``subtotal_internal`` is the in-house spend on this asset, which only feeds
+    the recoverable total when ``is_cost_recoverable`` is set.
     """
 
     asset_id = serializers.UUIDField()
@@ -2799,8 +2812,10 @@ class AssetCostRecoveryReportSerializer(serializers.Serializer):
     status = serializers.CharField()
     status_display = serializers.CharField()
     category = serializers.CharField(allow_null=True, allow_blank=True)
+    is_cost_recoverable = serializers.BooleanField()
     services = AssetCostRecoveryServiceSerializer(many=True)
     subtotal_estimated = serializers.DecimalField(max_digits=12, decimal_places=2)
+    subtotal_internal = serializers.DecimalField(max_digits=12, decimal_places=2)
     subtotal_actual = serializers.DecimalField(max_digits=12, decimal_places=2)
 
 

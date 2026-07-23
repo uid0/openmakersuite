@@ -10,8 +10,14 @@ This module is the one place that knows how to reach *all* of an asset's work
 orders. Use the two functions as a pair: :func:`prefetch_asset_work_orders`
 attaches both halves of the traversal to an ``Asset`` queryset, and
 :func:`iter_asset_work_orders` walks them without double-counting the overlap.
+
+It also owns what one of those work orders *cost* — :func:`wo_actual_material_cost`
+(real money, op-768w) and :func:`wo_material_cost` (actual where recorded, the
+old estimate otherwise) — so ``tco``, ``supplies_used`` and ``cost_recovery``
+all price internal work the same way.
 """
 
+from decimal import Decimal
 from typing import TYPE_CHECKING, Iterator, Optional
 
 from django.db.models import Prefetch, QuerySet
@@ -81,3 +87,72 @@ def iter_asset_work_orders(
             continue
         seen.add(work_order.id)
         yield work_order, work_order.maintenance_item
+
+
+def wo_estimated_material_cost(
+    maintenance_item: Optional["MaintenanceItem"],
+    work_order: "WorkOrder",
+) -> Decimal:
+    """Estimated cost of one completed internal work order.
+
+    A scheduled task (``interval_days`` set) contributes its
+    ``MaintenanceItem.estimated_cost``; an unscheduled or one-off task
+    contributes the sum of its used materials (``quantity_planned ×
+    material.estimated_cost_per_unit``). A corrective work order has no template
+    to estimate from (``maintenance_item is None``), so it costs like a one-off.
+
+    This is the pre-op-768w cost model, kept intact: it is what a work order with
+    no recorded ``unit_cost`` still reports.
+    """
+    if maintenance_item is not None and maintenance_item.interval_days is not None:
+        return maintenance_item.estimated_cost or Decimal("0.00")
+    total = Decimal("0.00")
+    for usage in work_order.material_usage.all():
+        if usage.was_used and usage.material is not None:
+            total += usage.quantity_planned * usage.material.estimated_cost_per_unit
+    return total
+
+
+def wo_actual_material_cost(work_order: "WorkOrder") -> Optional[Decimal]:
+    """Real money spent on materials for one work order, or ``None``.
+
+    Sums ``quantity_used × unit_cost`` over the lines marked *used* — the
+    op-768w capture. Returns ``None`` (not zero) when **no** used line carries a
+    ``unit_cost``, which is how a caller tells "this job cost nothing" from "this
+    job predates actual-cost capture" and falls back to the estimate.
+
+    Reads ``material_usage.all()``, so a caller who prefetched it pays no extra
+    query. Mirrors :attr:`inventory.models.WorkOrder.actual_material_cost`, which
+    is the same sum flattened to ``0.00`` for the API surface.
+    """
+    total = Decimal("0.00")
+    priced = False
+    for usage in work_order.material_usage.all():
+        if not usage.was_used:
+            continue
+        line_cost = usage.actual_cost
+        if line_cost is None:
+            continue
+        priced = True
+        total += line_cost
+    return total if priced else None
+
+
+def wo_material_cost(
+    maintenance_item: Optional["MaintenanceItem"],
+    work_order: "WorkOrder",
+) -> tuple[Decimal, bool]:
+    """Cost of one internal work order: actual where recorded, estimate otherwise.
+
+    Returns ``(cost, is_actual)``. The choice is made per *work order*, not per
+    material line, because a scheduled PM's estimate is a single template-level
+    figure that cannot be decomposed and blended line by line.
+
+    Every report that prices in-house work goes through here, so a work order
+    that predates actual-cost capture keeps exactly the number it reported
+    before (no regression) while a priced one reports what was really spent.
+    """
+    actual = wo_actual_material_cost(work_order)
+    if actual is not None:
+        return actual, True
+    return wo_estimated_material_cost(maintenance_item, work_order), False

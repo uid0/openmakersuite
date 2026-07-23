@@ -40,6 +40,20 @@ def _completed_wo(maintenance_item, *, completed_at):
     )
 
 
+def _priced_usage(work_order, *, name, quantity_used, unit_cost, material=None):
+    """An ad-hoc material line with a real ``unit_cost`` (the op-768w capture)."""
+    return WorkOrderMaterialUsage.objects.create(
+        work_order=work_order,
+        material=material,
+        is_ad_hoc=material is None,
+        material_name=name,
+        quantity_planned=quantity_used,
+        quantity_used=quantity_used,
+        was_used=True,
+        unit_cost=unit_cost,
+    )
+
+
 def _closed_vendor_link(asset, *, allocated_cost, closed_days_ago=5, title="Vendor work"):
     """Create a closed ThirdPartyWorkOrder + per-asset link (bypasses the state
     machine) so vendor allocated_cost rolls into the Actual column."""
@@ -560,6 +574,249 @@ class TestCostRecoveryAllAssetsAndOwnership:
 
 
 @pytest.mark.integration
+class TestCostRecoveryRecoverableInHouseWork:
+    """op-srrv (B5) — in-house actual cost is landlord-billable only on an asset
+    flagged ``is_cost_recoverable``; everywhere else it is internal cost only."""
+
+    def test_recoverable_asset_bills_in_house_actual(self, authenticated_client):
+        """A flagged asset (the HVAC case) puts the work order's real material
+        spend into the recoverable Actual total."""
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Rooftop Unit", asset_tag="A-REC", is_cost_recoverable=True)
+        mi = MaintenanceItem.objects.create(
+            asset=asset,
+            title="Compressor swap",
+            interval_days=None,
+            estimated_cost=Decimal("0.00"),
+        )
+        wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=4))
+        _priced_usage(
+            wo, name="Compressor", quantity_used=Decimal("1.00"), unit_cost=Decimal("640.00")
+        )
+        _priced_usage(
+            wo, name="Refrigerant", quantity_used=Decimal("3.00"), unit_cost=Decimal("22.50")
+        )
+
+        response = client.get(URL, {"asset_ids": str(asset.id), "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+
+        block = _assets_by_id(response)[str(asset.id)]
+        assert block["is_cost_recoverable"] is True
+        svc = block["services"][0]
+        assert svc["source"] == "pm"
+        # 640.00 + (3 × 22.50)
+        assert Decimal(svc["internal_cost"]) == Decimal("707.50")
+        assert Decimal(svc["actual_cost"]) == Decimal("707.50")
+        assert Decimal(block["subtotal_internal"]) == Decimal("707.50")
+        assert Decimal(block["subtotal_actual"]) == Decimal("707.50")
+        assert Decimal(response.data["grand_total_actual"]) == Decimal("707.50")
+        assert Decimal(response.data["grand_total_internal"]) == Decimal("707.50")
+
+    def test_non_recoverable_asset_shows_internal_only(self, authenticated_client):
+        """Same work order, unflagged asset: the figure is reported as internal
+        cost and stays out of the billable Actual column."""
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Shop Lathe", asset_tag="A-NOREC")
+        assert asset.is_cost_recoverable is False  # default
+        mi = MaintenanceItem.objects.create(
+            asset=asset, title="Bearing swap", interval_days=None, estimated_cost=Decimal("0.00")
+        )
+        wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=4))
+        _priced_usage(wo, name="Bearing", quantity_used=Decimal("2.00"), unit_cost=Decimal("35.00"))
+
+        response = client.get(URL, {"asset_ids": str(asset.id), "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+
+        block = _assets_by_id(response)[str(asset.id)]
+        assert block["is_cost_recoverable"] is False
+        svc = block["services"][0]
+        assert Decimal(svc["internal_cost"]) == Decimal("70.00")
+        assert svc["actual_cost"] is None
+        assert Decimal(block["subtotal_internal"]) == Decimal("70.00")
+        assert Decimal(block["subtotal_actual"]) == Decimal("0.00")
+        assert Decimal(response.data["grand_total_actual"]) == Decimal("0.00")
+        assert Decimal(response.data["grand_total_internal"]) == Decimal("70.00")
+
+    def test_unpriced_work_order_keeps_old_estimated_numbers(self, authenticated_client):
+        """No ``unit_cost`` anywhere — a work order that predates actual-cost
+        capture reports exactly what it reported before, on a *recoverable*
+        asset too: an estimate is never billed as an actual."""
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Old Boiler", asset_tag="A-OLD", is_cost_recoverable=True)
+        now = timezone.now()
+
+        scheduled = MaintenanceItem.objects.create(
+            asset=asset,
+            title="Quarterly service",
+            interval_days=90,
+            estimated_cost=Decimal("75.00"),
+        )
+        _completed_wo(scheduled, completed_at=now - timedelta(days=10))
+
+        unscheduled = MaintenanceItem.objects.create(
+            asset=asset, title="Belt swap", interval_days=None, estimated_cost=Decimal("0.00")
+        )
+        wo = _completed_wo(unscheduled, completed_at=now - timedelta(days=5))
+        belt = MaintenanceMaterial.objects.create(
+            maintenance_item=unscheduled,
+            name="Drive belt",
+            quantity=Decimal("1.00"),
+            estimated_cost_per_unit=Decimal("42.50"),
+        )
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=belt,
+            material_name=belt.name,
+            quantity_planned=Decimal("2.00"),
+            was_used=True,
+        )
+
+        response = client.get(URL, {"asset_ids": str(asset.id), "period": "past_month"})
+        block = _assets_by_id(response)[str(asset.id)]
+        by_desc = {svc["description"]: svc for svc in block["services"]}
+
+        for desc, expected in (("Quarterly service", "75.00"), ("Belt swap", "85.00")):
+            svc = by_desc[desc]
+            assert Decimal(svc["estimated_cost"]) == Decimal(expected)
+            # The internal column falls back to that same estimate...
+            assert Decimal(svc["internal_cost"]) == Decimal(expected)
+            # ...and nothing unpriced reaches the billable column.
+            assert svc["actual_cost"] is None
+
+        assert Decimal(block["subtotal_estimated"]) == Decimal("160.00")
+        assert Decimal(block["subtotal_actual"]) == Decimal("0.00")
+        assert Decimal(response.data["grand_total_actual"]) == Decimal("0.00")
+
+    def test_actual_replaces_estimate_for_the_internal_figure(self, authenticated_client):
+        """Where a real cost exists it wins over the template estimate — the
+        Estimated column still reports the old number for reference."""
+        client, _ = authenticated_client
+        asset = AssetFactory(asset_tag="A-BOTH", is_cost_recoverable=True)
+        mi = MaintenanceItem.objects.create(
+            asset=asset,
+            title="Quarterly filter",
+            interval_days=90,
+            estimated_cost=Decimal("100.00"),
+        )
+        wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=3))
+        _priced_usage(wo, name="Filter", quantity_used=Decimal("1.00"), unit_cost=Decimal("128.40"))
+
+        response = client.get(URL, {"asset_ids": str(asset.id), "period": "past_month"})
+        svc = _assets_by_id(response)[str(asset.id)]["services"][0]
+        assert Decimal(svc["estimated_cost"]) == Decimal("100.00")
+        assert Decimal(svc["internal_cost"]) == Decimal("128.40")
+        assert Decimal(svc["actual_cost"]) == Decimal("128.40")
+
+    def test_partially_priced_work_order_uses_the_recorded_lines(self, authenticated_client):
+        """A job where only some lines were priced bills what is known — the
+        unpriced line contributes nothing rather than blocking the total."""
+        client, _ = authenticated_client
+        asset = AssetFactory(asset_tag="A-PART", is_cost_recoverable=True)
+        mi = MaintenanceItem.objects.create(
+            asset=asset, title="Mixed job", interval_days=None, estimated_cost=Decimal("0.00")
+        )
+        wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=3))
+        _priced_usage(
+            wo, name="Contactor", quantity_used=Decimal("1.00"), unit_cost=Decimal("48.00")
+        )
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material_name="Shop rag",
+            is_ad_hoc=True,
+            quantity_planned=Decimal("4.00"),
+            quantity_used=Decimal("4.00"),
+            was_used=True,
+        )
+
+        response = client.get(URL, {"asset_ids": str(asset.id), "period": "past_month"})
+        svc = _assets_by_id(response)[str(asset.id)]["services"][0]
+        assert Decimal(svc["actual_cost"]) == Decimal("48.00")
+
+    def test_planned_but_unused_priced_line_costs_nothing(self, authenticated_client):
+        """``was_used=False`` means the material was never consumed, so it is
+        not billable even with a price on it."""
+        client, _ = authenticated_client
+        asset = AssetFactory(asset_tag="A-UNUSED", is_cost_recoverable=True)
+        mi = MaintenanceItem.objects.create(
+            asset=asset, title="Aborted swap", interval_days=None, estimated_cost=Decimal("0.00")
+        )
+        wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=3))
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material_name="Spare motor",
+            is_ad_hoc=True,
+            quantity_planned=Decimal("1.00"),
+            quantity_used=Decimal("1.00"),
+            was_used=False,
+            unit_cost=Decimal("900.00"),
+        )
+
+        response = client.get(URL, {"asset_ids": str(asset.id), "period": "past_month"})
+        svc = _assets_by_id(response)[str(asset.id)]["services"][0]
+        assert svc["actual_cost"] is None
+        assert Decimal(svc["internal_cost"]) == Decimal("0.00")
+        assert Decimal(response.data["grand_total_actual"]) == Decimal("0.00")
+
+    def test_corrective_work_order_on_recoverable_asset(self, authenticated_client):
+        """A corrective work order has no maintenance item — it reaches the
+        asset by direct FK and is billed the same way."""
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Exhaust Fan", asset_tag="A-CORR", is_cost_recoverable=True)
+        wo = WorkOrder.objects.create(
+            asset=asset,
+            status=WorkOrder.Status.COMPLETED,
+            completed_at=timezone.now() - timedelta(days=2),
+        )
+        _priced_usage(
+            wo, name="Fan motor", quantity_used=Decimal("1.00"), unit_cost=Decimal("212.75")
+        )
+
+        response = client.get(URL, {"asset_ids": str(asset.id), "period": "past_month"})
+        block = _assets_by_id(response)[str(asset.id)]
+        svc = block["services"][0]
+        assert svc["source"] == "pm"
+        assert Decimal(svc["actual_cost"]) == Decimal("212.75")
+        assert Decimal(response.data["grand_total_actual"]) == Decimal("212.75")
+
+    def test_vendor_actual_recoverable_regardless_of_flag(self, authenticated_client):
+        """The flag gates *in-house* cost only — a vendor invoice is billable on
+        an unflagged asset exactly as it was before."""
+        client, _ = authenticated_client
+        asset = AssetFactory(asset_tag="A-VENFLAG")
+        _closed_vendor_link(asset, allocated_cost=Decimal("250.00"), closed_days_ago=5)
+
+        response = client.get(URL, {"asset_ids": str(asset.id), "period": "past_month"})
+        block = _assets_by_id(response)[str(asset.id)]
+        svc = block["services"][0]
+        assert Decimal(svc["actual_cost"]) == Decimal("250.00")
+        assert svc["internal_cost"] is None
+        assert Decimal(block["subtotal_internal"]) == Decimal("0.00")
+        assert Decimal(response.data["grand_total_actual"]) == Decimal("250.00")
+
+    def test_mixed_fleet_totals_split_correctly(self, authenticated_client):
+        """One recoverable and one non-recoverable asset with identical in-house
+        spend: the recoverable total carries one, the internal total both."""
+        client, _ = authenticated_client
+        recoverable = AssetFactory(asset_tag="A-MIX-REC", is_cost_recoverable=True)
+        plain = AssetFactory(asset_tag="A-MIX-NO")
+        for asset in (recoverable, plain):
+            mi = MaintenanceItem.objects.create(
+                asset=asset, title="Service", interval_days=None, estimated_cost=Decimal("0.00")
+            )
+            wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=3))
+            _priced_usage(
+                wo, name="Part", quantity_used=Decimal("1.00"), unit_cost=Decimal("100.00")
+            )
+
+        response = client.get(
+            URL,
+            {"asset_ids": f"{recoverable.id},{plain.id}", "period": "past_month"},
+        )
+        assert Decimal(response.data["grand_total_actual"]) == Decimal("100.00")
+        assert Decimal(response.data["grand_total_internal"]) == Decimal("200.00")
+
+
+@pytest.mark.integration
 class TestCostRecoveryExports:
     def test_csv_export(self, authenticated_client):
         client, _ = authenticated_client
@@ -579,10 +836,12 @@ class TestCostRecoveryExports:
             "serial_number",
             "status",
             "date_received",
+            "cost_recoverable",
             "service_date",
             "source",
             "description",
             "estimated_cost",
+            "internal_cost",
             "actual_cost",
         ]
         rows = [r for r in reader if r["asset_tag"] == "A-CSV"]
@@ -592,6 +851,9 @@ class TestCostRecoveryExports:
         assert row["source"] == "vendor"
         assert row["actual_cost"] == "321.00"
         assert row["estimated_cost"] == ""
+        # Vendor work is not in-house, so it carries no internal figure.
+        assert row["internal_cost"] == ""
+        assert row["cost_recoverable"] == "no"
 
     def test_csv_empty_asset_emits_blank_service_row(self, authenticated_client):
         client, _ = authenticated_client
@@ -705,6 +967,87 @@ class TestCostRecoveryExports:
         )
         assert "All assets" in text
         assert "A-PDFALL" in text
+
+    def test_csv_carries_the_recoverable_internal_split(self, authenticated_client):
+        """Both columns land in the CSV: the flagged asset bills its in-house
+        spend, the unflagged one reports it as internal cost only."""
+        client, _ = authenticated_client
+        recoverable = AssetFactory(asset_tag="A-CSV-REC", is_cost_recoverable=True)
+        plain = AssetFactory(asset_tag="A-CSV-NOREC")
+        for asset in (recoverable, plain):
+            mi = MaintenanceItem.objects.create(
+                asset=asset, title="Repair", interval_days=None, estimated_cost=Decimal("0.00")
+            )
+            wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=3))
+            _priced_usage(
+                wo, name="Part", quantity_used=Decimal("2.00"), unit_cost=Decimal("60.00")
+            )
+
+        response = client.get(
+            URL,
+            {
+                "asset_ids": f"{recoverable.id},{plain.id}",
+                "period": "past_month",
+                "format": "csv",
+            },
+        )
+        assert response.status_code == status.HTTP_200_OK
+        rows = {
+            row["asset_tag"]: row
+            for row in csv.DictReader(io.StringIO(response.content.decode("utf-8")))
+        }
+
+        rec_row = rows["A-CSV-REC"]
+        assert rec_row["cost_recoverable"] == "yes"
+        assert rec_row["internal_cost"] == "120.00"
+        assert rec_row["actual_cost"] == "120.00"
+
+        plain_row = rows["A-CSV-NOREC"]
+        assert plain_row["cost_recoverable"] == "no"
+        assert plain_row["internal_cost"] == "120.00"
+        assert plain_row["actual_cost"] == ""
+
+    def test_pdf_carries_the_recoverable_internal_split(self, authenticated_client):
+        client, _ = authenticated_client
+        recoverable = AssetFactory(
+            name="Recoverable RTU", asset_tag="A-PDF-REC", is_cost_recoverable=True
+        )
+        plain = AssetFactory(name="Plain Press", asset_tag="A-PDF-NOREC")
+        for asset in (recoverable, plain):
+            mi = MaintenanceItem.objects.create(
+                asset=asset, title="Repair", interval_days=None, estimated_cost=Decimal("0.00")
+            )
+            wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=3))
+            _priced_usage(
+                wo, name="Part", quantity_used=Decimal("1.00"), unit_cost=Decimal("77.00")
+            )
+
+        response = client.get(
+            URL,
+            {
+                "asset_ids": f"{recoverable.id},{plain.id}",
+                "period": "past_month",
+                "format": "pdf",
+            },
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        from pypdf import PdfReader
+
+        # Long info lines wrap inside the flowable, so compare on a single line.
+        text = " ".join(
+            "".join(
+                page.extract_text() or "" for page in PdfReader(io.BytesIO(response.content)).pages
+            ).split()
+        )
+        # Both cost columns are rendered, and each asset says which side it is on.
+        assert "Internal" in text
+        assert "Grand total internal" in text
+        assert "Cost recovery: Recoverable (in-house work billable)" in text
+        assert "Cost recovery: Not recoverable (in-house work internal only)" in text
+        # Only the flagged asset's spend reaches the recoverable grand total.
+        assert "Grand total internal (in-house) $154.00" in text  # 77.00 × 2 assets
+        assert "Amount to recover (Actual) $77.00" in text  # the flagged asset only
 
     def test_unknown_format_404s_in_negotiation(self, authenticated_client):
         """``format`` is DRF's reserved content-negotiation param; an

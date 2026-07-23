@@ -6105,7 +6105,11 @@ class AssetReportViewSet(viewsets.ViewSet):
 
         Cost components:
         - scheduled_maintenance_cost / unscheduled_maintenance_cost: preventive
-          maintenance via internal WorkOrder + WorkOrderMaterialUsage.
+          maintenance via internal WorkOrder + WorkOrderMaterialUsage. Priced
+          from the materials actually paid for (``WorkOrderMaterialUsage.unit_cost``,
+          op-768w) where that was captured, falling back to the template/material
+          estimate otherwise. This is internal analytics, so it is *not* gated on
+          ``Asset.is_cost_recoverable`` the way the cost-recovery statement is.
         - vendor_maintenance_cost: third-party WO spend allocated to this asset
           via ThirdPartyWorkOrderAsset.allocated_cost (only closed records, since
           earlier statuses don't have allocated_cost materialized yet).
@@ -6123,6 +6127,7 @@ class AssetReportViewSet(viewsets.ViewSet):
         from .services.work_order_reports import (
             iter_asset_work_orders,
             prefetch_asset_work_orders,
+            wo_material_cost,
         )
 
         today = timezone.now().date()
@@ -6169,14 +6174,11 @@ class AssetReportViewSet(viewsets.ViewSet):
                 ):
                     # Corrective work has no template estimate, so it costs
                     # like a one-off PM: the materials it actually consumed.
+                    cost, _is_actual = wo_material_cost(mi, wo)
                     if mi is not None and mi.interval_days is not None:
-                        scheduled += mi.estimated_cost or Decimal("0.00")
+                        scheduled += cost
                     else:
-                        for usage in wo.material_usage.all():
-                            if usage.was_used and usage.material is not None:
-                                unscheduled += (
-                                    usage.quantity_planned * usage.material.estimated_cost_per_unit
-                                )
+                        unscheduled += cost
 
             vendor = Decimal("0.00")
             for link in getattr(asset, "_tco_vendor_links", []):
@@ -6259,7 +6261,11 @@ class AssetReportViewSet(viewsets.ViewSet):
           ``tco`` uses). Extra keys: ``quantity`` (planned qty), ``unit``,
           ``work_order_id``, ``estimated_cost`` (``quantity`` ×
           ``material.estimated_cost_per_unit``; null if the material was
-          deleted after the work order was created).
+          deleted after the work order was created, or the line is ad-hoc and
+          has no template spec), ``actual_cost`` (``quantity_used`` ×
+          ``unit_cost`` — the op-768w capture; null when the line was never
+          priced) and ``cost``, the one figure to report: the actual where it
+          exists, the estimate otherwise.
 
         Query params ``start_date``/``end_date`` (``YYYY-MM-DD``) default to the
         last 30 days. Rows are sorted by ``asset_name`` then ``used_at``.
@@ -6319,11 +6325,15 @@ class AssetReportViewSet(viewsets.ViewSet):
                         continue
                     estimated_cost = None
                     if usage.material is not None:
-                        estimated_cost = str(
-                            (
-                                usage.quantity_planned * usage.material.estimated_cost_per_unit
-                            ).quantize(Decimal("0.01"))
-                        )
+                        estimated_cost = (
+                            usage.quantity_planned * usage.material.estimated_cost_per_unit
+                        ).quantize(Decimal("0.01"))
+                    # Real money beats the estimate line by line here — unlike
+                    # the work-order-level reports, every row is one material.
+                    actual_cost = usage.actual_cost
+                    if actual_cost is not None:
+                        actual_cost = actual_cost.quantize(Decimal("0.01"))
+                    cost = actual_cost if actual_cost is not None else estimated_cost
                     rows.append(
                         {
                             "asset_id": str(asset.id),
@@ -6334,7 +6344,11 @@ class AssetReportViewSet(viewsets.ViewSet):
                             "unit": usage.unit,
                             "used_at": wo.completed_at,
                             "work_order_id": str(wo.id),
-                            "estimated_cost": estimated_cost,
+                            "estimated_cost": (
+                                None if estimated_cost is None else str(estimated_cost)
+                            ),
+                            "actual_cost": None if actual_cost is None else str(actual_cost),
+                            "cost": None if cost is None else str(cost),
                         }
                     )
 
@@ -6522,29 +6536,25 @@ class AssetReportViewSet(viewsets.ViewSet):
     def _pm_estimated_cost(maintenance_item, work_order):
         """Estimated cost of one completed internal PM work order.
 
-        Mirrors the ``tco`` cost walk: a scheduled task (``interval_days`` set)
-        contributes its ``MaintenanceItem.estimated_cost``; an unscheduled or
-        one-off task contributes the sum of its used materials
-        (``quantity_planned * material.estimated_cost_per_unit``). Internal PM
-        has no actual-cost source, so this feeds the Estimated column only.
-
-        A corrective work order has no template to estimate from
-        (``maintenance_item is None``), so it costs like a one-off: materials.
+        Thin alias for
+        :func:`inventory.services.work_order_reports.wo_estimated_material_cost`,
+        which ``tco`` shares — see there for the scheduled-vs-one-off rule. Kept
+        as a method so the report's own cost walk reads in one place.
         """
-        if maintenance_item is not None and maintenance_item.interval_days is not None:
-            return maintenance_item.estimated_cost or Decimal("0.00")
-        total = Decimal("0.00")
-        for usage in work_order.material_usage.all():
-            if usage.was_used and usage.material is not None:
-                total += usage.quantity_planned * usage.material.estimated_cost_per_unit
-        return total
+        from .services.work_order_reports import wo_estimated_material_cost
+
+        return wo_estimated_material_cost(maintenance_item, work_order)
 
     @staticmethod
     def _cost_recovery_csv(asset_blocks):
         """Flat one-row-per-service CSV for the cost-recovery report.
 
         Every selected asset appears; an asset with no in-window services emits
-        a single row with the service columns left blank.
+        a single row with the service columns left blank. ``cost_recoverable``
+        (per asset) and ``internal_cost`` (per row) carry the recoverable-vs-
+        internal split: ``actual_cost`` is the landlord-billable column and only
+        picks up in-house work on a recoverable asset, while ``internal_cost``
+        reports what the in-house work cost either way.
         """
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="asset_cost_recovery.csv"'
@@ -6553,10 +6563,12 @@ class AssetReportViewSet(viewsets.ViewSet):
             "serial_number",
             "status",
             "date_received",
+            "cost_recoverable",
             "service_date",
             "source",
             "description",
             "estimated_cost",
+            "internal_cost",
             "actual_cost",
         ]
         writer = csv.DictWriter(response, fieldnames=fieldnames)
@@ -6569,6 +6581,7 @@ class AssetReportViewSet(viewsets.ViewSet):
                 "date_received": (
                     block["date_received"].isoformat() if block["date_received"] else ""
                 ),
+                "cost_recoverable": "yes" if block["is_cost_recoverable"] else "no",
             }
             services = block["services"]
             if not services:
@@ -6579,6 +6592,7 @@ class AssetReportViewSet(viewsets.ViewSet):
                         "source": "",
                         "description": "",
                         "estimated_cost": "",
+                        "internal_cost": "",
                         "actual_cost": "",
                     }
                 )
@@ -6592,6 +6606,9 @@ class AssetReportViewSet(viewsets.ViewSet):
                         "description": svc["description"],
                         "estimated_cost": (
                             "" if svc["estimated_cost"] is None else f'{svc["estimated_cost"]:.2f}'
+                        ),
+                        "internal_cost": (
+                            "" if svc["internal_cost"] is None else f'{svc["internal_cost"]:.2f}'
                         ),
                         "actual_cost": (
                             "" if svc["actual_cost"] is None else f'{svc["actual_cost"]:.2f}'
@@ -6609,8 +6626,9 @@ class AssetReportViewSet(viewsets.ViewSet):
         """Per-asset cost-recovery statement billed to the landlord.
 
         Select assets/categories + a period and get, per asset, an itemized
-        service history with Estimated (internal) and Actual (vendor-invoice /
-        recorded) cost columns. The Actual total is the recoverable amount.
+        service history with Estimated (internal), Internal (what in-house work
+        really cost) and Actual (the landlord-billable column) figures. The
+        Actual total is the recoverable amount.
 
         Query params:
         - Selection (>=1 required): ``asset_ids`` (Asset UUIDs) and/or
@@ -6626,9 +6644,17 @@ class AssetReportViewSet(viewsets.ViewSet):
         - ``format`` in {json (default), csv, pdf}.
 
         Service sources:
-        - ``pm`` — completed internal WorkOrders (estimated only; actual null).
+        - ``pm`` — completed internal WorkOrders. ``estimated_cost`` is the
+          template/material estimate as always; ``internal_cost`` is what the
+          job really cost (``WorkOrderMaterialUsage.unit_cost`` where captured,
+          the estimate otherwise); ``actual_cost`` — the billable column — is
+          that internal figure **only for an asset flagged
+          ``is_cost_recoverable``**, and only when it is a real actual. An
+          estimate is never billed as an actual, so a work order that predates
+          cost capture keeps reporting exactly its old numbers.
         - ``vendor`` — closed ThirdPartyWorkOrder allocations to the asset
-          (actual = allocated_cost; the recoverable spend).
+          (actual = allocated_cost; the recoverable spend). Vendor invoices are
+          landlord-billable on every asset, flagged or not.
         - ``manual`` — MaintenanceRecord rows (actual = recorded cost).
         """
         from django.db.models import Prefetch
@@ -6639,6 +6665,7 @@ class AssetReportViewSet(viewsets.ViewSet):
         from .services.work_order_reports import (
             iter_asset_work_orders,
             prefetch_asset_work_orders,
+            wo_material_cost,
         )
 
         selection = self._cost_recovery_selection(request)
@@ -6690,21 +6717,29 @@ class AssetReportViewSet(viewsets.ViewSet):
 
         asset_blocks = []
         grand_estimated = Decimal("0.00")
+        grand_internal = Decimal("0.00")
         grand_actual = Decimal("0.00")
         service_count = 0
 
         for asset in assets:
             services = []
-            # Internal work — estimated only (no actual-cost source). Covers
-            # both preventive (from a template) and corrective work orders.
+            # Internal work — the in-house figure always lands in
+            # ``internal_cost``; it only reaches the billable ``actual_cost``
+            # column on a recoverable asset, and only when it is a real actual
+            # rather than an estimate. Covers both preventive (from a template)
+            # and corrective work orders.
             for wo, mi in iter_asset_work_orders(asset):
+                internal_cost, is_actual = wo_material_cost(mi, wo)
                 services.append(
                     {
                         "date": wo.completed_at.date(),
                         "source": "pm",
                         "description": wo.display_title,
                         "estimated_cost": self._pm_estimated_cost(mi, wo),
-                        "actual_cost": None,
+                        "internal_cost": internal_cost,
+                        "actual_cost": (
+                            internal_cost if (is_actual and asset.is_cost_recoverable) else None
+                        ),
                     }
                 )
             # Vendor — actual = per-asset allocated_cost (the recoverable spend).
@@ -6718,6 +6753,7 @@ class AssetReportViewSet(viewsets.ViewSet):
                         "source": "vendor",
                         "description": description,
                         "estimated_cost": None,
+                        "internal_cost": None,
                         "actual_cost": link.allocated_cost,
                     }
                 )
@@ -6731,6 +6767,7 @@ class AssetReportViewSet(viewsets.ViewSet):
                         "source": "manual",
                         "description": description,
                         "estimated_cost": None,
+                        "internal_cost": None,
                         "actual_cost": record.cost,
                     }
                 )
@@ -6739,10 +6776,14 @@ class AssetReportViewSet(viewsets.ViewSet):
             subtotal_estimated = sum(
                 (s["estimated_cost"] or Decimal("0.00") for s in services), Decimal("0.00")
             )
+            subtotal_internal = sum(
+                (s["internal_cost"] or Decimal("0.00") for s in services), Decimal("0.00")
+            )
             subtotal_actual = sum(
                 (s["actual_cost"] or Decimal("0.00") for s in services), Decimal("0.00")
             )
             grand_estimated += subtotal_estimated
+            grand_internal += subtotal_internal
             grand_actual += subtotal_actual
             service_count += len(services)
 
@@ -6756,8 +6797,10 @@ class AssetReportViewSet(viewsets.ViewSet):
                     "status": asset.status,
                     "status_display": asset.get_status_display(),
                     "category": asset.category.name if asset.category_id else None,
+                    "is_cost_recoverable": asset.is_cost_recoverable,
                     "services": services,
                     "subtotal_estimated": subtotal_estimated,
+                    "subtotal_internal": subtotal_internal,
                     "subtotal_actual": subtotal_actual,
                 }
             )
@@ -6792,6 +6835,7 @@ class AssetReportViewSet(viewsets.ViewSet):
                 "asset_count": len(asset_blocks),
                 "service_count": service_count,
                 "grand_total_estimated": grand_estimated,
+                "grand_total_internal": grand_internal,
                 "grand_total_actual": grand_actual,
                 "assets": asset_blocks,
             }
@@ -6813,6 +6857,7 @@ class AssetReportViewSet(viewsets.ViewSet):
             "asset_count": len(asset_blocks),
             "service_count": service_count,
             "grand_total_estimated": f"{grand_estimated:.2f}",
+            "grand_total_internal": f"{grand_internal:.2f}",
             "grand_total_actual": f"{grand_actual:.2f}",
             "assets": AssetCostRecoveryReportSerializer(asset_blocks, many=True).data,
         }
@@ -6965,6 +7010,8 @@ class AssetReportViewSet(viewsets.ViewSet):
                 "used_at",
                 "work_order_id",
                 "estimated_cost",
+                "actual_cost",
+                "cost",
                 "actor",
             ]
             writer = csv.DictWriter(response_obj, fieldnames=fieldnames)

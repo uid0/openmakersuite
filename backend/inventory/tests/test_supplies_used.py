@@ -231,6 +231,9 @@ class TestSuppliesUsedConsumable:
         assert row["work_order_id"] == str(wo.id)
         # 3.00 × 2.50 = 7.50
         assert row["estimated_cost"] == "7.50"
+        # Nothing was priced, so the reported cost falls back to the estimate.
+        assert row["actual_cost"] is None
+        assert row["cost"] == "7.50"
         assert "used_at" in row
 
     def test_excludes_material_not_used(self, authenticated_client):
@@ -319,6 +322,8 @@ class TestSuppliesUsedConsumable:
         assert rows[0]["item_name"] == "Deleted filter"
         assert rows[0]["quantity"] == "2.00"
         assert rows[0]["estimated_cost"] is None
+        assert rows[0]["actual_cost"] is None
+        assert rows[0]["cost"] is None
 
 
 @pytest.mark.integration
@@ -429,6 +434,8 @@ class TestSuppliesUsedExport:
             "used_at",
             "work_order_id",
             "estimated_cost",
+            "actual_cost",
+            "cost",
             "actor",
         ]
         rows = [r for r in reader if r["asset_id"] == str(asset.id)]
@@ -459,3 +466,84 @@ class TestSuppliesUsedExport:
         client, _ = authenticated_client
         response = client.get(EXPORT_URL, {"type": "not_a_report"})
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.integration
+class TestSuppliesUsedActualCost:
+    """op-srrv (B5) — a consumable row reports what the material really cost
+    (``WorkOrderMaterialUsage.unit_cost``, op-768w) where that was captured."""
+
+    def test_actual_cost_wins_over_the_estimate(self, authenticated_client):
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Priced Unit", asset_tag="A-SUACT")
+        _, _, usage = _completed_pm_with_material(
+            asset,
+            completed_at=timezone.now() - timedelta(days=3),
+            material_name="Contactor",
+            quantity_planned=Decimal("2.00"),
+            cost_per_unit=Decimal("10.00"),
+        )
+        usage.quantity_used = Decimal("2.00")
+        usage.unit_cost = Decimal("17.25")
+        usage.save(update_fields=["quantity_used", "unit_cost"])
+
+        rows = _rows_for_asset(client.get(URL).data, asset)
+        assert len(rows) == 1
+        row = rows[0]
+        # The estimate is untouched for reference; cost reports the real spend.
+        assert row["estimated_cost"] == "20.00"
+        assert row["actual_cost"] == "34.50"
+        assert row["cost"] == "34.50"
+
+    def test_ad_hoc_out_of_pocket_line_reports_its_cost(self, authenticated_client):
+        """An ad-hoc line has no template material, so it has no estimate — its
+        receipt price is the only figure, and it is reported."""
+        from inventory.models import WorkOrder
+
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Corrective Unit", asset_tag="A-SUADHOC")
+        wo = WorkOrder.objects.create(
+            asset=asset,
+            status=WorkOrder.Status.COMPLETED,
+            completed_at=timezone.now() - timedelta(days=2),
+        )
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material_name="Hardware-store fitting",
+            is_ad_hoc=True,
+            quantity_planned=Decimal("1.00"),
+            quantity_used=Decimal("1.00"),
+            was_used=True,
+            unit_cost=Decimal("8.99"),
+        )
+
+        rows = _rows_for_asset(client.get(URL).data, asset)
+        assert len(rows) == 1
+        assert rows[0]["estimated_cost"] is None
+        assert rows[0]["actual_cost"] == "8.99"
+        assert rows[0]["cost"] == "8.99"
+
+    def test_csv_export_carries_the_cost_columns(self, authenticated_client):
+        client, _ = authenticated_client
+        asset = AssetFactory(name="CSV Priced", asset_tag="A-SUCSV")
+        _, _, usage = _completed_pm_with_material(
+            asset,
+            completed_at=timezone.now() - timedelta(days=3),
+            material_name="Belt",
+            quantity_planned=Decimal("1.00"),
+            cost_per_unit=Decimal("5.00"),
+        )
+        usage.quantity_used = Decimal("1.00")
+        usage.unit_cost = Decimal("6.50")
+        usage.save(update_fields=["quantity_used", "unit_cost"])
+
+        response = client.get("/api/inventory/reports/assets/export/", {"type": "supplies_used"})
+        assert response.status_code == status.HTTP_200_OK
+        reader = csv.DictReader(io.StringIO(response.content.decode("utf-8")))
+        assert "actual_cost" in reader.fieldnames
+        assert "cost" in reader.fieldnames
+        rows = [r for r in reader if r["item_name"] == "Belt"]
+        assert len(rows) == 1
+        assert rows[0]["estimated_cost"] == "5.00"
+        assert rows[0]["actual_cost"] == "6.50"
+        assert rows[0]["cost"] == "6.50"

@@ -187,6 +187,15 @@ class Asset(OwnableModel):
         help_text="Name of donor (if applicable)",
     )
 
+    # Cost recovery (landlord billing)
+    is_cost_recoverable = models.BooleanField(
+        default=False,
+        help_text=(
+            "Landlord-billable; in-house repair cost on this asset flows into "
+            "the cost-recovery Actual (recoverable) column."
+        ),
+    )
+
     # Product information
     product_url = models.URLField(
         blank=True,

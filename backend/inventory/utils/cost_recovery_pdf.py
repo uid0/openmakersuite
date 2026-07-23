@@ -1,9 +1,10 @@
 """
 PDF generation for the asset cost-recovery statement.
 
-Renders a landlord-ready statement of per-asset service history with
-Estimated and Actual (vendor-invoice) cost columns. The Actual total is the
-recoverable amount ("Amount to recover").
+Renders a landlord-ready statement of per-asset service history with Estimated,
+Internal (what in-house work cost) and Actual (the billable column) costs. The
+Actual total is the recoverable amount ("Amount to recover"); in-house work only
+reaches it on an asset flagged ``is_cost_recoverable``.
 
 Mirrors the reportlab conventions used in ``work_order_pdf.py`` (SimpleDoc-
 Template + platypus flowables, built-in Helvetica fonts so no font files are
@@ -165,11 +166,16 @@ def generate_cost_recovery_pdf(report: dict) -> bytes:
             f"Status: {asset.get('status_display') or asset.get('status') or '-'}",
             f"Category: {asset.get('category') or '-'}",
             f"Date installed: {_fmt_date(asset.get('date_received'))}",
+            (
+                "Cost recovery: Recoverable (in-house work billable)"
+                if asset.get("is_cost_recoverable")
+                else "Cost recovery: Not recoverable (in-house work internal only)"
+            ),
         ]
         block.append(_para(" | ".join(info_bits), asset_info_style))
         block.append(Spacer(1, 2))
 
-        rows = [["Date", "Source", "Description", "Estimated", "Actual"]]
+        rows = [["Date", "Source", "Description", "Estimated", "Internal", "Actual"]]
         for svc in asset.get("services", []):
             rows.append(
                 [
@@ -177,24 +183,26 @@ def generate_cost_recovery_pdf(report: dict) -> bytes:
                     _SOURCE_LABELS.get(svc.get("source"), svc.get("source") or ""),
                     _para(svc.get("description") or "", cell_style),
                     _money(svc.get("estimated_cost")),
+                    _money(svc.get("internal_cost")),
                     _money(svc.get("actual_cost")),
                 ]
             )
         if len(rows) == 1:
-            rows.append(["-", "-", Paragraph("No services in period", cell_style), "", ""])
+            rows.append(["-", "-", Paragraph("No services in period", cell_style), "", "", ""])
         rows.append(
             [
                 "",
                 "",
                 "Subtotal",
                 _money(asset.get("subtotal_estimated")),
+                _money(asset.get("subtotal_internal")),
                 _money(asset.get("subtotal_actual")),
             ]
         )
 
         table = Table(
             rows,
-            colWidths=[0.9 * inch, 0.9 * inch, 3.3 * inch, 1.1 * inch, 1.1 * inch],
+            colWidths=[0.85 * inch, 0.85 * inch, 2.65 * inch, 1.0 * inch, 1.0 * inch, 1.05 * inch],
         )
         table.setStyle(
             TableStyle(
@@ -204,7 +212,7 @@ def generate_cost_recovery_pdf(report: dict) -> bytes:
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
                     ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("ALIGN", (3, 0), (4, -1), "RIGHT"),
+                    ("ALIGN", (3, 0), (5, -1), "RIGHT"),
                     ("PADDING", (0, 0), (-1, -1), 3),
                     # Subtotal row emphasis.
                     ("FONTNAME", (2, -1), (-1, -1), "Helvetica-Bold"),
@@ -223,6 +231,7 @@ def generate_cost_recovery_pdf(report: dict) -> bytes:
     story.append(HRFlowable(width="100%", thickness=1, color=colors.black))
     grand_rows = [
         ["Grand total estimated", _money(report.get("grand_total_estimated"))],
+        ["Grand total internal (in-house)", _money(report.get("grand_total_internal"))],
         ["Amount to recover (Actual)", _money(report.get("grand_total_actual"))],
     ]
     grand_table = Table(grand_rows, colWidths=[5.3 * inch, 2.0 * inch])
@@ -230,11 +239,11 @@ def generate_cost_recovery_pdf(report: dict) -> bytes:
         TableStyle(
             [
                 ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("FONTSIZE", (0, 1), (-1, 1), 13),
+                ("FONTSIZE", (0, 0), (-1, 1), 10),
+                ("FONTSIZE", (0, 2), (-1, 2), 13),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-                ("TEXTCOLOR", (0, 1), (-1, 1), colors.HexColor("#0b6b2e")),
-                ("LINEABOVE", (0, 1), (-1, 1), 1, colors.black),
+                ("TEXTCOLOR", (0, 2), (-1, 2), colors.HexColor("#0b6b2e")),
+                ("LINEABOVE", (0, 2), (-1, 2), 1, colors.black),
                 ("PADDING", (0, 0), (-1, -1), 5),
             ]
         )
@@ -243,10 +252,12 @@ def generate_cost_recovery_pdf(report: dict) -> bytes:
     story.append(Spacer(1, 6))
     story.append(
         Paragraph(
-            "The Actual column reflects vendor invoices and recorded actual costs "
-            "and is the amount billed to the landlord for recovery. Internal "
-            "preventive-maintenance estimates are shown for reference only and are "
-            "not part of the recoverable total.",
+            "The Actual column is the amount billed to the landlord for recovery: "
+            "vendor invoices and recorded actual costs on every asset, plus in-house "
+            "repair cost on the assets flagged recoverable above. The Internal column "
+            "reports what in-house work cost on every asset; on an asset that is not "
+            "recoverable it is shown for reference only and is not part of the "
+            "recoverable total, as are the preventive-maintenance estimates.",
             small_style,
         )
     )

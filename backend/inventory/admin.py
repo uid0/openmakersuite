@@ -1169,6 +1169,7 @@ class AssetAdmin(admin.ModelAdmin):
         "category",
         "location",
         "is_donation",
+        "is_cost_recoverable",
         "is_active",
         "report_only",
         "ownership_type",
@@ -1252,6 +1253,19 @@ class AssetAdmin(admin.ModelAdmin):
                     "acquisition_display",
                     "age_in_days",
                 )
+            },
+        ),
+        (
+            "Cost Recovery",
+            {
+                "fields": ("is_cost_recoverable",),
+                "description": (
+                    "Landlord billing. Flagged assets (the HVAC units) have their "
+                    "in-house repair cost flow into the recoverable Actual column of "
+                    "the cost-recovery statement; unflagged assets report that spend "
+                    "as internal cost only. Use the list actions to flag a whole "
+                    "category at once."
+                ),
             },
         ),
         (
@@ -1448,7 +1462,37 @@ class AssetAdmin(admin.ModelAdmin):
         except Exception:
             return mark_safe('<span style="color: #28a745;">✓ Unlocked</span>')
 
-    actions = ["duplicate_asset", "regenerate_qr_codes"]
+    actions = [
+        "duplicate_asset",
+        "regenerate_qr_codes",
+        "mark_cost_recoverable",
+        "unmark_cost_recoverable",
+    ]
+
+    @admin.action(description="Mark selected assets as landlord cost-recoverable")
+    def mark_cost_recoverable(self, request, queryset):
+        """Bulk-set ``is_cost_recoverable``.
+
+        The bulk-set-by-category path: filter the changelist by category (HVAC),
+        select all, run this. In-house repair cost on these assets then flows
+        into the recoverable Actual column of the cost-recovery statement.
+        """
+        updated = queryset.filter(is_cost_recoverable=False).update(is_cost_recoverable=True)
+        self.message_user(
+            request,
+            f"Marked {updated} asset(s) as cost-recoverable.",
+            level=messages.SUCCESS if updated else messages.INFO,
+        )
+
+    @admin.action(description="Clear landlord cost-recoverable on selected assets")
+    def unmark_cost_recoverable(self, request, queryset):
+        """Bulk-clear ``is_cost_recoverable`` (the undo for the action above)."""
+        updated = queryset.filter(is_cost_recoverable=True).update(is_cost_recoverable=False)
+        self.message_user(
+            request,
+            f"Cleared cost-recoverable on {updated} asset(s).",
+            level=messages.SUCCESS if updated else messages.INFO,
+        )
 
     @admin.action(description="Duplicate selected asset (enter new serial number)")
     def duplicate_asset(self, request, queryset):

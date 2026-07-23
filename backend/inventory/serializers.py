@@ -2,6 +2,8 @@
 Serializers for inventory API.
 """
 
+from decimal import Decimal
+
 from rest_framework import serializers
 
 # The asset's breaker/disconnect FKs live on facilities.AssetSiteRequirements
@@ -2162,12 +2164,24 @@ class WorkOrderTaskCompletionSerializer(serializers.ModelSerializer):
 class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
     """Serializer for material usage tracking within a work order.
 
-    ``quantity_used`` is writable (the consumed amount that drives the inventory
-    decrement); ``applied_quantity`` and ``stock_applied`` expose the decrement
-    state read-only so the UI can show what was drawn from stock.
+    ``quantity_used`` and ``unit_cost`` are writable (the consumed amount that
+    drives the inventory decrement, and the real price paid per unit);
+    ``applied_quantity`` and ``stock_applied`` expose the decrement state
+    read-only so the UI can show what was drawn from stock. ``actual_cost``
+    (op-768w) is the line's real spend — ``quantity_used × unit_cost``, null
+    when no cost was recorded.
+
+    ``material_name``/``unit``/``inventory_item`` are read-only here: a
+    template-derived row freezes them at generation, and an ad-hoc row sets
+    them once through the ``add_material`` action.
     """
 
     stock_applied = serializers.BooleanField(read_only=True)
+    actual_cost = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True, allow_null=True
+    )
+    inventory_item_name = serializers.SerializerMethodField()
+    receipt_url = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkOrderMaterialUsage
@@ -2176,12 +2190,19 @@ class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
             "work_order",
             "material",
             "material_name",
+            "inventory_item",
+            "inventory_item_name",
+            "is_ad_hoc",
             "quantity_planned",
             "quantity_used",
             "unit",
+            "unit_cost",
+            "actual_cost",
             "was_used",
             "applied_quantity",
             "stock_applied",
+            "receipt_image",
+            "receipt_url",
             "created_at",
         ]
         read_only_fields = [
@@ -2190,7 +2211,53 @@ class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
             "quantity_planned",
             "unit",
             "applied_quantity",
+            "inventory_item",
+            "is_ad_hoc",
+            "receipt_url",
         ]
+
+    def get_inventory_item_name(self, obj):
+        """Name of the stock row this line draws from, for either kind of row.
+
+        Reads :attr:`WorkOrderMaterialUsage.stock_item` so a template-derived
+        line shows its spec's item and an ad-hoc line shows its direct link.
+        """
+        item = obj.stock_item
+        return item.name if item is not None else None
+
+    def get_receipt_url(self, obj):
+        request = self.context.get("request")
+        if obj.receipt_image and request:
+            return request.build_absolute_uri(obj.receipt_image.url)
+        return obj.receipt_image.url if obj.receipt_image else None
+
+
+class WorkOrderAdHocMaterialSerializer(serializers.Serializer):
+    """Write-only input for ``WorkOrderViewSet.add_material`` (op-768w).
+
+    A separate input serializer rather than the model one because the model
+    serializer deliberately freezes ``material_name``/``unit``/
+    ``inventory_item`` — they are set exactly once, here. Going through a
+    serializer (like ``add_photo`` does) is also what validates the uploaded
+    ``receipt_image`` is a real image rather than trusting the content type.
+    """
+
+    material_name = serializers.CharField(max_length=200, trim_whitespace=True)
+    quantity_used = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal("0"), required=False
+    )
+    unit = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    unit_cost = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        required=False,
+        allow_null=True,
+    )
+    inventory_item = serializers.PrimaryKeyRelatedField(
+        queryset=InventoryItem.objects.all(), required=False, allow_null=True
+    )
+    receipt_image = serializers.ImageField(required=False, allow_null=True)
 
 
 class WorkOrderLotoCompletionSerializer(serializers.ModelSerializer):
@@ -2380,6 +2447,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     elapsed_seconds = serializers.SerializerMethodField()
     task_completions = WorkOrderTaskCompletionSerializer(many=True, read_only=True)
     material_usage = WorkOrderMaterialUsageSerializer(many=True, read_only=True)
+    # op-768w: real money spent on materials, summed over the *used* lines.
+    # Rides the ``material_usage`` prefetch, so it costs no extra query.
+    actual_material_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     loto_completions = WorkOrderLotoCompletionSerializer(many=True, read_only=True)
     photos = WorkOrderPhotoSerializer(many=True, read_only=True)
     tools = serializers.SerializerMethodField()
@@ -2418,6 +2488,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "is_overdue",
             "task_completions",
             "material_usage",
+            "actual_material_cost",
             "loto_completions",
             "photos",
             "tools",
@@ -2442,6 +2513,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "is_timing",
             "task_completions",
             "material_usage",
+            "actual_material_cost",
             "loto_completions",
             "photos",
             "tools",

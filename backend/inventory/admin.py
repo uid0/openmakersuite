@@ -2048,15 +2048,32 @@ class WorkOrderMaterialUsageInline(admin.TabularInline):
     extra = 0
     fields = [
         "material_name",
+        "is_ad_hoc",
+        "inventory_item",
         "quantity_planned",
         "quantity_used",
         "unit",
+        "unit_cost",
+        "actual_cost",
         "was_used",
         "applied_quantity",
+        "receipt_image",
     ]
     # ``applied_quantity`` (whole stock units decremented) is read-only audit
     # state managed by the material-usage service, not edited by hand here.
-    readonly_fields = ["material_name", "quantity_planned", "unit", "applied_quantity"]
+    # ``is_ad_hoc``/``actual_cost`` are provenance and derived spend.
+    readonly_fields = [
+        "material_name",
+        "quantity_planned",
+        "unit",
+        "applied_quantity",
+        "is_ad_hoc",
+        "actual_cost",
+    ]
+
+    @admin.display(description="Actual cost")
+    def actual_cost(self, obj):
+        return obj.actual_cost
 
 
 class WorkOrderLotoCompletionInline(admin.TabularInline):

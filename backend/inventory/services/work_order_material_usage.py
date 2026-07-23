@@ -20,7 +20,8 @@ Design notes
   application.
 * A material with no ``inventory_item`` link is flag-only: ``was_used`` /
   ``quantity_used`` are recorded but nothing is decremented and no error is
-  raised.
+  raised. This is what an out-of-pocket purchase (an ad-hoc line with a
+  ``unit_cost`` and a receipt, but no inventory row) always is.
 """
 
 from __future__ import annotations
@@ -105,8 +106,10 @@ def apply_material_usage(
     update_fields: list[str] = []
     log_to_delete = None
 
-    material = usage.material
-    item = material.inventory_item if material is not None else None
+    # ``stock_item`` resolves the link for BOTH kinds of row: a template-derived
+    # line inherits it from its ``MaintenanceMaterial`` spec, an ad-hoc line
+    # (op-768w) carries it directly. Either way an unlinked line is flag-only.
+    item = usage.stock_item
 
     if target and usage.applied_quantity is None and item is not None:
         # APPLY — guarded by ``applied_quantity is None`` so a double-apply

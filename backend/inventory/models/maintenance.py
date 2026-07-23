@@ -648,6 +648,28 @@ class WorkOrder(ElapsedTimerModel):
         return f"WO-{str(self.id)[:8].upper()} — {self.display_title} ({self.get_status_display()})"
 
     @property
+    def actual_material_cost(self) -> Decimal:
+        """Real money spent on materials for this job (op-768w).
+
+        Sums :attr:`WorkOrderMaterialUsage.actual_cost` over the lines actually
+        marked *used* — a planned-but-unused material cost nothing. Lines with
+        no recorded ``unit_cost`` contribute zero rather than blocking the
+        total, so a partially-priced job still reports what is known.
+
+        Reads ``material_usage.all()`` so a caller who prefetched it (every API
+        read path does) pays no extra query. This is the value downstream cost
+        reporting and the committee ledger charge consume.
+        """
+        return sum(
+            (
+                usage.actual_cost
+                for usage in self.material_usage.all()
+                if usage.was_used and usage.actual_cost is not None
+            ),
+            Decimal("0.00"),
+        )
+
+    @property
     def is_overdue(self) -> bool:
         """Return True if this open work order is past its due date."""
         from django.utils import timezone
@@ -745,6 +767,23 @@ class WorkOrderTaskCompletion(ElapsedTimerModel):
 class WorkOrderMaterialUsage(models.Model):
     """
     Tracks which materials were actually used when completing a work order.
+
+    Two kinds of row live here:
+
+    * **Template-derived** — a frozen copy of the PM template's
+      :class:`MaintenanceMaterial`, created up front at work-order generation.
+      ``material`` points at the spec (nullable only because the spec may be
+      deleted afterwards) and ``is_ad_hoc`` is False. These rows are part of
+      the printed sheet, so they are never deletable.
+    * **Ad-hoc** (op-768w) — added *during* the job through ``add_material``.
+      No template spec exists (``material`` is null, ``is_ad_hoc`` True), which
+      is the only kind of material a *corrective* work order can ever have: it
+      has no PM template to copy from. An out-of-pocket buy is an ad-hoc row
+      with a ``unit_cost`` and a ``receipt_image`` and no inventory link.
+
+    ``unit_cost`` × ``quantity_used`` is the line's :attr:`actual_cost` — the
+    real money spent, as opposed to the template's *estimated*
+    ``MaintenanceMaterial.estimated_cost_per_unit``.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -760,7 +799,32 @@ class WorkOrderMaterialUsage(models.Model):
         null=True,
         blank=True,
         related_name="usage_records",
-        help_text="The material specification (null if deleted after WO creation)",
+        help_text=(
+            "The material specification (null if deleted after WO creation, or "
+            "if this is an ad-hoc line typed in during the job)"
+        ),
+    )
+    # Ad-hoc lines carry their own stock link because they have no
+    # ``material`` spec to hang one off. Read :attr:`stock_item`, never either
+    # field directly, so both kinds of row decrement the same way.
+    inventory_item = models.ForeignKey(
+        "InventoryItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_order_material_usage",
+        help_text=(
+            "Direct stock link for an ad-hoc line. Set it to draw the material "
+            "from tracked inventory when the line is marked used; leave it null "
+            "for an out-of-pocket buy, which moves no stock."
+        ),
+    )
+    is_ad_hoc = models.BooleanField(
+        default=False,
+        help_text=(
+            "True when this line was added during the job rather than copied "
+            "from the PM template. Only ad-hoc lines can be removed."
+        ),
     )
     material_name = models.CharField(
         max_length=200,
@@ -813,6 +877,20 @@ class WorkOrderMaterialUsage(models.Model):
         related_name="+",
         help_text="UsageLog row written when stock was decremented; voided on reversal.",
     )
+    # --- Actual cost capture (op-768w) --------------------------------------
+    unit_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Actual price per unit paid.",
+    )
+    receipt_image = models.ImageField(
+        upload_to="work_orders/receipts/%Y/%m/",
+        null=True,
+        blank=True,
+        help_text="Photo of the receipt backing an out-of-pocket purchase.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -826,6 +904,35 @@ class WorkOrderMaterialUsage(models.Model):
     def stock_applied(self) -> bool:
         """True when a stock decrement is currently applied for this usage."""
         return self.applied_quantity is not None
+
+    @property
+    def stock_item(self):
+        """The inventory item this line draws from, or ``None`` (flag-only).
+
+        An ad-hoc line links stock directly (:attr:`inventory_item`); a
+        template-derived line inherits the link from its
+        :class:`MaintenanceMaterial` spec. The direct link wins when both are
+        set. This is the one accessor
+        :func:`inventory.services.work_order_material_usage.apply_material_usage`
+        consults, so both kinds of row decrement identically.
+        """
+        if self.inventory_item is not None:
+            return self.inventory_item
+        material = self.material
+        return material.inventory_item if material is not None else None
+
+    @property
+    def actual_cost(self) -> Optional[Decimal]:
+        """Real money spent on this line — ``quantity_used × unit_cost``.
+
+        ``None`` when no ``unit_cost`` was recorded (cost is optional: plenty
+        of lines are shop stock nobody prices at the point of use). Downstream
+        cost reporting and the ledger charge sum this over the *used* lines —
+        see :attr:`WorkOrder.actual_material_cost`.
+        """
+        if self.unit_cost is None:
+            return None
+        return (self.quantity_used or Decimal("0")) * self.unit_cost
 
 
 class WorkOrderLotoCompletion(models.Model):

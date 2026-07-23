@@ -1796,6 +1796,9 @@ views:
         - IsAuthenticated
   inventory.views.WorkOrderViewSet:
     actions:
+      add_material:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
       add_photo:
         permission_classes:
         - IsAuthenticated
@@ -1830,6 +1833,9 @@ views:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
       pdf:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      remove_material:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
       retrieve:

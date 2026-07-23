@@ -441,6 +441,53 @@ class TestAutoResolveOnCompletion:
         assert problem.resolved_at is not None
         assert problem.resolved_by == (staff.handle or staff.username)
 
+    def test_scanned_paper_completion_resolves_the_report(self, staff, asset):
+        """The paper path completes work orders too, so it must close reports.
+
+        A scanned sheet can only close a work order that has required tasks, so
+        this is the PM shape — the one a promoted LocationProblem rides on.
+        """
+        from inventory.models import (
+            MaintenanceItem,
+            MaintenanceTask,
+            WorkOrderSubmission,
+            WorkOrderTaskCompletion,
+        )
+        from inventory.services.work_order_ingest import omr_confirm_completion
+
+        item = MaintenanceItem.objects.create(
+            asset=asset, title="Monthly inspection", interval_days=30
+        )
+        wo = WorkOrder.objects.create(maintenance_item=item)
+        task = MaintenanceTask.objects.create(
+            maintenance_item=item, title="Check the belt", order=1, is_required=True
+        )
+        WorkOrderTaskCompletion.objects.create(
+            work_order=wo,
+            task=task,
+            task_title=task.title,
+            task_order=task.order,
+            is_required=True,
+            is_completed=True,
+        )
+        problem = AssetProblem.objects.create(
+            asset=asset,
+            description="Belt squeals",
+            work_order=wo,
+            status=AssetProblem.Status.IN_PROGRESS,
+        )
+        submission = WorkOrderSubmission.objects.create(
+            kind=WorkOrderSubmission.Kind.PM_COMPLETION,
+            work_order=wo,
+            status=WorkOrderSubmission.Status.PENDING_REVIEW,
+        )
+
+        assert omr_confirm_completion(wo, submission, user=staff) is True
+
+        problem.refresh_from_db()
+        assert problem.status == AssetProblem.Status.RESOLVED
+        assert problem.resolved_by == (staff.handle or staff.username)
+
     def test_vendor_closure_resolves_a_promoted_location_problem(self, staff, vendor):
         """The same hook covers the location sibling, which had no closer either."""
         from inventory.models import Location, LocationProblem

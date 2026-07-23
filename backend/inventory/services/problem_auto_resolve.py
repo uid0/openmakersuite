@@ -5,16 +5,18 @@ promoted to a work order is *tracked by* that work order — nobody goes back to
 the report to close it by hand. So when the work order finishes, the reports it
 came from resolve with it.
 
-"Finishes" means two different things depending on where the work happened:
+"Finishes" has no single signal in this codebase, so every path that closes a
+work order calls :func:`resolve_problems_for_work_order`:
 
-* in-house — ``WorkOrder.status`` transitions to ``completed``
-  (``WorkOrderViewSet.perform_update``);
-* vendor — ``ThirdPartyWorkOrder`` reaches ``closed``
-  (``maintenance_orders.transitions.close_work_order``).
+* in-house, on screen — ``WorkOrderViewSet.perform_update``;
+* in-house, off a paper form — ``work_order_ingest._apply_pm_submission``
+  (emailed in) and ``omr_confirm_completion`` (reviewed scan);
+* vendor — ``maintenance_orders.transitions.close_work_order``, which is the
+  only completion signal that workflow has.
 
-Both call :func:`resolve_problems_for_work_order`. It duck-types on the two
-reverse accessors both models carry (``asset_problems`` / ``location_problems``)
-rather than branching on type, so the stamp is written identically either way.
+The function duck-types on the two reverse accessors both work-order models
+carry (``asset_problems`` / ``location_problems``) rather than branching on
+type, so the stamp is written identically whoever did the work.
 """
 
 from __future__ import annotations

@@ -1,26 +1,35 @@
 /**
  * Asset Cost-Recovery Report generator.
  *
- * Pick one or more assets and/or asset categories plus a reporting period,
- * then Generate a per-asset service statement with Estimated (internal) and
- * Actual (vendor-invoice / recorded) columns. The Actual total is the amount
+ * Pick assets and/or asset categories — or switch on "All assets" and/or an
+ * ownership scope (Space / a Committee) — plus a reporting period, then
+ * Generate a per-asset service statement with Estimated (internal) and Actual
+ * (vendor-invoice / recorded) columns. The Actual total is the amount
  * recoverable from the landlord. CSV and the landlord-ready PDF are produced
  * server-side and downloaded as blobs.
  *
  * Consumes reports/assets/cost_recovery/ (PR1, backend) — see
  * inventory/views.py AssetReportViewSet.cost_recovery.
  */
-import { Alert, Button, Group, Loader, MultiSelect, Paper, SegmentedControl, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Button, Group, Loader, MultiSelect, Paper, SegmentedControl, Select, Stack, Switch, Table, Text, Title } from '@mantine/core';
 import { DatePickerInput, DatesRangeValue } from '@mantine/dates';
 import { IconAlertTriangle, IconDownload } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { assetsAPI, CostRecoveryParams, CostRecoveryPeriod, inventoryAPI, reportsAPI } from '../services/api';
-import { Asset, AssetCostRecoveryReport, Category } from '../types';
+import { assetsAPI, CostRecoveryOwnershipType, CostRecoveryParams, CostRecoveryPeriod, inventoryAPI, reportsAPI, sigAPI } from '../services/api';
+import { Asset, AssetCostRecoveryReport, Category, SIG } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 type PeriodMode = CostRecoveryPeriod | 'custom';
+
+// "" = Any (no ownership_type param sent).
+const OWNERSHIP_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: 'Any', value: '' },
+  { label: 'User', value: 'user' },
+  { label: 'Group (SIG / committee)', value: 'group' },
+  { label: 'Space', value: 'space' },
+];
 
 const PERIOD_OPTIONS: Array<{ label: string; value: PeriodMode }> = [
   { label: 'Past week', value: 'past_week' },
@@ -60,10 +69,14 @@ const getDefaultDateRange = (): DatesRangeValue => [
 const AssetCostRecoveryPage: React.FC = () => {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [sigs, setSigs] = useState<SIG[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
 
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [allAssets, setAllAssets] = useState(false);
+  const [ownershipType, setOwnershipType] = useState<string>('');
+  const [owningGroup, setOwningGroup] = useState<string>('');
   const [periodMode, setPeriodMode] = useState<PeriodMode>('past_month');
   const [dateRange, setDateRange] = useState<DatesRangeValue>(getDefaultDateRange);
 
@@ -72,16 +85,22 @@ const AssetCostRecoveryPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
 
-  // Load the asset + category pickers once. Guard the responses so an
-  // undefined payload (e.g. a fully mocked API in tests) can't throw.
+  // Load the asset + category + committee pickers once. Guard the responses so
+  // an undefined payload (e.g. a fully mocked API in tests) can't throw. The
+  // committee list reuses the same source as the asset ownership editor.
   useEffect(() => {
     let cancelled = false;
     setLoadingOptions(true);
-    Promise.all([assetsAPI.listAssets({ page_size: 500 }), inventoryAPI.listCategories()])
-      .then(([assetRes, catRes]) => {
+    Promise.all([
+      assetsAPI.listAssets({ page_size: 500 }),
+      inventoryAPI.listCategories(),
+      sigAPI.listMySIGs(),
+    ])
+      .then(([assetRes, catRes, sigRes]) => {
         if (cancelled) return;
         setAssets(assetRes?.data?.results ?? []);
         setCategories(catRes?.data?.results ?? []);
+        setSigs(sigRes?.data?.results ?? []);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -109,17 +128,42 @@ const AssetCostRecoveryPage: React.FC = () => {
     [categories],
   );
 
-  const hasSelection = selectedAssetIds.length > 0 || selectedCategoryIds.length > 0;
+  const sigOptions = useMemo(
+    () => sigs.map((sig) => ({ value: String(sig.id), label: sig.name })),
+    [sigs],
+  );
+
+  // An ownership filter or the All-assets toggle is itself a selection — the
+  // backend reads either as "every asset (then scoped)", so the asset/category
+  // pickers become optional and are disabled while All assets is on.
+  const scopeIsAll = allAssets || ownershipType !== '' || owningGroup !== '';
+  const pickersDisabled = loadingOptions || allAssets;
+  const hasSelection =
+    scopeIsAll || selectedAssetIds.length > 0 || selectedCategoryIds.length > 0;
   const periodComplete = periodMode !== 'custom' || Boolean(dateRange[0] && dateRange[1]);
   const canRun = hasSelection && periodComplete;
+
+  const selectionHint =
+    'Select at least one asset or category, switch on All assets, or pick an ownership scope — plus a complete period.';
 
   // Assemble the request params, or null if the selection/window is incomplete.
   const buildParams = useCallback((): CostRecoveryParams | null => {
     if (!hasSelection) return null;
     const base: CostRecoveryParams = {
-      asset_ids: selectedAssetIds,
-      category_ids: selectedCategoryIds.map(Number),
+      // All assets ignores the pickers (the backend widens the base set), so
+      // don't send a stale id list alongside it.
+      asset_ids: allAssets ? [] : selectedAssetIds,
+      category_ids: allAssets ? [] : selectedCategoryIds.map(Number),
     };
+    if (allAssets) {
+      base.all_assets = true;
+    }
+    if (ownershipType !== '') {
+      base.ownership_type = ownershipType as CostRecoveryOwnershipType;
+    }
+    if (owningGroup !== '') {
+      base.owning_group = Number(owningGroup);
+    }
     if (periodMode === 'custom') {
       if (!dateRange[0] || !dateRange[1]) return null;
       return {
@@ -129,12 +173,21 @@ const AssetCostRecoveryPage: React.FC = () => {
       };
     }
     return { ...base, period: periodMode };
-  }, [hasSelection, selectedAssetIds, selectedCategoryIds, periodMode, dateRange]);
+  }, [
+    hasSelection,
+    selectedAssetIds,
+    selectedCategoryIds,
+    allAssets,
+    ownershipType,
+    owningGroup,
+    periodMode,
+    dateRange,
+  ]);
 
   const handleGenerate = async () => {
     const params = buildParams();
     if (!params) {
-      setError('Select at least one asset or category and a complete period.');
+      setError(selectionHint);
       return;
     }
     try {
@@ -153,7 +206,7 @@ const AssetCostRecoveryPage: React.FC = () => {
   const handleExport = async (format: 'csv' | 'pdf') => {
     const params = buildParams();
     if (!params) {
-      setError('Select at least one asset or category and a complete period.');
+      setError(selectionHint);
       return;
     }
     try {
@@ -181,13 +234,22 @@ const AssetCostRecoveryPage: React.FC = () => {
     <Stack gap="md" p="md">
       <Title order={2}>Asset Cost-Recovery Report</Title>
       <Text size="sm" c="dimmed">
-        Build a per-asset service statement billed to the landlord. The Actual
-        (vendor-invoice / recorded) total is the recoverable amount; estimates
-        for internal preventive maintenance are shown as context only.
+        Build a per-asset service statement billed to the landlord. Scope it to
+        specific assets or categories, to every asset, or to an ownership group
+        (Space-owned, or one committee&apos;s assets). The Actual (vendor-invoice /
+        recorded) total is the recoverable amount; estimates for internal
+        preventive maintenance are shown as context only.
       </Text>
 
       <Paper withBorder p="md">
         <Stack gap="md">
+          <Switch
+            label="All assets"
+            description="Run the statement across every asset — the asset and category pickers are then ignored."
+            checked={allAssets}
+            onChange={(e) => setAllAssets(e.currentTarget.checked)}
+            data-testid="cost-recovery-all-assets"
+          />
           <MultiSelect
             label="Assets"
             placeholder="Search assets"
@@ -196,7 +258,7 @@ const AssetCostRecoveryPage: React.FC = () => {
             onChange={setSelectedAssetIds}
             searchable
             clearable
-            disabled={loadingOptions}
+            disabled={pickersDisabled}
             data-testid="cost-recovery-assets"
           />
           <MultiSelect
@@ -208,9 +270,33 @@ const AssetCostRecoveryPage: React.FC = () => {
             onChange={setSelectedCategoryIds}
             searchable
             clearable
-            disabled={loadingOptions}
+            disabled={pickersDisabled}
             data-testid="cost-recovery-categories"
           />
+
+          <Group grow align="flex-start">
+            <Select
+              label="Ownership type"
+              description="Scopes to assets with that ownership."
+              placeholder="Any"
+              data={OWNERSHIP_OPTIONS}
+              value={ownershipType}
+              onChange={(value) => setOwnershipType(value ?? '')}
+              data-testid="cost-recovery-ownership-type"
+            />
+            <Select
+              label="Owning group (Committee / SIG)"
+              description="Scopes to that committee's assets."
+              placeholder="Any"
+              data={sigOptions}
+              value={owningGroup === '' ? null : owningGroup}
+              onChange={(value) => setOwningGroup(value ?? '')}
+              searchable
+              clearable
+              disabled={loadingOptions}
+              data-testid="cost-recovery-owning-group"
+            />
+          </Group>
 
           <div>
             <Text size="sm" fw={500} mb={4}>
@@ -276,7 +362,8 @@ const AssetCostRecoveryPage: React.FC = () => {
         </Group>
       ) : report === null ? (
         <Text c="dimmed">
-          Choose one or more assets or categories and a period, then Generate the statement.
+          Choose assets or categories — or switch on All assets, or pick an ownership
+          scope — plus a period, then Generate the statement.
         </Text>
       ) : report.assets.length === 0 ? (
         <Paper withBorder p="md">

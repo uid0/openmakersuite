@@ -1,16 +1,19 @@
 /**
- * Tests for AssetCostRecoveryPage — the cost-recovery report generator (op-wjmm).
+ * Tests for AssetCostRecoveryPage — the cost-recovery report generator
+ * (op-wjmm; all-assets + ownership filters op-ilnl).
  *
  * Covers: options load on mount; asset select + default preset build the right
  * params and render per-asset line items + grand total; the custom date range
- * sends start_date/end_date instead of a period; CSV/PDF buttons hit the
- * format= endpoint and trigger a download; empty-state; and error surfacing.
+ * sends start_date/end_date instead of a period; the All-assets toggle and the
+ * ownership-type / owning-group (committee) selects drive the params and stand
+ * in as a selection on their own; CSV/PDF buttons hit the format= endpoint and
+ * trigger a download; empty-state; and error surfacing.
  */
 import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import AssetCostRecoveryPage from '../../pages/AssetCostRecoveryPage';
-import { assetsAPI, inventoryAPI, reportsAPI } from '../../services/api';
+import { assetsAPI, inventoryAPI, reportsAPI, sigAPI } from '../../services/api';
 import { networkError } from '../helpers/offline';
 
 vi.mock('../../services/api');
@@ -18,6 +21,7 @@ vi.mock('../../services/api');
 const mockAssetsAPI = assetsAPI as jest.Mocked<typeof assetsAPI>;
 const mockInventoryAPI = inventoryAPI as jest.Mocked<typeof inventoryAPI>;
 const mockReportsAPI = reportsAPI as jest.Mocked<typeof reportsAPI>;
+const mockSigAPI = sigAPI as jest.Mocked<typeof sigAPI>;
 
 const okResponse = <T,>(data: T) =>
   ({ data, status: 200, statusText: 'OK', headers: {}, config: {} as never }) as never;
@@ -28,6 +32,11 @@ const ASSETS = [
 ];
 
 const CATEGORIES = [{ id: 3, name: 'Fabrication' }];
+
+const SIGS = [
+  { id: 11, name: 'Woodshop Committee' },
+  { id: 12, name: 'Electronics Committee' },
+];
 
 const SAMPLE_REPORT = {
   period: 'past_month',
@@ -86,6 +95,7 @@ beforeEach(() => {
     okResponse({ count: ASSETS.length, next: null, previous: null, results: ASSETS }),
   );
   mockInventoryAPI.listCategories.mockResolvedValue(okResponse({ results: CATEGORIES }));
+  mockSigAPI.listMySIGs.mockResolvedValue(okResponse({ results: SIGS }));
   mockReportsAPI.getAssetCostRecovery.mockResolvedValue(okResponse(SAMPLE_REPORT));
   mockReportsAPI.downloadAssetCostRecovery.mockResolvedValue(okResponse(new Blob(['x'])));
 });
@@ -98,12 +108,24 @@ const selectLaserCutter = async () => {
   fireEvent.click(await screen.findByRole('option', { name: /Laser Cutter/i }));
 };
 
+// Pick an option from one of the ownership <Select>s. Mantine renders both a
+// visible and a hidden input per Select, so target the testid (which lands on
+// the visible one) rather than the shared label.
+const pickFromSelect = async (testId: string, option: RegExp) => {
+  const input = screen.getByTestId(testId);
+  await waitFor(() => expect(input).not.toBeDisabled());
+  fireEvent.click(input);
+  fireEvent.click(await screen.findByRole('option', { name: option }));
+};
+
+const allAssetsToggle = () => screen.getByTestId('cost-recovery-all-assets');
+
 describe('AssetCostRecoveryPage', () => {
-  it('loads asset + category pickers and shows the initial prompt', async () => {
+  it('loads asset + category + committee pickers and shows the initial prompt', async () => {
     renderPage();
 
     expect(
-      await screen.findByText(/choose one or more assets or categories and a period/i),
+      await screen.findByText(/choose assets or categories .* plus a period/i),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Generate' })).toBeInTheDocument();
 
@@ -111,6 +133,8 @@ describe('AssetCostRecoveryPage', () => {
       expect(mockAssetsAPI.listAssets).toHaveBeenCalledWith({ page_size: 500 });
     });
     expect(mockInventoryAPI.listCategories).toHaveBeenCalled();
+    // Committees come from the same source as the asset ownership editor.
+    expect(mockSigAPI.listMySIGs).toHaveBeenCalled();
   });
 
   it('generates with the default preset and renders per-asset line items + grand total', async () => {
@@ -228,5 +252,83 @@ describe('AssetCostRecoveryPage', () => {
     // Enable once loaded + a selection is made.
     await selectLaserCutter();
     await waitFor(() => expect(generate).not.toBeDisabled());
+  });
+
+  it('All assets is a selection on its own and sends all_assets=true', async () => {
+    renderPage();
+    const generate = screen.getByRole('button', { name: 'Generate' });
+    expect(generate).toBeDisabled();
+
+    fireEvent.click(allAssetsToggle());
+    await waitFor(() => expect(generate).not.toBeDisabled());
+    fireEvent.click(generate);
+
+    await waitFor(() => expect(mockReportsAPI.getAssetCostRecovery).toHaveBeenCalled());
+    const params = mockReportsAPI.getAssetCostRecovery.mock.calls[0][0];
+    expect(params.all_assets).toBe(true);
+    expect(params.period).toBe('past_month');
+    // The pickers are ignored in this mode, so no stale ids ride along.
+    expect(params.asset_ids).toEqual([]);
+    expect(params.category_ids).toEqual([]);
+  });
+
+  it('All assets disables the asset + category pickers', async () => {
+    renderPage();
+    const assetInput = screen.getByPlaceholderText('Search assets');
+    await waitFor(() => expect(assetInput).not.toBeDisabled());
+
+    fireEvent.click(allAssetsToggle());
+
+    await waitFor(() => expect(assetInput).toBeDisabled());
+    expect(screen.getByPlaceholderText('Search categories')).toBeDisabled();
+  });
+
+  it('an ownership type alone enables Generate and sends ownership_type', async () => {
+    renderPage();
+    const generate = screen.getByRole('button', { name: 'Generate' });
+    expect(generate).toBeDisabled();
+
+    await pickFromSelect('cost-recovery-ownership-type', /^Space$/);
+    await waitFor(() => expect(generate).not.toBeDisabled());
+    fireEvent.click(generate);
+
+    await waitFor(() => expect(mockReportsAPI.getAssetCostRecovery).toHaveBeenCalled());
+    const params = mockReportsAPI.getAssetCostRecovery.mock.calls[0][0];
+    expect(params.ownership_type).toBe('space');
+    expect(params.all_assets).toBeUndefined();
+  });
+
+  it('picking a committee sends owning_group and combines with All assets', async () => {
+    renderPage();
+
+    fireEvent.click(allAssetsToggle());
+    await pickFromSelect('cost-recovery-owning-group', /Woodshop Committee/i);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+
+    await waitFor(() => expect(mockReportsAPI.getAssetCostRecovery).toHaveBeenCalled());
+    const params = mockReportsAPI.getAssetCostRecovery.mock.calls[0][0];
+    expect(params.all_assets).toBe(true);
+    expect(params.owning_group).toBe(11);
+  });
+
+  it('carries the ownership scope into the CSV export', async () => {
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      value: vi.fn(() => 'blob:mock'),
+      writable: true,
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', { value: vi.fn(), writable: true });
+
+    renderPage();
+    await pickFromSelect('cost-recovery-owning-group', /Electronics Committee/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /export csv/i }));
+
+    await waitFor(() => {
+      expect(mockReportsAPI.downloadAssetCostRecovery).toHaveBeenCalledWith(
+        expect.objectContaining({ owning_group: 12, period: 'past_month' }),
+        'csv',
+      );
+    });
   });
 });

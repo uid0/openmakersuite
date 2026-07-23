@@ -2139,11 +2139,20 @@ type DateRangeParams = { start_date?: string; end_date?: string };
 
 export type CostRecoveryPeriod = 'past_week' | 'past_month' | 'past_year';
 
+// Asset ownership scope for the cost-recovery report (Asset.OwnershipType).
+export type CostRecoveryOwnershipType = 'user' | 'group' | 'space';
+
 // Selection + window for the asset cost-recovery report. Supply at least one
-// of asset_ids / category_ids, and exactly one of period OR start_date+end_date.
+// selection param (asset_ids / category_ids / all_assets / ownership_type /
+// owning_group), and exactly one of period OR start_date+end_date. Note that
+// all_assets or either ownership filter widens the base set to every asset,
+// so they are not narrowed by asset_ids/category_ids.
 export interface CostRecoveryParams {
   asset_ids?: string[];
   category_ids?: number[];
+  all_assets?: boolean;
+  ownership_type?: CostRecoveryOwnershipType;
+  owning_group?: number; // auth.Group PK — the owning SIG / committee
   period?: CostRecoveryPeriod;
   start_date?: string; // YYYY-MM-DD
   end_date?: string; // YYYY-MM-DD
@@ -2164,6 +2173,15 @@ const buildCostRecoveryQuery = (
   }
   if (params.category_ids && params.category_ids.length > 0) {
     query.category_ids = params.category_ids.join(',');
+  }
+  if (params.all_assets) {
+    query.all_assets = 'true';
+  }
+  if (params.ownership_type) {
+    query.ownership_type = params.ownership_type;
+  }
+  if (params.owning_group != null) {
+    query.owning_group = String(params.owning_group);
   }
   if (params.period) {
     query.period = params.period;

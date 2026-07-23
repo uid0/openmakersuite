@@ -392,6 +392,57 @@ def build_reference_documents_context(
     }
 
 
+def build_purchase_lines_context(work_order: "WorkOrder") -> list[dict[str, Any]]:
+    """The PO lines bought to do this job — "ordered for this WO" (op-bu80).
+
+    Every live purchase-order line tagged with this work order, whether still
+    on order or already received, newest purchase order first. Voided lines are
+    dropped: a voided line was un-ordered, so showing it as "on order" would be
+    a lie. A received line also has a material row on the work order (posted by
+    :mod:`inventory.services.work_order_purchase_bridge`) — this list is the
+    *ordering* view of the same fact, which is what tells a tech that the part
+    they are waiting on is still in transit.
+
+    Reads ``purchase_order_items.all()`` unfiltered/unordered so the viewset's
+    prefetch is used instead of a query per work order; the filter and sort
+    happen in Python over that cache.
+    """
+    from .work_order_purchase_bridge import purchase_line_name, purchase_line_unit_cost
+
+    lines = [line for line in work_order.purchase_order_items.all() if not line.is_voided]
+    lines.sort(
+        key=lambda line: (line.purchase_order.order_date, line.created_at),
+        reverse=True,
+    )
+    return [
+        {
+            "id": str(line.id),
+            "purchase_order_id": str(line.purchase_order_id),
+            "po_number": line.purchase_order.po_number,
+            "po_status": line.purchase_order.status,
+            "supplier_name": (
+                line.purchase_order.supplier.name if line.purchase_order.supplier_id else None
+            ),
+            "name": purchase_line_name(line),
+            "item_type": line.target_type,
+            "quantity_ordered": line.quantity_ordered,
+            "quantity_received": line.quantity_received,
+            "quantity_pending": line.quantity_pending,
+            "is_fully_received": line.is_fully_received,
+            "unit_cost": str(purchase_line_unit_cost(line)),
+            "expected_delivery_date": (
+                line.purchase_order.expected_delivery_date.isoformat()
+                if line.purchase_order.expected_delivery_date
+                else None
+            ),
+            "expected_shipment_date": (
+                line.expected_shipment_date.isoformat() if line.expected_shipment_date else None
+            ),
+        }
+        for line in lines
+    ]
+
+
 def build_work_order_context(work_order: "WorkOrder") -> dict[str, Any]:
     """Single source of truth for digital + PDF feature parity."""
     asset = work_order.asset

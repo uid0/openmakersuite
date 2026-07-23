@@ -116,6 +116,19 @@ def receive_delivery(
                             created_by=received_by,
                         )
 
+            # Ordered-for-a-job lines thread back onto that job (op-bu80):
+            # the received quantity and its actual cost become a material line
+            # on the work order, feeding ``WorkOrder.actual_material_cost``.
+            # No work order on the line → nothing happens, and the bridge
+            # never moves stock, so ordinary receives are untouched. Local
+            # import avoids a reorder_queue <-> inventory services cycle.
+            if po_item.work_order_id:
+                from inventory.services.work_order_purchase_bridge import (
+                    post_work_order_material,
+                )
+
+                post_work_order_material(po_item)
+
             if po_item.is_fully_received:
                 create_lead_time_log(po_item, delivery.delivery_date)
 

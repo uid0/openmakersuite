@@ -4161,6 +4161,12 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             # costs nothing extra.
             "maintenance_item__asset__documents",
             "asset__documents",
+            # op-bu80: feed WorkOrderSerializer.purchase_order_lines ("ordered
+            # for this WO"). One query for the lines plus their PO header/
+            # supplier, instead of a query per line per work order.
+            "purchase_order_items__purchase_order__supplier",
+            "purchase_order_items__item_supplier__item",
+            "purchase_order_items__asset",
         )
         .all()
     )

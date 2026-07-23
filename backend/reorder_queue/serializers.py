@@ -98,6 +98,10 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
     item_supplier_details = ItemSupplierSerializer(source="item_supplier", read_only=True)
     asset_details = serializers.SerializerMethodField()
     item_type = serializers.SerializerMethodField()
+    # op-bu80: "ordered for this work order". ``work_order`` itself is writable
+    # so a line can be tagged (or untagged) after the fact; the details block is
+    # what a PO screen renders without a second fetch.
+    work_order_details = serializers.SerializerMethodField()
 
     # Calculated fields
     estimated_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
@@ -113,6 +117,8 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "item_supplier",
             "asset",
             "description",
+            "work_order",
+            "work_order_details",
             "item_supplier_details",
             "item_details",
             "asset_details",
@@ -153,6 +159,18 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
         # Backed by the typed-target accessor (#884): returns
         # inventory_item / asset / freeform (or None if nothing is set).
         return obj.target_type
+
+    def get_work_order_details(self, obj):
+        """Minimal identity of the work order this line was ordered for."""
+        work_order = obj.work_order
+        if work_order is None:
+            return None
+        return {
+            "id": str(work_order.id),
+            "short_id": work_order.short_id,
+            "display_title": work_order.display_title,
+            "status": work_order.status,
+        }
 
 
 class PurchaseOrderAttachmentSerializer(serializers.ModelSerializer):
@@ -288,7 +306,10 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         '[{"item_supplier_id": 1, "quantity": 10, "unit_cost": 5.00, "expected_shipment_date": "2024-01-15"}, ...] for inventory items '
         "(unit_cost and expected_shipment_date are optional), "
         '[{"asset_id": "uuid", "quantity": 1, "unit_cost": 100.00}, ...] for assets, '
-        '[{"description": "Custom item", "quantity": 1, "unit_cost": 50.00}, ...] for freeform items',
+        '[{"description": "Custom item", "quantity": 1, "unit_cost": 50.00}, ...] for freeform items. '
+        'Any line may also carry "work_order_id": "uuid" to record that it was ordered '
+        "to complete that work order; receiving it posts the material and its cost "
+        "onto that work order.",
     )
 
     class Meta:

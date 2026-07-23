@@ -8,6 +8,7 @@ import re
 from datetime import timedelta
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from django.db.models import Avg, Count, F, Max, Min, Q, Sum
 from django.utils import timezone
@@ -560,6 +561,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         "items__item_supplier__supplier",
         "items__asset",
         "items__asset__manufacturer",
+        # op-bu80: feed PurchaseOrderItemSerializer.work_order_details ("ordered
+        # for this job") from one query rather than one per tagged line.
+        # ``display_title`` falls back template -> reported problem -> asset,
+        # so all three are pulled alongside it.
+        "items__work_order__maintenance_item",
+        "items__work_order__asset",
+        "items__work_order__asset_problems",
         "deliveries__items",
         "attachments__uploaded_by",
     )
@@ -1383,6 +1391,25 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         if "notes" in request.data:
             line_item.notes = request.data["notes"]
+
+        # "Ordered for this work order" (op-bu80). Settable after the fact —
+        # the job the parts were for is often identified after the order goes
+        # out. Empty string / null clears it. Receiving is what actually posts
+        # the material onto the work order.
+        if "work_order" in request.data:
+            work_order_id = request.data["work_order"]
+            if work_order_id in (None, ""):
+                line_item.work_order = None
+            else:
+                from inventory.models import WorkOrder
+
+                try:
+                    line_item.work_order = WorkOrder.objects.get(id=work_order_id)
+                except (WorkOrder.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+                    return Response(
+                        {"error": f"Work order {work_order_id} not found"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
 
         # Allow updating unit_cost_actual via line_cost (total cost)
         # If line_cost is provided, calculate unit_cost_actual = line_cost / quantity

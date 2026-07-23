@@ -826,6 +826,20 @@ class WorkOrderMaterialUsage(models.Model):
             "from the PM template. Only ad-hoc lines can be removed."
         ),
     )
+    # Provenance AND idempotency key for the PO bridge (op-bu80): a line that
+    # was *ordered* for this work order gets exactly one usage row per purchase
+    # order line, found-or-created on this FK. Null for every hand-entered row.
+    purchase_order_item = models.ForeignKey(
+        "reorder_queue.PurchaseOrderItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_order_material_usage",
+        help_text=(
+            "Purchase-order line this material was received from (null if it "
+            "was entered by hand, or if the PO line was deleted afterwards)."
+        ),
+    )
     material_name = models.CharField(
         max_length=200,
         help_text="Denormalized material name",

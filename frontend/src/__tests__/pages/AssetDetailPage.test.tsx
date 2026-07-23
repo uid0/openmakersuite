@@ -7,9 +7,10 @@ import userEvent from '@testing-library/user-event';
 import { AxiosError } from 'axios';
 import { MemoryRouter } from 'react-router-dom';
 import AssetDetailPage from '../../pages/AssetDetailPage';
-import {
+import api, {
   AssetLOTORequirements,
   assetPartsAPI,
+  assetProblemsAPI,
   assetsAPI,
   lotoAPI,
   maintenanceAPI,
@@ -27,6 +28,8 @@ vi.mock('react-router-dom', async () => ({
 
 const mockAssetsAPI = assetsAPI as jest.Mocked<typeof assetsAPI>;
 const mockAssetPartsAPI = assetPartsAPI as jest.Mocked<typeof assetPartsAPI>;
+const mockAssetProblemsAPI = assetProblemsAPI as jest.Mocked<typeof assetProblemsAPI>;
+const mockApi = api as jest.Mocked<typeof api>;
 const mockMaintenanceAPI = maintenanceAPI as jest.Mocked<typeof maintenanceAPI>;
 const mockWorkOrderAPI = workOrderAPI as jest.Mocked<typeof workOrderAPI>;
 const mockLotoAPI = lotoAPI as jest.Mocked<typeof lotoAPI>;
@@ -1051,6 +1054,173 @@ describe('AssetDetailPage', () => {
 
       expect(await screen.findByText(/components flagged/i)).toBeInTheDocument();
       expect(screen.getByText(/flagged belt/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('promote problem to work order (op-ybpn)', () => {
+    const renderDetail = () =>
+      render(
+        <MantineProvider>
+          <MemoryRouter>
+            <AssetDetailPage />
+          </MemoryRouter>
+        </MantineProvider>,
+      );
+
+    /** Serve one problem, with any promote/resolve fields the test needs. */
+    const serveProblem = (overrides: Partial<AssetProblem> = {}) => {
+      mockAssetsAPI.getAssetProblems.mockResolvedValue({
+        data: [{ ...mockProblems[0], ...overrides }],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      } as any);
+    };
+
+    beforeEach(() => {
+      localStorage.setItem('token', 'fake-token');
+      mockApi.get.mockResolvedValue({
+        data: { results: [{ id: 'vendor-1', name: 'Acme Repairs' }] },
+      } as any);
+    });
+
+    afterEach(() => {
+      localStorage.removeItem('token');
+    });
+
+    it('creates an in-house work order and shows the WO link without a reload', async () => {
+      serveProblem();
+      mockAssetProblemsAPI.promoteStandard.mockResolvedValue({
+        data: {
+          ...mockProblems[0],
+          status: 'in_progress',
+          work_order: 'wo-1',
+          work_order_short_id: 'WO-ABCD1234',
+        },
+      } as any);
+
+      renderDetail();
+
+      await screen.findByText('Test problem');
+      fireEvent.click(screen.getByRole('button', { name: /create work order/i }));
+
+      await waitFor(() => {
+        expect(mockAssetProblemsAPI.promoteStandard).toHaveBeenCalledWith('1');
+      });
+
+      // The row is patched from the response — no second problems fetch.
+      const link = await screen.findByRole('link', { name: 'WO-ABCD1234' });
+      expect(link).toHaveAttribute('href', '/maintenance/work-orders/wo-1');
+      expect(mockAssetsAPI.getAssetProblems).toHaveBeenCalledTimes(1);
+      // A promoted report can't be promoted again.
+      expect(
+        screen.queryByRole('button', { name: /create work order/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /send to vendor/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('sends a problem to a vendor from the inline form', async () => {
+      serveProblem();
+      mockAssetProblemsAPI.promoteThirdParty.mockResolvedValue({
+        data: {
+          ...mockProblems[0],
+          status: 'in_progress',
+          third_party_work_order: 'tp-1',
+          third_party_work_order_short_id: 'TPWO-99887766',
+        },
+      } as any);
+
+      renderDetail();
+
+      await screen.findByText('Test problem');
+      fireEvent.click(screen.getByRole('button', { name: /send to vendor/i }));
+
+      // Vendors load lazily when the form opens.
+      const vendorSelect = await screen.findByLabelText(/^vendor:$/i);
+      await waitFor(() => {
+        expect(within(vendorSelect as HTMLSelectElement).getByText('Acme Repairs')).toBeInTheDocument();
+      });
+      fireEvent.change(vendorSelect, { target: { value: 'vendor-1' } });
+      fireEvent.change(screen.getByLabelText(/^title:$/i), {
+        target: { value: 'Replace spindle bearing' },
+      });
+      fireEvent.change(screen.getByLabelText(/^work type:$/i), {
+        target: { value: 'major_repair' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /open vendor work order/i }));
+
+      await waitFor(() => {
+        expect(mockAssetProblemsAPI.promoteThirdParty).toHaveBeenCalledWith('1', {
+          vendor: 'vendor-1',
+          title: 'Replace spindle bearing',
+          work_type: 'major_repair',
+        });
+      });
+
+      const link = await screen.findByRole('link', { name: 'TPWO-99887766' });
+      expect(link).toHaveAttribute('href', '/maintenance/third-party/tp-1');
+      // Form closes once the vendor work order exists.
+      expect(screen.queryByTestId('vendor-form-1')).not.toBeInTheDocument();
+    });
+
+    it('shows the promoted work order instead of promote actions on an already-promoted report', async () => {
+      serveProblem({
+        status: 'in_progress',
+        work_order: 'wo-7',
+        work_order_short_id: 'WO-77777777',
+      });
+
+      renderDetail();
+
+      expect(await screen.findByRole('link', { name: 'WO-77777777' })).toHaveAttribute(
+        'href',
+        '/maintenance/work-orders/wo-7',
+      );
+      expect(
+        screen.queryByRole('button', { name: /create work order/i }),
+      ).not.toBeInTheDocument();
+      // Resolving by hand stays available on a promoted report.
+      expect(
+        screen.getByRole('button', { name: /resolve problem/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('keeps the report intact and re-enables the action when promotion fails', async () => {
+      serveProblem();
+      mockAssetProblemsAPI.promoteStandard.mockRejectedValue(sessionExpiredError());
+
+      renderDetail();
+
+      await screen.findByText('Test problem');
+      fireEvent.click(screen.getByRole('button', { name: /create work order/i }));
+
+      await waitFor(() => {
+        expect(mockAssetProblemsAPI.promoteStandard).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /create work order/i }),
+        ).not.toBeDisabled();
+      });
+      expect(screen.getByText('Test problem')).toBeInTheDocument();
+    });
+
+    it('hides the promote actions when logged out', async () => {
+      localStorage.removeItem('token');
+      serveProblem();
+
+      renderDetail();
+
+      await screen.findByText('Test problem');
+      expect(
+        screen.queryByRole('button', { name: /create work order/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /send to vendor/i }),
+      ).not.toBeInTheDocument();
     });
   });
 });

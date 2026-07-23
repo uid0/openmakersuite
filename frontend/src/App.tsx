@@ -13,6 +13,7 @@ import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage';
 import AssetCostRecoveryPage from './pages/AssetCostRecoveryPage';
 import AssetDetailPage from './pages/AssetDetailPage';
 import AssetFormPage from './pages/AssetFormPage';
+import AssetProblemDetailPage from './pages/AssetProblemDetailPage';
 import MaintenanceItemFormPage from './pages/MaintenanceItemFormPage';
 import AssetReportPage from './pages/AssetReportPage';
 import AssetScanPage from './pages/AssetScanPage';
@@ -362,6 +363,7 @@ function AppContent() {
           <Route path="/maintenance/dashboard" element={<WorkspaceLayout><MaintenanceDashboard /></WorkspaceLayout>} />
           <Route path="/maintenance/work-orders/:id" element={<WorkspaceLayout><WorkOrderPage /></WorkspaceLayout>} />
           <Route path="/maintenance/third-party/:id" element={<WorkspaceLayout><ThirdPartyWorkOrderPage /></WorkspaceLayout>} />
+          <Route path="/maintenance/asset-problems/:id" element={<WorkspaceLayout><AssetProblemDetailPage /></WorkspaceLayout>} />
           <Route path="/maintenance/location-problems" element={<WorkspaceLayout><LocationProblemsListPage /></WorkspaceLayout>} />
           <Route path="/maintenance/location-problems/:id" element={<WorkspaceLayout><LocationProblemDetailPage /></WorkspaceLayout>} />
           <Route path="/facilities/checklist" element={<WorkspaceLayout><FacilitiesChecklistsPage /></WorkspaceLayout>} />

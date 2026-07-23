@@ -103,6 +103,7 @@ from .serializers import (
     SupplierDetailSerializer,
     SupplierSerializer,
     UsageLogSerializer,
+    WorkOrderAdHocMaterialSerializer,
     WorkOrderListSerializer,
     WorkOrderLotoCompletionSerializer,
     WorkOrderMaterialUsageSerializer,
@@ -4138,7 +4139,12 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             # op-syov: the per-step evidence gallery. Without this the WO detail
             # serializer runs one photo query per step (plus one per uploader).
             "task_completions__evidence_photos__uploaded_by",
-            "material_usage__material",
+            # op-768w: ``stock_item`` reads the ad-hoc line's direct link OR
+            # the template line's spec link — prefetch both halves so
+            # serialising ``inventory_item_name`` across a WO's materials
+            # costs nothing extra.
+            "material_usage__material__inventory_item",
+            "material_usage__inventory_item",
             "loto_completions__completed_by",
             "loto_completions__energy_source",
             "photos__uploaded_by",
@@ -5150,16 +5156,20 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         see :func:`inventory.services.work_order_material_usage.apply_material_usage`.
 
         Body: ``was_used`` (required bool) plus an optional ``quantity_used``
-        (the consumed amount). ``quantity_used`` is only editable while no
-        decrement is applied — un-mark the material first to change it.
+        (the consumed amount) and ``unit_cost`` (the real price paid per unit,
+        op-768w). Both are only editable while no decrement is applied — the
+        used quantity because changing it after stock moved would desync the
+        reversal, and the cost alongside it so the line's recorded spend can
+        never drift from the stock movement it is charged against. Un-mark the
+        material first to change either.
         """
         from .services.work_order_material_usage import apply_material_usage
 
         work_order = self.get_object()
         try:
-            usage = work_order.material_usage.select_related("material__inventory_item").get(
-                id=material_id
-            )
+            usage = work_order.material_usage.select_related(
+                "material__inventory_item", "inventory_item"
+            ).get(id=material_id)
         except WorkOrderMaterialUsage.DoesNotExist:
             return Response(
                 {"detail": "Material usage record not found."},
@@ -5172,6 +5182,7 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        edits: list[str] = []
         raw_qty = request.data.get("quantity_used")
         if raw_qty is not None:
             try:
@@ -5190,10 +5201,149 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             # amount after stock has moved would desync the reversal.
             if usage.applied_quantity is None:
                 usage.quantity_used = new_qty
-                usage.save(update_fields=["quantity_used"])
+                edits.append("quantity_used")
+
+        if "unit_cost" in request.data:
+            raw_cost = request.data["unit_cost"]
+            # An explicit null (or a blank multipart field) clears the price —
+            # "I don't know what this cost" is a real answer.
+            if raw_cost in (None, "", "null"):
+                new_cost = None
+            else:
+                try:
+                    new_cost = Decimal(str(raw_cost))
+                except (InvalidOperation, ValueError, TypeError):
+                    return Response(
+                        {"detail": "unit_cost must be a number."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if new_cost < 0:
+                    return Response(
+                        {"detail": "unit_cost cannot be negative."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            # Same rule as ``quantity_used``: frozen once stock has moved, so
+            # the recorded spend can't drift from the decrement it backs.
+            if usage.applied_quantity is None:
+                usage.unit_cost = new_cost
+                edits.append("unit_cost")
+
+        if edits:
+            usage.save(update_fields=edits)
 
         apply_material_usage(usage, was_used=bool(was_used), actor=request.user)
-        return Response(WorkOrderMaterialUsageSerializer(usage).data)
+        return Response(WorkOrderMaterialUsageSerializer(usage, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="materials")
+    def add_material(self, request, pk=None):
+        """Add an ad-hoc material line to this work order (op-768w).
+
+        The only way to record a material on a *corrective* work order, which
+        has no PM template to copy rows from — and the way any work order
+        records something bought mid-job that nobody planned for.
+
+        Body (``multipart/form-data`` when a receipt is attached):
+
+        ``material_name``
+            Required. What was used or bought.
+        ``quantity_used``
+            Optional, defaults to 1. Also seeds ``quantity_planned`` so the
+            line reads consistently next to the template-derived ones.
+        ``unit``, ``unit_cost``
+            Optional. ``unit_cost`` defaults from the linked inventory item's
+            current unit cost when one is given and no cost is supplied — a
+            default, not a lock: the caller may override it.
+        ``inventory_item``
+            Optional. Links the line to tracked stock so marking it used
+            decrements that item (see ``toggle_material``). Omit it for an
+            out-of-pocket buy: the line then records the spend and moves no
+            stock. Adding a material NEVER creates an inventory item.
+        ``receipt_image``
+            Optional proof-of-purchase photo.
+
+        The line starts un-used — mark it with ``toggle_material`` so the
+        decrement goes through the one apply seam.
+        """
+        work_order = self.get_object()
+
+        form = WorkOrderAdHocMaterialSerializer(data=request.data)
+        if not form.is_valid():
+            return Response(form.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = form.validated_data
+
+        inventory_item = data.get("inventory_item")
+        quantity_used = data.get("quantity_used")
+        if quantity_used is None:
+            quantity_used = Decimal("1.00")
+
+        unit_cost = data.get("unit_cost")
+        if unit_cost is None and inventory_item is not None:
+            # Seed from what the item currently costs so the tech only types a
+            # price when the real one differs. A default, not a lock.
+            unit_cost = inventory_item.unit_cost
+
+        usage = WorkOrderMaterialUsage.objects.create(
+            work_order=work_order,
+            material=None,
+            is_ad_hoc=True,
+            inventory_item=inventory_item,
+            material_name=data["material_name"],
+            # Nothing planned this line — it *is* the plan, so both quantities
+            # agree and the row reads consistently beside the template ones.
+            quantity_planned=quantity_used,
+            quantity_used=quantity_used,
+            unit=data.get("unit", ""),
+            unit_cost=unit_cost,
+            receipt_image=data.get("receipt_image"),
+        )
+
+        return Response(
+            WorkOrderMaterialUsageSerializer(usage, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["delete"], url_path="materials/(?P<material_id>[^/.]+)")
+    def remove_material(self, request, pk=None, material_id=None):
+        """Delete an ad-hoc material line from this work order (op-768w).
+
+        Two guards, both 400:
+
+        * **Template-derived lines are not deletable** — they are the frozen
+          copy of the PM spec and appear on the printed sheet; removing one
+          would rewrite what the job was supposed to be. Parity with the
+          behaviour before ad-hoc lines existed, where nothing was deletable.
+        * **A line with a live stock decrement is not deletable** — deleting it
+          would strand the units taken out of inventory with nothing left to
+          reverse them. Un-toggle it first, which restores the stock, then
+          remove it.
+        """
+        work_order = self.get_object()
+        try:
+            usage = work_order.material_usage.get(id=material_id)
+        except (WorkOrderMaterialUsage.DoesNotExist, DjangoValidationError, ValueError):
+            return Response(
+                {"detail": "Material usage record not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not usage.is_ad_hoc:
+            return Response(
+                {"detail": "Only ad-hoc materials can be removed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if usage.applied_quantity is not None:
+            return Response(
+                {
+                    "detail": (
+                        "This material has stock applied. Un-mark it as used "
+                        "first to restore the stock, then remove it."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        usage.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class MaintenanceItemViewSet(viewsets.ModelViewSet):

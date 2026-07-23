@@ -135,6 +135,67 @@ describe('MaintenanceDashboardPage', () => {
     expect(screen.getByText('$5,000.00')).toBeInTheDocument();
   });
 
+  test('links an un-promoted asset problem to its own detail page (op-ybpn)', async () => {
+    mockMaintenanceAPI.getDashboard.mockResolvedValue({ data: emptyDashboard() } as any);
+    mockActiveMaintenanceAPI.list.mockResolvedValue({
+      data: {
+        count: 1,
+        results: [
+          {
+            kind: 'asset_problem',
+            id: 'ap-1',
+            short_id: 'AP123456',
+            title: 'Blade guide is loose',
+            status: 'reported',
+            status_display: 'Reported',
+            asset_id: 'asset-1',
+            asset_name: 'Bandsaw',
+            location_id: null,
+            location_name: null,
+            severity: null,
+            due_date: null,
+            opened_at: new Date().toISOString(),
+          },
+        ],
+      },
+    } as any);
+
+    renderPage();
+
+    const link = await screen.findByRole('link', { name: 'AP123456' });
+    expect(link).toHaveAttribute('href', '/maintenance/asset-problems/ap-1');
+  });
+
+  test('a promoted asset problem surfaces as its work order row (op-ybpn)', async () => {
+    // B2 drops promoted reports from the active feed and the corrective work
+    // order carries the report's text as its title — so the unscheduled table's
+    // Work Order column lights up with a WO the user can open.
+    mockMaintenanceAPI.getDashboard.mockResolvedValue({
+      data: {
+        ...emptyDashboard(),
+        unscheduled: [
+          {
+            workorder_id: 'wo-9',
+            short_id: 'WO-99999999',
+            asset_id: 'asset-1',
+            asset_name: 'Bandsaw',
+            problem: 'Blade guide is loose',
+            opened_at: new Date().toISOString(),
+            status: 'open',
+          },
+        ],
+      },
+    } as any);
+
+    renderPage();
+
+    const link = await screen.findByRole('link', { name: 'WO-99999999' });
+    expect(link).toHaveAttribute('href', '/maintenance/work-orders/wo-9');
+    expect(screen.getByText('Blade guide is loose')).toBeInTheDocument();
+    // The report itself is no longer double-listed in the active feed.
+    expect(screen.queryByTestId('active-row-asset_problem')).not.toBeInTheDocument();
+  });
+
   test('shows error alert when the dashboard API fails', async () => {
     mockMaintenanceAPI.getDashboard.mockRejectedValue({
       response: { data: { detail: 'Server exploded' } },

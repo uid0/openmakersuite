@@ -66,7 +66,9 @@ const SEVERITY_COLORS: Record<string, string> = {
 const detailLinkFor = (row: ActiveMaintenanceRow): string => {
   if (row.kind === 'work_order') return `/maintenance/work-orders/${row.id}`;
   if (row.kind === 'location_problem') return `/maintenance/location-problems/${row.id}`;
-  return `/assets/${row.asset_id ?? ''}`;
+  // Asset problems get their own detail page (op-ybpn) so the promote/resolve
+  // actions are one click from this feed instead of buried in the asset page.
+  return `/maintenance/asset-problems/${row.id}`;
 };
 
 const MaintenanceDashboardPage: React.FC = () => {

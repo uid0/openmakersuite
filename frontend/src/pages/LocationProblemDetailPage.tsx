@@ -271,7 +271,7 @@ const LocationProblemDetailPage: React.FC = () => {
             <p>
               Third-Party Work Order:{' '}
               <Link
-                to={`/maintenance/third-party-work-orders/${problem.third_party_work_order}`}
+                to={`/maintenance/third-party/${problem.third_party_work_order}`}
               >
                 {problem.third_party_work_order_short_id}
               </Link>

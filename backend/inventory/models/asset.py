@@ -892,6 +892,22 @@ class AssetProblem(models.Model):
         default=Status.REPORTED,
         help_text="Current status of the problem report",
     )
+    work_order = models.ForeignKey(
+        "WorkOrder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="asset_problems",
+        help_text="In-house corrective work order this problem was promoted to",
+    )
+    third_party_work_order = models.ForeignKey(
+        "maintenance_orders.ThirdPartyWorkOrder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="asset_problems",
+        help_text="Third-party work order this problem was promoted to",
+    )
     resolution_notes = models.TextField(
         blank=True,
         help_text="Notes about how the problem was resolved",

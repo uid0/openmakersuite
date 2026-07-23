@@ -1596,6 +1596,8 @@ class AssetProblemSerializer(serializers.ModelSerializer):
         source="affected_parts",
         help_text="AssetPart ids the reporter flagged as needing replace/fix.",
     )
+    work_order_short_id = serializers.SerializerMethodField()
+    third_party_work_order_short_id = serializers.SerializerMethodField()
 
     class Meta:
         model = AssetProblem
@@ -1607,6 +1609,10 @@ class AssetProblemSerializer(serializers.ModelSerializer):
             "reported_by",
             "description",
             "status",
+            "work_order",
+            "work_order_short_id",
+            "third_party_work_order",
+            "third_party_work_order_short_id",
             "resolution_notes",
             "created_at",
             "updated_at",
@@ -1616,7 +1622,19 @@ class AssetProblemSerializer(serializers.ModelSerializer):
             "affected_parts",
             "part_ids",
         ]
-        read_only_fields = ["created_at", "updated_at", "resolved_at"]
+        read_only_fields = [
+            "created_at",
+            "updated_at",
+            "resolved_at",
+            "work_order",
+            "third_party_work_order",
+        ]
+
+    def get_work_order_short_id(self, obj):
+        return obj.work_order.short_id if obj.work_order_id else None
+
+    def get_third_party_work_order_short_id(self, obj):
+        return obj.third_party_work_order.short_id if obj.third_party_work_order_id else None
 
 
 class LocationProblemSerializer(serializers.ModelSerializer):

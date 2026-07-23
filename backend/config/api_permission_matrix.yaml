@@ -1158,6 +1158,15 @@ views:
       list:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      promote_to_standard_work_order:
+        permission_classes:
+        - IsAuthenticated
+      promote_to_third_party_work_order:
+        permission_classes:
+        - IsAuthenticated
+      resolve:
+        permission_classes:
+        - IsAuthenticated
       retrieve:
         permission_classes:
         - IsAuthenticatedOrReadOnly

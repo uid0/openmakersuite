@@ -634,7 +634,10 @@ class WorkOrder(ElapsedTimerModel):
         """
         if self.maintenance_item_id:
             return self.maintenance_item.title
-        problem = getattr(self, "asset_problem", None)
+        # Reverse FK, so read it through ``.all()`` rather than ``.first()``:
+        # a caller that prefetched ``asset_problems`` pays no extra query.
+        # Only template-less (corrective) work orders ever reach this line.
+        problem = next(iter(self.asset_problems.all()), None)
         if problem is not None and problem.description:
             return problem.description[:60]
         if self.asset_id:

@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderLotoCompletion, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -1442,18 +1442,43 @@ export const workOrderAPI = {
       { action }
     ),
 
+  // `quantityUsed` and `unitCost` are only honoured before the stock decrement
+  // is applied — the backend freezes both once stock has moved, so the recorded
+  // spend can never drift from the decrement it backs (op-768w). Omit a value
+  // to leave it alone; pass `null` for unitCost to clear a recorded price.
   toggleMaterial: (
     workOrderId: string,
     materialUsageId: string,
     wasUsed: boolean,
-    quantityUsed?: number | string
-  ) =>
-    api.patch(
+    quantityUsed?: number | string,
+    unitCost?: number | string | null
+  ) => {
+    const body: Record<string, unknown> = { was_used: wasUsed };
+    if (quantityUsed !== undefined) body.quantity_used = quantityUsed;
+    if (unitCost !== undefined) body.unit_cost = unitCost;
+    return api.patch<WorkOrderMaterialUsage>(
       `/inventory/work-orders/${workOrderId}/materials/${materialUsageId}/toggle/`,
-      quantityUsed === undefined
-        ? { was_used: wasUsed }
-        : { was_used: wasUsed, quantity_used: quantityUsed }
+      body
+    );
+  },
+
+  // op-768w: add an ad-hoc material line — the only way a *corrective* work
+  // order (no PM template to copy rows from) records a material at all, and the
+  // way any work order records something bought mid-job. Pass FormData when a
+  // receipt image rides along, mirroring `addPhoto`.
+  addMaterial: (workOrderId: string, data: WorkOrderAdHocMaterialInput | FormData) =>
+    api.post<WorkOrderMaterialUsage>(
+      `/inventory/work-orders/${workOrderId}/materials/`,
+      data,
+      data instanceof FormData
+        ? { headers: { 'Content-Type': 'multipart/form-data' } }
+        : undefined
     ),
+
+  // Only ad-hoc lines with no stock applied can go: the backend 400s on a
+  // template row and on a line still holding a decrement (un-toggle it first).
+  removeMaterial: (workOrderId: string, materialUsageId: string) =>
+    api.delete(`/inventory/work-orders/${workOrderId}/materials/${materialUsageId}/`),
 
   addPhoto: (workOrderId: string, formData: FormData) =>
     api.post<WorkOrderPhoto>(`/inventory/work-orders/${workOrderId}/add_photo/`, formData, {

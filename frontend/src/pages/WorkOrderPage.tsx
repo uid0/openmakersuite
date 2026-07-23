@@ -8,15 +8,18 @@ import {
   Card,
   Checkbox,
   Container,
+  Divider,
   FileButton,
   Group,
   Image,
   Loader,
   Modal,
   NumberInput,
+  SegmentedControl,
   Select,
   Stack,
   Text,
+  TextInput,
   Textarea,
   Title,
   Tooltip,
@@ -35,18 +38,27 @@ import {
   IconPhoto,
   IconPlayerPause,
   IconPlayerPlay,
+  IconPlus,
+  IconReceipt,
   IconRobot,
   IconScan,
+  IconShoppingCart,
   IconStopwatch,
   IconTag,
   IconTool,
+  IconTrash,
   IconUpload,
 } from '@tabler/icons-react';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { workOrderAPI } from '../services/api';
-import { WorkOrder, WorkOrderStatus } from '../types';
+import { inventoryAPI, maintenanceAPI, workOrderAPI } from '../services/api';
+import {
+  WorkOrder,
+  WorkOrderAdHocMaterialInput,
+  WorkOrderMaterialUsage,
+  WorkOrderStatus,
+} from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
@@ -87,6 +99,44 @@ export const formatElapsedSummary = (
 ): string => {
   const minutes = Math.round(Math.max(0, totalSeconds || 0) / 60);
   return estimateMinutes ? `${minutes}m / est ${estimateMinutes}m` : `${minutes}m on job`;
+};
+
+// ── Material cost (op-768w) ─────────────────────────────────────────────────
+// A line's real spend is `quantity_used × unit_cost`, and the *work order's*
+// actual is the server-owned sum of that over the lines actually used. The
+// estimate it gets measured against lives on the PM template
+// (`MaintenanceMaterial.estimated_cost_per_unit`), so a corrective work order —
+// which has no template — has an actual and nothing to compare it against,
+// exactly like the stopwatch has no `estimated_time_minutes`.
+
+/** `$12.50`, or an em dash when nothing was priced. */
+export const formatMoney = (value: string | number | null | undefined): string => {
+  if (value === null || value === undefined || value === '') return '—';
+  const num = Number(value);
+  return Number.isFinite(num) ? `$${num.toFixed(2)}` : '—';
+};
+
+/** The number a Decimal-as-string field carries, or 0 when it carries nothing. */
+const toNumber = (value: string | number | null | undefined): number => {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? num : 0;
+};
+
+/**
+ * What the used lines actually cost, for a payload without the server total.
+ *
+ * Mirrors `WorkOrder.actual_material_cost`: planned-but-unused costs nothing,
+ * and an unpriced used line contributes 0 rather than voiding the total.
+ */
+const sumActualMaterialCost = (lines: WorkOrderMaterialUsage[]): number =>
+  lines.reduce((total, mu) => (mu.was_used ? total + toNumber(mu.actual_cost) : total), 0);
+
+/** True when two money/quantity drafts mean the same thing (`''`/null = unset). */
+const sameAmount = (a: string | number | null | undefined, b: string | number | null | undefined) => {
+  const left = a === '' || a === null || a === undefined ? null : Number(a);
+  const right = b === '' || b === null || b === undefined ? null : Number(b);
+  if (left === null || right === null) return left === right;
+  return Math.abs(left - right) < 1e-9;
 };
 
 /**
@@ -411,6 +461,33 @@ const WorkOrderPage: React.FC = () => {
   // Per-row "quantity used" edits, keyed by material-usage id. Seeded from the
   // row's quantity_used and sent when the material is checked off as used.
   const [materialQty, setMaterialQty] = useState<Record<string, number | string>>({});
+  // op-768w: the same idea for the real price paid per unit. Both drafts ride
+  // the toggle and commit on blur, so an already-checked line can still be
+  // priced — the backend freezes both once the stock decrement lands.
+  const [materialCost, setMaterialCost] = useState<Record<string, number | string>>({});
+  const [removingMaterial, setRemovingMaterial] = useState<string | null>(null);
+  // op-768w: the add-material form. `receipt` mode is the out-of-pocket buy —
+  // a line that records a spend and moves no stock.
+  const [addMaterialOpen, setAddMaterialOpen] = useState(false);
+  const [addMode, setAddMode] = useState<'material' | 'receipt'>('material');
+  const [newMaterialName, setNewMaterialName] = useState('');
+  const [newMaterialQty, setNewMaterialQty] = useState<number | string>(1);
+  const [newMaterialUnit, setNewMaterialUnit] = useState('');
+  const [newMaterialCost, setNewMaterialCost] = useState<number | string>('');
+  const [newMaterialItem, setNewMaterialItem] = useState<string | null>(null);
+  const [newReceiptWhere, setNewReceiptWhere] = useState('');
+  const [newReceiptFile, setNewReceiptFile] = useState<File | null>(null);
+  const [savingMaterial, setSavingMaterial] = useState(false);
+  // Stock picker for an ad-hoc line: searched server-side, since a shop's item
+  // list is far longer than a dropdown should ever hold.
+  const [itemSearch, setItemSearch] = useState('');
+  const [itemOptions, setItemOptions] = useState<{ value: string; label: string }[]>([]);
+  const [itemCosts, setItemCosts] = useState<Record<string, string | null>>({});
+  const resetReceiptRef = useRef<() => void>(null);
+  // Estimated cost per unit from the PM template, keyed by MaintenanceMaterial
+  // id — the only thing the "actual vs estimated" comparison can be measured
+  // against, and it does not ride the work-order payload.
+  const [estimatedUnitCosts, setEstimatedUnitCosts] = useState<Record<string, string>>({});
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   // Which step's evidence photo is currently uploading (null = none).
   const [uploadingStepPhoto, setUploadingStepPhoto] = useState<string | null>(null);
@@ -461,6 +538,65 @@ const WorkOrderPage: React.FC = () => {
   useEffect(() => {
     loadWorkOrder();
   }, [loadWorkOrder]);
+
+  // op-768w: pull the PM template's per-unit estimates so the materials total
+  // can say actual *against* estimate. One fetch per template; a corrective
+  // work order has none, and a failure just drops the comparison — the actual
+  // spend stands on its own.
+  const maintenanceItemId = workOrder?.maintenance_item ?? null;
+  useEffect(() => {
+    if (!maintenanceItemId) {
+      setEstimatedUnitCosts({});
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await maintenanceAPI.getItem(maintenanceItemId);
+        if (cancelled) return;
+        const costs: Record<string, string> = {};
+        (res?.data?.materials ?? []).forEach((mat) => {
+          costs[mat.id] = mat.estimated_cost_per_unit;
+        });
+        setEstimatedUnitCosts(costs);
+      } catch {
+        // No estimate to compare against; the actual is still worth showing.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [maintenanceItemId]);
+
+  // Stock picker options for the add-material form. Searched server-side and
+  // only while the form is open, so the page itself never pays for it.
+  useEffect(() => {
+    if (!addMaterialOpen) return undefined;
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const res = await inventoryAPI.listItems({
+          search: itemSearch || undefined,
+          page_size: 25,
+        });
+        if (cancelled) return;
+        const items = res?.data?.results ?? [];
+        setItemOptions(items.map((item) => ({ value: item.id, label: item.name })));
+        setItemCosts(
+          items.reduce<Record<string, string | null>>((acc, item) => {
+            acc[item.id] = item.unit_cost;
+            return acc;
+          }, {}),
+        );
+      } catch {
+        // Picking stock is optional — an ad-hoc line works without it.
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [addMaterialOpen, itemSearch]);
 
   const handleStatusChange = async (newStatus: string | null) => {
     if (!workOrder || !newStatus) return;
@@ -704,12 +840,29 @@ const WorkOrderPage: React.FC = () => {
   const handleToggleMaterial = async (
     materialUsageId: string,
     wasUsed: boolean,
-    quantityUsed?: number | string
+    quantityUsed?: number | string,
+    unitCost?: number | string | null
   ) => {
     if (!workOrder) return;
     setTogglingMaterial(materialUsageId);
     try {
-      await workOrderAPI.toggleMaterial(workOrder.id, materialUsageId, wasUsed, quantityUsed);
+      await workOrderAPI.toggleMaterial(
+        workOrder.id,
+        materialUsageId,
+        wasUsed,
+        quantityUsed,
+        unitCost
+      );
+      // The server now holds what the drafts were proposing — drop them so the
+      // row reads from the payload again (a PO re-mirror can move either one).
+      setMaterialQty((prev) => {
+        const { [materialUsageId]: _dropped, ...rest } = prev;
+        return rest;
+      });
+      setMaterialCost((prev) => {
+        const { [materialUsageId]: _dropped, ...rest } = prev;
+        return rest;
+      });
       await loadWorkOrder();
     } catch {
       notifications.show({
@@ -719,6 +872,118 @@ const WorkOrderPage: React.FC = () => {
       });
     } finally {
       setTogglingMaterial(null);
+    }
+  };
+
+  /**
+   * Send a quantity/cost edit that no checkbox click is going to carry.
+   *
+   * The toggle is the only write endpoint for these two fields, so an
+   * already-marked line (an out-of-pocket buy is marked used and moves no
+   * stock) would otherwise have no way to record what it cost. Sends the
+   * line's current `was_used` unchanged; a no-op edit sends nothing.
+   */
+  const handleCommitMaterialEdits = async (mu: WorkOrderMaterialUsage) => {
+    const qtyDraft = materialQty[mu.id];
+    const costDraft = materialCost[mu.id];
+    const qtyChanged = qtyDraft !== undefined && !sameAmount(qtyDraft, mu.quantity_used);
+    const costChanged = costDraft !== undefined && !sameAmount(costDraft, mu.unit_cost);
+    if (!qtyChanged && !costChanged) return;
+    await handleToggleMaterial(
+      mu.id,
+      mu.was_used,
+      qtyChanged ? qtyDraft : undefined,
+      // '' is a real answer — "I don't know what this cost" clears the price.
+      costChanged ? (costDraft === '' ? null : costDraft) : undefined
+    );
+  };
+
+  const handleRemoveMaterial = async (mu: WorkOrderMaterialUsage) => {
+    if (!workOrder) return;
+    setRemovingMaterial(mu.id);
+    try {
+      await workOrderAPI.removeMaterial(workOrder.id, mu.id);
+      await loadWorkOrder();
+      notifications.show({
+        title: 'Material removed',
+        message: `${mu.material_name} removed from this work order.`,
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch (err: unknown) {
+      notifications.show({
+        title: 'Error',
+        message: extractErrorMessage(err, 'Failed to remove material.'),
+        color: 'red',
+      });
+    } finally {
+      setRemovingMaterial(null);
+    }
+  };
+
+  const resetAddMaterialForm = () => {
+    setAddMode('material');
+    setNewMaterialName('');
+    setNewMaterialQty(1);
+    setNewMaterialUnit('');
+    setNewMaterialCost('');
+    setNewMaterialItem(null);
+    setNewReceiptWhere('');
+    setNewReceiptFile(null);
+    setItemSearch('');
+    resetReceiptRef.current?.();
+  };
+
+  /** The line an out-of-pocket receipt becomes: one unit, priced at the total. */
+  const receiptMaterialName = newReceiptWhere.trim()
+    ? `Misc supplies — ${newReceiptWhere.trim()}`
+    : 'Misc supplies';
+
+  const handleAddMaterial = async () => {
+    if (!workOrder) return;
+    const isReceipt = addMode === 'receipt';
+    const materialName = isReceipt ? receiptMaterialName : newMaterialName.trim();
+    if (!materialName) return;
+
+    const payload: WorkOrderAdHocMaterialInput = {
+      material_name: materialName,
+      quantity_used: isReceipt ? 1 : (newMaterialQty === '' ? 1 : newMaterialQty),
+    };
+    if (!isReceipt && newMaterialUnit.trim()) payload.unit = newMaterialUnit.trim();
+    if (newMaterialCost !== '' && newMaterialCost !== null) payload.unit_cost = newMaterialCost;
+    // A receipt buy is out of pocket by definition — it moves no stock.
+    if (!isReceipt && newMaterialItem) payload.inventory_item = newMaterialItem;
+
+    setSavingMaterial(true);
+    try {
+      if (newReceiptFile) {
+        // Multipart only when a receipt rides along, mirroring the photo client.
+        const formData = new FormData();
+        Object.entries(payload).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) formData.append(key, String(value));
+        });
+        formData.append('receipt_image', newReceiptFile);
+        await workOrderAPI.addMaterial(workOrder.id, formData);
+      } else {
+        await workOrderAPI.addMaterial(workOrder.id, payload);
+      }
+      setAddMaterialOpen(false);
+      resetAddMaterialForm();
+      await loadWorkOrder();
+      notifications.show({
+        title: 'Material added',
+        message: `${materialName} added to this work order.`,
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch (err: unknown) {
+      notifications.show({
+        title: 'Error',
+        message: extractErrorMessage(err, 'Failed to add material.'),
+        color: 'red',
+      });
+    } finally {
+      setSavingMaterial(false);
     }
   };
 
@@ -843,6 +1108,27 @@ const WorkOrderPage: React.FC = () => {
       setUploadingStepPhoto(null);
     }
   };
+
+  // op-768w: actual against estimate, the pair the materials card exists to
+  // produce. The actual is the server's; the estimate is the template's
+  // per-unit price applied to the quantities *this* work order planned, so a
+  // later edit to the template does not rewrite what this job estimated.
+  const materialCosts = useMemo(() => {
+    const lines = workOrder?.material_usage ?? [];
+    const actual =
+      workOrder?.actual_material_cost != null
+        ? toNumber(workOrder.actual_material_cost)
+        : sumActualMaterialCost(lines);
+    let estimated = 0;
+    let hasEstimate = false;
+    lines.forEach((mu) => {
+      const perUnit = mu.material ? estimatedUnitCosts[mu.material] : undefined;
+      if (perUnit === undefined) return;
+      hasEstimate = true;
+      estimated += toNumber(mu.quantity_planned) * toNumber(perUnit);
+    });
+    return { actual, estimated, hasEstimate };
+  }, [workOrder, estimatedUnitCosts]);
 
   if (loading) {
     return (
@@ -1563,80 +1849,288 @@ const WorkOrderPage: React.FC = () => {
       )}
 
       {/* Materials */}
-      {workOrder.material_usage.length > 0 && (
-        <Card withBorder p="md" radius="md" mb="md">
-          <Group mb="sm" gap="xs">
+      <Card withBorder p="md" radius="md" mb="md">
+        <Group mb="sm" justify="space-between">
+          <Group gap="xs">
             <IconTag size={18} />
             <Title order={5}>Materials</Title>
+            {workOrder.material_usage.length > 0 && (
+              <Badge color="gray" size="sm">{workOrder.material_usage.length}</Badge>
+            )}
+          </Group>
+          <Button
+            size="sm"
+            variant="light"
+            leftSection={<IconPlus size={16} />}
+            onClick={() => {
+              resetAddMaterialForm();
+              setAddMaterialOpen(true);
+            }}
+          >
+            Add material
+          </Button>
+        </Group>
+
+        {workOrder.material_usage.length === 0 ? (
+          <Text size="sm" c="dimmed" ta="center" py="sm">
+            No materials recorded. Add what you used or bought to do this job.
+          </Text>
+        ) : (
+          <Stack gap="xs">
+            {workOrder.material_usage.map((mu) => {
+              // A PO-sourced line mirrors its purchase order (op-bu80): the PO
+              // owns its quantity and price, and a later receipt re-writes
+              // both, so the job page shows them rather than offering edits.
+              const fromPurchaseOrder = Boolean(mu.purchase_order_item);
+              const busy = togglingMaterial === mu.id || removingMaterial === mu.id;
+              return (
+                <Box
+                  key={mu.id}
+                  p="sm"
+                  style={{
+                    borderRadius: 8,
+                    backgroundColor: mu.was_used ? '#f0fff4' : '#f8f9fa',
+                    border: `1px solid ${mu.was_used ? '#69db7c' : '#dee2e6'}`,
+                    opacity: busy ? 0.6 : 1,
+                  }}
+                >
+                  <Group gap="md" wrap="nowrap" justify="space-between" align="flex-start">
+                    <Checkbox
+                      checked={mu.was_used}
+                      onChange={(e) => {
+                        const checked = e.currentTarget.checked;
+                        handleToggleMaterial(
+                          mu.id,
+                          checked,
+                          checked ? (materialQty[mu.id] ?? mu.quantity_used) : undefined,
+                          checked ? materialCost[mu.id] : undefined
+                        );
+                      }}
+                      disabled={busy}
+                      size="lg"
+                      label={
+                        <Box>
+                          <Group gap={6}>
+                            <Text
+                              fw={mu.was_used ? 400 : 600}
+                              size="md"
+                              td={mu.was_used ? 'line-through' : 'none'}
+                              c={mu.was_used ? 'dimmed' : 'inherit'}
+                            >
+                              {mu.material_name}
+                            </Text>
+                            {mu.is_ad_hoc && !fromPurchaseOrder && (
+                              <Badge size="xs" variant="light" color="blue">added</Badge>
+                            )}
+                            {fromPurchaseOrder && (
+                              <Badge size="xs" variant="light" color="grape">from PO</Badge>
+                            )}
+                          </Group>
+                          <Text size="xs" c="dimmed">
+                            Planned: {mu.quantity_planned}
+                            {mu.unit ? ` ${mu.unit}` : ''}
+                            {mu.inventory_item_name ? ` · stock: ${mu.inventory_item_name}` : ''}
+                          </Text>
+                          <Group gap={8}>
+                            <Text size="xs" c={mu.actual_cost ? 'inherit' : 'dimmed'}>
+                              Cost: {formatMoney(mu.actual_cost)}
+                              {mu.unit_cost ? ` (${formatMoney(mu.unit_cost)}/unit)` : ''}
+                            </Text>
+                            {mu.receipt_url && (
+                              <Anchor
+                                size="xs"
+                                href={mu.receipt_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                Receipt
+                              </Anchor>
+                            )}
+                          </Group>
+                        </Box>
+                      }
+                    />
+                    <Group gap="xs" wrap="nowrap" align="flex-start">
+                      {mu.stock_applied ? (
+                        <Stack gap={0} align="flex-end">
+                          <Text
+                            size="xs"
+                            c="teal.7"
+                            fw={600}
+                            style={{ whiteSpace: 'nowrap' }}
+                          >
+                            −{mu.applied_quantity} from stock
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            usage logged
+                          </Text>
+                        </Stack>
+                      ) : fromPurchaseOrder ? (
+                        <Stack gap={0} align="flex-end">
+                          <Text size="xs" fw={600} style={{ whiteSpace: 'nowrap' }}>
+                            {mu.quantity_used} received
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            priced by the PO
+                          </Text>
+                        </Stack>
+                      ) : (
+                        <>
+                          {/* flexShrink 0 on both: the row is `nowrap`, and a
+                              shrunk NumberInput lays its stepper controls over
+                              whatever sits next to it — which put the remove
+                              button out of reach. */}
+                          <NumberInput
+                            size="xs"
+                            label="Qty used"
+                            value={materialQty[mu.id] ?? Number(mu.quantity_used)}
+                            onChange={(v) => setMaterialQty((prev) => ({ ...prev, [mu.id]: v }))}
+                            onBlur={() => handleCommitMaterialEdits(mu)}
+                            min={0}
+                            step={1}
+                            disabled={busy}
+                            style={{ width: 110, flexShrink: 0 }}
+                          />
+                          <NumberInput
+                            size="xs"
+                            label="Unit cost"
+                            aria-label={`Unit cost for ${mu.material_name}`}
+                            value={materialCost[mu.id] ?? (mu.unit_cost ?? '')}
+                            onChange={(v) => setMaterialCost((prev) => ({ ...prev, [mu.id]: v }))}
+                            onBlur={() => handleCommitMaterialEdits(mu)}
+                            min={0}
+                            prefix="$"
+                            decimalScale={2}
+                            // Stepping a price by ±1 is never what anyone wants,
+                            // and the controls are what did the overlapping.
+                            hideControls
+                            disabled={busy}
+                            style={{ width: 110, flexShrink: 0 }}
+                          />
+                        </>
+                      )}
+                      {mu.is_ad_hoc && !fromPurchaseOrder && (
+                        <Tooltip
+                          label={
+                            mu.stock_applied
+                              ? 'Un-mark it as used first to restore the stock'
+                              : 'Remove this line'
+                          }
+                        >
+                          {/* A disabled ActionIcon swallows pointer events, so
+                              the tooltip needs a wrapper to hang off. */}
+                          <Box style={{ flexShrink: 0 }}>
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              mt={20}
+                              aria-label={`Remove ${mu.material_name}`}
+                              disabled={busy || mu.stock_applied}
+                              onClick={() => handleRemoveMaterial(mu)}
+                            >
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Box>
+                        </Tooltip>
+                      )}
+                    </Group>
+                  </Group>
+                </Box>
+              );
+            })}
+          </Stack>
+        )}
+
+        {workOrder.material_usage.length > 0 && (
+          <>
+            <Divider my="sm" />
+            <Group justify="space-between" align="flex-end">
+              <Box>
+                <Text size="xs" c="dimmed">Actual material cost</Text>
+                <Text fw={700} size="lg" data-testid="wo-actual-material-cost">
+                  {formatMoney(materialCosts.actual)}
+                </Text>
+              </Box>
+              <Box ta="right">
+                {materialCosts.hasEstimate ? (
+                  <>
+                    <Text size="xs" c="dimmed">Estimated</Text>
+                    <Text size="sm" data-testid="wo-estimated-material-cost">
+                      {formatMoney(materialCosts.estimated)}
+                      {' · '}
+                      <Text
+                        span
+                        fw={600}
+                        c={materialCosts.actual > materialCosts.estimated ? 'red.7' : 'teal.7'}
+                      >
+                        {materialCosts.actual > materialCosts.estimated
+                          ? `${formatMoney(materialCosts.actual - materialCosts.estimated)} over`
+                          : `${formatMoney(materialCosts.estimated - materialCosts.actual)} under`}
+                      </Text>
+                    </Text>
+                  </>
+                ) : (
+                  <Text size="xs" c="dimmed">No estimate for this job</Text>
+                )}
+              </Box>
+            </Group>
+          </>
+        )}
+      </Card>
+
+      {/* Ordered for this work order (op-bu80) */}
+      {workOrder.purchase_order_lines && workOrder.purchase_order_lines.length > 0 && (
+        <Card withBorder p="md" radius="md" mb="md">
+          <Group mb="sm" gap="xs">
+            <IconShoppingCart size={18} />
+            <Title order={5}>Ordered for this work order</Title>
+            <Badge color="gray" size="sm">{workOrder.purchase_order_lines.length}</Badge>
           </Group>
           <Stack gap="xs">
-            {workOrder.material_usage.map((mu) => (
+            {workOrder.purchase_order_lines.map((line) => (
               <Box
-                key={mu.id}
+                key={line.id}
                 p="sm"
                 style={{
                   borderRadius: 8,
-                  backgroundColor: mu.was_used ? '#f0fff4' : '#f8f9fa',
-                  border: `1px solid ${mu.was_used ? '#69db7c' : '#dee2e6'}`,
-                  opacity: togglingMaterial === mu.id ? 0.6 : 1,
+                  backgroundColor: '#f8f9fa',
+                  border: '1px solid #dee2e6',
                 }}
               >
-                <Group gap="md" wrap="nowrap" justify="space-between" align="flex-start">
-                  <Checkbox
-                    checked={mu.was_used}
-                    onChange={(e) => {
-                      const checked = e.currentTarget.checked;
-                      handleToggleMaterial(
-                        mu.id,
-                        checked,
-                        checked ? (materialQty[mu.id] ?? mu.quantity_used) : undefined
-                      );
-                    }}
-                    disabled={togglingMaterial === mu.id}
-                    size="lg"
-                    label={
-                      <Box>
-                        <Text
-                          fw={mu.was_used ? 400 : 600}
-                          size="md"
-                          td={mu.was_used ? 'line-through' : 'none'}
-                          c={mu.was_used ? 'dimmed' : 'inherit'}
-                        >
-                          {mu.material_name}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          Planned: {mu.quantity_planned}
-                          {mu.unit ? ` ${mu.unit}` : ''}
-                        </Text>
-                      </Box>
-                    }
-                  />
-                  {mu.stock_applied ? (
-                    <Stack gap={0} align="flex-end">
-                      <Text
+                <Group justify="space-between" wrap="nowrap" align="flex-start" gap="sm">
+                  <Box style={{ flex: 1, minWidth: 0 }}>
+                    <Group gap="xs">
+                      <Text fw={600} size="sm">{line.name}</Text>
+                      <Badge
                         size="xs"
-                        c="teal.7"
-                        fw={600}
-                        style={{ whiteSpace: 'nowrap' }}
+                        variant="light"
+                        color={line.is_fully_received ? 'green' : 'yellow'}
                       >
-                        −{mu.applied_quantity} from stock
-                      </Text>
+                        {line.is_fully_received
+                          ? 'received'
+                          : `${line.quantity_pending} on order`}
+                      </Badge>
+                    </Group>
+                    <Text size="xs" c="dimmed">
+                      <Anchor
+                        component={Link}
+                        to={`/purchasing/orders/${line.purchase_order_id}`}
+                        size="xs"
+                      >
+                        {line.po_number}
+                      </Anchor>
+                      {line.supplier_name ? ` · ${line.supplier_name}` : ''}
+                      {` · ${line.quantity_received}/${line.quantity_ordered} received`}
+                    </Text>
+                    {!line.is_fully_received && line.expected_delivery_date && (
                       <Text size="xs" c="dimmed">
-                        usage logged
+                        Expected {formatDateOnly(line.expected_delivery_date)}
                       </Text>
-                    </Stack>
-                  ) : (
-                    <NumberInput
-                      size="xs"
-                      label="Qty used"
-                      value={materialQty[mu.id] ?? Number(mu.quantity_used)}
-                      onChange={(v) => setMaterialQty((prev) => ({ ...prev, [mu.id]: v }))}
-                      min={0}
-                      step={1}
-                      disabled={togglingMaterial === mu.id}
-                      style={{ maxWidth: 110 }}
-                    />
-                  )}
+                    )}
+                  </Box>
+                  <Text size="sm" fw={600} style={{ whiteSpace: 'nowrap' }}>
+                    {formatMoney(line.unit_cost)}/unit
+                  </Text>
                 </Group>
               </Box>
             ))}
@@ -1911,6 +2405,144 @@ const WorkOrderPage: React.FC = () => {
               disabled={!ackElectrical || !ackLoto || !ackRequired}
             >
               Confirm
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* op-768w: record a material used or bought to do this job */}
+      <Modal
+        opened={addMaterialOpen}
+        onClose={() => setAddMaterialOpen(false)}
+        title="Add material"
+        centered
+      >
+        <Stack gap="sm">
+          <SegmentedControl
+            value={addMode}
+            onChange={(value) => setAddMode(value as 'material' | 'receipt')}
+            data={[
+              { value: 'material', label: 'Material used' },
+              { value: 'receipt', label: 'Out-of-pocket receipt' },
+            ]}
+            fullWidth
+          />
+
+          {addMode === 'material' ? (
+            <>
+              <TextInput
+                label="Material name"
+                placeholder="What did you use?"
+                value={newMaterialName}
+                onChange={(e) => setNewMaterialName(e.currentTarget.value)}
+                required
+              />
+              <Select
+                label="Inventory item"
+                description="Link it to draw the material from stock when you mark it used. Leave empty for something bought just for this job."
+                placeholder="Search inventory…"
+                data={itemOptions}
+                value={newMaterialItem}
+                searchable
+                clearable
+                nothingFoundMessage="No matching items"
+                searchValue={itemSearch}
+                onSearchChange={setItemSearch}
+                // The server already matched the query (on sku and description
+                // too), so re-filtering the results by label would hide hits.
+                filter={({ options }) => options}
+                onChange={(value) => {
+                  setNewMaterialItem(value);
+                  // Seed the price from what the item costs today — a default,
+                  // not a lock: the tech overrides it when the real one differs.
+                  const seeded = value ? itemCosts[value] : null;
+                  if (seeded != null && newMaterialCost === '') setNewMaterialCost(seeded);
+                }}
+              />
+              <Group grow>
+                <NumberInput
+                  label="Quantity"
+                  value={newMaterialQty}
+                  onChange={setNewMaterialQty}
+                  min={0}
+                  step={1}
+                />
+                <TextInput
+                  label="Unit"
+                  placeholder="ea, ft, qt…"
+                  value={newMaterialUnit}
+                  onChange={(e) => setNewMaterialUnit(e.currentTarget.value)}
+                />
+              </Group>
+              <NumberInput
+                label="Unit cost"
+                description="Real price paid per unit. Leave empty if nobody prices it."
+                value={newMaterialCost}
+                onChange={setNewMaterialCost}
+                min={0}
+                prefix="$"
+                decimalScale={2}
+              />
+            </>
+          ) : (
+            <>
+              <TextInput
+                label="Bought where"
+                placeholder="Hardware store"
+                value={newReceiptWhere}
+                onChange={(e) => setNewReceiptWhere(e.currentTarget.value)}
+              />
+              <NumberInput
+                label="Amount"
+                description="What the receipt totals. Recorded as one line at this price."
+                value={newMaterialCost}
+                onChange={setNewMaterialCost}
+                min={0}
+                prefix="$"
+                decimalScale={2}
+              />
+              <Text size="xs" c="dimmed">
+                Records as “{receiptMaterialName}”. Moves no stock — it is money
+                spent, not something drawn from inventory.
+              </Text>
+            </>
+          )}
+
+          <Group gap="xs">
+            <FileButton
+              resetRef={resetReceiptRef}
+              onChange={setNewReceiptFile}
+              accept="image/*"
+            >
+              {(props) => (
+                <Button
+                  {...props}
+                  size="sm"
+                  variant="light"
+                  leftSection={<IconReceipt size={16} />}
+                >
+                  {newReceiptFile ? 'Change receipt' : 'Attach receipt'}
+                </Button>
+              )}
+            </FileButton>
+            {newReceiptFile && (
+              <Text size="xs" c="dimmed" truncate>
+                {newReceiptFile.name}
+              </Text>
+            )}
+          </Group>
+
+          <Group justify="flex-end" gap="xs">
+            <Button variant="default" onClick={() => setAddMaterialOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={handleAddMaterial}
+              loading={savingMaterial}
+              disabled={addMode === 'material' && !newMaterialName.trim()}
+            >
+              Add
             </Button>
           </Group>
         </Stack>

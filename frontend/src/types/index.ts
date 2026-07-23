@@ -760,7 +760,62 @@ export interface WorkOrderMaterialUsage {
   applied_quantity: number | null;
   /** True when a stock decrement is currently applied for this usage. */
   stock_applied: boolean;
+  /**
+   * op-768w: added *during* the job rather than copied from the PM template.
+   * Only ad-hoc lines can be removed — a template line is the frozen copy of
+   * what the job was supposed to be, and it prints on the sign-off sheet.
+   */
+  is_ad_hoc?: boolean;
+  /** Direct stock link of an ad-hoc line (null for an out-of-pocket buy). */
+  inventory_item?: string | null;
+  /** Name of whichever item this line draws from, either kind of row. */
+  inventory_item_name?: string | null;
+  /** op-bu80: set only by the receipt bridge — this line mirrors a PO line. */
+  purchase_order_item?: string | null;
+  /** Real price paid per unit; null when nobody priced the line. */
+  unit_cost?: string | null;
+  /** `quantity_used × unit_cost`; null when no cost was recorded. */
+  actual_cost?: string | null;
+  /** Proof-of-purchase photo backing an out-of-pocket buy. */
+  receipt_url?: string | null;
   created_at: string;
+}
+
+/**
+ * Body of `workOrderAPI.addMaterial` (op-768w). `unit_cost` defaults from the
+ * linked item's current cost when an item is given and no price is supplied —
+ * a default, not a lock. Omit `inventory_item` for an out-of-pocket buy: the
+ * line then records the spend and moves no stock.
+ */
+export interface WorkOrderAdHocMaterialInput {
+  material_name: string;
+  quantity_used?: number | string;
+  unit?: string;
+  unit_cost?: number | string | null;
+  inventory_item?: string | null;
+}
+
+/**
+ * op-bu80: a purchase-order line bought to complete this work order — the
+ * *ordering* view of the material, which is what says "the part you are
+ * waiting on is still in transit". Received lines also show up as material
+ * rows, posted by the receipt bridge.
+ */
+export interface WorkOrderPurchaseLine {
+  id: string;
+  purchase_order_id: string;
+  po_number: string;
+  po_status: string;
+  supplier_name: string | null;
+  name: string;
+  item_type: string;
+  quantity_ordered: number;
+  quantity_received: number;
+  quantity_pending: number;
+  is_fully_received: boolean;
+  unit_cost: string;
+  expected_delivery_date: string | null;
+  expected_shipment_date: string | null;
 }
 
 export interface WorkOrderLotoCompletion {
@@ -965,6 +1020,13 @@ export interface WorkOrder {
   is_overdue: boolean;
   task_completions: WorkOrderTaskCompletion[];
   material_usage: WorkOrderMaterialUsage[];
+  /**
+   * op-768w: real money spent on materials — the sum of `actual_cost` over the
+   * lines actually used. Server-owned; the page never accumulates into it.
+   */
+  actual_material_cost?: string | null;
+  /** op-bu80: PO lines ordered for this job, on order *and* received. */
+  purchase_order_lines?: WorkOrderPurchaseLine[];
   loto_completions: WorkOrderLotoCompletion[];
   photos: WorkOrderPhoto[];
   /** op-67q5: tools to gather, required first — reference only, no OMR box. */

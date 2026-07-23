@@ -347,3 +347,110 @@ class TestAssetTcoVendorRollup:
 
         row = {r["asset_id"]: r for r in response.data}[str(asset.id)]
         assert Decimal(row["vendor_maintenance_cost"]) == Decimal("0.00")
+
+
+@pytest.mark.integration
+class TestAssetTcoActualMaterialCost(object):
+    """op-srrv (B5) — tco prices internal work from the captured material
+    actuals where they exist. This is internal analytics, so it is *not* gated
+    on ``Asset.is_cost_recoverable`` the way the cost-recovery statement is."""
+
+    @staticmethod
+    def _priced_usage(work_order, *, name, quantity_used, unit_cost):
+        return WorkOrderMaterialUsage.objects.create(
+            work_order=work_order,
+            material_name=name,
+            is_ad_hoc=True,
+            quantity_planned=quantity_used,
+            quantity_used=quantity_used,
+            was_used=True,
+            unit_cost=unit_cost,
+        )
+
+    def test_actual_cost_replaces_scheduled_estimate(self, authenticated_client):
+        """A scheduled PM whose job recorded real material spend reports that
+        spend instead of the template estimate."""
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Priced RTU", asset_tag="A-ACT1")
+        mi = MaintenanceItem.objects.create(
+            asset=asset,
+            title="Quarterly filter",
+            interval_days=90,
+            estimated_cost=Decimal("75.00"),
+        )
+        wo = _create_completed_wo(mi, completed_at=timezone.now() - timedelta(days=5))
+        self._priced_usage(
+            wo, name="Filter", quantity_used=Decimal("2.00"), unit_cost=Decimal("61.25")
+        )
+
+        response = client.get(URL)
+        row = {r["asset_id"]: r for r in response.data}[str(asset.id)]
+        assert Decimal(row["scheduled_maintenance_cost"]) == Decimal("122.50")
+        assert Decimal(row["unscheduled_maintenance_cost"]) == Decimal("0.00")
+        assert Decimal(row["tco"]) == Decimal("122.50")
+
+    def test_actual_cost_replaces_unscheduled_material_estimate(self, authenticated_client):
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Priced Lathe", asset_tag="A-ACT2")
+        mi = MaintenanceItem.objects.create(
+            asset=asset,
+            title="Belt replacement",
+            interval_days=None,
+            estimated_cost=Decimal("0.00"),
+        )
+        wo = _create_completed_wo(mi, completed_at=timezone.now() - timedelta(days=5))
+        belt = MaintenanceMaterial.objects.create(
+            maintenance_item=mi,
+            name="Drive belt",
+            quantity=Decimal("1.00"),
+            estimated_cost_per_unit=Decimal("42.50"),
+        )
+        # Same line, now with what it really cost.
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=belt,
+            material_name=belt.name,
+            quantity_planned=Decimal("2.00"),
+            quantity_used=Decimal("2.00"),
+            was_used=True,
+            unit_cost=Decimal("50.00"),
+        )
+
+        response = client.get(URL)
+        row = {r["asset_id"]: r for r in response.data}[str(asset.id)]
+        assert Decimal(row["unscheduled_maintenance_cost"]) == Decimal("100.00")
+
+    def test_unpriced_work_order_keeps_the_estimate(self, authenticated_client):
+        """No regression: with no unit_cost anywhere the old numbers stand."""
+        client, _ = authenticated_client
+        asset = AssetFactory(name="Unpriced", asset_tag="A-ACT3")
+        mi = MaintenanceItem.objects.create(
+            asset=asset,
+            title="Quarterly PM",
+            interval_days=90,
+            estimated_cost=Decimal("75.00"),
+        )
+        _create_completed_wo(mi, completed_at=timezone.now() - timedelta(days=5))
+
+        response = client.get(URL)
+        row = {r["asset_id"]: r for r in response.data}[str(asset.id)]
+        assert Decimal(row["scheduled_maintenance_cost"]) == Decimal("75.00")
+
+    def test_not_gated_on_cost_recoverable_flag(self, authenticated_client):
+        """Two identical assets, one flagged recoverable — tco reports the same
+        cost for both."""
+        client, _ = authenticated_client
+        flagged = AssetFactory(name="TCO Flagged", asset_tag="A-ACT4", is_cost_recoverable=True)
+        plain = AssetFactory(name="TCO Plain", asset_tag="A-ACT5")
+        for asset in (flagged, plain):
+            mi = MaintenanceItem.objects.create(
+                asset=asset, title="Repair", interval_days=None, estimated_cost=Decimal("0.00")
+            )
+            wo = _create_completed_wo(mi, completed_at=timezone.now() - timedelta(days=5))
+            self._priced_usage(
+                wo, name="Part", quantity_used=Decimal("1.00"), unit_cost=Decimal("40.00")
+            )
+
+        rows = {r["asset_id"]: r for r in client.get(URL).data}
+        assert Decimal(rows[str(flagged.id)]["tco"]) == Decimal("40.00")
+        assert Decimal(rows[str(plain.id)]["tco"]) == Decimal("40.00")

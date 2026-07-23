@@ -1017,6 +1017,70 @@ describe('API Service', () => {
       expect(decoded).toContain('start_date=2026-01-01');
       expect(decoded).toContain('end_date=2026-03-31');
     });
+
+    test('getAssetCostRecovery sends all_assets + the ownership filters', async () => {
+      mock.onGet('/inventory/reports/assets/cost_recovery/').reply((config) => {
+        expect(config.params).toEqual({
+          all_assets: 'true',
+          ownership_type: 'group',
+          owning_group: '7',
+          period: 'past_year',
+        });
+        return [
+          200,
+          {
+            period: 'past_year',
+            start_date: '2025-07-23',
+            end_date: '2026-07-23',
+            asset_ids: [],
+            category_ids: [],
+            all_assets: true,
+            ownership_type: 'group',
+            owning_group: 7,
+            asset_count: 2,
+            service_count: 0,
+            grand_total_estimated: '0.00',
+            grand_total_actual: '0.00',
+            assets: [],
+          },
+        ];
+      });
+
+      const response = await reportsAPI.getAssetCostRecovery({
+        all_assets: true,
+        ownership_type: 'group',
+        owning_group: 7,
+        period: 'past_year',
+      });
+
+      expect(response.data.owning_group).toBe(7);
+    });
+
+    test('getAssetCostRecovery omits all_assets when false and keeps ownership_type', async () => {
+      mock.onGet('/inventory/reports/assets/cost_recovery/').reply((config) => {
+        expect(config.params).toEqual({ ownership_type: 'space', period: 'past_month' });
+        return [200, { assets: [] }];
+      });
+
+      await reportsAPI.getAssetCostRecovery({
+        all_assets: false,
+        ownership_type: 'space',
+        period: 'past_month',
+      });
+    });
+
+    test('the ownership filters ride along on the CSV/PDF download URL', () => {
+      const decoded = decodeURIComponent(
+        reportsAPI.getAssetCostRecoveryUrl(
+          { all_assets: true, owning_group: 12, period: 'past_month' },
+          'csv',
+        ),
+      );
+
+      expect(decoded).toContain('all_assets=true');
+      expect(decoded).toContain('owning_group=12');
+      expect(decoded).toContain('format=csv');
+    });
   });
 
   describe('resolveApiBaseUrl (deployment-configurable API base URL)', () => {

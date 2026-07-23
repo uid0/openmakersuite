@@ -44,6 +44,13 @@ _PERIOD_LABELS = {
     "past_year": "Past year",
 }
 
+# Asset.OwnershipType values, for the selection summary in the header.
+_OWNERSHIP_LABELS = {
+    "user": "User",
+    "group": "Group (SIG / committee)",
+    "space": "Space",
+}
+
 
 def _money(value: Optional[Decimal]) -> str:
     """Render a Decimal as ``$X.XX``; blank for a missing (null) value."""
@@ -127,13 +134,21 @@ def generate_cost_recovery_pdf(report: dict) -> bytes:
     selection_bits = []
     asset_ids = report.get("asset_ids") or []
     category_ids = report.get("category_ids") or []
+    if report.get("all_assets"):
+        selection_bits.append("All assets")
     if asset_ids:
         selection_bits.append(f"{len(asset_ids)} asset(s) selected")
     if category_ids:
         selection_bits.append(f"{len(category_ids)} category(ies) selected")
+    ownership_type = report.get("ownership_type")
+    if ownership_type:
+        selection_bits.append(f"Ownership: {_OWNERSHIP_LABELS.get(ownership_type, ownership_type)}")
+    owning_group = report.get("owning_group")
+    if owning_group is not None:
+        selection_bits.append(f"Owning group: {report.get('owning_group_name') or owning_group}")
     selection_bits.append(f"{report.get('asset_count', 0)} asset(s) in statement")
     selection_bits.append(f"{report.get('service_count', 0)} service line(s)")
-    story.append(Paragraph("; ".join(selection_bits), small_style))
+    story.append(_para("; ".join(selection_bits), small_style))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.black))
     story.append(Spacer(1, 4))
 

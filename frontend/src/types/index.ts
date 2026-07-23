@@ -1387,6 +1387,11 @@ export interface AssetCostRecoveryReport {
   end_date: string;
   asset_ids: string[];
   category_ids: number[];
+  // Ownership/all-assets selection echo. Optional so a cached response from
+  // before these filters shipped still type-checks.
+  all_assets?: boolean;
+  ownership_type?: 'user' | 'group' | 'space' | null;
+  owning_group?: number | null;
   asset_count: number;
   service_count: number;
   grand_total_estimated: string;

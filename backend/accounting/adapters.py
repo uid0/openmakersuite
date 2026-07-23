@@ -6,8 +6,9 @@ PO, recording a donation, …) and the double-entry engine in
 callers post money without hardcoding account codes or hand-writing balanced
 legs — they describe the business event, the adapter builds the entry.
 
-Phase 2 · Bead 1 ships the first one, :func:`post_supply_consumption`;
-Bead 5 adds :func:`post_po_receipt`.
+Phase 2 · Bead 1 ships the first one, :func:`post_supply_consumption` (reused
+unchanged by the Bead 6 work-order completion charge); Bead 5 adds
+:func:`post_po_receipt`.
 """
 
 from decimal import Decimal
@@ -72,10 +73,12 @@ def post_supply_consumption(
     Returns:
         The posted (or pre-existing, when idempotent) ``hordak.Transaction``.
 
-    This adapter is deliberately reusable by the later serialized-consume and
-    work-order material-usage charge paths, which will call it with the same
-    5100/1300 mapping. (No reversal helper yet — ``log_usage`` has no undo;
-    TODO: add one when a consumption-reversal flow lands.)
+    Two consumption routes share this one mapping: ``log_usage`` (Bead 1) and
+    :func:`inventory.services.work_order_ledger.charge_completed_work_order`
+    (Bead 6, the work-order completion charge). The serialized-consume path will
+    be the third. Undoing a charge is
+    :func:`accounting.services.reverse_entry` — append-only, never an edit; the
+    work-order path uses it when a completed job is reopened.
     """
     if not description:
         description = (

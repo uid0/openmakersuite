@@ -4452,6 +4452,47 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             },
         )
 
+    def _sync_committee_ledger_charge(self, work_order, *, old_status) -> None:
+        """Keep the committee's ledger in step with this work order's status.
+
+        Completing a job on a committee-owned asset charges that committee for
+        what it consumed (DR 5100 / CR 1300, keyed ``wo_complete:<id>``);
+        reopening a charged job posts the append-only reversal that gives the
+        money back. Everything about *which* committee, *how much*, and how the
+        charge/reversal cycle stays idempotent lives in the service — see
+        :mod:`inventory.services.work_order_ledger`.
+
+        The ledger warning (committee-owned job, nothing priced to charge) is
+        stashed for :meth:`_with_ledger_warning` to surface on the response, the
+        way ``log_usage`` reports the same situation.
+        """
+        from .services.work_order_ledger import (
+            charge_completed_work_order,
+            reverse_work_order_charge,
+        )
+
+        became_completed = (
+            work_order.status == WorkOrder.Status.COMPLETED
+            and old_status != WorkOrder.Status.COMPLETED
+        )
+        left_completed = (
+            old_status == WorkOrder.Status.COMPLETED
+            and work_order.status != WorkOrder.Status.COMPLETED
+        )
+        if became_completed:
+            _txn, self._ledger_warning = charge_completed_work_order(
+                work_order, actor=self.request.user
+            )
+        elif left_completed:
+            reverse_work_order_charge(work_order, actor=self.request.user)
+
+    def _with_ledger_warning(self, response):
+        """Attach the pending committee-ledger warning, if this save raised one."""
+        warning = getattr(self, "_ledger_warning", None)
+        if warning and isinstance(response.data, dict):
+            response.data = {**response.data, "warning": warning}
+        return response
+
     def perform_update(self, serializer):
         old_status = serializer.instance.status
         work_order = serializer.save()
@@ -4460,6 +4501,9 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         )
         self._finalize_timers(work_order)
         self._sync_maintenance_item_completion(work_order, actor=self.request.user)
+        # Runs on both edges of the completed boundary (charge in, reverse out),
+        # so it sits outside the "just completed" block below.
+        self._sync_committee_ledger_charge(work_order, old_status=old_status)
         if (
             work_order.status == WorkOrder.Status.COMPLETED
             and old_status != WorkOrder.Status.COMPLETED
@@ -4487,13 +4531,13 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         gate = self._check_completion_gate(request)
         if gate is not None:
             return gate
-        return super().update(request, *args, **kwargs)
+        return self._with_ledger_warning(super().update(request, *args, **kwargs))
 
     def partial_update(self, request, *args, **kwargs):
         gate = self._check_completion_gate(request)
         if gate is not None:
             return gate
-        return super().partial_update(request, *args, **kwargs)
+        return self._with_ledger_warning(super().partial_update(request, *args, **kwargs))
 
     def _render_wo_pdf(self, work_order, base_url):
         """Shared work-order PDF renderer for :meth:`pdf` and :meth:`omr_pdf`.

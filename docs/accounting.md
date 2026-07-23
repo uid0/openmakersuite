@@ -129,10 +129,12 @@ txn = post_supply_consumption(
 ```
 
 It wraps `accounting.services.post_entry` with the fixed **5100 / 1300** mapping
-and `source_type=SourceType.SIG_CHARGE`. It is deliberately reusable by the later
-serialized-consume and work-order material-usage charge paths, which share the
-same mapping. (No reversal helper yet — `log_usage` has no undo; a
-consumption-reversal flow is a future bead.)
+and `source_type=SourceType.SIG_CHARGE`. The [work-order completion
+charge](#committee-charge-on-work-order-completion-phase-2) reuses it unchanged;
+the serialized-consume path will be the third caller. Undoing a charge is
+`accounting.services.reverse_entry` — append-only, never an edit. `log_usage`
+itself still has no undo; the work-order path uses the reversal when a completed
+job is reopened.
 
 ### Snapshot + idempotency
 
@@ -367,5 +369,69 @@ an admin of SIG X cannot read SIG Y's statement. Otherwise **403**.
 
 Web committee-picker UI + ScanTTY consume-and-charge flow; the **web statement
 page** (a follow-on bead, mirroring the cost-recovery generator page); settlement /
-period-close; PO / vendor / donation / asset adapters; serialized-consume +
-work-order material-usage charge paths (they will reuse `post_supply_consumption`).
+period-close; PO / vendor / donation / asset adapters; the serialized-consume
+charge path (it will reuse `post_supply_consumption`).
+
+## Committee charge on work-order completion (Phase 2)
+
+The second consumption route into the same `SIG_CHARGE` mapping, and the one
+`post_supply_consumption` was explicitly reserved for. Finishing a job on a
+committee-owned machine spends that committee's money, so completing a work
+order posts **one aggregate entry** for everything the job consumed:
+
+```
+DR 5100 Committee supplies expense   (dimensions: sig = the committee, asset = the machine)
+CR 1300 Inventory — Supplies on hand
+```
+
+The seam is `inventory/services/work_order_ledger.py`, called from
+`WorkOrderViewSet.perform_update` on both edges of the completed boundary —
+charge on the way in, reverse on the way out.
+
+### Who pays, and for what
+
+- **The committee is the asset's owner** — `work_order.asset.owning_group` (the
+  `OwnableModel` mixin). A job on a space- or user-owned machine posts **nothing**.
+- **The basis is `WorkOrder.actual_material_cost`** — `quantity_used × unit_cost`
+  summed over the lines actually marked *used* (op-768w capture). Unused lines and
+  lines with no recorded cost contribute nothing, so a partially-priced job still
+  charges what is known.
+- **Material lines are not filtered by their own ownership.** The asset's committee
+  is the cost centre, so shop stock, the committee's own stock, and out-of-pocket
+  receipts are all charged alike. Filtering to lines whose inventory item carries
+  the same `owning_group` would silently drop every ad-hoc, out-of-pocket line —
+  which has no inventory item at all, and is exactly what corrective work orders
+  are made of.
+- **In-house consumption only.** Vendor invoices are a separate, still-unwired flow
+  (`SourceType.VENDOR_INVOICE`).
+
+### Reopen reverses; re-completing re-posts
+
+The first charge is keyed `source_ref=f"wo_complete:{work_order.id}"`, so re-saving
+an already-completed work order returns the existing entry instead of posting a
+second one. Reopening a charged job posts an append-only `REVERSAL`
+(`accounting.services.reverse_entry`) and the committee's balance returns to where
+it was — the original charge is never edited or deleted. A re-completion after
+that has to charge *again*, which the original key alone could never do, so each
+later cycle takes the next key in the family: `wo_complete:<id>:2`, `:3`, … The
+invariant both entry points maintain is **at most one un-reversed charge per work
+order at any time** (`work_order_ledger.active_charge`). Reopen-to-fix-the-numbers
+therefore works as expected: the corrected total is what gets charged.
+
+### The no-cost warning
+
+Mirroring `log_usage`: when the asset **is** committee-owned but the finished job
+carries no priced materials, nothing is posted and the update response carries a
+`warning`:
+
+> committee-owned asset, but no material costs were recorded on this work order —
+> nothing posted to the ledger
+
+A job on a space-owned asset is the shop's default and warns about nothing.
+
+### Out of scope (this bead)
+
+Vendor-invoice charges; the paper-form (OMR scan-to-complete) ingest path, which
+completes work orders outside `perform_update` and so does not yet charge — a
+scan-completed job that is later reopened via the API simply finds no charge to
+reverse, and a subsequent API re-completion charges normally.

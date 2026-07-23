@@ -487,11 +487,33 @@ class WorkOrder(ElapsedTimerModel):
         COMPLETED = "completed", "Completed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Optional: a *preventive* work order comes from a PM template, a
+    # *corrective* one comes from a reported problem and has no template at
+    # all. SET_NULL rather than CASCADE so deleting a retired PM template
+    # keeps the history of the work that was actually done under it.
     maintenance_item = models.ForeignKey(
         "MaintenanceItem",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="work_orders",
-        help_text="The maintenance task this work order is for",
+        help_text=(
+            "The PM template this work order is for. Null for corrective work "
+            "orders, which carry no template — read ``asset`` for the machine."
+        ),
+    )
+    # The machine being worked on. Nullable in the schema (an FK can't be
+    # added non-null to an existing table), but populated on every row: when a
+    # ``maintenance_item`` is given and this is blank, ``save()`` derives it.
+    # Read this — never ``maintenance_item.asset`` — so corrective work orders
+    # are not silently dropped.
+    asset = models.ForeignKey(
+        "inventory.Asset",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="work_orders",
+        help_text="The asset this work order is for",
     )
     # Bundled sibling PMs on the same asset that were due around the
     # same time and got rolled into this work order via the auto-bundle
@@ -587,8 +609,40 @@ class WorkOrder(ElapsedTimerModel):
             models.Index(fields=["status", "-created_at"], name="wo_status_created_idx"),
         ]
 
+    def save(self, *args, **kwargs):
+        """Keep ``asset`` populated for every work order.
+
+        The column is nullable so the FK could be added to an existing table,
+        but the whole point of it is that downstream code can read
+        ``work_order.asset`` unconditionally. A preventive work order is
+        normally created with only ``maintenance_item=``, so derive the asset
+        from the template here rather than asking every caller to pass both.
+        """
+        if self.asset_id is None and self.maintenance_item_id:
+            self.asset_id = self.maintenance_item.asset_id
+            if "update_fields" in kwargs and kwargs["update_fields"] is not None:
+                kwargs["update_fields"] = list(kwargs["update_fields"]) + ["asset"]
+        super().save(*args, **kwargs)
+
+    @property
+    def display_title(self) -> str:
+        """What to call this work order on a screen, a report, or a form.
+
+        Preventive work orders are named by their PM template. Corrective ones
+        have no template, so they fall back to the reported problem and then to
+        the asset itself — a work order always has *something* to be called.
+        """
+        if self.maintenance_item_id:
+            return self.maintenance_item.title
+        problem = getattr(self, "asset_problem", None)
+        if problem is not None and problem.description:
+            return problem.description[:60]
+        if self.asset_id:
+            return self.asset.name
+        return self.short_id
+
     def __str__(self) -> str:
-        return f"WO-{str(self.id)[:8].upper()} — {self.maintenance_item.title} ({self.get_status_display()})"
+        return f"WO-{str(self.id)[:8].upper()} — {self.display_title} ({self.get_status_display()})"
 
     @property
     def is_overdue(self) -> bool:

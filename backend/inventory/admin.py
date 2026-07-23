@@ -2092,6 +2092,9 @@ class WorkOrderAdmin(admin.ModelAdmin):
     search_fields = [
         "maintenance_item__title",
         "maintenance_item__asset__name",
+        # Corrective work orders have no maintenance_item, so searching only
+        # through the template would make them unfindable by machine name.
+        "asset__name",
         "completed_by_name",
         "notes",
     ]

@@ -58,8 +58,9 @@ def create_loto_completions(work_order: "WorkOrder") -> "list[WorkOrderLotoCompl
     """
     from inventory.models import WorkOrderLotoCompletion
 
-    item = work_order.maintenance_item
-    asset = getattr(item, "asset", None) if item is not None else None
+    # Straight off the work order: a corrective WO has no PM template but is
+    # every bit as capable of needing the machine locked out.
+    asset = work_order.asset
     if asset is None:
         return []
 

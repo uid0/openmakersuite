@@ -435,17 +435,21 @@ def _apply_pm_submission(submission: WorkOrderSubmission, pdf_bytes: bytes) -> W
     work_order.save()
 
     if wo_became_complete:
+        # Corrective work orders have no PM template to advance, and
+        # ``MaintenanceLog.maintenance_item`` is non-nullable — there is no log
+        # to write for them. The work order's own completion stamp is the record.
         item = work_order.maintenance_item
-        item.last_completed_at = now
-        item.save(update_fields=["last_completed_at"])
-        MaintenanceLog.objects.create(
-            maintenance_item=item,
-            completed_by=None,
-            notes=(
-                f"Completed via emailed paper work order "
-                f"(submission {submission.id}, WO {work_order.short_id})."
-            ),
-        )
+        if item is not None:
+            item.last_completed_at = now
+            item.save(update_fields=["last_completed_at"])
+            MaintenanceLog.objects.create(
+                maintenance_item=item,
+                completed_by=None,
+                notes=(
+                    f"Completed via emailed paper work order "
+                    f"(submission {submission.id}, WO {work_order.short_id})."
+                ),
+            )
 
     # Apply auto-confidence CV detections inline; queue the rest.
     cv_notes_to_append: list[str] = []
@@ -655,18 +659,22 @@ def omr_confirm_completion(
     # A WO started on-screen and closed off a scanned sheet must not be left
     # with a clock running — same finalize the digital completion path uses.
     finalize_work_order_timers(work_order, now=now)
+    # No PM template on a corrective work order, and no MaintenanceLog either:
+    # the log's ``maintenance_item`` is non-nullable, so there is nothing to
+    # write. The elapsed time stays on the work order itself.
     item = work_order.maintenance_item
-    item.last_completed_at = now
-    item.save(update_fields=["last_completed_at"])
-    log = MaintenanceLog.objects.create(
-        maintenance_item=item,
-        completed_by=user if (user and getattr(user, "is_authenticated", False)) else None,
-        notes=(
-            f"Completed via reviewed scan "
-            f"(submission {submission.id}, WO {work_order.short_id})."
-        ),
-    )
-    apply_elapsed_to_log(log, work_order)
+    if item is not None:
+        item.last_completed_at = now
+        item.save(update_fields=["last_completed_at"])
+        log = MaintenanceLog.objects.create(
+            maintenance_item=item,
+            completed_by=user if (user and getattr(user, "is_authenticated", False)) else None,
+            notes=(
+                f"Completed via reviewed scan "
+                f"(submission {submission.id}, WO {work_order.short_id})."
+            ),
+        )
+        apply_elapsed_to_log(log, work_order)
     return True
 
 

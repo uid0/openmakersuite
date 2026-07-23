@@ -314,9 +314,11 @@ class TestApplySubmission:
     def test_unknown_work_order_id_marks_failed(self):
         wo = _make_work_order(num_tasks=1)
         pdf_bytes = generate_work_order_pdf(wo, base_url="http://example.com")
-        # Delete the WO so the id in the PDF no longer resolves.
+        # Delete the WO so the id in the PDF no longer resolves. Deleting the
+        # maintenance item no longer does it: that FK is SET_NULL now (op-svut),
+        # so the work order outlives its PM template.
         wo_id = wo.id
-        wo.maintenance_item.delete()  # cascades
+        wo.delete()
 
         submission = WorkOrderSubmission()
         submission.attachment.save("wo.pdf", ContentFile(pdf_bytes), save=False)

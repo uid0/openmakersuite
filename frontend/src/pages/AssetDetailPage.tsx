@@ -241,7 +241,8 @@ const AssetDetailPage: React.FC = () => {
   };
 
   // Flip Asset.is_cost_recoverable. The optimistic local update keeps the
-  // switch responsive; a failure reverts it by reloading the asset.
+  // switch responsive; a failure puts the previous value back rather than
+  // leaving the UI claiming a save that did not happen.
   const handleToggleCostRecoverable = async (nextValue: boolean) => {
     if (!id || !asset) return;
     const previous = asset.is_cost_recoverable;

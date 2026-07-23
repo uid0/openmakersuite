@@ -2,7 +2,8 @@
  * Asset List Component
  * Displays all hard assets with search and filtering (status, location, SIG).
  * Supports Card and Table views, both lazily loaded via infinite scroll with
- * server-side filtering and sorting.
+ * server-side filtering and sorting. Staff also get the bulk cost-recovery
+ * panel here, since flagging a whole category is a list-level operation.
  */
 import { Alert, Button, Group, Loader, Paper, Select, Text } from '@mantine/core';
 import { IconLayoutGrid, IconTable } from '@tabler/icons-react';

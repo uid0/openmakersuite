@@ -4,7 +4,7 @@
  */
 import { Badge, Button, Group, Paper, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import AssetForgeKeyAccessCard from '../components/AssetForgeKeyAccessCard';
 import AssetReservationsAndOOSSection from '../components/AssetReservationsAndOOSSection';
 import AssetDocumentsSection from '../components/assets/AssetDocumentsSection';
@@ -12,9 +12,10 @@ import AssetMetersSection from '../components/assets/AssetMetersSection';
 import MaintenanceHistorySection from '../components/assets/MaintenanceHistorySection';
 import AssetSerializedComponentsSection from '../components/inventory/AssetSerializedComponentsSection';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import {
+import api, {
   AssetLOTORequirements,
   assetPartsAPI,
+  assetProblemsAPI,
   assetsAPI,
   lotoAPI,
   maintenanceAPI,
@@ -25,6 +26,19 @@ import { Asset, AssetPart, AssetProblem, MaintenanceItem, WorkOrder } from '../t
 import { formatDateOnly } from '../utils/dates';
 import { showError } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+
+interface VendorOption {
+  id: string;
+  name: string;
+}
+
+/** Work types a vendor work order can be opened as (ThirdPartyWorkOrder). */
+const VENDOR_WORK_TYPES: Array<{ value: string; label: string }> = [
+  { value: 'standard', label: 'Standard' },
+  { value: 'major_repair', label: 'Major Repair' },
+  { value: 'buildout', label: 'Buildout' },
+  { value: 'building_emergency', label: 'Building Emergency' },
+];
 
 const AssetDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -58,6 +72,14 @@ const AssetDetailPage: React.FC = () => {
   // a replacement; non-serialized parts stay one-click.
   const [serialModalPart, setSerialModalPart] = useState<AssetPart | null>(null);
   const [replacementSerial, setReplacementSerial] = useState<string>('');
+  // Promote-to-work-order state. `vendorFormProblemId` is the problem whose
+  // "Send to Vendor" form is expanded; vendors load lazily the first time one
+  // is opened so the page keeps its existing request budget on mount.
+  const [vendorFormProblemId, setVendorFormProblemId] = useState<string | null>(null);
+  const [vendors, setVendors] = useState<VendorOption[]>([]);
+  const [vendorId, setVendorId] = useState<string>('');
+  const [vendorTitle, setVendorTitle] = useState<string>('');
+  const [vendorWorkType, setVendorWorkType] = useState<string>('standard');
 
   const loadAssetDetails = useCallback(async () => {
     if (!id) return;
@@ -368,6 +390,82 @@ const AssetDetailPage: React.FC = () => {
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to resolve problem'));
       console.error('Error resolving problem:', err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Patch one problem in place from a mutation response instead of reloading
+  // the whole asset — see docs/REACTIVE_MUTATIONS.md. Falls back to a partial
+  // merge so a thin mock body can't blank out the row.
+  const applyProblemUpdate = (problemId: string, data: unknown) => {
+    if (!data || typeof data !== 'object') return;
+    setProblems((existing) =>
+      existing.map((p) =>
+        p.id === problemId ? { ...p, ...(data as Partial<AssetProblem>) } : p,
+      ),
+    );
+  };
+
+  const handlePromoteStandard = async (problemId: string) => {
+    if (actionLoading) return;
+    try {
+      setActionLoading(`promote-${problemId}`);
+      const resp = await assetProblemsAPI.promoteStandard(problemId);
+      applyProblemUpdate(problemId, resp?.data);
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to create work order'));
+      console.error('Error promoting problem:', err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const openVendorForm = async (problem: AssetProblem) => {
+    setVendorFormProblemId(problem.id);
+    setVendorId('');
+    // Seed the scope line from the report; a vendor WO is a purchase, so the
+    // title is editable rather than the raw complaint.
+    setVendorTitle(problem.description.slice(0, 80));
+    setVendorWorkType('standard');
+    if (vendors.length > 0) return;
+    try {
+      const resp = await api.get<{ results: VendorOption[] } | VendorOption[]>(
+        '/vendors/vendors/',
+      );
+      const body = resp?.data;
+      setVendors(Array.isArray(body) ? body : body?.results ?? []);
+    } catch (err) {
+      // Non-fatal: the picker just stays empty and the user can cancel out.
+      console.warn('Vendors unavailable', err);
+    }
+  };
+
+  const closeVendorForm = () => {
+    setVendorFormProblemId(null);
+    setVendorId('');
+    setVendorTitle('');
+    setVendorWorkType('standard');
+  };
+
+  const handlePromoteThirdParty = async (problemId: string) => {
+    if (!vendorId || !vendorTitle.trim()) {
+      showError('Vendor and title are required.');
+      return;
+    }
+    if (actionLoading) return;
+    try {
+      setActionLoading(`promote-tp-${problemId}`);
+      const resp = await assetProblemsAPI.promoteThirdParty(problemId, {
+        vendor: vendorId,
+        title: vendorTitle.trim(),
+        work_type: vendorWorkType,
+      });
+      applyProblemUpdate(problemId, resp?.data);
+      closeVendorForm();
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to send to vendor'));
+      console.error('Error promoting problem to vendor:', err);
     } finally {
       setActionLoading(null);
     }
@@ -894,6 +992,25 @@ const AssetDetailPage: React.FC = () => {
                       </p>
                     )}
 
+                    {(problem.work_order_short_id || problem.third_party_work_order_short_id) && (
+                      <p
+                        className="problem-promoted-to"
+                        data-testid={`problem-promoted-${problem.id}`}
+                      >
+                        <strong>Promoted to:</strong>{' '}
+                        {problem.work_order_short_id && (
+                          <Link to={`/maintenance/work-orders/${problem.work_order}`}>
+                            {problem.work_order_short_id}
+                          </Link>
+                        )}
+                        {problem.third_party_work_order_short_id && (
+                          <Link to={`/maintenance/third-party/${problem.third_party_work_order}`}>
+                            {problem.third_party_work_order_short_id}
+                          </Link>
+                        )}
+                      </p>
+                    )}
+
                     {problem.photos && problem.photos.length > 0 && (
                       <div className="problem-photos">
                         <strong>Photos:</strong>
@@ -983,7 +1100,31 @@ const AssetDetailPage: React.FC = () => {
                       </div>
                     ) : (
                       isLoggedIn && problem.status !== 'resolved' && problem.status !== 'closed' && (
-                        <div style={{ marginTop: '0.5rem' }}>
+                        <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          {/* An already-promoted report has real work attached;
+                              promoting twice is a 400 from the API. */}
+                          {!problem.work_order && !problem.third_party_work_order && (
+                            <>
+                              <button
+                                className="action-button"
+                                onClick={() => handlePromoteStandard(problem.id)}
+                                disabled={!!actionLoading}
+                                style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
+                              >
+                                {actionLoading === `promote-${problem.id}`
+                                  ? 'Creating...'
+                                  : 'Create Work Order'}
+                              </button>
+                              <button
+                                className="action-button"
+                                onClick={() => openVendorForm(problem)}
+                                disabled={!!actionLoading}
+                                style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
+                              >
+                                Send to Vendor
+                              </button>
+                            </>
+                          )}
                           <button
                             className="action-button"
                             onClick={() => startResolving(problem.id)}
@@ -994,6 +1135,89 @@ const AssetDetailPage: React.FC = () => {
                           </button>
                         </div>
                       )
+                    )}
+
+                    {/* Send-to-Vendor form: a vendor work order is a purchase,
+                        so it needs a picked vendor and a written scope line. */}
+                    {isLoggedIn && vendorFormProblemId === problem.id && (
+                      <div
+                        className="vendor-promote-form"
+                        data-testid={`vendor-form-${problem.id}`}
+                        style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9' }}
+                      >
+                        <h4>Send to Vendor</h4>
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <label htmlFor={`vendor-${problem.id}`} style={{ display: 'block', marginBottom: '0.25rem' }}>
+                            Vendor:
+                          </label>
+                          <select
+                            id={`vendor-${problem.id}`}
+                            value={vendorId}
+                            onChange={(e) => setVendorId(e.target.value)}
+                            style={{ width: '100%', padding: '0.5rem' }}
+                          >
+                            <option value="">Select…</option>
+                            {vendors.map((vendor) => (
+                              <option key={vendor.id} value={vendor.id}>
+                                {vendor.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <label htmlFor={`vendor-title-${problem.id}`} style={{ display: 'block', marginBottom: '0.25rem' }}>
+                            Title:
+                          </label>
+                          <input
+                            id={`vendor-title-${problem.id}`}
+                            type="text"
+                            value={vendorTitle}
+                            onChange={(e) => setVendorTitle(e.target.value)}
+                            placeholder="Short summary of the work"
+                            style={{ width: '100%', padding: '0.5rem' }}
+                          />
+                        </div>
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <label htmlFor={`vendor-work-type-${problem.id}`} style={{ display: 'block', marginBottom: '0.25rem' }}>
+                            Work Type:
+                          </label>
+                          <select
+                            id={`vendor-work-type-${problem.id}`}
+                            value={vendorWorkType}
+                            onChange={(e) => setVendorWorkType(e.target.value)}
+                            style={{ width: '100%', padding: '0.5rem' }}
+                          >
+                            {VENDOR_WORK_TYPES.map((wt) => (
+                              <option key={wt.value} value={wt.value}>
+                                {wt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            className="action-button"
+                            onClick={() => handlePromoteThirdParty(problem.id)}
+                            disabled={
+                              !vendorId
+                              || !vendorTitle.trim()
+                              || actionLoading === `promote-tp-${problem.id}`
+                            }
+                          >
+                            {actionLoading === `promote-tp-${problem.id}`
+                              ? 'Sending...'
+                              : 'Open Vendor Work Order'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={closeVendorForm}
+                            disabled={actionLoading === `promote-tp-${problem.id}`}
+                            style={{ padding: '0.5rem 1rem', background: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>

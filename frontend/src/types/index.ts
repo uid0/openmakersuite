@@ -527,6 +527,12 @@ export interface AssetProblem {
   reported_by: string;
   description: string;
   status: AssetProblemStatus;
+  // Set once the report is promoted to real work: an in-house corrective
+  // WorkOrder or a vendor ThirdPartyWorkOrder (never both from one promote).
+  work_order?: string | null;
+  work_order_short_id?: string | null;
+  third_party_work_order?: string | null;
+  third_party_work_order_short_id?: string | null;
   resolution_notes: string;
   created_at: string;
   updated_at: string;

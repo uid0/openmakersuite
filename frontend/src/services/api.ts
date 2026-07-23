@@ -1135,6 +1135,29 @@ export const assetProblemsAPI = {
       { headers: { 'Content-Type': 'multipart/form-data' } },
     );
   },
+
+  // Promote a report to real work. Unlike the LocationProblem sibling there is
+  // no MaintenanceItem picker — a corrective work order anchors straight to the
+  // problem's asset. All three actions return the full updated AssetProblem so
+  // the caller can patch its row without a follow-up GET.
+  promoteStandard: (id: string) =>
+    api.post<AssetProblem>(`/inventory/asset-problems/${id}/promote-standard/`, {}),
+
+  promoteThirdParty: (id: string, payload: {
+    vendor: string;
+    title: string;
+    work_type?: string;
+  }) =>
+    api.post<AssetProblem>(
+      `/inventory/asset-problems/${id}/promote-third-party/`,
+      payload,
+    ),
+
+  resolve: (id: string, payload: {
+    status?: 'resolved' | 'closed';
+    resolution_notes?: string;
+  }) =>
+    api.post<AssetProblem>(`/inventory/asset-problems/${id}/resolve/`, payload),
 };
 
 // Asset Document Library API (per-asset manuals / CAD / wiring / cut-ready files)

@@ -2,7 +2,7 @@
  * Asset Detail Page
  * Full page view for asset details with part tracking, problem history, maintenance, QR code, and lock/unlock controls
  */
-import { Badge, Button, Group, Paper, Text } from '@mantine/core';
+import { Badge, Button, Group, Paper, Switch, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import AssetForgeKeyAccessCard from '../components/AssetForgeKeyAccessCard';
@@ -80,6 +80,8 @@ const AssetDetailPage: React.FC = () => {
   const [vendorId, setVendorId] = useState<string>('');
   const [vendorTitle, setVendorTitle] = useState<string>('');
   const [vendorWorkType, setVendorWorkType] = useState<string>('standard');
+  // Landlord cost-recovery flag (staff only) — saved on toggle, no Save button.
+  const [savingCostRecoverable, setSavingCostRecoverable] = useState<boolean>(false);
 
   const loadAssetDetails = useCallback(async () => {
     if (!id) return;
@@ -235,6 +237,23 @@ const AssetDetailPage: React.FC = () => {
       showError(extractErrorMessage(err, 'Failed to lock asset'));
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  // Flip Asset.is_cost_recoverable. The optimistic local update keeps the
+  // switch responsive; a failure reverts it by reloading the asset.
+  const handleToggleCostRecoverable = async (nextValue: boolean) => {
+    if (!id || !asset) return;
+    const previous = asset.is_cost_recoverable;
+    try {
+      setSavingCostRecoverable(true);
+      setAsset({ ...asset, is_cost_recoverable: nextValue });
+      await assetsAPI.updateAsset(id, { is_cost_recoverable: nextValue });
+    } catch (err: any) {
+      setAsset((current) => (current ? { ...current, is_cost_recoverable: previous } : current));
+      showError(extractErrorMessage(err, 'Failed to update cost recovery'));
+    } finally {
+      setSavingCostRecoverable(false);
     }
   };
 
@@ -488,6 +507,11 @@ const AssetDetailPage: React.FC = () => {
     return problem.status === problemStatusFilter;
   });
 
+  // Same staff check the other privileged sections on this page use.
+  const isStaff =
+    localStorage.getItem('is_staff') === 'true' ||
+    localStorage.getItem('is_superuser') === 'true';
+
   if (loading) {
     return (
       <WorkspacePage
@@ -667,6 +691,27 @@ const AssetDetailPage: React.FC = () => {
                   {Math.floor(asset.age_in_days / 365)} years, {asset.age_in_days % 365} days
                 </span>
               </div>
+            )}
+            {/* Staff toggle the landlord-billable flag; everyone else just sees
+                it when it is on, since it explains the statement's numbers. */}
+            {isStaff ? (
+              <div className="info-item" data-testid="cost-recoverable-row">
+                <Switch
+                  label="Cost-recoverable (landlord-billable)"
+                  description="In-house repair cost on this asset flows into the recoverable column of the cost-recovery statement. Vendor invoices are recoverable either way."
+                  checked={asset.is_cost_recoverable ?? false}
+                  disabled={savingCostRecoverable}
+                  onChange={(e) => handleToggleCostRecoverable(e.currentTarget.checked)}
+                  data-testid="cost-recoverable-toggle"
+                />
+              </div>
+            ) : (
+              asset.is_cost_recoverable && (
+                <div className="info-item" data-testid="cost-recoverable-row">
+                  <span className="info-label">Cost-recoverable:</span>
+                  <span className="info-value">Yes (landlord-billable)</span>
+                </div>
+              )
             )}
           </div>
         </section>

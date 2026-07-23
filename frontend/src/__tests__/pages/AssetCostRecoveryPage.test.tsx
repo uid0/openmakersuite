@@ -47,6 +47,7 @@ const SAMPLE_REPORT = {
   asset_count: 1,
   service_count: 2,
   grand_total_estimated: '40.00',
+  grand_total_internal: '40.00',
   grand_total_actual: '250.00',
   assets: [
     {
@@ -58,12 +59,14 @@ const SAMPLE_REPORT = {
       status: 'operational',
       status_display: 'Operational',
       category: 'Fabrication',
+      is_cost_recoverable: false,
       services: [
         {
           date: '2026-06-20',
           source: 'vendor',
           description: 'Tube replacement (Acme)',
           estimated_cost: null,
+          internal_cost: null,
           actual_cost: '250.00',
         },
         {
@@ -71,11 +74,67 @@ const SAMPLE_REPORT = {
           source: 'pm',
           description: 'Lens cleaning',
           estimated_cost: '40.00',
+          internal_cost: '40.00',
           actual_cost: null,
         },
       ],
       subtotal_estimated: '40.00',
+      subtotal_internal: '40.00',
       subtotal_actual: '250.00',
+    },
+  ],
+};
+
+// A flagged asset next to an unflagged one — the B5 split the statement exists
+// to show. Same in-house PM cost on both; only the flagged one bills it.
+const SPLIT_REPORT = {
+  ...SAMPLE_REPORT,
+  asset_ids: ['a1', 'a2'],
+  asset_count: 2,
+  service_count: 2,
+  grand_total_estimated: '150.00',
+  grand_total_internal: '150.00',
+  grand_total_actual: '75.00',
+  assets: [
+    {
+      ...SAMPLE_REPORT.assets[0],
+      asset_id: 'a1',
+      name: 'Rooftop Unit',
+      asset_tag: 'HV-1',
+      is_cost_recoverable: true,
+      services: [
+        {
+          date: '2026-06-20',
+          source: 'pm',
+          description: 'Belt replacement',
+          estimated_cost: '80.00',
+          internal_cost: '75.00',
+          actual_cost: '75.00',
+        },
+      ],
+      subtotal_estimated: '80.00',
+      subtotal_internal: '75.00',
+      subtotal_actual: '75.00',
+    },
+    {
+      ...SAMPLE_REPORT.assets[0],
+      asset_id: 'a2',
+      name: 'CNC Mill',
+      asset_tag: 'CM-1',
+      is_cost_recoverable: false,
+      services: [
+        {
+          date: '2026-06-22',
+          source: 'pm',
+          description: 'Spindle service',
+          estimated_cost: '70.00',
+          internal_cost: '75.00',
+          actual_cost: null,
+        },
+      ],
+      subtotal_estimated: '70.00',
+      subtotal_internal: '75.00',
+      subtotal_actual: '0.00',
     },
   ],
 };
@@ -310,6 +369,57 @@ describe('AssetCostRecoveryPage', () => {
     const params = mockReportsAPI.getAssetCostRecovery.mock.calls[0][0];
     expect(params.all_assets).toBe(true);
     expect(params.owning_group).toBe(11);
+  });
+
+  it('shows the recoverable / internal split for a flagged vs unflagged asset', async () => {
+    mockReportsAPI.getAssetCostRecovery.mockResolvedValue(okResponse(SPLIT_REPORT));
+
+    renderPage();
+    await selectLaserCutter();
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+
+    const results = await screen.findByTestId('cost-recovery-results');
+
+    // The flag itself, per asset.
+    expect(within(results).getByTestId('cost-recoverable-badge-a1')).toHaveTextContent(
+      'Cost-recoverable',
+    );
+    expect(within(results).getByTestId('cost-recoverable-badge-a2')).toHaveTextContent(
+      /not billable/i,
+    );
+
+    // Same $75 of in-house work on both — only the flagged asset bills it.
+    expect(within(results).getByText(/Recoverable: \$75\.00/)).toBeInTheDocument();
+    expect(within(results).getByText(/Recoverable: \$0\.00/)).toBeInTheDocument();
+    expect(within(results).getByText(/In-house cost: \$75\.00 \(internal only\)/)).toBeInTheDocument();
+
+    // The grand total bills only the flagged asset's in-house work.
+    expect(within(results).getByText(/grand total recoverable: \$75\.00/i)).toBeInTheDocument();
+    expect(within(results).getByTestId('cost-recovery-grand-internal')).toHaveTextContent(
+      /In-house cost across the selection: \$150\.00/,
+    );
+  });
+
+  it('renders the in-house cost column alongside Estimated and Actual', async () => {
+    renderPage();
+    await selectLaserCutter();
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+
+    const results = await screen.findByTestId('cost-recovery-results');
+    expect(within(results).getByRole('columnheader', { name: /in-house cost/i })).toBeInTheDocument();
+    expect(
+      within(results).getByRole('columnheader', { name: /actual \(recoverable\)/i }),
+    ).toBeInTheDocument();
+    // A vendor line is not in-house work: estimated and in-house are both "—",
+    // and only the actual carries money.
+    const vendorRow = within(results).getByText('Tube replacement (Acme)').closest('tr')!;
+    expect(within(vendorRow).getAllByText('—')).toHaveLength(2);
+    expect(within(vendorRow).getByText('$250.00')).toBeInTheDocument();
+    // The PM line reports the same figure as estimate and in-house cost, and
+    // bills nothing — this asset is not flagged.
+    const pmRow = within(results).getByText('Lens cleaning').closest('tr')!;
+    expect(within(pmRow).getAllByText('$40.00')).toHaveLength(2);
+    expect(within(pmRow).getByText('—')).toBeInTheDocument();
   });
 
   it('carries the ownership scope into the CSV export', async () => {

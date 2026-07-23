@@ -477,6 +477,17 @@ export interface ReconciliationUploadResponse {
   errors: ReconciliationUploadError[];
 }
 
+// Result of a bulk cost-recovery flag set. `matched` is the size of the
+// category; `updated` counts only the assets whose flag actually flipped.
+export interface CostRecoverableBulkResult {
+  category_id: number;
+  category_slug: string;
+  category_name: string;
+  is_cost_recoverable: boolean;
+  matched: number;
+  updated: number;
+}
+
 // Assets API
 export const assetsAPI = {
   listAssets: (params?: {
@@ -532,6 +543,18 @@ export const assetsAPI = {
 
   deleteAsset: (id: string) =>
     api.delete(`/inventory/assets/${id}/`),
+
+  // Bulk-set the landlord cost-recovery flag on a whole asset category in one
+  // request (staff only) — the alternative is one PATCH per asset. `category`
+  // takes the Category PK or its slug; omitting `isCostRecoverable` flags them.
+  setCostRecoverableByCategory: (
+    category: number | string,
+    isCostRecoverable: boolean = true,
+  ) =>
+    api.post<CostRecoverableBulkResult>(
+      '/inventory/assets/set_cost_recoverable_by_category/',
+      { category, is_cost_recoverable: isCostRecoverable },
+    ),
 
   generateQR: (id: string) =>
     api.post(`/inventory/assets/${id}/generate_qr/`),

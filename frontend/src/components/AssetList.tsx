@@ -4,14 +4,15 @@
  * Supports Card and Table views, both lazily loaded via infinite scroll with
  * server-side filtering and sorting.
  */
-import { Button, Group, Loader, Text } from '@mantine/core';
+import { Alert, Button, Group, Loader, Paper, Select, Text } from '@mantine/core';
 import { IconLayoutGrid, IconTable } from '@tabler/icons-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
 import { assetsAPI, inventoryAPI, sigAPI } from '../services/api';
 import '../styles/AssetList.css';
-import { Asset, Location, SIG } from '../types';
+import { Asset, Category, Location, SIG } from '../types';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 import AssetTableView from './AssetTableView';
 
 interface AssetCardProps {
@@ -160,6 +161,14 @@ const AssetList: React.FC = () => {
   const [inventoryItemFilter, setInventoryItemFilter] = useState<string | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [sigs, setSigs] = useState<SIG[]>([]);
+  // Bulk cost-recovery flag by category (staff only). Flagging the landlord's
+  // HVAC equipment one asset at a time is not workable, so the whole category
+  // goes in a single request.
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [bulkCategoryId, setBulkCategoryId] = useState<string | null>(null);
+  const [bulkSaving, setBulkSaving] = useState<boolean>(false);
+  const [bulkResult, setBulkResult] = useState<string | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   // View mode and infinite-scroll pagination state.
   const [viewMode, setViewMode] = useState<'card' | 'table'>(getStoredViewMode());
@@ -189,12 +198,14 @@ const AssetList: React.FC = () => {
 
   const loadInitialData = async () => {
     try {
-      const [locationsRes, sigsRes] = await Promise.all([
+      const [locationsRes, sigsRes, categoriesRes] = await Promise.all([
         inventoryAPI.listLocations(),
         sigAPI.listMySIGs(),
+        inventoryAPI.listCategories(),
       ]);
       setLocations((locationsRes.data.results || []) as Location[]);
       setSigs((sigsRes.data.results || []) as SIG[]);
+      setCategories((categoriesRes?.data?.results || []) as Category[]);
     } catch (err) {
       console.error('Error loading initial data:', err);
     }
@@ -398,6 +409,29 @@ const AssetList: React.FC = () => {
     searchTerm || locationFilter || sigFilter || statusFilter !== 'all' || inventoryItemFilter
   );
 
+  // Staff-only: the flag decides what in-house work gets billed to the landlord.
+  const isStaff =
+    localStorage.getItem('is_staff') === 'true' ||
+    localStorage.getItem('is_superuser') === 'true';
+
+  const handleBulkCostRecoverable = async (value: boolean) => {
+    if (!bulkCategoryId) return;
+    try {
+      setBulkSaving(true);
+      setBulkError(null);
+      setBulkResult(null);
+      const response = await assetsAPI.setCostRecoverableByCategory(Number(bulkCategoryId), value);
+      const { updated, matched, category_name: categoryName } = response.data;
+      setBulkResult(
+        `${value ? 'Flagged' : 'Cleared'} ${updated} of ${matched} asset${matched === 1 ? '' : 's'} in ${categoryName}.`
+      );
+    } catch (err) {
+      setBulkError(extractErrorMessage(err, 'Failed to update cost recovery for that category.'));
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
   return (
     <div className="asset-list-container">
       <div className="asset-header">
@@ -516,6 +550,57 @@ const AssetList: React.FC = () => {
             </select>
           </div>
         </div>
+        {isStaff && (
+          <Paper withBorder p="sm" mt="sm" data-testid="bulk-cost-recoverable">
+            <Text size="sm" fw={500} mb={4}>
+              Cost recovery by category
+            </Text>
+            <Text size="xs" c="dimmed" mb="xs">
+              Flag every asset in a category as landlord-billable in one go — in-house
+              repair cost on flagged assets then counts toward the recoverable total on
+              the cost-recovery statement.
+            </Text>
+            <Group align="flex-end" gap="sm" wrap="wrap">
+              <Select
+                label="Category"
+                placeholder="Pick a category"
+                data={categories.map((c) => ({ value: String(c.id), label: c.name }))}
+                value={bulkCategoryId}
+                onChange={setBulkCategoryId}
+                searchable
+                clearable
+                data-testid="bulk-cost-recoverable-category"
+                style={{ minWidth: 220 }}
+              />
+              <Button
+                onClick={() => handleBulkCostRecoverable(true)}
+                disabled={!bulkCategoryId || bulkSaving}
+                loading={bulkSaving}
+                data-testid="bulk-cost-recoverable-set"
+              >
+                Mark cost-recoverable
+              </Button>
+              <Button
+                variant="default"
+                onClick={() => handleBulkCostRecoverable(false)}
+                disabled={!bulkCategoryId || bulkSaving}
+                data-testid="bulk-cost-recoverable-clear"
+              >
+                Clear flag
+              </Button>
+            </Group>
+            {bulkResult && (
+              <Text size="sm" mt="xs" data-testid="bulk-cost-recoverable-result">
+                {bulkResult}
+              </Text>
+            )}
+            {bulkError && (
+              <Alert color="red" mt="xs" data-testid="bulk-cost-recoverable-error">
+                {bulkError}
+              </Alert>
+            )}
+          </Paper>
+        )}
         {inventoryItemFilter && (
           <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#f0f0f0', borderRadius: '4px' }}>
             <span>Filtered by Inventory Item. </span>

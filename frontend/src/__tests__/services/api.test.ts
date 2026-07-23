@@ -634,6 +634,41 @@ describe('API Service', () => {
       expect(response.status).toBe(200);
     });
 
+    test('setCostRecoverableByCategory posts the category + flag', async () => {
+      const result = {
+        category_id: 7,
+        category_slug: 'hvac',
+        category_name: 'HVAC',
+        is_cost_recoverable: true,
+        matched: 4,
+        updated: 3,
+      };
+
+      mock.onPost('/inventory/assets/set_cost_recoverable_by_category/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({ category: 7, is_cost_recoverable: true });
+        return [200, result];
+      });
+
+      const response = await assetsAPI.setCostRecoverableByCategory(7);
+
+      expect(response.data).toEqual(result);
+      expect(response.status).toBe(200);
+    });
+
+    test('setCostRecoverableByCategory can clear the flag, and takes a slug', async () => {
+      mock.onPost('/inventory/assets/set_cost_recoverable_by_category/').reply((config) => {
+        expect(JSON.parse(config.data)).toEqual({
+          category: 'hvac',
+          is_cost_recoverable: false,
+        });
+        return [200, { updated: 0 }];
+      });
+
+      const response = await assetsAPI.setCostRecoverableByCategory('hvac', false);
+
+      expect(response.status).toBe(200);
+    });
+
     test('getAssetProblems fetches problems for an asset', async () => {
       const mockProblems = [
         {

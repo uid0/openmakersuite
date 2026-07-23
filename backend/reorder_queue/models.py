@@ -430,6 +430,23 @@ class PurchaseOrderItem(TypedTargetModel):
         blank=True,
         help_text="Freeform description for line items not linked to inventory items or assets",
     )
+    # "Ordered to complete this job" (op-bu80). Orthogonal to the three-way
+    # target above — an inventory, asset *or* freeform line can be bought for a
+    # work order — so it is deliberately NOT a TARGET_FIELDS entry. Receiving a
+    # line that carries this posts the received quantity back onto the work
+    # order as an actual-cost material; see
+    # ``inventory.services.work_order_purchase_bridge``.
+    work_order = models.ForeignKey(
+        "inventory.WorkOrder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="purchase_order_items",
+        help_text=(
+            "Work order this line was ordered for. Receiving it records the "
+            "received quantity and its cost as a material on that work order."
+        ),
+    )
 
     # Order quantities
     quantity_ordered = models.PositiveIntegerField(

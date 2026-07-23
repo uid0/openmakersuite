@@ -2173,7 +2173,9 @@ class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
 
     ``material_name``/``unit``/``inventory_item`` are read-only here: a
     template-derived row freezes them at generation, and an ad-hoc row sets
-    them once through the ``add_material`` action.
+    them once through the ``add_material`` action. ``purchase_order_item``
+    (op-bu80) is read-only too — it is set only by the receipt bridge, and a
+    non-null value marks the line as mirroring a purchase-order line.
     """
 
     stock_applied = serializers.BooleanField(read_only=True)
@@ -2193,6 +2195,7 @@ class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
             "inventory_item",
             "inventory_item_name",
             "is_ad_hoc",
+            "purchase_order_item",
             "quantity_planned",
             "quantity_used",
             "unit",
@@ -2213,6 +2216,7 @@ class WorkOrderMaterialUsageSerializer(serializers.ModelSerializer):
             "applied_quantity",
             "inventory_item",
             "is_ad_hoc",
+            "purchase_order_item",
             "receipt_url",
         ]
 
@@ -2460,6 +2464,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     loto = serializers.SerializerMethodField()
     validation = serializers.SerializerMethodField()
     reference_documents = serializers.SerializerMethodField()
+    # op-bu80: the PO lines ordered to complete this job — on order *and*
+    # received — so the job page can say "the part is still in transit".
+    purchase_order_lines = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkOrder
@@ -2489,6 +2496,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "task_completions",
             "material_usage",
             "actual_material_cost",
+            "purchase_order_lines",
             "loto_completions",
             "photos",
             "tools",
@@ -2514,6 +2522,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "task_completions",
             "material_usage",
             "actual_material_cost",
+            "purchase_order_lines",
             "loto_completions",
             "photos",
             "tools",
@@ -2619,6 +2628,17 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             obj.asset,
             request=self.context.get("request"),
         )
+
+    def get_purchase_order_lines(self, obj):
+        """PO lines ordered to complete this job — on order and received (op-bu80).
+
+        The ordering-side view of the same fact the received material lines
+        record: what was bought for this work order, from whom, and how much of
+        it has actually shown up. Detail-only, like ``reference_documents``.
+        """
+        from .services.work_order_context import build_purchase_lines_context
+
+        return build_purchase_lines_context(obj)
 
 
 class WorkOrderListSerializer(serializers.ModelSerializer):

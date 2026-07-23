@@ -25,6 +25,28 @@ from inventory.models import ItemSupplier
 from ..models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
 
 
+def _resolve_work_order(item_data, idx):
+    """Resolve an optional ``work_order_id`` on a line into a WorkOrder (op-bu80).
+
+    Orthogonal to the line's target — an inventory, asset or freeform line can
+    all be "ordered to complete this job" — so it is resolved once, up front,
+    for every branch below. Absent key → ``None``; unknown id → the same
+    ValidationError shape the rest of this function raises.
+    """
+    work_order_id = item_data.get("work_order_id")
+    if work_order_id in (None, ""):
+        return None
+
+    from inventory.models import WorkOrder
+
+    try:
+        return WorkOrder.objects.get(id=work_order_id)
+    except (WorkOrder.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+        raise serializers.ValidationError(
+            f"Item at index {idx}: work order {work_order_id} does not exist"
+        )
+
+
 @transaction.atomic
 def create_purchase_order(validated_data, items_data, user):
     """Create a purchase order with line items (inventory items, assets, freeform).
@@ -53,6 +75,8 @@ def create_purchase_order(validated_data, items_data, user):
             raise serializers.ValidationError(
                 f"Item at index {idx}: quantity must be a positive number, got {quantity}"
             )
+
+        work_order = _resolve_work_order(item_data, idx)
 
         # Handle inventory items
         if "item_supplier_id" in item_data:
@@ -116,6 +140,7 @@ def create_purchase_order(validated_data, items_data, user):
                     order_in_packages=order_in_packages,
                     notes=notes,
                     expected_shipment_date=expected_shipment_date,
+                    work_order=work_order,
                 )
 
                 total_cost += line_item.estimated_cost
@@ -159,6 +184,7 @@ def create_purchase_order(validated_data, items_data, user):
                     unit_cost_ordered=unit_cost,
                     order_in_packages=0,  # Assets don't have package information
                     notes=notes,
+                    work_order=work_order,
                 )
 
                 total_cost += line_item.estimated_cost
@@ -195,6 +221,7 @@ def create_purchase_order(validated_data, items_data, user):
                 unit_cost_ordered=unit_cost,
                 order_in_packages=0,  # Freeform items don't have package information
                 notes=notes,
+                work_order=work_order,
             )
 
             total_cost += line_item.estimated_cost

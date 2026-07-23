@@ -250,13 +250,16 @@ describe('WorkOrderPage material usage → inventory decrement (op-uh8z)', () =>
     fireEvent.click(checkbox);
 
     // Checking the box records the material as used AND carries the quantity,
-    // which the backend decrements from the linked inventory item.
+    // which the backend decrements from the linked inventory item. The trailing
+    // unit cost (op-768w) is undefined here — nobody typed a price, and an
+    // omitted one leaves whatever the line already recorded alone.
     await waitFor(() => {
       expect(mockWorkOrderAPI.toggleMaterial).toHaveBeenCalledWith(
         'wo-1',
         'mu-1',
         true,
         '2.00',
+        undefined,
       );
     });
   });
@@ -282,8 +285,6 @@ describe('WorkOrderPage material usage → inventory decrement (op-uh8z)', () =>
     expect(await screen.findByText(/3 from stock/i)).toBeInTheDocument();
     expect(screen.getByText(/usage logged/i)).toBeInTheDocument();
     // The quantity input is locked away once the decrement is applied.
-    expect(
-      screen.queryByRole('spinbutton', { name: /qty used/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/qty used/i)).not.toBeInTheDocument();
   });
 });

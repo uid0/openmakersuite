@@ -11,10 +11,12 @@ orders. Use the two functions as a pair: :func:`prefetch_asset_work_orders`
 attaches both halves of the traversal to an ``Asset`` queryset, and
 :func:`iter_asset_work_orders` walks them without double-counting the overlap.
 
-It also owns what one of those work orders *cost* — :func:`wo_actual_material_cost`
-(real money, op-768w) and :func:`wo_material_cost` (actual where recorded, the
-old estimate otherwise) — so ``tco``, ``supplies_used`` and ``cost_recovery``
-all price internal work the same way.
+It also owns what one of those work orders *cost*: :func:`wo_actual_material_cost`
+(real money, the op-768w capture), :func:`wo_estimated_material_cost` (the older
+template/material estimate) and :func:`wo_material_cost`, which picks the actual
+where it was recorded and falls back to the estimate otherwise. ``tco`` and
+``cost_recovery`` price in-house work from these, so both report the same money
+for the same job.
 """
 
 from decimal import Decimal
@@ -148,9 +150,11 @@ def wo_material_cost(
     material line, because a scheduled PM's estimate is a single template-level
     figure that cannot be decomposed and blended line by line.
 
-    Every report that prices in-house work goes through here, so a work order
-    that predates actual-cost capture keeps exactly the number it reported
-    before (no regression) while a priced one reports what was really spent.
+    A work order that predates actual-cost capture therefore keeps exactly the
+    number it reported before, while a priced one reports what was really spent.
+    ``cost_recovery`` needs the two figures side by side (it reports the estimate
+    in its own column) so it calls the two halves directly; anything that just
+    wants "what did this job cost" wants this.
     """
     actual = wo_actual_material_cost(work_order)
     if actual is not None:

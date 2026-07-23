@@ -6665,7 +6665,7 @@ class AssetReportViewSet(viewsets.ViewSet):
         from .services.work_order_reports import (
             iter_asset_work_orders,
             prefetch_asset_work_orders,
-            wo_material_cost,
+            wo_actual_material_cost,
         )
 
         selection = self._cost_recovery_selection(request)
@@ -6723,23 +6723,23 @@ class AssetReportViewSet(viewsets.ViewSet):
 
         for asset in assets:
             services = []
-            # Internal work — the in-house figure always lands in
-            # ``internal_cost``; it only reaches the billable ``actual_cost``
-            # column on a recoverable asset, and only when it is a real actual
-            # rather than an estimate. Covers both preventive (from a template)
-            # and corrective work orders.
+            # Internal work, preventive (from a template) and corrective alike.
+            # ``internal_cost`` is the in-house figure on every asset: real
+            # money where it was recorded, the estimate otherwise — which is
+            # what keeps a work order that predates cost capture reporting
+            # exactly its old numbers. Only a real actual, and only on a
+            # recoverable asset, reaches the billable ``actual_cost`` column.
             for wo, mi in iter_asset_work_orders(asset):
-                internal_cost, is_actual = wo_material_cost(mi, wo)
+                estimated_cost = self._pm_estimated_cost(mi, wo)
+                actual_cost = wo_actual_material_cost(wo)
                 services.append(
                     {
                         "date": wo.completed_at.date(),
                         "source": "pm",
                         "description": wo.display_title,
-                        "estimated_cost": self._pm_estimated_cost(mi, wo),
-                        "internal_cost": internal_cost,
-                        "actual_cost": (
-                            internal_cost if (is_actual and asset.is_cost_recoverable) else None
-                        ),
+                        "estimated_cost": estimated_cost,
+                        "internal_cost": (estimated_cost if actual_cost is None else actual_cost),
+                        "actual_cost": actual_cost if asset.is_cost_recoverable else None,
                     }
                 )
             # Vendor — actual = per-asset allocated_cost (the recoverable spend).

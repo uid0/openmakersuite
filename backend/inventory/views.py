@@ -6036,13 +6036,25 @@ class AssetReportViewSet(viewsets.ViewSet):
 
     @staticmethod
     def _cost_recovery_selection(request):
-        """Parse and validate the asset/category selection for cost_recovery.
+        """Parse and validate the asset selection for cost_recovery.
 
-        ``asset_ids`` (Asset UUIDs) and ``category_ids`` (integer Category PKs)
-        are each accepted as repeated params and/or comma-joined lists. At
-        least one asset or category must be supplied. Returns
-        ``(asset_ids, category_ids)`` as validated lists (UUID strings / ints).
-        Raises DRF ValidationError on malformed ids or an empty selection.
+        Selection params (all optional individually, but at least one is
+        required):
+
+        * ``asset_ids`` — Asset UUIDs, repeated and/or comma-joined.
+        * ``category_ids`` — integer Category PKs, repeated and/or comma-joined.
+        * ``all_assets`` — ``"true"``/``"1"`` to run across every asset.
+        * ``ownership_type`` — one of ``Asset.OwnershipType.values``
+          (user/group/space).
+        * ``owning_group`` — integer ``auth.Group`` PK (the SIG/committee).
+
+        Requiring at least one keeps a bare request from silently running an
+        unbounded statement; ``all_assets=true`` is the explicit escape hatch.
+
+        Returns a dict with keys ``asset_ids`` (UUID strings), ``category_ids``
+        (ints), ``all_assets`` (bool), ``ownership_type`` (str or None) and
+        ``owning_group`` (int or None). Raises DRF ValidationError on malformed
+        values or an empty selection.
         """
         import uuid
 
@@ -6055,9 +6067,37 @@ class AssetReportViewSet(viewsets.ViewSet):
         raw_asset_ids = _collect("asset_ids")
         raw_category_ids = _collect("category_ids")
 
-        if not raw_asset_ids and not raw_category_ids:
+        all_assets = (request.query_params.get("all_assets") or "").strip().lower() in {
+            "true",
+            "1",
+        }
+
+        ownership_type = (request.query_params.get("ownership_type") or "").strip() or None
+        if ownership_type is not None and ownership_type not in Asset.OwnershipType.values:
+            allowed = ", ".join(Asset.OwnershipType.values)
+            raise serializers.ValidationError({"ownership_type": f"Must be one of {allowed}."})
+
+        raw_owning_group = (request.query_params.get("owning_group") or "").strip() or None
+        owning_group = None
+        if raw_owning_group is not None:
+            try:
+                owning_group = int(raw_owning_group)
+            except (ValueError, TypeError):
+                raise serializers.ValidationError(
+                    {"owning_group": f"Invalid group id: {raw_owning_group!r}."}
+                )
+
+        if not (
+            raw_asset_ids
+            or raw_category_ids
+            or all_assets
+            or ownership_type is not None
+            or owning_group is not None
+        ):
             raise serializers.ValidationError(
-                "Select at least one asset (asset_ids) or category (category_ids)."
+                "Select at least one asset (asset_ids), category (category_ids), or "
+                "ownership filter (ownership_type / owning_group) — or pass "
+                "all_assets=true to run the statement across every asset."
             )
 
         asset_ids = []
@@ -6076,7 +6116,46 @@ class AssetReportViewSet(viewsets.ViewSet):
                     {"category_ids": f"Invalid category id: {value!r}."}
                 )
 
-        return asset_ids, category_ids
+        return {
+            "asset_ids": asset_ids,
+            "category_ids": category_ids,
+            "all_assets": all_assets,
+            "ownership_type": ownership_type,
+            "owning_group": owning_group,
+        }
+
+    @staticmethod
+    def _cost_recovery_asset_queryset(selection):
+        """Resolve the selected assets for cost_recovery from a parsed selection.
+
+        ``all_assets`` or either ownership filter widens the base set to every
+        asset (an ownership filter alone therefore means "all assets with that
+        ownership"); otherwise the base set is the explicit ``asset_ids`` UNION
+        the ``category_ids`` expansion, de-duped. The ownership filters are then
+        applied on top of whichever base set was chosen.
+        """
+        if (
+            selection["all_assets"]
+            or selection["ownership_type"] is not None
+            or selection["owning_group"] is not None
+        ):
+            queryset = Asset.objects.all()
+        else:
+            selected_ids = set(selection["asset_ids"])
+            if selection["category_ids"]:
+                selected_ids.update(
+                    str(pk)
+                    for pk in Asset.objects.filter(
+                        category_id__in=selection["category_ids"]
+                    ).values_list("id", flat=True)
+                )
+            queryset = Asset.objects.filter(id__in=selected_ids)
+
+        if selection["ownership_type"] is not None:
+            queryset = queryset.filter(ownership_type=selection["ownership_type"])
+        if selection["owning_group"] is not None:
+            queryset = queryset.filter(owning_group_id=selection["owning_group"])
+        return queryset
 
     @staticmethod
     def _cost_recovery_window(request):
@@ -6226,7 +6305,10 @@ class AssetReportViewSet(viewsets.ViewSet):
         - Selection (>=1 required): ``asset_ids`` (Asset UUIDs) and/or
           ``category_ids`` (integer Category PKs); each repeatable and/or
           comma-joined. Categories expand to ``category.assets`` and the union
-          is de-duped.
+          is de-duped. ``all_assets=true`` runs across every asset;
+          ``ownership_type`` (user/group/space) and ``owning_group`` (auth.Group
+          PK — the SIG/committee) scope by asset ownership and likewise widen
+          the base set to every asset before filtering.
         - Period (one of): ``period`` in {past_week, past_month, past_year}
           (trailing window ending today) OR ``start_date`` & ``end_date``
           (YYYY-MM-DD).
@@ -6248,7 +6330,9 @@ class AssetReportViewSet(viewsets.ViewSet):
             prefetch_asset_work_orders,
         )
 
-        asset_ids, category_ids = self._cost_recovery_selection(request)
+        selection = self._cost_recovery_selection(request)
+        asset_ids = selection["asset_ids"]
+        category_ids = selection["category_ids"]
         start_date, end_date, period_label = self._cost_recovery_window(request)
 
         # ``format`` is DRF's reserved content-negotiation query param; the
@@ -6256,15 +6340,8 @@ class AssetReportViewSet(viewsets.ViewSet):
         # cleanly (an unknown format 404s in negotiation before we get here).
         fmt = request.accepted_renderer.format
 
-        # Resolve the selected asset set: explicit ids UNION category expansion.
-        selected_ids = set(asset_ids)
-        if category_ids:
-            selected_ids.update(
-                str(pk)
-                for pk in Asset.objects.filter(category_id__in=category_ids).values_list(
-                    "id", flat=True
-                )
-            )
+        # Resolve the selected asset set (ids/categories/all + ownership).
+        selected_qs = self._cost_recovery_asset_queryset(selection)
 
         # Window-scoped prefetch querysets — one pass per source, no N+1.
         pm_wo_qs = WorkOrder.objects.filter(
@@ -6286,7 +6363,7 @@ class AssetReportViewSet(viewsets.ViewSet):
 
         assets = (
             prefetch_asset_work_orders(
-                Asset.objects.filter(id__in=selected_ids).select_related("category"),
+                selected_qs.select_related("category"),
                 pm_wo_qs,
             )
             .prefetch_related(
@@ -6378,7 +6455,17 @@ class AssetReportViewSet(viewsets.ViewSet):
             return self._cost_recovery_csv(asset_blocks)
 
         if fmt == "pdf":
+            from django.contrib.auth.models import Group
+
             from .utils.cost_recovery_pdf import generate_cost_recovery_pdf
+
+            owning_group_name = None
+            if selection["owning_group"] is not None:
+                owning_group_name = (
+                    Group.objects.filter(pk=selection["owning_group"])
+                    .values_list("name", flat=True)
+                    .first()
+                )
 
             report = {
                 "period": period_label,
@@ -6387,6 +6474,10 @@ class AssetReportViewSet(viewsets.ViewSet):
                 "generated_at": timezone.now(),
                 "asset_ids": asset_ids,
                 "category_ids": category_ids,
+                "all_assets": selection["all_assets"],
+                "ownership_type": selection["ownership_type"],
+                "owning_group": selection["owning_group"],
+                "owning_group_name": owning_group_name,
                 "asset_count": len(asset_blocks),
                 "service_count": service_count,
                 "grand_total_estimated": grand_estimated,
@@ -6405,6 +6496,9 @@ class AssetReportViewSet(viewsets.ViewSet):
             "end_date": end_date.isoformat(),
             "asset_ids": asset_ids,
             "category_ids": category_ids,
+            "all_assets": selection["all_assets"],
+            "ownership_type": selection["ownership_type"],
+            "owning_group": selection["owning_group"],
             "asset_count": len(asset_blocks),
             "service_count": service_count,
             "grand_total_estimated": f"{grand_estimated:.2f}",

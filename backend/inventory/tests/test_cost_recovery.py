@@ -3,8 +3,9 @@ Tests for the Asset Cost-Recovery report endpoint.
 
 Covers the cost walk (internal PM estimate vs vendor/manual actual, correct
 columns), period presets + custom range filtering, asset selection AND
-category expansion, an asset with no in-window services, the recoverable
-grand-total, and the CSV + PDF exports.
+category expansion, the all-assets + ownership (Space/Committee) filters, an
+asset with no in-window services, the recoverable grand-total, and the CSV +
+PDF exports.
 """
 
 import csv
@@ -12,12 +13,14 @@ import io
 from datetime import timedelta
 from decimal import Decimal
 
+from django.contrib.auth.models import Group
 from django.utils import timezone
 
 import pytest
 from rest_framework import status
 
 from inventory.models import (
+    Asset,
     MaintenanceItem,
     MaintenanceMaterial,
     MaintenanceRecord,
@@ -62,6 +65,12 @@ def _assets_by_id(response):
     return {block["asset_id"]: block for block in response.data["assets"]}
 
 
+def _error_details(response):
+    """Per-field details from the project's wrapped DRF error envelope
+    (``{"error": {"code", "message", "details": {...}}}``)."""
+    return response.data.get("error", {}).get("details", {})
+
+
 @pytest.mark.integration
 class TestCostRecoveryAccessAndParams:
     def test_requires_auth(self, api_client):
@@ -69,9 +78,39 @@ class TestCostRecoveryAccessAndParams:
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
     def test_requires_selection(self, authenticated_client):
+        """A bare request still 400s — all_assets=true is the explicit opt-in
+        for an unbounded run."""
         client, _ = authenticated_client
         response = client.get(URL, {"period": "past_month"})
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_empty_selection_params_still_rejected(self, authenticated_client):
+        """Blank/false values are not a selection."""
+        client, _ = authenticated_client
+        response = client.get(
+            URL,
+            {
+                "period": "past_month",
+                "asset_ids": "",
+                "category_ids": "",
+                "all_assets": "false",
+                "ownership_type": "",
+                "owning_group": "",
+            },
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_invalid_ownership_type_rejected(self, authenticated_client):
+        client, _ = authenticated_client
+        response = client.get(URL, {"ownership_type": "landlord", "period": "past_month"})
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "ownership_type" in _error_details(response)
+
+    def test_invalid_owning_group_rejected(self, authenticated_client):
+        client, _ = authenticated_client
+        response = client.get(URL, {"owning_group": "not-an-int", "period": "past_month"})
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "owning_group" in _error_details(response)
 
     def test_requires_period(self, authenticated_client):
         client, _ = authenticated_client
@@ -339,6 +378,188 @@ class TestCostRecoverySelection:
 
 
 @pytest.mark.integration
+class TestCostRecoveryAllAssetsAndOwnership:
+    """all_assets escape hatch + the Space/Committee ownership filters."""
+
+    def test_all_assets_returns_every_asset(self, authenticated_client):
+        client, _ = authenticated_client
+        a1 = AssetFactory(asset_tag="A-ALL1")
+        a2 = AssetFactory(asset_tag="A-ALL2")
+        a3 = AssetFactory(asset_tag="A-ALL3")
+
+        response = client.get(URL, {"all_assets": "true", "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+        ids = set(_assets_by_id(response))
+        assert {str(a1.id), str(a2.id), str(a3.id)} <= ids
+        assert response.data["all_assets"] is True
+        assert response.data["asset_count"] == len(ids)
+
+    def test_all_assets_accepts_1_as_true(self, authenticated_client):
+        client, _ = authenticated_client
+        asset = AssetFactory(asset_tag="A-ALL-1S")
+
+        response = client.get(URL, {"all_assets": "1", "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+        assert str(asset.id) in _assets_by_id(response)
+
+    def test_ownership_type_scopes_selection(self, authenticated_client):
+        """ownership_type alone = all assets with that ownership."""
+        client, _ = authenticated_client
+        sig = Group.objects.create(name="CR Robotics Committee")
+        space_asset = AssetFactory(asset_tag="A-OWN-SPACE")
+        group_asset = AssetFactory(
+            asset_tag="A-OWN-GROUP",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=sig,
+        )
+
+        response = client.get(URL, {"ownership_type": "space", "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+        ids = set(_assets_by_id(response))
+        assert str(space_asset.id) in ids
+        assert str(group_asset.id) not in ids
+        assert response.data["ownership_type"] == "space"
+
+    def test_owning_group_scopes_to_that_committee(self, authenticated_client):
+        client, _ = authenticated_client
+        committee = Group.objects.create(name="CR Woodshop Committee")
+        other = Group.objects.create(name="CR Metal Committee")
+        mine = AssetFactory(
+            asset_tag="A-OG-MINE",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=committee,
+        )
+        theirs = AssetFactory(
+            asset_tag="A-OG-THEIRS",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=other,
+        )
+        space_asset = AssetFactory(asset_tag="A-OG-SPACE")
+
+        response = client.get(URL, {"owning_group": str(committee.id), "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+        ids = set(_assets_by_id(response))
+        assert ids == {str(mine.id)}
+        assert str(theirs.id) not in ids
+        assert str(space_asset.id) not in ids
+        assert response.data["owning_group"] == committee.id
+
+    def test_all_assets_plus_ownership_type_combine(self, authenticated_client):
+        client, _ = authenticated_client
+        sig = Group.objects.create(name="CR Combined Committee")
+        space_asset = AssetFactory(asset_tag="A-COMBO-SPACE")
+        group_asset = AssetFactory(
+            asset_tag="A-COMBO-GROUP",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=sig,
+        )
+
+        response = client.get(
+            URL,
+            {"all_assets": "true", "ownership_type": "group", "period": "past_month"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        ids = set(_assets_by_id(response))
+        assert str(group_asset.id) in ids
+        assert str(space_asset.id) not in ids
+
+    def test_ownership_type_and_owning_group_combine(self, authenticated_client):
+        client, _ = authenticated_client
+        committee = Group.objects.create(name="CR Both-Filters Committee")
+        matching = AssetFactory(
+            asset_tag="A-BOTH-MATCH",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=committee,
+        )
+        # Same committee, but owned by a user — excluded by ownership_type.
+        AssetFactory(
+            asset_tag="A-BOTH-USER",
+            ownership_type=Asset.OwnershipType.USER,
+            owning_group=committee,
+        )
+
+        response = client.get(
+            URL,
+            {
+                "ownership_type": "group",
+                "owning_group": str(committee.id),
+                "period": "past_month",
+            },
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert set(_assets_by_id(response)) == {str(matching.id)}
+
+    def test_ownership_filter_widens_past_explicit_asset_ids(self, authenticated_client):
+        """An ownership filter starts from every asset, so it is not narrowed
+        by a stray asset_ids list (the UI disables the pickers in that mode)."""
+        client, _ = authenticated_client
+        committee = Group.objects.create(name="CR Widening Committee")
+        picked = AssetFactory(
+            asset_tag="A-WIDE-PICKED",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=committee,
+        )
+        sibling = AssetFactory(
+            asset_tag="A-WIDE-SIBLING",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=committee,
+        )
+
+        response = client.get(
+            URL,
+            {
+                "asset_ids": str(picked.id),
+                "owning_group": str(committee.id),
+                "period": "past_month",
+            },
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert set(_assets_by_id(response)) == {str(picked.id), str(sibling.id)}
+
+    def test_costs_still_walk_under_ownership_selection(self, authenticated_client):
+        """The new selection feeds the same cost walk — vendor actual still
+        rolls into the recoverable grand total."""
+        client, _ = authenticated_client
+        committee = Group.objects.create(name="CR Billing Committee")
+        asset = AssetFactory(
+            asset_tag="A-OWN-COST",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=committee,
+        )
+        _closed_vendor_link(asset, allocated_cost=Decimal("175.00"), closed_days_ago=3)
+
+        response = client.get(URL, {"owning_group": str(committee.id), "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+        assert Decimal(response.data["grand_total_actual"]) == Decimal("175.00")
+        assert response.data["service_count"] == 1
+
+    def test_unknown_owning_group_returns_no_assets(self, authenticated_client):
+        client, _ = authenticated_client
+        AssetFactory(asset_tag="A-OG-NONE")
+
+        response = client.get(URL, {"owning_group": "99999999", "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["assets"] == []
+        assert response.data["asset_count"] == 0
+
+    def test_explicit_selection_unaffected_by_new_params(self, authenticated_client):
+        """Without all_assets/ownership params the base set is still the
+        id + category union (regression guard on the default path)."""
+        client, _ = authenticated_client
+        picked = AssetFactory(asset_tag="A-DEFAULT-IN")
+        other = AssetFactory(asset_tag="A-DEFAULT-OUT")
+
+        response = client.get(URL, {"asset_ids": str(picked.id), "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+        ids = set(_assets_by_id(response))
+        assert ids == {str(picked.id)}
+        assert str(other.id) not in ids
+        assert response.data["all_assets"] is False
+        assert response.data["ownership_type"] is None
+        assert response.data["owning_group"] is None
+
+
+@pytest.mark.integration
 class TestCostRecoveryExports:
     def test_csv_export(self, authenticated_client):
         client, _ = authenticated_client
@@ -407,6 +628,83 @@ class TestCostRecoveryExports:
         assert "Cost-Recovery" in text
         assert "Amount to recover" in text
         assert "A-PDF" in text
+
+    def test_csv_honors_ownership_selection(self, authenticated_client):
+        """CSV flows through the same selection — the committee's asset is in,
+        the space-owned one is out."""
+        client, _ = authenticated_client
+        committee = Group.objects.create(name="CR CSV Committee")
+        owned = AssetFactory(
+            asset_tag="A-CSV-OWNED",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=committee,
+        )
+        _closed_vendor_link(owned, allocated_cost=Decimal("42.00"), closed_days_ago=4)
+        AssetFactory(asset_tag="A-CSV-SPACE")
+
+        response = client.get(
+            URL,
+            {"owning_group": str(committee.id), "period": "past_month", "format": "csv"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        reader = csv.DictReader(io.StringIO(response.content.decode("utf-8")))
+        tags = {row["asset_tag"] for row in reader}
+        assert tags == {"A-CSV-OWNED"}
+
+    def test_csv_all_assets(self, authenticated_client):
+        client, _ = authenticated_client
+        a1 = AssetFactory(asset_tag="A-CSVALL1")
+        a2 = AssetFactory(asset_tag="A-CSVALL2")
+
+        response = client.get(URL, {"all_assets": "true", "period": "past_month", "format": "csv"})
+        assert response.status_code == status.HTTP_200_OK
+        reader = csv.DictReader(io.StringIO(response.content.decode("utf-8")))
+        tags = {row["asset_tag"] for row in reader}
+        assert {a1.asset_tag, a2.asset_tag} <= tags
+
+    def test_pdf_honors_ownership_selection(self, authenticated_client):
+        client, _ = authenticated_client
+        committee = Group.objects.create(name="CR PDF Committee")
+        owned = AssetFactory(
+            name="Committee Lathe",
+            asset_tag="A-PDF-OWNED",
+            ownership_type=Asset.OwnershipType.GROUP,
+            owning_group=committee,
+        )
+        _closed_vendor_link(owned, allocated_cost=Decimal("99.00"), closed_days_ago=4)
+        AssetFactory(name="Space Router", asset_tag="A-PDF-SPACE")
+
+        response = client.get(
+            URL,
+            {"owning_group": str(committee.id), "period": "past_month", "format": "pdf"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response["Content-Type"] == "application/pdf"
+
+        from pypdf import PdfReader
+
+        text = "".join(
+            page.extract_text() or "" for page in PdfReader(io.BytesIO(response.content)).pages
+        )
+        assert "A-PDF-OWNED" in text
+        assert "A-PDF-SPACE" not in text
+        # The header summarizes the ownership scope for the landlord.
+        assert "CR PDF Committee" in text
+
+    def test_pdf_all_assets_header(self, authenticated_client):
+        client, _ = authenticated_client
+        AssetFactory(asset_tag="A-PDFALL")
+
+        response = client.get(URL, {"all_assets": "true", "period": "past_month", "format": "pdf"})
+        assert response.status_code == status.HTTP_200_OK
+
+        from pypdf import PdfReader
+
+        text = "".join(
+            page.extract_text() or "" for page in PdfReader(io.BytesIO(response.content)).pages
+        )
+        assert "All assets" in text
+        assert "A-PDFALL" in text
 
     def test_unknown_format_404s_in_negotiation(self, authenticated_client):
         """``format`` is DRF's reserved content-negotiation param; an

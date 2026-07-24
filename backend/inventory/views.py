@@ -1260,6 +1260,57 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         payload = compute_item_metrics(item)
         return Response(InventoryMetricsSerializer(payload).data)
 
+    @action(detail=True, methods=["get"], permission_classes=[IsAuthenticated])
+    def stock_history(self, request, pk=None):
+        """Time series + event markers powering the Stock-History chart (op-izy5).
+
+        Returns the item's weekly stock snapshots plus two event overlays and
+        the chart's reference lines:
+
+        * ``series`` — ``[{date, count}]`` from ``StockLevelSnapshot`` (the
+          weekly counts written by ``inventory.tasks.snapshot_stock_levels``),
+          chronological.
+        * ``reorder_events`` — ``[{date}]`` from ``ReorderRequest`` for this
+          item: when a reorder was raised.
+        * ``cycle_counts`` — ``[{date, count}]`` from ``StockReconciliation``
+          (``projected_count`` is the stock at reconciliation time). Carries the
+          count so the chart has real historical points immediately, before the
+          weekly snapshots accumulate.
+        * ``thresholds`` — ``{reorder_point, desired}`` where ``reorder_point``
+          is ``minimum_stock`` and ``desired`` is ``minimum_stock +
+          reorder_quantity``.
+        * ``current_stock`` — the item's live stock level.
+
+        Read-only; no migration beyond the snapshot model.
+        """
+        item = self.get_object()
+
+        series = [
+            {"date": snap.snapshot_date.isoformat(), "count": snap.count}
+            for snap in item.stock_snapshots.order_by("snapshot_date")
+        ]
+        reorder_events = [
+            {"date": req.requested_at.date().isoformat()}
+            for req in item.reorder_requests.order_by("requested_at")
+        ]
+        cycle_counts = [
+            {"date": rec.reconciled_at.date().isoformat(), "count": rec.projected_count}
+            for rec in item.reconciliations.order_by("reconciled_at")
+        ]
+
+        return Response(
+            {
+                "series": series,
+                "reorder_events": reorder_events,
+                "cycle_counts": cycle_counts,
+                "thresholds": {
+                    "reorder_point": item.minimum_stock,
+                    "desired": item.minimum_stock + item.reorder_quantity,
+                },
+                "current_stock": item.current_stock,
+            }
+        )
+
     def _resolve_location(self, value):
         if not value:
             return None

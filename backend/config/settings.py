@@ -699,6 +699,15 @@ CELERY_BEAT_SCHEDULE = {
         "task": "inventory.tasks.generate_demand_forecasts",
         "schedule": crontab(minute=0, hour=4),
     },
+    # Weekly, Monday 05:00 UTC — snapshot every tracked item's current_stock so
+    # the Inventory Stock-History chart has a real weekly time series (op-izy5).
+    # No historical backfill; idempotent per (item, week-start). Runs after the
+    # 04:00 nightly demand forecast so it reads a settled DB. See
+    # inventory.tasks.snapshot_stock_levels.
+    "inventory-stock-level-snapshot-weekly": {
+        "task": "inventory.tasks.snapshot_stock_levels",
+        "schedule": crontab(minute=0, hour=5, day_of_week=1),
+    },
 }
 
 # Backups (R-03). Output volume and retention window for the

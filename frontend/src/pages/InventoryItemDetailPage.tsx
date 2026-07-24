@@ -33,7 +33,7 @@ import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { useNotifications } from '../hooks/useNotifications';
 import { assetsAPI, CycleCountPayload, inventoryAPI, reorderAPI, sigAPI } from '../services/api';
-import { Asset, InventoryItem, InventoryItemMetrics, ReorderRequest, SIG, UsageLog } from '../types';
+import { Asset, InventoryItem, InventoryItemMetrics, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
 import { showError } from '../utils/dialogs';
 
 // Cycle-count reason options (op-c7y4). Mirrors the reconciliation grid's
@@ -326,6 +326,7 @@ const InventoryItemDetailPage: React.FC = () => {
   const [item, setItem] = useState<InventoryItem | null>(null);
   const [metrics, setMetrics] = useState<InventoryItemMetrics | null>(null);
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
+  const [stockHistory, setStockHistory] = useState<StockHistory | null>(null);
   const [reorderHistory, setReorderHistory] = useState<ReorderRequest[]>([]);
   const [linkedAssets, setLinkedAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -350,13 +351,15 @@ const InventoryItemDetailPage: React.FC = () => {
     // and show "Item not found" even though the item exists — uid0 hit
     // this on items with no linked-assets filter match where assetsAPI
     // returned a 400.
-    const [itemRes, metricsRes, usageLogsRes, reorderRes, assetsRes] = await Promise.allSettled([
-      inventoryAPI.getItem(id),
-      inventoryAPI.getItemMetrics(id),
-      inventoryAPI.getUsageLogs(id),
-      reorderAPI.listRequests({ status: undefined }),
-      assetsAPI.listAssets({ inventory_item: id }),
-    ]);
+    const [itemRes, metricsRes, usageLogsRes, stockHistoryRes, reorderRes, assetsRes] =
+      await Promise.allSettled([
+        inventoryAPI.getItem(id),
+        inventoryAPI.getItemMetrics(id),
+        inventoryAPI.getUsageLogs(id),
+        inventoryAPI.getStockHistory(id),
+        reorderAPI.listRequests({ status: undefined }),
+        assetsAPI.listAssets({ inventory_item: id }),
+      ]);
 
     if (itemRes.status === 'fulfilled') {
       setItem(itemRes.value.data);
@@ -374,6 +377,12 @@ const InventoryItemDetailPage: React.FC = () => {
       setUsageLogs(usageLogsRes.value.data.results || []);
     } else {
       console.error('Error loading usage logs:', usageLogsRes.reason);
+    }
+
+    if (stockHistoryRes.status === 'fulfilled' && stockHistoryRes.value) {
+      setStockHistory(stockHistoryRes.value.data);
+    } else if (stockHistoryRes.status === 'rejected') {
+      console.error('Error loading stock history:', stockHistoryRes.reason);
     }
 
     if (reorderRes.status === 'fulfilled') {
@@ -704,11 +713,7 @@ const InventoryItemDetailPage: React.FC = () => {
 
         {/* Stock History Tab */}
         <Tabs.Panel value="stock-history" pt="md">
-          <StockHistoryChart
-            usageLogs={usageLogs}
-            currentStock={item.current_stock}
-            minimumStock={item.minimum_stock}
-          />
+          <StockHistoryChart data={stockHistory} />
         </Tabs.Panel>
 
         {/* Reorder History Tab */}

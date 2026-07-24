@@ -862,6 +862,29 @@ export interface WorkOrderPhoto {
   uploaded_at: string;
 }
 
+/**
+ * A general file hung off a work order (op-7pjj / op-rjsv) — a receipt, a
+ * datasheet page, a nameplate photo. Distinct from `WorkOrderPhoto` (per-step
+ * or WO-level *evidence* images) and from the asset's document library: this is
+ * the internal WO's own catch-all attachments list, the same shape the purchase
+ * order and third-party work order carry. `file` is the multipart write field;
+ * `file_url` / `file_name` are what the list renders. Served from the top-level
+ * `inventory/work-order-attachments/?work_order=` route, not nested on the WO.
+ */
+export interface WorkOrderAttachment {
+  id: string;
+  work_order: string;
+  file: string;
+  file_url: string | null;
+  file_name: string | null;
+  kind: 'photo' | 'document' | 'other';
+  kind_display: string;
+  description: string;
+  uploaded_by: number | null;
+  uploaded_by_name: string | null;
+  uploaded_at: string;
+}
+
 export interface WorkOrderSubmissionPendingChange {
   kind: string;
   target_id: string | null;

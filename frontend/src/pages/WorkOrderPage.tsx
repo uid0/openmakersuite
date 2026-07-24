@@ -35,6 +35,7 @@ import {
   IconDownload,
   IconFileText,
   IconLock,
+  IconPaperclip,
   IconPhoto,
   IconPlayerPause,
   IconPlayerPlay,
@@ -56,6 +57,7 @@ import { inventoryAPI, maintenanceAPI, workOrderAPI } from '../services/api';
 import {
   WorkOrder,
   WorkOrderAdHocMaterialInput,
+  WorkOrderAttachment,
   WorkOrderMaterialUsage,
   WorkOrderStatus,
 } from '../types';
@@ -497,6 +499,20 @@ const WorkOrderPage: React.FC = () => {
   const [lotoNote, setLotoNote] = useState('');
   const [savingLotoNote, setSavingLotoNote] = useState(false);
   const resetPhotoRef = useRef<() => void>(null);
+  // op-rjsv: the WO's general attachments (op-7pjj backend). Fetched separately
+  // because the work-order payload deliberately carries no nested attachments
+  // field (would need a prefetch to dodge an N+1).
+  const [attachments, setAttachments] = useState<WorkOrderAttachment[]>([]);
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [attachmentDescription, setAttachmentDescription] = useState('');
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null);
+  const resetAttachmentRef = useRef<() => void>(null);
+  // Upload + delete are staff/SIG-admin only on the server
+  // (IsAuthenticatedOrStaffSigAdminWrite); any authenticated volunteer can still
+  // read the list. Mirror that gate so a volunteer never sees a control that
+  // would only 403.
+  const [isStaff, setIsStaff] = useState(false);
   // op-pzae: which reference document has its revision history expanded.
   const [openRevisions, setOpenRevisions] = useState<Record<string, boolean>>({});
   // op-m3so: in-flight timer calls (WO-level, and which step).
@@ -538,6 +554,30 @@ const WorkOrderPage: React.FC = () => {
   useEffect(() => {
     loadWorkOrder();
   }, [loadWorkOrder]);
+
+  // Staff/SIG-admin gate for the attachment controls (op-rjsv), read once from
+  // the same localStorage flags the rest of the app uses (see PurchaseOrderPage).
+  useEffect(() => {
+    setIsStaff(
+      localStorage.getItem('is_staff') === 'true' ||
+        localStorage.getItem('is_superuser') === 'true',
+    );
+  }, []);
+
+  const loadAttachments = useCallback(async () => {
+    if (!id) return;
+    try {
+      const res = await workOrderAPI.listAttachments(id);
+      setAttachments(res.data.results ?? []);
+    } catch {
+      // A failed attachments fetch must not blank the page — the work order
+      // itself still loaded. Leave the list as-is; a reload retries it.
+    }
+  }, [id]);
+
+  useEffect(() => {
+    loadAttachments();
+  }, [loadAttachments]);
 
   // op-768w: pull the PM template's per-unit estimates so the materials total
   // can say actual *against* estimate. One fetch per template; a corrective
@@ -1106,6 +1146,64 @@ const WorkOrderPage: React.FC = () => {
       });
     } finally {
       setUploadingStepPhoto(null);
+    }
+  };
+
+  // op-rjsv: general-attachment upload — a receipt, datasheet, or nameplate
+  // photo hung off the whole job (not per-step evidence). Multipart; the list
+  // reloads afterward so the new row shows without a full page refresh.
+  const handleUploadAttachment = async () => {
+    if (!workOrder || !attachmentFile) return;
+    setUploadingAttachment(true);
+    try {
+      await workOrderAPI.uploadAttachment(
+        workOrder.id,
+        attachmentFile,
+        attachmentDescription.trim() || undefined,
+      );
+      setAttachmentFile(null);
+      setAttachmentDescription('');
+      resetAttachmentRef.current?.();
+      await loadAttachments();
+      notifications.show({
+        title: 'Attachment uploaded',
+        message: 'File added to this work order.',
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch (err: unknown) {
+      notifications.show({
+        title: 'Error',
+        message: extractErrorMessage(err, 'Failed to upload attachment.'),
+        color: 'red',
+      });
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (attachment: WorkOrderAttachment) => {
+    if (!workOrder) return;
+    setDeletingAttachmentId(attachment.id);
+    try {
+      await workOrderAPI.deleteAttachment(workOrder.id, attachment.id);
+      await loadAttachments();
+      notifications.show({
+        title: 'Attachment removed',
+        message: `${
+          attachment.file_name || attachment.description || 'Attachment'
+        } removed from this work order.`,
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch (err: unknown) {
+      notifications.show({
+        title: 'Error',
+        message: extractErrorMessage(err, 'Failed to remove attachment.'),
+        color: 'red',
+      });
+    } finally {
+      setDeletingAttachmentId(null);
     }
   };
 
@@ -2215,6 +2313,139 @@ const WorkOrderPage: React.FC = () => {
               </Box>
             ))}
           </Group>
+        )}
+      </Card>
+
+      {/* op-rjsv: general attachments — the catch-all file list the internal
+          work order was missing (op-7pjj backend). A receipt, datasheet page, or
+          nameplate photo lives here; per-step evidence stays under its step and
+          the asset's controlled docs stay in the library below. Read is open to
+          every authenticated volunteer; upload + delete are staff/SIG-admin, so
+          the write controls are gated on `isStaff`. */}
+      <Card withBorder p="md" radius="md" mb="md">
+        <Group mb="sm" gap="xs">
+          <IconPaperclip size={18} />
+          <Title order={5}>Attachments</Title>
+          {attachments.length > 0 && (
+            <Badge color="gray" size="sm">
+              {attachments.length}
+            </Badge>
+          )}
+        </Group>
+
+        {attachments.length === 0 ? (
+          <Text size="sm" c="dimmed" ta="center" py="sm">
+            No attachments yet.
+            {isStaff ? ' Add a receipt, datasheet, or photo below.' : ''}
+          </Text>
+        ) : (
+          <Stack gap="sm">
+            {attachments.map((attachment) => (
+              <Group
+                key={attachment.id}
+                justify="space-between"
+                wrap="nowrap"
+                align="flex-start"
+              >
+                <Box style={{ flex: 1, minWidth: 0 }}>
+                  <Group gap="xs" wrap="wrap" align="center">
+                    {attachment.file_url ? (
+                      <Anchor
+                        href={attachment.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        size="sm"
+                        fw={500}
+                      >
+                        {attachment.file_name || 'Download'}
+                      </Anchor>
+                    ) : (
+                      <Text size="sm" fw={500}>
+                        {attachment.file_name || 'Attachment'}
+                      </Text>
+                    )}
+                    <Badge color="gray" variant="light" size="sm">
+                      {attachment.kind_display}
+                    </Badge>
+                  </Group>
+                  {attachment.description && (
+                    <Text size="sm" c="dimmed">
+                      {attachment.description}
+                    </Text>
+                  )}
+                  <Text size="xs" c="dimmed">
+                    {attachment.uploaded_by_name
+                      ? `Uploaded by ${attachment.uploaded_by_name}`
+                      : 'Uploaded'}{' '}
+                    on {formatDateOnly(attachment.uploaded_at)}
+                  </Text>
+                </Box>
+                {isStaff && (
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    aria-label={`Delete ${
+                      attachment.file_name || attachment.description || 'attachment'
+                    }`}
+                    loading={deletingAttachmentId === attachment.id}
+                    disabled={deletingAttachmentId !== null}
+                    onClick={() => handleDeleteAttachment(attachment)}
+                  >
+                    <IconTrash size={16} />
+                  </ActionIcon>
+                )}
+              </Group>
+            ))}
+          </Stack>
+        )}
+
+        {isStaff && (
+          <>
+            <Divider my="sm" />
+            <Stack gap="xs">
+              <Text size="sm" fw={500}>
+                Add attachment
+              </Text>
+              <Group gap="xs" align="center">
+                <FileButton resetRef={resetAttachmentRef} onChange={setAttachmentFile}>
+                  {(props) => (
+                    <Button
+                      {...props}
+                      size="sm"
+                      variant="light"
+                      leftSection={<IconPaperclip size={16} />}
+                    >
+                      {attachmentFile ? 'Change file' : 'Choose file'}
+                    </Button>
+                  )}
+                </FileButton>
+                {attachmentFile && (
+                  <Text size="xs" c="dimmed" truncate>
+                    {attachmentFile.name}
+                  </Text>
+                )}
+              </Group>
+              <TextInput
+                label="Description (optional)"
+                placeholder="e.g. Nameplate photo, supplier receipt"
+                value={attachmentDescription}
+                onChange={(e) => setAttachmentDescription(e.currentTarget.value)}
+                maxLength={500}
+                disabled={uploadingAttachment}
+              />
+              <Group justify="flex-end">
+                <Button
+                  size="sm"
+                  leftSection={<IconUpload size={16} />}
+                  onClick={handleUploadAttachment}
+                  loading={uploadingAttachment}
+                  disabled={!attachmentFile}
+                >
+                  Upload
+                </Button>
+              </Group>
+            </Stack>
+          </>
         )}
       </Card>
 

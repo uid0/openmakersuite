@@ -953,10 +953,15 @@ jobs:
 
   prod-stack-smoke:
     # oms-801 / AC-5: boot the prod docker-compose stack with a minimal env
-    # and verify the backend serves a request within 120 seconds. Production
-    # workers timed out at 120s without ever serving a request after the
+    # and verify the backend actually serves a request. Production workers
+    # timed out at 120s without ever serving a request after the
     # PR #303-#308 batch shipped; this gate would have caught that locally.
-    name: Prod Stack Smoke (livez within 120s)
+    #
+    # The livez budget deliberately is NOT part of the job name (op-dwyi).
+    # This string is a GitHub *check name* quoted verbatim by
+    # docs/PROFICIENCY_METRICS.md and deploy/BACKUP_RESTORE.md §8.1, so a
+    # number baked into it drifts those docs every time the budget is tuned.
+    name: Prod Stack Smoke (prod compose boot)
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.docker == 'true' || needs.changes.outputs.deploy == 'true'
@@ -1018,20 +1023,49 @@ jobs:
           mkdir -p scripts/emqx
           echo "admin:Strong1Password" > scripts/emqx/bootstrap-admins.txt
 
+      - name: Build backend image
+        run: |
+          # Build once, up front, so the migrate step below and the `up -d`
+          # after it both reuse the same oms-backend:local image instead of
+          # racing an implicit build.
+          docker compose -f docker-compose.prod.yml --env-file .env \
+              build backend
+
+      - name: Run migrations (off the livez critical path)
+        run: |
+          # op-dwyi: this job boots against a *fresh* database, and the prod
+          # entrypoint migrates before it execs gunicorn. That put "apply the
+          # entire migration set" and "boot gunicorn" on one timer, so the
+          # livez wait below was really measuring migration count — a budget
+          # every new migration ate into, which flaked on unrelated PRs (#957)
+          # and had already been bumped 60s -> 120s once (op-mfhh / #948).
+          #
+          # Migrate here instead, in a one-shot container against the same
+          # `db` service (compose honours depends_on, so it waits for the db
+          # healthcheck first). The long-running backend container's own
+          # entrypoint migrate is then a fast idempotent no-op and the livez
+          # step measures only gunicorn coming up — independent of how many
+          # migrations the repo has. Same shape as the backend-tests job,
+          # which has always had `Run migrations` as its own step before its
+          # livez wait.
+          docker compose -f docker-compose.prod.yml --env-file .env \
+              run --rm backend python manage.py migrate --no-input
+
       - name: Boot backend stack (db + redis + emqx + backend)
         run: |
           # frontend/nginx are skipped — we only need the API path to verify
           # gunicorn workers boot and serve livez.
           docker compose -f docker-compose.prod.yml --env-file .env \
-              up -d --build db redis emqx backend
+              up -d db redis emqx backend
 
-      - name: Wait for backend to serve /api/health/livez/ within 120s
+      - name: Wait for backend to serve /api/health/livez/
         run: |
-          # 120s, not 60s: this job boots against a *fresh* database, so the
-          # backend runs the entire migration set (~55-59s and growing with
-          # every new migration) before gunicorn serves livez. The old 60s
-          # budget was being grazed and flaked on most PRs.
-          deadline=$(( $(date +%s) + 120 ))
+          # This budget covers gunicorn boot only — the DB was migrated in its
+          # own step above, so it does not grow with the migration count. Keep
+          # it tight (same 60s the backend-tests livez wait uses); if it starts
+          # flaking, the cause is a real boot regression, not migration drift.
+          budget=60
+          deadline=$(( $(date +%s) + budget ))
           backend_id=$(docker compose -f docker-compose.prod.yml ps -q backend)
           while [ "$(date +%s)" -lt "$deadline" ]; do
             # Hit livez from inside the backend container so we don't depend
@@ -1039,12 +1073,14 @@ jobs:
             if docker exec "$backend_id" python -c \
                 "import urllib.request; r=urllib.request.urlopen('http://localhost:8000/api/health/livez/', timeout=5); import sys; sys.exit(0 if r.status==200 else 1)" \
                 2>/dev/null; then
-              echo "✅ /api/health/livez/ returned 200 within $(( 120 - (deadline - $(date +%s)) ))s"
+              echo "✅ /api/health/livez/ returned 200 within $(( budget - (deadline - $(date +%s)) ))s"
               exit 0
             fi
             sleep 2
           done
-          echo "❌ backend did not serve /api/health/livez/ within 120s"
+          echo "❌ backend did not serve /api/health/livez/ within ${budget}s"
+          # The job-level "Show backend logs on failure" step below dumps
+          # backend/db/redis/emqx logs, so no need to repeat them here.
           exit 1
 
       - name: AC-25 media restore drill (seed → backup → wipe → restore → verify)

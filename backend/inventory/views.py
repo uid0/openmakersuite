@@ -62,6 +62,7 @@ from .models import (
     Supplier,
     UsageLog,
     WorkOrder,
+    WorkOrderAttachment,
     WorkOrderLotoCompletion,
     WorkOrderMaterialUsage,
     WorkOrderSubmission,
@@ -104,6 +105,7 @@ from .serializers import (
     SupplierSerializer,
     UsageLogSerializer,
     WorkOrderAdHocMaterialSerializer,
+    WorkOrderAttachmentSerializer,
     WorkOrderListSerializer,
     WorkOrderLotoCompletionSerializer,
     WorkOrderMaterialUsageSerializer,
@@ -5466,6 +5468,52 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
         usage.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkOrderAttachmentViewSet(viewsets.ModelViewSet):
+    """API endpoint for the standard work order's attachments list (op-7pjj).
+
+    The internal-WO counterpart of
+    ``ThirdPartyWorkOrderAttachmentViewSet`` / the purchase-order attachments
+    list: upload, list, and delete arbitrary files hung off one work order.
+    Multipart upload; ``uploaded_by`` is stamped server-side.
+
+    Permissions deliberately follow the *parent* ``WorkOrderViewSet``
+    (``IsAuthenticatedOrStaffSigAdminWrite``) rather than the third-party
+    viewset's read-gated ``IsStaffOrSigAdmin``: standard PM work orders are
+    visible to every authenticated volunteer (gh #374), so hiding their
+    attachments would leave a maker looking at a work order whose paperwork
+    they could not open. Writes and deletes stay staff / Logistics / SIG-admin
+    only, matching every other mutation on the work order itself.
+    """
+
+    queryset = WorkOrderAttachment.objects.select_related("work_order", "uploaded_by").all()
+    serializer_class = WorkOrderAttachmentSerializer
+    permission_classes = [IsAuthenticatedOrStaffSigAdminWrite]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_queryset(self):
+        """Honor ``?work_order=`` and ``?kind=``.
+
+        Filtered here rather than via ``filterset_fields`` because
+        django-filter is not a dependency of this project — same as
+        ``AssetDocumentViewSet`` and ``AssetProblemViewSet``.
+        """
+        qs = super().get_queryset()
+        work_order = self.request.query_params.get("work_order")
+        if work_order:
+            qs = qs.filter(work_order_id=work_order)
+        kind = self.request.query_params.get("kind")
+        if kind:
+            qs = qs.filter(kind=kind)
+        return qs
+
+    def perform_create(self, serializer):
+        """Stamp the uploader — the serializer keeps the field read-only."""
+        if self.request.user and self.request.user.is_authenticated:
+            serializer.save(uploaded_by=self.request.user)
+        else:
+            serializer.save()
 
 
 class MaintenanceItemViewSet(viewsets.ModelViewSet):

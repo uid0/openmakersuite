@@ -1079,6 +1079,69 @@ class WorkOrderPhoto(models.Model):
         return f"Photo for WO {self.work_order.short_id} ({self.uploaded_at.date()})"
 
 
+class WorkOrderAttachment(models.Model):
+    """
+    An arbitrary file attached to a standard (internal) work order.
+
+    The generic attachments list the internal work order was missing: before
+    this, a WO could only carry per-step evidence photos
+    (:class:`WorkOrderPhoto`) and a scanned copy of its own paper form
+    (:class:`WorkOrderSubmission`). Anything else a tech wanted to keep with
+    the job — a supplier receipt, a datasheet page, a torque spec, a photo of
+    the nameplate — had nowhere to live.
+
+    Deliberately the same shape as the sibling lists on the other two order
+    types, :class:`~maintenance_orders.models.ThirdPartyWorkOrderAttachment`
+    and :class:`~reorder_queue.models.PurchaseOrderAttachment`, so the ScanTTY
+    and web attachment screens can be written once. ``kind`` is the internal
+    subset of the third-party choices: an internal WO has no invoice, FSR, or
+    vendor quote.
+    """
+
+    class Kind(models.TextChoices):
+        PHOTO = "photo", "Photo"
+        DOCUMENT = "document", "Document"
+        OTHER = "other", "Other"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_order = models.ForeignKey(
+        "WorkOrder",
+        on_delete=models.CASCADE,
+        related_name="attachments",
+        help_text="The work order this attachment belongs to",
+    )
+    file = models.FileField(
+        upload_to="work_orders/attachments/%Y/%m/",
+        help_text="Attached file — photo, document, receipt, or anything else",
+    )
+    kind = models.CharField(
+        max_length=32,
+        choices=Kind.choices,
+        default=Kind.OTHER,
+        help_text="Rough category, so the attachments list can be grouped",
+    )
+    description = models.CharField(max_length=500, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_work_order_attachments",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+        indexes = [
+            models.Index(fields=["work_order", "kind"], name="woa_wo_kind_idx"),
+            models.Index(fields=["-uploaded_at"], name="woa_uploaded_idx"),
+        ]
+
+    def __str__(self) -> str:
+        label = self.description or self.file.name
+        return f"{self.get_kind_display()} for WO {self.work_order.short_id}: {label}"
+
+
 class WorkOrderValidation(models.Model):
     """
     Audit record of a pre-finalization validation prompt acknowledgement.

@@ -242,6 +242,35 @@ export interface UsageLog {
   notes: string;
 }
 
+// Stock-history DTO (op-2dqu) — payload of GET /inventory/items/{id}/stock_history/.
+// `series` are weekly StockLevelSnapshot points; `cycle_counts` are real
+// StockReconciliation counts (date + count). Both feed the stock line so the
+// chart is populated before weekly snapshots accumulate. `reorder_events` are
+// ReorderRequest dates (no count). `thresholds.reorder_point` = minimum_stock,
+// `thresholds.desired` = minimum_stock + reorder_quantity. All dates are ISO
+// YYYY-MM-DD strings; counts are integers.
+export interface StockHistoryPoint {
+  date: string;
+  count: number;
+}
+
+export interface StockHistoryEvent {
+  date: string;
+}
+
+export interface StockHistoryThresholds {
+  reorder_point: number;
+  desired: number;
+}
+
+export interface StockHistory {
+  series: StockHistoryPoint[];
+  reorder_events: StockHistoryEvent[];
+  cycle_counts: StockHistoryPoint[];
+  thresholds: StockHistoryThresholds;
+  current_stock: number;
+}
+
 // Log-usage / consume payload (op-27wa). `charged_group` is a SIG/Group id;
 // when set the backend posts a committee charge on the ledger (Bead 1, #920).
 export interface LogUsageRequest {

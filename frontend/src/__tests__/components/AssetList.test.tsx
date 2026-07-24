@@ -454,4 +454,132 @@ describe('AssetList', () => {
     const calls = (mockAssetsAPI.listAssets as jest.Mock).mock.calls;
     expect(calls.some((c) => c[0]?.page === 2)).toBe(true);
   });
+
+  // Bulk cost-recovery flag by category (op-9ho2, W3). Staff-only: the flag
+  // decides which in-house repair cost gets billed to the landlord.
+  describe('bulk cost-recovery by category', () => {
+    const mockCategories = [
+      { id: 7, name: 'HVAC', slug: 'hvac', description: '', parent: null },
+      { id: 8, name: 'Woodshop', slug: 'woodshop', description: '', parent: null },
+    ];
+
+    // env="test" so the Select dropdown is reachable in jsdom.
+    const renderStaff = () =>
+      render(
+        <MantineProvider env="test">
+          <MemoryRouter>
+            <AssetList />
+          </MemoryRouter>
+        </MantineProvider>
+      );
+
+    beforeEach(() => {
+      mockInventoryAPI.listCategories.mockResolvedValue({
+        data: { results: mockCategories },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+      mockAssetsAPI.setCostRecoverableByCategory.mockResolvedValue({
+        data: {
+          category_id: 7,
+          category_slug: 'hvac',
+          category_name: 'HVAC',
+          is_cost_recoverable: true,
+          matched: 4,
+          updated: 3,
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+    });
+
+    const pickHvac = async () => {
+      const select = await screen.findByTestId('bulk-cost-recoverable-category');
+      await userEvent.click(select);
+      await userEvent.click(await screen.findByRole('option', { name: 'HVAC' }));
+    };
+
+    it('is hidden from non-staff', async () => {
+      renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Asset 1')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('bulk-cost-recoverable')).not.toBeInTheDocument();
+    });
+
+    it('flags a whole category and reports how many changed', async () => {
+      localStorage.setItem('is_staff', 'true');
+      renderStaff();
+
+      await pickHvac();
+      await userEvent.click(screen.getByTestId('bulk-cost-recoverable-set'));
+
+      await waitFor(() => {
+        expect(mockAssetsAPI.setCostRecoverableByCategory).toHaveBeenCalledWith(7, true);
+      });
+      expect(await screen.findByTestId('bulk-cost-recoverable-result')).toHaveTextContent(
+        'Flagged 3 of 4 assets in HVAC.'
+      );
+    });
+
+    it('clears the flag for a category', async () => {
+      localStorage.setItem('is_superuser', 'true');
+      mockAssetsAPI.setCostRecoverableByCategory.mockResolvedValue({
+        data: {
+          category_id: 7,
+          category_slug: 'hvac',
+          category_name: 'HVAC',
+          is_cost_recoverable: false,
+          matched: 4,
+          updated: 4,
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+      renderStaff();
+
+      await pickHvac();
+      await userEvent.click(screen.getByTestId('bulk-cost-recoverable-clear'));
+
+      await waitFor(() => {
+        expect(mockAssetsAPI.setCostRecoverableByCategory).toHaveBeenCalledWith(7, false);
+      });
+      expect(await screen.findByTestId('bulk-cost-recoverable-result')).toHaveTextContent(
+        'Cleared 4 of 4 assets in HVAC.'
+      );
+    });
+
+    it('keeps the buttons disabled until a category is picked', async () => {
+      localStorage.setItem('is_staff', 'true');
+      renderStaff();
+
+      expect(await screen.findByTestId('bulk-cost-recoverable-set')).toBeDisabled();
+      expect(screen.getByTestId('bulk-cost-recoverable-clear')).toBeDisabled();
+
+      await pickHvac();
+
+      await waitFor(() =>
+        expect(screen.getByTestId('bulk-cost-recoverable-set')).not.toBeDisabled()
+      );
+    });
+
+    it('surfaces a failure instead of claiming success', async () => {
+      localStorage.setItem('is_staff', 'true');
+      mockAssetsAPI.setCostRecoverableByCategory.mockRejectedValue(new Error('boom'));
+      renderStaff();
+
+      await pickHvac();
+      await userEvent.click(screen.getByTestId('bulk-cost-recoverable-set'));
+
+      expect(await screen.findByTestId('bulk-cost-recoverable-error')).toBeInTheDocument();
+      expect(screen.queryByTestId('bulk-cost-recoverable-result')).not.toBeInTheDocument();
+    });
+  });
 });

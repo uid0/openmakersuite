@@ -327,6 +327,9 @@ export interface Asset {
   is_donation: boolean;
   donor_name: string;
   acquisition_display: string;
+  // Landlord cost recovery: when set, in-house repair cost on this asset flows
+  // into the recoverable (Actual) column of the cost-recovery statement.
+  is_cost_recoverable: boolean;
   category: number | null;
   category_name: string;
   location: number | null;
@@ -1431,6 +1434,12 @@ export interface AssetCostRecoveryService {
   // Internal PM carries an estimate but no actual; vendor/manual carry the
   // actual (recoverable) but no estimate — hence each may be null.
   estimated_cost: string | null;
+  // What in-house work really cost (captured material actuals, else the
+  // estimate). Informational on every asset — it only reaches the recoverable
+  // column when the asset is flagged is_cost_recoverable. Null on vendor/manual
+  // rows, which are not in-house work. Optional so a response from before B5
+  // still type-checks.
+  internal_cost?: string | null;
   actual_cost: string | null;
 }
 
@@ -1443,8 +1452,11 @@ export interface AssetCostRecoveryAsset {
   status: string;
   status_display: string;
   category: string | null;
+  // Whether in-house cost on this asset is billable to the landlord (B5).
+  is_cost_recoverable?: boolean;
   services: AssetCostRecoveryService[];
   subtotal_estimated: string;
+  subtotal_internal?: string; // in-house spend, recoverable only when flagged
   subtotal_actual: string; // recoverable amount for this asset
 }
 
@@ -1463,6 +1475,7 @@ export interface AssetCostRecoveryReport {
   asset_count: number;
   service_count: number;
   grand_total_estimated: string;
+  grand_total_internal?: string; // total in-house spend across the selection
   grand_total_actual: string; // recoverable total billed to the landlord
   assets: AssetCostRecoveryAsset[];
 }

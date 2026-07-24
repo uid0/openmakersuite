@@ -3,15 +3,16 @@
  *
  * Pick assets and/or asset categories — or switch on "All assets" and/or an
  * ownership scope (Space / a Committee) — plus a reporting period, then
- * Generate a per-asset service statement with Estimated (internal) and Actual
- * (vendor-invoice / recorded) columns. The Actual total is the amount
- * recoverable from the landlord. CSV and the landlord-ready PDF are produced
- * server-side and downloaded as blobs.
+ * Generate a per-asset service statement with Estimated, In-house cost and
+ * Actual (recoverable) columns. The Actual total is the amount recoverable from
+ * the landlord; in-house cost only reaches it on an asset flagged
+ * `is_cost_recoverable` (B5), so the flag is surfaced per asset. CSV and the
+ * landlord-ready PDF are produced server-side and downloaded as blobs.
  *
  * Consumes reports/assets/cost_recovery/ (PR1, backend) — see
  * inventory/views.py AssetReportViewSet.cost_recovery.
  */
-import { Alert, Button, Group, Loader, MultiSelect, Paper, SegmentedControl, Select, Stack, Switch, Table, Text, Title } from '@mantine/core';
+import { Alert, Badge, Button, Group, Loader, MultiSelect, Paper, SegmentedControl, Select, Stack, Switch, Table, Text, Title } from '@mantine/core';
 import { DatePickerInput, DatesRangeValue } from '@mantine/dates';
 import { IconAlertTriangle, IconDownload } from '@tabler/icons-react';
 import dayjs from 'dayjs';
@@ -236,9 +237,11 @@ const AssetCostRecoveryPage: React.FC = () => {
       <Text size="sm" c="dimmed">
         Build a per-asset service statement billed to the landlord. Scope it to
         specific assets or categories, to every asset, or to an ownership group
-        (Space-owned, or one committee&apos;s assets). The Actual (vendor-invoice /
-        recorded) total is the recoverable amount; estimates for internal
-        preventive maintenance are shown as context only.
+        (Space-owned, or one committee&apos;s assets). The Actual column is the
+        recoverable amount: vendor invoices and recorded actuals on every asset,
+        plus in-house repair cost <strong>only on assets flagged
+        cost-recoverable</strong>. In-house cost is shown for every asset as
+        context — on an unflagged asset it stays internal and is never billed.
       </Text>
 
       <Paper withBorder p="md">
@@ -377,8 +380,10 @@ const AssetCostRecoveryPage: React.FC = () => {
                 <Text fw={700} size="lg">
                   Grand total recoverable: ${formatMoney(report.grand_total_actual)}
                 </Text>
-                <Text size="sm" c="dimmed">
-                  Estimated (internal, non-recoverable) context: $
+                <Text size="sm" c="dimmed" data-testid="cost-recovery-grand-internal">
+                  In-house cost across the selection: $
+                  {formatMoney(report.grand_total_internal ?? '0')} — billable only on
+                  assets flagged cost-recoverable. Estimated context: $
                   {formatMoney(report.grand_total_estimated)}
                 </Text>
               </div>
@@ -394,10 +399,22 @@ const AssetCostRecoveryPage: React.FC = () => {
             <Paper key={asset.asset_id} withBorder p="md">
               <Group justify="space-between" mb="xs" wrap="wrap">
                 <div>
-                  <Text fw={600}>
-                    {asset.name}
-                    {asset.asset_tag ? ` — ${asset.asset_tag}` : ''}
-                  </Text>
+                  <Group gap="xs">
+                    <Text fw={600}>
+                      {asset.name}
+                      {asset.asset_tag ? ` — ${asset.asset_tag}` : ''}
+                    </Text>
+                    {/* Whether in-house work on this asset is billable at all. */}
+                    <Badge
+                      color={asset.is_cost_recoverable ? 'green' : 'gray'}
+                      variant="light"
+                      data-testid={`cost-recoverable-badge-${asset.asset_id}`}
+                    >
+                      {asset.is_cost_recoverable
+                        ? 'Cost-recoverable'
+                        : 'In-house cost not billable'}
+                    </Badge>
+                  </Group>
                   <Text size="sm" c="dimmed">
                     Serial: {asset.serial_number || '—'} · Installed:{' '}
                     {asset.date_received ? dayjs(asset.date_received).format('YYYY-MM-DD') : '—'} ·
@@ -405,7 +422,13 @@ const AssetCostRecoveryPage: React.FC = () => {
                     {asset.category ? ` · ${asset.category}` : ''}
                   </Text>
                 </div>
-                <Text fw={600}>Recoverable: ${formatMoney(asset.subtotal_actual)}</Text>
+                <div style={{ textAlign: 'right' }}>
+                  <Text fw={600}>Recoverable: ${formatMoney(asset.subtotal_actual)}</Text>
+                  <Text size="sm" c="dimmed">
+                    In-house cost: ${formatMoney(asset.subtotal_internal ?? '0')}
+                    {asset.is_cost_recoverable ? '' : ' (internal only)'}
+                  </Text>
+                </div>
               </Group>
               <Table.ScrollContainer minWidth={640}>
                 <Table highlightOnHover>
@@ -415,13 +438,14 @@ const AssetCostRecoveryPage: React.FC = () => {
                       <Table.Th>Source</Table.Th>
                       <Table.Th>Description</Table.Th>
                       <Table.Th ta="right">Estimated</Table.Th>
-                      <Table.Th ta="right">Actual (vendor)</Table.Th>
+                      <Table.Th ta="right">In-house cost</Table.Th>
+                      <Table.Th ta="right">Actual (recoverable)</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
                     {asset.services.length === 0 ? (
                       <Table.Tr>
-                        <Table.Td colSpan={5} ta="center">
+                        <Table.Td colSpan={6} ta="center">
                           <Text c="dimmed">No services in this period</Text>
                         </Table.Td>
                       </Table.Tr>
@@ -433,6 +457,9 @@ const AssetCostRecoveryPage: React.FC = () => {
                           <Table.Td>{svc.description || '—'}</Table.Td>
                           <Table.Td ta="right">
                             {svc.estimated_cost != null ? `$${formatMoney(svc.estimated_cost)}` : '—'}
+                          </Table.Td>
+                          <Table.Td ta="right">
+                            {svc.internal_cost != null ? `$${formatMoney(svc.internal_cost)}` : '—'}
                           </Table.Td>
                           <Table.Td ta="right">
                             {svc.actual_cost != null ? `$${formatMoney(svc.actual_cost)}` : '—'}
@@ -447,6 +474,9 @@ const AssetCostRecoveryPage: React.FC = () => {
                         Subtotal
                       </Table.Th>
                       <Table.Th ta="right">${formatMoney(asset.subtotal_estimated)}</Table.Th>
+                      <Table.Th ta="right">
+                        ${formatMoney(asset.subtotal_internal ?? '0')}
+                      </Table.Th>
                       <Table.Th ta="right">${formatMoney(asset.subtotal_actual)}</Table.Th>
                     </Table.Tr>
                   </Table.Tfoot>

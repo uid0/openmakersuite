@@ -2020,6 +2020,78 @@ class AssetViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+    @action(detail=False, methods=["post"], permission_classes=[IsAdminUser])
+    def set_cost_recoverable_by_category(self, request):
+        """Bulk-set ``is_cost_recoverable`` on every asset in one category.
+
+        The REST twin of the ``mark_cost_recoverable`` / ``unmark_cost_recoverable``
+        admin actions (``inventory/admin.py``): flagging the landlord-billable
+        assets one PATCH at a time is unusable for a whole category (all the
+        HVAC equipment, say), so this does it in a single ``UPDATE``.
+
+        Body:
+        * ``category`` — Category PK (int) **or** slug. Required.
+        * ``is_cost_recoverable`` — bool, default ``True``. ``False`` is the undo.
+
+        Matching mirrors the cost-recovery statement's own category expansion
+        (``category_id__in``): exact category, child categories are not pulled
+        in. Only rows that actually change are written, so ``updated`` is the
+        count of assets whose flag flipped — never the size of the category.
+        """
+        raw_category = request.data.get("category")
+        if raw_category is None or (isinstance(raw_category, str) and not raw_category.strip()):
+            return Response(
+                {"detail": "category is required (Category id or slug)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_value = request.data.get("is_cost_recoverable", True)
+        if isinstance(raw_value, str):
+            normalized = raw_value.strip().lower()
+            if normalized in {"true", "1"}:
+                value = True
+            elif normalized in {"false", "0"}:
+                value = False
+            else:
+                return Response(
+                    {"detail": "is_cost_recoverable must be a boolean."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        elif isinstance(raw_value, bool):
+            value = raw_value
+        else:
+            return Response(
+                {"detail": "is_cost_recoverable must be a boolean."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        lookup = str(raw_category).strip()
+        category = Category.objects.filter(slug=lookup).first()
+        if category is None and lookup.isdigit():
+            category = Category.objects.filter(pk=int(lookup)).first()
+        if category is None:
+            return error_response(
+                ErrorCode.NOT_FOUND,
+                f"Category not found: {lookup!r}.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ``exclude`` the already-correct rows so the count reports real changes
+        # (same semantics as the admin action's ``filter(is_cost_recoverable=…)``).
+        matched = Asset.objects.filter(category_id=category.pk)
+        updated = matched.exclude(is_cost_recoverable=value).update(is_cost_recoverable=value)
+
+        return Response(
+            {
+                "category_id": category.pk,
+                "category_slug": category.slug,
+                "category_name": category.name,
+                "is_cost_recoverable": value,
+                "matched": matched.count(),
+                "updated": updated,
+            }
+        )
+
     @action(detail=True, methods=["post"], permission_classes=[AllowAny])
     def scan(self, request, pk=None):
         """

@@ -1057,6 +1057,119 @@ describe('AssetDetailPage', () => {
     });
   });
 
+  // Landlord cost-recovery flag (op-9ho2, W3). Staff toggle it; everyone else
+  // only sees it when it is on, since it explains the statement's numbers.
+  describe('cost-recoverable toggle (op-9ho2)', () => {
+    const renderDetail = () =>
+      render(
+        <MantineProvider>
+          <MemoryRouter>
+            <AssetDetailPage />
+          </MemoryRouter>
+        </MantineProvider>,
+      );
+
+    /** Serve the asset with the flag in a given state. */
+    const serveAsset = (isCostRecoverable: boolean) => {
+      mockAssetsAPI.getAsset.mockResolvedValue({
+        data: { ...mockAsset, is_cost_recoverable: isCostRecoverable },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+    };
+
+    afterEach(() => {
+      localStorage.removeItem('is_staff');
+      localStorage.removeItem('is_superuser');
+    });
+
+    it('shows staff the toggle and persists a flip', async () => {
+      localStorage.setItem('is_staff', 'true');
+      serveAsset(false);
+      mockAssetsAPI.updateAsset.mockResolvedValue({
+        data: { ...mockAsset, is_cost_recoverable: true },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+
+      renderDetail();
+
+      const toggle = await screen.findByTestId('cost-recoverable-toggle');
+      expect(toggle).not.toBeChecked();
+
+      fireEvent.click(toggle);
+
+      await waitFor(() => {
+        expect(mockAssetsAPI.updateAsset).toHaveBeenCalledWith('test-id', {
+          is_cost_recoverable: true,
+        });
+      });
+      await waitFor(() => expect(screen.getByTestId('cost-recoverable-toggle')).toBeChecked());
+    });
+
+    it('clears the flag on a flagged asset', async () => {
+      localStorage.setItem('is_superuser', 'true');
+      serveAsset(true);
+      mockAssetsAPI.updateAsset.mockResolvedValue({
+        data: { ...mockAsset, is_cost_recoverable: false },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      });
+
+      renderDetail();
+
+      const toggle = await screen.findByTestId('cost-recoverable-toggle');
+      expect(toggle).toBeChecked();
+
+      fireEvent.click(toggle);
+
+      await waitFor(() => {
+        expect(mockAssetsAPI.updateAsset).toHaveBeenCalledWith('test-id', {
+          is_cost_recoverable: false,
+        });
+      });
+    });
+
+    it('reverts the switch when the save fails', async () => {
+      localStorage.setItem('is_staff', 'true');
+      serveAsset(false);
+      mockAssetsAPI.updateAsset.mockRejectedValue(networkError());
+
+      renderDetail();
+
+      const toggle = await screen.findByTestId('cost-recoverable-toggle');
+      fireEvent.click(toggle);
+
+      await waitFor(() => expect(mockAssetsAPI.updateAsset).toHaveBeenCalled());
+      await waitFor(() =>
+        expect(screen.getByTestId('cost-recoverable-toggle')).not.toBeChecked(),
+      );
+    });
+
+    it('gives non-staff a read-only row, and nothing at all when unflagged', async () => {
+      serveAsset(true);
+      const { unmount } = renderDetail();
+
+      expect(await screen.findByTestId('cost-recoverable-row')).toHaveTextContent(
+        /yes \(landlord-billable\)/i,
+      );
+      expect(screen.queryByTestId('cost-recoverable-toggle')).not.toBeInTheDocument();
+      unmount();
+
+      serveAsset(false);
+      renderDetail();
+
+      await screen.findByText('Test Asset');
+      expect(screen.queryByTestId('cost-recoverable-row')).not.toBeInTheDocument();
+    });
+  });
+
   describe('promote problem to work order (op-ybpn)', () => {
     const renderDetail = () =>
       render(

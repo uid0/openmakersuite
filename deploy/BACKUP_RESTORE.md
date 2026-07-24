@@ -476,7 +476,7 @@ A backup that has never been restored is a hypothesis, not a backup.
 ### 8.1 Automated DB drill (CI-enforced)
 
 The Docker Compose half of the drill runs on every deploy-touching PR via
-the `Prod Stack Smoke (livez within 120s)` job in `.github/workflows/ci.yml`.
+the `Prod Stack Smoke (prod compose boot)` job in `.github/workflows/ci.yml`.
 After the stack boots and `/api/health/livez/` answers 200, the job
 invokes [`scripts/restore-drill.sh --skip-media --skip-smoke`](../scripts/restore-drill.sh),
 which takes a fresh `pg_dump` of the live `db` service, restores it

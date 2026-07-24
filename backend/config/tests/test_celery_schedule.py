@@ -69,6 +69,10 @@ EXPECTED_BEAT_SCHEDULE = {
         "inventory.tasks.generate_demand_forecasts",
         crontab(minute=0, hour=4),  # 04:00 UTC daily — ML demand forecast (op-2)
     ),
+    "inventory-stock-level-snapshot-weekly": (
+        "inventory.tasks.snapshot_stock_levels",
+        crontab(minute=0, hour=5, day_of_week=1),  # Mon 05:00 UTC — weekly stock snapshot (op-izy5)
+    ),
 }
 
 

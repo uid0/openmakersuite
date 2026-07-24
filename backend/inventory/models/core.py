@@ -1343,6 +1343,50 @@ class StockReconciliation(models.Model):
         )
 
 
+class StockLevelSnapshot(models.Model):
+    """A weekly point-in-time snapshot of an item's ``current_stock``.
+
+    Written by the ``inventory.tasks.snapshot_stock_levels`` beat task (weekly,
+    no backfill) so the Inventory Stock-History chart has a real time series to
+    plot even for items whose usage is never scanned. One row per
+    ``(item, snapshot_date)``; the task ``update_or_create``s on that pair so a
+    re-run within the same week is idempotent (it refreshes the count rather
+    than appending a duplicate point).
+
+    Behaviour-free storage — read by the ``stock_history`` action on
+    :class:`inventory.views.InventoryItemViewSet`.
+    """
+
+    item = models.ForeignKey(
+        "InventoryItem",
+        on_delete=models.CASCADE,
+        related_name="stock_snapshots",
+    )
+    count = models.PositiveIntegerField(
+        help_text="The item's current_stock at the moment the snapshot was taken.",
+    )
+    snapshot_date = models.DateField(
+        db_index=True,
+        help_text="Week the snapshot represents (the run's week-start date).",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["snapshot_date"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "snapshot_date"],
+                name="uniq_stock_snapshot_per_item_week",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["item", "snapshot_date"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.item_id} @ {self.snapshot_date}: {self.count}"
+
+
 class SerializedComponent(models.Model):
     """
     An individual, serial-numbered physical unit of a serialized InventoryItem.

@@ -1536,6 +1536,34 @@ export const workOrderAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
 
+  // op-rjsv: the internal WO's general attachments list (op-7pjj backend). The
+  // route is top-level and filtered by `?work_order=`, not nested on the work
+  // order, so `work_order` rides in the query on list and in the multipart body
+  // on upload. Paginated like every inventory list (PAGE_SIZE 50) — a work
+  // order never carries anywhere near a page of files.
+  listAttachments: (workOrderId: string) =>
+    api.get<{ count: number; next: string | null; previous: string | null; results: WorkOrderAttachment[] }>(
+      '/inventory/work-order-attachments/',
+      { params: { work_order: workOrderId } },
+    ),
+
+  uploadAttachment: (workOrderId: string, file: File, description?: string) => {
+    const formData = new FormData();
+    formData.append('work_order', workOrderId);
+    formData.append('file', file);
+    if (description) {
+      formData.append('description', description);
+    }
+    return api.post<WorkOrderAttachment>('/inventory/work-order-attachments/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  // `workOrderId` is unused in the URL (the detail route is keyed only by the
+  // attachment id) but kept for call-site symmetry with list/upload.
+  deleteAttachment: (workOrderId: string, attachmentId: string) =>
+    api.delete(`/inventory/work-order-attachments/${attachmentId}/`),
+
   uploadPdf: (file: File) => {
     const formData = new FormData();
     formData.append('pdf', file);

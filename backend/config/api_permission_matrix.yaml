@@ -1438,6 +1438,9 @@ views:
       scan:
         permission_classes:
         - AllowAny
+      stock_history:
+        permission_classes:
+        - IsAuthenticated
       unretire:
         permission_classes:
         - IsAuthenticatedOrReadOnly

@@ -259,6 +259,50 @@ def generate_demand_forecasts():
     )
 
 
+@shared_task
+def snapshot_stock_levels():
+    """Beat task (weekly): snapshot every tracked item's ``current_stock``.
+
+    For every active, non-retired :class:`~inventory.models.InventoryItem` this
+    writes **one** :class:`~inventory.models.StockLevelSnapshot` per calendar
+    week, keyed on the week-start (Monday) date. Using the week anchor makes the
+    run idempotent: a re-run within the same week ``update_or_create``s the
+    existing row (refreshing the count) instead of appending a duplicate point.
+    There is no historical backfill — the series starts accumulating from the
+    first run.
+
+    Read by the ``stock_history`` action on
+    :class:`inventory.views.InventoryItemViewSet`, which powers the Inventory
+    Stock-History chart.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    InventoryItem = apps.get_model("inventory", "InventoryItem")
+    StockLevelSnapshot = apps.get_model("inventory", "StockLevelSnapshot")
+
+    today = timezone.now().date()
+    # Anchor to the Monday of the current week so the weekly cadence is stable
+    # and any re-run lands on the same (item, snapshot_date) key.
+    week_start = today - timedelta(days=today.weekday())
+
+    created = 0
+    updated = 0
+    for item in InventoryItem.objects.filter(is_active=True, is_retired=False).iterator():
+        _, was_created = StockLevelSnapshot.objects.update_or_create(
+            item=item,
+            snapshot_date=week_start,
+            defaults={"count": item.current_stock},
+        )
+        if was_created:
+            created += 1
+        else:
+            updated += 1
+
+    return f"Stock snapshots for {week_start}: {created} created, {updated} updated"
+
+
 def _due_phrase(days):
     """Humanise a forecast's ``days_until_due`` for the digest listing."""
     if days is None:

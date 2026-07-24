@@ -38,6 +38,7 @@ from .views import (
     SerializedComponentViewSet,
     SupplierViewSet,
     UsageLogViewSet,
+    WorkOrderAttachmentViewSet,
     WorkOrderViewSet,
     postmark_inbound_work_order,
 )
@@ -69,6 +70,7 @@ router.register(r"maintenance-records", MaintenanceRecordViewSet, basename="main
 router.register(r"maintenance-tasks", MaintenanceTaskViewSet)
 router.register(r"maintenance-tools", MaintenanceToolViewSet)
 router.register(r"work-orders", WorkOrderViewSet)
+router.register(r"work-order-attachments", WorkOrderAttachmentViewSet)
 router.register(
     r"serialized-components", SerializedComponentViewSet, basename="serialized-component"
 )

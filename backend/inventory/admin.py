@@ -44,6 +44,7 @@ from .models import (
     Supplier,
     UsageLog,
     WorkOrder,
+    WorkOrderAttachment,
     WorkOrderLotoCompletion,
     WorkOrderMaterialUsage,
     WorkOrderPhoto,
@@ -2147,6 +2148,13 @@ class WorkOrderPhotoInline(admin.TabularInline):
     readonly_fields = ["uploaded_at", "task_completion"]
 
 
+class WorkOrderAttachmentInline(admin.TabularInline):
+    model = WorkOrderAttachment
+    extra = 0
+    fields = ["kind", "file", "description", "uploaded_by", "uploaded_at"]
+    readonly_fields = ["uploaded_at"]
+
+
 @admin.register(WorkOrder)
 class WorkOrderAdmin(admin.ModelAdmin):
     list_display = [
@@ -2195,7 +2203,17 @@ class WorkOrderAdmin(admin.ModelAdmin):
         WorkOrderLotoCompletionInline,
         WorkOrderMaterialUsageInline,
         WorkOrderPhotoInline,
+        WorkOrderAttachmentInline,
     ]
+
+
+@admin.register(WorkOrderAttachment)
+class WorkOrderAttachmentAdmin(admin.ModelAdmin):
+    list_display = ["work_order", "kind", "description", "uploaded_by", "uploaded_at"]
+    list_filter = ["kind", "uploaded_at"]
+    search_fields = ["work_order__id", "description"]
+    autocomplete_fields = ["work_order", "uploaded_by"]
+    readonly_fields = ["id", "uploaded_at"]
 
 
 @admin.register(WorkOrderSubmission)

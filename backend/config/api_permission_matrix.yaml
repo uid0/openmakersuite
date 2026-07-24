@@ -1794,6 +1794,26 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  inventory.views.WorkOrderAttachmentViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      list:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      update:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
   inventory.views.WorkOrderViewSet:
     actions:
       add_material:

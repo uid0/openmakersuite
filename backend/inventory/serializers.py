@@ -45,6 +45,7 @@ from .models import (
     Supplier,
     UsageLog,
     WorkOrder,
+    WorkOrderAttachment,
     WorkOrderLotoCompletion,
     WorkOrderMaterialUsage,
     WorkOrderPhoto,
@@ -2344,6 +2345,68 @@ class WorkOrderPhotoSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if obj.image and request:
             return request.build_absolute_uri(obj.image.url)
+        return None
+
+
+class WorkOrderAttachmentSerializer(serializers.ModelSerializer):
+    """Serializer for a file attached to a standard (internal) work order.
+
+    Mirrors ``PurchaseOrderAttachmentSerializer`` — ``file`` is the multipart
+    write field and ``file_url`` / ``file_name`` are what a client renders, so
+    the ScanTTY and web attachment lists never have to build a media URL
+    themselves. ``work_order`` is writable because attachments are created
+    through the top-level ``work-order-attachments/`` route rather than a
+    nested action.
+    """
+
+    uploaded_by_name = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+    file_name = serializers.SerializerMethodField()
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+
+    class Meta:
+        model = WorkOrderAttachment
+        fields = [
+            "id",
+            "work_order",
+            "file",
+            "file_url",
+            "file_name",
+            "kind",
+            "kind_display",
+            "description",
+            "uploaded_by",
+            "uploaded_by_name",
+            "uploaded_at",
+        ]
+        read_only_fields = [
+            "id",
+            "uploaded_at",
+            # Server-stamped from request.user in the viewset — a client must
+            # not be able to attribute an upload to somebody else.
+            "uploaded_by",
+            "uploaded_by_name",
+            "file_url",
+            "file_name",
+            "kind_display",
+        ]
+
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by:
+            return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
+        return None
+
+    def get_file_url(self, obj):
+        request = self.context.get("request")
+        if obj.file and request:
+            return request.build_absolute_uri(obj.file.url)
+        if obj.file:
+            return obj.file.url
+        return None
+
+    def get_file_name(self, obj):
+        if obj.file:
+            return obj.file.name.rsplit("/", 1)[-1]
         return None
 
 

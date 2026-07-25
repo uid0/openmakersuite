@@ -539,11 +539,21 @@ class PurchaseOrderItem(TypedTargetModel):
         ]
 
     def __str__(self) -> str:
-        # Route the three-way label through the typed-target accessor (#884):
-        # inventory_item -> item.name, asset -> asset.name, freeform -> generic.
+        return f"{self.target_label} - {self.quantity_ordered} units"
+
+    @property
+    def target_label(self) -> str:
+        """Human label for this line, never dereferencing a null target.
+
+        Routes the three-way label through the typed-target accessor (#884):
+        inventory_item -> item.name, asset -> asset.name, freeform -> generic.
+        Single home for "what is this line called?", shared with
+        ``DeliveryItem.__str__`` and the admin item columns so none of them
+        repeat the ``.item.name`` dereference that null-crashed on asset-only
+        lines (BACKEND-13).
+        """
         target = self.target
-        label = target.name if target is not None else "Purchase Order Item"
-        return f"{label} - {self.quantity_ordered} units"
+        return target.name if target is not None else "Purchase Order Item"
 
     @property
     def item(self) -> Optional[InventoryItem]:
@@ -725,17 +735,21 @@ class DeliveryItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        item_name = self.purchase_order_item.item.name
-        return f"{item_name} - {self.quantity_received} received"
+        # ``purchase_order_item.item`` is None on asset-only and freeform lines,
+        # so label through the line's typed-target accessor instead of
+        # dereferencing ``.item.name`` (BACKEND-13: the admin delete-confirmation
+        # page str()s every cascade-related object, and a received asset line
+        # under a supplier being deleted took the whole page down with it).
+        return f"{self.purchase_order_item.target_label} - {self.quantity_received} received"
 
     @property
-    def item(self) -> InventoryItem:
-        """Convenience property to access the inventory item."""
+    def item(self) -> Optional[InventoryItem]:
+        """The inventory item, or None for asset-only / freeform lines."""
         return self.purchase_order_item.item
 
     @property
-    def supplier(self) -> Supplier:
-        """Convenience property to access the supplier."""
+    def supplier(self) -> Optional[Supplier]:
+        """The supplier, or None when the line carries no resolvable supplier."""
         return self.purchase_order_item.supplier
 
 

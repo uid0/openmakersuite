@@ -361,11 +361,16 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
 
     @admin.display(description="Item")
     def item_name(self, obj):
-        return obj.item.name
+        # ``.item`` is None on asset-only and freeform lines — label through the
+        # typed-target accessor instead of dereferencing it (BACKEND-13).
+        return obj.target_label
 
     @admin.display(description="Supplier")
     def supplier_name(self, obj):
-        return obj.supplier.name
+        # ``.supplier`` is None on freeform lines and manufacturer-less assets;
+        # None renders as the admin's empty value.
+        supplier = obj.supplier
+        return supplier.name if supplier is not None else None
 
     @admin.display(description="Pending")
     def quantity_pending_display(self, obj):
@@ -480,11 +485,13 @@ class DeliveryItemAdmin(admin.ModelAdmin):
 
     @admin.display(description="Item")
     def item_name(self, obj):
-        return obj.item.name
+        # Same nullable target as the line itself (BACKEND-13).
+        return obj.purchase_order_item.target_label
 
     @admin.display(description="Supplier")
     def supplier_name(self, obj):
-        return obj.supplier.name
+        supplier = obj.supplier
+        return supplier.name if supplier is not None else None
 
     @admin.display(description="Condition")
     def condition_status(self, obj):

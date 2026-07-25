@@ -238,6 +238,48 @@ def create_purchase_order(validated_data, items_data, user):
     return purchase_order
 
 
+def apply_line_quantity(line_item, quantity):
+    """Set ``quantity_ordered`` on a line and re-derive its package count.
+
+    Does not save — the caller owns persistence (``update_item`` applies several
+    fields to a line and saves it once). ``order_in_packages`` is re-derived
+    with the same ceil-divide ``create_purchase_order`` uses for inventory
+    lines; asset and freeform lines carry no package information and keep the 0
+    they were created with.
+
+    The caller owns the value/voided/status/already-received guards.
+    """
+    line_item.quantity_ordered = quantity
+    if line_item.item_supplier_id is not None:
+        quantity_per_package = line_item.item_supplier.quantity_per_package or 1
+        line_item.order_in_packages = (quantity + quantity_per_package - 1) // quantity_per_package
+    return line_item
+
+
+def recalculate_estimated_total(purchase_order):
+    """Recompute and persist ``estimated_total`` from the PO's current lines.
+
+    Editing a line's quantity moves its ``estimated_cost``, which the stored
+    PO-level total was frozen from at create time. Voided lines stay in the
+    stored total (``effective_estimated_total`` is what subtracts them), so the
+    sum here matches what ``create_purchase_order`` wrote.
+
+    Reads the lines back from the database instead of ``purchase_order.items``:
+    the viewset prefetches ``items``, so the cached relation still holds the
+    pre-edit quantities after a line is updated.
+    """
+    total = sum(
+        (
+            line.estimated_cost
+            for line in PurchaseOrderItem.objects.filter(purchase_order=purchase_order)
+        ),
+        start=Decimal("0.00"),
+    )
+    purchase_order.estimated_total = total
+    purchase_order.save(update_fields=["estimated_total", "updated_at"])
+    return total
+
+
 def add_business_days(start_date, business_days):
     """Add business days to a date (excluding weekends)."""
     if isinstance(start_date, timezone.datetime):

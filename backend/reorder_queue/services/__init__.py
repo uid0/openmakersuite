@@ -7,9 +7,11 @@ Views keep the serializers as the request/response boundary and keep their
 from .numbering import next_po_number
 from .purchase_orders import (
     add_business_days,
+    apply_line_quantity,
     confirm_order,
     create_purchase_order,
     mark_sent,
+    recalculate_estimated_total,
     update_reorder_requests_from_po,
     void_line_item,
     void_po,
@@ -18,10 +20,12 @@ from .receiving import create_lead_time_log, mark_delivered_receipt, receive_del
 
 __all__ = [
     "add_business_days",
+    "apply_line_quantity",
     "confirm_order",
     "create_purchase_order",
     "mark_sent",
     "next_po_number",
+    "recalculate_estimated_total",
     "update_reorder_requests_from_po",
     "void_line_item",
     "void_po",

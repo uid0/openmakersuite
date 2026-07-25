@@ -445,6 +445,111 @@ class TestReorderRequestAPI:
         assert request_obj.status == ReorderRequest.Status.RECEIVED
         assert request_obj.actual_delivery is not None
 
+    def test_mark_received_twice_adds_stock_only_once(self, authenticated_client):
+        """A second mark-received is a no-op — it must not re-add the quantity."""
+        client, _user = authenticated_client
+        item = InventoryItemFactory(current_stock=10)
+        request_obj = ReorderRequestFactory(
+            item=item, quantity=50, status=ReorderRequest.Status.ORDERED
+        )
+
+        url = reverse("reorderrequest-mark-received", kwargs={"pk": request_obj.pk})
+        first = client.post(url, format="json")
+        assert first.status_code == status.HTTP_200_OK
+
+        item.refresh_from_db()
+        assert item.current_stock == 60  # 10 + 50
+        request_obj.refresh_from_db()
+        first_delivery = request_obj.actual_delivery
+
+        # Stale tab / double click: same request posted again.
+        second = client.post(url, format="json")
+
+        assert second.status_code == status.HTTP_200_OK
+        assert second.data["status"] == ReorderRequest.Status.RECEIVED
+
+        item.refresh_from_db()
+        assert item.current_stock == 60  # unchanged — no second increment
+
+        request_obj.refresh_from_db()
+        assert request_obj.status == ReorderRequest.Status.RECEIVED
+        assert request_obj.actual_delivery == first_delivery
+
+    def test_mark_received_after_po_receipt_leaves_stock_unchanged(self, authenticated_client):
+        """A request already received via a PO receipt must not bump stock again.
+
+        The receipt moves the stock itself, so a late manual mark-received on
+        the closed request would double-count the same delivery.
+        """
+        client, user = authenticated_client
+        item = InventoryItemFactory(current_stock=0)
+        item_supplier = ItemSupplierFactory(item=item, quantity_per_package=1)
+        request_obj = ReorderRequestFactory(
+            item=item, quantity=5, status=ReorderRequest.Status.ORDERED
+        )
+        purchase_order = PurchaseOrder.objects.create(
+            po_number=f"PO-MR-{item_supplier.id}",
+            supplier=item_supplier.supplier,
+            status=PurchaseOrder.Status.SENT,
+            created_by=user,
+            sent_by=user,
+            sent_at=timezone.now() - timedelta(days=3),
+        )
+        PurchaseOrderItem.objects.create(
+            purchase_order=purchase_order,
+            item_supplier=item_supplier,
+            quantity_ordered=5,
+            quantity_received=0,
+            unit_cost_ordered=Decimal("10.00"),
+            order_in_packages=5,
+        )
+
+        deliver_url = reverse("purchaseorder-mark-delivered", kwargs={"pk": purchase_order.pk})
+        delivered = client.post(
+            deliver_url,
+            {"delivery_date": timezone.now().date().isoformat()},
+            format="json",
+        )
+        assert delivered.status_code == status.HTTP_200_OK
+
+        item.refresh_from_db()
+        assert item.current_stock == 5  # the receipt moved the stock
+
+        request_obj.refresh_from_db()
+        if request_obj.status != ReorderRequest.Status.RECEIVED:
+            # Auto-close on full receipt (op-hjz3) may not be present on this
+            # branch; close it by hand so the stale-click scenario is the same.
+            request_obj.status = ReorderRequest.Status.RECEIVED
+            request_obj.save(update_fields=["status"])
+
+        url = reverse("reorderrequest-mark-received", kwargs={"pk": request_obj.pk})
+        response = client.post(url, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        item.refresh_from_db()
+        assert item.current_stock == 5  # still just the one delivery
+
+    def test_mark_received_on_cancelled_request_is_rejected(self, authenticated_client):
+        """A cancelled request can't be received, and never touches stock."""
+        client, _user = authenticated_client
+        item = InventoryItemFactory(current_stock=10)
+        request_obj = ReorderRequestFactory(
+            item=item, quantity=50, status=ReorderRequest.Status.CANCELLED
+        )
+
+        url = reverse("reorderrequest-mark-received", kwargs={"pk": request_obj.pk})
+        response = client.post(url, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "cancelled" in response.data["detail"].lower()
+
+        item.refresh_from_db()
+        assert item.current_stock == 10
+
+        request_obj.refresh_from_db()
+        assert request_obj.status == ReorderRequest.Status.CANCELLED
+        assert request_obj.actual_delivery is None
+
     def test_cancel_request(self, authenticated_client):
         """Test cancelling a reorder request."""
         client, user = authenticated_client

@@ -476,16 +476,41 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def mark_received(self, request, pk=None):
-        """Mark a request as received and update inventory."""
-        reorder = self.get_object()
-        reorder.status = ReorderRequest.Status.RECEIVED
-        reorder.actual_delivery = request.data.get("actual_delivery", timezone.now().date())
-        reorder.save()
+        """Mark a request as received and update inventory.
 
-        # Update inventory stock
-        item = reorder.item
-        item.current_stock += reorder.quantity
-        item.save()
+        The stock bump only happens on the transition *into* ``received``, so
+        the action is idempotent: re-posting to an already-received request is
+        a no-op that returns it unchanged rather than adding ``quantity`` to
+        inventory a second time. That covers a double-click, a stale browser
+        tab, and a request already closed by a purchase-order receipt (which
+        moves the stock itself). A cancelled request cannot be received.
+
+        The guard re-reads the row under ``select_for_update`` inside the
+        transaction that also writes the stock, so two clicks in flight at once
+        can't both pass it.
+        """
+        reorder = self.get_object()
+
+        with transaction.atomic():
+            reorder = ReorderRequest.objects.select_for_update().get(pk=reorder.pk)
+
+            if reorder.status == ReorderRequest.Status.RECEIVED:
+                return Response(self.get_serializer(reorder).data)
+
+            if reorder.status == ReorderRequest.Status.CANCELLED:
+                return Response(
+                    {"detail": "Cannot receive a cancelled reorder request."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            reorder.status = ReorderRequest.Status.RECEIVED
+            reorder.actual_delivery = request.data.get("actual_delivery", timezone.now().date())
+            reorder.save()
+
+            # Update inventory stock
+            item = reorder.item
+            item.current_stock += reorder.quantity
+            item.save()
 
         serializer = self.get_serializer(reorder)
         return Response(serializer.data)

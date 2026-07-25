@@ -14,7 +14,12 @@ from .purchase_orders import (
     void_line_item,
     void_po,
 )
-from .receiving import create_lead_time_log, mark_delivered_receipt, receive_delivery
+from .receiving import (
+    close_linked_reorder_request,
+    create_lead_time_log,
+    mark_delivered_receipt,
+    receive_delivery,
+)
 
 __all__ = [
     "add_business_days",
@@ -25,6 +30,7 @@ __all__ = [
     "update_reorder_requests_from_po",
     "void_line_item",
     "void_po",
+    "close_linked_reorder_request",
     "create_lead_time_log",
     "mark_delivered_receipt",
     "receive_delivery",

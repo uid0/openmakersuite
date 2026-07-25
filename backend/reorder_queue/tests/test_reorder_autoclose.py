@@ -306,14 +306,13 @@ def test_cancelled_request_is_untouched():
     assert request.actual_delivery is None
 
 
-def test_only_the_most_recent_active_request_is_closed():
-    """One receipt, one request.
+def test_all_active_requests_for_the_item_are_closed():
+    """One receipt, every open request for the item.
 
     ``update_reorder_requests_from_po`` marks *every* active request for an item
-    as ordered when the PO goes out, so several can be open at once. The close
-    follows ``get_active_reorder_request``: the most recent one. The older one
-    stays in the queue rather than being silently closed by a delivery that was
-    not necessarily its own.
+    as ordered when the PO goes out, so several can be open at once. Receiving
+    the line closes all of them — the delivery satisfies the item's outstanding
+    demand, so nothing is left dangling in the queue.
     """
     user = _staff()
     client = _staff_client(user)
@@ -326,7 +325,7 @@ def test_only_the_most_recent_active_request_is_closed():
     older.refresh_from_db()
     newer.refresh_from_db()
     assert newer.status == ReorderRequest.Status.RECEIVED
-    assert older.status == ReorderRequest.Status.ORDERED
+    assert older.status == ReorderRequest.Status.RECEIVED
 
 
 def test_closing_twice_is_idempotent():
@@ -339,6 +338,6 @@ def test_closing_twice_is_idempotent():
     second = services.close_linked_reorder_request(line, timezone.now())
 
     request.refresh_from_db()
-    assert first == request
-    assert second is None
+    assert first == [request]
+    assert second == []
     assert request.admin_notes.count("Auto-received") == 1

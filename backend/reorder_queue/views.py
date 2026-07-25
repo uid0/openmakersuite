@@ -1838,6 +1838,12 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
             # Create lead time log if order is complete
             if po_item.is_fully_received:
                 self._create_lead_time_log(po_item, delivery.delivery_date)
+                # Same auto-close as the ``receive``/``mark-delivered`` paths:
+                # scanning a delivery in must retire the reorder request too.
+                # Shared from the receiving service (like the lead-time log
+                # above) because this path is inline rather than routed through
+                # ``services.receive_delivery`` — see the note on this action.
+                services.close_linked_reorder_request(po_item, delivery.delivery_date)
 
         return Response(
             {

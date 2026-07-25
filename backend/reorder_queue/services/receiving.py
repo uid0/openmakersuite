@@ -12,7 +12,64 @@ from datetime import timedelta
 
 from django.db import transaction
 
-from ..models import DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder
+from ..models import DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder, ReorderRequest
+
+
+def close_linked_reorder_request(po_item, delivery_date):
+    """Close the item's open reorder requests when a PO line is fully received.
+
+    The requests that started the purchase are what a member actually watches:
+    receiving the parts through the purchase-order workflow used to leave them
+    sitting in the reorder queue until somebody separately hit their
+    ``mark_received`` action. Fully receiving the line now closes them.
+
+    Deliberately **status-only bookkeeping**: the caller has already posted the
+    received quantity to ``item.current_stock``, and
+    :meth:`ReorderRequestViewSet.mark_received` only increments stock because it
+    is a standalone path with no receipt behind it. Adding the request quantity
+    here as well would double-count the delivery.
+
+    Matching is by inventory item — there is no FK from a purchase order (or its
+    lines) to a reorder request. :func:`update_reorder_requests_from_po` marks
+    *every* active request for an item as ordered when the PO is sent, so several
+    concurrent requests for one item can legitimately be open; receiving the line
+    closes **all** of them (every pending/approved/ordered request for the item).
+    Already-received or cancelled requests are never touched, so re-driving the
+    same receipt is a no-op.
+
+    Returns the list of requests it closed — empty for asset-only or freeform
+    lines, which have no inventory item, and for an item with nothing
+    outstanding.
+    """
+    inventory_item = po_item.item
+    if inventory_item is None:
+        return []
+
+    active_requests = list(
+        inventory_item.reorder_requests.filter(
+            status__in=[
+                ReorderRequest.Status.PENDING,
+                ReorderRequest.Status.APPROVED,
+                ReorderRequest.Status.ORDERED,
+            ]
+        )
+    )
+    if not active_requests:
+        return []
+
+    received_on = delivery_date.date() if hasattr(delivery_date, "date") else delivery_date
+    purchase_order = po_item.purchase_order
+    reference = purchase_order.po_number or purchase_order.pk
+    note = f"Auto-received via PO {reference} on {received_on:%Y-%m-%d}."
+
+    for reorder_request in active_requests:
+        reorder_request.status = ReorderRequest.Status.RECEIVED
+        reorder_request.actual_delivery = received_on
+        reorder_request.admin_notes = f"{reorder_request.admin_notes}\n{note}".strip()
+        reorder_request.save(
+            update_fields=["status", "actual_delivery", "admin_notes", "updated_at"],
+        )
+    return active_requests
 
 
 def create_lead_time_log(po_item, delivery_date):
@@ -131,6 +188,10 @@ def receive_delivery(
 
             if po_item.is_fully_received:
                 create_lead_time_log(po_item, delivery.delivery_date)
+                # The whole line landed, so whatever reorder request asked for
+                # it is satisfied — close it in the same transaction as the
+                # receipt. A partial receipt leaves it open.
+                close_linked_reorder_request(po_item, delivery.delivery_date)
 
         if purchase_order.is_fully_received:
             purchase_order.status = PurchaseOrder.Status.RECEIVED

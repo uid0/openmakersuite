@@ -645,7 +645,7 @@ class WorkOrder(ElapsedTimerModel):
         return self.short_id
 
     def __str__(self) -> str:
-        return f"WO-{str(self.id)[:8].upper()} — {self.display_title} ({self.get_status_display()})"
+        return f"{self.short_id} — {self.display_title} ({self.get_status_display()})"
 
     @property
     def actual_material_cost(self) -> Decimal:
@@ -680,10 +680,20 @@ class WorkOrder(ElapsedTimerModel):
             return False
         return timezone.now().date() > self.due_date
 
+    @staticmethod
+    def short_id_for(work_order_id) -> str:
+        """Short human-readable identifier built from a raw primary key.
+
+        The one place the ``WO-XXXXXXXX`` format lives, so a caller holding
+        only an id (a grouped-aggregate row, say) labels a work order exactly
+        the way a loaded instance does.
+        """
+        return f"WO-{str(work_order_id)[:8].upper()}"
+
     @property
     def short_id(self) -> str:
         """Return a short human-readable identifier for this work order."""
-        return f"WO-{str(self.id)[:8].upper()}"
+        return WorkOrder.short_id_for(self.id)
 
     #: ``started_at`` rides along because ``start_timer`` stamps it.
     TIMER_FIELDS = ElapsedTimerModel.TIMER_FIELDS + ("started_at",)

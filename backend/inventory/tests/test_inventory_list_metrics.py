@@ -18,7 +18,13 @@ import pytest
 from rest_framework import status
 
 from donations.tests.factories import DispositionFactory, DonationFactory, DonationItemFactory
-from inventory.models import FixtureRefillRequest, MaintenanceItem, MaintenanceMaterial, WorkOrder
+from inventory.models import (
+    FixtureRefillRequest,
+    MaintenanceItem,
+    MaintenanceMaterial,
+    WorkOrder,
+    WorkOrderMaterialUsage,
+)
 from inventory.tests.factories import AssetFactory, FixtureFactory, InventoryItemFactory
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
 from reorder_queue.tests.factories import UserFactory
@@ -32,6 +38,7 @@ METRICS_FIELDS = {
     "quantity_on_order",
     "quantity_available",
     "quantity_committed",
+    "committed_breakdown",
     "quantity_in_transit",
     "reorder_point",
     "lead_time_days",
@@ -171,6 +178,40 @@ class TestListMetricsValues:
         assert metrics["quantity_committed"] == 4.0  # not 8.0
         assert metrics["quantity_available"] == 6.0
 
+    def test_ad_hoc_work_order_demand_is_committed_and_attributed_per_row(self, api_client):
+        """The batch path counts ad-hoc usage rows and attributes them, per item."""
+        asset = AssetFactory(name="Lathe")
+        a = InventoryItemFactory(image=None, current_stock=10, reorder_quantity=1)
+        b = InventoryItemFactory(image=None, current_stock=10, reorder_quantity=1)
+        work_order = WorkOrder.objects.create(asset=asset, status=WorkOrder.Status.OPEN)
+        WorkOrderMaterialUsage.objects.create(
+            work_order=work_order,
+            is_ad_hoc=True,
+            inventory_item=a,
+            material_name="ad-hoc widget",
+            quantity_planned=Decimal("2.00"),
+            quantity_used=Decimal("2.00"),
+        )
+
+        results = _results(api_client.get(_list_url(with_metrics=True)))
+        ma = _row_for(results, a)["metrics"]
+        mb = _row_for(results, b)["metrics"]
+
+        assert ma["quantity_committed"] == 2.0
+        assert ma["quantity_available"] == 8.0
+        assert ma["committed_breakdown"] == [
+            {
+                "work_order_id": str(work_order.id),
+                "work_order_short_id": work_order.short_id,
+                "asset_id": str(asset.id),
+                "asset_name": "Lathe",
+                "quantity": 2.0,
+            }
+        ]
+        # ... and the other item on the same page is untouched by it.
+        assert mb["quantity_committed"] == 0.0
+        assert mb["committed_breakdown"] == []
+
     def test_case_based_item_reports_case_cost_and_size(self, api_client):
         item = InventoryItemFactory(
             image=None,
@@ -216,10 +257,23 @@ def _count_queries(api_client, url):
 
 
 def _make_active_item(asset):
-    """An item with a PO line and a committed material, so the aggregates hit rows."""
+    """An item every metrics aggregate hits rows for.
+
+    A PO line, a PM-template committed material, and an ad-hoc work-order usage
+    row — so the committed pair of queries (template + actual usage) is
+    exercised with real rows and an N+1 in either would show up here.
+    """
     item = InventoryItemFactory(image=None, current_stock=15, reorder_quantity=2)
     _open_po_line(item, quantity_ordered=5, po_status=PurchaseOrder.Status.SENT)
     _commit_material(item, asset, quantity="1", wo_statuses=[WorkOrder.Status.OPEN])
+    WorkOrderMaterialUsage.objects.create(
+        work_order=WorkOrder.objects.create(asset=asset, status=WorkOrder.Status.OPEN),
+        is_ad_hoc=True,
+        inventory_item=item,
+        material_name="ad-hoc widget",
+        quantity_planned=Decimal("1.00"),
+        quantity_used=Decimal("1.00"),
+    )
     return item
 
 
@@ -248,8 +302,10 @@ class TestListMetricsQueryBudget:
         # ...and adds the SAME number of queries for 6 items as for 2 — batched,
         # not per-row (an N+1 would make the 6-item delta larger).
         assert metrics_6 - base_6 == metrics_2 - base_2
-        # ...and that constant is small (a handful of grouped aggregates).
-        assert metrics_6 - base_6 <= 6
+        # ...and that constant is exactly the six grouped aggregates the batch
+        # helper runs: on-order, in-transit, committed-from-usage,
+        # committed-from-template, last PO cost, primary supplier.
+        assert metrics_6 - base_6 == 6
 
     def test_default_path_is_unaffected(self, api_client):
         """No param -> no metrics work: same query count for 2 vs 6 items' overhead."""

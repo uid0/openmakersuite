@@ -8,7 +8,7 @@ item (the ``/metrics/`` detail action) and a whole page of items (the
 ``compute_item_metrics_batch`` is the workhorse: given an iterable of already
 loaded ``InventoryItem`` instances (typically one paginated page) it returns
 ``{item_id: payload}`` using a BOUNDED number of grouped-aggregate queries —
-five, independent of how many items are passed — so the list endpoint never
+six, independent of how many items are passed — so the list endpoint never
 degrades into an N+1. ``compute_item_metrics`` is the single-item convenience
 wrapper the detail action uses.
 
@@ -16,9 +16,9 @@ The ``payload`` dict shape is the pinned contract consumed by
 ``InventoryMetricsSerializer`` and the ScanTTY worker — do not rename keys.
 """
 
-from django.db.models import ExpressionWrapper, F, IntegerField, Sum
+from django.db.models import ExpressionWrapper, F, IntegerField, Q, Sum
 
-from inventory.models import ItemSupplier, MaintenanceMaterial, WorkOrder
+from inventory.models import ItemSupplier, MaintenanceMaterial, WorkOrder, WorkOrderMaterialUsage
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem
 
 # PO statuses that count as "on order" (QOO): units committed on a live PO that
@@ -48,12 +48,148 @@ def _cost_trend(current_unit_cost, last_po_unit_cost):
     return "flat"
 
 
+def _committed_by_item(item_ids):
+    """Return ``({item_id: total}, {item_id: [breakdown_entry, ...]})`` (2 queries).
+
+    QC is the open-work-order demand that has **not yet drawn down**
+    ``current_stock``. Two kinds of row express that demand, and the rule that
+    reconciles them is per **(work order, item)**:
+
+    * **Actual usage rows** (:class:`WorkOrderMaterialUsage`) are authoritative
+      for a work order that has materialised any for the item. An un-consumed
+      row (``was_used`` False and no ``applied_quantity``) is demand; a consumed
+      one contributes nothing, because its units have already left
+      ``current_stock``. That is what stops a material consumed while its work
+      order is still open from being subtracted twice — once from stock and
+      again as committed.
+    * **Template materials** (:class:`MaintenanceMaterial` on the work order's
+      PM task) are the fallback for a work order that has not materialised
+      usage rows for the item yet — one created straight from a template, or
+      one whose rows were deleted.
+
+    A template material is counted **at most once** even when its task carries
+    several open work orders (a task with two open WOs needs the material once,
+    not twice — the pre-existing rule), and is attributed to the oldest such
+    work order that has not materialised usage rows for the item.
+
+    The breakdown is the attribution side of the same numbers: one entry per
+    (work order, item) pair holding a non-zero share of QC, so
+    ``sum(entry["quantity"]) == total`` for every item. Entries are ordered
+    oldest work order first.
+    """
+    # ``(item_id, work_order_id)`` -> committed quantity. A pair is fed by
+    # EITHER usage rows or template materials, never both (see below).
+    demand = {}
+    # Pairs whose work order has materialised usage rows for the item — the
+    # template fallback is switched off for exactly these.
+    materialised = set()
+    # work_order_id -> (created_at, asset_id, asset_name), for attribution.
+    work_orders = {}
+
+    # Actual usage on open work orders. ``stock_item`` prefers the row's own
+    # ``inventory_item`` (how an ad-hoc line links stock) and falls back to the
+    # template spec's; both columns come back so the same precedence can be
+    # applied here, off one query, without loading rows. (1 query)
+    for (
+        direct_item_id,
+        spec_item_id,
+        work_order_id,
+        quantity_used,
+        was_used,
+        applied_quantity,
+        asset_id,
+        asset_name,
+        created_at,
+    ) in (
+        WorkOrderMaterialUsage.objects.filter(
+            Q(inventory_item_id__in=item_ids)
+            | Q(inventory_item__isnull=True, material__inventory_item_id__in=item_ids),
+            work_order__status__in=OPEN_WO_STATUSES,
+        )
+        .values_list(
+            "inventory_item_id",
+            "material__inventory_item_id",
+            "work_order_id",
+            "quantity_used",
+            "was_used",
+            "applied_quantity",
+            "work_order__asset_id",
+            "work_order__asset__name",
+            "work_order__created_at",
+        )
+        .order_by()  # clear Meta ordering; the rows are grouped in Python
+    ):
+        item_id = direct_item_id if direct_item_id is not None else spec_item_id
+        work_orders[work_order_id] = (created_at, asset_id, asset_name)
+        key = (item_id, work_order_id)
+        materialised.add(key)
+        if was_used or applied_quantity is not None:
+            continue  # already consumed — these units are out of current_stock
+        demand[key] = demand.get(key, 0.0) + float(quantity_used or 0)
+
+    # Template materials on open work orders. DISTINCT over (material, work
+    # order) so a task with several open work orders yields one candidate row
+    # per work order — the material's quantity is still counted once, in the
+    # reconciliation loop below. (1 query)
+    template_candidates = {}
+    for material_id, item_id, quantity, work_order_id, asset_id, asset_name, created_at in (
+        MaintenanceMaterial.objects.filter(
+            inventory_item_id__in=item_ids,
+            maintenance_item__work_orders__status__in=OPEN_WO_STATUSES,
+        )
+        .values_list(
+            "id",
+            "inventory_item_id",
+            "quantity",
+            "maintenance_item__work_orders__id",
+            "maintenance_item__work_orders__asset_id",
+            "maintenance_item__work_orders__asset__name",
+            "maintenance_item__work_orders__created_at",
+        )
+        .order_by()  # clear Meta ordering so DISTINCT dedupes purely by the row
+        .distinct()
+    ):
+        work_orders[work_order_id] = (created_at, asset_id, asset_name)
+        candidate = template_candidates.setdefault(material_id, (item_id, quantity, []))
+        candidate[2].append(work_order_id)
+
+    def _age(work_order_id):
+        """Sort key: oldest work order first, id breaking a created_at tie."""
+        return (work_orders[work_order_id][0], str(work_order_id))
+
+    for item_id, quantity, candidate_work_orders in template_candidates.values():
+        fallback = [wo for wo in candidate_work_orders if (item_id, wo) not in materialised]
+        if not fallback:
+            continue  # every open work order materialised its own rows
+        key = (item_id, min(fallback, key=_age))
+        demand[key] = demand.get(key, 0.0) + float(quantity or 0)
+
+    totals = {}
+    breakdown = {}
+    for (item_id, work_order_id), quantity in sorted(demand.items(), key=lambda kv: _age(kv[0][1])):
+        totals[item_id] = totals.get(item_id, 0.0) + quantity
+        if not quantity:
+            continue  # nothing committed here — don't clutter the attribution
+        _created_at, asset_id, asset_name = work_orders[work_order_id]
+        breakdown.setdefault(item_id, []).append(
+            {
+                "work_order_id": work_order_id,
+                "work_order_short_id": WorkOrder.short_id_for(work_order_id),
+                "asset_id": asset_id,
+                "asset_name": asset_name,
+                "quantity": quantity,
+            }
+        )
+
+    return totals, breakdown
+
+
 def compute_item_metrics_batch(items):
     """Return ``{item_id: metrics_payload}`` for ``items`` in bounded queries.
 
     ``items`` is an iterable of already-loaded ``InventoryItem`` instances
     (typically a single paginated page). The number of database queries is
-    constant — five grouped aggregates — regardless of how many items are
+    constant — six grouped aggregates — regardless of how many items are
     passed, so the list endpoint stays O(1) in queries rather than O(n). Every
     item id in ``items`` is present in the result (with zeros / ``None`` where
     there is no PO / work-order / supplier data).
@@ -107,21 +243,11 @@ def compute_item_metrics_batch(items):
         )
     }
 
-    # QC — quantity committed to open work orders. Select DISTINCT materials
-    # first: a task with several open work orders would otherwise multiply the
-    # join and double-count the material's quantity. Sum per item in Python so
-    # this stays a single query. (1 query)
-    quantity_committed = {}
-    for _material_id, item_id, quantity in (
-        MaintenanceMaterial.objects.filter(
-            inventory_item_id__in=item_ids,
-            maintenance_item__work_orders__status__in=OPEN_WO_STATUSES,
-        )
-        .values_list("id", "inventory_item_id", "quantity")
-        .order_by()  # clear Meta ordering so DISTINCT dedupes purely by material
-        .distinct()
-    ):
-        quantity_committed[item_id] = quantity_committed.get(item_id, 0.0) + float(quantity or 0)
+    # QC — quantity committed to open work orders, plus the per-work-order
+    # attribution of it. Covers both the PM-template materials and the actual
+    # (including ad-hoc) usage rows, reconciled so neither double-counts the
+    # other — see ``_committed_by_item``. (2 queries)
+    quantity_committed, committed_breakdown = _committed_by_item(item_ids)
 
     # Most-recent PO unit cost per item (drives cost_trend / last_po_unit_cost).
     # Rows arrive newest-first within each item; keep the first one seen. (1 query)
@@ -165,6 +291,7 @@ def compute_item_metrics_batch(items):
             "quantity_on_order": quantity_on_order.get(item.id, 0),
             "quantity_available": float(item.current_stock) - committed,
             "quantity_committed": committed,
+            "committed_breakdown": committed_breakdown.get(item.id, []),
             "quantity_in_transit": quantity_in_transit.get(item.id, 0),
             "reorder_point": item.reorder_quantity,
             "lead_time_days": lead_time_days,

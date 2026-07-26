@@ -87,6 +87,8 @@ from .serializers import (
     InventoryItemDetailSerializer,
     InventoryItemSerializer,
     InventoryMetricsSerializer,
+    ItemDeliverySerializer,
+    ItemOrderCostSerializer,
     ItemSupplierSerializer,
     LocationProblemSerializer,
     LocationReconcileItemSerializer,
@@ -1308,6 +1310,84 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                     "desired": item.minimum_stock + item.reorder_quantity,
                 },
                 "current_stock": item.current_stock,
+            }
+        )
+
+    @action(detail=True, methods=["get"], permission_classes=[IsAuthenticated])
+    def purchase_history(self, request, pk=None):
+        """Order + receipt provenance for the item detail view (op-96uo).
+
+        Exposes history that already exists on the PO/delivery models so the
+        detail screen can answer "what did we pay per order, on which order,
+        and what shipped when":
+
+        * ``order_costs`` — one row per ``PurchaseOrderItem`` for this item,
+          oldest order first: ``{purchase_order, po_number, order_date, status,
+          quantity_ordered, unit_cost_ordered, unit_cost_actual}``. This is the
+          full list behind ``metrics``' ``last_po_unit_cost``, which keeps only
+          the newest row (see ``services/item_metrics.py``).
+        * ``deliveries`` — one row per ``DeliveryItem``, oldest delivery first:
+          ``{purchase_order, po_number, delivery_date, tracking_number,
+          carrier, quantity_received, receipt_notes, is_complete}``. A
+          partially-shipped order has several deliveries and therefore several
+          tracking numbers; all of them are returned.
+
+        Both lists are flat and carry the PO pk so a client can group by order
+        even when ``po_number`` is still unassigned (it is nullable). Joining
+        through ``item_supplier`` excludes asset-only and freeform PO lines,
+        which carry no inventory item. Read-only; no migration.
+
+        Auth-required, like ``stock_history`` and unlike the public
+        ``metrics``/``retrieve`` reads, because it surfaces supplier pricing.
+        """
+        from reorder_queue.models import DeliveryItem, PurchaseOrderItem
+
+        item = self.get_object()
+
+        # Both lists tie-break on ``id``: ``order_date`` is auto_now_add and
+        # partial shipments are often logged together, so rows sharing a
+        # timestamp would otherwise come back in an arbitrary order.
+        order_lines = (
+            PurchaseOrderItem.objects.filter(item_supplier__item_id=item.id)
+            .select_related("purchase_order")
+            .order_by("purchase_order__order_date", "id")
+        )
+        order_costs = [
+            {
+                "purchase_order": line.purchase_order_id,
+                "po_number": line.purchase_order.po_number,
+                "order_date": line.purchase_order.order_date,
+                "status": line.purchase_order.status,
+                "quantity_ordered": line.quantity_ordered,
+                "unit_cost_ordered": line.unit_cost_ordered,
+                "unit_cost_actual": line.unit_cost_actual,
+            }
+            for line in order_lines
+        ]
+
+        delivery_items = (
+            DeliveryItem.objects.filter(purchase_order_item__item_supplier__item=item)
+            .select_related("delivery", "delivery__purchase_order")
+            .order_by("delivery__delivery_date", "id")
+        )
+        deliveries = [
+            {
+                "purchase_order": received.delivery.purchase_order_id,
+                "po_number": received.delivery.purchase_order.po_number,
+                "delivery_date": received.delivery.delivery_date,
+                "tracking_number": received.delivery.tracking_number,
+                "carrier": received.delivery.carrier,
+                "quantity_received": received.quantity_received,
+                "receipt_notes": received.delivery.receipt_notes,
+                "is_complete": received.delivery.is_complete,
+            }
+            for received in delivery_items
+        ]
+
+        return Response(
+            {
+                "order_costs": ItemOrderCostSerializer(order_costs, many=True).data,
+                "deliveries": ItemDeliverySerializer(deliveries, many=True).data,
             }
         )
 

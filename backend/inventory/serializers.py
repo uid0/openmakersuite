@@ -856,6 +856,48 @@ class InventoryMetricsSerializer(serializers.Serializer):
     case_size = serializers.IntegerField(allow_null=True)  # units per case (quantity_per_package)
 
 
+class ItemOrderCostSerializer(serializers.Serializer):
+    """One purchase-order line for an item — the per-order unit cost (op-96uo).
+
+    Fed a plain ``dict`` built in ``InventoryItemViewSet.purchase_history``.
+    Money is a DRF ``DecimalField`` so it serializes as a string, matching
+    ``InventoryMetricsSerializer.last_po_unit_cost`` and the item serializer's
+    ``unit_cost``. Field names are a pinned contract shared with the web item
+    detail page and the ScanTTY TUI, so do not rename them.
+
+    ``purchase_order`` (the PO pk) is carried alongside ``po_number`` because
+    ``po_number`` is nullable — clients that group rows by order need a key
+    that is always present.
+    """
+
+    purchase_order = serializers.IntegerField()
+    po_number = serializers.CharField(allow_null=True)
+    order_date = serializers.DateTimeField()
+    status = serializers.CharField()
+    quantity_ordered = serializers.IntegerField()
+    unit_cost_ordered = serializers.DecimalField(max_digits=10, decimal_places=4)
+    unit_cost_actual = serializers.DecimalField(max_digits=10, decimal_places=4, allow_null=True)
+
+
+class ItemDeliverySerializer(serializers.Serializer):
+    """One delivery of an item — tracking number + receipt record (op-96uo).
+
+    One row per ``DeliveryItem``: a partially-shipped order produces several
+    rows for the same ``po_number``, each with its own tracking number, which
+    is exactly how "one order, many tracking numbers" is meant to render.
+    Pinned contract; see :class:`ItemOrderCostSerializer`.
+    """
+
+    purchase_order = serializers.IntegerField()
+    po_number = serializers.CharField(allow_null=True)
+    delivery_date = serializers.DateTimeField()
+    tracking_number = serializers.CharField(allow_blank=True)
+    carrier = serializers.CharField(allow_blank=True)
+    quantity_received = serializers.IntegerField()
+    receipt_notes = serializers.CharField(allow_blank=True)
+    is_complete = serializers.BooleanField()
+
+
 class AssetPartSerializer(serializers.ModelSerializer):
     """Serializer for asset parts/consumables."""
 

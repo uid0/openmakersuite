@@ -392,10 +392,18 @@ charge on the way in, reverse on the way out.
 
 - **The committee is the asset's owner** — `work_order.asset.owning_group` (the
   `OwnableModel` mixin). A job on a space- or user-owned machine posts **nothing**.
-- **The basis is `WorkOrder.actual_material_cost`** — `quantity_used × unit_cost`
+- **The basis is `WorkOrder.consumed_material_cost`** — `quantity_used × unit_cost`
   summed over the lines actually marked *used* (op-768w capture). Unused lines and
   lines with no recorded cost contribute nothing, so a partially-priced job still
   charges what is known.
+- **The charge is not the job's cost, and is not meant to be** (op-4pzp). What the
+  work-order screen and the cost-recovery/TCO reports show is
+  `WorkOrder.actual_material_cost`, which since op-4pzp also counts a priced
+  **ad-hoc** line the moment it is entered — a freehand or out-of-pocket supply is
+  money spent whether or not anyone marks it used. This entry credits
+  `1300 Inventory — supplies on hand`, i.e. asserts stock left the shelf, so it
+  stays keyed to consumption. Job cost ≥ ledger charge, and the gap is exactly the
+  freehand spend that never came out of inventory.
 - **Material lines are not filtered by their own ownership.** The asset's committee
   is the cost centre, so shop stock, the committee's own stock, and out-of-pocket
   receipts are all charged alike. Filtering to lines whose inventory item carries

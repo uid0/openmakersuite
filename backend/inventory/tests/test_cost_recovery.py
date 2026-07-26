@@ -687,6 +687,53 @@ class TestCostRecoveryRecoverableInHouseWork:
         assert Decimal(block["subtotal_actual"]) == Decimal("0.00")
         assert Decimal(response.data["grand_total_actual"]) == Decimal("0.00")
 
+    def test_freehand_supply_bills_without_being_marked_used(self, authenticated_client):
+        """op-4pzp — the report reads the same rule as the work-order screen.
+
+        A priced ad-hoc line is money spent on the job the moment it is entered,
+        so it reaches the billable column without anyone toggling ``was_used``;
+        a planned-but-unused *template* line still costs nothing. If this report
+        used the older used-only rule it would quietly bill less than the work
+        order says the job cost.
+        """
+        client, _ = authenticated_client
+        asset = AssetFactory(asset_tag="A-FREE", is_cost_recoverable=True)
+        mi = MaintenanceItem.objects.create(
+            asset=asset, title="Sink repair", interval_days=None, estimated_cost=Decimal("0.00")
+        )
+        wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=3))
+        # Out-of-pocket hardware-store run: priced, never toggled used.
+        freehand = _priced_usage(
+            wo, name="PVC fittings", quantity_used=Decimal("3.00"), unit_cost=Decimal("4.15")
+        )
+        freehand.was_used = False
+        freehand.save(update_fields=["was_used"])
+        # Template line off the PM spec, planned but never used → still nothing.
+        spare = MaintenanceMaterial.objects.create(
+            maintenance_item=mi,
+            name="Spare trap",
+            quantity=Decimal("1.00"),
+            estimated_cost_per_unit=Decimal("0.00"),
+        )
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=spare,
+            material_name=spare.name,
+            quantity_planned=Decimal("1.00"),
+            quantity_used=Decimal("1.00"),
+            unit_cost=Decimal("99.00"),
+            was_used=False,
+        )
+
+        response = client.get(URL, {"asset_ids": str(asset.id), "period": "past_month"})
+        assert response.status_code == status.HTTP_200_OK
+
+        wo.refresh_from_db()
+        svc = _assets_by_id(response)[str(asset.id)]["services"][0]
+        assert Decimal(svc["internal_cost"]) == Decimal("12.45")
+        assert Decimal(svc["actual_cost"]) == Decimal("12.45")
+        assert wo.actual_material_cost == Decimal("12.45")
+
     def test_actual_replaces_estimate_for_the_internal_figure(self, authenticated_client):
         """Where a real cost exists it wins over the template estimate — the
         Estimated column still reports the old number for reference."""
@@ -733,18 +780,30 @@ class TestCostRecoveryRecoverableInHouseWork:
         assert Decimal(svc["actual_cost"]) == Decimal("48.00")
 
     def test_planned_but_unused_priced_line_costs_nothing(self, authenticated_client):
-        """``was_used=False`` means the material was never consumed, so it is
-        not billable even with a price on it."""
+        """A *template* line with ``was_used=False`` was never consumed, so it is
+        not billable even with a price on it.
+
+        op-4pzp narrowed this to template lines: an ad-hoc one is money already
+        spent (see ``test_freehand_supply_bills_without_being_marked_used``),
+        while a line copied off the PM spec is only ever a plan until someone
+        marks it used.
+        """
         client, _ = authenticated_client
         asset = AssetFactory(asset_tag="A-UNUSED", is_cost_recoverable=True)
         mi = MaintenanceItem.objects.create(
             asset=asset, title="Aborted swap", interval_days=None, estimated_cost=Decimal("0.00")
         )
         wo = _completed_wo(mi, completed_at=timezone.now() - timedelta(days=3))
+        spare = MaintenanceMaterial.objects.create(
+            maintenance_item=mi,
+            name="Spare motor",
+            quantity=Decimal("1.00"),
+            estimated_cost_per_unit=Decimal("0.00"),
+        )
         WorkOrderMaterialUsage.objects.create(
             work_order=wo,
-            material_name="Spare motor",
-            is_ad_hoc=True,
+            material=spare,
+            material_name=spare.name,
             quantity_planned=Decimal("1.00"),
             quantity_used=Decimal("1.00"),
             was_used=False,

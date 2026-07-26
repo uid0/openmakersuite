@@ -6536,6 +6536,12 @@ class AssetReportViewSet(viewsets.ViewSet):
                 if not (start_date <= completed_date <= end_date):
                     continue
                 for usage in wo.material_usage.all():
+                    # Consumption, not cost: this listing answers "what was drawn
+                    # for this asset", so it stays on ``was_used`` and does NOT
+                    # take op-4pzp's "a priced ad-hoc line counts on entry" rule
+                    # (that governs ``WorkOrder.actual_material_cost``). There is
+                    # no total here for the two to disagree about — every row is
+                    # one material line.
                     if not usage.was_used:
                         continue
                     estimated_cost = None

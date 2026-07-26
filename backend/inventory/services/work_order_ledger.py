@@ -27,11 +27,20 @@ to own (see :attr:`WorkOrderMaterialUsage.stock_item`), so it would silently
 escape the charge.
 
 **One entry per job, not one per material line.** The basis is
-:attr:`WorkOrder.actual_material_cost` — ``quantity_used × unit_cost`` summed
+:attr:`WorkOrder.consumed_material_cost` — ``quantity_used × unit_cost`` summed
 over the lines actually marked *used*. Lines with no recorded cost contribute
 nothing rather than blocking the post, so a partially-priced job still charges
 what is known. Vendor invoices are a separate, still-unwired flow
 (``SourceType.VENDOR_INVOICE``): the basis here is **in-house consumption only**.
+
+That is deliberately *not* the same number the work-order screen and the cost
+reports show. Since op-4pzp those read :attr:`WorkOrder.actual_material_cost`,
+which counts a priced **ad-hoc** line the moment it is entered — money spent on
+the job, whether or not anyone ever marks it used. This entry credits ``1300
+Inventory — supplies on hand``, an assertion that stock left the shelf, so it
+stays keyed to consumption: charging it for a freehand line nobody drew from
+inventory would write down stock that was never issued. Job cost ≥ ledger
+charge, and the gap is exactly the out-of-pocket spend.
 
 **Reopening reverses; re-completing re-posts.** A charge is keyed
 ``wo_complete:<id>``, which makes re-saving a completed work order a no-op
@@ -155,7 +164,9 @@ def charge_completed_work_order(
         if not meta.is_reversed:
             return meta.transaction, None
 
-    amount = work_order.actual_material_cost or Decimal("0.00")
+    # Consumption, not job cost: see the "One entry per job" note above for why
+    # this is deliberately not ``actual_material_cost``.
+    amount = work_order.consumed_material_cost or Decimal("0.00")
     if amount <= 0:
         logger.warning(
             "Work order %s completed on committee-owned asset %s with no "

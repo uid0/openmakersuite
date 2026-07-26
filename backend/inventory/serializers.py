@@ -2516,8 +2516,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     elapsed_seconds = serializers.SerializerMethodField()
     task_completions = WorkOrderTaskCompletionSerializer(many=True, read_only=True)
     material_usage = WorkOrderMaterialUsageSerializer(many=True, read_only=True)
-    # op-768w: real money spent on materials, summed over the *used* lines.
-    # Rides the ``material_usage`` prefetch, so it costs no extra query.
+    # op-768w/op-4pzp: real money spent on materials — every priced *used* line
+    # plus every priced *ad-hoc* one, whose cost is already spent whether or not
+    # anyone marks it used. Rides the ``material_usage`` prefetch, no extra query.
     actual_material_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     loto_completions = WorkOrderLotoCompletionSerializer(many=True, read_only=True)
     photos = WorkOrderPhotoSerializer(many=True, read_only=True)

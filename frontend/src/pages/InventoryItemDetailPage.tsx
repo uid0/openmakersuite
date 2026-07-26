@@ -3,7 +3,6 @@
  * Comprehensive detail view with tabs for overview, stock history, reorder history, usage logs, and linked assets
  */
 import {
-    ActionIcon,
     Alert,
     Badge,
     Button,
@@ -328,7 +327,12 @@ const InventoryItemDetailPage: React.FC = () => {
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
   const [stockHistory, setStockHistory] = useState<StockHistory | null>(null);
   const [reorderHistory, setReorderHistory] = useState<ReorderRequest[]>([]);
+  // Two *different* asset relationships, both surfaced on the Linked Assets
+  // tab (op-qdfr). `linkedAssets` = Asset.inventory_item, i.e. the asset IS an
+  // instance of this item type. `usedByAssets` = the AssetPart through-model,
+  // i.e. assets that consume this item as a part. Conflating them was the bug.
   const [linkedAssets, setLinkedAssets] = useState<Asset[]>([]);
+  const [usedByAssets, setUsedByAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string | null>('overview');
   const [cycleCountOpen, setCycleCountOpen] = useState(false);
@@ -351,15 +355,23 @@ const InventoryItemDetailPage: React.FC = () => {
     // and show "Item not found" even though the item exists — uid0 hit
     // this on items with no linked-assets filter match where assetsAPI
     // returned a 400.
-    const [itemRes, metricsRes, usageLogsRes, stockHistoryRes, reorderRes, assetsRes] =
-      await Promise.allSettled([
-        inventoryAPI.getItem(id),
-        inventoryAPI.getItemMetrics(id),
-        inventoryAPI.getUsageLogs(id),
-        inventoryAPI.getStockHistory(id),
-        reorderAPI.listRequests({ status: undefined }),
-        assetsAPI.listAssets({ inventory_item: id }),
-      ]);
+    const [
+      itemRes,
+      metricsRes,
+      usageLogsRes,
+      stockHistoryRes,
+      reorderRes,
+      assetsRes,
+      usedByRes,
+    ] = await Promise.allSettled([
+      inventoryAPI.getItem(id),
+      inventoryAPI.getItemMetrics(id),
+      inventoryAPI.getUsageLogs(id),
+      inventoryAPI.getStockHistory(id),
+      reorderAPI.listRequests({ status: undefined }),
+      assetsAPI.listAssets({ inventory_item: id }),
+      assetsAPI.listAssets({ consumable_for_item: id }),
+    ]);
 
     if (itemRes.status === 'fulfilled') {
       setItem(itemRes.value.data);
@@ -396,6 +408,12 @@ const InventoryItemDetailPage: React.FC = () => {
       setLinkedAssets(assetsRes.value.data.results || []);
     } else {
       console.error('Error loading linked assets:', assetsRes.reason);
+    }
+
+    if (usedByRes.status === 'fulfilled') {
+      setUsedByAssets(usedByRes.value.data.results || []);
+    } else {
+      console.error('Error loading assets that use this item:', usedByRes.reason);
     }
 
     setLoading(false);
@@ -786,48 +804,122 @@ const InventoryItemDetailPage: React.FC = () => {
           </Card>
         </Tabs.Panel>
 
-        {/* Linked Assets Tab */}
+        {/* Linked Assets Tab — two distinct relationships, never conflated:
+            (1) assets that CONSUME this item as a part (AssetPart), which is
+            what people mean by "what uses this?", and (2) assets that ARE an
+            instance of this item type (Asset.inventory_item). (op-qdfr) */}
         <Tabs.Panel value="linked-assets" pt="md">
-          <Card withBorder p="md">
-            <Title order={4} mb="md">
-              Linked Assets
-            </Title>
-            {linkedAssets.length === 0 ? (
-              <Text c="dimmed">No assets linked to this inventory item.</Text>
-            ) : (
-              <Table>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Asset Name</Table.Th>
-                    <Table.Th>Asset Tag</Table.Th>
-                    <Table.Th>Status</Table.Th>
-                    <Table.Th>Location</Table.Th>
-                    <Table.Th>Actions</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {linkedAssets.map((asset) => (
-                    <Table.Tr key={asset.id}>
-                      <Table.Td>{asset.name}</Table.Td>
-                      <Table.Td>{asset.asset_tag || '-'}</Table.Td>
-                      <Table.Td>
-                        <Badge color={asset.status === 'active' ? 'green' : 'gray'}>{asset.status}</Badge>
-                      </Table.Td>
-                      <Table.Td>{asset.location_name || '-'}</Table.Td>
-                      <Table.Td>
-                        <ActionIcon
-                          variant="subtle"
-                          onClick={() => navigate(`/inventory/scan/asset/${asset.id}`)}
-                        >
-                          View
-                        </ActionIcon>
-                      </Table.Td>
+          <Stack gap="md">
+            <Card withBorder p="md" data-testid="assets-using-item">
+              <Title order={4} mb="xs">
+                Assets that use this item
+              </Title>
+              <Text size="sm" c="dimmed" mb="md">
+                Equipment that lists this item as a part or consumable.
+              </Text>
+              {usedByAssets.length === 0 ? (
+                <Text c="dimmed">No assets use this item as a part.</Text>
+              ) : (
+                <Table>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Asset Name</Table.Th>
+                      <Table.Th>Asset Tag</Table.Th>
+                      <Table.Th>Qty Needed</Table.Th>
+                      <Table.Th>Required</Table.Th>
+                      <Table.Th>Status</Table.Th>
+                      <Table.Th>Location</Table.Th>
+                      <Table.Th>Actions</Table.Th>
                     </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            )}
-          </Card>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {usedByAssets.map((asset) => {
+                      // The asset payload already nests its AssetPart rows, so
+                      // the through-model detail for *this* item is free — no
+                      // extra round-trip and no new endpoint.
+                      const partLink = (asset.parts || []).find((p) => p.part === id);
+                      return (
+                        <Table.Tr key={asset.id}>
+                          <Table.Td>{asset.name}</Table.Td>
+                          <Table.Td>{asset.asset_tag || '-'}</Table.Td>
+                          <Table.Td>{partLink ? partLink.quantity_needed : '-'}</Table.Td>
+                          <Table.Td>
+                            {partLink ? (
+                              <Badge color={partLink.is_required ? 'red' : 'gray'} variant="light">
+                                {partLink.is_required ? 'Required' : 'Optional'}
+                              </Badge>
+                            ) : (
+                              '-'
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge color={asset.status === 'active' ? 'green' : 'gray'}>
+                              {asset.status}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>{asset.location_name || '-'}</Table.Td>
+                          <Table.Td>
+                            <Button
+                              size="xs"
+                              variant="subtle"
+                              onClick={() => navigate(`/inventory/scan/asset/${asset.id}`)}
+                            >
+                              View
+                            </Button>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              )}
+            </Card>
+
+            <Card withBorder p="md" data-testid="assets-of-this-type">
+              <Title order={4} mb="xs">
+                Assets of this type
+              </Title>
+              <Text size="sm" c="dimmed" mb="md">
+                Tracked assets that are an instance of this inventory item.
+              </Text>
+              {linkedAssets.length === 0 ? (
+                <Text c="dimmed">No assets are an instance of this inventory item.</Text>
+              ) : (
+                <Table>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Asset Name</Table.Th>
+                      <Table.Th>Asset Tag</Table.Th>
+                      <Table.Th>Status</Table.Th>
+                      <Table.Th>Location</Table.Th>
+                      <Table.Th>Actions</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {linkedAssets.map((asset) => (
+                      <Table.Tr key={asset.id}>
+                        <Table.Td>{asset.name}</Table.Td>
+                        <Table.Td>{asset.asset_tag || '-'}</Table.Td>
+                        <Table.Td>
+                          <Badge color={asset.status === 'active' ? 'green' : 'gray'}>{asset.status}</Badge>
+                        </Table.Td>
+                        <Table.Td>{asset.location_name || '-'}</Table.Td>
+                        <Table.Td>
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            onClick={() => navigate(`/inventory/scan/asset/${asset.id}`)}
+                          >
+                            View
+                          </Button>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              )}
+            </Card>
+          </Stack>
         </Tabs.Panel>
 
         {/* Serialized Units Tab — per-unit lifecycle for serialized items.

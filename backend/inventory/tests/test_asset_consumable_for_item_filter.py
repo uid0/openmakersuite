@@ -95,6 +95,28 @@ class TestConsumableForItemFilter:
         assert str(printer.id) in ids
         assert str(unrelated.id) in ids
 
+    def test_rows_carry_the_asset_part_detail_for_the_queried_item(self):
+        """Each returned row nests its AssetPart rows under ``parts``, including
+        ``quantity_needed``/``is_required`` for the queried item.
+
+        The inventory-item detail page's "Assets that use this item" table reads
+        those through-model fields straight off the list payload rather than
+        making a second round-trip (op-qdfr) — this pins that contract.
+        """
+        item = InventoryItemFactory()
+        printer = AssetFactory(name="UV Printer")
+        AssetPartFactory(asset=printer, part=item, quantity_needed=3, is_required=True)
+
+        resp = _client().get(ASSETS_URL, {"consumable_for_item": str(item.id)})
+
+        assert resp.status_code == 200, resp.content
+        data = resp.data
+        results = data["results"] if isinstance(data, dict) and "results" in data else data
+        row = next(r for r in results if str(r["id"]) == str(printer.id))
+        link = next(p for p in row["parts"] if str(p["part"]) == str(item.id))
+        assert link["quantity_needed"] == 3
+        assert link["is_required"] is True
+
     def test_garbage_value_is_ignored_not_a_500(self):
         """A non-UUID value is ignored gracefully (unfiltered), not a server error."""
         item = InventoryItemFactory()

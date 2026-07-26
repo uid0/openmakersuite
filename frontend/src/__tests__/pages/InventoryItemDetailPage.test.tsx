@@ -380,8 +380,94 @@ describe('InventoryItemDetailPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /Linked Assets/i }));
     expect(
-      await screen.findByText('No assets linked to this inventory item.')
+      await screen.findByText('No assets use this item as a part.')
     ).toBeInTheDocument();
+    expect(
+      screen.getByText('No assets are an instance of this inventory item.')
+    ).toBeInTheDocument();
+  });
+
+  // ---- op-qdfr: assets that USE this item as a part (AssetPart) ----
+
+  it('requests the assets that use this item as a part and renders them with AssetPart detail', async () => {
+    const consumingAsset = {
+      id: 'asset-consumer',
+      name: 'Laser Cutter',
+      asset_tag: 'AT-LASER',
+      status: 'active' as const,
+      location_name: 'Fab Lab',
+      inventory_item: null,
+      parts: [
+        {
+          id: 'part-link-1',
+          asset: 'asset-consumer',
+          part: 'test-id',
+          part_name: 'Test Item',
+          quantity_needed: 3,
+          is_required: true,
+          maintenance_interval_days: 90,
+          last_replaced_at: null,
+        },
+      ],
+    };
+
+    (api.assetsAPI.listAssets as jest.Mock).mockImplementation((params: any) =>
+      Promise.resolve({
+        data: { results: params?.consumable_for_item ? [consumingAsset] : [] },
+      })
+    );
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    // The page asks for the AssetPart relationship, not just inventory_item.
+    expect(api.assetsAPI.listAssets).toHaveBeenCalledWith({
+      consumable_for_item: 'test-id',
+    });
+    expect(api.assetsAPI.listAssets).toHaveBeenCalledWith({ inventory_item: 'test-id' });
+
+    fireEvent.click(screen.getByRole('tab', { name: /Linked Assets/i }));
+
+    // The two relationships are labeled distinctly so they aren't conflated.
+    const usingSection = await screen.findByTestId('assets-using-item');
+    expect(usingSection).toHaveTextContent('Assets that use this item');
+    expect(screen.getByTestId('assets-of-this-type')).toHaveTextContent(
+      'Assets of this type'
+    );
+
+    // The consuming asset lands in the "uses this item" section, enriched with
+    // the through-model detail — and not in the "is this item" section.
+    expect(usingSection).toHaveTextContent('Laser Cutter');
+    expect(usingSection).toHaveTextContent('AT-LASER');
+    expect(usingSection).toHaveTextContent('3');
+    expect(usingSection).toHaveTextContent('Required');
+    expect(screen.getByTestId('assets-of-this-type')).toHaveTextContent(
+      'No assets are an instance of this inventory item.'
+    );
+  });
+
+  it('still renders the item when the used-by-assets call fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.assetsAPI.listAssets as jest.Mock).mockImplementation((params: any) =>
+      params?.consumable_for_item
+        ? Promise.reject(new Error('boom'))
+        : Promise.resolve({ data: { results: [] } })
+    );
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /Linked Assets/i }));
+    expect(
+      await screen.findByText('No assets use this item as a part.')
+    ).toBeInTheDocument();
+    consoleError.mockRestore();
   });
 
   it('renders the not-found state when the item load is forbidden (403)', async () => {

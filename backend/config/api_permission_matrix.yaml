@@ -1423,6 +1423,9 @@ views:
       partial_update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      purchase_history:
+        permission_classes:
+        - IsAuthenticated
       qr_code:
         permission_classes:
         - IsAuthenticatedOrReadOnly

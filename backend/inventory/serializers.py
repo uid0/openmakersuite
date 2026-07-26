@@ -822,6 +822,21 @@ class DemandForecastSerializer(serializers.ModelSerializer):
         ]
 
 
+class CommittedBreakdownEntrySerializer(serializers.Serializer):
+    """One work order holding part of an item's committed quantity (QC).
+
+    The attribution side of ``quantity_committed``: which job — and so which
+    machine — the reserved stock is going to. Entries sum to
+    ``quantity_committed`` and arrive oldest work order first.
+    """
+
+    work_order_id = serializers.UUIDField()
+    work_order_short_id = serializers.CharField()  # e.g. "WO-1A2B3C4D"
+    asset_id = serializers.UUIDField(allow_null=True)  # null on an asset-less work order
+    asset_name = serializers.CharField(allow_null=True)
+    quantity = serializers.FloatField()
+
+
 class InventoryMetricsSerializer(serializers.Serializer):
     """Computed stock + cost metrics for the inventory-item detail view.
 
@@ -840,6 +855,7 @@ class InventoryMetricsSerializer(serializers.Serializer):
     quantity_on_order = serializers.IntegerField()  # QOO — open PO units
     quantity_available = serializers.FloatField()  # QA — QOH minus QC
     quantity_committed = serializers.FloatField()  # QC — open work-order demand
+    committed_breakdown = CommittedBreakdownEntrySerializer(many=True)  # which WOs/assets hold QC
     quantity_in_transit = serializers.IntegerField()  # QIT — partially-received (⊆ QOO)
     reorder_point = serializers.IntegerField()  # RP — reorder_quantity
     lead_time_days = serializers.IntegerField(allow_null=True)  # Lead — average_lead_time

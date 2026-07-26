@@ -259,6 +259,46 @@ class TestCompletionCharge:
 
         assert committee_balance(committee) == Decimal("10.00")
 
+    def test_freehand_spend_is_job_cost_but_not_a_committee_charge(self):
+        """op-4pzp — the audited split, asserted from both sides.
+
+        A priced ad-hoc line counts toward the job's Actual Material Cost the
+        moment it is entered. The charge does **not** follow it: this entry
+        credits ``1300 Inventory — supplies on hand``, so charging for a
+        freehand supply nobody drew from stock would write down inventory that
+        was never issued. Job cost ≥ ledger charge, and the gap is exactly the
+        out-of-pocket spend.
+        """
+        client, _user = _staff_client()
+        committee = _committee("Metalworking SIG")
+        wo = _corrective_wo(committee)
+        _line(wo, unit_cost="10.00", quantity="1.00")  # drawn from stock
+        _line(wo, unit_cost="23.87", was_used=False, name="Ace Hardware run")  # freehand
+
+        _complete(client, wo)
+
+        wo.refresh_from_db()
+        assert wo.actual_material_cost == Decimal("33.87")
+        assert wo.consumed_material_cost == Decimal("10.00")
+        assert committee_balance(committee) == Decimal("10.00")
+
+    def test_freehand_only_job_charges_nothing_and_warns(self):
+        """Nothing left the shelf, so there is nothing to book — even though the
+        job did cost money. The committee hears about it through the same
+        no-cost warning rather than a silent zero."""
+        client, _user = _staff_client()
+        committee = _committee("Fiber Arts SIG")
+        wo = _corrective_wo(committee)
+        _line(wo, unit_cost="23.87", was_used=False, name="Ace Hardware run")
+
+        resp = _complete(client, wo)
+
+        wo.refresh_from_db()
+        assert wo.actual_material_cost == Decimal("23.87")
+        assert Transaction.objects.count() == 0
+        assert resp.data["warning"] == NO_COST_WARNING
+        assert committee_balance(committee) == Decimal("0.00")
+
     def test_space_owned_job_posts_nothing(self):
         """No committee owns the machine — the ledger is untouched, no warning."""
         client, _user = _staff_client()

@@ -707,28 +707,31 @@ class TestActualCostRollup:
         )
         assert usage.actual_cost is None
 
-    def test_wo_total_sums_only_used_lines(self):
-        wo = _corrective_wo()
+    def test_wo_total_sums_used_lines(self):
+        wo, template = _preventive_wo(quantity=Decimal("2.00"))
+        template.unit_cost = Decimal("10.00")
+        template.was_used = True
+        template.save(update_fields=["unit_cost", "was_used"])
         WorkOrderMaterialUsage.objects.create(
             work_order=wo,
             material=None,
             is_ad_hoc=True,
             material_name="Used",
             quantity_used=Decimal("2.00"),
-            unit_cost=Decimal("10.00"),
+            unit_cost=Decimal("5.00"),
             was_used=True,
         )
-        WorkOrderMaterialUsage.objects.create(
-            work_order=wo,
-            material=None,
-            is_ad_hoc=True,
-            material_name="Not used",
-            quantity_used=Decimal("5.00"),
-            unit_cost=Decimal("100.00"),
-            was_used=False,
-        )
 
-        assert wo.actual_material_cost == Decimal("20.00")
+        assert wo.actual_material_cost == Decimal("30.00")
+
+    def test_unused_template_line_still_costs_nothing(self):
+        """A planned-but-unused PM material is a plan, not a purchase."""
+        wo, template = _preventive_wo(quantity=Decimal("5.00"))
+        template.unit_cost = Decimal("100.00")
+        template.was_used = False
+        template.save(update_fields=["unit_cost", "was_used"])
+
+        assert wo.actual_material_cost == Decimal("0.00")
 
     def test_unpriced_used_line_contributes_zero_not_an_error(self):
         wo = _corrective_wo()
@@ -820,6 +823,217 @@ class TestActualCostRollup:
         assert Decimal(resp.json()["actual_material_cost"]) == Decimal("38.37")
         item.refresh_from_db()
         assert item.current_stock == 8
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# op-4pzp — a freehand (ad-hoc) supply costs the job the moment it is added
+# ─────────────────────────────────────────────────────────────────────────────
+class TestFreehandSupplyCountsImmediately:
+    """The bug: a tech adds an out-of-pocket supply *with a price* and the job's
+    Actual Material Cost stays at zero until someone separately marks the line
+    "used" — which is neither obvious nor what ``was_used`` is for. That flag
+    governs *stock*; the money left the wallet at the hardware store.
+
+    So a priced **ad-hoc** line counts on entry, ``was_used`` or not, and moves
+    no stock in the process. A **template** line is still a plan until it is
+    marked used.
+    """
+
+    def test_priced_ad_hoc_line_counts_before_it_is_marked_used(self):
+        wo = _corrective_wo()
+        usage = WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=None,
+            is_ad_hoc=True,
+            material_name="Misc supplies — Ace Hardware",
+            quantity_used=Decimal("1.00"),
+            unit_cost=Decimal("23.87"),
+        )
+
+        assert usage.was_used is False
+        assert wo.actual_material_cost == Decimal("23.87")
+
+    def test_unpriced_ad_hoc_line_still_contributes_nothing(self):
+        """Unchanged: no ``unit_cost`` is no cost, however the line got here."""
+        wo = _corrective_wo()
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=None,
+            is_ad_hoc=True,
+            material_name="Shop rag",
+            quantity_used=Decimal("3.00"),
+        )
+
+        assert wo.actual_material_cost == Decimal("0.00")
+
+    def test_mixed_work_order_counts_each_kind_by_its_own_rule(self):
+        """One job, all four combinations, one total."""
+        wo, template_unused = _preventive_wo(quantity=Decimal("5.00"))
+        template_unused.unit_cost = Decimal("100.00")  # planned, never used → 0
+        template_unused.save(update_fields=["unit_cost"])
+        template_used = WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=template_unused.material,
+            material_name="Gasket",
+            quantity_used=Decimal("2.00"),
+            unit_cost=Decimal("3.00"),  # used template line → 6.00
+            was_used=True,
+        )
+        assert template_used.is_ad_hoc is False
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=None,
+            is_ad_hoc=True,
+            material_name="Bolts — out of pocket",
+            quantity_used=Decimal("4.00"),
+            unit_cost=Decimal("1.25"),  # freehand, never toggled → 5.00
+        )
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=None,
+            is_ad_hoc=True,
+            material_name="Sealant",
+            quantity_used=Decimal("1.00"),
+            unit_cost=Decimal("9.00"),  # freehand and toggled → 9.00, once
+            was_used=True,
+        )
+
+        assert wo.actual_material_cost == Decimal("20.00")
+
+    def test_added_over_the_api_shows_up_without_a_toggle(self):
+        """Ian's report, end to end: add a freehand supply with a cost, read the
+        work order back, and the job's Actual Material Cost is already there."""
+        client, _u = _staff_client()
+        wo = _corrective_wo()
+
+        created = client.post(
+            _add_url(wo),
+            {"material_name": "PVC fittings", "quantity_used": "3", "unit_cost": "4.15"},
+            format="json",
+        )
+        assert created.status_code == status.HTTP_201_CREATED
+        assert created.json()["was_used"] is False
+
+        resp = client.get(reverse("workorder-detail", kwargs={"pk": wo.id}))
+
+        assert resp.status_code == status.HTTP_200_OK
+        assert Decimal(resp.json()["actual_material_cost"]) == Decimal("12.45")
+
+    def test_counting_a_freehand_line_moves_no_stock(self):
+        """Cost and stock stay decoupled: the line counts, the shelf does not
+        move until someone explicitly marks it used."""
+        client, _u = _staff_client()
+        wo = _corrective_wo()
+        item = _priced_item("7.25", current_stock=10)
+
+        line = client.post(
+            _add_url(wo),
+            {"material_name": "V-belt", "quantity_used": "2", "inventory_item": str(item.id)},
+            format="json",
+        ).json()
+
+        wo.refresh_from_db()
+        item.refresh_from_db()
+        usage = WorkOrderMaterialUsage.objects.get(id=line["id"])
+        assert wo.actual_material_cost == Decimal("14.50")
+        assert usage.was_used is False
+        assert usage.applied_quantity is None
+        assert item.current_stock == 10
+        assert UsageLog.objects.filter(item=item).count() == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# consumed_material_cost — the ledger's basis, deliberately a different number
+# ─────────────────────────────────────────────────────────────────────────────
+class TestConsumedMaterialCost:
+    """``actual_material_cost`` is what the job cost; ``consumed_material_cost``
+    is what left the shelf. They diverge by exactly the freehand spend, which is
+    why the committee charge (which credits *Inventory — supplies on hand*)
+    reads the second one. See ``test_work_order_committee_charge.py``.
+    """
+
+    def test_used_only_rule_survives_on_the_consumption_basis(self):
+        wo = _corrective_wo()
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=None,
+            is_ad_hoc=True,
+            material_name="Drawn from stock",
+            quantity_used=Decimal("2.00"),
+            unit_cost=Decimal("10.00"),
+            was_used=True,
+        )
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=None,
+            is_ad_hoc=True,
+            material_name="Out of pocket",
+            quantity_used=Decimal("1.00"),
+            unit_cost=Decimal("23.87"),
+        )
+
+        assert wo.actual_material_cost == Decimal("43.87")
+        assert wo.consumed_material_cost == Decimal("20.00")
+
+    def test_the_two_agree_when_every_line_was_used(self):
+        wo, usage = _preventive_wo(quantity=Decimal("2.00"))
+        usage.unit_cost = Decimal("6.00")
+        usage.was_used = True
+        usage.save(update_fields=["unit_cost", "was_used"])
+
+        assert wo.actual_material_cost == wo.consumed_material_cost == Decimal("12.00")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The report mirror — reports and the work-order screen must say the same thing
+# ─────────────────────────────────────────────────────────────────────────────
+class TestReportMirrorMatchesTheWorkOrder:
+    """``work_order_reports.wo_actual_material_cost`` is the same sum with a
+    ``None`` for "never priced" so the reports can fall back to the estimate. A
+    freehand line has to count there too, or the cost-recovery/TCO reports
+    disagree with the screen about what the job cost.
+    """
+
+    def test_freehand_line_reaches_the_report_sum(self):
+        from inventory.services.work_order_reports import wo_actual_material_cost
+
+        wo = _corrective_wo()
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=None,
+            is_ad_hoc=True,
+            material_name="Out of pocket",
+            quantity_used=Decimal("2.00"),
+            unit_cost=Decimal("11.50"),
+        )
+
+        assert wo_actual_material_cost(wo) == wo.actual_material_cost == Decimal("23.00")
+
+    def test_unpriced_job_still_reports_none_and_falls_back(self):
+        """The None-vs-zero contract is untouched: an ad-hoc line with no price
+        is not "this job cost nothing", it is "nobody priced this job"."""
+        from inventory.services.work_order_reports import wo_actual_material_cost
+
+        wo = _corrective_wo()
+        WorkOrderMaterialUsage.objects.create(
+            work_order=wo,
+            material=None,
+            is_ad_hoc=True,
+            material_name="Shop rag",
+            quantity_used=Decimal("1.00"),
+        )
+
+        assert wo_actual_material_cost(wo) is None
+
+    def test_unused_template_line_is_excluded_from_the_report_sum_too(self):
+        from inventory.services.work_order_reports import wo_actual_material_cost
+
+        wo, usage = _preventive_wo(quantity=Decimal("5.00"))
+        usage.unit_cost = Decimal("100.00")
+        usage.save(update_fields=["unit_cost"])
+
+        assert wo_actual_material_cost(wo) is None
+        assert wo.actual_material_cost == Decimal("0.00")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

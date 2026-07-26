@@ -118,19 +118,23 @@ def wo_estimated_material_cost(
 def wo_actual_material_cost(work_order: "WorkOrder") -> Optional[Decimal]:
     """Real money spent on materials for one work order, or ``None``.
 
-    Sums ``quantity_used × unit_cost`` over the lines marked *used* — the
-    op-768w capture. Returns ``None`` (not zero) when **no** used line carries a
-    ``unit_cost``, which is how a caller tells "this job cost nothing" from "this
-    job predates actual-cost capture" and falls back to the estimate.
+    Sums ``quantity_used × unit_cost`` over the lines that cost the job money —
+    the op-768w capture. Returns ``None`` (not zero) when **no** counted line
+    carries a ``unit_cost``, which is how a caller tells "this job cost nothing"
+    from "this job predates actual-cost capture" and falls back to the estimate.
 
     Reads ``material_usage.all()``, so a caller who prefetched it pays no extra
-    query. Mirrors :attr:`inventory.models.WorkOrder.actual_material_cost`, which
-    is the same sum flattened to ``0.00`` for the API surface.
+    query. Mirrors :attr:`inventory.models.WorkOrder.actual_material_cost` —
+    including its op-4pzp rule that an **ad-hoc** line counts as soon as it is
+    priced while a template line still has to be marked *used* — and is the same
+    sum flattened to ``0.00`` for the API surface. The two must move together:
+    a report that disagreed with the work-order screen about what a job cost is
+    the bug this mirror exists to avoid.
     """
     total = Decimal("0.00")
     priced = False
     for usage in work_order.material_usage.all():
-        if not usage.was_used:
+        if not (usage.was_used or usage.is_ad_hoc):
             continue
         line_cost = usage.actual_cost
         if line_cost is None:

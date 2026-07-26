@@ -649,16 +649,51 @@ class WorkOrder(ElapsedTimerModel):
 
     @property
     def actual_material_cost(self) -> Decimal:
-        """Real money spent on materials for this job (op-768w).
+        """Real money spent on materials for this job (op-768w, op-4pzp).
 
-        Sums :attr:`WorkOrderMaterialUsage.actual_cost` over the lines actually
-        marked *used* — a planned-but-unused material cost nothing. Lines with
-        no recorded ``unit_cost`` contribute zero rather than blocking the
-        total, so a partially-priced job still reports what is known.
+        Sums :attr:`WorkOrderMaterialUsage.actual_cost` over the lines that cost
+        the job money, which is two different tests for the two kinds of row:
+
+        * **Ad-hoc** (``is_ad_hoc``) — typed in during the job: a freehand
+          supply or an out-of-pocket buy. A priced one counts the moment it is
+          added, ``was_used`` or not. That flag governs *stock*, and the money
+          left the wallet at the hardware store whether or not anyone
+          afterwards ticks a box about the shelf (op-4pzp).
+        * **Template-derived** — a frozen copy of the PM spec, so it is a
+          *plan* until someone marks it used. A planned-but-unused material
+          still costs nothing.
+
+        Lines with no recorded ``unit_cost`` contribute zero rather than
+        blocking the total, so a partially-priced job still reports what is
+        known.
 
         Reads ``material_usage.all()`` so a caller who prefetched it (every API
-        read path does) pays no extra query. This is the value downstream cost
-        reporting and the committee ledger charge consume.
+        read path does) pays no extra query. This is the job-cost roll-up the
+        cost-recovery/TCO reports and the actual-vs-estimated display consume.
+        The committee ledger charge deliberately does **not** — it books stock
+        leaving the shelf, so it reads :attr:`consumed_material_cost`.
+        """
+        return sum(
+            (
+                usage.actual_cost
+                for usage in self.material_usage.all()
+                if (usage.was_used or usage.is_ad_hoc) and usage.actual_cost is not None
+            ),
+            Decimal("0.00"),
+        )
+
+    @property
+    def consumed_material_cost(self) -> Decimal:
+        """Priced material this job actually drew down — the ledger's basis.
+
+        Only lines marked *used*, ad-hoc or not: the pre-op-4pzp reading of
+        :attr:`actual_material_cost`, kept as a number of its own because the
+        committee charge (``inventory.services.work_order_ledger``) books
+        ``DR 5100 committee supplies expense / CR 1300 inventory — supplies on
+        hand``. Crediting 1300 is an assertion that stock left the shelf, so an
+        ad-hoc line entered but never marked used — real job cost, and counted
+        by :attr:`actual_material_cost` — must not reach it, or the books write
+        down inventory that was never issued.
         """
         return sum(
             (

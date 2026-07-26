@@ -14,6 +14,7 @@ const buildMetrics = (overrides: Partial<InventoryItemMetrics> = {}): InventoryI
   quantity_on_order: 7,
   quantity_available: 6,
   quantity_committed: 4,
+  committed_breakdown: [],
   quantity_in_transit: 3,
   reorder_point: 5,
   lead_time_days: 14,

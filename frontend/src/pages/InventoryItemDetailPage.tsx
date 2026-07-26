@@ -25,14 +25,16 @@ import { IconArchive, IconArchiveOff, IconClipboardCheck, IconEdit, IconPackageE
 import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import CommittedBreakdown from '../components/inventory/CommittedBreakdown';
 import InventoryMetricsRow from '../components/inventory/InventoryMetricsRow';
+import PurchaseReceiptsPanel from '../components/inventory/PurchaseReceiptsPanel';
 import SerializedComponentsPanel from '../components/inventory/SerializedComponentsPanel';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { useNotifications } from '../hooks/useNotifications';
 import { assetsAPI, CycleCountPayload, inventoryAPI, reorderAPI, sigAPI } from '../services/api';
-import { Asset, InventoryItem, InventoryItemMetrics, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
+import { Asset, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
 import { showError } from '../utils/dialogs';
 
 // Cycle-count reason options (op-c7y4). Mirrors the reconciliation grid's
@@ -326,6 +328,7 @@ const InventoryItemDetailPage: React.FC = () => {
   const [metrics, setMetrics] = useState<InventoryItemMetrics | null>(null);
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
   const [stockHistory, setStockHistory] = useState<StockHistory | null>(null);
+  const [purchaseHistory, setPurchaseHistory] = useState<ItemPurchaseHistory | null>(null);
   const [reorderHistory, setReorderHistory] = useState<ReorderRequest[]>([]);
   // Two *different* asset relationships, both surfaced on the Linked Assets
   // tab (op-qdfr). `linkedAssets` = Asset.inventory_item, i.e. the asset IS an
@@ -360,6 +363,7 @@ const InventoryItemDetailPage: React.FC = () => {
       metricsRes,
       usageLogsRes,
       stockHistoryRes,
+      purchaseHistoryRes,
       reorderRes,
       assetsRes,
       usedByRes,
@@ -368,6 +372,7 @@ const InventoryItemDetailPage: React.FC = () => {
       inventoryAPI.getItemMetrics(id),
       inventoryAPI.getUsageLogs(id),
       inventoryAPI.getStockHistory(id),
+      inventoryAPI.getPurchaseHistory(id),
       reorderAPI.listRequests({ status: undefined }),
       assetsAPI.listAssets({ inventory_item: id }),
       assetsAPI.listAssets({ consumable_for_item: id }),
@@ -395,6 +400,15 @@ const InventoryItemDetailPage: React.FC = () => {
       setStockHistory(stockHistoryRes.value.data);
     } else if (stockHistoryRes.status === 'rejected') {
       console.error('Error loading stock history:', stockHistoryRes.reason);
+    }
+
+    // Purchase/receipt provenance is auth-required (unlike the item read), so a
+    // rejection here is expected for an anonymous viewer — the tab degrades to
+    // its empty state rather than taking the page down.
+    if (purchaseHistoryRes.status === 'fulfilled' && purchaseHistoryRes.value) {
+      setPurchaseHistory(purchaseHistoryRes.value.data);
+    } else if (purchaseHistoryRes.status === 'rejected') {
+      console.error('Error loading purchase history:', purchaseHistoryRes.reason);
     }
 
     if (reorderRes.status === 'fulfilled') {
@@ -544,8 +558,18 @@ const InventoryItemDetailPage: React.FC = () => {
       </Group>
 
       {/* Prominent metrics strip — hard to get from a single screen otherwise
-          (issue-5): SKU · QOH · QOO · QA · QC · QIT · RP · Lead · Cost. */}
-      {metrics && <InventoryMetricsRow sku={item.sku} metrics={metrics} />}
+          (issue-5): SKU · QOH · QOO · QA · QC · QIT · RP · Lead · Cost. The
+          "Committed to" strip underneath attributes QC to the work orders (and
+          so the assets) holding it (op-l4i0). */}
+      {metrics && (
+        <>
+          <InventoryMetricsRow sku={item.sku} metrics={metrics} />
+          <CommittedBreakdown
+            entries={metrics.committed_breakdown || []}
+            totalCommitted={metrics.quantity_committed}
+          />
+        </>
+      )}
 
       {/* Tabs */}
       <Tabs value={activeTab} onChange={setActiveTab}>
@@ -553,6 +577,7 @@ const InventoryItemDetailPage: React.FC = () => {
           <Tabs.Tab value="overview">Overview</Tabs.Tab>
           <Tabs.Tab value="stock-history">Stock History</Tabs.Tab>
           <Tabs.Tab value="reorder-history">Reorder History</Tabs.Tab>
+          <Tabs.Tab value="purchase-receipts">Purchase / Receipts</Tabs.Tab>
           <Tabs.Tab value="usage-logs">Usage Logs</Tabs.Tab>
           <Tabs.Tab value="linked-assets">Linked Assets</Tabs.Tab>
           {/* Always present so a user looking to add a serial number can find
@@ -771,6 +796,13 @@ const InventoryItemDetailPage: React.FC = () => {
               </Table>
             )}
           </Card>
+        </Tabs.Panel>
+
+        {/* Purchase / Receipts Tab — per-order cost history plus every
+            delivery of this item, grouped by order so one order's several
+            tracking numbers read as one shipment set (op-96uo). */}
+        <Tabs.Panel value="purchase-receipts" pt="md">
+          <PurchaseReceiptsPanel history={purchaseHistory} />
         </Tabs.Panel>
 
         {/* Usage Logs Tab */}

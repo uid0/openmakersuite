@@ -1378,6 +1378,67 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         except PurchaseOrderItem.DoesNotExist:
             return Response({"error": "Line item not found"}, status=status.HTTP_404_NOT_FOUND)
 
+        # Quantity edits (op-yh4h) — "we actually need 12, not 10" on an order
+        # that is already out. Applied before the cost branches below so a
+        # combined {quantity_ordered, line_cost} PATCH divides the line cost by
+        # the NEW quantity.
+        quantity_changed = False
+        if "quantity_ordered" in request.data:
+            raw_quantity = request.data["quantity_ordered"]
+            try:
+                new_quantity = int(str(raw_quantity))
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": f"Invalid quantity ordered value: {raw_quantity!r}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if new_quantity < 1:
+                return Response(
+                    {"error": "Quantity ordered must be a positive integer"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if line_item.is_voided:
+                return Response(
+                    {"error": "Cannot change the quantity of a voided line item"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Same window the receive flow treats as "in flight", plus draft.
+            # A closed order (received/cancelled/voided) is settled — reopening
+            # it by re-ordering more is a new PO, not a line edit.
+            if purchase_order.status not in [
+                PurchaseOrder.Status.DRAFT,
+                PurchaseOrder.Status.SENT,
+                PurchaseOrder.Status.CONFIRMED,
+                PurchaseOrder.Status.PARTIALLY_RECEIVED,
+            ]:
+                return Response(
+                    {
+                        "error": (
+                            "Quantity can only be changed while the purchase order is "
+                            "draft, sent, confirmed, or partially received"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if new_quantity < line_item.quantity_received:
+                return Response(
+                    {
+                        "error": (
+                            f"Quantity ordered ({new_quantity}) cannot be less than the "
+                            f"quantity already received ({line_item.quantity_received})"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if new_quantity != line_item.quantity_ordered:
+                services.apply_line_quantity(line_item, new_quantity)
+                quantity_changed = True
+
         # Allow updating expected_shipment_date and notes
         expected_shipment_date = request.data.get("expected_shipment_date")
         if expected_shipment_date is not None:
@@ -1487,7 +1548,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        line_item.save()
+        with transaction.atomic():
+            line_item.save()
+            # The PO-level estimated_total is frozen at create time from each
+            # line's estimated_cost, so a quantity edit has to re-roll it.
+            if quantity_changed:
+                services.recalculate_estimated_total(purchase_order)
 
         from .serializers import PurchaseOrderItemSerializer
 

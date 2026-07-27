@@ -141,6 +141,47 @@ class Supplier(models.Model):
         return self.supplied_items
 
 
+class SupplierAgreement(models.Model):
+    """
+    A purchase or pricing agreement negotiated with a supplier (op-yoos).
+
+    Some suppliers give the makerspace contract pricing, a standing quote or a
+    membership/nonprofit discount. The agreement is recorded here — name, terms
+    notes and an optional scan of the paperwork — so a purchase order can point
+    at the agreement it was placed under (``PurchaseOrder.supplier_agreement``).
+    """
+
+    supplier = models.ForeignKey(
+        "Supplier",
+        on_delete=models.CASCADE,
+        related_name="agreements",
+        help_text="Supplier this agreement is with",
+    )
+    name = models.CharField(
+        max_length=200,
+        help_text="Short name for the agreement (e.g. '2026 nonprofit pricing')",
+    )
+    notes = models.TextField(blank=True, help_text="Terms, pricing notes, contacts")
+    document = models.FileField(
+        upload_to="supplier_agreements/",
+        null=True,
+        blank=True,
+        help_text="Optional scan/PDF of the signed agreement or quote",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive agreements are hidden when picking one on a purchase order",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.supplier.name} — {self.name}"
+
+
 class Category(models.Model):
     """
     Categories for organizing inventory items.

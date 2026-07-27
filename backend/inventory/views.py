@@ -60,6 +60,7 @@ from .models import (
     SerializedComponent,
     StockReconciliation,
     Supplier,
+    SupplierAgreement,
     UsageLog,
     WorkOrder,
     WorkOrderAttachment,
@@ -103,6 +104,7 @@ from .serializers import (
     SerializedComponentSerializer,
     StockReconciliationBatchSerializer,
     StockReconciliationSerializer,
+    SupplierAgreementSerializer,
     SupplierDetailSerializer,
     SupplierSerializer,
     UsageLogSerializer,
@@ -251,6 +253,33 @@ class SupplierViewSet(viewsets.ModelViewSet):
                     "order_statistics": {},
                 }
             )
+
+
+class SupplierAgreementViewSet(viewsets.ModelViewSet):
+    """API endpoint for supplier purchase/pricing agreements (op-yoos).
+
+    Filterable by ``?supplier=<id>`` and ``?is_active=true|false`` — the
+    purchase-order create form asks for one supplier's active agreements.
+    """
+
+    queryset = SupplierAgreement.objects.select_related("supplier").all()
+    serializer_class = SupplierAgreementSerializer
+    # Mirrors SupplierViewSet: agreements are supplier reference data.
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        """Filter agreements by supplier and/or active flag."""
+        queryset = super().get_queryset()
+
+        supplier = self.request.query_params.get("supplier")
+        if supplier:
+            queryset = queryset.filter(supplier_id=supplier)
+
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None and is_active != "":
+            queryset = queryset.filter(is_active=is_active.lower() in ("true", "1", "yes"))
+
+        return queryset
 
 
 class CategoryViewSet(viewsets.ModelViewSet):

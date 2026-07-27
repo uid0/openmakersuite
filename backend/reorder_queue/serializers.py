@@ -232,6 +232,9 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     supplier_ordering_adapter = serializers.CharField(
         source="supplier.ordering_adapter", read_only=True, allow_null=True
     )
+    # The purchase/pricing agreement this order was placed under (op-yoos).
+    # Nested so the detail page can label it without a second request.
+    supplier_agreement_details = serializers.SerializerMethodField()
     created_by_username = serializers.CharField(source="created_by.username", read_only=True)
     sent_by_username = serializers.CharField(
         source="sent_by.username", read_only=True, allow_null=True
@@ -265,6 +268,8 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "supplier",
             "supplier_details",
             "supplier_ordering_adapter",
+            "supplier_agreement",
+            "supplier_agreement_details",
             "status",
             "order_date",
             "expected_delivery_date",
@@ -295,6 +300,13 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["po_number", "order_date", "updated_at"]
 
+    def get_supplier_agreement_details(self, obj):
+        """Minimal {id, name} for the attached agreement, or None."""
+        agreement = obj.supplier_agreement
+        if agreement is None:
+            return None
+        return {"id": agreement.id, "name": agreement.name}
+
 
 class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating purchase orders with line items."""
@@ -318,12 +330,30 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
             "id",
             "po_number",
             "supplier",
+            "supplier_agreement",
             "expected_delivery_date",
             "sales_order_number",
             "notes",
             "items",
         ]
         read_only_fields = ["id", "po_number"]
+
+    def validate(self, attrs):
+        """Reject an agreement that belongs to a different supplier (op-yoos)."""
+        attrs = super().validate(attrs)
+
+        agreement = attrs.get("supplier_agreement")
+        supplier = attrs.get("supplier")
+        if agreement is not None and supplier is not None and agreement.supplier_id != supplier.id:
+            raise serializers.ValidationError(
+                {
+                    "supplier_agreement": (
+                        f"Agreement '{agreement.name}' belongs to "
+                        f"{agreement.supplier.name}, not to the selected supplier."
+                    )
+                }
+            )
+        return attrs
 
     def validate_items(self, value):
         """Validate items list: non-empty and no duplicate item_supplier_id/asset_id."""

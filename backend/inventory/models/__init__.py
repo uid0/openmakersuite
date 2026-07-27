@@ -28,6 +28,7 @@ from .core import (  # noqa: F401
     StockLevelSnapshot,
     StockReconciliation,
     Supplier,
+    SupplierAgreement,
     UsageLog,
     generate_sku,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "generate_sku",
     "Location",
     "Supplier",
+    "SupplierAgreement",
     "Category",
     "InventoryItem",
     "InventorySafetyProfile",

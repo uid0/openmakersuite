@@ -96,6 +96,7 @@ describe('InventoryItemDetailPage', () => {
     quantity_on_order: 20,
     quantity_available: 8,
     quantity_committed: 2,
+    committed_breakdown: [],
     quantity_in_transit: 5,
     reorder_point: 20,
     lead_time_days: 7,
@@ -122,6 +123,9 @@ describe('InventoryItemDetailPage', () => {
     });
     (api.assetsAPI.listAssets as jest.Mock).mockResolvedValue({
       data: { results: [] },
+    });
+    (api.inventoryAPI.getPurchaseHistory as jest.Mock).mockResolvedValue({
+      data: { order_costs: [], deliveries: [] },
     });
   });
 
@@ -567,5 +571,150 @@ describe('InventoryItemDetailPage', () => {
     // The item view is intact; only the metrics strip is absent.
     expect(screen.queryByTestId('inventory-metrics-row')).not.toBeInTheDocument();
     consoleError.mockRestore();
+  });
+
+  // ---- op-u9ap: Purchase / Receipts tab (#969) ----
+
+  it('loads the purchase history and renders order costs plus deliveries grouped by order', async () => {
+    (api.inventoryAPI.getPurchaseHistory as jest.Mock).mockResolvedValue({
+      data: {
+        order_costs: [
+          {
+            purchase_order: 7,
+            po_number: 'PO-0007',
+            order_date: '2026-01-05T10:00:00Z',
+            status: 'received',
+            quantity_ordered: 12,
+            unit_cost_ordered: '4.5000',
+            unit_cost_actual: '4.7500',
+          },
+        ],
+        deliveries: [
+          {
+            purchase_order: 7,
+            po_number: 'PO-0007',
+            delivery_date: '2026-01-10T10:00:00Z',
+            tracking_number: '1Z-FIRST',
+            carrier: 'UPS',
+            quantity_received: 8,
+            receipt_notes: 'Short shipped',
+            is_complete: false,
+          },
+          {
+            purchase_order: 7,
+            po_number: 'PO-0007',
+            delivery_date: '2026-01-17T10:00:00Z',
+            tracking_number: '1Z-SECOND',
+            carrier: 'UPS',
+            quantity_received: 4,
+            receipt_notes: '',
+            is_complete: true,
+          },
+        ],
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+    expect(api.inventoryAPI.getPurchaseHistory).toHaveBeenCalledWith('test-id');
+
+    fireEvent.click(screen.getByRole('tab', { name: /Purchase \/ Receipts/i }));
+
+    const costs = await screen.findByTestId('order-cost-history');
+    expect(costs).toHaveTextContent('PO-0007');
+    expect(costs).toHaveTextContent('$4.50');
+    expect(costs).toHaveTextContent('$4.75');
+
+    // One order, two tracking numbers — the whole point of grouping by PO.
+    const group = screen.getByTestId('delivery-group-7');
+    expect(group).toHaveTextContent('2 deliveries');
+    expect(group).toHaveTextContent('1Z-FIRST');
+    expect(group).toHaveTextContent('1Z-SECOND');
+    expect(group).toHaveTextContent('Short shipped');
+  });
+
+  it('shows the purchase/receipts empty states when the item has no orders', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /Purchase \/ Receipts/i }));
+
+    expect(await screen.findByText('This item has never been ordered.')).toBeInTheDocument();
+    expect(screen.getByText('No deliveries recorded for this item.')).toBeInTheDocument();
+  });
+
+  it('still renders the item when the purchase-history call fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (api.inventoryAPI.getPurchaseHistory as jest.Mock).mockRejectedValue(new Error('boom'));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /Purchase \/ Receipts/i }));
+    expect(await screen.findByText('This item has never been ordered.')).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  // ---- op-u9ap: committed-quantity attribution (#970) ----
+
+  it('attributes the committed quantity to its work orders under the metrics row', async () => {
+    (api.inventoryAPI.getItemMetrics as jest.Mock).mockResolvedValue({
+      data: {
+        ...mockMetrics,
+        quantity_committed: 4,
+        committed_breakdown: [
+          {
+            work_order_id: 'wo-1',
+            work_order_short_id: 'WO-1A2B3C4D',
+            asset_id: 'asset-1',
+            asset_name: 'Laser Cutter',
+            quantity: 3,
+          },
+          {
+            work_order_id: 'wo-2',
+            work_order_short_id: 'WO-9F8E7D6C',
+            asset_id: null,
+            asset_name: null,
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    const breakdown = await screen.findByTestId('committed-breakdown');
+    expect(breakdown).toHaveTextContent('Committed to');
+    // The rows sum to the QC cell shown in the strip above them.
+    expect(screen.getByTestId('metric-qc')).toHaveTextContent('4');
+    expect(breakdown).toHaveTextContent('WO-1A2B3C4D');
+    expect(breakdown).toHaveTextContent('Laser Cutter');
+    expect(breakdown).toHaveTextContent('WO-9F8E7D6C');
+    expect(breakdown).toHaveTextContent('No asset');
+  });
+
+  it('explains an empty committed breakdown rather than hiding it', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Item')).toBeInTheDocument();
+    });
+
+    expect(await screen.findByTestId('committed-breakdown-empty')).toHaveTextContent(
+      'Nothing is committed to an open work order.'
+    );
   });
 });

@@ -216,6 +216,18 @@ export interface InventoryItem {
 
 export type InventoryCostTrend = 'up' | 'down' | 'flat' | 'no_history';
 
+// One open work order holding part of an item's committed quantity (op-l4i0).
+// The attribution side of QC: which job — and so which machine — the reserved
+// stock is going to. Entries arrive oldest work order first and sum to
+// `quantity_committed`. `asset_id`/`asset_name` are null on an asset-less WO.
+export interface CommittedBreakdownEntry {
+  work_order_id: string;
+  work_order_short_id: string; // e.g. "WO-1A2B3C4D"
+  asset_id: string | null;
+  asset_name: string | null;
+  quantity: number;
+}
+
 // Computed stock + cost metrics for the item-detail metrics row (issue-5).
 // Served by GET /api/inventory/items/<id>/metrics/. Quantities are numbers;
 // money fields arrive as decimal strings (matching InventoryItem.unit_cost).
@@ -224,6 +236,7 @@ export interface InventoryItemMetrics {
   quantity_on_order: number; // QOO — open PO units
   quantity_available: number; // QA — on hand minus committed
   quantity_committed: number; // QC — open work-order demand
+  committed_breakdown: CommittedBreakdownEntry[]; // which WOs/assets hold QC
   quantity_in_transit: number; // QIT — partially-received (⊆ QOO)
   reorder_point: number; // RP
   lead_time_days: number | null; // Lead
@@ -232,6 +245,41 @@ export interface InventoryItemMetrics {
   last_po_unit_cost: string | null;
   is_case_based: boolean;
   case_size: number | null; // units per case
+}
+
+// Per-item purchase/receipt provenance (op-96uo) — payload of
+// GET /api/inventory/items/<id>/purchase_history/. Both lists are flat, oldest
+// first, and carry the PO pk (`purchase_order`) alongside `po_number` because
+// po_number is nullable and so is not a safe grouping key. Money fields arrive
+// as decimal strings (DRF DecimalField), like InventoryItem.unit_cost.
+
+// One purchase-order line: what this item cost on that order.
+export interface ItemOrderCost {
+  purchase_order: number;
+  po_number: string | null;
+  order_date: string;
+  status: string;
+  quantity_ordered: number;
+  unit_cost_ordered: string;
+  unit_cost_actual: string | null;
+}
+
+// One delivery of the item. A partially-shipped order yields several rows for
+// the same purchase_order, each with its own tracking number.
+export interface ItemDelivery {
+  purchase_order: number;
+  po_number: string | null;
+  delivery_date: string;
+  tracking_number: string;
+  carrier: string;
+  quantity_received: number;
+  receipt_notes: string;
+  is_complete: boolean;
+}
+
+export interface ItemPurchaseHistory {
+  order_costs: ItemOrderCost[];
+  deliveries: ItemDelivery[];
 }
 
 export interface UsageLog {

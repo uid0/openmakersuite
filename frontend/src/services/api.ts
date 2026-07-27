@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, Supplier, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -1786,6 +1786,9 @@ export interface CreatePurchaseOrderItem {
 
 export interface CreatePurchaseOrderData {
   supplier: number;
+  // Optional purchase/pricing agreement this order is placed under (op-yoos).
+  // Must belong to `supplier` — the backend rejects a mismatch.
+  supplier_agreement?: number;
   expected_delivery_date?: string;
   notes?: string;
   items: CreatePurchaseOrderItem[];
@@ -1824,6 +1827,18 @@ export interface OrderPadExport {
   // Amazon adapter only.
   cart_urls?: string[];
 }
+
+/**
+ * Per-supplier purchase/pricing agreements (op-yoos). The PO create form asks
+ * for one supplier's *active* agreements so retired paperwork stays out of the
+ * picker.
+ */
+export const supplierAgreementAPI = {
+  listBySupplier: (supplierId: number) =>
+    api.get<{ results: SupplierAgreement[] }>(
+      `/inventory/supplier-agreements/?supplier=${supplierId}&is_active=true`
+    ),
+};
 
 export const purchaseOrderAPI = {
   listOrders: (params?: { status?: string }) =>

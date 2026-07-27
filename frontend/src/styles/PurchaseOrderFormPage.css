@@ -134,6 +134,38 @@
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
+/* Optional purchase/pricing agreement picker (op-yoos) — only shown when the
+   selected supplier has active agreements on file. */
+.supplier-agreement-picker {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  max-width: 32rem;
+}
+
+.supplier-agreement-picker label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary, #64748b);
+}
+
+.supplier-agreement-picker select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: 0.375rem;
+  background: var(--bg-primary, #ffffff);
+  color: var(--text-primary, #1a202c);
+  font-size: 0.9375rem;
+}
+
+.supplier-agreement-picker .agreement-notes {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary, #64748b);
+  white-space: pre-wrap;
+}
+
 .supplier-card-header {
   display: flex;
   align-items: center;

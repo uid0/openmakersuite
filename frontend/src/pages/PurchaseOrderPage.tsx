@@ -75,6 +75,10 @@ interface PurchaseOrder {
   // Selects the adapter-aware order-pad affordances (op-svpq): Amazon "Open
   // cart" vs HD Supply / generic download+copy. Read-only, from the supplier.
   supplier_ordering_adapter: OrderingAdapter | null;
+  // The purchase/pricing agreement this order was placed under (op-yoos).
+  // Optional — most orders are placed at list price.
+  supplier_agreement: number | null;
+  supplier_agreement_details: { id: number; name: string } | null;
   status: string;
   status_label: string;
   order_date: string;
@@ -1078,6 +1082,10 @@ const PurchaseOrderPage: React.FC = () => {
         <div className="info-item">
           <span className="info-label">Sales Order #:</span>
           <span className="info-value">{order.sales_order_number || '—'}</span>
+        </div>
+        <div className="info-item">
+          <span className="info-label">Agreement:</span>
+          <span className="info-value">{order.supplier_agreement_details?.name || '—'}</span>
         </div>
         <div className="info-item">
           <span className="info-label">Estimated Total:</span>

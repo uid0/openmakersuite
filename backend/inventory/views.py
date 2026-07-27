@@ -273,7 +273,12 @@ class SupplierAgreementViewSet(viewsets.ModelViewSet):
 
         supplier = self.request.query_params.get("supplier")
         if supplier:
-            queryset = queryset.filter(supplier_id=supplier)
+            # A non-numeric ?supplier= is a caller mistake, not a server error —
+            # answer with an empty page rather than letting the ORM raise.
+            try:
+                queryset = queryset.filter(supplier_id=int(supplier))
+            except (TypeError, ValueError):
+                return queryset.none()
 
         is_active = self.request.query_params.get("is_active")
         if is_active is not None and is_active != "":

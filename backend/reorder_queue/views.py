@@ -1812,7 +1812,11 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
     """API endpoint for order receipt and barcode scanning."""
 
     queryset = OrderDelivery.objects.select_related(
-        "purchase_order__supplier", "received_by"
+        "purchase_order__supplier",
+        # op-yoos: the nested purchase_order_details carries
+        # supplier_agreement_details — joined so it costs no query per delivery.
+        "purchase_order__supplier_agreement",
+        "received_by",
     ).prefetch_related("items__purchase_order_item__item_supplier__item")
 
     serializer_class = OrderDeliverySerializer

@@ -224,14 +224,19 @@ class PurchaseOrderAttachmentSerializer(serializers.ModelSerializer):
 def validate_agreement_supplier(attrs, instance=None):
     """An order may only cite an agreement held with *its own* supplier (op-yoos).
 
-    Shared by the create and update serializers. On a partial update the
-    supplier may not be in ``attrs`` at all, so it falls back to the instance's
-    current supplier. Returns ``attrs`` unchanged; raises otherwise.
-    """
-    if "supplier_agreement" not in attrs:
-        return attrs
+    Shared by the create and update serializers. Both sides of the pair are
+    resolved from the payload *or*, on a partial update, from the instance —
+    so re-pointing the order at a different supplier is caught just as surely
+    as attaching the wrong agreement. To move an order to another supplier,
+    clear or replace its agreement in the same request.
 
-    agreement = attrs["supplier_agreement"]
+    Returns ``attrs`` unchanged; raises otherwise.
+    """
+    agreement = (
+        attrs["supplier_agreement"]
+        if "supplier_agreement" in attrs
+        else getattr(instance, "supplier_agreement", None)
+    )
     if agreement is None:
         return attrs
 

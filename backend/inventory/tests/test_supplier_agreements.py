@@ -177,6 +177,15 @@ class TestSupplierAgreementEndpoint:
         assert [row["name"] for row in active.data["results"]] == ["Live"]
         assert [row["name"] for row in retired.data["results"]] == ["Retired"]
 
+    def test_a_junk_supplier_filter_is_an_empty_page_not_a_500(self):
+        client, _ = _authed_client()
+        SupplierAgreementFactory()
+
+        response = client.get(AGREEMENTS_URL, {"supplier": "not-an-id"})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["results"] == []
+
     def test_create_requires_authentication(self):
         supplier = SupplierFactory()
 
@@ -353,6 +362,73 @@ class TestPurchaseOrderAgreement:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert PurchaseOrder.objects.get(id=created.data["id"]).supplier_agreement is None
+
+    def test_moving_the_order_to_another_supplier_cannot_strand_the_agreement(self):
+        """Changing only ``supplier`` must not leave a foreign agreement attached."""
+        client, _ = _authed_client()
+        supplier = SupplierFactory()
+        agreement = SupplierAgreementFactory(supplier=supplier)
+        other_supplier = SupplierFactory()
+        created = client.post(
+            "/api/reorders/purchase-orders/",
+            self._po_payload(supplier, supplier_agreement=agreement.id),
+            format="json",
+        )
+
+        response = client.patch(
+            f"/api/reorders/purchase-orders/{created.data['id']}/",
+            {"supplier": other_supplier.id},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        purchase_order = PurchaseOrder.objects.get(id=created.data["id"])
+        assert purchase_order.supplier == supplier
+        assert purchase_order.supplier_agreement == agreement
+
+    def test_moving_suppliers_is_allowed_when_the_agreement_is_cleared_too(self):
+        client, _ = _authed_client()
+        supplier = SupplierFactory()
+        agreement = SupplierAgreementFactory(supplier=supplier)
+        other_supplier = SupplierFactory()
+        created = client.post(
+            "/api/reorders/purchase-orders/",
+            self._po_payload(supplier, supplier_agreement=agreement.id),
+            format="json",
+        )
+
+        response = client.patch(
+            f"/api/reorders/purchase-orders/{created.data['id']}/",
+            {"supplier": other_supplier.id, "supplier_agreement": None},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        purchase_order = PurchaseOrder.objects.get(id=created.data["id"])
+        assert purchase_order.supplier == other_supplier
+        assert purchase_order.supplier_agreement is None
+
+    def test_editing_an_unrelated_field_on_an_agreement_order_still_works(self):
+        """The stricter guard must not block ordinary edits."""
+        client, _ = _authed_client()
+        supplier = SupplierFactory()
+        agreement = SupplierAgreementFactory(supplier=supplier)
+        created = client.post(
+            "/api/reorders/purchase-orders/",
+            self._po_payload(supplier, supplier_agreement=agreement.id),
+            format="json",
+        )
+
+        response = client.patch(
+            f"/api/reorders/purchase-orders/{created.data['id']}/",
+            {"sales_order_number": "SO-123"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        purchase_order = PurchaseOrder.objects.get(id=created.data["id"])
+        assert purchase_order.sales_order_number == "SO-123"
+        assert purchase_order.supplier_agreement == agreement
 
     def test_agreement_details_cost_no_extra_query_per_order(self):
         """The viewset's select_related feeds the display field (no N+1)."""

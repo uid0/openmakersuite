@@ -2096,6 +2096,73 @@ class TestPurchaseOrderListVoidHandling:
 
 
 @pytest.mark.integration
+class TestPurchaseOrderListDraftFilter:
+    """Tests for op-nr6h: a saved draft PO must be findable again.
+
+    Creating a PO leaves it in ``draft``, and the web list now offers a "Draft"
+    filter option that sends ``?status=draft`` to narrow to unsent orders.
+    These guard that the query param actually surfaces the draft, that the
+    all-line-items-voided filter (oms-a8o, above) does not swallow a draft that
+    has line items, and that drafts stay server-side private from the public
+    list. No view change was needed — these pin the behaviour the web relies on.
+    """
+
+    def _make_po(self, user, *, po_status, item_count=1):
+        supplier = SupplierFactory()
+        purchase_order = PurchaseOrder.objects.create(
+            supplier=supplier,
+            status=po_status,
+            created_by=user,
+        )
+        for _ in range(item_count):
+            PurchaseOrderItem.objects.create(
+                purchase_order=purchase_order,
+                item_supplier=ItemSupplierFactory(supplier=supplier),
+                quantity_ordered=5,
+                unit_cost_ordered=Decimal("10.00"),
+            )
+        purchase_order.calculate_estimated_total()
+        purchase_order.save()
+        return purchase_order
+
+    def test_status_draft_lists_a_draft_with_items(self, authenticated_client):
+        """?status=draft returns the draft — it is not hidden by the void filter."""
+        client, user = authenticated_client
+        draft_po = self._make_po(user, po_status=PurchaseOrder.Status.DRAFT)
+        sent_po = self._make_po(user, po_status=PurchaseOrder.Status.SENT)
+
+        url = reverse("purchaseorder-list")
+        response = client.get(url, {"status": "draft"})
+
+        assert response.status_code == status.HTTP_200_OK
+        listed_ids = {row["id"] for row in response.data["results"]}
+        assert draft_po.id in listed_ids
+        assert sent_po.id not in listed_ids
+
+    def test_unfiltered_list_still_includes_the_draft_for_staff(self, authenticated_client):
+        """An authenticated user's unfiltered list is not restricted to sent+."""
+        client, user = authenticated_client
+        draft_po = self._make_po(user, po_status=PurchaseOrder.Status.DRAFT)
+
+        url = reverse("purchaseorder-list")
+        response = client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert draft_po.id in {row["id"] for row in response.data["results"]}
+
+    def test_status_draft_hides_drafts_from_anonymous_users(self, api_client):
+        """Drafts stay private: the public list is active+settled only."""
+        user = User.objects.create_user(username="po-draft-owner", password="pw12345678")
+        self._make_po(user, po_status=PurchaseOrder.Status.DRAFT)
+
+        url = reverse("purchaseorder-list")
+        response = api_client.get(url, {"status": "draft"})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["results"] == []
+
+
+@pytest.mark.integration
 class TestPurchaseOrderAutoTransitionToSent:
     """DRAFT -> SENT auto-transition when a sales order number is attached (oms-qdxss).
 

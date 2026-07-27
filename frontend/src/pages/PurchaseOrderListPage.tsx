@@ -154,6 +154,7 @@ const PurchaseOrderListPage: React.FC = () => {
 
   const getStatusClass = (status: string) => {
     const statusMap: { [key: string]: string } = {
+      draft: 'status-draft',
       sent: 'status-sent',
       confirmed: 'status-confirmed',
       partially_received: 'status-partially-received',
@@ -219,6 +220,10 @@ const PurchaseOrderListPage: React.FC = () => {
           className="status-filter-select"
         >
           <option value="">All Active & Settled</option>
+          {/* Narrows to saved-but-unsent orders so a draft can be found and
+              resumed. Only signed-in users see drafts at all; the public list
+              is restricted to active and settled orders server-side. */}
+          <option value="draft">Draft</option>
           <option value="sent">Sent to Supplier</option>
           <option value="confirmed">Confirmed by Supplier</option>
           <option value="partially_received">Partially Received</option>

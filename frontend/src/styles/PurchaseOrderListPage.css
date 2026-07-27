@@ -204,6 +204,13 @@
   display: inline-block;
 }
 
+/* Unsent work-in-progress: muted amber so a draft reads as "not yet ordered"
+   rather than as another in-flight order. */
+.status-badge.status-draft {
+  background-color: #fef9c3;
+  color: #854d0e;
+}
+
 .status-badge.status-sent {
   background-color: #dbeafe;
   color: #1e40af;

@@ -14,10 +14,13 @@ import {
   ReorderDataItem,
   ReorderDataSupplier,
   scannerAPI,
+  sigAPI,
   supplierAgreementAPI,
+  workOrderAPI,
 } from '../services/api';
-import { SupplierAgreement } from '../types';
+import { SIG, SupplierAgreement, WorkOrder } from '../types';
 import '../styles/PurchaseOrderFormPage.css';
+import { workOrderOptionLabel } from '../utils/associations';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
 interface SelectedItem extends ReorderDataItem {
@@ -71,6 +74,14 @@ const PurchaseOrderFormPage: React.FC = () => {
   const [agreements, setAgreements] = useState<SupplierAgreement[]>([]);
   const [selectedAgreementId, setSelectedAgreementId] = useState<number | null>(null);
 
+  // Order-level association (op-shb9): "this order is for job X" / "…on behalf
+  // of committee Y". Both optional and independent of the supplier, so the
+  // options are loaded once. Per-line association is done on the detail page.
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [sigs, setSigs] = useState<SIG[]>([]);
+  const [selectedWorkOrderId, setSelectedWorkOrderId] = useState<string>('');
+  const [selectedCommitteeId, setSelectedCommitteeId] = useState<number | null>(null);
+
   // Line items state
   const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
   const [selectedAssets, setSelectedAssets] = useState<SelectedAsset[]>([]);
@@ -102,6 +113,30 @@ const PurchaseOrderFormPage: React.FC = () => {
   useEffect(() => {
     loadReorderData();
   }, [loadReorderData]);
+
+  // Options for the order-level association pickers (op-shb9). Only unfinished
+  // jobs are offered — you do not raise a PO for a closed work order. Neither
+  // list is required to create an order, so a failure just leaves that picker
+  // empty rather than blocking the form.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [openWos, activeWos, mySigs] = await Promise.allSettled([
+        workOrderAPI.listWorkOrders({ status: 'open' }),
+        workOrderAPI.listWorkOrders({ status: 'in_progress' }),
+        sigAPI.listMySIGs(),
+      ]);
+      if (cancelled) return;
+      const results = (settled: PromiseSettledResult<any>): WorkOrder[] =>
+        settled.status === 'fulfilled' ? (settled.value?.data?.results ?? []) : [];
+      setWorkOrders([...results(openWos), ...results(activeWos)]);
+      setSigs(mySigs.status === 'fulfilled' ? (mySigs.value?.data?.results ?? []) : []);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // When a supplier is selected, populate items and assets
   useEffect(() => {
@@ -567,6 +602,8 @@ const PurchaseOrderFormPage: React.FC = () => {
         supplier: selectedSupplierId,
         items,
         ...(selectedAgreementId && { supplier_agreement: selectedAgreementId }),
+        ...(selectedWorkOrderId && { work_order: selectedWorkOrderId }),
+        ...(selectedCommitteeId && { owning_group: selectedCommitteeId }),
         ...(expectedDeliveryDate && { expected_delivery_date: expectedDeliveryDate }),
         ...(notes && { notes }),
       };
@@ -1161,6 +1198,50 @@ const PurchaseOrderFormPage: React.FC = () => {
                     onChange={(e) => setNotes(e.target.value)}
                     rows={3}
                   />
+                </div>
+              </div>
+            </section>
+
+            {/* Associations (op-shb9). Order-level only — individual lines are
+                associated from the order's detail page once it exists. */}
+            <section className="form-section associations-section">
+              <h2>6. Associations</h2>
+              <p className="associations-help-text">
+                Optional. Records who this order was placed for; it does not change stock,
+                pricing, or what a committee is billed.
+              </p>
+              <div className="associations-grid">
+                <div className="form-field">
+                  <label htmlFor="order-work-order">Work Order</label>
+                  <select
+                    id="order-work-order"
+                    value={selectedWorkOrderId}
+                    onChange={(e) => setSelectedWorkOrderId(e.target.value)}
+                  >
+                    <option value="">No work order</option>
+                    {workOrders.map((workOrder) => (
+                      <option key={workOrder.id} value={workOrder.id}>
+                        {workOrderOptionLabel(workOrder)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="order-committee">Committee</label>
+                  <select
+                    id="order-committee"
+                    value={selectedCommitteeId ?? ''}
+                    onChange={(e) =>
+                      setSelectedCommitteeId(e.target.value ? Number(e.target.value) : null)
+                    }
+                  >
+                    <option value="">No committee</option>
+                    {sigs.map((sig) => (
+                      <option key={sig.id} value={sig.id}>
+                        {sig.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </section>

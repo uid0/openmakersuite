@@ -47,6 +47,28 @@ def _resolve_work_order(item_data, idx):
         )
 
 
+def _resolve_owning_group(item_data, idx):
+    """Resolve an optional ``owning_group_id`` on a line into a Group (op-shb9).
+
+    The committee twin of :func:`_resolve_work_order`, and equally orthogonal to
+    the line's target — any of the three line kinds can be bought on behalf of a
+    committee. Attribution only: it moves no stock and posts nothing to the
+    ledger. Absent key → ``None``; unknown id → the same ValidationError shape.
+    """
+    owning_group_id = item_data.get("owning_group_id")
+    if owning_group_id in (None, ""):
+        return None
+
+    from django.contrib.auth.models import Group
+
+    try:
+        return Group.objects.get(id=owning_group_id)
+    except (Group.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+        raise serializers.ValidationError(
+            f"Item at index {idx}: committee {owning_group_id} does not exist"
+        )
+
+
 @transaction.atomic
 def create_purchase_order(validated_data, items_data, user):
     """Create a purchase order with line items (inventory items, assets, freeform).
@@ -58,9 +80,10 @@ def create_purchase_order(validated_data, items_data, user):
     per-item validation failure, exactly as the serializer did.
 
     Header-level PO fields — including the optional ``supplier_agreement`` the
-    order was placed under (op-yoos) — ride through ``validated_data`` onto the
-    created ``PurchaseOrder``; the serializer owns validating that the
-    agreement belongs to the PO's supplier.
+    order was placed under (op-yoos) and the optional order-level
+    ``work_order``/``owning_group`` associations (op-shb9) — ride through
+    ``validated_data`` onto the created ``PurchaseOrder``; the serializer owns
+    validating that the agreement belongs to the PO's supplier.
     """
     # Create the purchase order; PurchaseOrder.save() auto-generates the
     # po_number and retries on uniqueness collisions (concurrent-create race).
@@ -82,6 +105,7 @@ def create_purchase_order(validated_data, items_data, user):
             )
 
         work_order = _resolve_work_order(item_data, idx)
+        owning_group = _resolve_owning_group(item_data, idx)
 
         # Handle inventory items
         if "item_supplier_id" in item_data:
@@ -146,6 +170,7 @@ def create_purchase_order(validated_data, items_data, user):
                     notes=notes,
                     expected_shipment_date=expected_shipment_date,
                     work_order=work_order,
+                    owning_group=owning_group,
                 )
 
                 total_cost += line_item.estimated_cost
@@ -190,6 +215,7 @@ def create_purchase_order(validated_data, items_data, user):
                     order_in_packages=0,  # Assets don't have package information
                     notes=notes,
                     work_order=work_order,
+                    owning_group=owning_group,
                 )
 
                 total_cost += line_item.estimated_cost
@@ -227,6 +253,7 @@ def create_purchase_order(validated_data, items_data, user):
                 order_in_packages=0,  # Freeform items don't have package information
                 notes=notes,
                 work_order=work_order,
+                owning_group=owning_group,
             )
 
             total_cost += line_item.estimated_cost

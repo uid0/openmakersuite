@@ -18,8 +18,17 @@ import {
   purchaseOrderAPI,
   serializedComponentsAPI,
   SerializedTrackingMode,
+  sigAPI,
+  workOrderAPI,
 } from '../services/api';
+import { SIG, WorkOrder } from '../types';
 import '../styles/PurchaseOrderPage.css';
+import {
+  OwningGroupIdentity,
+  workOrderDetailsLabel,
+  WorkOrderIdentity,
+  workOrderOptionLabel,
+} from '../utils/associations';
 import { formatDateOnly, formatYmd } from '../utils/dates';
 import { confirmAction, promptInput, showError, showSuccess } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -55,6 +64,11 @@ interface PurchaseOrderItem {
   is_voided: boolean;
   voided_at: string | null;
   void_reason: string;
+  // Who this line was bought for (op-bu80 / op-shb9). Both editable here.
+  work_order: string | null;
+  work_order_details: WorkOrderIdentity | null;
+  owning_group: number | null;
+  owning_group_details: OwningGroupIdentity | null;
 }
 
 interface PurchaseOrderAttachment {
@@ -79,6 +93,12 @@ interface PurchaseOrder {
   // Optional — most orders are placed at list price.
   supplier_agreement: number | null;
   supplier_agreement_details: { id: number; name: string } | null;
+  // Who the whole order was placed for (op-shb9). Attribution only — the
+  // material bridge and the receiving ledger read the lines, not these.
+  work_order: string | null;
+  work_order_details: WorkOrderIdentity | null;
+  owning_group: number | null;
+  owning_group_details: OwningGroupIdentity | null;
   status: string;
   status_label: string;
   order_date: string;
@@ -108,6 +128,83 @@ const getItemNameAndSku = (item: PurchaseOrderItem): { itemName: string; itemSku
     itemSku: item.item_details?.sku || '—',
   };
 };
+
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Options for an association picker, with the currently-attached target kept
+ * selectable even when it is not in the fetched list (op-shb9) — the pickers
+ * offer open/in-progress jobs and the viewer's own committees, so an order
+ * tagged with a finished job or another committee's SIG would otherwise show
+ * blank and be silently cleared by an unrelated edit.
+ */
+const withCurrentOption = (
+  available: SelectOption[],
+  currentValue: string,
+  currentLabel: string,
+): SelectOption[] =>
+  currentValue && !available.some((option) => option.value === currentValue)
+    ? [{ value: currentValue, label: currentLabel }, ...available]
+    : available;
+
+/** The work-order + committee picker pair, used at order and line level. */
+const AssociationPickers: React.FC<{
+  idPrefix: string;
+  workOrderOptions: SelectOption[];
+  committeeOptions: SelectOption[];
+  workOrderValue: string;
+  committeeValue: string;
+  onWorkOrderChange: (value: string) => void;
+  onCommitteeChange: (value: string) => void;
+  disabled?: boolean;
+}> = ({
+  idPrefix,
+  workOrderOptions,
+  committeeOptions,
+  workOrderValue,
+  committeeValue,
+  onWorkOrderChange,
+  onCommitteeChange,
+  disabled,
+}) => (
+  <>
+    <label htmlFor={`${idPrefix}-work-order`}>
+      Work Order
+      <select
+        id={`${idPrefix}-work-order`}
+        value={workOrderValue}
+        onChange={(e) => onWorkOrderChange(e.target.value)}
+        disabled={disabled}
+      >
+        <option value="">No work order</option>
+        {workOrderOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+    <label htmlFor={`${idPrefix}-committee`}>
+      Committee
+      <select
+        id={`${idPrefix}-committee`}
+        value={committeeValue}
+        onChange={(e) => onCommitteeChange(e.target.value)}
+        disabled={disabled}
+      >
+        <option value="">No committee</option>
+        {committeeOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  </>
+);
 
 const PurchaseOrderPage: React.FC = () => {
   const { orderId } = useParams<{ orderId: string }>();
@@ -142,6 +239,18 @@ const PurchaseOrderPage: React.FC = () => {
   const [metadataSupplierOrderNumber, setMetadataSupplierOrderNumber] = useState('');
   const [metadataSalesOrderNumber, setMetadataSalesOrderNumber] = useState('');
   const [metadataExpectedDelivery, setMetadataExpectedDelivery] = useState('');
+  // Order-level associations (op-shb9), edited alongside the other order
+  // metadata. Empty string means "no association" in both pickers.
+  const [metadataWorkOrder, setMetadataWorkOrder] = useState('');
+  const [metadataCommittee, setMetadataCommittee] = useState('');
+  // Per-line associations. `editingAssociationItemId` is the line whose cell is
+  // currently a pair of pickers; the two draft values back those pickers.
+  const [editingAssociationItemId, setEditingAssociationItemId] = useState<string | null>(null);
+  const [lineWorkOrder, setLineWorkOrder] = useState('');
+  const [lineCommittee, setLineCommittee] = useState('');
+  // Options for every association picker on this page.
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [sigs, setSigs] = useState<SIG[]>([]);
   const [attachmentDescription, setAttachmentDescription] = useState('');
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
@@ -178,6 +287,43 @@ const PurchaseOrderPage: React.FC = () => {
       loadOrder();
     }
   }, [orderId, loadOrder]);
+
+  // Association picker options (op-shb9). Only fetched for signed-in users —
+  // the page is publicly readable, and an anonymous visitor edits nothing.
+  // Neither list is required to read the order, so a failure just empties that
+  // picker instead of erroring the page.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let cancelled = false;
+    (async () => {
+      const [openWos, activeWos, mySigs] = await Promise.allSettled([
+        workOrderAPI.listWorkOrders({ status: 'open' }),
+        workOrderAPI.listWorkOrders({ status: 'in_progress' }),
+        sigAPI.listMySIGs(),
+      ]);
+      if (cancelled) return;
+      const results = (settled: PromiseSettledResult<any>): WorkOrder[] =>
+        settled.status === 'fulfilled' ? (settled.value?.data?.results ?? []) : [];
+      setWorkOrders([...results(openWos), ...results(activeWos)]);
+      setSigs(mySigs.status === 'fulfilled' ? (mySigs.value?.data?.results ?? []) : []);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
+  // Base option lists for every association picker on the page. The
+  // currently-attached target is grafted on per picker (see withCurrentOption).
+  const workOrderOptions: SelectOption[] = workOrders.map((workOrder) => ({
+    value: workOrder.id,
+    label: workOrderOptionLabel(workOrder),
+  }));
+  const committeeOptions: SelectOption[] = sigs.map((sig) => ({
+    value: String(sig.id),
+    label: sig.name,
+  }));
 
   const handleEditShipmentDate = (item: PurchaseOrderItem) => {
     setEditingItemId(item.id);
@@ -226,6 +372,38 @@ const PurchaseOrderPage: React.FC = () => {
     } catch (err: any) {
       showError(extractErrorMessage(err, 'Failed to update line cost'));
       console.error('Error updating line cost:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Per-line associations (op-shb9): "this line is for job X / committee Y".
+  // Set after the fact as often as at order time — which job the parts were for
+  // is frequently identified once they arrive.
+  const handleEditAssociation = (item: PurchaseOrderItem) => {
+    setEditingAssociationItemId(item.id);
+    setLineWorkOrder(item.work_order || '');
+    setLineCommittee(item.owning_group ? String(item.owning_group) : '');
+  };
+
+  const handleCancelEditAssociation = () => {
+    setEditingAssociationItemId(null);
+    setLineWorkOrder('');
+    setLineCommittee('');
+  };
+
+  const handleSaveAssociation = async (itemId: string) => {
+    try {
+      setSaving(true);
+      await purchaseOrderAPI.updateLineItem(orderId!, itemId, {
+        work_order: lineWorkOrder || null,
+        owning_group: lineCommittee ? Number(lineCommittee) : null,
+      });
+      await loadOrder();
+      handleCancelEditAssociation();
+    } catch (err: any) {
+      showError(extractErrorMessage(err, 'Failed to update line associations'));
+      console.error('Error updating line associations:', err);
     } finally {
       setSaving(false);
     }
@@ -596,6 +774,8 @@ const PurchaseOrderPage: React.FC = () => {
     setMetadataSupplierOrderNumber(order.supplier_order_number || '');
     setMetadataSalesOrderNumber(order.sales_order_number || '');
     setMetadataExpectedDelivery(order.expected_delivery_date || '');
+    setMetadataWorkOrder(order.work_order || '');
+    setMetadataCommittee(order.owning_group ? String(order.owning_group) : '');
     setEditingMetadata(true);
   };
 
@@ -604,6 +784,8 @@ const PurchaseOrderPage: React.FC = () => {
     setMetadataSupplierOrderNumber('');
     setMetadataSalesOrderNumber('');
     setMetadataExpectedDelivery('');
+    setMetadataWorkOrder('');
+    setMetadataCommittee('');
   };
 
   const handleSaveMetadata = async () => {
@@ -613,6 +795,9 @@ const PurchaseOrderPage: React.FC = () => {
         supplier_order_number: metadataSupplierOrderNumber,
         sales_order_number: metadataSalesOrderNumber,
         expected_delivery_date: metadataExpectedDelivery || null,
+        // Empty picker means "no association" — send null to clear it.
+        work_order: metadataWorkOrder || null,
+        owning_group: metadataCommittee ? Number(metadataCommittee) : null,
       });
       await loadOrder();
       setEditingMetadata(false);
@@ -1088,6 +1273,14 @@ const PurchaseOrderPage: React.FC = () => {
           <span className="info-value">{order.supplier_agreement_details?.name || '—'}</span>
         </div>
         <div className="info-item">
+          <span className="info-label">Work Order:</span>
+          <span className="info-value">{workOrderDetailsLabel(order.work_order_details)}</span>
+        </div>
+        <div className="info-item">
+          <span className="info-label">Committee:</span>
+          <span className="info-value">{order.owning_group_details?.name || '—'}</span>
+        </div>
+        <div className="info-item">
           <span className="info-label">Estimated Total:</span>
           <span className="info-value">{formatCurrency(order.estimated_total)}</span>
         </div>
@@ -1140,6 +1333,26 @@ const PurchaseOrderPage: React.FC = () => {
                   onChange={(e) => setMetadataExpectedDelivery(e.target.value)}
                 />
               </label>
+              {/* Order-level associations (op-shb9). Attribution only — they
+                  change no cost and bill no committee. */}
+              <AssociationPickers
+                idPrefix="metadata"
+                workOrderOptions={withCurrentOption(
+                  workOrderOptions,
+                  metadataWorkOrder,
+                  workOrderDetailsLabel(order.work_order_details),
+                )}
+                committeeOptions={withCurrentOption(
+                  committeeOptions,
+                  metadataCommittee,
+                  order.owning_group_details?.name || '',
+                )}
+                workOrderValue={metadataWorkOrder}
+                committeeValue={metadataCommittee}
+                onWorkOrderChange={setMetadataWorkOrder}
+                onCommitteeChange={setMetadataCommittee}
+                disabled={saving}
+              />
               <div className="po-metadata-actions">
                 <button
                   type="button"
@@ -1257,6 +1470,7 @@ const PurchaseOrderPage: React.FC = () => {
               <th>Unit Cost</th>
               <th>Line Cost</th>
               <th>Expected Shipment Date</th>
+              <th>Ordered For</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
@@ -1264,7 +1478,7 @@ const PurchaseOrderPage: React.FC = () => {
           <tbody>
             {order.items.length === 0 ? (
               <tr>
-                <td colSpan={9} className="no-data">
+                <td colSpan={10} className="no-data">
                   No line items found
                 </td>
               </tr>
@@ -1385,6 +1599,67 @@ const PurchaseOrderPage: React.FC = () => {
                             onClick={() => handleEditShipmentDate(item)}
                             className="btn-edit"
                             title="Edit shipment date"
+                          >
+                            ✏️
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {editingAssociationItemId === item.id ? (
+                      <div className="edit-association">
+                        <AssociationPickers
+                          idPrefix={`line-${item.id}`}
+                          workOrderOptions={withCurrentOption(
+                            workOrderOptions,
+                            lineWorkOrder,
+                            workOrderDetailsLabel(item.work_order_details),
+                          )}
+                          committeeOptions={withCurrentOption(
+                            committeeOptions,
+                            lineCommittee,
+                            item.owning_group_details?.name || '',
+                          )}
+                          workOrderValue={lineWorkOrder}
+                          committeeValue={lineCommittee}
+                          onWorkOrderChange={setLineWorkOrder}
+                          onCommitteeChange={setLineCommittee}
+                          disabled={saving || item.is_voided}
+                        />
+                        <div className="edit-actions">
+                          <button
+                            onClick={() => handleSaveAssociation(item.id)}
+                            disabled={saving}
+                            className="btn-save"
+                          >
+                            {saving ? 'Saving...' : 'Save'}
+                          </button>
+                          <button
+                            onClick={handleCancelEditAssociation}
+                            disabled={saving}
+                            className="btn-cancel"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="association-display">
+                        <span className="association-work-order">
+                          {workOrderDetailsLabel(item.work_order_details)}
+                        </span>
+                        <span className="association-committee">
+                          {item.owning_group_details?.name || '—'}
+                        </span>
+                        {!item.is_voided && isAuthenticated && (
+                          <button
+                            onClick={() => handleEditAssociation(item)}
+                            className="btn-edit"
+                            title="Edit work order and committee"
+                            // The pencil glyph is the button's content, so it
+                            // would otherwise be its whole accessible name.
+                            aria-label="Edit work order and committee"
                           >
                             ✏️
                           </button>

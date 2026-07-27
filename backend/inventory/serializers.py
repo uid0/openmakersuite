@@ -308,10 +308,18 @@ class SupplierDetailSerializer(SupplierSerializer):
             from reorder_queue.serializers import PurchaseOrderSerializer
 
             # select_related feeds PurchaseOrderSerializer's
-            # supplier_agreement_details (op-yoos) without a query per order.
+            # supplier_agreement_details (op-yoos) and its work-order /
+            # committee identity blocks (op-shb9) without a query per order.
             orders = (
                 PurchaseOrder.objects.filter(supplier=obj)
-                .select_related("supplier_agreement")
+                .select_related(
+                    "supplier_agreement",
+                    "work_order",
+                    "work_order__maintenance_item",
+                    "work_order__asset",
+                    "owning_group",
+                )
+                .prefetch_related("work_order__asset_problems", "items__owning_group")
                 .order_by("-order_date")[:50]
             )
             return PurchaseOrderSerializer(orders, many=True).data

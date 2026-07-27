@@ -87,6 +87,33 @@ class ReorderRequestCreateSerializer(serializers.ModelSerializer):
 # Purchase Order Serializers
 
 
+def work_order_identity(work_order):
+    """Minimal identity block for an associated work order, or ``None``.
+
+    Shared by the line (op-bu80) and order (op-shb9) serializers so both render
+    the same four fields without a second fetch.
+    """
+    if work_order is None:
+        return None
+    return {
+        "id": str(work_order.id),
+        "short_id": work_order.short_id,
+        "display_title": work_order.display_title,
+        "status": work_order.status,
+    }
+
+
+def owning_group_identity(group):
+    """Minimal ``{id, name}`` for an associated committee (SIG), or ``None``.
+
+    The committee is an ``auth.Group``; ``name`` is what the SIG pickers label
+    it with, so nothing else is needed to render the association (op-shb9).
+    """
+    if group is None:
+        return None
+    return {"id": group.id, "name": group.name}
+
+
 class PurchaseOrderItemSerializer(serializers.ModelSerializer):
     """Serializer for purchase order line items."""
 
@@ -102,6 +129,9 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
     # so a line can be tagged (or untagged) after the fact; the details block is
     # what a PO screen renders without a second fetch.
     work_order_details = serializers.SerializerMethodField()
+    # op-shb9: "ordered on behalf of this committee", the line-level twin of the
+    # work-order tag above. Both are set through ``update_item``.
+    owning_group_details = serializers.SerializerMethodField()
 
     # Calculated fields
     estimated_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
@@ -119,6 +149,8 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "description",
             "work_order",
             "work_order_details",
+            "owning_group",
+            "owning_group_details",
             "item_supplier_details",
             "item_details",
             "asset_details",
@@ -162,15 +194,11 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
 
     def get_work_order_details(self, obj):
         """Minimal identity of the work order this line was ordered for."""
-        work_order = obj.work_order
-        if work_order is None:
-            return None
-        return {
-            "id": str(work_order.id),
-            "short_id": work_order.short_id,
-            "display_title": work_order.display_title,
-            "status": work_order.status,
-        }
+        return work_order_identity(obj.work_order)
+
+    def get_owning_group_details(self, obj):
+        """Minimal identity of the committee this line was ordered for."""
+        return owning_group_identity(obj.owning_group)
 
 
 class PurchaseOrderAttachmentSerializer(serializers.ModelSerializer):
@@ -267,6 +295,12 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     # The purchase/pricing agreement this order was placed under (op-yoos).
     # Nested so the detail page can label it without a second request.
     supplier_agreement_details = serializers.SerializerMethodField()
+    # Order-level associations (op-shb9). ``work_order``/``owning_group`` stay
+    # writable — this serializer backs ``partial_update``/``update``, which is
+    # how the detail page re-tags an order after it has gone out — and the
+    # ``*_details`` blocks let a PO screen label them without a second fetch.
+    work_order_details = serializers.SerializerMethodField()
+    owning_group_details = serializers.SerializerMethodField()
     created_by_username = serializers.CharField(source="created_by.username", read_only=True)
     sent_by_username = serializers.CharField(
         source="sent_by.username", read_only=True, allow_null=True
@@ -302,6 +336,10 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "supplier_ordering_adapter",
             "supplier_agreement",
             "supplier_agreement_details",
+            "work_order",
+            "work_order_details",
+            "owning_group",
+            "owning_group_details",
             "status",
             "order_date",
             "expected_delivery_date",
@@ -343,6 +381,14 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             return None
         return {"id": agreement.id, "name": agreement.name}
 
+    def get_work_order_details(self, obj):
+        """Minimal identity of the work order this order was placed for."""
+        return work_order_identity(obj.work_order)
+
+    def get_owning_group_details(self, obj):
+        """Minimal identity of the committee this order was placed for."""
+        return owning_group_identity(obj.owning_group)
+
 
 class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating purchase orders with line items."""
@@ -357,7 +403,8 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
         '[{"description": "Custom item", "quantity": 1, "unit_cost": 50.00}, ...] for freeform items. '
         'Any line may also carry "work_order_id": "uuid" to record that it was ordered '
         "to complete that work order; receiving it posts the material and its cost "
-        "onto that work order.",
+        'onto that work order. A line may also carry "owning_group_id": 3 to attribute '
+        "it to a committee (SIG); that is metadata only and moves no money.",
     )
 
     class Meta:
@@ -367,6 +414,10 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
             "po_number",
             "supplier",
             "supplier_agreement",
+            # Order-level associations (op-shb9), both optional. Per-line
+            # associations ride in the ``items`` dicts above.
+            "work_order",
+            "owning_group",
             "expected_delivery_date",
             "sales_order_number",
             "notes",

@@ -263,6 +263,17 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
                 )
             },
         ),
+        (
+            "Associations",
+            {
+                "fields": ("work_order", "owning_group"),
+                "description": (
+                    "Who this order was placed for. Attribution only — the "
+                    "material bridge and the receiving ledger read the line "
+                    "items, not these."
+                ),
+            },
+        ),
         ("Financial Details", {"fields": ("estimated_total", "actual_total")}),
         ("User Tracking", {"fields": ("created_by", "sent_by", "sent_at")}),
         (
@@ -339,10 +350,15 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
         "quantity_pending_display",
         "unit_cost_ordered",
         "estimated_cost_display",
+        # Who the line was bought for (op-bu80 / op-shb9). Related columns, so
+        # the changelist select_related()s them — no query per row.
+        "work_order",
+        "owning_group",
     ]
     list_filter = [
         "purchase_order__status",
         "purchase_order__supplier",
+        "owning_group",
         ReceiptStatusFilter,  # Custom filter for receipt status
     ]
     search_fields = [

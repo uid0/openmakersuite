@@ -42,6 +42,7 @@ from .models import (
     SerializedComponent,
     StockReconciliation,
     Supplier,
+    SupplierAgreement,
     UsageLog,
     WorkOrder,
     WorkOrderAttachment,
@@ -53,8 +54,24 @@ from .models import (
 )
 
 
+class SupplierAgreementInline(admin.TabularInline):
+    """Purchase/pricing agreements held with a supplier (op-yoos)."""
+
+    model = SupplierAgreement
+    extra = 0
+    fields = ["name", "is_active", "document", "notes"]
+
+
+@admin.register(SupplierAgreement)
+class SupplierAgreementAdmin(admin.ModelAdmin):
+    list_display = ["name", "supplier", "is_active", "created_at"]
+    list_filter = ["is_active", "supplier"]
+    search_fields = ["name"]
+
+
 @admin.register(Supplier)
 class SupplierAdmin(admin.ModelAdmin):
+    inlines = [SupplierAgreementInline]
     list_display = [
         "name",
         "supplier_type",

@@ -36,6 +36,7 @@ from .views import (
     MaintenanceToolViewSet,
     PriceHistoryViewSet,
     SerializedComponentViewSet,
+    SupplierAgreementViewSet,
     SupplierViewSet,
     UsageLogViewSet,
     WorkOrderAttachmentViewSet,
@@ -45,6 +46,7 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r"suppliers", SupplierViewSet)
+router.register(r"supplier-agreements", SupplierAgreementViewSet)
 router.register(r"categories", CategoryViewSet)
 router.register(r"locations", LocationViewSet)
 router.register(r"items", InventoryItemViewSet)

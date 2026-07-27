@@ -18,6 +18,24 @@ export interface Supplier {
   total_spent?: string;
 }
 
+/**
+ * A purchase/pricing agreement held with a supplier (op-yoos) — contract
+ * pricing, a standing quote, a nonprofit discount. A purchase order can be
+ * placed *under* one of these; retired agreements have `is_active: false` and
+ * are hidden from the PO create picker.
+ */
+export interface SupplierAgreement {
+  id: number;
+  supplier: number;
+  supplier_name: string;
+  name: string;
+  notes: string;
+  document: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SupplierDetail extends Supplier {
   items?: ItemSupplier[];
   purchase_orders?: any[]; // PurchaseOrder type from reorder_queue

@@ -1760,6 +1760,26 @@ views:
       update:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
+  inventory.views.SupplierAgreementViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
   inventory.views.SupplierViewSet:
     actions:
       analytics:

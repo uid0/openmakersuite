@@ -14,7 +14,9 @@ import {
   ReorderDataItem,
   ReorderDataSupplier,
   scannerAPI,
+  supplierAgreementAPI,
 } from '../services/api';
+import { SupplierAgreement } from '../types';
 import '../styles/PurchaseOrderFormPage.css';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
@@ -63,6 +65,11 @@ const PurchaseOrderFormPage: React.FC = () => {
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
   const [notes, setNotes] = useState('');
+
+  // Optional purchase/pricing agreement this order is placed under (op-yoos).
+  // Loaded per supplier — only that supplier's active agreements are offered.
+  const [agreements, setAgreements] = useState<SupplierAgreement[]>([]);
+  const [selectedAgreementId, setSelectedAgreementId] = useState<number | null>(null);
 
   // Line items state
   const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
@@ -136,6 +143,37 @@ const PurchaseOrderFormPage: React.FC = () => {
     }
   }, [selectedSupplierId, suppliers]);
 
+  // Load the selected supplier's active purchase/pricing agreements (op-yoos).
+  // Changing supplier always clears the previously picked agreement — an
+  // agreement belongs to exactly one supplier and the backend rejects a
+  // mismatch.
+  useEffect(() => {
+    setSelectedAgreementId(null);
+
+    if (!selectedSupplierId) {
+      setAgreements([]);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await supplierAgreementAPI.listBySupplier(selectedSupplierId);
+        if (!cancelled) {
+          setAgreements(response?.data?.results ?? []);
+        }
+      } catch (err) {
+        // A missing agreement list must never block creating an order.
+        console.error('Error loading supplier agreements:', err);
+        if (!cancelled) setAgreements([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSupplierId]);
+
   // Debounce search term for automatic search
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -157,6 +195,7 @@ const PurchaseOrderFormPage: React.FC = () => {
   // This is handled in the onKeyDown and onBlur handlers below
 
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
+  const selectedAgreement = agreements.find((a) => a.id === selectedAgreementId);
 
   // Toggle item selection
   const toggleItemSelection = (itemSupplierId: number) => {
@@ -527,6 +566,7 @@ const PurchaseOrderFormPage: React.FC = () => {
       const orderData: CreatePurchaseOrderData = {
         supplier: selectedSupplierId,
         items,
+        ...(selectedAgreementId && { supplier_agreement: selectedAgreementId }),
         ...(expectedDeliveryDate && { expected_delivery_date: expectedDeliveryDate }),
         ...(notes && { notes }),
       };
@@ -617,6 +657,31 @@ const PurchaseOrderFormPage: React.FC = () => {
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* Optional purchase/pricing agreement (op-yoos). Only rendered when
+              the chosen supplier actually has active agreements on file. */}
+          {selectedSupplier && agreements.length > 0 && (
+            <div className="supplier-agreement-picker">
+              <label htmlFor="supplier-agreement">Purchase / pricing agreement (optional)</label>
+              <select
+                id="supplier-agreement"
+                value={selectedAgreementId ?? ''}
+                onChange={(e) =>
+                  setSelectedAgreementId(e.target.value ? Number(e.target.value) : null)
+                }
+              >
+                <option value="">No agreement</option>
+                {agreements.map((agreement) => (
+                  <option key={agreement.id} value={agreement.id}>
+                    {agreement.name}
+                  </option>
+                ))}
+              </select>
+              {selectedAgreement?.notes && (
+                <p className="agreement-notes">{selectedAgreement.notes}</p>
+              )}
             </div>
           )}
         </section>

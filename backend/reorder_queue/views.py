@@ -580,7 +580,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     """API endpoint for purchase order management."""
 
     queryset = PurchaseOrder.objects.select_related(
-        "supplier", "created_by", "sent_by"
+        # op-yoos: supplier_agreement feeds
+        # PurchaseOrderSerializer.supplier_agreement_details — joined here so
+        # the list endpoint does not fire one extra query per order.
+        "supplier",
+        "created_by",
+        "sent_by",
+        "supplier_agreement",
     ).prefetch_related(
         "items__item_supplier__item",
         "items__item_supplier__supplier",
@@ -1806,7 +1812,11 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
     """API endpoint for order receipt and barcode scanning."""
 
     queryset = OrderDelivery.objects.select_related(
-        "purchase_order__supplier", "received_by"
+        "purchase_order__supplier",
+        # op-yoos: the nested purchase_order_details carries
+        # supplier_agreement_details — joined so it costs no query per delivery.
+        "purchase_order__supplier_agreement",
+        "received_by",
     ).prefetch_related("items__purchase_order_item__item_supplier__item")
 
     serializer_class = OrderDeliverySerializer

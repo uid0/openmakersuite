@@ -56,6 +56,11 @@ def create_purchase_order(validated_data, items_data, user):
     serializer) owns the non-empty / request-context / authenticated-user
     checks. Raises :class:`rest_framework.serializers.ValidationError` on any
     per-item validation failure, exactly as the serializer did.
+
+    Header-level PO fields — including the optional ``supplier_agreement`` the
+    order was placed under (op-yoos) — ride through ``validated_data`` onto the
+    created ``PurchaseOrder``; the serializer owns validating that the
+    agreement belongs to the PO's supplier.
     """
     # Create the purchase order; PurchaseOrder.save() auto-generates the
     # po_number and retries on uniqueness collisions (concurrent-create race).

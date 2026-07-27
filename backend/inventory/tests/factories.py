@@ -27,6 +27,7 @@ from inventory.models import (
     Location,
     SerializedComponent,
     Supplier,
+    SupplierAgreement,
     UsageLog,
 )
 
@@ -54,6 +55,18 @@ class SupplierFactory(DjangoModelFactory):
     )
     website = Faker("url")
     notes = Faker("text", max_nb_chars=200)
+
+
+class SupplierAgreementFactory(DjangoModelFactory):
+    """Factory for creating SupplierAgreement instances (op-yoos)."""
+
+    class Meta:
+        model = SupplierAgreement
+
+    supplier = SubFactory(SupplierFactory)
+    name = factory.Sequence(lambda n: f"Agreement {n}")
+    notes = Faker("text", max_nb_chars=120)
+    is_active = True
 
 
 class CategoryFactory(DjangoModelFactory):

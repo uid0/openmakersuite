@@ -43,6 +43,7 @@ from .models import (
     SerializedComponent,
     StockReconciliation,
     Supplier,
+    SupplierAgreement,
     UsageLog,
     WorkOrder,
     WorkOrderAttachment,
@@ -95,6 +96,27 @@ class SupplierSerializer(serializers.ModelSerializer):
             return str(result)
         except (ImportError, TypeError):
             return "0.00"
+
+
+class SupplierAgreementSerializer(serializers.ModelSerializer):
+    """Purchase/pricing agreement held with a supplier (op-yoos)."""
+
+    supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+
+    class Meta:
+        model = SupplierAgreement
+        fields = [
+            "id",
+            "supplier",
+            "supplier_name",
+            "name",
+            "notes",
+            "document",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -285,7 +307,13 @@ class SupplierDetailSerializer(SupplierSerializer):
             from reorder_queue.models import PurchaseOrder
             from reorder_queue.serializers import PurchaseOrderSerializer
 
-            orders = PurchaseOrder.objects.filter(supplier=obj).order_by("-order_date")[:50]
+            # select_related feeds PurchaseOrderSerializer's
+            # supplier_agreement_details (op-yoos) without a query per order.
+            orders = (
+                PurchaseOrder.objects.filter(supplier=obj)
+                .select_related("supplier_agreement")
+                .order_by("-order_date")[:50]
+            )
             return PurchaseOrderSerializer(orders, many=True).data
         except ImportError:
             return []

@@ -138,6 +138,45 @@
   background-color: #f8fafc;
 }
 
+/* Line target-type label (op-49th): the item's KIND. Kept in the item cell,
+   away from the "Ordered For" column, which answers a different question. */
+.item-type-badge {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.75rem;
+  background-color: #eef2ff;
+  color: #4338ca;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Running total under the Line Cost column (op-r1sg). */
+.items-table tfoot td {
+  padding: 1rem;
+  border-top: 2px solid #cbd5e1;
+  background-color: #f8fafc;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.items-total-label {
+  text-align: right;
+  font-size: 0.875rem;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.items-total-estimated {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #64748b;
+}
+
 .no-data {
   text-align: center;
   color: #94a3b8;

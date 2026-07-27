@@ -307,7 +307,13 @@ class SupplierDetailSerializer(SupplierSerializer):
             from reorder_queue.models import PurchaseOrder
             from reorder_queue.serializers import PurchaseOrderSerializer
 
-            orders = PurchaseOrder.objects.filter(supplier=obj).order_by("-order_date")[:50]
+            # select_related feeds PurchaseOrderSerializer's
+            # supplier_agreement_details (op-yoos) without a query per order.
+            orders = (
+                PurchaseOrder.objects.filter(supplier=obj)
+                .select_related("supplier_agreement")
+                .order_by("-order_date")[:50]
+            )
             return PurchaseOrderSerializer(orders, many=True).data
         except ImportError:
             return []

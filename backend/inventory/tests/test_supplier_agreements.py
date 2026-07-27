@@ -18,6 +18,8 @@ What this file pins down:
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 import pytest
 from rest_framework import status
@@ -31,6 +33,8 @@ from inventory.tests.factories import (
     SupplierFactory,
 )
 from reorder_queue.models import PurchaseOrder
+from reorder_queue.serializers import PurchaseOrderSerializer
+from reorder_queue.views import PurchaseOrderViewSet
 
 User = get_user_model()
 
@@ -310,6 +314,68 @@ class TestPurchaseOrderAgreement:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert PurchaseOrder.objects.count() == 0
+
+    def test_can_attach_an_agreement_after_the_fact(self):
+        """The order was placed before the paperwork was filed."""
+        client, _ = _authed_client()
+        supplier = SupplierFactory()
+        agreement = SupplierAgreementFactory(supplier=supplier, name="Backdated quote")
+        created = client.post(
+            "/api/reorders/purchase-orders/", self._po_payload(supplier), format="json"
+        )
+
+        response = client.patch(
+            f"/api/reorders/purchase-orders/{created.data['id']}/",
+            {"supplier_agreement": agreement.id},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["supplier_agreement_details"] == {
+            "id": agreement.id,
+            "name": "Backdated quote",
+        }
+        assert PurchaseOrder.objects.get(id=created.data["id"]).supplier_agreement == agreement
+
+    def test_patching_in_another_suppliers_agreement_is_rejected(self):
+        client, _ = _authed_client()
+        supplier = SupplierFactory()
+        other_agreement = SupplierAgreementFactory(supplier=SupplierFactory())
+        created = client.post(
+            "/api/reorders/purchase-orders/", self._po_payload(supplier), format="json"
+        )
+
+        response = client.patch(
+            f"/api/reorders/purchase-orders/{created.data['id']}/",
+            {"supplier_agreement": other_agreement.id},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert PurchaseOrder.objects.get(id=created.data["id"]).supplier_agreement is None
+
+    def test_agreement_details_cost_no_extra_query_per_order(self):
+        """The viewset's select_related feeds the display field (no N+1)."""
+        client, _ = _authed_client()
+        for _ in range(5):
+            supplier = SupplierFactory()
+            client.post(
+                "/api/reorders/purchase-orders/",
+                self._po_payload(
+                    supplier,
+                    supplier_agreement=SupplierAgreementFactory(supplier=supplier).id,
+                ),
+                format="json",
+            )
+
+        serializer = PurchaseOrderSerializer()
+        orders = list(PurchaseOrderViewSet.queryset.all())
+        with CaptureQueriesContext(connection) as ctx:
+            details = [serializer.get_supplier_agreement_details(order) for order in orders]
+
+        assert len(details) == 5
+        assert all(entry is not None for entry in details)
+        assert ctx.captured_queries == []
 
     def test_deleting_the_agreement_leaves_the_po_and_nulls_the_link(self):
         """SET_NULL — purchasing history must survive retiring the paperwork."""

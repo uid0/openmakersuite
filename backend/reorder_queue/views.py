@@ -580,7 +580,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     """API endpoint for purchase order management."""
 
     queryset = PurchaseOrder.objects.select_related(
-        "supplier", "created_by", "sent_by"
+        # op-yoos: supplier_agreement feeds
+        # PurchaseOrderSerializer.supplier_agreement_details — joined here so
+        # the list endpoint does not fire one extra query per order.
+        "supplier",
+        "created_by",
+        "sent_by",
+        "supplier_agreement",
     ).prefetch_related(
         "items__item_supplier__item",
         "items__item_supplier__supplier",

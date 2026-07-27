@@ -221,6 +221,33 @@ class PurchaseOrderAttachmentSerializer(serializers.ModelSerializer):
         return None
 
 
+def validate_agreement_supplier(attrs, instance=None):
+    """An order may only cite an agreement held with *its own* supplier (op-yoos).
+
+    Shared by the create and update serializers. On a partial update the
+    supplier may not be in ``attrs`` at all, so it falls back to the instance's
+    current supplier. Returns ``attrs`` unchanged; raises otherwise.
+    """
+    if "supplier_agreement" not in attrs:
+        return attrs
+
+    agreement = attrs["supplier_agreement"]
+    if agreement is None:
+        return attrs
+
+    supplier = attrs.get("supplier") or getattr(instance, "supplier", None)
+    if supplier is not None and agreement.supplier_id != supplier.id:
+        raise serializers.ValidationError(
+            {
+                "supplier_agreement": (
+                    f"Agreement '{agreement.name}' belongs to "
+                    f"{agreement.supplier.name}, not to the selected supplier."
+                )
+            }
+        )
+    return attrs
+
+
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     """Comprehensive serializer for purchase orders."""
 
@@ -300,6 +327,10 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["po_number", "order_date", "updated_at"]
 
+    def validate(self, attrs):
+        """Re-attaching an agreement must respect the order's supplier."""
+        return validate_agreement_supplier(super().validate(attrs), self.instance)
+
     def get_supplier_agreement_details(self, obj):
         """Minimal {id, name} for the attached agreement, or None."""
         agreement = obj.supplier_agreement
@@ -340,20 +371,7 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """Reject an agreement that belongs to a different supplier (op-yoos)."""
-        attrs = super().validate(attrs)
-
-        agreement = attrs.get("supplier_agreement")
-        supplier = attrs.get("supplier")
-        if agreement is not None and supplier is not None and agreement.supplier_id != supplier.id:
-            raise serializers.ValidationError(
-                {
-                    "supplier_agreement": (
-                        f"Agreement '{agreement.name}' belongs to "
-                        f"{agreement.supplier.name}, not to the selected supplier."
-                    )
-                }
-            )
-        return attrs
+        return validate_agreement_supplier(super().validate(attrs))
 
     def validate_items(self, value):
         """Validate items list: non-empty and no duplicate item_supplier_id/asset_id."""

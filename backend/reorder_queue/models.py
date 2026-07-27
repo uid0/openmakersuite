@@ -10,6 +10,7 @@ from typing import Optional
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.validators import MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
@@ -183,6 +184,33 @@ class PurchaseOrder(models.Model):
         help_text="Purchase/pricing agreement this order was placed under, if any",
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+
+    # Order-level association (op-shb9). "This whole order was placed for job X"
+    # / "…on behalf of committee Y". Both are attribution metadata: the
+    # PO -> work-order material bridge stays line-level
+    # (``PurchaseOrderItem.work_order``) and receiving still books the committee
+    # from the received item's own ``owning_group``, so nothing here moves stock
+    # or posts to the ledger.
+    work_order = models.ForeignKey(
+        "inventory.WorkOrder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="purchase_orders",
+        help_text="Work order this whole order was placed for (attribution only)",
+    )
+    # Committee == the owning SIG, mirroring ``inventory.OwnableModel``'s
+    # ``owning_group``. Deliberately a standalone field rather than inheriting
+    # OwnableModel: an order is not user- or space-owned, so pulling in
+    # ownership_type/owning_user would add two columns nothing reads.
+    owning_group = models.ForeignKey(
+        Group,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reorder_purchaseorder_owned",
+        help_text="Committee (SIG) this order was placed on behalf of",
+    )
 
     # Order details
     order_date = models.DateTimeField(auto_now_add=True)
@@ -456,6 +484,18 @@ class PurchaseOrderItem(TypedTargetModel):
             "Work order this line was ordered for. Receiving it records the "
             "received quantity and its cost as a material on that work order."
         ),
+    )
+    # Per-line committee attribution (op-shb9). Same shape and intent as the
+    # order-level field above — a single order can be split across committees,
+    # so the line carries its own. Attribution only: the receiving ledger still
+    # books the committee from the received item's own ``owning_group``.
+    owning_group = models.ForeignKey(
+        Group,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reorder_purchaseorderitem_owned",
+        help_text="Committee (SIG) this line was ordered on behalf of",
     )
 
     # Order quantities

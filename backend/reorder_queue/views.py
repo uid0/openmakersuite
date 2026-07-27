@@ -587,6 +587,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         "created_by",
         "sent_by",
         "supplier_agreement",
+        # op-shb9: the order-level work-order / committee associations feed
+        # PurchaseOrderSerializer.{work_order,owning_group}_details. Joined for
+        # the same reason as supplier_agreement above.
+        "work_order",
+        "work_order__maintenance_item",
+        "work_order__asset",
+        "owning_group",
     ).prefetch_related(
         "items__item_supplier__item",
         "items__item_supplier__supplier",
@@ -599,6 +606,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         "items__work_order__maintenance_item",
         "items__work_order__asset",
         "items__work_order__asset_problems",
+        # op-shb9: the reverse-FK leg of the order-level work order's
+        # display_title, plus the per-line committee block.
+        "work_order__asset_problems",
+        "items__owning_group",
         "deliveries__items",
         "attachments__uploaded_by",
     )
@@ -1503,6 +1514,25 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_404_NOT_FOUND,
                     )
 
+        # "Ordered on behalf of this committee" (op-shb9), the line-level twin
+        # of the work-order tag above. Also settable after the fact; empty
+        # string / null clears it. Attribution only — the receiving ledger books
+        # the committee from the received item's own owning_group, not this.
+        if "owning_group" in request.data:
+            owning_group_id = request.data["owning_group"]
+            if owning_group_id in (None, ""):
+                line_item.owning_group = None
+            else:
+                from django.contrib.auth.models import Group
+
+                try:
+                    line_item.owning_group = Group.objects.get(id=owning_group_id)
+                except (Group.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+                    return Response(
+                        {"error": f"Committee {owning_group_id} not found"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
         # Allow updating unit_cost_actual via line_cost (total cost)
         # If line_cost is provided, calculate unit_cost_actual = line_cost / quantity
         line_cost = request.data.get("line_cost")
@@ -1816,8 +1846,17 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
         # op-yoos: the nested purchase_order_details carries
         # supplier_agreement_details — joined so it costs no query per delivery.
         "purchase_order__supplier_agreement",
+        # op-shb9: same for the order-level work-order / committee associations.
+        "purchase_order__work_order",
+        "purchase_order__work_order__maintenance_item",
+        "purchase_order__work_order__asset",
+        "purchase_order__owning_group",
         "received_by",
-    ).prefetch_related("items__purchase_order_item__item_supplier__item")
+    ).prefetch_related(
+        "items__purchase_order_item__item_supplier__item",
+        "purchase_order__work_order__asset_problems",
+        "purchase_order__items__owning_group",
+    )
 
     serializer_class = OrderDeliverySerializer
     permission_classes = [IsAuthenticated]

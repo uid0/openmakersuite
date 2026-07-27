@@ -1121,6 +1121,8 @@ export interface WorkOrder {
   short_id: string;
   maintenance_item: string;
   maintenance_item_title: string;
+  /** Template title, else the reported problem, else the asset — always set. */
+  display_title?: string;
   asset_name: string;
   asset_tag: string;
   asset_id: string;

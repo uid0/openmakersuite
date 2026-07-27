@@ -1782,6 +1782,10 @@ export interface CreatePurchaseOrderItem {
   unit_cost?: number;
   expected_shipment_date?: string;
   notes?: string;
+  // Per-line association (op-bu80 / op-shb9): the job this line was ordered to
+  // complete, and the committee (SIG) it was ordered on behalf of.
+  work_order_id?: string;
+  owning_group_id?: number;
 }
 
 export interface CreatePurchaseOrderData {
@@ -1789,9 +1793,27 @@ export interface CreatePurchaseOrderData {
   // Optional purchase/pricing agreement this order is placed under (op-yoos).
   // Must belong to `supplier` — the backend rejects a mismatch.
   supplier_agreement?: number;
+  // Order-level association (op-shb9): the work order this order was placed
+  // for, and the committee (SIG) it was placed on behalf of. Both optional and
+  // attribution-only — neither moves stock nor posts to the ledger.
+  work_order?: string;
+  owning_group?: number;
   expected_delivery_date?: string;
   notes?: string;
   items: CreatePurchaseOrderItem[];
+}
+
+/**
+ * Fields the PO detail page can PATCH onto a single line (op-shb9 adds the two
+ * associations). `null` clears an association; omitting a key leaves it alone.
+ */
+export interface LineItemUpdate {
+  expected_shipment_date?: string;
+  notes?: string;
+  line_cost?: number;
+  unit_cost_actual?: number;
+  work_order?: string | null;
+  owning_group?: number | null;
 }
 
 /**
@@ -1849,7 +1871,7 @@ export const purchaseOrderAPI = {
     api.get<ReorderDataResponse>('/reorders/purchase-orders/reorder_data/'),
   createOrder: (data: CreatePurchaseOrderData) =>
     api.post<any>('/reorders/purchase-orders/', data),
-  updateLineItem: (orderId: string, itemId: string, data: { expected_shipment_date?: string; notes?: string; line_cost?: number; unit_cost_actual?: number }) =>
+  updateLineItem: (orderId: string, itemId: string, data: LineItemUpdate) =>
     api.patch(`/reorders/purchase-orders/${orderId}/items/${itemId}/`, data),
   voidLineItem: (orderId: string, itemId: string, reason?: string) =>
     api.post(`/reorders/purchase-orders/${orderId}/items/${itemId}/void/`, { reason }),
@@ -1882,6 +1904,9 @@ export const purchaseOrderAPI = {
       sales_order_number?: string;
       expected_delivery_date?: string | null;
       notes?: string;
+      // Order-level associations (op-shb9). `null` clears one.
+      work_order?: string | null;
+      owning_group?: number | null;
     },
   ) => api.patch<any>(`/reorders/purchase-orders/${orderId}/`, data),
   uploadAttachment: (orderId: string, file: File, description?: string) => {

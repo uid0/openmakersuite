@@ -2438,3 +2438,102 @@ class TestReorderDataExcludesRetired:
         assert str(retired.id) not in listed_item_ids
         # Only the active item counts toward the active-request tally.
         assert response.data["items_with_requests"] == 1
+
+
+@pytest.mark.integration
+class TestReorderQuantityIsModeAware:
+    """Suggested reorder quantities honour the item's counting granularity (op-es7c).
+
+    The stored/quoted quantity stays in BASE units in every mode — only the
+    derivation moves. An ``each`` item keeps the supplier-package round-up it has
+    always had; an item counted in whole packs of its OWN chain is quoted in
+    those packs instead, because rounding its case count up to a *second*,
+    unrelated supplier case size would silently inflate the order.
+    """
+
+    REORDER_DATA_URL = "/api/reorders/purchase-orders/reorder_data/"
+    OPTIMIZED_URL = "/api/reorders/purchase-orders/create_optimized_order/"
+
+    def _pack_item(self, **kwargs):
+        """A low-stock item counted in whole cases of 12 base units."""
+        from inventory.models import InventoryItem, PackagingLevel
+
+        kwargs.setdefault("image", None)
+        kwargs.setdefault("base_unit", "bottle")
+        item = InventoryItemFactory(**kwargs)
+        case = PackagingLevel.objects.create(item=item, name="case", sort_order=0, base_units=12)
+        PackagingLevel.objects.create(item=item, name="bottle", sort_order=1, base_units=1)
+        item.count_mode = InventoryItem.CountMode.BY_LEVEL
+        item.count_level = case
+        item.save(update_fields=["count_mode", "count_level"])
+        return item
+
+    def _line_for(self, response, item):
+        lines = [
+            line
+            for group in response.data["suppliers"]
+            for line in group["items"]
+            if line["item_id"] == str(item.id)
+        ]
+        assert lines, f"{item.name} missing from reorder_data"
+        return lines[0]
+
+    def test_reorder_data_quotes_pack_counted_items_in_their_own_packs(self):
+        """3 cases of 12 = 36 bottles, NOT re-rounded to the supplier's 50-packs."""
+        client = APIClient()
+        user = User.objects.create_user(username="packs", password="pw")
+        client.force_authenticate(user=user)
+
+        # 35 bottles is only 2 whole cases, at a 2-case reorder point.
+        item = self._pack_item(
+            current_stock=35, minimum_stock=2, reorder_quantity=3, quantity_per_package=50
+        )
+
+        response = client.get(self.REORDER_DATA_URL)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert self._line_for(response, item)["suggested_quantity"] == 36
+
+    def test_reorder_data_still_rounds_each_items_to_supplier_packages(self):
+        """The unchanged path: an ``each`` item rounds up to whole supplier packs."""
+        client = APIClient()
+        user = User.objects.create_user(username="eaches", password="pw")
+        client.force_authenticate(user=user)
+
+        item = InventoryItemFactory(
+            image=None,
+            current_stock=1,
+            minimum_stock=10,
+            reorder_quantity=25,
+            quantity_per_package=10,
+        )
+
+        response = client.get(self.REORDER_DATA_URL)
+
+        assert response.status_code == status.HTTP_200_OK
+        # max(shortage 9, reorder 25) = 25 -> 3 packages of 10.
+        assert self._line_for(response, item)["suggested_quantity"] == 30
+
+    def test_optimized_order_recommends_whole_packs_of_the_items_chain(self):
+        """``unit_cost=None`` sidesteps the optimizer's pre-existing Decimal*float bug."""
+        client = APIClient()
+        user = User.objects.create_user(username="optimized", password="pw")
+        client.force_authenticate(user=user)
+
+        item = self._pack_item(
+            current_stock=35,
+            minimum_stock=2,
+            reorder_quantity=3,
+            quantity_per_package=50,
+            unit_cost=None,
+        )
+
+        response = client.post(self.OPTIMIZED_URL, {}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        quantities = {
+            str(line["item_id"]): line["recommended_quantity"]
+            for rec in response.data.get("recommendations", [])
+            for line in rec["items"]
+        }
+        assert quantities[str(item.id)] == 36

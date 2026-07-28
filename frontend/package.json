@@ -56,8 +56,8 @@
     "husky": "^9.0.0",
     "iconv-lite": "^0.7.0",
     "identity-obj-proxy": "^3.0.0",
-    "jest-axe": "^10.0.0",
-    "jsdom": "^29.0.0",
+    "jest-axe": "^11.0.0",
+    "jsdom": "^30.0.0",
     "patch-package": "^8.0.1",
     "playwright": "^1.56.1",
     "postinstall-postinstall": "^2.1.0",
@@ -113,7 +113,7 @@
     "uuid": "^14.0.0",
     "http-proxy-agent": "^9.0.0",
     "protobufjs": "^8.0.2",
-    "source-map": "^0.7.4",
+    "source-map": "^0.8.0",
     "esbuild": "^0.28.1",
     "vitest": {
       "vite": "^8.0.14"

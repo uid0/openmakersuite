@@ -535,6 +535,15 @@ class TestBridgeCaseReorderCommand:
         item.refresh_from_db()
         assert item.needs_reorder is True
 
+    def test_retired_item_is_never_reported_as_flipping(self):
+        """Retirement wins over stock in both modes, so the verdict cannot change."""
+        self._eligible_item(current_stock=30, is_retired=True)
+
+        output = self._run()
+
+        assert "needs reorder: False -> False" in output
+        assert "CHANGES" not in output
+
     def test_is_idempotent(self):
         item = self._eligible_item()
         self._run("--apply")

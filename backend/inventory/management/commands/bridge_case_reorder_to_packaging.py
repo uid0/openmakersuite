@@ -92,9 +92,14 @@ class Command(BaseCommand):
 
                 case_size = item.primary_item_supplier.quantity_per_package
                 before = item.needs_reorder
-                # The bridged trigger, computed without writing: whole cases
-                # against the threshold minimum_cases becomes.
-                after = (item.current_stock // case_size) <= item.minimum_cases
+                # What the trigger will say once bridged, computed without
+                # writing: WHOLE cases against minimum_cases, which is the
+                # value minimum_stock is about to take. Retirement still wins
+                # over stock in both modes, so it short-circuits here too —
+                # otherwise a retired item would be reported as flipping.
+                after = not item.is_retired and (item.current_stock // case_size) <= (
+                    item.minimum_cases
+                )
 
                 self._report(item, case_size, before, after)
                 if before != after:

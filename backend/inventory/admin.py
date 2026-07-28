@@ -6,7 +6,7 @@ import os
 
 from django.contrib import admin, messages
 from django.core.files.base import ContentFile
-from django.forms import CharField, Form
+from django.forms import BaseInlineFormSet, CharField, Form, ModelForm
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
@@ -389,15 +389,52 @@ class SerializedComponentInline(admin.TabularInline):
     show_change_link = True
 
 
+class PackagingLevelInlineForm(ModelForm):
+    """Defer chain validation to the formset, which sees every rung at once."""
+
+    class Meta:
+        model = PackagingLevel
+        fields = ["sort_order", "name", "base_units"]
+
+    def _post_clean(self):
+        self.instance._chain_validated_as_a_set = True
+        super()._post_clean()
+
+
+class PackagingLevelInlineFormSet(BaseInlineFormSet):
+    """Validate the item's packaging chain as an assembled set.
+
+    Each rung's own ``clean()`` only makes sense against a finished chain, so
+    validating the inline row by row would reject a perfectly good three-rung
+    chain purely because the first row it sees has no base rung yet. The whole
+    submitted set is checked here instead, with the same shared validator the
+    API uses.
+    """
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+        from .services.packaging import validate_packaging_chain
+
+        levels = [
+            form.cleaned_data
+            for form in self.forms
+            if form.cleaned_data and not form.cleaned_data.get("DELETE")
+        ]
+        validate_packaging_chain(levels)
+
+
 class PackagingLevelInline(admin.TabularInline):
     """The item's packaging hierarchy, outermost rung first (op-hzji).
 
     ``sort_order`` 0 is the largest pack and increases toward the base rung,
-    whose ``base_units`` is 1. The chain is validated as a whole on save — see
-    :func:`inventory.services.packaging.validate_packaging_chain`.
+    whose ``base_units`` is 1.
     """
 
     model = PackagingLevel
+    form = PackagingLevelInlineForm
+    formset = PackagingLevelInlineFormSet
     fk_name = "item"
     extra = 0
     fields = ["sort_order", "name", "base_units"]

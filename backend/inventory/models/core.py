@@ -994,9 +994,15 @@ class PackagingLevel(models.Model):
         rules are enforced independently in
         ``InventoryItemSerializer.validate`` — see
         :func:`inventory.services.packaging.validate_packaging_chain`.
+
+        Writers that submit a whole chain at once set
+        ``_chain_validated_as_a_set`` to opt out: row-by-row validation would
+        reject every rung of a brand-new chain (the first row it sees has no
+        base rung yet) even though the finished set is valid. The admin inline
+        formset does this and validates the assembled set instead.
         """
         super().clean()
-        if self.item_id is None:
+        if self.item_id is None or getattr(self, "_chain_validated_as_a_set", False):
             return
         from ..services.packaging import validate_packaging_chain
 

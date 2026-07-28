@@ -620,3 +620,90 @@ class TestListQueryBudget:
         six_items = _packaging_query_count(api_client, _list_url())
 
         assert six_items == two_items
+
+
+def _inline_post_data(item, rungs):
+    """Admin change-form payload: the item's own fields plus the inline formset."""
+    data = {
+        "name": item.name,
+        "description": item.description,
+        "reorder_quantity": item.reorder_quantity,
+        "current_stock": item.current_stock,
+        "minimum_stock": item.minimum_stock,
+        "minimum_cases": item.minimum_cases,
+        "reorder_cases": item.reorder_cases,
+        "base_unit": item.base_unit,
+        "count_mode": item.count_mode,
+        "open_container_count": item.open_container_count,
+        "ownership_type": item.ownership_type,
+        "serial_tracking_mode": item.serial_tracking_mode,
+        "packaging_levels-TOTAL_FORMS": str(len(rungs)),
+        "packaging_levels-INITIAL_FORMS": "0",
+        "packaging_levels-MIN_NUM_FORMS": "0",
+        "packaging_levels-MAX_NUM_FORMS": "1000",
+    }
+    for index, rung in enumerate(rungs):
+        data[f"packaging_levels-{index}-id"] = ""
+        data[f"packaging_levels-{index}-item"] = str(item.pk)
+        data[f"packaging_levels-{index}-sort_order"] = str(rung["sort_order"])
+        data[f"packaging_levels-{index}-name"] = rung["name"]
+        data[f"packaging_levels-{index}-base_units"] = str(rung["base_units"])
+    for prefix, total in (
+        ("item_suppliers", 0),
+        ("serialized_components", 0),
+        ("safety_profile", 0),
+    ):
+        data[f"{prefix}-TOTAL_FORMS"] = str(total)
+        data[f"{prefix}-INITIAL_FORMS"] = "0"
+        data[f"{prefix}-MIN_NUM_FORMS"] = "0"
+        data[f"{prefix}-MAX_NUM_FORMS"] = "1000"
+    return data
+
+
+class TestPackagingAdminInline:
+    """The admin inline submits a whole chain at once, so it validates as a set."""
+
+    @pytest.fixture
+    def staff_client(self, admin_user, client):
+        client.force_login(admin_user)
+        return client
+
+    def _change_url(self, item):
+        return reverse("admin:inventory_inventoryitem_change", args=[item.pk])
+
+    def test_change_page_renders_the_inline_and_the_unit_fields(self, staff_client):
+        item = InventoryItemFactory(image=None)
+
+        response = staff_client.get(self._change_url(item))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert "packaging_levels" in response.content.decode()
+        assert "base_unit" in response.content.decode()
+
+    def test_whole_chain_saves_in_one_post(self, staff_client):
+        """Row-by-row validation would reject the first rung; the set is valid."""
+        item = InventoryItemFactory(image=None)
+
+        response = staff_client.post(self._change_url(item), _inline_post_data(item, CHAIN))
+
+        # A redirect means the admin accepted and saved the form.
+        assert response.status_code == status.HTTP_302_FOUND
+        assert list(item.packaging_levels.values_list("name", "base_units")) == [
+            ("case", 500),
+            ("ream", 100),
+            ("sheet", 1),
+        ]
+
+    def test_invalid_chain_is_rejected_with_the_shared_message(self, staff_client):
+        item = InventoryItemFactory(image=None)
+        broken = [
+            {"name": "case", "sort_order": 0, "base_units": 100},
+            {"name": "ream", "sort_order": 1, "base_units": 500},
+            {"name": "sheet", "sort_order": 2, "base_units": 1},
+        ]
+
+        response = staff_client.post(self._change_url(item), _inline_post_data(item, broken))
+
+        assert response.status_code == status.HTTP_200_OK  # redisplayed with errors
+        assert "fewer base units" in response.content.decode()
+        assert not item.packaging_levels.exists()

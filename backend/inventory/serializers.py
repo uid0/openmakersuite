@@ -4,6 +4,8 @@ Serializers for inventory API.
 
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+
 from rest_framework import serializers
 
 # The asset's breaker/disconnect FKs live on facilities.AssetSiteRequirements
@@ -39,6 +41,7 @@ from .models import (
     MaintenanceRecord,
     MaintenanceTask,
     MaintenanceTool,
+    PackagingLevel,
     PriceHistory,
     SerializedComponent,
     StockReconciliation,
@@ -473,6 +476,36 @@ class SupplierDetailSerializer(SupplierSerializer):
             return {"trends": [], "summary": {}}
 
 
+class PackagingLevelSerializer(serializers.ModelSerializer):
+    """One rung of an item's packaging chain (op-hzji).
+
+    Used nested-writable on :class:`InventoryItemSerializer` so the item form
+    saves the whole chain in a single request; there is deliberately no
+    standalone endpoint in phase 1.
+    """
+
+    per_parent = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PackagingLevel
+        fields = ["id", "name", "sort_order", "base_units", "per_parent"]
+
+    def get_per_parent(self, obj):
+        """How many of the next rung down fit in this one — the "case = 10 reams" number.
+
+        ``None`` for the base rung, which has nothing below it. Reads the item's
+        levels through the relation so a caller that prefetched
+        ``packaging_levels`` pays no per-row query.
+        """
+        if obj.pk is None:
+            return None
+        siblings = sorted(obj.item.packaging_levels.all(), key=lambda level: level.sort_order)
+        smaller = [level for level in siblings if level.sort_order > obj.sort_order]
+        if not smaller or smaller[0].base_units < 1:
+            return None
+        return obj.base_units // smaller[0].base_units
+
+
 class InventoryItemSerializer(serializers.ModelSerializer):
     # Primary-supplier compat fields (issue #882). ``supplier_name`` here and the
     # flat ``supplier_sku`` / ``supplier_url`` / ``unit_cost`` / ``package_cost``
@@ -542,6 +575,13 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     # count, or None if the item has never been counted.
     days_since_last_count = serializers.SerializerMethodField()
 
+    # Unit of measure / packaging chain (op-hzji). ``packaging_levels`` is
+    # nested-writable so the item form saves the whole chain in one request;
+    # ``on_hand_display`` renders the canonical ``current_stock`` at the item's
+    # counting granularity without changing it.
+    packaging_levels = PackagingLevelSerializer(many=True, required=False)
+    on_hand_display = serializers.SerializerMethodField()
+
     class Meta:
         model = InventoryItem
         fields = [
@@ -564,6 +604,15 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "reorder_cases",
             "current_cases",
             "reorder_instruction",
+            # Unit of measure / packaging matrix (op-hzji). Additive and opt-in:
+            # an item that sets none of these counts individual base units
+            # exactly as it always has.
+            "base_unit",
+            "count_mode",
+            "count_level",
+            "open_container_count",
+            "packaging_levels",
+            "on_hand_display",
             # ML demand-forecast opt-in (read+write; default OFF). The "ping me"
             # toggle that puts an item into the reorder_alerts notify set.
             "reorder_alerts_enabled",
@@ -662,6 +711,12 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
         return (timezone.now() - obj.last_counted_at).days
 
+    def get_on_hand_display(self, obj):
+        """Current stock expressed at the item's counting granularity (op-hzji)."""
+        from inventory.services.packaging import on_hand_display
+
+        return on_hand_display(obj)
+
     def get_active_reorder_request(self, obj):
         """Return details of the active reorder request if any."""
         active_request = obj.get_active_reorder_request()
@@ -717,16 +772,78 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             profile.save()
             instance.safety_profile = profile
 
+    # ── Packaging chain: nested write + cross-field validation (op-hzji) ──────
+    def validate(self, attrs):
+        """Reject packaging chains and count-mode/level pairs that cannot hold.
+
+        ``PackagingLevel.clean()`` enforces the chain rules for a single-row
+        save, but a nested write is a bulk write and never calls it — so the
+        same shared validator runs here, plus the one check the model cannot
+        make: a level named by ``count_level`` has to survive a chain
+        replacement happening in the same request.
+        """
+        attrs = super().validate(attrs)
+        from inventory.services.packaging import (
+            resolve_count_level_error,
+            validate_packaging_chain,
+        )
+
+        levels = attrs.get("packaging_levels")
+        if levels is not None:
+            try:
+                validate_packaging_chain(levels)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({"packaging_levels": exc.messages})
+
+        def effective(field):
+            if field in attrs:
+                return attrs[field]
+            return getattr(self.instance, field, None) if self.instance else None
+
+        count_mode = effective("count_mode") or InventoryItem.CountMode.EACH
+        error = resolve_count_level_error(
+            count_mode,
+            effective("count_level"),
+            self.instance,
+            {level["sort_order"] for level in levels} if levels is not None else None,
+        )
+        if error:
+            raise serializers.ValidationError({"count_level": [error]})
+        return attrs
+
+    def _apply_packaging_levels(self, instance, levels):
+        """Replace the item's chain with ``levels``, upserting on ``sort_order``.
+
+        Upsert rather than delete-and-recreate so a rung that keeps its position
+        keeps its primary key — otherwise every save would break the
+        ``count_level`` foreign key pointing at it.
+        """
+        if levels is None:
+            return
+        keep = set()
+        for level in levels:
+            row, _ = PackagingLevel.objects.update_or_create(
+                item=instance,
+                sort_order=level["sort_order"],
+                defaults={"name": level["name"], "base_units": level["base_units"]},
+            )
+            keep.add(row.pk)
+        instance.packaging_levels.exclude(pk__in=keep).delete()
+
     def create(self, validated_data):
         hazmat = self._pop_hazmat(validated_data)
+        levels = validated_data.pop("packaging_levels", None)
         instance = super().create(validated_data)
         self._apply_hazmat(instance, hazmat)
+        self._apply_packaging_levels(instance, levels)
         return instance
 
     def update(self, instance, validated_data):
         hazmat = self._pop_hazmat(validated_data)
+        levels = validated_data.pop("packaging_levels", None)
         instance = super().update(instance, validated_data)
         self._apply_hazmat(instance, hazmat)
+        self._apply_packaging_levels(instance, levels)
         return instance
 
 

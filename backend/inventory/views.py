@@ -540,8 +540,10 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     """API endpoint for inventory items."""
 
     queryset = (
-        InventoryItem.objects.select_related("category", "location", "safety_profile")
-        .prefetch_related("item_suppliers__supplier")
+        InventoryItem.objects.select_related(
+            "category", "location", "safety_profile", "count_level"
+        )
+        .prefetch_related("item_suppliers__supplier", "packaging_levels")
         .all()
     )
 
@@ -588,9 +590,15 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         from reorder_queue.models import ReorderRequest
 
         queryset = (
-            InventoryItem.objects.select_related("category", "location", "safety_profile")
+            InventoryItem.objects.select_related(
+                "category", "location", "safety_profile", "count_level"
+            )
             .prefetch_related(
+                # ``packaging_levels`` + the ``count_level`` join keep the
+                # unit-of-measure fields (op-hzji) off the per-row path: both the
+                # nested chain and ``on_hand_display`` read them from cache.
                 "item_suppliers__supplier",
+                "packaging_levels",
                 Prefetch(
                     "reorder_requests",
                     queryset=ReorderRequest.objects.filter(

@@ -311,6 +311,47 @@ class InventoryItem(OwnableModel):
         "If empty, will show default text based on stock levels.",
     )
 
+    # Unit of measure / packaging matrix (op-hzji, phase 1).
+    #
+    # ``current_stock`` above stays THE canonical quantity: it is always counted
+    # in BASE units (the smallest countable thing, labelled by ``base_unit``).
+    # The fields here only describe how that base count is *expressed* to a
+    # human, plus the packaging hierarchy it can be expressed in
+    # (:class:`PackagingLevel`). Every existing item keeps today's behaviour by
+    # default — ``base_unit="unit"``, ``count_mode=EACH``, no packaging levels —
+    # and no quantity flow (reorder, PO, receive, usage) reads them yet.
+    class CountMode(models.TextChoices):
+        EACH = "each", "Each (count individual base units)"
+        BY_LEVEL = "by_level", "By packaging level (count whole packs)"
+        OPEN_CLOSED = "open_closed", "Sealed + open (count sealed packs, track open ones)"
+
+    base_unit = models.CharField(
+        max_length=40,
+        default="unit",
+        help_text="Label for the smallest countable thing (e.g. 'sheet', 'bottle', 'unit'). "
+        "current_stock is always expressed in these.",
+    )
+    count_mode = models.CharField(
+        max_length=20,
+        choices=CountMode.choices,
+        default=CountMode.EACH,
+        help_text="Granularity this item is counted at. 'Each' counts base units "
+        "(today's behaviour); the other modes count whole packs of count_level.",
+    )
+    count_level = models.ForeignKey(
+        "PackagingLevel",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Which packaging level is the counting granularity. "
+        "Must be one of this item's packaging levels; null for 'Each'.",
+    )
+    open_container_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of currently-OPEN packs (sealed + open counting mode); typically 0 or 1.",
+    )
+
     # Per-item opt-in for ML demand-forecast reorder alerts. Default OFF; the
     # nightly forecasting task only surfaces flagged items in the
     # ``reorder_alerts`` notify set (see ``inventory.models.DemandForecast``).
@@ -435,6 +476,31 @@ class InventoryItem(OwnableModel):
         profile = self._working_safety_profile()
         if profile is not None:
             profile.full_clean(exclude=["item"], validate_unique=False, validate_constraints=False)
+        self._clean_count_mode()
+
+    def _clean_count_mode(self) -> None:
+        """Keep ``count_mode`` and ``count_level`` consistent (op-hzji).
+
+        ``EACH`` counts base units and must not name a level; the pack-counting
+        modes need a level, and it has to be one of *this* item's levels. Every
+        pre-existing item is ``EACH`` with a null level, so this only ever
+        rejects newly-invalid combinations.
+        """
+        if self.count_mode == self.CountMode.EACH:
+            if self.count_level_id is not None:
+                raise ValidationError(
+                    {"count_level": "Count level must be empty when counting each base unit."}
+                )
+            return
+
+        if self.count_level_id is None:
+            raise ValidationError(
+                {"count_level": f"Count level is required when count mode is '{self.count_mode}'."}
+            )
+        if self.count_level.item_id != self.pk:
+            raise ValidationError(
+                {"count_level": "Count level must be one of this item's packaging levels."}
+            )
 
     @property
     def current_cases(self) -> float:
@@ -873,6 +939,73 @@ class InventoryItem(OwnableModel):
             return f"{level} - {level_map[level]}"
 
         return "Not specified"
+
+
+class PackagingLevel(models.Model):
+    """One rung of an item's packaging hierarchy (op-hzji, phase 1).
+
+    A chain describes how an item is packed, outermost first — e.g. paper is
+    bought by the ``case`` (500 sheets), stored by the ``ream`` (100 sheets) and
+    used by the ``sheet`` (the base). ``sort_order`` 0 is the outermost/largest
+    rung and increases toward the base; ``base_units`` is how many of the item's
+    BASE units one of this rung contains, so the base rung is always 1.
+
+    This is descriptive only in phase 1: it never changes
+    :attr:`InventoryItem.current_stock`, which stays the canonical base-unit
+    count every reorder / purchase / usage flow reads. Items with no packaging
+    levels behave exactly as they always have.
+
+    ``ItemSupplier.quantity_per_package`` is a different thing and stays put: it
+    is the *supplier's* case size for ordering and costing, which can differ per
+    supplier, while this chain is the item's own physical packaging.
+    """
+
+    item = models.ForeignKey(
+        "InventoryItem",
+        on_delete=models.CASCADE,
+        related_name="packaging_levels",
+    )
+    name = models.CharField(
+        max_length=40,
+        help_text="What this rung is called: 'case', 'ream', 'bottle', 'bag', 'sheet', 'roll'…",
+    )
+    sort_order = models.PositiveIntegerField(
+        help_text="0 = outermost/largest rung; increases toward the base unit.",
+    )
+    base_units = models.PositiveIntegerField(
+        help_text="How many of the item's base units ONE of this rung holds. The base rung is 1.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["item", "sort_order"]
+        unique_together = [("item", "sort_order")]
+
+    def __str__(self) -> str:
+        return f"{self.item} {self.name} (={self.base_units} {self.item.base_unit})"
+
+    def clean(self) -> None:
+        """Validate this rung against the rest of its item's chain.
+
+        A rung is only meaningful in context, so ``full_clean()`` re-checks the
+        whole prospective chain: the persisted siblings with this instance
+        substituted in. ``clean()`` is not called on bulk writes, so the same
+        rules are enforced independently in
+        ``InventoryItemSerializer.validate`` — see
+        :func:`inventory.services.packaging.validate_packaging_chain`.
+        """
+        super().clean()
+        if self.item_id is None:
+            return
+        from ..services.packaging import validate_packaging_chain
+
+        siblings = [
+            level
+            for level in PackagingLevel.objects.filter(item_id=self.item_id)
+            if level.pk != self.pk and level.sort_order != self.sort_order
+        ]
+        validate_packaging_chain(siblings + [self])
 
 
 class InventorySafetyProfile(models.Model):

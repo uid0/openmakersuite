@@ -38,6 +38,7 @@ from .models import (
     MaintenanceRecord,
     MaintenanceTask,
     MaintenanceTool,
+    PackagingLevel,
     PriceHistory,
     SerializedComponent,
     StockReconciliation,
@@ -388,6 +389,21 @@ class SerializedComponentInline(admin.TabularInline):
     show_change_link = True
 
 
+class PackagingLevelInline(admin.TabularInline):
+    """The item's packaging hierarchy, outermost rung first (op-hzji).
+
+    ``sort_order`` 0 is the largest pack and increases toward the base rung,
+    whose ``base_units`` is 1. The chain is validated as a whole on save — see
+    :func:`inventory.services.packaging.validate_packaging_chain`.
+    """
+
+    model = PackagingLevel
+    fk_name = "item"
+    extra = 0
+    fields = ["sort_order", "name", "base_units"]
+    ordering = ["sort_order"]
+
+
 class InventorySafetyProfileInline(admin.StackedInline):
     """Edit the item's hazmat / NFPA safety profile inline on the item page.
 
@@ -461,7 +477,12 @@ class InventoryItemAdmin(admin.ModelAdmin):
         "hazmat_compliance_status",
         "index_card_preview",
     ]
-    inlines = [ItemSupplierInline, SerializedComponentInline, InventorySafetyProfileInline]
+    inlines = [
+        ItemSupplierInline,
+        PackagingLevelInline,
+        SerializedComponentInline,
+        InventorySafetyProfileInline,
+    ]
     fieldsets = (
         (
             "Basic Information",
@@ -519,6 +540,24 @@ class InventoryItemAdmin(admin.ModelAdmin):
                 "Use 'reorder_instruction' to customize the text shown on index cards (e.g., 'Reorder when last case is opened').",
             },
         ),
+        (
+            "Units & Packaging",
+            {
+                "fields": (
+                    "base_unit",
+                    "count_mode",
+                    "count_level",
+                    "open_container_count",
+                ),
+                "classes": ("collapse",),
+                "description": (
+                    "How this item is measured and counted. 'current_stock' is always "
+                    "kept in base units; the counting mode only changes how that count "
+                    "is expressed. Pick a count level from the Packaging levels inline "
+                    "below (save the levels first — a new item has none yet)."
+                ),
+            },
+        ),
         # Hazardous-material fields moved to the ``InventorySafetyProfile``
         # inline above (#885); the computed ``nfpa_fire_diamond_display`` /
         # ``hazmat_compliance_status`` display methods remain in
@@ -532,6 +571,28 @@ class InventoryItemAdmin(admin.ModelAdmin):
             {"fields": ("notes", "created_at", "updated_at"), "classes": ("collapse",)},
         ),
     )
+
+    def get_form(self, request, obj=None, **kwargs):
+        """Stash the edited item so ``formfield_for_foreignkey`` can scope count_level."""
+        request._packaging_item = obj
+        return super().get_form(request, obj, **kwargs)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        """Offer only THIS item's packaging levels as the count level (op-hzji).
+
+        The unscoped dropdown would list every rung of every item, and picking a
+        foreign one is rejected by ``InventoryItem.clean()`` anyway. On the add
+        page there is no item yet, so the choices are empty until the levels are
+        saved.
+        """
+        if db_field.name == "count_level":
+            item = getattr(request, "_packaging_item", None)
+            kwargs["queryset"] = (
+                PackagingLevel.objects.filter(item=item)
+                if item is not None
+                else PackagingLevel.objects.none()
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     @admin.display(description="API Link")
     def api_link(self, obj):

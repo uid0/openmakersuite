@@ -14,12 +14,15 @@ item's OWN count unit rather than base units.
 
 from io import StringIO
 
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.db.models import F
+from django.utils.crypto import get_random_string
 
 import pytest
 from rest_framework import status
 from rest_framework.reverse import reverse
+from rest_framework.test import APIClient
 
 from inventory.models import InventoryItem, PackagingLevel
 from inventory.services.packaging import (
@@ -33,6 +36,20 @@ from inventory.services.packaging import (
 from inventory.tests.factories import InventoryItemFactory
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture
+def staff_api_client():
+    """Reconciliation is staff/SIG-admin gated (``_can_reconcile``)."""
+    user = get_user_model().objects.create_user(
+        username=get_random_string(8),
+        email=f"{get_random_string(6)}@example.com",
+        password=get_random_string(24),
+        is_staff=True,
+    )
+    client = APIClient()
+    client.force_authenticate(user=user)
+    return client
 
 
 # A case of 12 bottles: the case is the counting rung, the bottle is the base
@@ -551,3 +568,75 @@ class TestBridgeCaseReorderCommand:
         assert list(
             item.packaging_levels.order_by("sort_order").values_list("name", flat=True)
         ) == ["case", "bottle"]
+
+
+class TestReconciliationAutoReorderIsModeAware:
+    """A counted-stock reconciliation raises its auto-reorder at the count level.
+
+    Reconciliation duplicates the reorder trigger inline rather than calling
+    ``needs_reorder``, and stores ``reorder_quantity`` straight into the
+    request. For a pack-counting item both of those read pack amounts, so both
+    have to convert (op-es7c); for an ``each`` item both are identities.
+    """
+
+    URL = "/api/inventory/reconciliations/batch/"
+
+    def _post(self, client, item, actual_count):
+        from inventory.models import StockReconciliation
+
+        return client.post(
+            self.URL,
+            {
+                "rows": [
+                    {
+                        "item_id": str(item.id),
+                        "actual_count": actual_count,
+                        "reason": StockReconciliation.ReasonCode.USED_WITHOUT_SCAN,
+                    }
+                ]
+            },
+            format="json",
+        )
+
+    def test_each_item_reorder_quantity_unchanged(self, staff_api_client):
+        from reorder_queue.models import ReorderRequest
+
+        item = InventoryItemFactory(
+            image=None, current_stock=20, minimum_stock=10, reorder_quantity=25
+        )
+
+        response = self._post(staff_api_client, item, 3)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["reorders_created"] == 1
+        assert ReorderRequest.objects.get(item=item).quantity == 25
+
+    def test_pack_counted_item_converts_to_base_units(self, staff_api_client):
+        """Counting 35 bottles leaves 2 whole cases against a 2-case minimum."""
+        from reorder_queue.models import ReorderRequest
+
+        item = _pack_item(case_size=12, current_stock=100, minimum_stock=2, reorder_quantity=3)
+
+        response = self._post(staff_api_client, item, 35)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["reorders_created"] == 1
+        # 3 cases of 12 bottles — NOT the bare 3 that the pack count would be.
+        assert ReorderRequest.objects.get(item=item).quantity == 36
+
+    def test_pack_counted_item_above_its_reorder_point_raises_nothing(self, staff_api_client):
+        """36 bottles is 3 whole cases, above the 2-case minimum.
+
+        The old base-unit comparison (36 <= 2) also said "no", so this pins the
+        other half of the trigger: raw base units must not be compared against a
+        pack threshold in EITHER direction.
+        """
+        from reorder_queue.models import ReorderRequest
+
+        item = _pack_item(case_size=12, current_stock=100, minimum_stock=2, reorder_quantity=3)
+
+        response = self._post(staff_api_client, item, 36)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["reorders_created"] == 0
+        assert not ReorderRequest.objects.filter(item=item).exists()

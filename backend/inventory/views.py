@@ -118,6 +118,7 @@ from .serializers import (
     WorkOrderTaskCompletionSerializer,
     WorkOrderValidationSerializer,
 )
+from .services.packaging import count_at_level, counts_in_packs
 from .services.problem_auto_resolve import resolve_problems_for_work_order
 
 
@@ -7571,11 +7572,21 @@ def _apply_reconciliation_row(user, item, actual_count, reason, notes="", skip_r
     reorder_created = False
     # Retired items are phased out: reconciliation must never auto-create a
     # ReorderRequest for them, even when the counted stock is at/below minimum.
-    if not skip_reorder and not item.is_retired and actual <= item.minimum_stock:
+    #
+    # Both the trigger and the quantity are read at the granularity the item is
+    # counted in (op-es7c). For an ``each`` item — every item that exists today —
+    # ``count_at_level`` IS ``current_stock`` (just set to ``actual``) and the
+    # multiplier is 1, so this is byte-for-byte the previous comparison and the
+    # previous quantity. For an item counted in whole packs, ``minimum_stock``
+    # and ``reorder_quantity`` are amounts in ITS packs, so comparing raw base
+    # units against them — or storing a pack count as if it were base units —
+    # would be wrong in both directions.
+    if not skip_reorder and not item.is_retired and count_at_level(item) <= item.minimum_stock:
         from reorder_queue.models import ReorderRequest
 
         requested_by = (user.get_full_name() or user.username).strip()
-        reorder_quantity = item.reorder_quantity or 1
+        base_units_per_count = item.count_level.base_units if counts_in_packs(item) else 1
+        reorder_quantity = (item.reorder_quantity or 1) * base_units_per_count
         reorder = ReorderRequest.objects.create(
             item=item,
             quantity=reorder_quantity,

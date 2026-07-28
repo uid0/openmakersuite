@@ -451,6 +451,12 @@ class TestBridgeCaseReorderCommand:
             **kwargs,
         )
 
+    def test_dry_run_flag_is_accepted_and_matches_the_default(self):
+        """``--dry-run`` is the default; typing it out loud must not be an error."""
+        self._eligible_item()
+
+        assert self._run("--dry-run") == self._run()
+
     def test_dry_run_reports_and_writes_nothing(self):
         item = self._eligible_item()
 

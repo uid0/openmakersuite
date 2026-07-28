@@ -56,10 +56,16 @@ class Command(BaseCommand):
     )
 
     def add_arguments(self, parser):
-        parser.add_argument(
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument(
             "--apply",
             action="store_true",
             help="Write the changes. Without it the command only reports what it would do.",
+        )
+        group.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Report without writing. This is the default; the flag just says so out loud.",
         )
 
     def handle(self, *args, **options):

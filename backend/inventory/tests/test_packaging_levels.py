@@ -240,6 +240,19 @@ class TestChainValidator:
     def test_single_base_rung_is_valid(self):
         validate_packaging_chain([{"name": "each", "sort_order": 0, "base_units": 1}])
 
+    def test_missing_sort_order_is_a_validation_error_not_a_crash(self):
+        """A rung with no position cannot be ordered — reject it, don't raise TypeError."""
+        item = InventoryItemFactory(image=None)
+        level = PackagingLevel(item=item, name="case", base_units=1)
+
+        with pytest.raises(ValidationError) as exc:
+            level.full_clean()
+
+        # The field check fires, and so does the chain validator's own guard —
+        # proof it bailed instead of trying to sort None against an int.
+        assert "sort_order" in exc.value.message_dict
+        assert any("sort order" in message for message in exc.value.message_dict["__all__"])
+
 
 class TestConversionService:
     def test_to_base_multiplies_by_the_rung_size(self):
@@ -373,6 +386,27 @@ class TestPackagingApi:
             None,
         ]
         assert response.data["on_hand_display"]["text"] == "2 ream(s)"
+
+    def test_per_parent_is_exact_for_a_chain_that_does_not_divide_evenly(self, api_client):
+        """A chain only has to shrink, so per_parent must not round the ratio away."""
+        item = InventoryItemFactory(image=None)
+        _make_chain(
+            item,
+            [
+                {"name": "box", "sort_order": 0, "base_units": 10},
+                {"name": "sleeve", "sort_order": 1, "base_units": 4},
+                {"name": "unit", "sort_order": 2, "base_units": 1},
+            ],
+        )
+
+        response = api_client.get(_detail_url(item))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [level["per_parent"] for level in response.data["packaging_levels"]] == [
+            2.5,
+            4,
+            None,
+        ]
 
     def test_update_upserts_the_chain_and_keeps_the_count_level_row(self, authenticated_client):
         client, _ = authenticated_client

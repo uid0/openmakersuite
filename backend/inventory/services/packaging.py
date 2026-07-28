@@ -134,7 +134,10 @@ def validate_packaging_chain(levels: Iterable[Any]) -> None:
             break
 
     sort_orders = [_attr(level, "sort_order") for level in chain]
-    if len(set(sort_orders)) != len(sort_orders):
+    if any(sort_order is None for sort_order in sort_orders):
+        # Bail before the sort below, which cannot order None against an int.
+        errors.append("Every packaging level needs a sort order.")
+    elif len(set(sort_orders)) != len(sort_orders):
         errors.append("Packaging levels must have distinct sort orders.")
 
     if errors:

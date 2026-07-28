@@ -494,8 +494,13 @@ class PackagingLevelSerializer(serializers.ModelSerializer):
     def get_per_parent(self, obj):
         """How many of the next rung down fit in this one — the "case = 10 reams" number.
 
-        ``None`` for the base rung, which has nothing below it. Reads the item's
-        levels through the relation so a caller that prefetched
+        ``None`` for the base rung, which has nothing below it. A chain is only
+        required to shrink, not to divide evenly, so this is true division
+        narrowed back to an ``int`` when it comes out whole — a case of 10 reams
+        reads ``10``, not ``10.0``, while an uneven 10-of-4 rung reads ``2.5``
+        instead of silently rounding to ``2``.
+
+        Reads the item's levels through the relation so a caller that prefetched
         ``packaging_levels`` pays no per-row query.
         """
         if obj.pk is None:
@@ -504,7 +509,8 @@ class PackagingLevelSerializer(serializers.ModelSerializer):
         smaller = [level for level in siblings if level.sort_order > obj.sort_order]
         if not smaller or smaller[0].base_units < 1:
             return None
-        return obj.base_units // smaller[0].base_units
+        ratio = obj.base_units / smaller[0].base_units
+        return int(ratio) if ratio.is_integer() else ratio
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):

@@ -27,6 +27,7 @@ from inventory.services.packaging import (
     counts_in_packs,
     low_stock_q,
     on_hand_display,
+    parse_at_level,
     reorder_display,
     resolve_base_quantity,
 )
@@ -1500,16 +1501,17 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             # "make it 3 cases" — convert to base units before the guards below,
             # which all compare against base-unit columns (op-ev14). Absent
             # ``at_level`` the quantity is base units, as it always was.
-            if request.data.get("at_level") and line_item.item_supplier_id is not None:
-                try:
+            try:
+                at_level = parse_at_level(request.data.get("at_level"))
+                if at_level and line_item.item_supplier_id is not None:
                     new_quantity = resolve_base_quantity(
                         line_item.item_supplier.item, new_quantity, at_level=True
                     )
-                except DjangoValidationError as exc:
-                    return Response(
-                        {"error": exc.messages[0]},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+            except DjangoValidationError as exc:
+                return Response(
+                    {"error": exc.messages[0]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             if line_item.is_voided:
                 return Response(

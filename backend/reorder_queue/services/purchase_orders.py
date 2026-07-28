@@ -41,7 +41,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from inventory.models import ItemSupplier
-from inventory.services.packaging import order_level, resolve_base_quantity
+from inventory.services.packaging import order_level, parse_at_level, resolve_base_quantity
 
 from ..models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
 
@@ -172,7 +172,7 @@ def create_purchase_order(validated_data, items_data, user):
                     quantity = resolve_base_quantity(
                         item_supplier.item,
                         int(quantity),
-                        at_level=bool(item_data.get("at_level", False)),
+                        at_level=parse_at_level(item_data.get("at_level")),
                     )
                 except DjangoValidationError as exc:
                     raise serializers.ValidationError(f"Item at index {idx}: {exc.messages[0]}")

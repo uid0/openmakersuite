@@ -421,6 +421,11 @@ class TestCsvUpload:
             "reason",
             "notes",
             "skip_reorder",
+            # Count-unit columns appended by op-ev14 — every column above keeps
+            # the index it had, so a positional consumer is unaffected.
+            "count_unit",
+            "projected_at_unit",
+            "open_count",
         ]
         first = next(reader)
         # actual_count/reason/notes/skip_reorder left blank for volunteer fill-in

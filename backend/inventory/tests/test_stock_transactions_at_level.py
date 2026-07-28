@@ -33,6 +33,7 @@ from inventory.services.pack_transitions import finish_open_pack, open_pack
 from inventory.services.packaging import (
     count_unit,
     order_level,
+    parse_at_level,
     resolve_base_quantity,
 )
 from inventory.tests.factories import InventoryItemFactory, LocationFactory
@@ -190,6 +191,63 @@ class TestEachItemsAreUntouched:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         item.refresh_from_db()
         assert item.current_stock == 30
+
+
+class TestParseAtLevel:
+    """``bool("false")`` is True, so the flag needs real coercion.
+
+    Scantty and any form-encoded client post strings, so an endpoint that reads
+    ``request.data`` by hand would otherwise read ``at_level=false`` as a pack
+    count and multiply the quantity.
+    """
+
+    @pytest.mark.parametrize("raw", ["false", "False", "0", "no", "off", "f", "n", False, 0])
+    def test_false_spellings(self, raw):
+        assert parse_at_level(raw) is False
+
+    @pytest.mark.parametrize("raw", ["true", "True", "1", "yes", "on", "t", "y", True, 1])
+    def test_true_spellings(self, raw):
+        assert parse_at_level(raw) is True
+
+    @pytest.mark.parametrize("raw", [None, ""])
+    def test_absent_means_base_units(self, raw):
+        assert parse_at_level(raw) is False
+
+    def test_garbage_is_an_error_not_a_guess(self):
+        with pytest.raises(ValidationError):
+            parse_at_level("maybe")
+
+    def test_agrees_with_drf_booleanfield(self):
+        """Pinned so the hand-written value sets cannot drift from DRF's."""
+        from rest_framework import serializers as drf
+
+        field = drf.BooleanField()
+        for raw in drf.BooleanField.TRUE_VALUES | drf.BooleanField.FALSE_VALUES:
+            assert parse_at_level(raw) == field.to_internal_value(raw), raw
+
+    def test_string_false_leaves_an_each_item_alone_over_the_wire(self, staff_api_client):
+        item = InventoryItemFactory(image=None, current_stock=20)
+
+        response = staff_api_client.post(
+            _cycle_count_url(item),
+            {"counted_qty": 7, "reason": USED, "at_level": "false"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        item.refresh_from_db()
+        assert item.current_stock == 7
+
+    def test_string_false_does_not_multiply_a_pack_item(self, api_client):
+        item = _pack_item(case_size=12, current_stock=60)
+
+        response = api_client.post(
+            _log_usage_url(item), {"quantity": 2, "at_level": "false"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        item.refresh_from_db()
+        assert item.current_stock == 58
 
 
 class TestResolveBaseQuantity:

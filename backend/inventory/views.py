@@ -123,6 +123,7 @@ from .services.packaging import (
     count_unit,
     counts_in_packs,
     on_hand_display,
+    parse_at_level,
     resolve_base_quantity,
 )
 from .services.problem_auto_resolve import resolve_problems_for_work_order
@@ -1151,12 +1152,11 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Base units unless the caller says the number is a pack count. Unlike
-        # the reconciliation paths (where the entry IS a physical count at the
-        # item's granularity) usage is often machine-derived from base-unit
-        # sources, so the pack reading is opt-in rather than mode-driven.
-        at_level = bool(request.data.get("at_level", False))
+        # Base units unless the caller says the number is a pack count. Opt-in
+        # rather than inferred from ``count_mode``, because a usage quantity is
+        # often machine-derived from a base-unit source.
         try:
+            at_level = parse_at_level(request.data.get("at_level"))
             quantity = resolve_base_quantity(item, entered_quantity, at_level=at_level)
         except DjangoValidationError as exc:
             return Response(
@@ -1355,7 +1355,13 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         skip_reorder = bool(request.data.get("skip_reorder", False))
         notes = request.data.get("notes", "") or ""
 
-        at_level = bool(request.data.get("at_level", False))
+        try:
+            at_level = parse_at_level(request.data.get("at_level"))
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages[0]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         raw_open_count = request.data.get("open_count")
         open_count = None
@@ -7989,9 +7995,14 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
             skip_reorder = skip_flag in ("1", "true", "yes", "y", "t")
             # Optional columns (op-ev14): ``at_level`` reads ``actual_count`` as
             # a pack count (absent/blank = base units, as before), and
-            # ``open_count`` sets an ``open_closed`` item's open tally.
-            at_level_flag = (row.get("at_level") or "").strip().lower()
-            at_level = at_level_flag in ("1", "true", "yes", "y", "t")
+            # ``open_count`` sets an ``open_closed`` item's open tally. Shared
+            # parsing with the JSON paths, so "false" in a spreadsheet cell means
+            # false rather than a truthy non-empty string.
+            try:
+                at_level = parse_at_level((row.get("at_level") or "").strip())
+            except DjangoValidationError as exc:
+                errors.append({"row": row_num, "error": exc.messages[0]})
+                continue
             open_count = None
             raw_open = (row.get("open_count") or "").strip()
             if raw_open:
@@ -8110,13 +8121,17 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
             "name",
             "projected",
             "minimum_stock",
-            "count_unit",
-            "projected_at_unit",
             "actual_count",
-            "open_count",
             "reason",
             "notes",
             "skip_reorder",
+            # Appended, not inserted: every pre-op-ev14 column keeps its index,
+            # so a consumer reading this template positionally is unaffected —
+            # and ``upload_csv`` matches on header NAMES, so the round trip works
+            # either way.
+            "count_unit",
+            "projected_at_unit",
+            "open_count",
         ]
 
         class _Echo:
@@ -8135,9 +8150,12 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
                         item.name,
                         item.current_stock,
                         item.minimum_stock,
+                        "",  # actual_count
+                        "",  # reason
+                        "",  # notes
+                        "",  # skip_reorder
                         count_unit(item),
                         count_at_level(item),
-                        "",
                         # Only an ``open_closed`` item accepts open_count back on
                         # upload, so only it gets the column pre-filled.
                         (
@@ -8145,9 +8163,6 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
                             if item.count_mode == InventoryItem.CountMode.OPEN_CLOSED
                             else ""
                         ),
-                        "",
-                        "",
-                        "",
                     ]
                 )
 

@@ -75,6 +75,9 @@ def order_packages_for_line(item_supplier, base_quantity):
     outermost packaging rung when it does not (op-ev14 — see the module
     docstring for why that order). An item counted in base units has no rung, so
     it keeps exactly the previous ceil-divide by ``quantity_per_package or 1``.
+
+    Costs no extra query for an ``each`` item: :func:`order_level` reads
+    ``count_mode`` and short-circuits before touching the chain.
     """
     quantity_per_package = item_supplier.quantity_per_package or 1
     if quantity_per_package > 1:
@@ -84,7 +87,9 @@ def order_packages_for_line(item_supplier, base_quantity):
     if rung is not None:
         return -(-base_quantity // rung.base_units)
 
-    return -(-base_quantity // quantity_per_package)
+    # Neither pack size is declared: the previous ceil-divide by 1, i.e. the
+    # base-unit count itself.
+    return base_quantity
 
 
 def _resolve_owning_group(item_data, idx):

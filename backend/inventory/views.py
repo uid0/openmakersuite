@@ -1281,7 +1281,8 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             if transition == "open":
                 item, usage_log = open_pack(item, user=request.user, notes=notes)
             else:
-                item, usage_log = finish_open_pack(item, user=request.user), None
+                item = finish_open_pack(item, user=request.user)
+                usage_log = None
         except DjangoValidationError as exc:
             return Response(
                 {"detail": exc.messages[0]},

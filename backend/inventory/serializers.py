@@ -2,6 +2,7 @@
 Serializers for inventory API.
 """
 
+import copy
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -589,6 +590,18 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     packaging_levels = PackagingLevelSerializer(many=True, required=False)
     on_hand_display = serializers.SerializerMethodField()
     reorder_display = serializers.SerializerMethodField()
+    # The write complement of ``on_hand_display`` for the manual stock-set path
+    # (op-ev14): set on-hand as a count of whole ``count_level`` packs and let
+    # the server convert. ``current_stock`` itself stays writable and stays base
+    # units, so nothing about the existing edit form changes.
+    current_stock_at_level = serializers.IntegerField(
+        min_value=0,
+        required=False,
+        write_only=True,
+        help_text="Set current_stock as a count of whole count_level packs "
+        "(e.g. 3 cases). Converted to base units on save; only valid for an item "
+        "counted in packs, and not alongside current_stock.",
+    )
 
     class Meta:
         model = InventoryItem
@@ -622,6 +635,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "packaging_levels",
             "on_hand_display",
             "reorder_display",
+            "current_stock_at_level",
             # ML demand-forecast opt-in (read+write; default OFF). The "ping me"
             # toggle that puts an item into the reorder_alerts notify set.
             "reorder_alerts_enabled",
@@ -803,9 +817,13 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         same shared validator runs here, plus the one check the model cannot
         make: a level named by ``count_level`` has to survive a chain
         replacement happening in the same request.
+
+        Also resolves ``current_stock_at_level`` (op-ev14) into ``current_stock``
+        once the count mode/level pair is known to hold.
         """
         attrs = super().validate(attrs)
         from inventory.services.packaging import (
+            resolve_base_quantity,
             resolve_count_level_error,
             validate_packaging_chain,
         )
@@ -831,6 +849,43 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         )
         if error:
             raise serializers.ValidationError({"count_level": [error]})
+
+        pack_count = attrs.pop("current_stock_at_level", None)
+        if pack_count is not None:
+            if "current_stock" in attrs:
+                raise serializers.ValidationError(
+                    {
+                        "current_stock_at_level": [
+                            "Send either current_stock (base units) or "
+                            "current_stock_at_level (packs), not both."
+                        ]
+                    }
+                )
+            if self.instance is None:
+                # A brand-new item has no packaging rung for count_level to
+                # point at yet, so it cannot be counted in packs on create.
+                raise serializers.ValidationError(
+                    {
+                        "current_stock_at_level": [
+                            "Set the packaging chain and count level first, then "
+                            "set stock in packs."
+                        ]
+                    }
+                )
+            # Convert against the mode/level the item will HAVE, so one request
+            # can both opt an item into a pack mode and set its stock in packs.
+            # A shallow copy keeps the shared conversion seam (rather than
+            # re-deriving the arithmetic here) without mutating the instance DRF
+            # is about to save.
+            prospective = copy.copy(self.instance)
+            prospective.count_mode = count_mode
+            prospective.count_level = effective("count_level")
+            try:
+                attrs["current_stock"] = resolve_base_quantity(
+                    prospective, pack_count, at_level=True
+                )
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({"current_stock_at_level": exc.messages})
         return attrs
 
     def _apply_packaging_levels(self, instance, levels):

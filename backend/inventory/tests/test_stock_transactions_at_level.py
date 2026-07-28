@@ -366,6 +366,74 @@ class TestOnHandSetAtCountLevel:
         assert "(actual=3, minimum=10)" in reorder.request_notes
 
 
+class TestManualStockSetAtCountLevel:
+    """``current_stock_at_level`` on the item edit form — the other set path."""
+
+    def _patch(self, client, item, payload):
+        return client.patch(f"/api/inventory/items/{item.id}/", payload, format="json")
+
+    def test_pack_count_sets_base_stock(self, staff_api_client):
+        item = _pack_item(case_size=12, current_stock=0)
+
+        response = self._patch(staff_api_client, item, {"current_stock_at_level": 3})
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        item.refresh_from_db()
+        assert item.current_stock == 36
+        # Write-only: it never comes back on the read side.
+        assert "current_stock_at_level" not in response.data
+        assert response.data["on_hand_display"]["level_count"] == 3
+
+    def test_plain_current_stock_write_is_unchanged(self, staff_api_client):
+        item = _pack_item(case_size=12, current_stock=0)
+
+        response = self._patch(staff_api_client, item, {"current_stock": 36})
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        item.refresh_from_db()
+        assert item.current_stock == 36
+
+    def test_both_at_once_is_rejected(self, staff_api_client):
+        item = _pack_item(case_size=12, current_stock=5)
+
+        response = self._patch(
+            staff_api_client, item, {"current_stock": 36, "current_stock_at_level": 3}
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        item.refresh_from_db()
+        assert item.current_stock == 5
+
+    def test_rejected_on_an_each_item(self, staff_api_client):
+        item = InventoryItemFactory(image=None, current_stock=5)
+
+        response = self._patch(staff_api_client, item, {"current_stock_at_level": 3})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        item.refresh_from_db()
+        assert item.current_stock == 5
+
+    def test_opting_into_a_pack_mode_and_setting_stock_in_one_request(self, staff_api_client):
+        """The conversion reads the mode the item will HAVE, not the stored one."""
+        item = _pack_item(mode=InventoryItem.CountMode.EACH, case_size=12, current_stock=0)
+        case = item.packaging_levels.get(name="case")
+
+        response = self._patch(
+            staff_api_client,
+            item,
+            {
+                "count_mode": InventoryItem.CountMode.BY_LEVEL,
+                "count_level": case.pk,
+                "current_stock_at_level": 2,
+            },
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        item.refresh_from_db()
+        assert item.count_mode == InventoryItem.CountMode.BY_LEVEL
+        assert item.current_stock == 24
+
+
 class TestReconcileCsvAndGrid:
     """The offline round-trip: the grid/template name the unit, upload reads it."""
 

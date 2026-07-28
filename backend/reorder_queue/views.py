@@ -247,9 +247,16 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = (
         ReorderRequest.objects.select_related(
-            "item", "item__category", "item__location", "reviewed_by"
+            "item", "item__category", "item__location", "item__count_level", "reviewed_by"
         )
-        .prefetch_related("item__item_suppliers__supplier", "item__item_suppliers")
+        .prefetch_related(
+            "item__item_suppliers__supplier",
+            "item__item_suppliers",
+            # ``item_details`` nests the full item serializer, which now carries
+            # the packaging chain (op-hzji) — prefetch it so a page of requests
+            # does not cost a query per row.
+            "item__packaging_levels",
+        )
         .all()
     )
 
@@ -404,8 +411,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         """Group pending requests by supplier for easier bulk ordering."""
         pending = (
             ReorderRequest.objects.filter(status=ReorderRequest.Status.PENDING)
-            .select_related("item")
-            .prefetch_related("item__item_suppliers__supplier")
+            .select_related("item", "item__count_level")
+            .prefetch_related("item__item_suppliers__supplier", "item__packaging_levels")
         )
 
         # Group by supplier
@@ -548,8 +555,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
             ReorderRequest.objects.filter(
                 status__in=[ReorderRequest.Status.PENDING, ReorderRequest.Status.APPROVED]
             )
-            .select_related("item")
-            .prefetch_related("item__item_suppliers__supplier")
+            .select_related("item", "item__count_level")
+            .prefetch_related("item__item_suppliers__supplier", "item__packaging_levels")
         )
 
         # Group each request under its item's primary supplier so the emitted

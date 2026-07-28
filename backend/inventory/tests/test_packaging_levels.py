@@ -15,7 +15,8 @@ adds them without touching how any existing item behaves:
 """
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.test.utils import CaptureQueriesContext
 
 import pytest
 from rest_framework import status
@@ -595,3 +596,27 @@ class TestBackwardCompatibility:
         assert response.status_code == status.HTTP_201_CREATED, response.data
         assert response.data["count_mode"] == InventoryItem.CountMode.EACH
         assert response.data["packaging_levels"] == []
+
+
+def _packaging_query_count(api_client, url):
+    """Number of captured queries that read the packaging-level table."""
+    with CaptureQueriesContext(connection) as ctx:
+        response = api_client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+    return sum(1 for query in ctx.captured_queries if "inventory_packaginglevel" in query["sql"])
+
+
+class TestListQueryBudget:
+    """The chain rides the list viewset's prefetch, not a query per row."""
+
+    def test_packaging_fields_do_not_add_a_query_per_item(self, api_client):
+        for _ in range(2):
+            _make_chain(InventoryItemFactory(image=None))
+        _packaging_query_count(api_client, _list_url())  # warm one-time caches
+        two_items = _packaging_query_count(api_client, _list_url())
+
+        for _ in range(4):  # grow the page from 2 to 6 items
+            _make_chain(InventoryItemFactory(image=None))
+        six_items = _packaging_query_count(api_client, _list_url())
+
+        assert six_items == two_items

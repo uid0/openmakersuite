@@ -5,6 +5,7 @@ Serializers for inventory API.
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 
 from rest_framework import serializers
 
@@ -820,15 +821,16 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         """
         if levels is None:
             return
-        keep = set()
-        for level in levels:
-            row, _ = PackagingLevel.objects.update_or_create(
-                item=instance,
-                sort_order=level["sort_order"],
-                defaults={"name": level["name"], "base_units": level["base_units"]},
-            )
-            keep.add(row.pk)
-        instance.packaging_levels.exclude(pk__in=keep).delete()
+        with transaction.atomic():
+            keep = set()
+            for level in levels:
+                row, _ = PackagingLevel.objects.update_or_create(
+                    item=instance,
+                    sort_order=level["sort_order"],
+                    defaults={"name": level["name"], "base_units": level["base_units"]},
+                )
+                keep.add(row.pk)
+            instance.packaging_levels.exclude(pk__in=keep).delete()
 
     def create(self, validated_data):
         hazmat = self._pop_hazmat(validated_data)

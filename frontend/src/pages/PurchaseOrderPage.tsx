@@ -113,6 +113,25 @@ interface PurchaseOrder {
   void_reason: string;
 }
 
+/**
+ * What KIND of thing a line orders (op-49th) — deliberately distinct from
+ * op-shb9's "Ordered For" column, which is the job/committee the line was
+ * bought *for*.
+ *
+ * Caveat: a line raised from a reorder request is indistinguishable from a
+ * hand-added inventory line on the wire (the serializer carries no reorder FK),
+ * so it reads as "Inventory item" here. A real "Reorder" badge needs a backend
+ * `reorder_request` field on the line first.
+ */
+const ITEM_TYPE_LABELS: Record<NonNullable<PurchaseOrderItem['item_type']>, string> = {
+  inventory_item: 'Inventory item',
+  asset: 'Asset',
+  freeform: 'Freeform',
+};
+
+const getItemTypeLabel = (item: PurchaseOrderItem): string =>
+  (item.item_type && ITEM_TYPE_LABELS[item.item_type]) || '—';
+
 const getItemNameAndSku = (item: PurchaseOrderItem): { itemName: string; itemSku: string } => {
   if (item.item_type === 'asset') {
     return {
@@ -898,6 +917,22 @@ const PurchaseOrderPage: React.FC = () => {
 
   const receivableItems = getReceivableItems(order);
 
+  // Detail-page running total (op-r1sg). Summed from the rendered lines rather
+  // than read off order.estimated_total so it stays live when a line is cost-
+  // edited or voided in place; the two should agree, which makes the footer a
+  // free sanity check on the stored create-time snapshot.
+  //
+  // Voided lines are excluded (matching the backend's effective_estimated_total)
+  // and each line contributes exactly what its "Line Cost" cell displays —
+  // actual where known, estimated otherwise. Where those diverge, the footer
+  // also spells out the pure estimated sum, which is what estimated_total holds.
+  const activeItems = order.items.filter((item) => !item.is_voided);
+  const sumLines = (pick: (item: PurchaseOrderItem) => string | null) =>
+    activeItems.reduce((total, item) => total + (parseFloat(pick(item) || '0') || 0), 0);
+  const lineCostTotal = sumLines((item) => item.actual_cost || item.estimated_cost);
+  const estimatedLineTotal = sumLines((item) => item.estimated_cost);
+  const totalsDiffer = lineCostTotal.toFixed(2) !== estimatedLineTotal.toFixed(2);
+
   // Status-gated hero affordances: Send (draft→sent) and Confirm (sent→confirmed)
   // surface the existing PO lifecycle transitions alongside receive/mark-delivered.
   const heroActions: React.ReactNode[] = [];
@@ -1490,6 +1525,11 @@ const PurchaseOrderPage: React.FC = () => {
                 <tr key={item.id} className={item.is_voided ? 'voided-item' : ''}>
                   <td>
                     {itemName}
+                    <div>
+                      <span className="item-type-badge" data-testid="line-item-type">
+                        {getItemTypeLabel(item)}
+                      </span>
+                    </div>
                     {item.item_type === 'asset' && item.asset_details?.location_name && (
                       <div style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '0.25rem' }}>
                         Location: {item.asset_details.location_name}
@@ -1745,6 +1785,24 @@ const PurchaseOrderPage: React.FC = () => {
               })
             )}
           </tbody>
+          {order.items.length > 0 && (
+            <tfoot>
+              <tr className="items-total-row">
+                <td colSpan={5} className="items-total-label">
+                  Total
+                </td>
+                <td className="items-total-value" data-testid="po-items-total">
+                  {formatCurrency(lineCostTotal.toFixed(2))}
+                  {totalsDiffer && (
+                    <div className="items-total-estimated">
+                      (estimated: {formatCurrency(estimatedLineTotal.toFixed(2))})
+                    </div>
+                  )}
+                </td>
+                <td colSpan={4} />
+              </tr>
+            </tfoot>
+          )}
         </table>
       </section>
       </div>

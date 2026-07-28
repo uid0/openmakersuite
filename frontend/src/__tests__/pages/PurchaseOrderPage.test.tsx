@@ -376,6 +376,147 @@ describe('PurchaseOrderPage line item rendering', () => {
   });
 });
 
+describe('PurchaseOrderPage line target-type label (op-49th)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  test('labels every line with its target type, falling back to — for an unknown type', async () => {
+    const line = (id: string, item_type: string | null) => ({
+      id,
+      item_type,
+      description: 'Custom Panel',
+      item_details: { id: 'i1', name: `Item ${id}`, sku: `SKU-${id}` },
+      asset_details: { id: 'a1', name: `Asset ${id}`, asset_tag: `AT-${id}`, location_name: null },
+      quantity_ordered: 1,
+      quantity_received: 0,
+      quantity_pending: 1,
+      is_fully_received: false,
+      unit_cost_ordered: '1.00',
+      unit_cost_actual: null,
+      estimated_cost: '1.00',
+      actual_cost: null,
+      expected_shipment_date: null,
+      notes: '',
+      is_voided: false,
+      voided_at: null,
+      void_reason: '',
+    });
+
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: {
+        ...baseOrder,
+        attachments: [],
+        items: [
+          line('inv', 'inventory_item'),
+          line('ast', 'asset'),
+          line('free', 'freeform'),
+          line('none', null),
+        ],
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('line-item-type')).toHaveLength(4);
+    });
+    expect(
+      screen.getAllByTestId('line-item-type').map((node) => node.textContent),
+    ).toEqual(['Inventory item', 'Asset', 'Freeform', '—']);
+  });
+});
+
+describe('PurchaseOrderPage line-items running total (op-r1sg)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('token', 'test-token');
+    localStorage.setItem('is_staff', 'true');
+  });
+
+  const costLine = (
+    id: string,
+    overrides: Partial<{ estimated_cost: string; actual_cost: string | null; is_voided: boolean }>,
+  ) => ({
+    id,
+    item_type: 'inventory_item',
+    description: null,
+    item_details: { id: `i-${id}`, name: `Item ${id}`, sku: `SKU-${id}` },
+    asset_details: null,
+    quantity_ordered: 1,
+    quantity_received: 0,
+    quantity_pending: 1,
+    is_fully_received: false,
+    unit_cost_ordered: '1.00',
+    unit_cost_actual: null,
+    estimated_cost: '0.00',
+    actual_cost: null,
+    expected_shipment_date: null,
+    notes: '',
+    is_voided: false,
+    voided_at: null,
+    void_reason: '',
+    ...overrides,
+  });
+
+  test('sums the active lines and excludes voided ones', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: {
+        ...baseOrder,
+        attachments: [],
+        items: [
+          costLine('a', { estimated_cost: '10.00' }),
+          costLine('b', { estimated_cost: '48.00' }),
+          costLine('c', { estimated_cost: '12.00', is_voided: true }),
+        ],
+      },
+    });
+
+    renderPage();
+
+    const total = await screen.findByTestId('po-items-total');
+    expect(total).toHaveTextContent('$58.00');
+    // Nothing to reconcile while every line is still at its ordered cost.
+    expect(total).not.toHaveTextContent(/estimated/i);
+  });
+
+  test('follows the displayed line costs and spells out the estimated sum when they diverge', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: {
+        ...baseOrder,
+        attachments: [],
+        items: [
+          // Received at a higher unit cost than ordered — the Line Cost column
+          // shows the actual, so the footer must too.
+          costLine('a', { estimated_cost: '10.00', actual_cost: '12.00' }),
+          costLine('b', { estimated_cost: '48.00' }),
+        ],
+      },
+    });
+
+    renderPage();
+
+    const total = await screen.findByTestId('po-items-total');
+    expect(total).toHaveTextContent('$60.00');
+    expect(total).toHaveTextContent('(estimated: $58.00)');
+  });
+
+  test('omits the total row entirely when the order has no lines', async () => {
+    (api.purchaseOrderAPI.getOrder as jest.Mock).mockResolvedValue({
+      data: { ...baseOrder, attachments: [], items: [] },
+    });
+
+    renderPage();
+
+    await screen.findByText('No line items found');
+    expect(screen.queryByTestId('po-items-total')).not.toBeInTheDocument();
+  });
+});
+
 describe('PurchaseOrderPage receive items (oms-s0hj4)', () => {
   beforeEach(() => {
     jest.clearAllMocks();

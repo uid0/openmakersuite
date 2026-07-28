@@ -132,6 +132,87 @@ describe('PurchaseOrderListPage', () => {
   });
 });
 
+/**
+ * op-nr6h: a PO is saved as a draft, but the default list only shows active and
+ * settled orders — so the status filter has to offer "Draft" for a saved draft
+ * to be findable (and, from its row, resumable) after you navigate away.
+ */
+describe('PurchaseOrderListPage draft filter', () => {
+  const draftOrder = {
+    id: 'po-draft-1',
+    po_number: 'PO-2026-009',
+    supplier_details: 'Acme Supplies',
+    status: 'draft',
+    status_label: 'Draft',
+    order_date: '2026-02-02',
+    expected_delivery_date: null,
+    estimated_total: '75.00',
+    actual_total: null,
+    total_items: 2,
+    total_quantity: 4,
+    is_fully_received: false,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('offers Draft as a status filter option', async () => {
+    (api.purchaseOrderAPI.listOrders as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    renderPage();
+
+    const filter = await screen.findByLabelText(/Filter by Status/);
+    expect(within(filter).getByRole('option', { name: 'Draft' })).toHaveValue('draft');
+  });
+
+  it('requests ?status=draft when Draft is selected', async () => {
+    (api.purchaseOrderAPI.listOrders as jest.Mock).mockResolvedValue({
+      data: { results: [] },
+    });
+
+    renderPage();
+
+    // The initial load is unfiltered (all active & settled).
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.listOrders).toHaveBeenCalledWith(undefined);
+    });
+
+    (api.purchaseOrderAPI.listOrders as jest.Mock).mockResolvedValue({
+      data: { results: [draftOrder] },
+    });
+    await userEvent.selectOptions(await screen.findByLabelText(/Filter by Status/), 'draft');
+
+    await waitFor(() => {
+      expect(api.purchaseOrderAPI.listOrders).toHaveBeenCalledWith({ status: 'draft' });
+    });
+  });
+
+  it('lists a draft with its own badge and a link back to the order', async () => {
+    (api.purchaseOrderAPI.listOrders as jest.Mock).mockResolvedValue({
+      data: { results: [draftOrder] },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('PO-2026-009')).toBeInTheDocument();
+    });
+    // 'Draft' is also a filter <option>; scope to the status badge.
+    const badge = screen.getByText('Draft', { selector: '.status-badge' });
+    expect(badge).toHaveClass('status-draft');
+    // Resumable: the row links to the detail page, where a draft can be edited
+    // and sent to the supplier.
+    expect(screen.getByRole('link', { name: 'View Details →' })).toHaveAttribute(
+      'href',
+      '/purchasing/orders/po-draft-1'
+    );
+  });
+});
+
 describe('PurchaseOrderListPage sorting', () => {
   const baseOrder = {
     id: 'po-1',

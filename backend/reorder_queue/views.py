@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from inventory.models import InventoryItem, Supplier
+from inventory.services.packaging import base_reorder_quantity, counts_in_packs, low_stock_q
 
 from . import services
 from .audit import record_event as record_audit_event
@@ -754,10 +755,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         """Create an optimized purchase order based on current needs and supplier analysis."""
 
         # Get items that need reordering (retired items are phased out and
-        # excluded — no optimized order line for them).
+        # excluded — no optimized order line for them). ``low_stock_q`` compares
+        # stock to the reorder point at the granularity each item is counted in;
+        # for the ``each`` items that is exactly the old
+        # ``current_stock <= minimum_stock`` (op-es7c).
         low_stock_items = (
-            InventoryItem.objects.filter(current_stock__lte=F("minimum_stock"), is_retired=False)
-            .select_related("category", "location")
+            InventoryItem.objects.filter(low_stock_q(), is_retired=False)
+            .select_related("category", "location", "count_level")
             .prefetch_related("item_suppliers__supplier")
         )
 
@@ -856,20 +860,21 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 is_retired=False,
             )
             .distinct()
-            .select_related("category", "location")
+            .select_related("category", "location", "count_level")
             .prefetch_related("item_suppliers__supplier", "reorder_requests")
         )
 
-        # Also get items that need reordering (current_stock <= minimum_stock)
+        # Also get items that need reordering (stock at/below the reorder point,
+        # compared at whatever granularity each item is counted in — op-es7c)
         # but exclude those already in items_with_requests
         low_stock_items = (
             InventoryItem.objects.filter(
-                current_stock__lte=F("minimum_stock"),
+                low_stock_q(),
                 is_active=True,
                 is_retired=False,
             )
             .exclude(id__in=items_with_requests.values_list("id", flat=True))
-            .select_related("category", "location")
+            .select_related("category", "location", "count_level")
             .prefetch_related("item_suppliers__supplier")
         )
 
@@ -903,17 +908,23 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "avg_lead_time": 0,
                     }
 
-                # Calculate suggested quantity
+                # Calculate suggested quantity (base units, mode-aware — op-es7c)
                 # If item has an active reorder request, use that quantity
                 active_request = item.get_active_reorder_request()
                 if active_request:
                     suggested_qty = active_request.quantity
                 else:
-                    shortage = max(0, item.minimum_stock - item.current_stock)
-                    suggested_qty = max(shortage, item.reorder_quantity)
+                    suggested_qty = base_reorder_quantity(item)
 
-                # Adjust for package quantities
-                if item_supplier.quantity_per_package and item_supplier.quantity_per_package > 1:
+                # Adjust for package quantities. Supplier packaging only rounds
+                # items counted in base units: a pack-counting item already
+                # ordered whole packs of its own chain above, and re-rounding to
+                # a supplier's case would silently inflate that.
+                if (
+                    not counts_in_packs(item)
+                    and item_supplier.quantity_per_package
+                    and item_supplier.quantity_per_package > 1
+                ):
                     packages_needed = (
                         suggested_qty + item_supplier.quantity_per_package - 1
                     ) // item_supplier.quantity_per_package
@@ -1103,10 +1114,17 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         return scored_suppliers[0][0] if scored_suppliers else None
 
     def _calculate_optimal_quantity(self, item, supplier):
-        """Calculate optimal order quantity considering package sizes and stock needs."""
-        # Calculate basic reorder quantity
-        shortage = max(0, item.minimum_stock - item.current_stock)
-        base_quantity = max(shortage, item.reorder_quantity)
+        """Calculate optimal order quantity considering package sizes and stock needs.
+
+        Always base units. For an item counted in whole packs the item's own
+        packaging chain sets the quantity and the supplier's case size is not
+        applied on top (op-es7c); ``each`` items keep the supplier round-up.
+        """
+        # Calculate basic reorder quantity (mode-aware; each = today's math)
+        base_quantity = base_reorder_quantity(item)
+
+        if counts_in_packs(item):
+            return base_quantity
 
         # Adjust for package quantities if available
         if supplier.quantity_per_package and supplier.quantity_per_package > 1:

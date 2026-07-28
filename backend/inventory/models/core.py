@@ -520,17 +520,36 @@ class InventoryItem(OwnableModel):
     def needs_reorder(self) -> bool:
         """Check if item stock is below minimum and needs reordering.
 
+        Compares stock to the reorder point *at the granularity the item is
+        counted in* (op-es7c):
+
+        * ``count_mode=each`` — unchanged, and it is what every pre-existing
+          item is: case-based items compare ``current_cases`` to
+          ``minimum_cases``, everything else ``current_stock`` to
+          ``minimum_stock``, both in base units.
+        * ``by_level`` / ``open_closed`` — whole packs of ``count_level``
+          against ``minimum_stock``, which for these modes is a threshold in the
+          item's COUNT unit (cases/reams/sealed packs). ``count_mode`` is the
+          source of truth here: the legacy ``use_case_based_reorder`` /
+          ``minimum_cases`` pair is deliberately not consulted.
+
         Pure stock math — despite the name it never touches ``reorder_requests``,
         so it is prefetch-safe and is intentionally NOT part of the
         ``reorder_requests`` N+1 fix (issue #890). Do not add a reorder-request
-        query here.
+        query here. The database-side twin lives in
+        ``inventory.services.packaging.low_stock_q``.
         """
+        from inventory.services.packaging import count_at_level, counts_in_packs
+
         # Retired items are phased out: never flagged for reorder, regardless of
         # stock level. This is the central chokepoint for every property-based
         # low-stock surface (reorder_status, low_stock action, serializer
         # needs_reorder field, admin, AssetPart, Fixture refill).
         if self.is_retired:
             return False
+        if counts_in_packs(self):
+            # Counted in whole packs: minimum_stock is the threshold in those packs.
+            return count_at_level(self) <= self.minimum_stock
         if self.use_case_based_reorder:
             # For case-based reordering, calculate current cases and compare to minimum cases
             current_cases = self.current_cases

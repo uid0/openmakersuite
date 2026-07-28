@@ -6,6 +6,20 @@ remains the canonical BASE-unit quantity that every reorder / purchase /
 usage flow reads, and these helpers only convert it between rungs or format it
 for display.
 
+Phase 2a (op-es7c) adds the *reorder* half: :func:`count_at_level` (the whole
+count in the unit an item is counted in), :func:`base_reorder_quantity` (how
+much to suggest ordering, still stored in base units) and :func:`low_stock_q`
+(the SQL twin of ``needs_reorder``). ``each`` items — including legacy
+``use_case_based_reorder`` ones — route through the same helpers and come out
+byte-for-byte where they were; only an item opted into a pack-counting
+``count_mode`` takes the new path.
+
+⚠️ For the pack-counting modes, ``InventoryItem.minimum_stock`` and
+``reorder_quantity`` are read as thresholds/amounts in the item's COUNT unit
+(cases, reams, sealed packs), not base units. That reinterpretation is the
+point of the unification: one pair of columns drives reordering at whatever
+granularity the item is counted at. ``each`` keeps their base-unit meaning.
+
 The validators are shared deliberately: ``PackagingLevel.clean()`` calls
 :func:`validate_packaging_chain` for single-row saves, and
 ``InventoryItemSerializer.validate`` calls it for the nested (bulk) write,
@@ -18,6 +32,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Sequence
 
 from django.core.exceptions import ValidationError
+from django.db.models import ExpressionWrapper, F, IntegerField, Q
 
 if TYPE_CHECKING:
     from inventory.models.core import InventoryItem, PackagingLevel
@@ -101,6 +116,154 @@ def on_hand_display(item: "InventoryItem") -> dict:
         "remainder_base": remainder,
         "text": f"{whole} {level.name}(s)",
     }
+
+
+def counts_in_packs(item: "InventoryItem") -> bool:
+    """True when ``item`` is counted in whole packs of a usable ``count_level``.
+
+    The single predicate every mode-aware caller branches on (op-es7c). It is
+    deliberately conservative: a half-configured item — a pack-counting
+    ``count_mode`` with no ``count_level``, or one pointing at a rung that holds
+    less than a base unit — reads as ``False`` and keeps today's base-unit
+    behaviour instead of raising, mirroring :func:`on_hand_display`'s fallback.
+    """
+    if item.count_mode == item.CountMode.EACH:
+        return False
+    level = item.count_level
+    return level is not None and level.base_units >= 1
+
+
+def count_at_level(item: "InventoryItem") -> int:
+    """The item's whole count expressed in the unit it is *counted* in.
+
+    * ``each`` → ``current_stock`` (base units), i.e. today's number.
+    * ``by_level`` / ``open_closed`` → whole packs of ``count_level``. A partial
+      pack is not a countable pack, and under ``open_closed`` that is exactly
+      the sealed count — the open container is not counted.
+
+    Falls back to ``current_stock`` for a pack-counting item with no usable
+    ``count_level`` (see :func:`counts_in_packs`).
+    """
+    if not counts_in_packs(item):
+        return item.current_stock
+    whole, _ = to_level_count(item.current_stock, item.count_level)
+    return whole
+
+
+def reorder_threshold(item: "InventoryItem") -> tuple[int, str]:
+    """``(threshold, unit noun)`` naming the item's reorder point as a human reads it.
+
+    Pack-counting items read ``minimum_stock`` in their ``count_level``'s unit;
+    legacy ``use_case_based_reorder`` items keep their ``minimum_cases``/"case"
+    wording; everything else is ``minimum_stock`` base units. Callers own
+    pluralisation.
+    """
+    if counts_in_packs(item):
+        return item.minimum_stock, item.count_level.name
+    if item.use_case_based_reorder:
+        return item.minimum_cases, "case"
+    return item.minimum_stock, item.base_unit or "unit"
+
+
+def base_reorder_quantity(item: "InventoryItem") -> int:
+    """How much to suggest ordering, in BASE units, before any supplier rounding.
+
+    The stored ``ReorderRequest``/``PurchaseOrderItem`` quantity stays in base
+    units — only the derivation is mode-aware:
+
+    * ``each`` → UNCHANGED: ``max(minimum_stock - current_stock, reorder_quantity)``
+      base units, which callers may still round up to a whole supplier package.
+    * pack-counting → the same arithmetic one rung up, in the item's count unit,
+      then converted through ``count_level``. With stock at the reorder point
+      that is exactly ``reorder_quantity × count_level.base_units``; the
+      shortage clause only bites for an item that fell far below its minimum,
+      and is the count-level twin of the ``each`` behaviour rather than a new
+      rule. Supplier packaging plays no part — a pack-counting item already
+      orders whole packs of its OWN chain.
+    """
+    if not counts_in_packs(item):
+        shortage = max(0, item.minimum_stock - item.current_stock)
+        return max(shortage, item.reorder_quantity)
+
+    shortage_levels = max(0, item.minimum_stock - count_at_level(item))
+    return max(shortage_levels, item.reorder_quantity) * item.count_level.base_units
+
+
+def reorder_display(item: "InventoryItem") -> dict:
+    """Reorder point + current count in one unit, ready to label a UI (op-es7c).
+
+    ``{mode, unit, threshold, current, reorder_quantity, needs_reorder, text}``
+    — every quantity expressed in ``unit``, so a caller can render
+    "1 case on hand · reorder at 2 cases" without knowing which columns the
+    item's ``count_mode`` gives meaning to.
+    """
+    threshold, unit = reorder_threshold(item)
+    if counts_in_packs(item):
+        current: float = count_at_level(item)
+        quantity = item.reorder_quantity
+    elif item.use_case_based_reorder:
+        current = item.current_cases
+        quantity = item.reorder_cases
+    else:
+        current = item.current_stock
+        quantity = item.reorder_quantity
+
+    def _plural(count) -> str:
+        return unit if count == 1 else f"{unit}s"
+
+    return {
+        "mode": item.count_mode,
+        "unit": unit,
+        "threshold": threshold,
+        "current": current,
+        "reorder_quantity": quantity,
+        "needs_reorder": item.needs_reorder,
+        "text": (
+            f"{current} {_plural(current)} on hand · "
+            f"reorder at {threshold} {_plural(threshold)}"
+        ),
+    }
+
+
+def low_stock_q() -> Q:
+    """``Q`` selecting items at/below their reorder point — the SQL twin of ``needs_reorder``.
+
+    For the reorder-queue surfaces that pre-filter in the database rather than
+    walking the property. ``each`` items keep EXACTLY today's predicate,
+    ``current_stock <= minimum_stock`` — including ``use_case_based_reorder``
+    ones, whose SQL filter has always been that base-unit comparison even though
+    the property compares cases (a pre-existing divergence this deliberately
+    preserves). Pack-counting items compare WHOLE packs instead::
+
+        floor(current_stock / base_units) <= minimum_stock
+        ⟺ current_stock < (minimum_stock + 1) × base_units
+
+    The two branches are exact complements — the second is De Morgan's of
+    :func:`counts_in_packs`, spelled positively so the nullable ``count_level``
+    join is never negated.
+    """
+    from inventory.models.core import InventoryItem
+
+    pack_modes = [InventoryItem.CountMode.BY_LEVEL, InventoryItem.CountMode.OPEN_CLOSED]
+
+    counted_in_packs = Q(
+        count_mode__in=pack_modes,
+        count_level__isnull=False,
+        count_level__base_units__gte=1,
+    )
+    counted_in_base = (
+        ~Q(count_mode__in=pack_modes)
+        | Q(count_level__isnull=True)
+        | Q(count_level__base_units__lt=1)
+    )
+    pack_threshold = ExpressionWrapper(
+        (F("minimum_stock") + 1) * F("count_level__base_units"),
+        output_field=IntegerField(),
+    )
+
+    return (counted_in_base & Q(current_stock__lte=F("minimum_stock"))) | (
+        counted_in_packs & Q(current_stock__lt=pack_threshold)
+    )
 
 
 def validate_packaging_chain(levels: Iterable[Any]) -> None:

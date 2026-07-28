@@ -588,6 +588,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     # counting granularity without changing it.
     packaging_levels = PackagingLevelSerializer(many=True, required=False)
     on_hand_display = serializers.SerializerMethodField()
+    reorder_display = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
@@ -620,6 +621,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "open_container_count",
             "packaging_levels",
             "on_hand_display",
+            "reorder_display",
             # ML demand-forecast opt-in (read+write; default OFF). The "ping me"
             # toggle that puts an item into the reorder_alerts notify set.
             "reorder_alerts_enabled",
@@ -723,6 +725,19 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         from inventory.services.packaging import on_hand_display
 
         return on_hand_display(obj)
+
+    def get_reorder_display(self, obj):
+        """Reorder point + current count in one unit (op-es7c).
+
+        Lets a client label the threshold correctly per mode ("reorder at 2
+        cases") without re-deriving which of ``minimum_stock``/``minimum_cases``
+        the item's ``count_mode`` gives meaning to. Reads only ``count_level``
+        (already select_related on every queryset that serialises items) and
+        ``item_suppliers`` (already prefetched), so it costs no extra query.
+        """
+        from inventory.services.packaging import reorder_display
+
+        return reorder_display(obj)
 
     def get_active_reorder_request(self, obj):
         """Return details of the active reorder request if any."""

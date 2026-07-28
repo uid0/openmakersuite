@@ -295,7 +295,7 @@ class IndexCardRenderer:
             # Get image bottom position (reuse logic from _draw_left_section)
             info_y = current_y - 0.1 * inch
             info_lines = [
-                f"Reorder at: {self._pluralize(item.minimum_cases if item.use_case_based_reorder else item.minimum_stock, 'case' if item.use_case_based_reorder else 'unit')}",
+                self._reorder_at_line(item),
             ]
             if item.average_lead_time:
                 info_lines.append(f"Avg Lead: {self._pluralize(item.average_lead_time, 'day')}")
@@ -360,16 +360,9 @@ class IndexCardRenderer:
     ) -> None:
         """Draw the left section with stock info and product image."""
         # Draw Kanban stock info (reorder point and lead times)
-        if item.use_case_based_reorder:
-            # Case-based reordering display
-            info_lines = [
-                f"Reorder at: {self._pluralize(item.minimum_cases, 'case')}",
-            ]
-        else:
-            # Traditional unit-based display
-            info_lines = [
-                f"Reorder at: {self._pluralize(item.minimum_stock, 'unit')}",
-            ]
+        info_lines = [
+            self._reorder_at_line(item),
+        ]
 
         # Add average lead time from primary supplier
         if item.average_lead_time:
@@ -819,6 +812,20 @@ class IndexCardRenderer:
 
     def _calculate_desired_stock(self, item: InventoryItem) -> int:
         return max(item.minimum_stock + item.reorder_quantity, item.reorder_quantity)
+
+    def _reorder_at_line(self, item: InventoryItem) -> str:
+        """The card's "Reorder at:" line, worded for how the item is counted.
+
+        One helper because the shelf-position arrow re-measures the same line to
+        find the image bottom, and the two must not drift apart. The service
+        picks the column that the item's ``count_mode`` gives meaning to —
+        cases for a legacy case-based item, packs of ``count_level`` for a
+        pack-counting one, base units otherwise (op-es7c).
+        """
+        from inventory.services.packaging import reorder_threshold
+
+        threshold, unit = reorder_threshold(item)
+        return f"Reorder at: {self._pluralize(threshold, unit)}"
 
     def _get_longest_lead_time(self, item: InventoryItem) -> int | None:
         """Get the longest lead time across all suppliers for this item."""

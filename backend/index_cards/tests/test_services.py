@@ -190,3 +190,51 @@ class IndexCardRendererTests(TestCase):
 
         # Clean up temporary media directory
         shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+
+class ReorderAtLineTests(TestCase):
+    """The card's "Reorder at:" line names the unit the item is counted in (op-es7c).
+
+    One helper feeds both the drawn line and the shelf-arrow's height
+    measurement, so these assertions pin the text for both.
+    """
+
+    def setUp(self) -> None:
+        self.renderer = IndexCardRenderer(base_url="http://localhost:3000")
+
+    def _item(self, **kwargs) -> InventoryItem:
+        defaults = {
+            "name": "Nitrile gloves",
+            "reorder_quantity": 5,
+            "current_stock": 2,
+            "minimum_stock": 3,
+        }
+        return InventoryItem.objects.create(**{**defaults, **kwargs})
+
+    def test_plain_item_reads_in_base_units(self) -> None:
+        item = self._item(minimum_stock=3)
+
+        self.assertEqual(self.renderer._reorder_at_line(item), "Reorder at: 3 units")
+
+    def test_case_based_item_still_reads_in_cases(self) -> None:
+        item = self._item(use_case_based_reorder=True, minimum_cases=1)
+
+        self.assertEqual(self.renderer._reorder_at_line(item), "Reorder at: 1 case")
+
+    def test_pack_counting_item_reads_in_its_own_packs(self) -> None:
+        from inventory.models import PackagingLevel
+
+        item = self._item(base_unit="glove", minimum_stock=2)
+        case = PackagingLevel.objects.create(item=item, name="box", sort_order=0, base_units=100)
+        PackagingLevel.objects.create(item=item, name="glove", sort_order=1, base_units=1)
+        item.count_mode = InventoryItem.CountMode.BY_LEVEL
+        item.count_level = case
+        item.save(update_fields=["count_mode", "count_level"])
+
+        self.assertEqual(self.renderer._reorder_at_line(item), "Reorder at: 2 boxes")
+
+    def test_custom_base_unit_labels_an_each_item(self) -> None:
+        """An item that opted into a named base unit gets that noun, not "unit"."""
+        item = self._item(base_unit="sheet", minimum_stock=500)
+
+        self.assertEqual(self.renderer._reorder_at_line(item), "Reorder at: 500 sheets")

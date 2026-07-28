@@ -601,10 +601,19 @@ class MarkDeliveredSerializer(serializers.Serializer):
 
 
 class ReceiveItemSerializer(serializers.Serializer):
-    """A single line in a per-item purchase order receive request."""
+    """A single line in a per-item purchase order receive request.
+
+    ``quantity_received`` is BASE units — it is checked against the line's
+    base-unit pending quantity — unless ``at_level`` is set, in which case it is
+    a count of whole packs of the item's ``count_level`` ("three cases came in")
+    and is converted before any of that (op-ev14). ``at_level`` on a line whose
+    item is not counted in packs, or on an asset/freeform line, is an error
+    rather than a silent base-unit reading.
+    """
 
     purchase_order_item = serializers.IntegerField()
     quantity_received = serializers.IntegerField(min_value=1)
+    at_level = serializers.BooleanField(required=False, default=False)
 
 
 class ReceiveItemsSerializer(serializers.Serializer):

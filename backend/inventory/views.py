@@ -118,7 +118,13 @@ from .serializers import (
     WorkOrderTaskCompletionSerializer,
     WorkOrderValidationSerializer,
 )
-from .services.packaging import count_at_level, counts_in_packs
+from .services.packaging import (
+    count_at_level,
+    count_unit,
+    counts_in_packs,
+    on_hand_display,
+    resolve_base_quantity,
+)
 from .services.problem_auto_resolve import resolve_problems_for_work_order
 
 
@@ -1110,7 +1116,14 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         """Log usage/consumption of an item, optionally charging a committee.
 
         Body:
-        - ``quantity`` (int, default 1): units consumed.
+        - ``quantity`` (int, default 1): units consumed. Base units by default —
+          unchanged for every existing caller — or whole packs of the item's
+          ``count_level`` when ``at_level`` is true ("used 2 cases").
+        - ``at_level`` (bool, optional): read ``quantity`` as a pack count and
+          convert it through the item's packaging chain (op-ev14). Rejected for
+          an item that is not counted in packs. ``UsageLog.quantity_used`` still
+          stores base units, so the wire shape of the log is unchanged; the
+          response reports which unit was entered.
         - ``notes`` (str, optional).
         - ``charged_group`` (``auth.Group`` id, optional): when given, the
           committee is charged for the consumption. A snapshot of the item's cost
@@ -1131,10 +1144,23 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
         item = self.get_object()
         try:
-            quantity = int(request.data.get("quantity", 1))
+            entered_quantity = int(request.data.get("quantity", 1))
         except (TypeError, ValueError):
             return Response(
                 {"detail": "quantity must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Base units unless the caller says the number is a pack count. Unlike
+        # the reconciliation paths (where the entry IS a physical count at the
+        # item's granularity) usage is often machine-derived from base-unit
+        # sources, so the pack reading is opt-in rather than mode-driven.
+        at_level = bool(request.data.get("at_level", False))
+        try:
+            quantity = resolve_base_quantity(item, entered_quantity, at_level=at_level)
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages[0]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         notes = request.data.get("notes", "")
@@ -1203,9 +1229,75 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                     )
 
         data = UsageLogSerializer(usage_log).data
+        # Echo the unit the entry was read in so a caller that sent a pack count
+        # can confirm the conversion (``quantity_used`` above is base units).
+        data = {
+            **data,
+            "entered_quantity": entered_quantity,
+            "entered_unit": count_unit(item) if at_level else (item.base_unit or "unit"),
+            "on_hand_display": on_hand_display(item),
+        }
         if warning:
             data = {**data, "warning": warning}
         return Response(data)
+
+    @action(detail=True, methods=["post"], url_path="pack-container")
+    def pack_container(self, request, pk=None):
+        """Open a sealed pack, or finish the open one (``open_closed`` items).
+
+        The two container moves an ``open_closed`` item makes, which no other
+        stock path expresses (op-ev14). Body: ``transition`` — ``"open"`` or
+        ``"finish"`` — plus optional ``notes`` carried onto the usage log.
+
+        * ``open`` — a sealed pack is broken into: ``current_stock`` drops by the
+          pack's base units, ``open_container_count`` rises by one, and a
+          ``UsageLog`` records the pack. Under this mode the countable stock is
+          the *sealed* packs and an open pack's remaining contents are untracked,
+          so the base units stop being countable the moment it is opened — which
+          is why opening is the half that moves stock and writes usage.
+        * ``finish`` — the open pack is empty: ``open_container_count`` drops by
+          one and stock does not move (it already did). No usage row: nothing was
+          consumed here, and a zero-quantity one would violate
+          ``UsageLog.quantity_used``'s minimum.
+
+        Returns ``{transition, current_stock, open_container_count,
+        on_hand_display, usage_log}`` — ``usage_log`` is null for ``finish``.
+        Requires authentication (the ``AllowAny`` ``log_usage`` path stays the
+        public way to record consumption); 400 for a non-``open_closed`` item,
+        no sealed pack left to open, or no open pack to finish.
+        """
+        from .services.pack_transitions import finish_open_pack, open_pack
+
+        item = self.get_object()
+        transition = (request.data.get("transition") or "").strip().lower()
+        if transition not in ("open", "finish"):
+            return Response(
+                {"detail": "transition is required; choose 'open' or 'finish'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        notes = request.data.get("notes", "") or ""
+        try:
+            if transition == "open":
+                item, usage_log = open_pack(item, user=request.user, notes=notes)
+            else:
+                item, usage_log = finish_open_pack(item, user=request.user), None
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages[0]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "transition": transition,
+                "id": str(item.id),
+                "current_stock": item.current_stock,
+                "open_container_count": item.open_container_count,
+                "on_hand_display": on_hand_display(item),
+                "usage_log": UsageLogSerializer(usage_log).data if usage_log else None,
+            }
+        )
 
     @action(detail=True, methods=["post"], url_path="cycle-count")
     def cycle_count(self, request, pk=None):
@@ -1218,9 +1310,17 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         the item's ``last_counted_at`` is stamped so the detail views can show
         days-since-last-count.
 
+        ``counted_qty`` is base units unless ``at_level`` says it is a count of
+        whole packs of the item's ``count_level`` — "I counted 3 cases"
+        (op-ev14). ``open_count`` sets the open-container tally of an
+        ``open_closed`` item in the same write (the sealed/open pair). The
+        response echoes ``counted_unit`` and ``on_hand_display`` so a caller can
+        confirm which unit was applied.
+
         Body: ``counted_qty`` (required int >= 0), ``reason`` (required, from
         ``StockReconciliation.ReasonCode.choices``), ``skip_reorder`` (optional bool),
-        ``notes`` (optional str).
+        ``notes`` (optional str), ``at_level`` (optional bool), ``open_count``
+        (optional int >= 0, ``open_closed`` items only).
         """
         item = self.get_object()
 
@@ -1254,17 +1354,43 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         skip_reorder = bool(request.data.get("skip_reorder", False))
         notes = request.data.get("notes", "") or ""
 
-        with transaction.atomic():
-            reconciliation, _reorder_created = _apply_reconciliation_row(
-                request.user,
-                item,
-                counted_qty,
-                reason,
-                notes=notes,
-                skip_reorder=skip_reorder,
+        at_level = bool(request.data.get("at_level", False))
+
+        raw_open_count = request.data.get("open_count")
+        open_count = None
+        if raw_open_count is not None:
+            try:
+                open_count = int(raw_open_count)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "open_count must be an integer."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if open_count < 0:
+                return Response(
+                    {"detail": "open_count must be >= 0."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            with transaction.atomic():
+                reconciliation, _reorder_created = _apply_reconciliation_row(
+                    request.user,
+                    item,
+                    counted_qty,
+                    reason,
+                    notes=notes,
+                    skip_reorder=skip_reorder,
+                    at_level=at_level,
+                    open_count=open_count,
+                )
+                item.last_counted_at = timezone.now()
+                item.save(update_fields=["last_counted_at"])
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages[0]},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-            item.last_counted_at = timezone.now()
-            item.save(update_fields=["last_counted_at"])
 
         days_since_last_count = (timezone.now() - item.last_counted_at).days
 
@@ -1272,6 +1398,8 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             {
                 "id": str(item.id),
                 "current_stock": item.current_stock,
+                "counted_unit": count_unit(item),
+                "on_hand_display": on_hand_display(item),
                 "last_counted_at": item.last_counted_at,
                 "days_since_last_count": days_since_last_count,
                 "reconciliation": {
@@ -7548,16 +7676,48 @@ def _user_can_reconcile_item(user, item):
     return is_sig_admin(user, group)
 
 
-def _apply_reconciliation_row(user, item, actual_count, reason, notes="", skip_reorder=False):
+def _apply_reconciliation_row(
+    user,
+    item,
+    actual_count,
+    reason,
+    notes="",
+    skip_reorder=False,
+    at_level=False,
+    open_count=None,
+):
     """Apply a single reconciliation row. Caller owns transaction + permission check.
 
-    Returns (StockReconciliation, reorder_created_bool).
+    ``actual_count`` is BASE units — unchanged, and what every caller before
+    op-ev14 sends — unless ``at_level`` says it is a count of whole packs of the
+    item's ``count_level`` ("I counted 3 cases"), which is converted before it
+    reaches ``current_stock``. ``open_count`` optionally sets the ``open_closed``
+    open-container tally in the same write; that pack count plus the open tally
+    is the sealed/open pair that fully describes such an item.
+
+    The stored audit row stays BASE-unit canonical — ``projected_count``,
+    ``actual_count`` and ``delta`` are always base units, whatever unit the
+    entry arrived in — so the reconciliation history is comparable across a
+    later count-mode change.
+
+    Returns (StockReconciliation, reorder_created_bool). Raises
+    ``DjangoValidationError`` for a quantity the item's packaging cannot express.
     """
     projected = int(item.current_stock)
-    actual = int(actual_count)
+    actual = resolve_base_quantity(item, int(actual_count), at_level=at_level)
     delta = actual - projected
     item.current_stock = actual
-    item.save(update_fields=["current_stock", "updated_at"])
+
+    update_fields = ["current_stock", "updated_at"]
+    if open_count is not None:
+        if item.count_mode != InventoryItem.CountMode.OPEN_CLOSED:
+            raise DjangoValidationError(
+                f"'{item.name}' does not track open containers (count mode "
+                f"'{item.count_mode}'); omit open_count."
+            )
+        item.open_container_count = int(open_count)
+        update_fields.append("open_container_count")
+    item.save(update_fields=update_fields)
 
     reconciliation = StockReconciliation.objects.create(
         item=item,
@@ -7587,14 +7747,19 @@ def _apply_reconciliation_row(user, item, actual_count, reason, notes="", skip_r
         requested_by = (user.get_full_name() or user.username).strip()
         base_units_per_count = item.count_level.base_units if counts_in_packs(item) else 1
         reorder_quantity = (item.reorder_quantity or 1) * base_units_per_count
+        # Report the trigger in the unit it was judged in. For an ``each`` item
+        # that is the previous sentence verbatim; naming the pack for the others
+        # keeps the note from reading a base count against a pack threshold.
+        if counts_in_packs(item):
+            unit = item.count_level.name
+            trigger = f"actual={count_at_level(item)} {unit}, minimum={item.minimum_stock} {unit}"
+        else:
+            trigger = f"actual={actual}, minimum={item.minimum_stock}"
         reorder = ReorderRequest.objects.create(
             item=item,
             quantity=reorder_quantity,
             requested_by=requested_by,
-            request_notes=(
-                "Auto-created by stock reconciliation "
-                f"(actual={actual}, minimum={item.minimum_stock})."
-            ),
+            request_notes=f"Auto-created by stock reconciliation ({trigger}).",
         )
         reconciliation.triggered_reorder = reorder
         reconciliation.save(update_fields=["triggered_reorder"])
@@ -7635,8 +7800,9 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
             )
         items = (
             InventoryItem.objects.filter(location=location, is_active=True)
-            .select_related("owning_group")
-            .order_by("name")
+            # ``count_level`` joins for the grid's count-unit columns (op-ev14);
+            # without it every pack-counting row costs a query.
+            .select_related("owning_group", "count_level").order_by("name")
         )
         serializer = LocationReconcileItemSerializer(items, many=True)
         return Response(
@@ -7688,6 +7854,8 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
                         row["reason"],
                         notes=row.get("notes", "") or "",
                         skip_reorder=bool(row.get("skip_reorder", False)),
+                        at_level=bool(row.get("at_level", False)),
+                        open_count=row.get("open_count"),
                     )
                     if reorder_created:
                         reorders_created += 1
@@ -7818,6 +7986,27 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
                 continue
             skip_flag = (row.get("skip_reorder") or "").lower()
             skip_reorder = skip_flag in ("1", "true", "yes", "y", "t")
+            # Optional columns (op-ev14): ``at_level`` reads ``actual_count`` as
+            # a pack count (absent/blank = base units, as before), and
+            # ``open_count`` sets an ``open_closed`` item's open tally.
+            at_level_flag = (row.get("at_level") or "").strip().lower()
+            at_level = at_level_flag in ("1", "true", "yes", "y", "t")
+            open_count = None
+            raw_open = (row.get("open_count") or "").strip()
+            if raw_open:
+                try:
+                    open_count = int(raw_open)
+                except (TypeError, ValueError):
+                    errors.append(
+                        {
+                            "row": row_num,
+                            "error": "open_count must be a non-negative integer.",
+                        }
+                    )
+                    continue
+                if open_count < 0:
+                    errors.append({"row": row_num, "error": "open_count must be >= 0."})
+                    continue
             parsed.append(
                 {
                     "row": row_num,
@@ -7826,6 +8015,8 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
                     "reason": reason,
                     "notes": row.get("notes") or "",
                     "skip_reorder": skip_reorder,
+                    "at_level": at_level,
+                    "open_count": open_count,
                 }
             )
 
@@ -7857,6 +8048,8 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
                         p["reason"],
                         notes=p["notes"],
                         skip_reorder=p["skip_reorder"],
+                        at_level=p["at_level"],
+                        open_count=p["open_count"],
                     )
                     created += 1
         except DjangoValidationError as exc:
@@ -7886,24 +8079,40 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
 
         items = (
             InventoryItem.objects.filter(location=location, is_active=True)
+            # The count-mode fields ride along (select_related + only) so the
+            # per-row unit columns below cost no extra query on a streamed export.
+            .select_related("count_level")
             .only(
                 "id",
                 "sku",
                 "name",
                 "current_stock",
                 "minimum_stock",
+                "base_unit",
+                "count_mode",
+                "open_container_count",
+                "count_level__name",
+                "count_level__base_units",
             )
             .order_by("name")
             .iterator(chunk_size=500)
         )
 
+        # ``projected`` stays base-unit canonical; ``count_unit`` /
+        # ``projected_at_unit`` name the unit a counter should write
+        # ``actual_count`` in (op-ev14), and ``open_count`` round-trips an
+        # ``open_closed`` item's open tally. For an ``each`` item the unit is its
+        # base unit and ``projected_at_unit`` equals ``projected``.
         header = [
             "item_id",
             "sku",
             "name",
             "projected",
             "minimum_stock",
+            "count_unit",
+            "projected_at_unit",
             "actual_count",
+            "open_count",
             "reason",
             "notes",
             "skip_reorder",
@@ -7925,7 +8134,16 @@ class InventoryReconciliationViewSet(viewsets.ViewSet):
                         item.name,
                         item.current_stock,
                         item.minimum_stock,
+                        count_unit(item),
+                        count_at_level(item),
                         "",
+                        # Only an ``open_closed`` item accepts open_count back on
+                        # upload, so only it gets the column pre-filled.
+                        (
+                            item.open_container_count
+                            if item.count_mode == InventoryItem.CountMode.OPEN_CLOSED
+                            else ""
+                        ),
                         "",
                         "",
                         "",

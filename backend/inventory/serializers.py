@@ -953,10 +953,18 @@ class DemandForecastSerializer(serializers.ModelSerializer):
     The restock-interval fields carry the live signal; the retired v1 quantity
     fields are still emitted (as ``0``/``null`` on current rows) so existing
     consumers keep their keys until they are relabelled.
+
+    ``count_mode`` / ``count_unit`` / ``on_hand_display`` present the item at its
+    counting granularity (op-ev14) so a forecast row can be read in cases where
+    the item is counted in cases. Presentation only — every stored forecast
+    number stays exactly as the engine computed it, in base units.
     """
 
     item_name = serializers.CharField(source="item.name", read_only=True)
     sku = serializers.CharField(source="item.sku", read_only=True)
+    count_mode = serializers.CharField(source="item.count_mode", read_only=True)
+    count_unit = serializers.SerializerMethodField()
+    on_hand_display = serializers.SerializerMethodField()
     # allow_null so an uncategorised item still emits ``category_name: null``
     # (mirrors the serialized_forecast payload) instead of dropping the key when
     # ``item.category`` is None.
@@ -972,6 +980,10 @@ class DemandForecastSerializer(serializers.ModelSerializer):
             "item_name",
             "sku",
             "category_name",
+            # Count-level presentation (op-ev14) -- display only.
+            "count_mode",
+            "count_unit",
+            "on_hand_display",
             "generated_at",
             # Restock-interval signal (v2).
             "avg_interval_days",
@@ -996,6 +1008,16 @@ class DemandForecastSerializer(serializers.ModelSerializer):
             "method",
             "model_version",
         ]
+
+    def get_count_unit(self, obj) -> str:
+        from inventory.services.packaging import count_unit
+
+        return count_unit(obj.item)
+
+    def get_on_hand_display(self, obj) -> dict:
+        from inventory.services.packaging import on_hand_display
+
+        return on_hand_display(obj.item)
 
 
 class CommittedBreakdownEntrySerializer(serializers.Serializer):
@@ -3036,13 +3058,26 @@ class StockReconciliationSerializer(serializers.ModelSerializer):
 
 
 class StockReconciliationRowSerializer(serializers.Serializer):
-    """A single row in a batch reconciliation submission."""
+    """A single row in a batch reconciliation submission.
+
+    ``actual_count`` is base units, unchanged. The two optional fields (op-ev14)
+    let a caller count the way the item is stocked instead:
+
+    * ``at_level`` — read ``actual_count`` as whole packs of the item's
+      ``count_level`` ("I counted 3 cases"). Rejected on an item that is not
+      counted in packs, rather than silently read as base units.
+    * ``open_count`` — sets the open-container tally, ``open_closed`` only.
+    """
 
     item_id = serializers.UUIDField()
     actual_count = serializers.IntegerField(min_value=0)
     reason = serializers.ChoiceField(choices=StockReconciliation.ReasonCode.choices)
     notes = serializers.CharField(required=False, allow_blank=True, default="")
     skip_reorder = serializers.BooleanField(required=False, default=False)
+    at_level = serializers.BooleanField(required=False, default=False)
+    open_count = serializers.IntegerField(
+        required=False, allow_null=True, min_value=0, default=None
+    )
 
 
 class StockReconciliationBatchSerializer(serializers.Serializer):
@@ -3118,13 +3153,22 @@ class AssetCostRecoveryReportSerializer(serializers.Serializer):
 
 
 class LocationReconcileItemSerializer(serializers.ModelSerializer):
-    """Single item row in the location reconcile grid payload."""
+    """Single item row in the location reconcile grid payload.
+
+    ``projected`` stays the canonical base-unit stock. ``count_mode`` /
+    ``count_unit`` / ``projected_at_unit`` name the unit the counter should
+    enter ``actual_count`` in (op-ev14) — the item's counting rung for a
+    pack-counting item, its base unit otherwise — so the grid can label the
+    input instead of leaving a case count to be multiplied out by hand.
+    """
 
     item_id = serializers.UUIDField(source="id", read_only=True)
     projected = serializers.IntegerField(source="current_stock", read_only=True)
     owning_group_name = serializers.CharField(
         source="owning_group.name", read_only=True, default=""
     )
+    count_unit = serializers.SerializerMethodField()
+    projected_at_unit = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
@@ -3136,8 +3180,22 @@ class LocationReconcileItemSerializer(serializers.ModelSerializer):
             "minimum_stock",
             "reorder_quantity",
             "owning_group_name",
+            "count_mode",
+            "count_unit",
+            "projected_at_unit",
+            "open_container_count",
         ]
         read_only_fields = fields
+
+    def get_count_unit(self, obj) -> str:
+        from inventory.services.packaging import count_unit
+
+        return count_unit(obj)
+
+    def get_projected_at_unit(self, obj) -> int:
+        from inventory.services.packaging import count_at_level
+
+        return count_at_level(obj)
 
 
 class MaintenanceRecordSerializer(serializers.ModelSerializer):

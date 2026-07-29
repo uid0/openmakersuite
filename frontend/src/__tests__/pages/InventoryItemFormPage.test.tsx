@@ -46,7 +46,12 @@ vi.mock('react-router-dom', async () => ({
   useNavigate: () => mockNavigate,
 }));
 
-describe('InventoryItemFormPage', () => {
+// Every test here renders the repo's biggest form, which costs ~2s in jsdom on
+// its own and more once 168 files import in parallel — "renders create form" has
+// a history of tripping the default 5s per-test budget on a loaded box, and the
+// packaging section (op-lkxl) added another Select to the page. The budget is
+// stated explicitly so a slow box reports slow tests rather than red ones.
+describe('InventoryItemFormPage', { timeout: 30000 }, () => {
   const mockCategories = [
     { id: 1, name: 'Tools', slug: 'tools', description: 'Tools category', parent: null },
   ];

@@ -765,12 +765,10 @@ const InventoryItemDetailPage: React.FC = () => {
                             {line}
                           </Text>
                         ))}
-                        {countUnit && (
-                          <Text size="sm" c="dimmed">
-                            Counted in {pluralizeUnit(countUnit, 2)}
-                            {item.count_mode === 'open_closed' ? ' (sealed + open)' : ''}
-                          </Text>
-                        )}
+                        <Text size="sm" c="dimmed">
+                          Counted in {pluralizeUnit(countUnit, 2)}
+                          {item.count_mode === 'open_closed' ? ' (sealed + open)' : ''}
+                        </Text>
                       </Stack>
                     </div>
                   )}
@@ -788,7 +786,7 @@ const InventoryItemDetailPage: React.FC = () => {
                         disabled={sealedCount === 0 || packBusy !== null}
                         data-testid="open-pack-button"
                       >
-                        Open a {countUnit || 'pack'}
+                        Open a {countUnit}
                       </Button>
                       <Button
                         size="xs"
@@ -799,7 +797,7 @@ const InventoryItemDetailPage: React.FC = () => {
                         disabled={openCount === 0 || packBusy !== null}
                         data-testid="finish-pack-button"
                       >
-                        Finish open {countUnit || 'pack'}
+                        Finish open {countUnit}
                       </Button>
                     </Group>
                   )}

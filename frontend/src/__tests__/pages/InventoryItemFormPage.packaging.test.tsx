@@ -13,6 +13,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import InventoryItemFormPage from '../../pages/InventoryItemFormPage';
 import * as api from '../../services/api';
+import { COUNT_MODE_LABELS } from '../../utils/packaging';
 
 vi.mock('../../services/api');
 
@@ -157,13 +158,40 @@ const enterChain = (rows: [string, string][]) => {
   });
 };
 
-/** Pick an option out of a Mantine Select by its test id. */
-const chooseOption = async (testId: string, optionName: RegExp) => {
-  fireEvent.click(screen.getByTestId(testId));
-  fireEvent.click(await screen.findByRole('option', { name: optionName }));
+/**
+ * Open a Mantine Select and return its own options.
+ *
+ * Deliberately plain attribute queries rather than `findByRole('option')`: role
+ * queries compute the accessibility tree over the whole document, and this
+ * form's DOM is big enough that a handful of them push a test past vitest's 5s
+ * budget when the suite runs in parallel. Scoped through the input's
+ * `aria-controls` because every select on the page keeps its options mounted
+ * once opened.
+ */
+const openOptions = (testId: string): HTMLElement[] => {
+  const input = screen.getByTestId(testId);
+  fireEvent.click(input);
+  const dropdownId = input.getAttribute('aria-controls');
+  const dropdown = dropdownId ? document.getElementById(dropdownId) : null;
+  return Array.from(
+    (dropdown ?? document).querySelectorAll<HTMLElement>('[data-combobox-option]')
+  );
 };
 
-describe('InventoryItemFormPage — units & packaging', () => {
+/** Pick an option out of a Mantine Select by its label. */
+const chooseOption = (testId: string, label: string) => {
+  const option = openOptions(testId).find((element) => element.textContent === label);
+  if (!option) {
+    throw new Error(`no "${label}" option in ${testId}`);
+  }
+  fireEvent.click(option);
+};
+
+// This page is the repo's biggest form, and these tests drive it hard (chain
+// rows + two selects + a submit). One render already costs ~1s here, so the
+// default 5s per-test budget is genuinely tight once the whole suite runs in
+// parallel — hence the explicit, generous timeout rather than thinner coverage.
+describe('InventoryItemFormPage — units & packaging', { timeout: 30000 }, () => {
   it('renders the packaging section with the chain editor and count-mode picker', async () => {
     renderCreate();
 
@@ -183,13 +211,14 @@ describe('InventoryItemFormPage — units & packaging', () => {
       ['case', '1000'],
       ['sheet', '1'],
     ]);
-    await chooseOption('item-count-mode', /By packaging level/i);
+    chooseOption('item-count-mode', COUNT_MODE_LABELS.by_level);
 
-    const levelSelect = await screen.findByTestId('item-count-level');
-    expect(levelSelect).toBeInTheDocument();
-    fireEvent.click(levelSelect);
-    expect(await screen.findByRole('option', { name: 'case' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'sheet' })).toBeInTheDocument();
+    expect(screen.getByTestId('item-count-level')).toBeInTheDocument();
+    // The chain's rungs are the options, in chain order.
+    expect(openOptions('item-count-level').map((option) => option.textContent)).toEqual([
+      'case',
+      'sheet',
+    ]);
   });
 
   it('relabels the reorder thresholds in the counting unit', async () => {
@@ -205,8 +234,8 @@ describe('InventoryItemFormPage — units & packaging', () => {
       ['case', '1000'],
       ['sheet', '1'],
     ]);
-    await chooseOption('item-count-mode', /By packaging level/i);
-    await chooseOption('item-count-level', /^case$/);
+    chooseOption('item-count-mode', COUNT_MODE_LABELS.by_level);
+    chooseOption('item-count-level', 'case');
 
     expect(await screen.findByLabelText(/Minimum Stock \(cases\)/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Reorder Quantity \(cases\)/)).toBeInTheDocument();
@@ -240,7 +269,7 @@ describe('InventoryItemFormPage — units & packaging', () => {
       ['case', '1000'],
       ['sheet', '1'],
     ]);
-    await chooseOption('item-count-mode', /Sealed \+ open/i);
+    chooseOption('item-count-mode', COUNT_MODE_LABELS.open_closed);
 
     fireEvent.click(screen.getByText('Create Item'));
 
@@ -273,9 +302,9 @@ describe('InventoryItemFormPage — units & packaging', () => {
       ['case', '1000'],
       ['sheet', '1'],
     ]);
-    await chooseOption('item-count-mode', /By packaging level/i);
+    chooseOption('item-count-mode', COUNT_MODE_LABELS.by_level);
     // The INNER rung, so resolving its pk cannot pass by accident on "first".
-    await chooseOption('item-count-level', /^sheet$/);
+    chooseOption('item-count-level', 'sheet');
 
     fireEvent.click(screen.getByText('Create Item'));
 
@@ -325,7 +354,7 @@ describe('InventoryItemFormPage — units & packaging', () => {
 
     // Remove the middle rung and go back to counting base units.
     fireEvent.click(screen.getByTestId('packaging-row-remove-1'));
-    await chooseOption('item-count-mode', /^Each/);
+    chooseOption('item-count-mode', COUNT_MODE_LABELS.each);
 
     fireEvent.click(screen.getByText('Save Changes'));
 
@@ -359,9 +388,7 @@ describe('InventoryItemFormPage — units & packaging', () => {
     });
 
     await waitFor(() => expect(screen.getByDisplayValue('Copy paper')).toBeInTheDocument());
-    expect(screen.getByTestId('item-count-mode')).toHaveValue(
-      'Sealed + open (count sealed packs, track the open one)'
-    );
+    expect(screen.getByTestId('item-count-mode')).toHaveValue(COUNT_MODE_LABELS.open_closed);
     expect(screen.getByTestId('item-count-level')).toHaveValue('ream');
     // Thresholds are read in the counting unit for this mode.
     expect(screen.getByLabelText(/Minimum Stock \(reams\)/)).toBeInTheDocument();

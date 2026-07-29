@@ -7,6 +7,26 @@ The views keep the serializers as the request/response boundary and keep their
 Note: PO number generation stays in ``PurchaseOrder.save()`` (owned by #887) —
 ``create_purchase_order`` relies on ``save()`` to number and retry on
 uniqueness collisions.
+
+**Item packaging vs supplier packaging (op-ev14).** Two different pack sizes
+meet on a PO line and the reconciliation between them is deliberate:
+
+* ``ItemSupplier.quantity_per_package`` is the *supplier's* case — what that
+  vendor actually ships. When a supplier declares one it **wins** for
+  ``order_in_packages``: you buy what the vendor sells, and the line's package
+  count has to match the vendor's catalogue for the order pad and package
+  costing to mean anything. Unchanged behaviour.
+* The item's own chain (:func:`inventory.services.packaging.order_level`, the
+  outermost rung) fills in when the supplier declares **no** case size. Before
+  op-ev14 such a line recorded ``order_in_packages == quantity_ordered``, which
+  says nothing; a case-counted item now records how many of its OWN cases were
+  ordered.
+* ``quantity_ordered`` is always BASE units, whichever pack size shaped it — so
+  on-hand, receipts and usage keep comparing like with like — and a caller may
+  express it in the item's *count* unit with ``at_level`` on the line. That is
+  the same unit every other op-ev14 path names (``on_hand_display``,
+  ``count_unit``, the reconcile grid), never the supplier's case: the count unit
+  is the one the API tells clients about.
 """
 
 from __future__ import annotations
@@ -21,6 +41,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from inventory.models import ItemSupplier
+from inventory.services.packaging import order_level, parse_at_level, resolve_base_quantity
 
 from ..models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
 
@@ -45,6 +66,30 @@ def _resolve_work_order(item_data, idx):
         raise serializers.ValidationError(
             f"Item at index {idx}: work order {work_order_id} does not exist"
         )
+
+
+def order_packages_for_line(item_supplier, base_quantity):
+    """How many packages ``base_quantity`` base units represents on a line.
+
+    The supplier's case size when that supplier declares one, the item's own
+    outermost packaging rung when it does not (op-ev14 — see the module
+    docstring for why that order). An item counted in base units has no rung, so
+    it keeps exactly the previous ceil-divide by ``quantity_per_package or 1``.
+
+    Costs no extra query for an ``each`` item: :func:`order_level` reads
+    ``count_mode`` and short-circuits before touching the chain.
+    """
+    quantity_per_package = item_supplier.quantity_per_package or 1
+    if quantity_per_package > 1:
+        return -(-base_quantity // quantity_per_package)
+
+    rung = order_level(item_supplier.item)
+    if rung is not None:
+        return -(-base_quantity // rung.base_units)
+
+    # Neither pack size is declared: the previous ceil-divide by 1, i.e. the
+    # base-unit count itself.
+    return base_quantity
 
 
 def _resolve_owning_group(item_data, idx):
@@ -119,10 +164,23 @@ def create_purchase_order(validated_data, items_data, user):
                         f"Item supplier {item_supplier_id} does not belong to selected supplier"
                     )
 
+                # ``at_level`` lets a caller order in the item's count unit
+                # ("4 cases") instead of base units; the stored
+                # ``quantity_ordered`` is always base units (op-ev14). Absent —
+                # every caller today — the quantity passes through untouched.
+                try:
+                    quantity = resolve_base_quantity(
+                        item_supplier.item,
+                        int(quantity),
+                        at_level=parse_at_level(item_data.get("at_level")),
+                    )
+                except DjangoValidationError as exc:
+                    raise serializers.ValidationError(f"Item at index {idx}: {exc.messages[0]}")
+
                 # Calculate order_in_packages: prefer explicit caller value
                 # (frontend sends this when user enters whole cases), otherwise
-                # ceil-divide the unit quantity by the supplier's case size.
-                quantity_per_package = item_supplier.quantity_per_package or 1
+                # derive it from the supplier's case size, falling back to the
+                # item's own outermost packaging rung.
                 explicit_packages = item_data.get("order_in_packages")
                 if explicit_packages is not None:
                     try:
@@ -138,11 +196,7 @@ def create_purchase_order(validated_data, items_data, user):
                             f"non-negative, got {order_in_packages}"
                         )
                 else:
-                    order_in_packages = (
-                        (int(quantity) + quantity_per_package - 1) // quantity_per_package
-                        if quantity_per_package > 0
-                        else 0
-                    )
+                    order_in_packages = order_packages_for_line(item_supplier, int(quantity))
 
                 # Get unit_cost override if provided, otherwise use item_supplier.unit_cost
                 unit_cost_override = item_data.get("unit_cost")
@@ -275,16 +329,18 @@ def apply_line_quantity(line_item, quantity):
 
     Does not save — the caller owns persistence (``update_item`` applies several
     fields to a line and saves it once). ``order_in_packages`` is re-derived
-    with the same ceil-divide ``create_purchase_order`` uses for inventory
-    lines; asset and freeform lines carry no package information and keep the 0
-    they were created with.
+    through the same :func:`order_packages_for_line` ``create_purchase_order``
+    uses, so an edited line records packages the same way the created one did;
+    asset and freeform lines carry no package information and keep the 0 they
+    were created with.
 
-    The caller owns the value/voided/status/already-received guards.
+    ``quantity`` is BASE units — the caller owns any count-unit conversion (it
+    also owns the value/voided/status/already-received guards, which compare
+    against base-unit columns).
     """
     line_item.quantity_ordered = quantity
     if line_item.item_supplier_id is not None:
-        quantity_per_package = line_item.item_supplier.quantity_per_package or 1
-        line_item.order_in_packages = (quantity + quantity_per_package - 1) // quantity_per_package
+        line_item.order_in_packages = order_packages_for_line(line_item.item_supplier, quantity)
     return line_item
 
 

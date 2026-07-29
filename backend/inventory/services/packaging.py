@@ -14,6 +14,29 @@ much to suggest ordering, still stored in base units) and :func:`low_stock_q`
 byte-for-byte where they were; only an item opted into a pack-counting
 ``count_mode`` takes the new path.
 
+Phase 2b (op-ev14) adds the *write* complement — :func:`resolve_base_quantity`,
+the one seam every stock-moving path (reconcile, cycle count, usage, PO order,
+receipt) puts a caller-supplied number through to get BASE units. One rule
+covers all of them:
+
+* by default a quantity is BASE units, so every existing caller — and every
+  ``each`` item, which is all of them today — is untouched;
+* a caller that has a pack count says so with ``at_level=True``, and it is
+  converted through the item's ``count_level``;
+* ``at_level=True`` on an item that is *not* counted in packs is an error, never
+  a silent base-unit reading, so a mis-sent flag cannot corrupt stock.
+
+Deliberately opt-in rather than inferred from ``count_mode``: unlike
+``minimum_stock``/``reorder_quantity`` (which phase 2a reinterprets for
+pack-counting items, because they are *configuration* a human sets), a
+transaction quantity often arrives from a base-unit-canonical source — a PO
+line's pending quantity, a work-order material template — and those callers must
+keep meaning base units after an item switches mode.
+
+:func:`order_level` names the rung an item is *bought* in, which is how the
+purchase-order paths reconcile the item's own chain against a supplier's case
+size (see :mod:`reorder_queue.services.purchase_orders`).
+
 ⚠️ For the pack-counting modes, ``InventoryItem.minimum_stock`` and
 ``reorder_quantity`` are read as thresholds/amounts in the item's COUNT unit
 (cases, reams, sealed packs), not base units. That reinterpretation is the
@@ -148,6 +171,141 @@ def count_at_level(item: "InventoryItem") -> int:
         return item.current_stock
     whole, _ = to_level_count(item.current_stock, item.count_level)
     return whole
+
+
+def order_level(item: "InventoryItem") -> Optional["PackagingLevel"]:
+    """The rung an item is *bought* in: the outermost rung of its chain (op-ev14).
+
+    ``sort_order`` 0 is the largest rung, so the outermost one is how the item
+    arrives from a supplier — a case of paper, a carton of gloves. Returns
+    ``None`` for an item that is not counted in packs (see
+    :func:`counts_in_packs`), which keeps ``each`` items — every item that
+    exists today — on the supplier's ``quantity_per_package`` for ordering.
+
+    Distinct from ``ItemSupplier.quantity_per_package`` on purpose: this is the
+    item's *own* packaging, and a supplier may sell it in a different case. The
+    purchase-order paths prefer the supplier's case size when one is declared
+    (you buy what the vendor ships) and fall back to this rung when it is not.
+    """
+    if not counts_in_packs(item):
+        return None
+    return item.packaging_levels.order_by("sort_order").first()
+
+
+# The wire spellings of the ``at_level`` flag, matching
+# ``rest_framework.serializers.BooleanField``'s own sets so a form-encoded
+# ``at_level=false`` reads the same on the endpoints that parse ``request.data``
+# by hand as on the ones with a serializer. Spelled out rather than imported to
+# keep this module free of DRF; :func:`parse_at_level` is pinned against
+# ``BooleanField`` by a test so the two cannot drift.
+# ``True``/``False`` cover the int spellings too: ``1 == True`` and ``0 == False``
+# hash equal, so ``1 in _AT_LEVEL_TRUE`` holds without listing them twice.
+_AT_LEVEL_TRUE = frozenset(
+    {"t", "T", "y", "Y", "yes", "Yes", "YES", "true", "True", "TRUE", "on", "On", "ON", "1", True}
+)
+_AT_LEVEL_FALSE = frozenset(
+    {
+        "f",
+        "F",
+        "n",
+        "N",
+        "no",
+        "No",
+        "NO",
+        "false",
+        "False",
+        "FALSE",
+        "off",
+        "Off",
+        "OFF",
+        "0",
+        False,
+    }
+)
+
+
+def parse_at_level(value: Any) -> bool:
+    """Read an ``at_level`` flag off the wire (op-ev14).
+
+    ``bool("false")`` is ``True``, so an endpoint that reads ``request.data``
+    directly cannot use it: a form-encoded client — scantty posts strings —
+    saying ``at_level=false`` would silently get the pack reading and a
+    multiplied quantity. Missing/empty means the default, base units.
+
+    Raises:
+        ValidationError: a value that is neither a true nor a false spelling,
+            rather than guessing at a quantity's unit.
+    """
+    if value is None or value == "":
+        return False
+    try:
+        if value in _AT_LEVEL_TRUE:
+            return True
+        if value in _AT_LEVEL_FALSE:
+            return False
+    except TypeError:  # pragma: no cover - unhashable payload value
+        pass
+    raise ValidationError(f"at_level must be a boolean; got {value!r}.")
+
+
+def resolve_base_quantity(
+    item: "InventoryItem",
+    count: int,
+    *,
+    at_level: bool = False,
+    level: Optional["PackagingLevel"] = None,
+) -> int:
+    """Convert a caller-supplied ``count`` into BASE units (op-ev14).
+
+    THE write seam: every path that moves stock from a number a caller sent —
+    reconciliation, cycle count, usage, PO order quantity, receipt — routes
+    through here so "is this base units or packs?" is answered in exactly one
+    place.
+
+    Args:
+        item: the item the quantity belongs to.
+        count: the caller's number, in whatever unit ``at_level`` selects.
+        at_level: ``False`` (the default, and what every pre-op-ev14 caller
+            effectively passes) → ``count`` is base units and comes back
+            untouched. ``True`` → ``count`` is whole packs, and an item that is
+            not counted in packs is an error rather than a guess.
+        level: the rung ``count`` is expressed in, defaulting to the item's
+            ``count_level``.
+
+    Raises:
+        ValidationError: ``at_level=True`` on an item that is not counted in
+            packs, or a rung that holds less than one base unit.
+    """
+    if not at_level:
+        return count
+
+    if not counts_in_packs(item):
+        raise ValidationError(
+            f"'{item.name}' is not counted in packs (count mode "
+            f"'{item.count_mode}'), so a pack count cannot be converted; "
+            "send the quantity in base units."
+        )
+
+    rung = level or item.count_level
+    if rung is None or rung.base_units < 1:
+        raise ValidationError(
+            f"'{item.name}' has no usable packaging level to count packs of; "
+            "send the quantity in base units."
+        )
+    return to_base(rung, count)
+
+
+def count_unit(item: "InventoryItem", level: Optional["PackagingLevel"] = None) -> str:
+    """The noun a quantity for ``item`` is entered/reported in (op-ev14).
+
+    The counting rung's name for a pack-counting item, ``base_unit`` otherwise.
+    For labelling responses and error messages, so a caller can tell which unit
+    the server just interpreted its number in.
+    """
+    if not counts_in_packs(item):
+        return item.base_unit or "unit"
+    rung = level or item.count_level
+    return rung.name if rung is not None else (item.base_unit or "unit")
 
 
 def reorder_threshold(item: "InventoryItem") -> tuple[int, str]:

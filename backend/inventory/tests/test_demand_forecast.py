@@ -32,6 +32,11 @@ EXPECTED_ROW_KEYS = {
     "item_name",
     "sku",
     "category_name",
+    # Count-level presentation (op-ev14) -- display only; the forecast numbers
+    # below stay in base units.
+    "count_mode",
+    "count_unit",
+    "on_hand_display",
     "generated_at",
     # Restock-interval signal.
     "avg_interval_days",

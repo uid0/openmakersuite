@@ -45,7 +45,8 @@ def _latest_per_item_qs() -> "QuerySet[DemandForecast]":
     Uses a correlated subquery (``pk`` of the newest row for the same item) so
     it works identically on SQLite and PostgreSQL -- ``DISTINCT ON`` is
     Postgres-only. ``select_related`` keeps the serializer's item/category
-    lookups off the per-row path.
+    lookups off the per-row path -- including ``count_level``, which the
+    count-level presentation fields read (op-ev14).
     """
     newest_pk = (
         DemandForecast.objects.filter(item=OuterRef("item"))
@@ -59,7 +60,7 @@ def _latest_per_item_qs() -> "QuerySet[DemandForecast]":
             item__is_retired=False,
             item__is_serialized=False,
         )
-        .select_related("item", "item__category")
+        .select_related("item", "item__category", "item__count_level")
     )
 
 

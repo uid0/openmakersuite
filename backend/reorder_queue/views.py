@@ -21,7 +21,16 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from inventory.models import InventoryItem, Supplier
-from inventory.services.packaging import base_reorder_quantity, counts_in_packs, low_stock_q
+from inventory.services.packaging import (
+    base_reorder_quantity,
+    count_unit,
+    counts_in_packs,
+    low_stock_q,
+    on_hand_display,
+    parse_at_level,
+    reorder_display,
+    resolve_base_quantity,
+)
 
 from . import services
 from .audit import record_event as record_audit_event
@@ -804,6 +813,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "package_cost": best_supplier.package_cost,
                         "quantity_per_package": best_supplier.quantity_per_package,
                         "estimated_line_total": optimal_qty * (best_supplier.unit_cost or 0),
+                        # Count-level presentation (op-ev14); the quantities
+                        # above remain base units.
+                        "count_unit": count_unit(item),
+                        "on_hand_display": on_hand_display(item),
+                        "recommended_quantity_at_unit": (
+                            optimal_qty // item.count_level.base_units
+                            if counts_in_packs(item)
+                            else optimal_qty
+                        ),
                     }
                 )
 
@@ -959,6 +977,19 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "line_total": str(line_total),
                         "has_active_reorder_request": has_active_request,
                         "reorder_request_id": reorder_request_id,
+                        # Presentation at the item's counting granularity
+                        # (op-ev14): every number above stays base units, these
+                        # let the pad label "2 cases on hand" without the client
+                        # re-deriving it. ``count_level`` is select_related on
+                        # both querysets feeding this loop, so they are free.
+                        "count_unit": count_unit(item),
+                        "on_hand_display": on_hand_display(item),
+                        "reorder_display": reorder_display(item),
+                        "suggested_quantity_at_unit": (
+                            suggested_qty // item.count_level.base_units
+                            if counts_in_packs(item)
+                            else suggested_qty
+                        ),
                     }
                 )
 
@@ -1313,6 +1344,11 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         that contains only some of what was ordered. Shares the receipt side
         effects (delivery, stock, status, lead-time logs) with
         ``mark_delivered`` via :func:`_apply_po_receipt`.
+
+        A line may carry ``at_level: true`` to report its ``quantity_received``
+        as whole packs of the item's ``count_level`` — "three cases came in" —
+        converted to base units before the pending-quantity check and the stock
+        add (op-ev14). Without it the quantity is base units exactly as before.
         """
         from datetime import datetime
 
@@ -1355,6 +1391,27 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     {"error": f"Line item {po_item_id} is voided and cannot be received"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            # "N packs arrived" → base units, before the pending check below
+            # compares it against the base-unit order (op-ev14).
+            if line.get("at_level"):
+                if po_item.item is None:
+                    return Response(
+                        {
+                            "error": (
+                                f"Line item {po_item_id} has no inventory item, so a "
+                                "pack count cannot be converted; send base units"
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                try:
+                    quantity = resolve_base_quantity(po_item.item, quantity, at_level=True)
+                except DjangoValidationError as exc:
+                    return Response(
+                        {"error": f"Line item {po_item_id}: {exc.messages[0]}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             # Track remaining allowance per line so repeated references to the
             # same line in one request can't collectively over-receive.
@@ -1438,6 +1495,21 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             if new_quantity < 1:
                 return Response(
                     {"error": "Quantity ordered must be a positive integer"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # "make it 3 cases" — convert to base units before the guards below,
+            # which all compare against base-unit columns (op-ev14). Absent
+            # ``at_level`` the quantity is base units, as it always was.
+            try:
+                at_level = parse_at_level(request.data.get("at_level"))
+                if at_level and line_item.item_supplier_id is not None:
+                    new_quantity = resolve_base_quantity(
+                        line_item.item_supplier.item, new_quantity, at_level=True
+                    )
+            except DjangoValidationError as exc:
+                return Response(
+                    {"error": exc.messages[0]},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 

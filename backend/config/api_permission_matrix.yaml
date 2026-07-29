@@ -1420,6 +1420,9 @@ views:
       my_sig_inventory:
         permission_classes:
         - IsAuthenticated
+      pack_container:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
       partial_update:
         permission_classes:
         - IsAuthenticatedOrReadOnly

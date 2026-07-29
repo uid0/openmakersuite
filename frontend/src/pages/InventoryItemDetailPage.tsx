@@ -21,7 +21,7 @@ import {
     Textarea,
     Title,
 } from '@mantine/core';
-import { IconArchive, IconArchiveOff, IconClipboardCheck, IconEdit, IconPackageExport, IconQrcode } from '@tabler/icons-react';
+import { IconArchive, IconArchiveOff, IconBoxOff, IconBoxSeam, IconClipboardCheck, IconEdit, IconPackageExport, IconQrcode } from '@tabler/icons-react';
 import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -33,9 +33,19 @@ import WorkspacePage from '../components/landing/WorkspacePage';
 import NFPADiamond from '../components/NFPADiamond';
 import StockHistoryChart from '../components/StockHistoryChart';
 import { useNotifications } from '../hooks/useNotifications';
-import { assetsAPI, CycleCountPayload, inventoryAPI, reorderAPI, sigAPI } from '../services/api';
+import { assetsAPI, CycleCountPayload, inventoryAPI, PackTransition, reorderAPI, sigAPI } from '../services/api';
 import { Asset, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, ReorderRequest, SIG, StockHistory, UsageLog } from '../types';
 import { showError } from '../utils/dialogs';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
+import {
+  baseUnitOf,
+  countLevelOf,
+  countUnitOf,
+  countsInPacks,
+  describePackChain,
+  onHandLabel,
+  pluralizeUnit,
+} from '../utils/packaging';
 
 // Cycle-count reason options (op-c7y4). Mirrors the reconciliation grid's
 // user-facing set — the system-only `vision_supply_check` reason is omitted.
@@ -52,6 +62,17 @@ interface CycleCountModalProps {
   itemId: string;
   itemName: string;
   currentStock: number;
+  /**
+   * Packaging context (op-lkxl). When `packCounted` is true the count is
+   * entered — and posted — in whole `countUnit` packs (`at_level`); otherwise
+   * the modal is exactly the base-unit form it has always been. `openCount` is
+   * only used by `open_closed` items, whose count is "sealed packs + open ones".
+   */
+  packCounted: boolean;
+  countUnit: string;
+  countAtLevel: number;
+  isOpenClosed: boolean;
+  openCount: number;
   opened: boolean;
   onClose: () => void;
   onCounted: () => void;
@@ -61,17 +82,29 @@ interface CycleCountModalProps {
  * Modal for recording a physical cycle count. Mirrors the reconciliation form
  * controls: counted quantity, reason, notes, and a skip-reorder toggle. On
  * success it reloads the parent item so days-since-last-count refreshes.
+ *
+ * For a pack-counting item the quantity is entered in the item's own unit
+ * ("4 cases") and posted with `at_level: true`; the flag is deliberately NOT
+ * sent for anything else, because the backend contract is that a quantity means
+ * base units unless a caller opts in.
  */
 const CycleCountModal: React.FC<CycleCountModalProps> = ({
   itemId,
   itemName,
   currentStock,
+  packCounted,
+  countUnit,
+  countAtLevel,
+  isOpenClosed,
+  openCount,
   opened,
   onClose,
   onCounted,
 }) => {
   const notifications = useNotifications();
-  const [countedQty, setCountedQty] = useState<number | ''>(currentStock);
+  const seededQty = packCounted ? countAtLevel : currentStock;
+  const [countedQty, setCountedQty] = useState<number | ''>(seededQty);
+  const [openContainers, setOpenContainers] = useState<number | ''>(openCount);
   const [reason, setReason] = useState<CycleCountPayload['reason']>('miscounted');
   const [notes, setNotes] = useState('');
   const [skipReorder, setSkipReorder] = useState(false);
@@ -81,12 +114,13 @@ const CycleCountModal: React.FC<CycleCountModalProps> = ({
   // so the operator starts from the number they're reconciling against.
   useEffect(() => {
     if (opened) {
-      setCountedQty(currentStock);
+      setCountedQty(seededQty);
+      setOpenContainers(openCount);
       setReason('miscounted');
       setNotes('');
       setSkipReorder(false);
     }
-  }, [opened, currentStock]);
+  }, [opened, seededQty, openCount]);
 
   const handleSubmit = async () => {
     if (countedQty === '' || countedQty < 0) {
@@ -100,11 +134,18 @@ const CycleCountModal: React.FC<CycleCountModalProps> = ({
         reason,
         notes: notes || undefined,
         skip_reorder: skipReorder,
+        // Opt-in only: an each-mode item sends neither key and is read in base
+        // units, exactly as before the packaging matrix existed.
+        ...(packCounted ? { at_level: true } : {}),
+        ...(packCounted && isOpenClosed && openContainers !== ''
+          ? { open_count: openContainers }
+          : {}),
       });
       const delta = data.reconciliation.delta;
+      const onHand = data.on_hand_display?.text ?? `${data.current_stock}`;
       notifications.showSuccess(
         'Cycle count recorded',
-        `On-hand set to ${data.current_stock} (Δ ${delta >= 0 ? '+' : ''}${delta}).`
+        `On-hand set to ${onHand} (Δ ${delta >= 0 ? '+' : ''}${delta}).`
       );
       onCounted();
       onClose();
@@ -120,8 +161,18 @@ const CycleCountModal: React.FC<CycleCountModalProps> = ({
     <Modal opened={opened} onClose={onClose} title={`Cycle Count — ${itemName}`} centered>
       <Stack gap="md">
         <NumberInput
-          label="Counted quantity"
-          description="Physical count of units on the shelf"
+          label={
+            packCounted
+              ? `Counted quantity (${pluralizeUnit(countUnit, 2)})`
+              : 'Counted quantity'
+          }
+          description={
+            packCounted
+              ? `Whole ${pluralizeUnit(countUnit, 2)} on the shelf${
+                  isOpenClosed ? ' — sealed only' : ''
+                }`
+              : 'Physical count of units on the shelf'
+          }
           value={countedQty}
           onChange={(v) => setCountedQty(v === '' ? '' : Number(v))}
           min={0}
@@ -130,6 +181,18 @@ const CycleCountModal: React.FC<CycleCountModalProps> = ({
           required
           data-testid="cycle-count-qty"
         />
+        {packCounted && isOpenClosed && (
+          <NumberInput
+            label="Open containers"
+            description={`Opened ${pluralizeUnit(countUnit, 2)} in use — not counted as stock`}
+            value={openContainers}
+            onChange={(v) => setOpenContainers(v === '' ? '' : Number(v))}
+            min={0}
+            allowDecimal={false}
+            allowNegative={false}
+            data-testid="cycle-count-open-containers"
+          />
+        )}
         <Select
           label="Reason"
           data={CYCLE_COUNT_REASONS}
@@ -169,6 +232,11 @@ interface LogUsageModalProps {
   itemId: string;
   itemName: string;
   unitCost: string | null;
+  /** op-lkxl: enter + post usage in whole packs when the item is counted that way. */
+  packCounted: boolean;
+  countUnit: string;
+  /** Base units in one counting pack — 1 for an each-mode item. Prices the charge. */
+  packBaseUnits: number;
   opened: boolean;
   onClose: () => void;
   onLogged: () => void;
@@ -185,6 +253,9 @@ const LogUsageModal: React.FC<LogUsageModalProps> = ({
   itemId,
   itemName,
   unitCost,
+  packCounted,
+  countUnit,
+  packBaseUnits,
   opened,
   onClose,
   onLogged,
@@ -217,8 +288,10 @@ const LogUsageModal: React.FC<LogUsageModalProps> = ({
   // Only meaningful when a committee is selected; mirrors the backend's
   // snapshot of unit_cost × quantity at consume time. Keyed off unitCost (not
   // qty) so clearing the quantity field shows $0.00 rather than the wrong
-  // "no unit cost" hint.
-  const projectedCharge = unitCost != null ? (parseFloat(unitCost) * qty).toFixed(2) : null;
+  // "no unit cost" hint. unit_cost is per BASE unit, so a pack entry is priced
+  // through the pack's size — the same conversion the server does.
+  const projectedCharge =
+    unitCost != null ? (parseFloat(unitCost) * qty * packBaseUnits).toFixed(2) : null;
 
   const handleSubmit = async () => {
     if (quantity === '' || quantity < 1) {
@@ -232,6 +305,9 @@ const LogUsageModal: React.FC<LogUsageModalProps> = ({
         quantity,
         notes: notes || undefined,
         charged_group: chargedGroup ?? undefined,
+        // Opt-in only (op-ev14): without this the quantity is base units, which
+        // is what every each-mode item must keep meaning.
+        ...(packCounted ? { at_level: true } : {}),
       });
       if (data.warning) {
         // Committee recorded but no unit cost → nothing posted. Non-error tone.
@@ -264,8 +340,12 @@ const LogUsageModal: React.FC<LogUsageModalProps> = ({
     <Modal opened={opened} onClose={onClose} title={`Use / Log Usage — ${itemName}`} centered>
       <Stack gap="md">
         <NumberInput
-          label="Quantity used"
-          description="Units consumed from stock"
+          label={packCounted ? `Quantity used (${pluralizeUnit(countUnit, 2)})` : 'Quantity used'}
+          description={
+            packCounted
+              ? `Whole ${pluralizeUnit(countUnit, 2)} consumed from stock`
+              : 'Units consumed from stock'
+          }
           value={quantity}
           onChange={(v) => setQuantity(v === '' ? '' : Number(v))}
           min={1}
@@ -341,6 +421,9 @@ const InventoryItemDetailPage: React.FC = () => {
   const [cycleCountOpen, setCycleCountOpen] = useState(false);
   const [logUsageOpen, setLogUsageOpen] = useState(false);
   const [retiring, setRetiring] = useState(false);
+  // Which pack transition is in flight, so both buttons disable together.
+  const [packBusy, setPackBusy] = useState<PackTransition | null>(null);
+  const notifications = useNotifications();
 
   useEffect(() => {
     if (id) {
@@ -445,6 +528,36 @@ const InventoryItemDetailPage: React.FC = () => {
     }
   };
 
+  /**
+   * Open a sealed pack, or finish the open one (op-ev14 `pack-container`).
+   *
+   * Only reachable for an `open_closed` item. Opening IS consumption under that
+   * mode — the backend drops stock by the pack's base units, bumps the open
+   * tally and writes a usage log — so the page reloads afterwards to pick up
+   * the new sealed + open split.
+   */
+  const handlePackTransition = async (transition: PackTransition) => {
+    if (!id) return;
+
+    setPackBusy(transition);
+    try {
+      const response = await inventoryAPI.packContainer(id, transition);
+      const text = response?.data?.on_hand_display?.text;
+      notifications.showSuccess(
+        transition === 'open' ? 'Pack opened' : 'Open pack finished',
+        text ? `On hand: ${text}.` : undefined
+      );
+      await loadData();
+    } catch (err) {
+      notifications.showError(
+        transition === 'open' ? 'Could not open a pack' : 'Could not finish the open pack',
+        extractErrorMessage(err, 'Please try again.')
+      );
+    } finally {
+      setPackBusy(null);
+    }
+  };
+
   // Retire / un-retire (op-jv7r). Mirrors handleGenerateQR: call the action
   // then reload so the badge + button label reflect the new state. Toggles by
   // the item's current is_retired.
@@ -492,6 +605,16 @@ const InventoryItemDetailPage: React.FC = () => {
       </WorkspacePage>
     );
   }
+
+  // Packaging matrix (op-lkxl). `packCounted` is the one predicate the new
+  // surfaces branch on: false for an each-mode item AND for a half-configured
+  // one, which keeps everything below on today's base-unit behaviour.
+  const packCounted = countsInPacks(item);
+  const baseUnit = baseUnitOf(item);
+  const countUnit = countUnitOf(item);
+  const chainLines = describePackChain(item.packaging_levels);
+  const sealedCount = item.on_hand_display?.sealed ?? 0;
+  const openCount = item.on_hand_display?.open ?? item.open_container_count ?? 0;
 
   return (
     <WorkspacePage
@@ -611,10 +734,73 @@ const InventoryItemDetailPage: React.FC = () => {
                   <Title order={4}>Stock Information</Title>
                   <Group justify="space-between">
                     <Text size="sm">Current Stock:</Text>
-                    <Text size="sm" fw={600} c={item.needs_reorder ? 'red' : undefined}>
-                      {item.current_stock} {item.use_case_based_reorder ? 'units' : 'units'}
+                    <Text
+                      size="sm"
+                      fw={600}
+                      c={item.needs_reorder ? 'red' : undefined}
+                      data-testid="item-on-hand"
+                    >
+                      {onHandLabel(item)}
                     </Text>
                   </Group>
+                  {/* Pack-counting items also show the canonical base-unit
+                      number, because that is what every PO, usage log and
+                      reorder quantity is stored in (op-lkxl). */}
+                  {packCounted && (
+                    <Group justify="space-between">
+                      <Text size="sm">Base units:</Text>
+                      <Text size="sm" c="dimmed" data-testid="item-base-units">
+                        {item.current_stock} {pluralizeUnit(baseUnit, item.current_stock)}
+                      </Text>
+                    </Group>
+                  )}
+                  {chainLines.length > 0 && (
+                    <div data-testid="item-pack-chain">
+                      <Text size="sm" fw={500} mb="xs">
+                        Packaging
+                      </Text>
+                      <Stack gap={2}>
+                        {chainLines.map((line) => (
+                          <Text key={line} size="sm" c="dimmed">
+                            {line}
+                          </Text>
+                        ))}
+                        <Text size="sm" c="dimmed">
+                          Counted in {pluralizeUnit(countUnit, 2)}
+                          {item.count_mode === 'open_closed' ? ' (sealed + open)' : ''}
+                        </Text>
+                      </Stack>
+                    </div>
+                  )}
+                  {/* Open / finish a pack — the two container moves an
+                      open_closed item makes, and the only stock path that
+                      expresses them (op-ev14). Opening consumes the pack. */}
+                  {item.count_mode === 'open_closed' && packCounted && (
+                    <Group gap="sm" data-testid="pack-container-controls">
+                      <Button
+                        size="xs"
+                        variant="light"
+                        leftSection={<IconBoxOff size={14} />}
+                        onClick={() => handlePackTransition('open')}
+                        loading={packBusy === 'open'}
+                        disabled={sealedCount === 0 || packBusy !== null}
+                        data-testid="open-pack-button"
+                      >
+                        Open a {countUnit}
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        leftSection={<IconBoxSeam size={14} />}
+                        onClick={() => handlePackTransition('finish')}
+                        loading={packBusy === 'finish'}
+                        disabled={openCount === 0 || packBusy !== null}
+                        data-testid="finish-pack-button"
+                      >
+                        Finish open {countUnit}
+                      </Button>
+                    </Group>
+                  )}
                   {item.use_case_based_reorder && (
                     <Group justify="space-between">
                       <Text size="sm">Current Cases:</Text>
@@ -625,14 +811,22 @@ const InventoryItemDetailPage: React.FC = () => {
                   )}
                   <Group justify="space-between">
                     <Text size="sm">Minimum Stock:</Text>
-                    <Text size="sm">
-                      {item.use_case_based_reorder ? `${item.minimum_cases} cases` : `${item.minimum_stock} units`}
+                    <Text size="sm" data-testid="item-minimum-stock">
+                      {packCounted
+                        ? `${item.minimum_stock} ${pluralizeUnit(countUnit, item.minimum_stock)}`
+                        : item.use_case_based_reorder
+                          ? `${item.minimum_cases} cases`
+                          : `${item.minimum_stock} units`}
                     </Text>
                   </Group>
                   <Group justify="space-between">
                     <Text size="sm">Reorder Quantity:</Text>
-                    <Text size="sm">
-                      {item.use_case_based_reorder ? `${item.reorder_cases} cases` : `${item.reorder_quantity} units`}
+                    <Text size="sm" data-testid="item-reorder-quantity">
+                      {packCounted
+                        ? `${item.reorder_quantity} ${pluralizeUnit(countUnit, item.reorder_quantity)}`
+                        : item.use_case_based_reorder
+                          ? `${item.reorder_cases} cases`
+                          : `${item.reorder_quantity} units`}
                     </Text>
                   </Group>
                   <Group justify="space-between">
@@ -974,6 +1168,13 @@ const InventoryItemDetailPage: React.FC = () => {
         itemId={item.id}
         itemName={item.name}
         currentStock={item.current_stock}
+        packCounted={packCounted}
+        countUnit={countUnit}
+        countAtLevel={
+          item.on_hand_display?.level_count ?? item.on_hand_display?.sealed ?? item.current_stock
+        }
+        isOpenClosed={item.count_mode === 'open_closed'}
+        openCount={openCount}
         opened={cycleCountOpen}
         onClose={() => setCycleCountOpen(false)}
         onCounted={loadData}
@@ -983,6 +1184,9 @@ const InventoryItemDetailPage: React.FC = () => {
         itemId={item.id}
         itemName={item.name}
         unitCost={item.unit_cost}
+        packCounted={packCounted}
+        countUnit={countUnit}
+        packBaseUnits={countLevelOf(item)?.base_units ?? 1}
         opened={logUsageOpen}
         onClose={() => setLogUsageOpen(false)}
         onLogged={loadData}

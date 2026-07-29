@@ -137,6 +137,65 @@ export interface ItemSupplier {
   updated_at: string;
 }
 
+// ---- Unit of measure / packaging matrix (op-hzji P1, op-es7c P2a, op-ev14 P2b) ----
+
+/**
+ * How an item is counted.
+ *
+ * `each` is the default and what every legacy item is: quantities are the
+ * item's base unit. `by_level` counts whole packs of `count_level` (4 cases);
+ * `open_closed` counts sealed packs plus a tally of opened ones.
+ */
+export type ItemCountMode = 'each' | 'by_level' | 'open_closed';
+
+/**
+ * One rung of an item's packaging chain. `sort_order` 0 is the outermost /
+ * largest rung and increases toward the base rung, whose `base_units` is 1.
+ * `per_parent` ("1 case = 10 reams") is derived server-side and is null for
+ * the base rung.
+ */
+export interface PackagingLevel {
+  id: number;
+  name: string;
+  sort_order: number;
+  base_units: number;
+  per_parent: number | null;
+}
+
+/**
+ * `InventoryItem.current_stock` expressed at the item's counting granularity —
+ * read-only, computed from the canonical base-unit count. Which optional keys
+ * are present depends on `mode`: `each` → unit/base_units, `by_level` →
+ * level/level_count/remainder_base, `open_closed` → level/sealed/open. `text`
+ * is always present and is the label to render.
+ */
+export interface ItemOnHandDisplay {
+  mode: ItemCountMode;
+  text: string;
+  unit?: string;
+  base_units?: number;
+  level?: string;
+  level_count?: number;
+  remainder_base?: number;
+  sealed?: number;
+  open?: number;
+}
+
+/**
+ * Reorder point + current count in ONE unit (op-es7c), so a caller can label
+ * the pair without knowing which columns the item's `count_mode` gives meaning
+ * to. For a pack-counting item every quantity here is in `unit` (cases/reams).
+ */
+export interface ItemReorderDisplay {
+  mode: ItemCountMode;
+  unit: string;
+  threshold: number;
+  current: number;
+  reorder_quantity: number;
+  needs_reorder: boolean;
+  text: string;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
@@ -230,6 +289,20 @@ export interface InventoryItem {
   // and whole days since (null when the item has never been counted).
   last_counted_at: string | null;
   days_since_last_count: number | null;
+  // Unit of measure / packaging matrix (op-hzji + op-es7c + op-ev14). Additive
+  // and opt-in: an item that sets none of these counts individual base units
+  // exactly as it always has, so every field is optional on the wire as far as
+  // the web is concerned. `base_unit`/`count_mode`/`count_level`/
+  // `open_container_count`/`packaging_levels` are writable; `on_hand_display`
+  // and `reorder_display` are server-rendered presentations of the canonical
+  // base-unit `current_stock`.
+  base_unit?: string;
+  count_mode?: ItemCountMode;
+  count_level?: number | null;
+  open_container_count?: number;
+  packaging_levels?: PackagingLevel[];
+  on_hand_display?: ItemOnHandDisplay;
+  reorder_display?: ItemReorderDisplay;
 }
 
 export type InventoryCostTrend = 'up' | 'down' | 'flat' | 'no_history';
@@ -343,6 +416,11 @@ export interface LogUsageRequest {
   quantity: number;
   notes?: string;
   charged_group?: number;
+  // op-ev14: opt in to reading `quantity` as a count of whole `count_level`
+  // packs instead of base units. Omitted (the default) means base units, which
+  // is what every each-mode item must keep sending; sending it for an item that
+  // is not counted in packs is a 400, never a silent base-unit reading.
+  at_level?: boolean;
 }
 
 // Response from POST /inventory/items/{id}/log_usage/: the UsageLog plus the
@@ -355,6 +433,11 @@ export interface LogUsageResponse extends UsageLog {
   total_cost: string | null;
   ledger_transaction: number | null;
   warning?: string;
+  // op-ev14 echoes the number as sent plus the unit the server read it in
+  // (`quantity_used` above is always base units), and the refreshed on-hand.
+  entered_quantity?: number;
+  entered_unit?: string;
+  on_hand_display?: ItemOnHandDisplay;
 }
 
 export type ReorderStatus = 'pending' | 'approved' | 'ordered' | 'received' | 'cancelled';

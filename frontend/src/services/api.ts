@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -319,7 +319,7 @@ export const inventoryAPI = {
   getSupplierAnalytics: (id: string) =>
     api.get(`/inventory/suppliers/${id}/analytics/`),
 
-  createItem: (data: FormData | Partial<InventoryItem>) => {
+  createItem: (data: FormData | Partial<InventoryItem> | InventoryItemPackagingPayload) => {
     if (data instanceof FormData) {
       return api.post<InventoryItem>('/inventory/items/', data, {
         headers: {
@@ -330,7 +330,10 @@ export const inventoryAPI = {
     return api.post<InventoryItem>('/inventory/items/', data);
   },
 
-  updateItem: (id: string, data: FormData | Partial<InventoryItem>) => {
+  updateItem: (
+    id: string,
+    data: FormData | Partial<InventoryItem> | InventoryItemPackagingPayload
+  ) => {
     if (data instanceof FormData) {
       return api.patch<InventoryItem>(`/inventory/items/${id}/`, data, {
         headers: {
@@ -340,6 +343,17 @@ export const inventoryAPI = {
     }
     return api.patch<InventoryItem>(`/inventory/items/${id}/`, data);
   },
+
+  // Open a sealed pack / finish the open one, for `open_closed` items (op-ev14).
+  // Opening IS consumption under that mode — stock drops by the pack's base
+  // units, the open tally rises, and a usage log is written; finishing only
+  // clears the open tally. Anything else (a non-open_closed item, no sealed pack
+  // left, no open pack) is a 400.
+  packContainer: (itemId: string, transition: PackTransition, notes?: string) =>
+    api.post<PackContainerResponse>(`/inventory/items/${itemId}/pack-container/`, {
+      transition,
+      ...(notes ? { notes } : {}),
+    }),
 
   updateStock: (id: string, quantity: number) =>
     api.patch<InventoryItem>(`/inventory/items/${id}/`, { current_stock: quantity }),
@@ -437,6 +451,13 @@ export interface CycleCountPayload {
   reason: ReconciliationRow['reason'];
   skip_reorder?: boolean;
   notes?: string;
+  // op-ev14, opt-in: read `counted_qty` as a count of whole `count_level` packs
+  // instead of base units. Omitting it keeps the base-unit reading every
+  // each-mode caller depends on; sending it for an item that is not counted in
+  // packs is a 400. `open_count` sets an `open_closed` item's open-container
+  // tally in the same reconciliation.
+  at_level?: boolean;
+  open_count?: number;
 }
 
 export interface CycleCountResponse {
@@ -444,6 +465,9 @@ export interface CycleCountResponse {
   current_stock: number;
   last_counted_at: string | null;
   days_since_last_count: number | null;
+  // op-ev14 echoes the unit the count was read in plus the refreshed on-hand.
+  counted_unit?: string;
+  on_hand_display?: ItemOnHandDisplay;
   reconciliation: {
     id: number;
     projected_count: number;
@@ -453,6 +477,45 @@ export interface CycleCountResponse {
     reconciled_at: string;
     reconciled_by: number;
   };
+}
+
+// ---- Packaging matrix write payloads (op-hzji/op-ev14 backend, op-lkxl web) ----
+
+/**
+ * One rung of the nested-writable `packaging_levels` chain. The pk is
+ * deliberately absent: the serializer upserts rungs on `(item, sort_order)`, so
+ * position carries identity and a kept rung keeps its pk (and any `count_level`
+ * FK pointing at it).
+ */
+export interface PackagingLevelInput {
+  name: string;
+  sort_order: number;
+  base_units: number;
+}
+
+/**
+ * The packaging half of an item write. Sent as JSON rather than folded into the
+ * form's multipart body because `packaging_levels` is a nested list, and
+ * `count_level` is a pk that can only be resolved once the chain exists.
+ */
+export interface InventoryItemPackagingPayload {
+  base_unit?: string;
+  count_mode?: ItemCountMode;
+  count_level?: number | null;
+  packaging_levels?: PackagingLevelInput[];
+  /** Set on-hand as a count of whole `count_level` packs; not with current_stock. */
+  current_stock_at_level?: number;
+}
+
+export type PackTransition = 'open' | 'finish';
+
+export interface PackContainerResponse {
+  transition: PackTransition;
+  id: string;
+  current_stock: number;
+  open_container_count: number;
+  on_hand_display: ItemOnHandDisplay;
+  usage_log: UsageLog | null;
 }
 
 export interface StockReconciliation {

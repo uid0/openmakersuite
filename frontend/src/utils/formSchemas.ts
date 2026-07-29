@@ -63,6 +63,12 @@ export const inventoryItemSchema = z
     image: z.union([z.instanceof(File), z.string().url(), z.null()]).optional(),
     image_url: z.string().url('Invalid URL').optional().or(z.literal('')),
 
+    // Unit of measure (op-hzji). The smallest unit the item is counted in;
+    // every legacy item is "unit". The rest of the packaging matrix
+    // (count_mode / count_level / packaging_levels) is saved as JSON outside
+    // this multipart form — see InventoryItemFormPage.
+    base_unit: z.string().max(40, 'Base unit must be 40 characters or less').optional(),
+
     // Stock Settings
     current_stock: z.number().int().min(0, 'Stock cannot be negative').default(0),
     minimum_stock: z.number().int().min(0, 'Minimum stock cannot be negative').default(0),

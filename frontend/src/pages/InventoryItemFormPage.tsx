@@ -3,7 +3,7 @@
  * Create/Edit form for inventory items with all fields
  */
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Alert, Button, Group, Modal, Paper, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
+import { Alert, Button, Group, Modal, Paper, Select, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { Controller, Resolver, useForm } from 'react-hook-form';
@@ -17,12 +17,33 @@ import { FormLayout } from '../components/forms/FormLayout';
 import { FormNumberInput } from '../components/forms/FormNumberInput';
 import { FormSelect } from '../components/forms/FormSelect';
 import { FormTextarea } from '../components/forms/FormTextarea';
+import PackagingChainEditor from '../components/inventory/PackagingChainEditor';
 import WorkspacePage from '../components/landing/WorkspacePage';
-import { inventoryAPI } from '../services/api';
-import { Category, InventoryItem, ItemSupplier, Location, Supplier } from '../types';
+import { InventoryItemPackagingPayload, inventoryAPI } from '../services/api';
+import { Category, InventoryItem, ItemCountMode, ItemSupplier, Location, Supplier } from '../types';
 import { promptInput, showError } from '../utils/dialogs';
 import { InventoryItemFormData, inventoryItemSchema } from '../utils/formSchemas';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import {
+  COUNT_MODE_LABELS,
+  PackagingRow,
+  pluralizeUnit,
+  resolveCountLevelError,
+  toPackagingPayload,
+  toPackagingRows,
+  validatePackagingChain,
+} from '../utils/packaging';
+
+// The count-mode picker, in the order a user grows into it (op-lkxl).
+const COUNT_MODE_OPTIONS: { value: ItemCountMode; label: string }[] = [
+  { value: 'each', label: COUNT_MODE_LABELS.each },
+  { value: 'by_level', label: COUNT_MODE_LABELS.by_level },
+  { value: 'open_closed', label: COUNT_MODE_LABELS.open_closed },
+];
+
+/** Chain rows as compared for dirtiness — position, name and size, nothing else. */
+const chainSignature = (rows: PackagingRow[]): string =>
+  JSON.stringify(rows.map((row) => [row.name.trim(), row.base_units]));
 
 const InventoryItemFormPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -41,6 +62,20 @@ const InventoryItemFormPage: React.FC = () => {
   const [_newLocationName, setNewLocationName] = useState('');
   const [supplierRelationships, setSupplierRelationships] = useState<SupplierRelationship[]>([]);
 
+  // Packaging matrix (op-lkxl). Held outside react-hook-form because it does
+  // not go through the multipart body: `packaging_levels` is a nested list and
+  // `count_level` is a pk that only exists once the chain has been saved, so
+  // these are written as a JSON follow-up in onSubmit. `countLevelKey` names a
+  // chain ROW (not a pk), so the selection survives reorders and new rungs.
+  const [packagingRows, setPackagingRows] = useState<PackagingRow[]>([]);
+  const [countMode, setCountMode] = useState<ItemCountMode>('each');
+  const [countLevelKey, setCountLevelKey] = useState<string | null>(null);
+  const [savedPackaging, setSavedPackaging] = useState<{
+    signature: string;
+    countMode: ItemCountMode;
+    countLevelId: number | null;
+  }>({ signature: chainSignature([]), countMode: 'each', countLevelId: null });
+
   const {
     control,
     handleSubmit,
@@ -56,6 +91,7 @@ const InventoryItemFormPage: React.FC = () => {
       name: '',
       description: '',
       sku: '',
+      base_unit: 'unit',
       current_stock: 0,
       minimum_stock: 0,
       reorder_quantity: 1,
@@ -84,6 +120,17 @@ const InventoryItemFormPage: React.FC = () => {
   const isHazardous = watch('is_hazardous');
   const useCaseBasedReorder = watch('use_case_based_reorder');
   const isSerialized = watch('is_serialized');
+  const baseUnit = (watch('base_unit') || '').trim() || 'unit';
+
+  // Client twins of the backend validators, so an impossible chain is caught
+  // before the request rather than coming back as a 400.
+  const chainErrors = validatePackagingChain(packagingRows);
+  const countLevelError = resolveCountLevelError(countMode, countLevelKey, packagingRows);
+  const countLevelRow = packagingRows.find((row) => row.key === countLevelKey) ?? null;
+  // Thresholds are read in the COUNT unit for the pack-counting modes, so the
+  // min/reorder inputs say which unit they mean (op-es7c's contract shift).
+  const thresholdUnit =
+    countMode !== 'each' && countLevelRow?.name.trim() ? countLevelRow.name.trim() : null;
 
   useEffect(() => {
     loadInitialData();
@@ -126,6 +173,7 @@ const InventoryItemFormPage: React.FC = () => {
         name: item.name,
         description: item.description,
         sku: item.sku,
+        base_unit: item.base_unit || 'unit',
         current_stock: item.current_stock,
         minimum_stock: item.minimum_stock,
         reorder_quantity: item.reorder_quantity,
@@ -151,6 +199,20 @@ const InventoryItemFormPage: React.FC = () => {
         is_retired: item.is_retired ?? false,
         notes: item.notes || '',
         image_url: item.image ? (item.image.startsWith('http') ? item.image : '') : '',
+      });
+
+      // Hydrate the packaging chain + counting mode, and remember what the
+      // server already has so a save that touches none of it sends no extra
+      // request (the common case: an each-mode item with no chain).
+      const rows = toPackagingRows(item.packaging_levels);
+      const mode = item.count_mode ?? 'each';
+      setPackagingRows(rows);
+      setCountMode(mode);
+      setCountLevelKey(rows.find((row) => row.id === item.count_level)?.key ?? null);
+      setSavedPackaging({
+        signature: chainSignature(rows),
+        countMode: mode,
+        countLevelId: item.count_level ?? null,
       });
 
       // Map supplier relationships
@@ -194,7 +256,66 @@ const InventoryItemFormPage: React.FC = () => {
     }
   };
 
+  /**
+   * Save the packaging matrix for an item that already exists (op-lkxl).
+   *
+   * Separate from the multipart item write for two reasons: `packaging_levels`
+   * is a nested list, and `count_level` is a pk — a rung the user just added has
+   * no pk until the chain is saved. So the chain goes first, then the mode +
+   * counting level resolved from the saved chain by `sort_order` (which is the
+   * row's position, the identity the serializer upserts on).
+   *
+   * Sends nothing when nothing packaging-related changed.
+   */
+  const savePackaging = async (savedItem: InventoryItem) => {
+    const signature = chainSignature(packagingRows);
+    const chainDirty = signature !== savedPackaging.signature;
+    const countLevelIndex = packagingRows.findIndex((row) => row.key === countLevelKey);
+    const needsLevel = countMode !== 'each';
+
+    let chain = savedItem.packaging_levels ?? [];
+
+    if (chainDirty) {
+      const payload: InventoryItemPackagingPayload = {
+        packaging_levels: toPackagingPayload(packagingRows),
+      };
+      // Fold the mode in when no pk has to be resolved — dropping to each-mode
+      // clears count_level, so chain + mode is one legal write.
+      if (!needsLevel) {
+        payload.count_mode = 'each';
+        payload.count_level = null;
+      }
+      const response = await inventoryAPI.updateItem(savedItem.id, payload);
+      chain = response?.data?.packaging_levels ?? [];
+      if (!needsLevel) return;
+    }
+
+    const countLevelId = needsLevel
+      ? chain.find((level) => level.sort_order === countLevelIndex)?.id ?? null
+      : null;
+    if (needsLevel && countLevelId === null) {
+      // `detail` so extractErrorMessage surfaces it like a backend error would.
+      throw { detail: 'the saved packaging chain did not come back with the counting level.' };
+    }
+    const modeDirty =
+      countMode !== savedPackaging.countMode || countLevelId !== savedPackaging.countLevelId;
+    if (!modeDirty) return;
+
+    await inventoryAPI.updateItem(savedItem.id, {
+      count_mode: countMode,
+      count_level: countLevelId,
+    });
+  };
+
   const onSubmit = async (data: InventoryItemFormData) => {
+    // Refuse an impossible chain here rather than sending it: the backend
+    // rejects the same combinations, but the item write would already have
+    // landed by then.
+    if (chainErrors.length > 0 || countLevelError) {
+      setError([...chainErrors, countLevelError].filter(Boolean).join(' '));
+      return;
+    }
+
     try {
       setSaving(true);
       setError(null);
@@ -242,6 +363,22 @@ const InventoryItemFormPage: React.FC = () => {
 
       // Save supplier relationships
       // TODO: Implement supplier relationship saving via ItemSupplier API
+
+      // The packaging matrix rides a JSON follow-up. It is reported separately
+      // because the item itself is already saved by this point — the user needs
+      // to know which half failed.
+      try {
+        await savePackaging(savedItem);
+      } catch (err: any) {
+        console.error('Error saving packaging setup:', err);
+        setError(
+          `Item saved, but the packaging setup failed: ${extractErrorMessage(
+            err,
+            'please try again.'
+          )}`
+        );
+        return;
+      }
 
       navigate(`/inventory/items/${savedItem.id}`);
     } catch (err: any) {
@@ -340,6 +477,63 @@ const InventoryItemFormPage: React.FC = () => {
                 ),
               },
               {
+                // Unit of measure / packaging matrix (op-lkxl). Every control
+                // here is opt-in: an item with no chain and count mode "each"
+                // behaves — and reads — exactly as it did before this section
+                // existed.
+                title: 'Units & Packaging',
+                children: (
+                  <>
+                    <FormInput
+                      name="base_unit"
+                      control={control}
+                      label="Base unit"
+                      placeholder="unit"
+                      description="The smallest unit you count — sheet, glove, bolt. Stock is always stored in these."
+                    />
+                    <PackagingChainEditor
+                      rows={packagingRows}
+                      onChange={setPackagingRows}
+                      baseUnit={baseUnit}
+                      errors={chainErrors}
+                    />
+                    <Select
+                      label="Count mode"
+                      description="How stock is counted for this item."
+                      data={COUNT_MODE_OPTIONS}
+                      value={countMode}
+                      onChange={(value) => {
+                        const next = (value as ItemCountMode) || 'each';
+                        setCountMode(next);
+                        if (next === 'each') {
+                          setCountLevelKey(null);
+                        }
+                      }}
+                      allowDeselect={false}
+                      data-testid="item-count-mode"
+                    />
+                    {countMode !== 'each' && (
+                      <Select
+                        label="Counted in"
+                        description="Which packaging level whole counts are taken in."
+                        placeholder={
+                          packagingRows.length === 0
+                            ? 'Add a packaging level first'
+                            : 'Select a packaging level'
+                        }
+                        data={packagingRows
+                          .filter((row) => row.name.trim())
+                          .map((row) => ({ value: row.key, label: row.name.trim() }))}
+                        value={countLevelKey}
+                        onChange={setCountLevelKey}
+                        error={countLevelError}
+                        data-testid="item-count-level"
+                      />
+                    )}
+                  </>
+                ),
+              },
+              {
                 title: 'Stock Settings',
                 children: (
                   <>
@@ -347,20 +541,36 @@ const InventoryItemFormPage: React.FC = () => {
                       name="current_stock"
                       control={control}
                       label="Current Stock"
+                      description={
+                        thresholdUnit
+                          ? `In ${pluralizeUnit(baseUnit, 2)}. Count in ${pluralizeUnit(
+                              thresholdUnit,
+                              2
+                            )} from the item page.`
+                          : undefined
+                      }
                       min={0}
                       required
                     />
                     <FormNumberInput
                       name="minimum_stock"
                       control={control}
-                      label="Minimum Stock"
+                      label={
+                        thresholdUnit
+                          ? `Minimum Stock (${pluralizeUnit(thresholdUnit, 2)})`
+                          : 'Minimum Stock'
+                      }
                       min={0}
                       required
                     />
                     <FormNumberInput
                       name="reorder_quantity"
                       control={control}
-                      label="Reorder Quantity"
+                      label={
+                        thresholdUnit
+                          ? `Reorder Quantity (${pluralizeUnit(thresholdUnit, 2)})`
+                          : 'Reorder Quantity'
+                      }
                       min={1}
                       required
                     />

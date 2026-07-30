@@ -222,23 +222,26 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         "po_number",
         "supplier",
         "status",
+        "priority",
         "order_date",
         "expected_delivery_date",
         "estimated_total_display",
         "total_items",
         "days_since_ordered_display",
     ]
-    list_filter = ["status", "order_date", "supplier"]
+    list_filter = ["status", "priority", "payment_terms", "freight_terms", "order_date", "supplier"]
     search_fields = ["po_number", "supplier__name", "notes"]
+    # ``order_date`` is editable (op-bwo9) so an order entered after the fact can
+    # be backdated to when it was actually placed.
     readonly_fields = [
         "po_number",
-        "order_date",
         "updated_at",
         "total_items",
         "total_quantity",
         "total_received_quantity",
         "is_fully_received",
         "days_since_ordered",
+        "payment_schedule_display",
     ]
     date_hierarchy = "order_date"
 
@@ -258,9 +261,22 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
                     "po_number",
                     "supplier",
                     "status",
+                    "priority",
                     "order_date",
                     "expected_delivery_date",
                 )
+            },
+        ),
+        (
+            "Terms",
+            {
+                "fields": ("payment_terms", "freight_terms", "payment_schedule_display"),
+                "description": (
+                    "Descriptive terms agreed with the supplier — neither moves "
+                    "stock nor posts to the ledger. The payment schedule is "
+                    "derived from the payment terms, the order date and the "
+                    "live estimated total."
+                ),
             },
         ),
         (
@@ -301,6 +317,15 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         if obj.estimated_total:
             return f"${obj.estimated_total:,.2f}"
         return "-"
+
+    @admin.display(description="Payment Schedule")
+    def payment_schedule_display(self, obj):
+        """Show the payment this order's terms imply (op-bwo9)."""
+        if obj is None or obj.pk is None:
+            return "-"
+        schedule = obj.payment_schedule
+        when = schedule["due_date"].isoformat() if schedule["due_date"] else "no date"
+        return f"${schedule['amount']:,.2f} due {when} ({schedule['basis']})"
 
     @admin.display(description="Days Since Ordered")
     def days_since_ordered_display(self, obj):

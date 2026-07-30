@@ -22,10 +22,22 @@ import { SIG, SupplierAgreement, WorkOrder } from '../types';
 import '../styles/PurchaseOrderFormPage.css';
 import { workOrderOptionLabel } from '../utils/associations';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import {
+  countLevelOf,
+  countUnitOf,
+  orderLevelOf,
+  OrderPack,
+  pluralizeUnit,
+  resolveOrderPack,
+  toPackSummary,
+} from '../utils/packaging';
 
 interface SelectedItem extends ReorderDataItem {
   selected: boolean;
+  // BASE units, always — what the backend stores as `quantity_ordered`.
   quantity: number;
+  // Whole packs of `orderPackFor(item)`: the supplier's case when they declare
+  // one, else the item's own outermost rung. Sent as `order_in_packages`.
   cases: number;
   unit_cost_override?: string;
   // Per-case cost, kept in sync with unit_cost_override (case = unit × qpp).
@@ -54,6 +66,83 @@ interface FreeformItem {
 const formatCostValue = (value: number): string => {
   if (!Number.isFinite(value)) return '';
   return String(parseFloat(value.toFixed(6)));
+};
+
+// ---- Packaging matrix on a PO line (op-4aqu) --------------------------------
+//
+// Three pack sizes can meet on one line and the form has to keep them apart:
+//
+// * `quantity_per_package` is the SUPPLIER's case — what this vendor ships, and
+//   what the line is ordered in whenever they declare one.
+// * `order_pack` is the item's OWN outermost rung, which fills in when the
+//   supplier declares no case (mirroring `order_packages_for_line`).
+// * `count_pack` is the rung the item is COUNTED in, which is what on-hand is
+//   reported at and need not be either of the above.
+//
+// A `count_pack` is the marker of a packaging-matrix item; it is null for every
+// `each` item, and every branch below falls back to the pre-matrix behaviour on
+// that null, so a legacy line renders and submits exactly as it did.
+
+/** The item's base unit, defaulting to the backend's own default. */
+const baseUnitFor = (item: ReorderDataItem): string => item.base_unit?.trim() || 'unit';
+
+/** True when the item is counted in whole packs rather than base units. */
+const isPackCounted = (item: ReorderDataItem): boolean => item.count_pack != null;
+
+/** The pack this line is ordered in, or null to order in plain base units. */
+const orderPackFor = (item: ReorderDataItem): OrderPack | null =>
+  resolveOrderPack(item.quantity_per_package, item.order_pack);
+
+/** "Cases" / "Reams" / "Sheets" — a noun as a column label. */
+const titleCasePlural = (noun: string): string => {
+  const plural = pluralizeUnit(noun, 2);
+  return plural.charAt(0).toUpperCase() + plural.slice(1);
+};
+
+/**
+ * The reconciliation line under a pack-counted item's quantity inputs: which
+ * pack the order is being placed in, and how that relates to the item's own
+ * packaging. Named explicitly rather than silently picking one, because the two
+ * sizes routinely differ — a vendor's 24-count carton of an item this shop
+ * counts in 12-count cases.
+ */
+const packHintFor = (item: ReorderDataItem, pack: OrderPack | null): string => {
+  const baseUnit = baseUnitFor(item);
+  const countPack = item.count_pack;
+  const parts: string[] = [];
+
+  if (countPack) {
+    parts.push(
+      `Counted in ${pluralizeUnit(countPack.name, 2)} of ${countPack.base_units} ` +
+        `${pluralizeUnit(baseUnit, countPack.base_units)}.`
+    );
+  }
+
+  if (!pack) {
+    parts.push(`Ordered in single ${pluralizeUnit(baseUnit, 2)} — this supplier lists no case.`);
+    return parts.join(' ');
+  }
+
+  const ownPack = item.order_pack;
+  if (pack.source === 'supplier') {
+    parts.push(
+      `Ordered in the supplier's case of ${pack.baseUnits} ` +
+        `${pluralizeUnit(baseUnit, pack.baseUnits)}.`
+    );
+    if (ownPack && ownPack.base_units !== pack.baseUnits) {
+      parts.push(
+        `This item's own ${ownPack.name} holds ${ownPack.base_units} ` +
+          `${pluralizeUnit(baseUnit, ownPack.base_units)}.`
+      );
+    }
+  } else {
+    parts.push(
+      `This supplier lists no case, so it is ordered in the item's own ` +
+        `${pack.name} of ${pack.baseUnits} ${pluralizeUnit(baseUnit, pack.baseUnits)}.`
+    );
+  }
+
+  return parts.join(' ');
 };
 
 const PurchaseOrderFormPage: React.FC = () => {
@@ -146,11 +235,13 @@ const PurchaseOrderFormPage: React.FC = () => {
         // Initialize items with all selected by default
         setSelectedItems(
           supplier.items.map((item) => {
-            const qpp = item.quantity_per_package || 1;
-            // For case-packed items, round suggested units up to whole cases
+            const pack = orderPackFor(item);
+            // For pack-ordered items, round suggested units up to whole packs
             // so the user always orders at least the suggested coverage.
-            const cases = qpp > 1 ? Math.max(1, Math.ceil(item.suggested_quantity / qpp)) : item.suggested_quantity;
-            const quantity = qpp > 1 ? cases * qpp : item.suggested_quantity;
+            const cases = pack
+              ? Math.max(1, Math.ceil(item.suggested_quantity / pack.baseUnits))
+              : item.suggested_quantity;
+            const quantity = pack ? cases * pack.baseUnits : item.suggested_quantity;
             return {
               ...item,
               selected: true,
@@ -241,28 +332,28 @@ const PurchaseOrderFormPage: React.FC = () => {
     );
   };
 
-  // Update item quantity (units). For case-packed items, also re-derive cases
-  // as ceil(units / qpp) so the two stay consistent.
+  // Update item quantity (base units). For pack-ordered items, also re-derive
+  // the pack count as ceil(units / pack) so the two stay consistent.
   const updateItemQuantity = (itemSupplierId: number, quantity: number) => {
     setSelectedItems((prev) =>
       prev.map((item) => {
         if (item.item_supplier_id !== itemSupplierId) return item;
         const units = Math.max(1, quantity);
-        const qpp = item.quantity_per_package || 1;
-        const cases = qpp > 1 ? Math.max(1, Math.ceil(units / qpp)) : units;
+        const pack = orderPackFor(item);
+        const cases = pack ? Math.max(1, Math.ceil(units / pack.baseUnits)) : units;
         return { ...item, quantity: units, cases };
       })
     );
   };
 
-  // Update item case count. Drives quantity (units) = cases * qpp.
+  // Update item pack count. Drives quantity (base units) = packs * pack size.
   const updateItemCases = (itemSupplierId: number, cases: number) => {
     setSelectedItems((prev) =>
       prev.map((item) => {
         if (item.item_supplier_id !== itemSupplierId) return item;
-        const qpp = item.quantity_per_package || 1;
+        const pack = orderPackFor(item);
         const newCases = Math.max(1, cases);
-        return { ...item, cases: newCases, quantity: newCases * qpp };
+        return { ...item, cases: newCases, quantity: newCases * (pack?.baseUnits ?? 1) };
       })
     );
   };
@@ -271,6 +362,13 @@ const PurchaseOrderFormPage: React.FC = () => {
   // case-cost field in sync (case = unit × qpp). The per-unit value the user
   // typed is stored verbatim (full precision) and remains the source of truth
   // for submit.
+  //
+  // Costing is keyed to the SUPPLIER's `quantity_per_package` here and below,
+  // never to `orderPackFor` — `package_cost` is the price of one of THIS
+  // vendor's cases, so pairing it with the item's own rung would quote a case
+  // that nobody sells. A pack-counted item bought from a supplier with no case
+  // size therefore keeps a single per-unit cost field, which is exactly what
+  // that vendor prices in.
   const updateItemUnitCost = (itemSupplierId: number, unitCostOverride: string) => {
     setSelectedItems((prev) =>
       prev.map((item) => {
@@ -463,8 +561,14 @@ const PurchaseOrderFormPage: React.FC = () => {
         return;
       }
 
-      // Add the item to selectedItems
+      // Add the item to selectedItems. The item detail response carries the
+      // packaging chain, so a manually added line gets the same pack context
+      // the order pad hands down for a pre-populated one (op-4aqu).
       const qpp = matchingItemSupplier.quantity_per_package || 1;
+      const countPack = toPackSummary(countLevelOf(inventoryItem));
+      const orderPackSummary = toPackSummary(orderLevelOf(inventoryItem));
+      const pack = resolveOrderPack(qpp, orderPackSummary);
+      const packSize = pack?.baseUnits ?? 1;
       const newItem: SelectedItem = {
         item_supplier_id: matchingItemSupplier.id,
         item_id: inventoryItem.id,
@@ -473,7 +577,7 @@ const PurchaseOrderFormPage: React.FC = () => {
         current_stock: inventoryItem.current_stock || 0,
         minimum_stock: inventoryItem.minimum_stock || 0,
         reorder_quantity: inventoryItem.reorder_quantity || 0,
-        suggested_quantity: qpp,
+        suggested_quantity: packSize,
         unit_cost: matchingItemSupplier.unit_cost?.toString() || '0',
         package_cost: matchingItemSupplier.package_cost?.toString() || null,
         quantity_per_package: qpp,
@@ -481,9 +585,17 @@ const PurchaseOrderFormPage: React.FC = () => {
         supplier_sku: matchingItemSupplier.supplier_sku || '',
         supplier_url: matchingItemSupplier.supplier_url || '',
         is_primary: matchingItemSupplier.is_primary || false,
-        line_total: (parseFloat(matchingItemSupplier.unit_cost?.toString() || '0') * qpp).toString(),
+        line_total: (
+          parseFloat(matchingItemSupplier.unit_cost?.toString() || '0') * packSize
+        ).toString(),
+        base_unit: inventoryItem.base_unit,
+        count_unit: countUnitOf(inventoryItem),
+        on_hand_display: inventoryItem.on_hand_display,
+        reorder_display: inventoryItem.reorder_display,
+        count_pack: countPack,
+        order_pack: orderPackSummary,
         selected: true,
-        quantity: qpp,
+        quantity: packSize,
         cases: 1,
       };
 
@@ -557,9 +669,12 @@ const PurchaseOrderFormPage: React.FC = () => {
             item_supplier_id: item.item_supplier_id,
             quantity: item.quantity,
           };
-          // For case-packed items, send the case count explicitly so the
+          // For pack-ordered items, send the pack count explicitly so the
           // backend records exactly what the user entered (no ceil rounding).
-          if ((item.quantity_per_package || 1) > 1) {
+          // `quantity` stays base units and no `at_level` is sent: that flag
+          // names the item's COUNT level, which is not necessarily the pack
+          // this line was ordered in.
+          if (orderPackFor(item)) {
             itemData.order_in_packages = item.cases;
           }
           // Add unit_cost override if provided
@@ -728,10 +843,17 @@ const PurchaseOrderFormPage: React.FC = () => {
             {/* Inventory Items */}
             <section className="form-section items-section">
               <h2>2. Inventory Items ({selectedItems.length})</h2>
-              {selectedItems.some((it) => it.quantity_per_package > 1) && (
+              {selectedItems.some((it) => orderPackFor(it)?.source === 'supplier') && (
                 <p className="case-help-text">
                   When ordering items by the case, enter the number of cases. We compute units
                   automatically from the supplier&apos;s case size.
+                </p>
+              )}
+              {selectedItems.some((it) => isPackCounted(it)) && (
+                <p className="case-help-text">
+                  Items counted in packs show their own packaging under the quantity. On-hand is
+                  counted in the item&apos;s own unit; the order is placed in the supplier&apos;s
+                  pack, or the item&apos;s own when the supplier lists no case.
                 </p>
               )}
               {selectedItems.length === 0 ? (
@@ -763,7 +885,18 @@ const PurchaseOrderFormPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedItems.map((item) => (
+                      {selectedItems.map((item) => {
+                        // The pack this line is ordered in (null = base units),
+                        // and whether the item is counted in packs at all —
+                        // two independent facts, since a pack-counted item can
+                        // be bought from a vendor who sells singles.
+                        const pack = orderPackFor(item);
+                        const packCounted = isPackCounted(item);
+                        const baseUnit = baseUnitFor(item);
+                        const effectiveUnitCost = item.unit_cost_override
+                          ? parseFloat(item.unit_cost_override)
+                          : parseFloat(item.unit_cost);
+                        return (
                         <tr
                           key={item.item_supplier_id}
                           className={item.selected ? 'row-selected' : 'row-unselected'}
@@ -789,15 +922,41 @@ const PurchaseOrderFormPage: React.FC = () => {
                             </div>
                           </td>
                           <td className="col-stock">
-                            <span className={item.current_stock <= 0 ? 'stock-critical' : 'stock-low'}>
-                              {item.current_stock} / {item.minimum_stock}
-                            </span>
+                            {/*
+                              A pack-counted item's `minimum_stock` is a threshold
+                              in its COUNT unit (2 cases), so pairing it with the
+                              base-unit `current_stock` would compare bottles
+                              against cases. `reorder_display` puts both in one
+                              unit; the base-unit count rides underneath so the
+                              real stock level is still on screen. Each-mode
+                              items keep the original pairing exactly.
+                            */}
+                            {isPackCounted(item) && item.reorder_display ? (
+                              <>
+                                <span
+                                  className={
+                                    item.reorder_display.current <= 0 ? 'stock-critical' : 'stock-low'
+                                  }
+                                >
+                                  {item.reorder_display.current} / {item.reorder_display.threshold}{' '}
+                                  {pluralizeUnit(item.reorder_display.unit, item.reorder_display.threshold)}
+                                </span>
+                                <span className="stock-base-units">
+                                  {item.current_stock}{' '}
+                                  {pluralizeUnit(baseUnitFor(item), item.current_stock)}
+                                </span>
+                              </>
+                            ) : (
+                              <span className={item.current_stock <= 0 ? 'stock-critical' : 'stock-low'}>
+                                {item.current_stock} / {item.minimum_stock}
+                              </span>
+                            )}
                           </td>
                           <td className="col-quantity">
-                            {item.quantity_per_package > 1 ? (
+                            {pack ? (
                               <div className="case-qty-group">
                                 <label className="case-qty-field">
-                                  <span className="case-qty-label">Cases</span>
+                                  <span className="case-qty-label">{titleCasePlural(pack.name)}</span>
                                   <input
                                     type="number"
                                     min="1"
@@ -806,11 +965,18 @@ const PurchaseOrderFormPage: React.FC = () => {
                                       updateItemCases(item.item_supplier_id, parseInt(e.target.value, 10) || 1)
                                     }
                                     disabled={!item.selected}
-                                    aria-label={`Cases for ${item.item_name}`}
+                                    aria-label={`${titleCasePlural(pack.name)} for ${item.item_name}`}
                                   />
                                 </label>
                                 <label className="case-qty-field">
-                                  <span className="case-qty-label">Units</span>
+                                  {/*
+                                    A pack-counted item names its own base unit
+                                    here ("Sheets"); everything else keeps the
+                                    generic "Units" it has always shown.
+                                  */}
+                                  <span className="case-qty-label">
+                                    {packCounted ? titleCasePlural(baseUnit) : 'Units'}
+                                  </span>
                                   <input
                                     type="number"
                                     min="1"
@@ -819,39 +985,64 @@ const PurchaseOrderFormPage: React.FC = () => {
                                       updateItemQuantity(item.item_supplier_id, parseInt(e.target.value, 10) || 1)
                                     }
                                     disabled={!item.selected}
-                                    aria-label={`Units for ${item.item_name}`}
+                                    aria-label={
+                                      packCounted
+                                        ? `${titleCasePlural(baseUnit)} for ${item.item_name}`
+                                        : `Units for ${item.item_name}`
+                                    }
                                   />
                                 </label>
                                 <div
                                   className="case-qty-summary"
                                   data-testid={`case-summary-${item.item_supplier_id}`}
                                 >
-                                  {item.cases} cases × {item.quantity_per_package} units/case ={' '}
-                                  {item.quantity} units @{' '}
-                                  {formatCurrency(
-                                    item.unit_cost_override
-                                      ? parseFloat(item.unit_cost_override)
-                                      : parseFloat(item.unit_cost)
-                                  )}
-                                  /unit ={' '}
-                                  {formatCurrency(
-                                    (item.unit_cost_override
-                                      ? parseFloat(item.unit_cost_override)
-                                      : parseFloat(item.unit_cost)) * item.quantity
+                                  {packCounted ? (
+                                    <>
+                                      Order: {item.cases}{' '}
+                                      {pluralizeUnit(pack.name, item.cases)} ×{' '}
+                                      {pack.baseUnits} {pluralizeUnit(baseUnit, pack.baseUnits)} ={' '}
+                                      {item.quantity} {pluralizeUnit(baseUnit, item.quantity)} @{' '}
+                                      {formatCurrency(effectiveUnitCost)}/{baseUnit} ={' '}
+                                      {formatCurrency(effectiveUnitCost * item.quantity)}
+                                    </>
+                                  ) : (
+                                    <>
+                                      {item.cases} cases × {pack.baseUnits} units/case ={' '}
+                                      {item.quantity} units @ {formatCurrency(effectiveUnitCost)}
+                                      /unit = {formatCurrency(effectiveUnitCost * item.quantity)}
+                                    </>
                                   )}
                                 </div>
+                                {packCounted && (
+                                  <div
+                                    className="pack-hint"
+                                    data-testid={`pack-hint-${item.item_supplier_id}`}
+                                  >
+                                    {packHintFor(item, pack)}
+                                  </div>
+                                )}
                               </div>
                             ) : (
-                              <input
-                                type="number"
-                                min="1"
-                                value={item.quantity}
-                                onChange={(e) =>
-                                  updateItemQuantity(item.item_supplier_id, parseInt(e.target.value, 10) || 1)
-                                }
-                                disabled={!item.selected}
-                                aria-label={`Quantity for ${item.item_name}`}
-                              />
+                              <>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(e) =>
+                                    updateItemQuantity(item.item_supplier_id, parseInt(e.target.value, 10) || 1)
+                                  }
+                                  disabled={!item.selected}
+                                  aria-label={`Quantity for ${item.item_name}`}
+                                />
+                                {packCounted && (
+                                  <div
+                                    className="pack-hint"
+                                    data-testid={`pack-hint-${item.item_supplier_id}`}
+                                  >
+                                    {packHintFor(item, pack)}
+                                  </div>
+                                )}
+                              </>
                             )}
                           </td>
                           <td className="col-cost">
@@ -925,13 +1116,12 @@ const PurchaseOrderFormPage: React.FC = () => {
                           </td>
                           <td className="col-total">
                             {item.selected
-                              ? formatCurrency(
-                                  (item.unit_cost_override ? parseFloat(item.unit_cost_override) : parseFloat(item.unit_cost)) * item.quantity
-                                )
+                              ? formatCurrency(effectiveUnitCost * item.quantity)
                               : '—'}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                       {/* Blank line for manual product entry */}
                       <tr className="row-add-product">
                         <td colSpan={2}>

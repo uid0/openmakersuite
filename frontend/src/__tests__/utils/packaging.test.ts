@@ -16,9 +16,12 @@ import {
   countsInPacks,
   describePackChain,
   onHandLabel,
+  orderLevelOf,
   perParent,
   pluralizeUnit,
   resolveCountLevelError,
+  resolveOrderPack,
+  toPackSummary,
   toPackagingPayload,
   toPackagingRows,
   validatePackagingChain,
@@ -298,5 +301,69 @@ describe('pluralizeUnit / baseUnitOf', () => {
     expect(baseUnitOf({ base_unit: undefined })).toBe('unit');
     expect(baseUnitOf({ base_unit: '   ' })).toBe('unit');
     expect(baseUnitOf({ base_unit: 'sheet' })).toBe('sheet');
+  });
+});
+
+describe('orderLevelOf / toPackSummary', () => {
+  const paperItem = (overrides: Partial<InventoryItem> = {}) =>
+    makeItem({
+      count_mode: 'by_level',
+      count_level: 2, // counted in reams, bought in cases
+      packaging_levels: PAPER_CHAIN,
+      ...overrides,
+    });
+
+  it('is the OUTERMOST rung, not the counting one', () => {
+    expect(orderLevelOf(paperItem())).toEqual(PAPER_CHAIN[0]);
+    expect(countLevelOf(paperItem())).toEqual(PAPER_CHAIN[1]);
+  });
+
+  it('does not depend on the chain arriving sorted', () => {
+    const scrambled = [PAPER_CHAIN[2], PAPER_CHAIN[0], PAPER_CHAIN[1]];
+    expect(orderLevelOf(paperItem({ packaging_levels: scrambled }))).toEqual(PAPER_CHAIN[0]);
+  });
+
+  it('is null for an item that is not counted in packs', () => {
+    expect(orderLevelOf(makeItem())).toBeNull();
+    // A pack mode with an unresolvable counting level is half-configured, and
+    // degrades to base units rather than guessing a rung to buy in.
+    expect(orderLevelOf(paperItem({ count_level: 999 }))).toBeNull();
+  });
+
+  it('reduces a rung to the wire shape, passing null through', () => {
+    expect(toPackSummary(PAPER_CHAIN[0])).toEqual({ name: 'case', base_units: 1000 });
+    expect(toPackSummary(null)).toBeNull();
+  });
+});
+
+describe('resolveOrderPack', () => {
+  const itemCase = { name: 'case', base_units: 48 };
+
+  it("prefers the supplier's case — you buy what the vendor ships", () => {
+    expect(resolveOrderPack(24, itemCase)).toEqual({
+      baseUnits: 24,
+      name: 'case',
+      source: 'supplier',
+    });
+  });
+
+  it("falls back to the item's own rung when the supplier declares none", () => {
+    expect(resolveOrderPack(1, itemCase)).toEqual({
+      baseUnits: 48,
+      name: 'case',
+      source: 'item',
+    });
+    expect(resolveOrderPack(null, { name: 'carton', base_units: 6 })).toEqual({
+      baseUnits: 6,
+      name: 'carton',
+      source: 'item',
+    });
+  });
+
+  it('is null when neither side declares a pack — plain base units', () => {
+    expect(resolveOrderPack(1, null)).toBeNull();
+    expect(resolveOrderPack(undefined, undefined)).toBeNull();
+    // A one-base-unit rung is not a pack; it is the base unit itself.
+    expect(resolveOrderPack(1, { name: 'sheet', base_units: 1 })).toBeNull();
   });
 });

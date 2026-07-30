@@ -186,10 +186,16 @@ def order_level(item: "InventoryItem") -> Optional["PackagingLevel"]:
     item's *own* packaging, and a supplier may sell it in a different case. The
     purchase-order paths prefer the supplier's case size when one is declared
     (you buy what the vendor ships) and fall back to this rung when it is not.
+
+    Sorts in Python rather than re-ordering the queryset so a caller that has
+    already ``prefetch_related("packaging_levels")`` — the order pad, which
+    reads this per row — pays no per-item query. ``PackagingLevel.Meta.ordering``
+    already sorts by ``sort_order``; the explicit key does not depend on that.
     """
     if not counts_in_packs(item):
         return None
-    return item.packaging_levels.order_by("sort_order").first()
+    rungs = sorted(item.packaging_levels.all(), key=lambda rung: rung.sort_order)
+    return rungs[0] if rungs else None
 
 
 # The wire spellings of the ``at_level`` flag, matching

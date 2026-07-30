@@ -27,6 +27,7 @@ from inventory.services.packaging import (
     counts_in_packs,
     low_stock_q,
     on_hand_display,
+    order_level,
     parse_at_level,
     reorder_display,
     resolve_base_quantity,
@@ -64,6 +65,20 @@ from .serializers import (
 )
 from .webhook_audit import diff_audited_fields as diff_webhook_audited_fields
 from .webhook_audit import record_event as record_webhook_audit_event
+
+
+def _pack_summary(level):
+    """``{name, base_units}`` for a packaging rung, or ``None`` for no rung.
+
+    The wire shape the order pad uses to name a pack size (op-4aqu). Two of them
+    ride on each reorder-data row — the rung the item is *counted* in and the
+    rung it is *bought* in — so the PO form can label "2 cases × 24 bottles"
+    and flag a supplier case that differs from the item's own, instead of
+    silently picking one of the two.
+    """
+    if level is None:
+        return None
+    return {"name": level.name, "base_units": level.base_units}
 
 
 def _po_line_display_name(po_item):
@@ -879,7 +894,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             )
             .distinct()
             .select_related("category", "location", "count_level")
-            .prefetch_related("item_suppliers__supplier", "reorder_requests")
+            .prefetch_related(
+                "item_suppliers__supplier",
+                "reorder_requests",
+                # ``order_level`` reads the chain per row (op-4aqu); prefetched
+                # it costs one query for the page instead of one per item.
+                "packaging_levels",
+            )
         )
 
         # Also get items that need reordering (stock at/below the reorder point,
@@ -893,7 +914,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             )
             .exclude(id__in=items_with_requests.values_list("id", flat=True))
             .select_related("category", "location", "count_level")
-            .prefetch_related("item_suppliers__supplier")
+            .prefetch_related("item_suppliers__supplier", "packaging_levels")
         )
 
         # Combine both sets, prioritizing items with requests
@@ -990,6 +1011,19 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                             if counts_in_packs(item)
                             else suggested_qty
                         ),
+                        # The two pack sizes the PO form has to reconcile
+                        # (op-4aqu). ``quantity_per_package`` above is the
+                        # SUPPLIER's case — what you order in — while these name
+                        # the ITEM's own rungs: what it is counted in, and what
+                        # it is bought in when the supplier declares no case.
+                        # Both null for an ``each`` item, so the form's existing
+                        # supplier-case behaviour is what every legacy item
+                        # keeps.
+                        "base_unit": item.base_unit,
+                        "count_pack": _pack_summary(
+                            item.count_level if counts_in_packs(item) else None
+                        ),
+                        "order_pack": _pack_summary(order_level(item)),
                     }
                 )
 

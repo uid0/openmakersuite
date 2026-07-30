@@ -163,6 +163,18 @@ export interface PackagingLevel {
 }
 
 /**
+ * A packaging rung named by size — the compact shape surfaces that only need
+ * "what is one pack called, and how many base units does it hold" use, without
+ * the pk/`sort_order`/`per_parent` of a full `PackagingLevel` (op-4aqu). The
+ * order pad sends one per row for the rung an item is counted in and the rung
+ * it is bought in; both are null for an `each` item.
+ */
+export interface PackSummary {
+  name: string;
+  base_units: number;
+}
+
+/**
  * `InventoryItem.current_stock` expressed at the item's counting granularity —
  * read-only, computed from the canonical base-unit count. Which optional keys
  * are present depends on `mode`: `each` → unit/base_units, `by_level` →

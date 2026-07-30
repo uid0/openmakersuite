@@ -22,6 +22,8 @@ The on-hand / usage / container half lives in
 from datetime import timedelta
 from decimal import Decimal
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 import pytest
@@ -414,10 +416,25 @@ class TestReceiveAtCountLevel:
         assert "no inventory item" in response.data["error"]
 
 
+REORDER_DATA_URL = "/api/reorders/purchase-orders/reorder_data/"
+
+
+def _reorder_rows_for(client, item):
+    """Every order-pad row for ``item`` — one per supplier that stocks it."""
+    response = client.get(REORDER_DATA_URL)
+    assert response.status_code == status.HTTP_200_OK
+    return [
+        row
+        for supplier in response.data["suppliers"]
+        for row in supplier["items"]
+        if row["item_id"] == str(item.id)
+    ]
+
+
 class TestReorderDataPresentation:
     """The order pad reads at the item's counting granularity — display only."""
 
-    URL = "/api/reorders/purchase-orders/reorder_data/"
+    URL = REORDER_DATA_URL
 
     def test_pack_counted_item_carries_its_count_unit(self, authenticated_client):
         client, _ = authenticated_client
@@ -473,3 +490,113 @@ class TestReorderDataPresentation:
         assert len(rows) == 1
         assert rows[0]["count_unit"] == "unit"
         assert rows[0]["suggested_quantity"] == rows[0]["suggested_quantity_at_unit"] == 10
+
+
+class TestReorderDataNamesBothPackSizes:
+    """The pad hands the PO form both pack sizes; it never picks one (op-4aqu).
+
+    ``quantity_per_package`` on a row is the SUPPLIER's case — what the line is
+    ordered in. ``count_pack`` / ``order_pack`` are the ITEM's own rungs: what
+    it is counted in, and what it is bought in when the supplier declares no
+    case. The three can all differ, and the form has to be able to say so
+    rather than silently reconciling them.
+    """
+
+    def test_row_names_the_item_pack_alongside_the_supplier_case(self, authenticated_client):
+        client, _ = authenticated_client
+        # Item chain: 1 case = 4 reams = 48 sheets, counted in reams. The
+        # supplier ships a 24-sheet carton — a third pack size entirely.
+        item = InventoryItemFactory(
+            image=None,
+            base_unit="sheet",
+            current_stock=24,
+            minimum_stock=2,
+            reorder_quantity=2,
+            quantity_per_package=24,
+            unit_cost=Decimal("0.10"),
+        )
+        PackagingLevel.objects.create(item=item, name="case", sort_order=0, base_units=48)
+        ream = PackagingLevel.objects.create(item=item, name="ream", sort_order=1, base_units=12)
+        PackagingLevel.objects.create(item=item, name="sheet", sort_order=2, base_units=1)
+        item.count_mode = InventoryItem.CountMode.BY_LEVEL
+        item.count_level = ream
+        item.save(update_fields=["count_mode", "count_level"])
+
+        rows = _reorder_rows_for(client, item)
+
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["base_unit"] == "sheet"
+        assert row["count_pack"] == {"name": "ream", "base_units": 12}
+        # The OUTERMOST rung, not the counting one — the rung the item would be
+        # bought in if this supplier declared no case of its own.
+        assert row["order_pack"] == {"name": "case", "base_units": 48}
+        # And the supplier's case, unchanged, still says what you order in.
+        assert row["quantity_per_package"] == 24
+
+    def test_each_item_reports_a_base_unit_and_no_packs(self, authenticated_client):
+        client, _ = authenticated_client
+        item = InventoryItemFactory(
+            image=None,
+            current_stock=2,
+            minimum_stock=5,
+            reorder_quantity=10,
+            quantity_per_package=6,
+            unit_cost=Decimal("2.00"),
+        )
+
+        rows = _reorder_rows_for(client, item)
+
+        assert len(rows) == 1
+        # Every item has a base unit; only an opted-in one has packs of its own,
+        # so the form keeps ordering an each item in the supplier's case.
+        assert rows[0]["base_unit"] == "unit"
+        assert rows[0]["count_pack"] is None
+        assert rows[0]["order_pack"] is None
+
+    def test_half_configured_item_reports_no_packs(self, authenticated_client):
+        """A pack mode with no ``count_level`` is not counted in packs."""
+        client, _ = authenticated_client
+        item = _pack_item(
+            case_size=12,
+            current_stock=2,
+            minimum_stock=5,
+            reorder_quantity=10,
+            quantity_per_package=1,
+            unit_cost=Decimal("2.00"),
+        )
+        item.count_level = None
+        item.save(update_fields=["count_level"])
+
+        rows = _reorder_rows_for(client, item)
+
+        assert len(rows) == 1
+        assert rows[0]["count_pack"] is None
+        assert rows[0]["order_pack"] is None
+
+    def test_the_chain_is_read_once_not_once_per_row(self, authenticated_client):
+        """``order_level`` per row rides the prefetch rather than re-querying."""
+        client, _ = authenticated_client
+        for _ in range(3):
+            _pack_item(
+                case_size=12,
+                current_stock=12,
+                minimum_stock=2,
+                reorder_quantity=3,
+                quantity_per_package=12,
+                unit_cost=Decimal("2.00"),
+            )
+
+        with CaptureQueriesContext(connection) as captured:
+            response = client.get(REORDER_DATA_URL)
+
+        assert response.status_code == status.HTTP_200_OK
+        # Reads OF the chain table, not the item queries that merely join it for
+        # ``low_stock_q``'s ``count_level__base_units`` comparison.
+        chain_queries = [
+            query
+            for query in captured.captured_queries
+            if 'from "inventory_packaginglevel"' in query["sql"].lower()
+        ]
+        # At most one prefetch per queryset feeding the pad, never one per row.
+        assert len(chain_queries) <= 2, chain_queries

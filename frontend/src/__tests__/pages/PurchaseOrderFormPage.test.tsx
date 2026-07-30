@@ -359,6 +359,128 @@ describe('PurchaseOrderFormPage', () => {
     });
   });
 
+  describe('packaging-matrix line (op-4aqu)', () => {
+    // A shop that counts this item in 12-bottle cases, buying it from a vendor
+    // who ships 24-bottle cartons: three different pack sizes on one line
+    // (supplier 24 / item's own outermost rung 48 / counting rung 12).
+    const matrixItem: api.ReorderDataItem = {
+      ...mockItem,
+      current_stock: 24,
+      minimum_stock: 2,
+      suggested_quantity: 36,
+      unit_cost: '1.00',
+      package_cost: '24.00',
+      quantity_per_package: 24,
+      base_unit: 'bottle',
+      count_unit: 'case',
+      count_pack: { name: 'case', base_units: 12 },
+      order_pack: { name: 'crate', base_units: 48 },
+      reorder_display: {
+        mode: 'by_level',
+        unit: 'case',
+        threshold: 2,
+        current: 2,
+        reorder_quantity: 3,
+        needs_reorder: true,
+        text: '2 cases on hand · reorder at 2 cases',
+      },
+    };
+
+    test('stock reads in the count unit, with the base-unit count alongside', async () => {
+      await renderWithItem(matrixItem);
+
+      // The count-unit pair — comparing 24 bottles against a 2-CASE minimum
+      // would be nonsense, so both sides are cases here.
+      expect(screen.getByText('2 / 2 cases')).toBeInTheDocument();
+      // …and the canonical base-unit count is still on screen.
+      expect(screen.getByText('24 bottles')).toBeInTheDocument();
+    });
+
+    test('quantity inputs are labelled in the supplier pack and the base unit', async () => {
+      await renderWithItem(matrixItem);
+
+      expect(screen.getByLabelText(/^cases for test item$/i)).toBeInTheDocument();
+      // The base unit, not the generic "Units" an each-mode line shows.
+      expect(screen.getByLabelText(/^bottles for test item$/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/^units for test item$/i)).not.toBeInTheDocument();
+    });
+
+    test("orders in the supplier's pack: 3 cases × 24 = 72 bottles", async () => {
+      await renderWithItem(matrixItem);
+
+      // suggested_quantity 36 base units rounds UP to 2 supplier cases (48).
+      const casesInput = screen.getByLabelText(/^cases for test item$/i) as HTMLInputElement;
+      const unitsInput = screen.getByLabelText(/^bottles for test item$/i) as HTMLInputElement;
+      expect(casesInput.value).toBe('2');
+      expect(unitsInput.value).toBe('48');
+
+      fireEvent.change(casesInput, { target: { value: '3' } });
+      expect(unitsInput.value).toBe('72'); // 3 × 24, the SUPPLIER's case
+
+      expect(screen.getByTestId('case-summary-1')).toHaveTextContent(
+        'Order: 3 cases × 24 bottles = 72 bottles @ $1.00/bottle = $72.00'
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /create purchase order/i }));
+      await waitFor(() => {
+        expect(api.purchaseOrderAPI.createOrder).toHaveBeenCalled();
+      });
+      const call = (api.purchaseOrderAPI.createOrder as jest.Mock).mock.calls[0][0];
+      // Base units on the wire, the supplier's pack count alongside — and no
+      // `at_level`, which would name the COUNT level, not the ordered pack.
+      expect(call.items[0].quantity).toBe(72);
+      expect(call.items[0].order_in_packages).toBe(3);
+      expect(call.items[0]).not.toHaveProperty('at_level');
+    });
+
+    test('names both pack sizes rather than silently picking one', async () => {
+      await renderWithItem(matrixItem);
+
+      const hint = screen.getByTestId('pack-hint-1');
+      expect(hint).toHaveTextContent('Counted in cases of 12 bottles.');
+      expect(hint).toHaveTextContent("Ordered in the supplier's case of 24 bottles.");
+      expect(hint).toHaveTextContent("This item's own crate holds 48 bottles.");
+    });
+
+    test("falls back to the item's own pack when the supplier lists no case", async () => {
+      // Mirrors `order_packages_for_line`: the item's outermost rung fills in.
+      await renderWithItem({ ...matrixItem, quantity_per_package: 1, package_cost: null });
+
+      const casesInput = screen.getByLabelText(/^crates for test item$/i) as HTMLInputElement;
+      const unitsInput = screen.getByLabelText(/^bottles for test item$/i) as HTMLInputElement;
+      expect(casesInput.value).toBe('1'); // ceil(36 / 48)
+      expect(unitsInput.value).toBe('48');
+
+      expect(screen.getByTestId('pack-hint-1')).toHaveTextContent(
+        "This supplier lists no case, so it is ordered in the item's own crate of 48 bottles."
+      );
+      // Costing stays keyed to the supplier, who prices per bottle here.
+      expect(screen.getByLabelText(/unit cost for test item/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/cost per case for test item/i)).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /create purchase order/i }));
+      await waitFor(() => {
+        expect(api.purchaseOrderAPI.createOrder).toHaveBeenCalled();
+      });
+      const call = (api.purchaseOrderAPI.createOrder as jest.Mock).mock.calls[0][0];
+      expect(call.items[0].quantity).toBe(48);
+      expect(call.items[0].order_in_packages).toBe(1);
+    });
+
+    test('an each-mode line shows no pack context at all', async () => {
+      // The same supplier case size, but an item counted in base units — the
+      // pre-matrix rendering, unchanged.
+      await renderWithItem({ ...mockItem, quantity_per_package: 24, suggested_quantity: 24 });
+
+      expect(screen.queryByTestId('pack-hint-1')).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/^units for test item$/i)).toBeInTheDocument();
+      expect(screen.getByText('5 / 10')).toBeInTheDocument();
+      expect(screen.getByTestId('case-summary-1')).toHaveTextContent(
+        '1 cases × 24 units/case = 24 units'
+      );
+    });
+  });
+
   test('handles API error gracefully', async () => {
     const mockReorderData = {
       suppliers: [

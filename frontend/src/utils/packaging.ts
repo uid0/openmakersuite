@@ -11,7 +11,7 @@
  * rendered by the server. Nothing here converts stock: `current_stock` remains
  * the canonical base-unit count.
  */
-import { InventoryItem, ItemCountMode, PackagingLevel } from '../types';
+import { InventoryItem, ItemCountMode, PackagingLevel, PackSummary } from '../types';
 
 /** The two `count_mode`s that count whole packs rather than base units. */
 export const PACK_COUNT_MODES: ItemCountMode[] = ['by_level', 'open_closed'];
@@ -208,6 +208,58 @@ export const onHandLabel = (item: InventoryItem): string => {
   }
   const unit = baseUnitOf(item);
   return `${item.current_stock} ${pluralizeUnit(unit, item.current_stock)}`;
+};
+
+/**
+ * The rung an item is *bought* in: the outermost rung of its chain — the client
+ * twin of `order_level`. Null for an item that is not counted in packs, which
+ * is what keeps every legacy item ordering in its supplier's case.
+ */
+export const orderLevelOf = (item: InventoryItem): PackagingLevel | null => {
+  if (!countsInPacks(item)) return null;
+  const ordered = [...(item.packaging_levels ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+  return ordered[0] ?? null;
+};
+
+/** A rung reduced to the wire shape the order pad sends, or null. */
+export const toPackSummary = (level: PackagingLevel | null): PackSummary | null =>
+  level ? { name: level.name, base_units: level.base_units } : null;
+
+/** The pack a purchase-order line is ordered in, and which side declared it. */
+export interface OrderPack {
+  /** Base units in one ordered pack. Always > 1 — below that there is no pack. */
+  baseUnits: number;
+  /** What one pack is called ("case" for a supplier's, else the rung's name). */
+  name: string;
+  source: 'supplier' | 'item';
+}
+
+/**
+ * Which pack a PO line is ordered in — the client twin of
+ * `order_packages_for_line`, and deliberately the same precedence:
+ *
+ * * the SUPPLIER's case wins whenever that vendor declares one, because you buy
+ *   what the vendor ships and their package cost is quoted against it;
+ * * the item's own outermost rung fills in when the supplier declares none;
+ * * neither → null, i.e. the line is ordered in plain base units, exactly as
+ *   every `each` item with a supplier case size of 1 always has been.
+ *
+ * Keeping this in step with the server matters: the form sends the pack count
+ * as `order_in_packages`, and a client that picked a different pack would
+ * record a line whose package count contradicts its own quantity.
+ */
+export const resolveOrderPack = (
+  supplierQuantityPerPackage: number | null | undefined,
+  itemOrderPack?: PackSummary | null
+): OrderPack | null => {
+  const supplierPack = supplierQuantityPerPackage || 1;
+  if (supplierPack > 1) {
+    return { baseUnits: supplierPack, name: 'case', source: 'supplier' };
+  }
+  if (itemOrderPack && itemOrderPack.base_units > 1) {
+    return { baseUnits: itemOrderPack.base_units, name: itemOrderPack.name, source: 'item' };
+  }
+  return null;
 };
 
 /**

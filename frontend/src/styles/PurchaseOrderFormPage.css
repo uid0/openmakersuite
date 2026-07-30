@@ -636,6 +636,27 @@
   margin-top: 2px;
 }
 
+/* Packaging matrix (op-4aqu). The reconciliation line under a pack-counted
+   item's quantity inputs: which pack the order is placed in vs the item's own
+   packaging. Quieter than the cost summary above it — context, not arithmetic. */
+.pack-hint {
+  font-size: 11px;
+  font-style: italic;
+  color: #64748b;
+  margin-top: 2px;
+  text-align: left;
+  white-space: normal;
+}
+
+/* The base-unit count under a pack-counted item's count-unit reorder pair, so
+   both granularities are on screen at once. */
+.stock-base-units {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 400;
+}
+
 /* Paired unit / case cost entry for case-packed items. Editing either field
    live-derives the other; the per-unit value stays the source of truth. */
 .case-cost-group {
@@ -667,6 +688,11 @@
   .case-qty-summary,
   .case-cost-label {
     color: #cbd5e1;
+  }
+
+  .pack-hint,
+  .stock-base-units {
+    color: #94a3b8;
   }
 
   .po-form-page {

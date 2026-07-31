@@ -2580,6 +2580,12 @@ views:
         - AllowAny
   project_storage.views.StorageSlotViewSet:
     actions:
+      card_preview:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      cards:
+        permission_classes:
+        - IsStorageAdminOrStaff
       create:
         permission_classes:
         - IsStorageAdminOrStaff

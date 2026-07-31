@@ -32,11 +32,13 @@ from .permissions import IsStorageAdminOrStaff
 from .serializers import (
     GenerateRackSerializer,
     ProjectStorageStintSerializer,
+    SlotCardBatchSerializer,
     StartStintSerializer,
     StorageSlotSerializer,
 )
 from .services.email_service import send_violation_notice
 from .services.label_service import PrinterFamily, render_stint_label
+from .services.slot_cards import build_slot_card_preview, render_slot_cards
 from .services.storage_slots import LevelSpec, ensure_slot_tag, generate_rack_slots
 
 logger = logging.getLogger(__name__)
@@ -733,3 +735,100 @@ class StorageSlotViewSet(viewsets.ModelViewSet):
             payload,
             status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
         )
+
+    # ------------------------------------------------------------------
+    # Printable cards (Avery 5388, 3 per sheet)
+    # ------------------------------------------------------------------
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="card-preview",
+        permission_classes=[IsStorageAdminOrStaff],
+    )
+    def card_preview(self, request, code: str):
+        """Base64 PDF of this one slot's card, for an on-screen preview.
+
+        Mirrors the index-card preview endpoint: a single-card PDF, encoded
+        so the caller can drop it straight into an ``<iframe>`` without a
+        second round trip. Also reports the kiosk URL and marker ID the card
+        carries so the preview surface can show what was encoded.
+        """
+        return Response(build_slot_card_preview(self.get_object()))
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="cards",
+        permission_classes=[IsStorageAdminOrStaff],
+    )
+    def cards(self, request):
+        """Batch-render slot cards as a multi-page 5388 PDF (3 cards/page).
+
+        Payload is either ``{"slot_ids": [...]}`` or a rack filter
+        (``{"rack": 1, "level": "A", "include_inactive": false}``) — see
+        :class:`SlotCardBatchSerializer`. Explicit IDs print in the order
+        they were given (reprinting a handful of cards keeps the caller's
+        order); a rack prints in code order, which is the order the sheets
+        get stuck on the uprights.
+
+        Returns the PDF itself rather than a stored file: these sheets are
+        printed once and thrown away, so persisting them would only grow
+        MEDIA_ROOT.
+        """
+        ser = SlotCardBatchSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+
+        # Base manager + the tag annotation: one query for the whole sheet
+        # instead of a marker lookup per card. Not get_queryset(), so a stray
+        # query string on the POST can't silently drop cards from the run.
+        base = StorageSlot.objects.select_related("owning_group").annotate(
+            active_april_tag_id=active_tag_id_subquery(StorageSlot)
+        )
+
+        slot_ids = ser.validated_data.get("slot_ids")
+        if slot_ids:
+            found = {slot.pk: slot for slot in base.filter(pk__in=slot_ids)}
+            missing = [slot_id for slot_id in slot_ids if slot_id not in found]
+            if missing:
+                return Response(
+                    {
+                        "detail": "Some requested storage slots were not found.",
+                        "missing_ids": missing,
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            # De-duplicated, but otherwise exactly the order asked for.
+            slots = []
+            seen: set[int] = set()
+            for slot_id in slot_ids:
+                if slot_id in seen:
+                    continue
+                seen.add(slot_id)
+                slots.append(found[slot_id])
+            filename = "storage_slot_cards.pdf"
+        else:
+            rack = ser.validated_data["rack"]
+            level = ser.validated_data.get("level")
+            qs = base.filter(rack=rack).order_by("rack", "level", "position")
+            if level:
+                qs = qs.filter(level=level)
+            if not ser.validated_data.get("include_inactive"):
+                qs = qs.filter(is_active=True)
+            slots = list(qs)
+            if not slots:
+                return Response(
+                    {
+                        "detail": f"No storage slots match rack {rack}"
+                        + (f", level {level}" if level else "")
+                        + ".",
+                        "code": "no_slots_matched",
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            filename = f"storage_slot_cards_rack{rack}{level or ''}.pdf"
+
+        pdf_bytes = render_slot_cards(slots)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

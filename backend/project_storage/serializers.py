@@ -230,3 +230,48 @@ class GenerateRackSerializer(serializers.Serializer):
                 f"Each level may appear at most once: {', '.join(duplicates)} repeated."
             )
         return value
+
+
+class SlotCardBatchSerializer(serializers.Serializer):
+    """Which slots to print cards for: an explicit list, or a whole rack.
+
+    Two selection modes because the two real jobs are different. Racking a
+    new aisle prints every slot of a rack in code order (the sheets come off
+    the printer in the order they get stuck on the uprights); replacing a
+    handful of scuffed cards prints exactly those slots, in the order the
+    caller listed them. Mixing the two would only make "what did I just
+    print?" ambiguous, so exactly one mode is required.
+    """
+
+    slot_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=False,
+        # 300 cards = 100 sheets. Past that the request is a rack print that
+        # should say so, and the renderer would be holding a lot of PNGs.
+        max_length=300,
+    )
+    rack = serializers.IntegerField(min_value=1, required=False)
+    level = serializers.RegexField(
+        StorageSlot.LEVEL_PATTERN,
+        required=False,
+        error_messages={"invalid": "Level must be a single letter (A-Z)."},
+    )
+    # A rack print covers the slots in service. Retired slots keep their
+    # marker (see StorageSlot.is_active) and can still be reprinted on
+    # purpose, but they shouldn't ride along with a rack's sheets.
+    include_inactive = serializers.BooleanField(required=False, default=False)
+
+    def validate_level(self, value: str) -> str:
+        return (value or "").upper()
+
+    def validate(self, attrs: dict) -> dict:
+        has_ids = bool(attrs.get("slot_ids"))
+        has_rack = attrs.get("rack") is not None
+        if has_ids and has_rack:
+            raise serializers.ValidationError("Provide either slot_ids or a rack filter, not both.")
+        if not has_ids and not has_rack:
+            raise serializers.ValidationError("Provide slot_ids or a rack to print.")
+        if attrs.get("level") and not has_rack:
+            raise serializers.ValidationError({"level": "level narrows a rack — send rack too."})
+        return attrs

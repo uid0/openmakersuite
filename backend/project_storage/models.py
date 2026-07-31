@@ -6,17 +6,21 @@ sends a violation notice; if the member doesn't remove the items within
 7 days, the items move to a "purgatory" location. After a stint is
 removed, the member has to wait 3 days before starting a new one.
 
-This module models a single *stint* (one occupancy by one member) plus an
-append-only audit log of events on that stint.
+This module models a single *stint* (one occupancy by one member), an
+append-only audit log of events on that stint, and the physical
+:class:`StorageSlot` racking those stints eventually get assigned to.
 """
 
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import timedelta
 from typing import Optional
 
 from django.conf import settings
+from django.contrib.auth.models import Group
+from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 
@@ -239,6 +243,148 @@ class ProjectStorageStint(models.Model):
             removed_at__isnull=True,
             moved_to_purgatory_at__isnull=True,
         ).exists()
+
+
+class StorageSlot(models.Model):
+    """One physical reservation slot in the project-storage racking.
+
+    Slots are addressed by a structured location code — ``1A1``, ``1B3``,
+    ``2A2`` — decomposed as:
+
+    * leading number → the pallet **rack**,
+    * letter → the **level** on that rack. Early letters (a/b/c) are
+      ground-reachable; late letters (x/y/z) are up high and need a pallet
+      jack, which is what ``requires_pallet_jack`` records per slot.
+    * trailing number → the **position** along the rack, numbered from
+      South/East toward North/West.
+
+    The three components are authoritative; :attr:`code` is the canonical
+    computed string, stored (rather than derived on read) so it can be
+    indexed for scan lookups and printed on the slot's QR/AprilTag label.
+    :meth:`compose_code` and :meth:`parse_code` round-trip the two forms.
+
+    Lives in ``project_storage`` rather than reusing ``inventory.Location``:
+    Location is the generic free-text "places" table for the supply system
+    and modelling permanent racking there would pollute it. Keeping the slot
+    here also keeps the future stint→slot FK intra-app, which is the reason
+    this app avoids cross-app FKs in the first place.
+    """
+
+    # Shared by the field validator, the parser, and the API layer, so
+    # "what is a valid code?" has exactly one definition.
+    CODE_PATTERN = r"^(\d+)([A-Za-z])(\d+)$"
+    CODE_RE = re.compile(CODE_PATTERN)
+    LEVEL_PATTERN = r"^[A-Za-z]$"
+
+    rack = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1)],
+        help_text="Pallet rack number — the leading digits of the code (1 in 1A1).",
+    )
+    level = models.CharField(
+        max_length=1,
+        validators=[
+            RegexValidator(LEVEL_PATTERN, "Level must be a single letter (A-Z)."),
+        ],
+        help_text=(
+            "Level on the rack — the letter in the code (A in 1A1). Stored "
+            "upper-case. Early letters are ground-reachable, late letters are high."
+        ),
+    )
+    position = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1)],
+        help_text=(
+            "Position along the rack — the trailing digits of the code (1 in "
+            "1A1), numbered from South/East toward North/West."
+        ),
+    )
+
+    # unique=True already creates the unique index (Django skips the plain
+    # db_index when a field is unique), so this single declaration *is* the
+    # unique(code) constraint — a second UniqueConstraint in Meta would only
+    # add a duplicate index to maintain.
+    code = models.CharField(
+        max_length=16,
+        unique=True,
+        db_index=True,
+        help_text="Canonical location code, computed from rack + level + position (e.g. 1A1).",
+    )
+
+    requires_pallet_jack = models.BooleanField(
+        default=False,
+        help_text="This slot is too high to reach without a pallet jack.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive slots stay on file (their AprilTag ID is permanent) but "
+        "are not offered for new reservations.",
+    )
+    owning_group = models.ForeignKey(
+        Group,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="storage_slots",
+        help_text="Optional SIG this slot is reserved for.",
+    )
+    notes = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["rack", "level", "position"]
+        constraints = [
+            # The components are the real identity; code is derived from
+            # them, so both spellings of "one slot per physical place" are
+            # enforced (code's uniqueness comes from the field itself).
+            models.UniqueConstraint(
+                fields=["rack", "level", "position"],
+                name="unique_storage_slot_components",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.code or self.compose_code(self.rack, self.level, self.position)
+
+    # ------------------------------------------------------------------
+    # code <-> (rack, level, position)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def compose_code(rack, level: str, position) -> str:
+        """Build the canonical code string from the three components."""
+        return f"{rack}{(level or '').upper()}{position}"
+
+    @classmethod
+    def parse_code(cls, code: str) -> tuple[int, str, int]:
+        """Split a code back into ``(rack, level, position)``.
+
+        Raises :class:`ValueError` for anything that isn't
+        digits + one letter + digits, so callers (scanners, the generator,
+        the API) all reject malformed codes the same way.
+        """
+        match = cls.CODE_RE.match((code or "").strip())
+        if match is None:
+            raise ValueError(
+                f"Invalid storage slot code {code!r}: expected <rack><level><position>, e.g. 1A1."
+            )
+        rack, level, position = match.groups()
+        return int(rack), level.upper(), int(position)
+
+    def save(self, *args, **kwargs):
+        # The components are authoritative: normalize the level and recompute
+        # the code on every write so the stored string can never drift from
+        # them. This is pure derivation — tag allocation and the other
+        # side-effects live in services/storage_slots.py.
+        self.level = (self.level or "").upper()
+        self.code = self.compose_code(self.rack, self.level, self.position)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            if update_fields & {"rack", "level", "position"}:
+                update_fields.update({"level", "code"})
+                kwargs["update_fields"] = update_fields
+        super().save(*args, **kwargs)
 
 
 class ProjectStorageEvent(models.Model):

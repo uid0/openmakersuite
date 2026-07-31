@@ -27,6 +27,7 @@ from fiducials.services.allocator import (
     get_active_assignment,
     get_active_tag_id,
     release_tag,
+    resolve_subject,
 )
 
 User = get_user_model()
@@ -174,3 +175,62 @@ def test_active_tag_id_subquery_annotates_without_query_per_row(django_assert_nu
 
 def test_get_active_assignment_returns_none_for_unsaved():
     assert get_active_assignment(User(username="ghost")) is None
+
+
+# ---------------------------------------------------------------------------
+# resolve_subject — the reverse direction (detected tag -> record)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_subject_returns_the_tagged_record():
+    u = _subject(1)
+    assignment = allocate_tag(u)
+    assert resolve_subject(assignment.family, assignment.tag_id) == u
+
+
+def test_resolve_subject_returns_none_for_a_free_id():
+    allocate_tag(_subject(1))  # takes id 0
+    assert resolve_subject(FAMILY_TAG36H11, 1) is None
+
+
+def test_resolve_subject_is_family_scoped():
+    """The same ID in two families is two different markers."""
+    u = _subject(1)
+    allocate_tag(u, family=FAMILY_TAG36H11)  # id 0 in 36h11
+    assert resolve_subject(FAMILY_TAG36H11, 0) == u
+    assert resolve_subject(FAMILY_TAG36H10, 0) is None
+
+
+def test_resolve_subject_ignores_released_allocations():
+    u = _subject(1)
+    assignment = allocate_tag(u)
+    release_tag(u)
+    assert resolve_subject(assignment.family, assignment.tag_id) is None
+
+
+def test_resolve_subject_follows_a_recycled_id_to_its_new_owner():
+    first, second = _subject(1), _subject(2)
+    allocate_tag(first)  # id 0
+    release_tag(first)
+    allocate_tag(second)  # id 0 again
+    assert resolve_subject(FAMILY_TAG36H11, 0) == second
+
+
+def test_resolve_subject_returns_none_for_a_dangling_assignment():
+    """Hard-deleting a subject without releasing leaves the GenericForeignKey
+    pointing at nothing (there is no DB-level cascade) — resolve reports
+    'nothing there' rather than raising."""
+    u = _subject(1)
+    assignment = allocate_tag(u)
+    # Point the allocation at a PK that doesn't exist — the state a
+    # delete-without-release leaves behind.
+    AprilTagAssignment.objects.filter(pk=assignment.pk).update(object_id=u.pk + 10_000)
+    assert resolve_subject(assignment.family, assignment.tag_id) is None
+
+
+def test_resolve_subject_does_not_query_per_content_type(django_assert_num_queries):
+    assignment = allocate_tag(_subject(1))
+    # One query for the assignment (content_type joined in), one for the
+    # subject row itself.
+    with django_assert_num_queries(2):
+        resolve_subject(assignment.family, assignment.tag_id)

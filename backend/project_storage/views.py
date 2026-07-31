@@ -27,13 +27,29 @@ from fiducials.services.allocator import (
     release_tag,
 )
 
-from .models import ProjectStorageEvent, ProjectStorageStint
+from .models import ProjectStorageEvent, ProjectStorageStint, StorageSlot
 from .permissions import IsStorageAdminOrStaff
-from .serializers import ProjectStorageStintSerializer, StartStintSerializer
+from .serializers import (
+    GenerateRackSerializer,
+    ProjectStorageStintSerializer,
+    StartStintSerializer,
+    StorageSlotSerializer,
+)
 from .services.email_service import send_violation_notice
 from .services.label_service import PrinterFamily, render_stint_label
+from .services.storage_slots import LevelSpec, ensure_slot_tag, generate_rack_slots
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_bool(value, *, default=None):
+    """Coerce a query-param string to bool. Returns ``default`` when absent.
+
+    Explicit rather than ``bool(value)`` — the string "false" is truthy.
+    """
+    if value is None:
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _allocate_where_fiducial(stint) -> None:
@@ -579,3 +595,141 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
                 note=request.data.get("note", ""),
             )
         return Response(ProjectStorageStintSerializer(stint).data)
+
+
+class StorageSlotViewSet(viewsets.ModelViewSet):
+    """CRUD for the physical racking, plus a per-rack bulk generator.
+
+    Addressed by ``code`` (``/slots/1A1/``) rather than PK: the code is what
+    is printed on the rack and what a scanner reads, so it's the identifier
+    every caller already has.
+
+    Gated to ``IsStorageAdminOrStaff`` throughout — the storage warden owns
+    the racking layout, and the group membership exists precisely so that
+    duty can be delegated without platform-wide staff rights. The permission
+    is declared once at class level (and verbatim on the @action) so the
+    permission-matrix gate snapshots it without re-deriving get_permissions().
+    """
+
+    queryset = StorageSlot.objects.all().select_related("owning_group")
+    serializer_class = StorageSlotSerializer
+    lookup_field = "code"
+    permission_classes = [IsStorageAdminOrStaff]
+
+    def get_queryset(self):
+        """Apply ?rack= / ?level= / ?is_active= / ?requires_pallet_jack=.
+
+        Hand-rolled rather than django-filter, which isn't installed here —
+        ``filterset_fields`` would be silently inert.
+        """
+        qs = super().get_queryset()
+        params = self.request.query_params if hasattr(self, "request") else {}
+
+        rack = params.get("rack")
+        if rack:
+            try:
+                qs = qs.filter(rack=int(rack))
+            except (TypeError, ValueError):
+                # A junk rack matches nothing rather than 500ing the list.
+                qs = qs.none()
+
+        level = params.get("level")
+        if level:
+            qs = qs.filter(level=level.upper())
+
+        is_active = _parse_bool(params.get("is_active"))
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active)
+
+        pallet_jack = _parse_bool(params.get("requires_pallet_jack"))
+        if pallet_jack is not None:
+            qs = qs.filter(requires_pallet_jack=pallet_jack)
+
+        # Annotate the permanent marker so the serializer doesn't fire a
+        # query per row on the list endpoint.
+        return qs.annotate(active_april_tag_id=active_tag_id_subquery(StorageSlot))
+
+    def perform_create(self, serializer):
+        """Individually-created slots get their permanent tag immediately.
+
+        DRF reads ``serializer.data`` after this returns, and a freshly
+        created instance carries no ``active_april_tag_id`` annotation, so
+        the serializer falls back to a direct lookup and the response
+        reports the tag just allocated.
+        """
+        ensure_slot_tag(serializer.save())
+
+    def perform_destroy(self, instance):
+        """Release the marker before the row goes away.
+
+        Slot tags are never released while the slot *exists* — a code has to
+        keep meaning the same physical place. A hard delete is the one case
+        where that promise ends: leaving the assignment behind would both
+        strand a pool ID forever and leave a dangling GenericForeignKey
+        (there is no DB-level cascade), so a scan of that ID would resolve
+        to nothing while still reading as taken. Deactivating (is_active =
+        False) is the non-destructive option and keeps the tag.
+        """
+        release_tag(instance)
+        instance.delete()
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="generate",
+        permission_classes=[IsStorageAdminOrStaff],
+    )
+    def generate(self, request):
+        """Bulk-create one rack's slots from a per-level spec. Idempotent.
+
+        Payload::
+
+            {"rack": 1,
+             "levels": [{"level": "A", "positions": 12},
+                        {"level": "Y", "positions": 10,
+                         "requires_pallet_jack": true}],
+             "owning_group": 3}          # optional
+
+        Existing codes are left untouched and reported under ``skipped``, so
+        re-running after adding a level (or after a partial failure) is safe.
+        """
+        ser = GenerateRackSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+
+        result = generate_rack_slots(
+            rack=ser.validated_data["rack"],
+            levels=[
+                LevelSpec(
+                    level=spec["level"],
+                    positions=spec["positions"],
+                    requires_pallet_jack=spec.get("requires_pallet_jack", False),
+                )
+                for spec in ser.validated_data["levels"]
+            ],
+            owning_group=ser.validated_data.get("owning_group"),
+            notes=ser.validated_data.get("notes", ""),
+        )
+
+        # Built from the base manager, not get_queryset(), so a stray query
+        # string on the POST can't filter rows out of the run's own report.
+        slots = (
+            StorageSlot.objects.filter(code__in=[slot.code for slot in result.slots])
+            .select_related("owning_group")
+            .annotate(active_april_tag_id=active_tag_id_subquery(StorageSlot))
+            .order_by("rack", "level", "position")
+        )
+        payload = {
+            "rack": result.rack,
+            "created": [slot.code for slot in result.created],
+            "skipped": [slot.code for slot in result.skipped],
+            "created_count": len(result.created),
+            "skipped_count": len(result.skipped),
+            # Non-empty means the tag family ran dry mid-run; the slots are
+            # usable by code, they just have no marker to scan yet.
+            "without_tag": [slot.code for slot in result.without_tag],
+            "slots": StorageSlotSerializer(slots, many=True).data,
+        }
+        return Response(
+            payload,
+            status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
+        )

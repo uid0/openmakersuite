@@ -23,6 +23,7 @@ from django.contrib.auth.models import Group
 from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
+from django.utils.functional import cached_property
 
 DEFAULT_STINT_DAYS = 30
 DEFAULT_PURGATORY_GRACE_DAYS = 7
@@ -100,8 +101,28 @@ class ProjectStorageStint(models.Model):
     # avoid creating a hard inventory dependency at migrate time, but the
     # admin should set these from the SiteSettings page once the spots
     # are created. Storing the location *name* keeps it cheap to read.
+    #
+    # storage_location_name stays for legacy stints and for ad-hoc storage
+    # that isn't racked (a pallet on the floor, a corner of the mezzanine).
+    # When :attr:`slot` is set it is authoritative and this free text is
+    # ignored — see :attr:`location_display`.
     storage_location_name = models.CharField(max_length=120, blank=True)
     purgatory_location_name = models.CharField(max_length=120, blank=True)
+
+    # The physical racking slot this stint occupies, when it's in the rack.
+    # Nullable on purpose: pre-racking stints and non-rack storage have no
+    # slot, and the free-text field above still describes those.
+    slot = models.ForeignKey(
+        "project_storage.StorageSlot",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stints",
+        help_text=(
+            "Reservation slot in the racking. Authoritative over "
+            "storage_location_name when set; blank for ad-hoc storage."
+        ),
+    )
 
     # Print pipeline state. printed_at is set by the Pi daemon after a
     # successful print; print_target picks the layout the daemon should
@@ -145,6 +166,25 @@ class ProjectStorageStint(models.Model):
             models.Index(fields=["expires_at"]),
             models.Index(fields=["removed_at"]),
             models.Index(fields=["printed_at"]),
+        ]
+        constraints = [
+            # One live occupancy per physical slot. Partial (unique-when-
+            # active) like VisionSlot.unique_active_vision_slot_marker and
+            # maker_box_bin_id_unique_when_set: history keeps every stint
+            # that ever sat in 1A1, but only one of them may be unresolved
+            # at a time. "Active" here is the same predicate
+            # member_has_active_stint() uses — an expired-but-not-removed
+            # stint still holds its slot, which is the point (the shelf is
+            # physically still full).
+            models.UniqueConstraint(
+                fields=["slot"],
+                condition=models.Q(
+                    slot__isnull=False,
+                    removed_at__isnull=True,
+                    moved_to_purgatory_at__isnull=True,
+                ),
+                name="unique_active_stint_per_slot",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -197,6 +237,22 @@ class ProjectStorageStint(models.Model):
         return name or self.username
 
     @property
+    def slot_code(self) -> str:
+        """Canonical code of the racking slot, or "" for non-rack storage."""
+        return self.slot.code if self.slot_id else ""
+
+    @property
+    def location_display(self) -> str:
+        """Where this stint lives, in one string.
+
+        The slot wins when set — it's a surveyed physical place with a code
+        printed on the upright, where storage_location_name is whatever the
+        member typed at the kiosk. Legacy/ad-hoc stints fall back to that
+        free text so nothing that predates the racking reads as location-less.
+        """
+        return self.slot_code or self.storage_location_name
+
+    @property
     def expiry_week_and_day(self) -> tuple[int, int]:
         """ISO-week and day-of-year of expires_at — printed in big type."""
         local = timezone.localtime(self.expires_at)
@@ -230,6 +286,19 @@ class ProjectStorageStint(models.Model):
         return unblock
 
     @classmethod
+    def active(cls):
+        """Stints that are still holding their space.
+
+        "Active" = not removed and not moved to purgatory. One definition,
+        used by the per-member guard, the per-slot guard, the occupancy
+        readouts, and (as a Q) the partial unique constraint above.
+        """
+        return cls.objects.filter(
+            removed_at__isnull=True,
+            moved_to_purgatory_at__isnull=True,
+        )
+
+    @classmethod
     def member_has_active_stint(cls, username: str) -> bool:
         """One stint at a time per member.
 
@@ -238,11 +307,20 @@ class ProjectStorageStint(models.Model):
         resolve the old one (mark removed or move to purgatory) before the
         member starts a new project.
         """
-        return cls.objects.filter(
-            username=username,
-            removed_at__isnull=True,
-            moved_to_purgatory_at__isnull=True,
-        ).exists()
+        return cls.active().filter(username=username).exists()
+
+    @classmethod
+    def active_stint_in_slot(cls, slot) -> Optional["ProjectStorageStint"]:
+        """The stint currently occupying ``slot``, or None if it's free.
+
+        Mirrors :meth:`member_has_active_stint` on the other axis: a slot
+        holds at most one live stint (enforced by
+        ``unique_active_stint_per_slot``), so the warden console can show
+        "1A1 → PS-ABC12345 (Pat Member)" straight off this.
+        """
+        if slot is None:
+            return None
+        return cls.active().filter(slot=slot).first()
 
 
 class StorageSlot(models.Model):
@@ -266,8 +344,13 @@ class StorageSlot(models.Model):
     Lives in ``project_storage`` rather than reusing ``inventory.Location``:
     Location is the generic free-text "places" table for the supply system
     and modelling permanent racking there would pollute it. Keeping the slot
-    here also keeps the future stint→slot FK intra-app, which is the reason
-    this app avoids cross-app FKs in the first place.
+    here also keeps the ``ProjectStorageStint.slot`` FK intra-app, which is
+    the reason this app avoids cross-app FKs in the first place.
+
+    Occupancy lives on the other side of that FK: ``slot.stints`` is every
+    stint that ever sat here, and at most one of them may be live at a time
+    (``ProjectStorageStint.unique_active_stint_per_slot``). Ask
+    :meth:`ProjectStorageStint.active_stint_in_slot` for the current one.
     """
 
     # Shared by the field validator, the parser, and the API layer, so
@@ -345,6 +428,38 @@ class StorageSlot(models.Model):
 
     def __str__(self) -> str:
         return self.code or self.compose_code(self.rack, self.level, self.position)
+
+    # ------------------------------------------------------------------
+    # Occupancy
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def active_stints_prefetch(cls) -> models.Prefetch:
+        """Prefetch that feeds :attr:`current_stint` for a whole page at once.
+
+        Kept next to the property it serves so the ``to_attr`` name has one
+        definition — every listing that renders occupancy (API, admin) adds
+        this and pays one query instead of one per slot.
+        """
+        return models.Prefetch(
+            "stints",
+            queryset=ProjectStorageStint.active().order_by("-started_at"),
+            to_attr="active_stints",
+        )
+
+    @cached_property
+    def current_stint(self) -> Optional["ProjectStorageStint"]:
+        """The live stint in this slot, or None when it's free.
+
+        Reads :meth:`active_stints_prefetch`'s ``to_attr`` when the caller
+        set it up, and falls back to a direct lookup otherwise — a slot
+        fetched on its own (a create response, an admin change form) still
+        answers correctly, just with a query.
+        """
+        occupants = getattr(self, "active_stints", None)
+        if occupants is None:
+            return ProjectStorageStint.active_stint_in_slot(self)
+        return occupants[0] if occupants else None
 
     # ------------------------------------------------------------------
     # code <-> (rack, level, position)

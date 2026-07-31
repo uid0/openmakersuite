@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 
+from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -52,6 +54,30 @@ def _parse_bool(value, *, default=None):
     if value is None:
         return default
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _slot_occupied_response(slot, occupant, *, detail: str = "") -> Response:
+    """The 409 for "a live stint is already in that slot".
+
+    Shared by the claim pre-check, the lost-a-race path, and the delete
+    guard so the three can't drift into reporting one condition three
+    different ways. ``detail`` overrides the member-facing wording for
+    callers who aren't at the kiosk.
+    """
+    return Response(
+        {
+            "detail": detail
+            or (
+                f"Slot {slot.code} is already holding stint {occupant.stint_id} "
+                f"({occupant.display_name}). Pick a free slot or ask the storage "
+                "warden to clear that one."
+            ),
+            "code": "slot_occupied",
+            "slot_code": slot.code,
+            "occupied_by": occupant.stint_id,
+        },
+        status=status.HTTP_409_CONFLICT,
+    )
 
 
 def _allocate_where_fiducial(stint) -> None:
@@ -99,7 +125,9 @@ class _PiDaemonThrottle(_BakedScopedThrottle):
 
 
 class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = ProjectStorageStint.objects.all().prefetch_related("events")
+    # select_related("slot") so the serializer's slot_code / location_display
+    # (model properties that walk the FK) don't fire a query per row.
+    queryset = ProjectStorageStint.objects.all().select_related("slot").prefetch_related("events")
     serializer_class = ProjectStorageStintSerializer
     lookup_field = "stint_id"
     # Class-level default for list + retrieve (the DRF-built-in actions
@@ -122,6 +150,12 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
     def start(self, request):
         """Member-initiated kiosk flow: create a stint + return label payload.
 
+        Scanning a slot's marker claims it outright — there is no warden
+        approval step. Name the slot with ``slot`` (its pk or its code) or
+        ``slot_code`` (``1A1``, what the scanner reads); the slot then *is*
+        the stint's location, and ``storage_location_name`` is left for the
+        ad-hoc, non-rack case.
+
         Throttled per-IP via the ``project_storage_start`` scope (5/hour).
         A real member starts one stint per ~month; an abuse loop trying to
         spam new stints from a single kiosk should top out fast.
@@ -136,16 +170,21 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         ser = StartStintSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         username = ser.validated_data["username"]
+        slot = ser.validated_data.get("slot")
 
         # gh-714 idempotency: a duplicate submit within 5 minutes
         # (network blip → kiosk retry) should resolve to the existing
-        # stint, not surface as a 409 error to the member.
+        # stint, not surface as a 409 error to the member. The slot is
+        # part of "the same submission" and this check runs BEFORE the
+        # occupancy guard — otherwise a retry of the scan that claimed
+        # 1A1 would bounce off its own stint as slot_occupied.
         existing = find_recent_duplicate(
             ProjectStorageStint,
             lookup_fields={
                 "username": username,
                 "project_title": ser.validated_data.get("project_title", ""),
                 "storage_location_name": ser.validated_data.get("storage_location_name", ""),
+                "slot": slot,
                 "removed_at__isnull": True,
                 "moved_to_purgatory_at__isnull": True,
             },
@@ -184,18 +223,39 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        stint = ProjectStorageStint.objects.create(
-            username=username,
-            first_name=ser.validated_data.get("first_name", ""),
-            last_name=ser.validated_data.get("last_name", ""),
-            email=ser.validated_data.get("email", ""),
-            project_title=ser.validated_data.get("project_title", ""),
-            storage_location_name=ser.validated_data.get("storage_location_name", ""),
-        )
+        # One live stint per slot. The DB constraint is the real guard (see
+        # below); this pre-check exists so the common case reports who is
+        # in the slot instead of a bare integrity failure.
+        occupant = ProjectStorageStint.active_stint_in_slot(slot)
+        if occupant is not None:
+            return _slot_occupied_response(slot, occupant)
+
+        try:
+            with transaction.atomic():
+                stint = ProjectStorageStint.objects.create(
+                    username=username,
+                    first_name=ser.validated_data.get("first_name", ""),
+                    last_name=ser.validated_data.get("last_name", ""),
+                    email=ser.validated_data.get("email", ""),
+                    project_title=ser.validated_data.get("project_title", ""),
+                    storage_location_name=ser.validated_data.get("storage_location_name", ""),
+                    slot=slot,
+                )
+        except IntegrityError:
+            # Two members scanned the same slot at the same time and the
+            # partial unique constraint picked a winner. Report the loser's
+            # request as the 409 the pre-check would have given it. Any
+            # other integrity failure is a real bug — let it propagate.
+            occupant = ProjectStorageStint.active_stint_in_slot(slot)
+            if occupant is None:
+                raise
+            return _slot_occupied_response(slot, occupant)
+
         ProjectStorageEvent.objects.create(
             stint=stint,
             event_type=ProjectStorageEvent.EVENT_CREATED,
             actor_label="kiosk: member self-issue",
+            note=f"slot {slot.code}" if slot is not None else "",
         )
         # Allocate the per-item WHERE fiducial so the label prints with it.
         _allocate_where_fiducial(stint)
@@ -218,6 +278,7 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         """All stints (most recent first) for one member."""
         stints = (
             ProjectStorageStint.objects.filter(username=username)
+            .select_related("slot")
             .prefetch_related("events")
             .annotate(active_april_tag_id=active_tag_id_subquery(ProjectStorageStint))
             .order_by("-started_at")
@@ -351,6 +412,15 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         permission_classes=[IsAdminUser],
     )
     def move_to_purgatory(self, request, stint_id: str):
+        """Warden physically relocates the items out of project storage.
+
+        The stint keeps its ``slot`` as the historical record of where the
+        items were — the racking slot is freed by this transition rather
+        than by clearing the FK, because ``unique_active_stint_per_slot``
+        only counts unresolved stints. So 1A1 becomes claimable again the
+        moment its occupant is purgatoried, and the audit trail still says
+        which slot the items came out of.
+        """
         stint = self.get_object()
         if stint.notice_sent_at is None:
             return Response(
@@ -374,11 +444,15 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
                 "updated_at",
             ]
         )
+        # Name the vacated slot in the audit note — "moved to Project
+        # Purgatory" alone loses the one fact a warden retracing the sweep
+        # needs, since the slot is claimable by someone else immediately.
+        origin = f"vacated {stint.slot_code}" if stint.slot_id else ""
         ProjectStorageEvent.objects.create(
             stint=stint,
             event_type=ProjectStorageEvent.EVENT_MOVED_TO_PURGATORY,
             actor=request.user if request.user.is_authenticated else None,
-            note=location,
+            note=" · ".join(part for part in (location, origin) if part),
         )
         return Response(ProjectStorageStintSerializer(stint).data)
 
@@ -386,6 +460,13 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         detail=True, methods=["post"], url_path="mark-removed", permission_classes=[IsAdminUser]
     )
     def mark_removed(self, request, stint_id: str):
+        """Member cleared their stuff out; the stint is done.
+
+        Like ``move_to_purgatory`` this frees the racking slot for the next
+        claim without clearing ``stint.slot`` — the partial unique
+        constraint stops counting a removed stint, so the history of who
+        was in 1A1 survives.
+        """
         stint = self.get_object()
         if stint.removed_at is not None:
             return Response(
@@ -510,7 +591,11 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
         polls every ~10 s and a single IP may serve multiple printers
         behind NAT.
         """
-        stint = get_object_or_404(ProjectStorageStint, stint_id=stint_id)
+        # select_related: the ticket prints the slot code, so the renderer
+        # walks the FK on every daemon poll.
+        stint = get_object_or_404(
+            ProjectStorageStint.objects.select_related("slot"), stint_id=stint_id
+        )
         printer: PrinterFamily = request.query_params.get(
             "printer", stint.print_target or "brother_ql"
         )
@@ -619,10 +704,14 @@ class StorageSlotViewSet(viewsets.ModelViewSet):
     permission_classes = [IsStorageAdminOrStaff]
 
     def get_queryset(self):
-        """Apply ?rack= / ?level= / ?is_active= / ?requires_pallet_jack=.
+        """Apply ?rack= / ?level= / ?is_active= / ?requires_pallet_jack= /
+        ?occupied=.
 
         Hand-rolled rather than django-filter, which isn't installed here —
         ``filterset_fields`` would be silently inert.
+
+        ``?occupied=false`` is the warden's "what can I hand out?" query and
+        ``?occupied=true`` its "what's on the rack right now?" mirror.
         """
         qs = super().get_queryset()
         params = self.request.query_params if hasattr(self, "request") else {}
@@ -647,9 +736,20 @@ class StorageSlotViewSet(viewsets.ModelViewSet):
         if pallet_jack is not None:
             qs = qs.filter(requires_pallet_jack=pallet_jack)
 
-        # Annotate the permanent marker so the serializer doesn't fire a
-        # query per row on the list endpoint.
-        return qs.annotate(active_april_tag_id=active_tag_id_subquery(StorageSlot))
+        occupied = _parse_bool(params.get("occupied"))
+        if occupied is not None:
+            # Exists() rather than ``pk__in=…values("slot")``: slot-less
+            # stints put a NULL in that subquery, and ``NOT IN (NULL, …)``
+            # is UNKNOWN for every row — the "free slots" half of this
+            # filter would silently return nothing.
+            live = ProjectStorageStint.active().filter(slot=OuterRef("pk"))
+            qs = qs.filter(Exists(live)) if occupied else qs.filter(~Exists(live))
+
+        # Annotate the permanent marker and attach the live occupant so the
+        # serializer resolves both without firing a query per row.
+        return qs.annotate(
+            active_april_tag_id=active_tag_id_subquery(StorageSlot)
+        ).prefetch_related(StorageSlot.active_stints_prefetch())
 
     def perform_create(self, serializer):
         """Individually-created slots get their permanent tag immediately.
@@ -660,6 +760,32 @@ class StorageSlotViewSet(viewsets.ModelViewSet):
         reports the tag just allocated.
         """
         ensure_slot_tag(serializer.save())
+
+    def destroy(self, request, *args, **kwargs):
+        """Refuse to delete a slot somebody's project is sitting in.
+
+        ``ProjectStorageStint.slot`` is SET_NULL, so without this the
+        delete would succeed and quietly strip the location off a live
+        stint — the member's stuff is still physically on the rack and now
+        nothing records where. Resolve the stint first (mark-removed /
+        move-to-purgatory), or deactivate the slot instead.
+        """
+        instance = self.get_object()
+        occupant = ProjectStorageStint.active_stint_in_slot(instance)
+        if occupant is not None:
+            return _slot_occupied_response(
+                instance,
+                occupant,
+                detail=(
+                    f"Slot {instance.code} still holds stint {occupant.stint_id} "
+                    f"({occupant.display_name}). Resolve that stint, or set "
+                    "is_active=false to retire the slot without deleting it."
+                ),
+            )
+        # Mirrors DRF's own destroy(); inlined so the guard above doesn't
+        # cost a second fetch of the same row.
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def perform_destroy(self, instance):
         """Release the marker before the row goes away.
@@ -718,6 +844,7 @@ class StorageSlotViewSet(viewsets.ModelViewSet):
             StorageSlot.objects.filter(code__in=[slot.code for slot in result.slots])
             .select_related("owning_group")
             .annotate(active_april_tag_id=active_tag_id_subquery(StorageSlot))
+            .prefetch_related(StorageSlot.active_stints_prefetch())
             .order_by("rack", "level", "position")
         )
         payload = {

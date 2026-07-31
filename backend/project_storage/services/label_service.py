@@ -14,7 +14,8 @@ The same renderer drives both — caller picks the layout via the
     │                Day 327    │     right side: expiry week / DoY in big bold
     │                           │
     │  PS-AB23CDFG              │   ← eye-readable stint id
-    │  Member Name              │
+    │  Slot 1A1                 │   ← the claimed rack slot (omitted when the
+    │  Member Name              │     stint has no slot — ad-hoc storage)
     │  Project: <title>         │
     ├───────────────────────────┤
     │  [AprilTag]  Location tag │   ← WHERE fiducial: unique per-item tag a
@@ -48,6 +49,27 @@ BROTHER_SIZE_PX = (696, 271)
 # Taller than square so the big expiry stack + id/name get vertical room
 # for larger type — height is effectively free on the continuous roll.
 EPSON_SIZE_PX = (576, 340)
+
+
+def ticket_lines(stint) -> list[str]:
+    """The eye-readable text block printed under the expiry stack.
+
+    Split out of the renderer so "what does the claim ticket say?" is
+    assertable without OCR — the PNG itself is only checkable for size and
+    for decodable fiducials.
+
+    The slot line appears only for a stint that claimed one; ad-hoc storage
+    (free-text ``storage_location_name``, or nothing) prints exactly the
+    three lines it always has, so labels on shelves today still describe
+    what the renderer produces.
+    """
+    lines = [stint.stint_id]
+    if stint.slot_code:
+        lines.append(f"Slot {stint.slot_code}")
+    lines.append(stint.display_name)
+    if stint.project_title:
+        lines.append(f"Proj: {stint.project_title}")
+    return lines
 
 
 def _try_font(size: int) -> ImageFont.ImageFont:
@@ -221,16 +243,15 @@ def render_stint_label(
         day_of_year=doy,
     )
 
-    # Right column lower half: stint_id, member name, project title.
+    # Right column lower half: stint_id, slot, member name, project title.
     bottom_y = margin + top_h + 8
     bottom_h = base_height - bottom_y - margin
-    small_font = _try_font(max(18, bottom_h // 4))
-    lines = [
-        stint.stint_id,
-        stint.display_name,
-    ]
-    if stint.project_title:
-        lines.append(f"Proj: {stint.project_title}")
+    lines = ticket_lines(stint)
+    # Size the type to the number of lines so a slot line doesn't push the
+    # last one off the label. At three lines this still resolves to the
+    # 19 px (Brother) / 26 px (Epson) the renderer has always used, so a
+    # slot-less stint re-prints byte-identically.
+    small_font = _try_font(max(14, bottom_h // (len(lines) + 1)))
     y = bottom_y
     for line in lines:
         draw.text((text_x, y), line, fill="black", font=small_font)

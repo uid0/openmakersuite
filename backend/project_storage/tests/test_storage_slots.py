@@ -416,7 +416,9 @@ class TestSlotApiFilters:
     def test_list_does_not_query_per_row_for_the_tag(
         self, staff_client, django_assert_max_num_queries
     ):
-        with django_assert_max_num_queries(6):
+        # 6 as of PR1, +1 for the occupancy prefetch added in PR3 — both are
+        # per-page costs, so this cap holds however many slots exist.
+        with django_assert_max_num_queries(7):
             resp = staff_client.get(SLOTS_URL)
         assert len(self._codes(resp)) == 5
 

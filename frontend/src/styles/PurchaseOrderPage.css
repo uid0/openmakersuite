@@ -70,7 +70,8 @@
 
 .po-info {
   display: flex;
-  gap: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
   margin-bottom: 2rem;
   padding: 1rem;
   background-color: #f8fafc;
@@ -581,5 +582,50 @@
   color: #94a3b8;
   font-size: 0.875rem;
   font-style: italic;
+}
+
+/* Order-details editor — reference numbers, header terms (op-bwo9) and the
+   order-level associations, all edited together. */
+.po-metadata-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.po-metadata-edit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+  background-color: #f8fafc;
+  border-radius: 0.5rem;
+}
+
+.po-metadata-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.po-metadata-edit input,
+.po-metadata-edit select {
+  padding: 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: #1e293b;
+  background-color: #ffffff;
+  font-family: inherit;
+}
+
+.po-metadata-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.5rem;
 }
 

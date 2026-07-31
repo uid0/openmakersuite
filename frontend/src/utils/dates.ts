@@ -37,6 +37,44 @@ export function formatYmd(date: Date | null | undefined): string {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Add whole days to a 'YYYY-MM-DD' string, staying in local Y/M/D space so
+ * DST transitions can't shift the answer. Returns '' for invalid input.
+ */
+export function addDaysToYmd(value: string | null | undefined, days: number): string {
+  const date = parseYmd(value);
+  if (!date) return '';
+  date.setDate(date.getDate() + days);
+  return formatYmd(date);
+}
+
+/**
+ * The calendar day a value falls on **in UTC**, as 'YYYY-MM-DD'.
+ *
+ * Some Django `DateTimeField`s carry a business *date* rather than a moment —
+ * `PurchaseOrder.order_date` is one: the server derives the payment schedule
+ * from `order_date.date()`, and `TIME_ZONE` is UTC. Editing such a field as a
+ * date means editing the day the server reasons about, not the day the
+ * viewer's timezone happens to render. A bare 'YYYY-MM-DD' passes through.
+ */
+export function utcYmd(value: string | Date | null | undefined): string {
+  if (!value) return '';
+  if (typeof value === 'string' && YMD_RE.test(value)) return value;
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * The ISO datetime to send for a date-only edit of a UTC business-date field
+ * (see `utcYmd`). Midday UTC, so the day survives both directions: the server
+ * stores exactly the day picked, and every timezone from UTC-11 to UTC+11
+ * renders it back as that same day.
+ */
+export function ymdToUtcDateTime(value: string): string {
+  return `${value}T12:00:00Z`;
+}
+
 const DEFAULT_DISPLAY_OPTS: Intl.DateTimeFormatOptions = {
   year: 'numeric',
   month: 'short',

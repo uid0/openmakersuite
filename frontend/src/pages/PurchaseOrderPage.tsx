@@ -16,6 +16,10 @@ import {
   OrderingAdapter,
   OrderPadExport,
   purchaseOrderAPI,
+  PurchaseOrderFreightTerms,
+  PurchaseOrderPaymentSchedule,
+  PurchaseOrderPaymentTerms,
+  PurchaseOrderPriority,
   serializedComponentsAPI,
   SerializedTrackingMode,
   sigAPI,
@@ -29,9 +33,18 @@ import {
   WorkOrderIdentity,
   workOrderOptionLabel,
 } from '../utils/associations';
-import { formatDateOnly, formatYmd } from '../utils/dates';
+import { formatDateOnly, formatYmd, utcYmd, ymdToUtcDateTime } from '../utils/dates';
 import { confirmAction, promptInput, showError, showSuccess } from '../utils/dialogs';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import {
+  freightTermsLabel,
+  paymentScheduleSummary,
+  paymentTermsLabel,
+  PO_FREIGHT_TERMS_OPTIONS,
+  PO_PAYMENT_TERMS_OPTIONS,
+  PO_PRIORITY_OPTIONS,
+  priorityLabel,
+} from '../utils/purchaseOrderTerms';
 import { parseSerialNumbers } from '../utils/serializedComponents';
 
 interface PurchaseOrderItem {
@@ -101,7 +114,15 @@ interface PurchaseOrder {
   owning_group_details: OwningGroupIdentity | null;
   status: string;
   status_label: string;
+  // Header terms (op-bwo9), all editable here. `order_date` is a datetime that
+  // carries a business *day* — the server derives `payment_schedule` from its
+  // UTC date — so it is read and written as a day (see `utcYmd`).
   order_date: string;
+  priority: PurchaseOrderPriority;
+  payment_terms: PurchaseOrderPaymentTerms | '';
+  freight_terms: PurchaseOrderFreightTerms | '';
+  // Derived, read-only: the single payment these terms imply.
+  payment_schedule: PurchaseOrderPaymentSchedule | null;
   expected_delivery_date: string | null;
   supplier_order_number: string;
   sales_order_number: string;
@@ -258,6 +279,16 @@ const PurchaseOrderPage: React.FC = () => {
   const [metadataSupplierOrderNumber, setMetadataSupplierOrderNumber] = useState('');
   const [metadataSalesOrderNumber, setMetadataSalesOrderNumber] = useState('');
   const [metadataExpectedDelivery, setMetadataExpectedDelivery] = useState('');
+  // Header terms (op-bwo9), edited alongside the rest of the order details.
+  // `metadataOrderDate` is a 'YYYY-MM-DD' day; empty terms mean "not agreed".
+  const [metadataOrderDate, setMetadataOrderDate] = useState('');
+  const [metadataPriority, setMetadataPriority] = useState<PurchaseOrderPriority>('normal');
+  const [metadataPaymentTerms, setMetadataPaymentTerms] = useState<PurchaseOrderPaymentTerms | ''>(
+    '',
+  );
+  const [metadataFreightTerms, setMetadataFreightTerms] = useState<PurchaseOrderFreightTerms | ''>(
+    '',
+  );
   // Order-level associations (op-shb9), edited alongside the other order
   // metadata. Empty string means "no association" in both pickers.
   const [metadataWorkOrder, setMetadataWorkOrder] = useState('');
@@ -793,6 +824,10 @@ const PurchaseOrderPage: React.FC = () => {
     setMetadataSupplierOrderNumber(order.supplier_order_number || '');
     setMetadataSalesOrderNumber(order.sales_order_number || '');
     setMetadataExpectedDelivery(order.expected_delivery_date || '');
+    setMetadataOrderDate(utcYmd(order.order_date));
+    setMetadataPriority(order.priority || 'normal');
+    setMetadataPaymentTerms(order.payment_terms || '');
+    setMetadataFreightTerms(order.freight_terms || '');
     setMetadataWorkOrder(order.work_order || '');
     setMetadataCommittee(order.owning_group ? String(order.owning_group) : '');
     setEditingMetadata(true);
@@ -803,6 +838,10 @@ const PurchaseOrderPage: React.FC = () => {
     setMetadataSupplierOrderNumber('');
     setMetadataSalesOrderNumber('');
     setMetadataExpectedDelivery('');
+    setMetadataOrderDate('');
+    setMetadataPriority('normal');
+    setMetadataPaymentTerms('');
+    setMetadataFreightTerms('');
     setMetadataWorkOrder('');
     setMetadataCommittee('');
   };
@@ -814,6 +853,15 @@ const PurchaseOrderPage: React.FC = () => {
         supplier_order_number: metadataSupplierOrderNumber,
         sales_order_number: metadataSalesOrderNumber,
         expected_delivery_date: metadataExpectedDelivery || null,
+        // Header terms (op-bwo9). The order date is edited as a day but the
+        // field is a datetime, so send midday UTC — the day the operator
+        // picked is the day the payment schedule is derived from. A cleared
+        // date would leave the order without one, so it is only sent when set.
+        ...(metadataOrderDate && { order_date: ymdToUtcDateTime(metadataOrderDate) }),
+        priority: metadataPriority,
+        // '' is a real value for both terms fields: "not agreed yet".
+        payment_terms: metadataPaymentTerms,
+        freight_terms: metadataFreightTerms,
         // Empty picker means "no association" — send null to clear it.
         work_order: metadataWorkOrder || null,
         owning_group: metadataCommittee ? Number(metadataCommittee) : null,
@@ -1288,12 +1336,26 @@ const PurchaseOrderPage: React.FC = () => {
 
       <div className="po-info">
         <div className="info-item">
-          <span className="info-label">Order Date:</span>
-          <span className="info-value">{formatDate(order.order_date)}</span>
+          <span className="info-label">Date Ordered:</span>
+          {/* The business day, not the viewer's local rendering of the stored
+              instant — it is the day `payment_schedule` is derived from. */}
+          <span className="info-value">{formatDate(utcYmd(order.order_date))}</span>
         </div>
         <div className="info-item">
-          <span className="info-label">Expected Delivery:</span>
+          <span className="info-label">Date Promised:</span>
           <span className="info-value">{formatDate(order.expected_delivery_date)}</span>
+        </div>
+        <div className="info-item">
+          <span className="info-label">Priority:</span>
+          <span className="info-value">{priorityLabel(order.priority)}</span>
+        </div>
+        <div className="info-item">
+          <span className="info-label">Payment Terms:</span>
+          <span className="info-value">{paymentTermsLabel(order.payment_terms)}</span>
+        </div>
+        <div className="info-item">
+          <span className="info-label">Freight:</span>
+          <span className="info-value">{freightTermsLabel(order.freight_terms)}</span>
         </div>
         <div className="info-item">
           <span className="info-label">Supplier Order #:</span>
@@ -1318,6 +1380,12 @@ const PurchaseOrderPage: React.FC = () => {
         <div className="info-item">
           <span className="info-label">Estimated Total:</span>
           <span className="info-value">{formatCurrency(order.estimated_total)}</span>
+        </div>
+        {/* Derived from the terms above (op-bwo9) — never stored, so voiding a
+            line moves it. Read-only: change the terms to change the payment. */}
+        <div className="info-item">
+          <span className="info-label">Payment schedule:</span>
+          <span className="info-value">{paymentScheduleSummary(order.payment_schedule)}</span>
         </div>
       </div>
 
@@ -1359,14 +1427,76 @@ const PurchaseOrderPage: React.FC = () => {
                   maxLength={128}
                 />
               </label>
+              {/* Header terms (op-bwo9). `order_date` is editable because an
+                  order is often entered after it was placed. */}
+              <label htmlFor="metadata-order-date">
+                Date Ordered
+                <input
+                  id="metadata-order-date"
+                  type="date"
+                  value={metadataOrderDate}
+                  onChange={(e) => setMetadataOrderDate(e.target.value)}
+                />
+              </label>
               <label htmlFor="metadata-expected-delivery">
-                Expected Delivery Date
+                Date Promised (expected delivery)
                 <input
                   id="metadata-expected-delivery"
                   type="date"
                   value={metadataExpectedDelivery}
                   onChange={(e) => setMetadataExpectedDelivery(e.target.value)}
                 />
+              </label>
+              <label htmlFor="metadata-priority">
+                Priority
+                <select
+                  id="metadata-priority"
+                  value={metadataPriority}
+                  onChange={(e) => setMetadataPriority(e.target.value as PurchaseOrderPriority)}
+                  disabled={saving}
+                >
+                  {PO_PRIORITY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label htmlFor="metadata-payment-terms">
+                Payment Terms
+                <select
+                  id="metadata-payment-terms"
+                  value={metadataPaymentTerms}
+                  onChange={(e) =>
+                    setMetadataPaymentTerms(e.target.value as PurchaseOrderPaymentTerms | '')
+                  }
+                  disabled={saving}
+                >
+                  <option value="">Not agreed</option>
+                  {PO_PAYMENT_TERMS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label htmlFor="metadata-freight-terms">
+                Freight Terms
+                <select
+                  id="metadata-freight-terms"
+                  value={metadataFreightTerms}
+                  onChange={(e) =>
+                    setMetadataFreightTerms(e.target.value as PurchaseOrderFreightTerms | '')
+                  }
+                  disabled={saving}
+                >
+                  <option value="">Not agreed</option>
+                  {PO_FREIGHT_TERMS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               {/* Order-level associations (op-shb9). Attribution only — they
                   change no cost and bill no committee. */}

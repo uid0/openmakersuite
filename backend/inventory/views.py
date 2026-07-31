@@ -1522,9 +1522,10 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
 
         item = self.get_object()
 
-        # Both lists tie-break on ``id``: ``order_date`` is auto_now_add and
-        # partial shipments are often logged together, so rows sharing a
-        # timestamp would otherwise come back in an arbitrary order.
+        # Both lists tie-break on ``id``: ``order_date`` defaults to "now" (and
+        # backdated orders are often entered in a batch), and partial shipments
+        # are often logged together, so rows sharing a timestamp would otherwise
+        # come back in an arbitrary order.
         order_lines = (
             PurchaseOrderItem.objects.filter(item_supplier__item_id=item.id)
             .select_related("purchase_order")

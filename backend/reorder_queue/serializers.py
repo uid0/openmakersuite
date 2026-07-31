@@ -2,6 +2,10 @@
 Serializers for reorder queue API.
 """
 
+from datetime import timedelta
+
+from django.utils import timezone
+
 from rest_framework import serializers
 
 from inventory.serializers import InventoryItemSerializer, ItemSupplierSerializer
@@ -281,6 +285,46 @@ def validate_agreement_supplier(attrs, instance=None):
     return attrs
 
 
+# How far ahead of "now" a hand-entered order date is still believable (op-bwo9).
+# Backdating is unlimited — the field exists to record when an order was really
+# placed — but a date a year out is a typo, not an intent.
+MAX_ORDER_DATE_FUTURE_DAYS = 365
+
+
+def validate_order_date_not_far_future(value):
+    """Reject an order date more than a year ahead (op-bwo9).
+
+    Shared by the create and update serializers so a backdated PO and a
+    corrected one obey the same rule. Returns ``value`` unchanged; raises
+    otherwise.
+    """
+    if value is None:
+        return value
+    horizon = timezone.now() + timedelta(days=MAX_ORDER_DATE_FUTURE_DAYS)
+    if value > horizon:
+        raise serializers.ValidationError(
+            f"Order date is more than {MAX_ORDER_DATE_FUTURE_DAYS} days in the "
+            "future — check the date."
+        )
+    return value
+
+
+def render_payment_schedule(purchase_order):
+    """JSON shape of ``PurchaseOrder.payment_schedule`` (op-bwo9).
+
+    The model owns the math; this owns only the wire format — ``amount`` is
+    stringified to two decimals so it matches the ``estimated_total`` it is
+    derived from (DRF renders ``DecimalField`` as a string by default).
+    """
+    schedule = purchase_order.payment_schedule
+    due_date = schedule["due_date"]
+    return {
+        "due_date": due_date.isoformat() if due_date else None,
+        "amount": f"{schedule['amount']:.2f}",
+        "basis": schedule["basis"],
+    }
+
+
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     """Comprehensive serializer for purchase orders."""
 
@@ -325,6 +369,9 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         source="effective_estimated_total",
         read_only=True,
     )
+    # Derived single payment implied by ``payment_terms`` (op-bwo9). Read-only —
+    # it is recomputed from the order's own fields on every read, never stored.
+    payment_schedule = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseOrder
@@ -341,6 +388,9 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "owning_group",
             "owning_group_details",
             "status",
+            "priority",
+            "payment_terms",
+            "freight_terms",
             "order_date",
             "expected_delivery_date",
             "supplier_order_number",
@@ -367,12 +417,28 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "total_received_quantity",
             "is_fully_received",
             "days_since_ordered",
+            "payment_schedule",
         ]
-        read_only_fields = ["po_number", "order_date", "updated_at"]
+        # ``order_date`` is deliberately absent (op-bwo9): a PO entered after the
+        # fact is backdated to when it was actually placed, so PATCH must reach it.
+        read_only_fields = ["po_number", "updated_at"]
 
     def validate(self, attrs):
         """Re-attaching an agreement must respect the order's supplier."""
         return validate_agreement_supplier(super().validate(attrs), self.instance)
+
+    def validate_order_date(self, value):
+        """Reject an order date implausibly far in the future (op-bwo9).
+
+        Backdating is the point of the field, and same-day/near-future entry is
+        legitimate, so only a date beyond a generous horizon is treated as a
+        typo rather than an intent.
+        """
+        return validate_order_date_not_far_future(value)
+
+    def get_payment_schedule(self, obj):
+        """``{due_date, amount, basis}`` — see ``PurchaseOrder.payment_schedule``."""
+        return render_payment_schedule(obj)
 
     def get_supplier_agreement_details(self, obj):
         """Minimal {id, name} for the attached agreement, or None."""
@@ -418,6 +484,13 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
             # associations ride in the ``items`` dicts above.
             "work_order",
             "owning_group",
+            # Header details (op-bwo9), all optional: ``order_date`` backdates an
+            # order entered after it was placed; the other three fall back to
+            # their model defaults (normal priority, no terms agreed yet).
+            "order_date",
+            "priority",
+            "payment_terms",
+            "freight_terms",
             "expected_delivery_date",
             "sales_order_number",
             "notes",
@@ -428,6 +501,10 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         """Reject an agreement that belongs to a different supplier (op-yoos)."""
         return validate_agreement_supplier(super().validate(attrs))
+
+    def validate_order_date(self, value):
+        """Reject an order date implausibly far in the future (op-bwo9)."""
+        return validate_order_date_not_far_future(value)
 
     def validate_items(self, value):
         """Validate items list: non-empty and no duplicate item_supplier_id/asset_id."""

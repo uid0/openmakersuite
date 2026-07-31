@@ -5,6 +5,7 @@ Models for reorder queue management.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -164,6 +165,39 @@ class PurchaseOrder(models.Model):
         CANCELLED = "cancelled", "Cancelled"
         VOIDED = "voided", "Voided"
 
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        NORMAL = "normal", "Normal"
+        HIGH = "high", "High"
+        URGENT = "urgent", "Urgent"
+
+    class PaymentTerms(models.TextChoices):
+        """When the supplier expects to be paid. Blank == not agreed yet."""
+
+        DUE_ON_RECEIPT = "due_on_receipt", "Due on Receipt"
+        NET_15 = "net_15", "Net 15"
+        NET_30 = "net_30", "Net 30"
+        NET_60 = "net_60", "Net 60"
+        COD = "cod", "Cash on Delivery"
+        PREPAID = "prepaid", "Prepaid"
+
+    class FreightTerms(models.TextChoices):
+        """Who pays the freight (and from where). Blank == not agreed yet."""
+
+        FOB_ORIGIN = "fob_origin", "FOB Origin"
+        FOB_DESTINATION = "fob_destination", "FOB Destination"
+        PREPAID = "prepaid", "Prepaid"
+        COLLECT = "collect", "Collect"
+        THIRD_PARTY = "third_party", "Third Party"
+
+    # Days-until-due for the "net N" terms. Every other term anchors the payment
+    # to a date rather than to a delay — see :attr:`payment_schedule`.
+    NET_PAYMENT_DAYS = {
+        PaymentTerms.NET_15: 15,
+        PaymentTerms.NET_30: 30,
+        PaymentTerms.NET_60: 60,
+    }
+
     # Core fields
     po_number = models.CharField(
         max_length=50,
@@ -213,9 +247,37 @@ class PurchaseOrder(models.Model):
     )
 
     # Order details
-    order_date = models.DateTimeField(auto_now_add=True)
+    # User-editable (op-bwo9): defaults to "now" but a PO entered after the
+    # fact can be backdated to when the order was actually placed. Deliberately
+    # NOT auto_now_add — that made the field read-only at every layer.
+    order_date = models.DateTimeField(
+        default=timezone.now,
+        help_text="When the order was actually placed (may be backdated)",
+    )
     expected_delivery_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
+
+    # Header metadata (op-bwo9). All three are plain descriptive terms: nothing
+    # here moves stock or posts to the ledger. ``payment_terms`` additionally
+    # drives the derived :attr:`payment_schedule` below.
+    priority = models.CharField(
+        max_length=20,
+        choices=Priority.choices,
+        default=Priority.NORMAL,
+        help_text="How urgently this order needs to be placed/filled",
+    )
+    payment_terms = models.CharField(
+        max_length=20,
+        choices=PaymentTerms.choices,
+        blank=True,
+        help_text="Payment terms agreed with the supplier",
+    )
+    freight_terms = models.CharField(
+        max_length=20,
+        choices=FreightTerms.choices,
+        blank=True,
+        help_text="Freight terms — who pays to ship this order",
+    )
 
     # Supplier-side reference numbers (filled in after creation, e.g. once the
     # supplier confirms the order and assigns their own identifiers)
@@ -346,6 +408,40 @@ class PurchaseOrder(models.Model):
         if adjusted < Decimal("0.00"):
             return Decimal("0.00")
         return adjusted
+
+    @property
+    def payment_schedule(self) -> dict:
+        """Single payment this order implies, derived from ``payment_terms`` (op-bwo9).
+
+        Returns ``{"due_date": date | None, "amount": Decimal, "basis": str}``.
+        A **pure** derivation over fields this order already carries — no stored
+        column, no ledger posting — so the web create-form can mirror the same
+        math client-side before the order exists and every reader (detail page,
+        ScanTTY) gets the identical answer from the API.
+
+        ``due_date`` is null where the rule has nothing to anchor to: no terms
+        agreed yet, or delivery-anchored terms on an order with no expected
+        delivery date. ``amount`` is always the order's live estimated total, so
+        voiding a line moves the payment down with it.
+        """
+        terms = self.payment_terms
+        amount = self.effective_estimated_total
+        net_days = self.NET_PAYMENT_DAYS.get(terms)
+
+        if net_days is not None:
+            due_date = self.order_date.date() + timedelta(days=net_days)
+            basis = f"{self.PaymentTerms(terms).label} from order date"
+        elif terms == self.PaymentTerms.PREPAID:
+            due_date = self.order_date.date()
+            basis = "Prepaid"
+        elif terms in (self.PaymentTerms.DUE_ON_RECEIPT, self.PaymentTerms.COD):
+            due_date = self.expected_delivery_date
+            basis = "On delivery"
+        else:
+            due_date = None
+            basis = "No payment terms set"
+
+        return {"due_date": due_date, "amount": amount, "basis": basis}
 
     @property
     def has_active_items(self) -> bool:

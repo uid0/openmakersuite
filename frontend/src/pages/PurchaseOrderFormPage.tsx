@@ -10,6 +10,9 @@ import {
   CreatePurchaseOrderItem,
   inventoryAPI,
   purchaseOrderAPI,
+  PurchaseOrderFreightTerms,
+  PurchaseOrderPaymentTerms,
+  PurchaseOrderPriority,
   ReorderDataAsset,
   ReorderDataItem,
   ReorderDataSupplier,
@@ -21,7 +24,15 @@ import {
 import { SIG, SupplierAgreement, WorkOrder } from '../types';
 import '../styles/PurchaseOrderFormPage.css';
 import { workOrderOptionLabel } from '../utils/associations';
+import { utcYmd, ymdToUtcDateTime } from '../utils/dates';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import {
+  derivePaymentSchedule,
+  paymentScheduleSummary,
+  PO_FREIGHT_TERMS_OPTIONS,
+  PO_PAYMENT_TERMS_OPTIONS,
+  PO_PRIORITY_OPTIONS,
+} from '../utils/purchaseOrderTerms';
 
 interface SelectedItem extends ReorderDataItem {
   selected: boolean;
@@ -68,6 +79,14 @@ const PurchaseOrderFormPage: React.FC = () => {
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
   const [notes, setNotes] = useState('');
+
+  // Header terms (op-bwo9). `orderDate` is left blank on purpose: an order
+  // placed now takes the server's own timestamp, and a value is only sent when
+  // the operator backdates an order entered after the fact.
+  const [orderDate, setOrderDate] = useState('');
+  const [priority, setPriority] = useState<PurchaseOrderPriority>('normal');
+  const [paymentTerms, setPaymentTerms] = useState<PurchaseOrderPaymentTerms | ''>('');
+  const [freightTerms, setFreightTerms] = useState<PurchaseOrderFreightTerms | ''>('');
 
   // Optional purchase/pricing agreement this order is placed under (op-yoos).
   // Loaded per supplier — only that supplier's active agreements are offered.
@@ -525,6 +544,18 @@ const PurchaseOrderFormPage: React.FC = () => {
   const freeformItemCount = freeformItems.filter((item) => item.description && item.unit_cost).length;
   const totalLineItems = selectedItemCount + selectedAssetCount + freeformItemCount;
 
+  // The payment this cart implies, recomputed on every render from the running
+  // total and the chosen terms (op-uc0o). The order does not exist yet, so
+  // there is no server `payment_schedule` to read — this mirrors the same rule
+  // the API will apply the moment it is created. A blank order date means
+  // "now", which is the day the server would stamp.
+  const livePaymentSchedule = derivePaymentSchedule({
+    orderDate: orderDate || utcYmd(new Date()),
+    expectedDeliveryDate,
+    paymentTerms,
+    amount: grandTotal,
+  });
+
   // Validate form
   const canSubmit =
     selectedSupplierId &&
@@ -605,6 +636,14 @@ const PurchaseOrderFormPage: React.FC = () => {
         ...(selectedWorkOrderId && { work_order: selectedWorkOrderId }),
         ...(selectedCommitteeId && { owning_group: selectedCommitteeId }),
         ...(expectedDeliveryDate && { expected_delivery_date: expectedDeliveryDate }),
+        // Header terms (op-bwo9). `order_date` is a datetime, so a backdate
+        // goes out as midday UTC — the day picked is the day the server
+        // derives the payment schedule from. Left off entirely when blank so
+        // an order placed now keeps the server's own timestamp.
+        ...(orderDate && { order_date: ymdToUtcDateTime(orderDate) }),
+        priority,
+        ...(paymentTerms && { payment_terms: paymentTerms }),
+        ...(freightTerms && { freight_terms: freightTerms }),
         ...(notes && { notes }),
       };
 
@@ -1180,14 +1219,75 @@ const PurchaseOrderFormPage: React.FC = () => {
             <section className="form-section details-section">
               <h2>5. Order Details</h2>
               <div className="details-grid">
+                {/* Header terms (op-bwo9). Blank "Date Ordered" means the order
+                    is being placed now; fill it in to backdate one entered
+                    after the fact. */}
                 <div className="form-field">
-                  <label htmlFor="expected-delivery">Expected Delivery Date</label>
+                  <label htmlFor="order-date">Date Ordered</label>
+                  <input
+                    id="order-date"
+                    type="date"
+                    value={orderDate}
+                    onChange={(e) => setOrderDate(e.target.value)}
+                  />
+                  <span className="field-help-text">Leave blank for today.</span>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="expected-delivery">Date Promised (expected delivery)</label>
                   <input
                     id="expected-delivery"
                     type="date"
                     value={expectedDeliveryDate}
                     onChange={(e) => setExpectedDeliveryDate(e.target.value)}
                   />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="order-priority">Priority</label>
+                  <select
+                    id="order-priority"
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as PurchaseOrderPriority)}
+                  >
+                    {PO_PRIORITY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="order-payment-terms">Payment Terms</label>
+                  <select
+                    id="order-payment-terms"
+                    value={paymentTerms}
+                    onChange={(e) =>
+                      setPaymentTerms(e.target.value as PurchaseOrderPaymentTerms | '')
+                    }
+                  >
+                    <option value="">Not agreed</option>
+                    {PO_PAYMENT_TERMS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="order-freight-terms">Freight Terms</label>
+                  <select
+                    id="order-freight-terms"
+                    value={freightTerms}
+                    onChange={(e) =>
+                      setFreightTerms(e.target.value as PurchaseOrderFreightTerms | '')
+                    }
+                  >
+                    <option value="">Not agreed</option>
+                    {PO_FREIGHT_TERMS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="form-field notes-field">
                   <label htmlFor="notes">Notes</label>
@@ -1264,6 +1364,19 @@ const PurchaseOrderFormPage: React.FC = () => {
                 <div className="summary-row summary-total">
                   <span>Grand Total ({totalLineItems} line items)</span>
                   <span>{formatCurrency(grandTotal)}</span>
+                </div>
+                {/* What the order will look like the moment it is created
+                    (op-uc0o): every new order starts as a draft, and the
+                    payment follows the terms above and the running total. */}
+                <div className="summary-row">
+                  <span>Status</span>
+                  <span data-testid="live-status">Draft</span>
+                </div>
+                <div className="summary-row">
+                  <span>Payment schedule</span>
+                  <span data-testid="live-payment-schedule">
+                    {paymentScheduleSummary(livePaymentSchedule)}
+                  </span>
                 </div>
               </div>
             </section>

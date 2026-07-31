@@ -427,7 +427,7 @@
 /* Order Details */
 .details-grid {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
   gap: 1.5rem;
 }
 
@@ -468,6 +468,11 @@
 
 .notes-field {
   grid-column: 1 / -1;
+}
+
+.field-help-text {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #64748b);
 }
 
 /* Associations (op-shb9) — work order / committee this order is placed for. */

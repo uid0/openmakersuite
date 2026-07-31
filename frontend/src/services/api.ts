@@ -1851,7 +1851,59 @@ export interface CreatePurchaseOrderItem {
   owning_group_id?: number;
 }
 
-export interface CreatePurchaseOrderData {
+/**
+ * Purchase-order header terms (op-bwo9). `priority` always carries a value —
+ * the model defaults it to `normal` — while both terms fields are blank until
+ * they are agreed with the supplier.
+ */
+export type PurchaseOrderPriority = 'low' | 'normal' | 'high' | 'urgent';
+
+export type PurchaseOrderPaymentTerms =
+  | 'due_on_receipt'
+  | 'net_15'
+  | 'net_30'
+  | 'net_60'
+  | 'cod'
+  | 'prepaid';
+
+export type PurchaseOrderFreightTerms =
+  | 'fob_origin'
+  | 'fob_destination'
+  | 'prepaid'
+  | 'collect'
+  | 'third_party';
+
+/**
+ * The single payment an order implies, derived server-side from its
+ * `payment_terms`, `order_date` and `expected_delivery_date` (op-bwo9).
+ * Read-only: recomputed on every read, never stored, so voiding a line moves
+ * `amount` with it.
+ *
+ * `due_date` is a bare 'YYYY-MM-DD', null where the terms have nothing to
+ * anchor to (none agreed, or delivery-anchored terms with no expected
+ * delivery). `amount` is the order's live estimated total as a 2dp string,
+ * matching `estimated_total` next to it.
+ */
+export interface PurchaseOrderPaymentSchedule {
+  due_date: string | null;
+  amount: string;
+  basis: string;
+}
+
+/**
+ * The four header fields a purchase order carries beyond its supplier and
+ * lines (op-bwo9). Shared by create and update: `order_date` is a *datetime*
+ * on the wire even though it is edited as a day — see `ymdToUtcDateTime`.
+ */
+export interface PurchaseOrderHeaderTerms {
+  order_date?: string;
+  priority?: PurchaseOrderPriority;
+  // '' clears the field back to "not agreed yet".
+  payment_terms?: PurchaseOrderPaymentTerms | '';
+  freight_terms?: PurchaseOrderFreightTerms | '';
+}
+
+export interface CreatePurchaseOrderData extends PurchaseOrderHeaderTerms {
   supplier: number;
   // Optional purchase/pricing agreement this order is placed under (op-yoos).
   // Must belong to `supplier` — the backend rejects a mismatch.
@@ -1864,6 +1916,20 @@ export interface CreatePurchaseOrderData {
   expected_delivery_date?: string;
   notes?: string;
   items: CreatePurchaseOrderItem[];
+}
+
+/**
+ * Fields the PO detail page can PATCH onto the order header. Omitting a key
+ * leaves it alone; `null` clears an association or the expected delivery date.
+ */
+export interface PurchaseOrderUpdate extends PurchaseOrderHeaderTerms {
+  supplier_order_number?: string;
+  sales_order_number?: string;
+  expected_delivery_date?: string | null;
+  notes?: string;
+  // Order-level associations (op-shb9). `null` clears one.
+  work_order?: string | null;
+  owning_group?: number | null;
 }
 
 /**
@@ -1960,18 +2026,8 @@ export const purchaseOrderAPI = {
       receipt_notes?: string;
     },
   ) => api.post<any>(`/reorders/purchase-orders/${orderId}/receive/`, data),
-  updateOrder: (
-    orderId: string,
-    data: {
-      supplier_order_number?: string;
-      sales_order_number?: string;
-      expected_delivery_date?: string | null;
-      notes?: string;
-      // Order-level associations (op-shb9). `null` clears one.
-      work_order?: string | null;
-      owning_group?: number | null;
-    },
-  ) => api.patch<any>(`/reorders/purchase-orders/${orderId}/`, data),
+  updateOrder: (orderId: string, data: PurchaseOrderUpdate) =>
+    api.patch<any>(`/reorders/purchase-orders/${orderId}/`, data),
   uploadAttachment: (orderId: string, file: File, description?: string) => {
     const formData = new FormData();
     formData.append('file', file);

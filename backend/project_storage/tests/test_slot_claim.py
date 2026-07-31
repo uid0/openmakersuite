@@ -482,8 +482,9 @@ class TestSlotOccupancyFilter:
         ]
 
     def test_occupancy_does_not_query_per_row(self, staff_client, django_assert_max_num_queries):
-        # Occupancy costs one prefetch for the page, not one query per slot.
-        with django_assert_max_num_queries(7):
+        # Occupancy costs one prefetch per kind for the page (stints and
+        # staff assignments), not one query per slot.
+        with django_assert_max_num_queries(8):
             resp = staff_client.get(SLOTS_URL)
         assert len(self._codes(resp)) == 3
 

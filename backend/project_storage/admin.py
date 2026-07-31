@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from fiducials.services.allocator import get_active_tag_id
 
-from .models import ProjectStorageEvent, ProjectStorageStint, StorageSlot
+from .models import ProjectStorageEvent, ProjectStorageStint, StorageAssignment, StorageSlot
 from .services.storage_slots import ensure_slot_tag
 
 
@@ -68,6 +68,7 @@ class StorageSlotAdmin(admin.ModelAdmin):
         "is_active",
         "owning_group",
         "april_tag_id",
+        "occupancy_type",
         "occupied_by",
     )
     list_filter = ("rack", "level", "requires_pallet_jack", "is_active", "owning_group")
@@ -81,20 +82,65 @@ class StorageSlotAdmin(admin.ModelAdmin):
         tag_id = get_active_tag_id(obj)
         return "—" if tag_id is None else str(tag_id)
 
+    @admin.display(description="Type")
+    def occupancy_type(self, obj: StorageSlot) -> str:
+        return obj.occupancy_type or "—"
+
     @admin.display(description="Occupied by")
     def occupied_by(self, obj: StorageSlot) -> str:
+        """Whoever holds the slot — a member's stint or a staff assignment."""
         occupant = obj.current_stint
-        return "—" if occupant is None else f"{occupant.stint_id} · {occupant.display_name}"
+        if occupant is not None:
+            return f"{occupant.stint_id} · {occupant.display_name}"
+        assignment = obj.current_assignment
+        if assignment is not None:
+            return f"{assignment.get_storage_type_display()} · {assignment.occupant_display}"
+        return "—"
 
     def get_queryset(self, request):
-        # Same one-query occupancy the API list uses — the changelist shows
-        # 100 slots a page and current_stint would otherwise be an N+1.
-        return super().get_queryset(request).prefetch_related(StorageSlot.active_stints_prefetch())
+        # Same one-query-per-occupancy-kind the API list uses — the changelist
+        # shows 100 slots a page and both sides would otherwise be an N+1.
+        return (
+            super()
+            .get_queryset(request)
+            .prefetch_related(
+                StorageSlot.active_stints_prefetch(),
+                StorageSlot.active_assignments_prefetch(),
+            )
+        )
 
     def save_model(self, request, obj, form, change):
         """Admin-created slots get their permanent marker like API ones do."""
         super().save_model(request, obj, form, change)
         ensure_slot_tag(obj)
+
+
+@admin.register(StorageAssignment)
+class StorageAssignmentAdmin(admin.ModelAdmin):
+    list_display = (
+        "slot",
+        "storage_type",
+        "occupant_display",
+        "assigned_at",
+        "released_at",
+        "assigned_by",
+    )
+    list_filter = ("storage_type", "released_at", "slot__rack", "owning_group")
+    search_fields = ("slot__code", "occupant_label", "owning_group__name", "notes")
+    readonly_fields = ("created_at", "updated_at")
+    # Same reason as the stint admin: a site with a few thousand slots
+    # shouldn't render them all in a <select>.
+    raw_id_fields = ("slot", "assigned_by")
+    date_hierarchy = "assigned_at"
+    ordering = ("-assigned_at",)
+
+    def get_queryset(self, request):
+        # occupant_display walks owning_group on every row.
+        return super().get_queryset(request).select_related("slot", "owning_group", "assigned_by")
+
+    @admin.display(description="Occupant")
+    def occupant_display(self, obj: StorageAssignment) -> str:
+        return obj.occupant_display
 
 
 @admin.register(ProjectStorageEvent)

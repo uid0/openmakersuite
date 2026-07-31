@@ -3,6 +3,12 @@
 Self-service create (member at a kiosk) is intentionally AllowAny — there's
 no Django auth at the kiosk. The warden surfaces (history lookup, send
 notice, move to purgatory, mark removed) require staff auth.
+
+Staff-assigned storage (committee / logistics / class) is a separate
+lifecycle on the same racking: :class:`StorageAssignmentViewSet` hands a slot
+out and takes it back, with no kiosk and no clock. The two kinds of occupancy
+exclude each other per slot; the guards for that live in
+:func:`_reject_if_slot_held`.
 """
 
 from __future__ import annotations
@@ -10,7 +16,7 @@ from __future__ import annotations
 import logging
 
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -20,6 +26,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.views import APIView
 
 from config.idempotency import find_recent_duplicate
 from fiducials.services.allocator import (
@@ -29,18 +36,22 @@ from fiducials.services.allocator import (
     release_tag,
 )
 
-from .models import ProjectStorageEvent, ProjectStorageStint, StorageSlot
+from .models import ProjectStorageEvent, ProjectStorageStint, StorageAssignment, StorageSlot
 from .permissions import IsStorageAdminOrStaff
 from .serializers import (
+    AssignSlotSerializer,
     GenerateRackSerializer,
     ProjectStorageStintSerializer,
     SlotCardBatchSerializer,
     StartStintSerializer,
+    StorageAssignmentSerializer,
+    StorageOverviewSerializer,
     StorageSlotSerializer,
 )
 from .services.email_service import send_violation_notice
 from .services.label_service import PrinterFamily, render_stint_label
 from .services.slot_cards import build_slot_card_preview, render_slot_cards
+from .services.storage_overview import build_overview
 from .services.storage_slots import LevelSpec, ensure_slot_tag, generate_rack_slots
 
 logger = logging.getLogger(__name__)
@@ -56,27 +67,84 @@ def _parse_bool(value, *, default=None):
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-def _slot_occupied_response(slot, occupant, *, detail: str = "") -> Response:
+#: What to tell a member standing at the kiosk whose slot is already taken.
+#: Callers that aren't the kiosk (the delete guard) pass their own advice —
+#: the sentence naming the occupant is built by the helpers below either way,
+#: so no caller has to reconstruct it to say something different afterwards.
+_KIOSK_PICK_ANOTHER = "Pick a free slot or ask the storage warden to clear that one."
+
+
+def _slot_occupied_response(slot, occupant, *, advice: str = "") -> Response:
     """The 409 for "a live stint is already in that slot".
 
     Shared by the claim pre-check, the lost-a-race path, and the delete
     guard so the three can't drift into reporting one condition three
-    different ways. ``detail`` overrides the member-facing wording for
-    callers who aren't at the kiosk.
+    different ways.
     """
     return Response(
         {
-            "detail": detail
-            or (
+            "detail": (
                 f"Slot {slot.code} is already holding stint {occupant.stint_id} "
-                f"({occupant.display_name}). Pick a free slot or ask the storage "
-                "warden to clear that one."
+                f"({occupant.display_name}). {advice or _KIOSK_PICK_ANOTHER}"
             ),
             "code": "slot_occupied",
             "slot_code": slot.code,
             "occupied_by": occupant.stint_id,
         },
         status=status.HTTP_409_CONFLICT,
+    )
+
+
+def _slot_assigned_response(slot, assignment, *, advice: str = "") -> Response:
+    """The 409 for "staff already gave that slot to a committee/class/crew".
+
+    Distinct code from ``slot_occupied`` because the remedy is different: a
+    member's stint expires and can be cleared by the warden on a sweep, but
+    an assignment ends only when staff hands the slot back, and telling a
+    member at the kiosk to "wait for it to expire" would be a lie.
+    """
+    return Response(
+        {
+            "detail": (
+                f"Slot {slot.code} is assigned to {assignment.occupant_display} "
+                f"({assignment.get_storage_type_display()}). {advice or 'Pick a free slot.'}"
+            ),
+            "code": "slot_assigned",
+            "slot_code": slot.code,
+            "assigned_to": assignment.occupant_display,
+            "storage_type": assignment.storage_type,
+        },
+        status=status.HTTP_409_CONFLICT,
+    )
+
+
+def _reject_if_slot_held(slot, *, advice: str = ""):
+    """Return the 409 for whichever live occupancy holds ``slot``, or None.
+
+    One live occupancy per slot, and there are two tables it can be in — so
+    no single DB constraint covers it and every write path that hands a slot
+    to somebody has to ask both. Claiming, assigning and deleting share this
+    so the three can't drift into enforcing different halves of the rule.
+    """
+    occupant = ProjectStorageStint.active_stint_in_slot(slot)
+    if occupant is not None:
+        return _slot_occupied_response(slot, occupant, advice=advice)
+    assignment = StorageAssignment.active_assignment_in_slot(slot)
+    if assignment is not None:
+        return _slot_assigned_response(slot, assignment, advice=advice)
+    return None
+
+
+def _slot_is_held() -> Q:
+    """Q matching slots with any live occupancy — a stint *or* an assignment.
+
+    ``Exists`` on both sides rather than ``pk__in=…values("slot")``: a
+    slot-less stint puts a NULL in that subquery and ``NOT IN (NULL, …)`` is
+    UNKNOWN for every row, so the "which slots are free?" half would silently
+    return nothing.
+    """
+    return Q(Exists(ProjectStorageStint.active().filter(slot=OuterRef("pk")))) | Q(
+        Exists(StorageAssignment.active().filter(slot=OuterRef("pk")))
     )
 
 
@@ -223,12 +291,14 @@ class ProjectStorageStintViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # One live stint per slot. The DB constraint is the real guard (see
-        # below); this pre-check exists so the common case reports who is
-        # in the slot instead of a bare integrity failure.
-        occupant = ProjectStorageStint.active_stint_in_slot(slot)
-        if occupant is not None:
-            return _slot_occupied_response(slot, occupant)
+        # One live occupancy per slot, of either kind. For a stint the DB
+        # constraint is the real guard (see below) and this pre-check exists
+        # so the common case reports who is in the slot instead of a bare
+        # integrity failure; for an assignment it *is* the guard, since the
+        # two live in different tables.
+        held = _reject_if_slot_held(slot)
+        if held is not None:
+            return held
 
         try:
             with transaction.atomic():
@@ -738,18 +808,19 @@ class StorageSlotViewSet(viewsets.ModelViewSet):
 
         occupied = _parse_bool(params.get("occupied"))
         if occupied is not None:
-            # Exists() rather than ``pk__in=…values("slot")``: slot-less
-            # stints put a NULL in that subquery, and ``NOT IN (NULL, …)``
-            # is UNKNOWN for every row — the "free slots" half of this
-            # filter would silently return nothing.
-            live = ProjectStorageStint.active().filter(slot=OuterRef("pk"))
-            qs = qs.filter(Exists(live)) if occupied else qs.filter(~Exists(live))
+            # Held by *either* kind of occupancy: a slot the welding SIG has
+            # been assigned is no more available to hand out than one with a
+            # member's project in it.
+            held = _slot_is_held()
+            qs = qs.filter(held) if occupied else qs.filter(~held)
 
-        # Annotate the permanent marker and attach the live occupant so the
-        # serializer resolves both without firing a query per row.
-        return qs.annotate(
-            active_april_tag_id=active_tag_id_subquery(StorageSlot)
-        ).prefetch_related(StorageSlot.active_stints_prefetch())
+        # Annotate the permanent marker and attach both live occupancies so
+        # the serializer resolves them without firing a query per row.
+        return (
+            qs.annotate(active_april_tag_id=active_tag_id_subquery(StorageSlot))
+            .prefetch_related(StorageSlot.active_stints_prefetch())
+            .prefetch_related(StorageSlot.active_assignments_prefetch())
+        )
 
     def perform_create(self, serializer):
         """Individually-created slots get their permanent tag immediately.
@@ -762,26 +833,27 @@ class StorageSlotViewSet(viewsets.ModelViewSet):
         ensure_slot_tag(serializer.save())
 
     def destroy(self, request, *args, **kwargs):
-        """Refuse to delete a slot somebody's project is sitting in.
+        """Refuse to delete a slot somebody's stuff is sitting in.
 
         ``ProjectStorageStint.slot`` is SET_NULL, so without this the
         delete would succeed and quietly strip the location off a live
         stint — the member's stuff is still physically on the rack and now
-        nothing records where. Resolve the stint first (mark-removed /
-        move-to-purgatory), or deactivate the slot instead.
+        nothing records where. ``StorageAssignment.slot`` is CASCADE, which
+        is worse: the record of the committee holding the slot would be
+        deleted outright. Resolve the stint first (mark-removed /
+        move-to-purgatory) or release the assignment, or deactivate the slot
+        instead.
         """
         instance = self.get_object()
-        occupant = ProjectStorageStint.active_stint_in_slot(instance)
-        if occupant is not None:
-            return _slot_occupied_response(
-                instance,
-                occupant,
-                detail=(
-                    f"Slot {instance.code} still holds stint {occupant.stint_id} "
-                    f"({occupant.display_name}). Resolve that stint, or set "
-                    "is_active=false to retire the slot without deleting it."
-                ),
-            )
+        held = _reject_if_slot_held(
+            instance,
+            advice=(
+                "Resolve it first, or set is_active=false to retire the slot "
+                "without deleting it."
+            ),
+        )
+        if held is not None:
+            return held
         # Mirrors DRF's own destroy(); inlined so the guard above doesn't
         # cost a second fetch of the same row.
         self.perform_destroy(instance)
@@ -844,7 +916,10 @@ class StorageSlotViewSet(viewsets.ModelViewSet):
             StorageSlot.objects.filter(code__in=[slot.code for slot in result.slots])
             .select_related("owning_group")
             .annotate(active_april_tag_id=active_tag_id_subquery(StorageSlot))
-            .prefetch_related(StorageSlot.active_stints_prefetch())
+            .prefetch_related(
+                StorageSlot.active_stints_prefetch(),
+                StorageSlot.active_assignments_prefetch(),
+            )
             .order_by("rack", "level", "position")
         )
         payload = {
@@ -959,3 +1034,165 @@ class StorageSlotViewSet(viewsets.ModelViewSet):
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
+
+
+class StorageAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
+    """Staff-assigned storage: committee (C), logistics (L), class (E).
+
+    The long-term half of the racking. Where a member claims a slot at the
+    kiosk and a 30-day clock starts, these slots are handed out by staff and
+    stay handed out — no expiry, no violation notice, no purgatory, no
+    cool-down. The whole lifecycle is ``assign`` → ``release``, both gated to
+    ``IsStorageAdminOrStaff`` like the racking itself, so the storage warden
+    can run it without platform-wide staff rights.
+
+    Read-only for CRUD on purpose: the two actions are the only way in and
+    out, which keeps ``assigned_by`` meaningful and stops a PATCH from
+    quietly reopening a released assignment.
+    """
+
+    queryset = StorageAssignment.objects.all().select_related("slot", "owning_group", "assigned_by")
+    serializer_class = StorageAssignmentSerializer
+    permission_classes = [IsStorageAdminOrStaff]
+
+    def get_queryset(self):
+        """Apply ?active= / ?storage_type= / ?rack= / ?slot_code=.
+
+        Hand-rolled rather than django-filter, which isn't installed here —
+        ``filterset_fields`` would be silently inert.
+
+        ``?active=true`` is the one the staff console lives on ("who holds
+        what right now?"); the unfiltered list is the history of every
+        holding the racking has ever had.
+        """
+        qs = super().get_queryset()
+        params = self.request.query_params if hasattr(self, "request") else {}
+
+        active = _parse_bool(params.get("active"))
+        if active is not None:
+            qs = qs.filter(released_at__isnull=active)
+
+        storage_type = params.get("storage_type")
+        if storage_type:
+            qs = qs.filter(storage_type=storage_type)
+
+        rack = params.get("rack")
+        if rack:
+            try:
+                qs = qs.filter(slot__rack=int(rack))
+            except (TypeError, ValueError):
+                # A junk rack matches nothing rather than 500ing the list.
+                qs = qs.none()
+
+        slot_code = params.get("slot_code")
+        if slot_code:
+            qs = qs.filter(slot__code=slot_code.strip().upper())
+
+        return qs
+
+    @action(
+        detail=False,
+        methods=["post"],
+        permission_classes=[IsStorageAdminOrStaff],
+    )
+    def assign(self, request):
+        """Hand a slot to a committee, the logistics crew, or a class.
+
+        Payload::
+
+            {"slot": "1A1",                   # or the pk; slot_code also works
+             "storage_type": "committee",
+             "owning_group": 3,               # the SIG, for committee
+             "occupant_label": "Ana's CNC class",   # free text, for L/E
+             "notes": ""}
+
+        Refuses a slot that already holds anything — a member's live stint
+        (409 ``slot_occupied``) or another assignment (409 ``slot_assigned``).
+        """
+        ser = AssignSlotSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        slot = ser.validated_data["slot"]
+
+        held = _reject_if_slot_held(
+            slot,
+            advice="Resolve or release it before assigning the slot.",
+        )
+        if held is not None:
+            return held
+
+        try:
+            with transaction.atomic():
+                assignment = StorageAssignment.objects.create(
+                    slot=slot,
+                    storage_type=ser.validated_data["storage_type"],
+                    owning_group=ser.validated_data.get("owning_group"),
+                    occupant_label=ser.validated_data.get("occupant_label", ""),
+                    notes=ser.validated_data.get("notes", ""),
+                    assigned_by=request.user if request.user.is_authenticated else None,
+                )
+        except IntegrityError:
+            # Two wardens assigned the same slot at once and
+            # unique_active_assignment_per_slot picked a winner. Report the
+            # loser's request as the 409 the pre-check would have given it;
+            # any other integrity failure is a real bug, so re-raise.
+            existing = StorageAssignment.active_assignment_in_slot(slot)
+            if existing is None:
+                raise
+            return _slot_assigned_response(slot, existing)
+
+        return Response(
+            StorageAssignmentSerializer(assignment).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[IsStorageAdminOrStaff],
+    )
+    def release(self, request, pk: str = None):
+        """Take the slot back. The row stays as the history of who had it.
+
+        Like resolving a stint, this frees the slot by ceasing to match the
+        partial unique constraint rather than by deleting anything — 1A1 is
+        immediately assignable (or claimable at the kiosk) again, and the
+        record of the two years the welding SIG held it survives.
+        """
+        assignment = self.get_object()
+        if assignment.released_at is not None:
+            return Response(
+                {
+                    "detail": (
+                        f"Slot {assignment.slot.code} was already released on "
+                        f"{assignment.released_at:%Y-%m-%d}."
+                    ),
+                    "code": "already_released",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        assignment.released_at = timezone.now()
+        assignment.save(update_fields=["released_at", "updated_at"])
+        return Response(StorageAssignmentSerializer(assignment).data)
+
+
+class StorageOverviewView(APIView):
+    """``GET /api/project-storage/overview/`` — the per-rack status grid.
+
+    The read Ian actually does: pull it up on a phone, look for the coloured
+    cells, go fix those. ``?rack=1`` narrows to one rack for a small screen.
+
+    Staff-gated to the same ``IsStorageAdminOrStaff`` as the racking it
+    describes — it names every member with something on the shelves.
+
+    The payload's shape and its type/status/colour rules are documented in
+    ``services/storage_overview.py``; this view is just the HTTP door.
+    """
+
+    permission_classes = [IsStorageAdminOrStaff]
+    # Declared for the OpenAPI schema; the response is rendered through it
+    # below, so the documented shape is the shape that ships.
+    serializer_class = StorageOverviewSerializer
+
+    def get(self, request):
+        payload = build_overview(rack=request.query_params.get("rack"))
+        return Response(StorageOverviewSerializer(payload).data)

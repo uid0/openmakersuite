@@ -2578,6 +2578,23 @@ views:
       start:
         permission_classes:
         - AllowAny
+  project_storage.views.StorageAssignmentViewSet:
+    actions:
+      assign:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      list:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      release:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      retrieve:
+        permission_classes:
+        - IsStorageAdminOrStaff
+  project_storage.views.StorageOverviewView:
+    permission_classes:
+    - IsStorageAdminOrStaff
   project_storage.views.StorageSlotViewSet:
     actions:
       card_preview:

@@ -13,6 +13,12 @@
  *
  * The 409 paths from the backend become inline messages, with the
  * unblock date surfaced when it's a cool-down rejection.
+ *
+ * Slot pre-fill: every rack slot's printed card carries a QR pointing at
+ * `…/project-storage/kiosk?slot=<code>` (`?slot_id=<pk>` is accepted too),
+ * so scanning the card off the upright lands here with that slot already
+ * chosen and the claim goes out for it. The start endpoint resolves the
+ * code itself and answers 409 `slot_occupied` if somebody beat them to it.
  */
 import {
   Alert,
@@ -30,22 +36,40 @@ import {
 import {
   IconAlertCircle,
   IconCheck,
+  IconMapPin,
   IconPackage,
   IconRefresh,
 } from '@tabler/icons-react';
 import axios from 'axios';
 import React, { useEffect, useRef, useState } from 'react';
-import { projectStorageAPI } from '../services/api';
-import { ProjectStorageStint } from '../types';
+import { useSearchParams } from 'react-router-dom';
+import { projectStorageAPI, storageSlotsAPI } from '../services/api';
+import { ProjectStorageStint, StorageSlot } from '../types';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
-type RejectionKind = 'active_stint_exists' | 'cooldown_active' | null;
+type RejectionKind =
+  | 'active_stint_exists'
+  | 'cooldown_active'
+  | 'slot_occupied'
+  | null;
 
 interface RejectionDetails {
   kind: RejectionKind;
   message: string;
   cooldownUntil?: string;
+  slotCode?: string;
+  occupiedBy?: string;
 }
+
+const REJECTION_TITLES: Record<Exclude<RejectionKind, null>, string> = {
+  active_stint_exists: 'You already have an active stint',
+  cooldown_active: 'Cool-down in effect',
+  slot_occupied: 'That slot is already taken',
+};
+
+// Same shape the backend's StorageSlot.CODE_RE accepts: rack digits, one
+// level letter, position digits.
+const SLOT_CODE_RE = /^\d+[A-Za-z]\d+$/;
 
 const formatDate = (iso: string): string => {
   try {
@@ -61,12 +85,19 @@ const formatDate = (iso: string): string => {
 };
 
 const ProjectStorageKioskPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
+
   const [username, setUsername] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [projectTitle, setProjectTitle] = useState('');
   const [storageLocation, setStorageLocation] = useState('');
+  // The slot being claimed — a code ("1A1") from the card's QR, or a pk
+  // from ?slot_id=. Held as a string because the start endpoint takes
+  // either under the same `slot` key.
+  const [slotClaim, setSlotClaim] = useState('');
+  const [slotDetail, setSlotDetail] = useState<StorageSlot | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +110,38 @@ const ProjectStorageKioskPage: React.FC = () => {
     usernameRef.current?.focus();
   }, []);
 
+  // Seed the claim from the card's QR (?slot=1A1) or the console's
+  // ?slot_id=<pk>. Depends only on searchParams, so clearing the claim by
+  // hand (wrong card scanned) sticks instead of being re-seeded.
+  useEffect(() => {
+    const seed = (searchParams.get('slot') || searchParams.get('slot_id') || '').trim();
+    if (seed) setSlotClaim(seed);
+  }, [searchParams]);
+
+  // Best-effort detail lookup, deliberately conditional. /slots/ is
+  // IsStorageAdminOrStaff and this page is AllowAny: firing it with no
+  // token would come back 401 and trip the api interceptor's
+  // session-expired path on a public kiosk. So we only ask when somebody
+  // is signed in (a warden working the rack), and otherwise show the code
+  // the QR carried — the start endpoint resolves and validates it anyway.
+  useEffect(() => {
+    setSlotDetail(null);
+    if (!SLOT_CODE_RE.test(slotClaim) || !localStorage.getItem('token')) return undefined;
+    let cancelled = false;
+    storageSlotsAPI
+      .get(slotClaim)
+      .then((res) => {
+        if (!cancelled) setSlotDetail(res?.data ?? null);
+      })
+      .catch(() => {
+        // Not fatal: the claim still goes through on the public endpoint.
+        if (!cancelled) setSlotDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slotClaim]);
+
   const reset = () => {
     setUsername('');
     setFirstName('');
@@ -86,6 +149,9 @@ const ProjectStorageKioskPage: React.FC = () => {
     setEmail('');
     setProjectTitle('');
     setStorageLocation('');
+    // The slot just got claimed by the stint we created, so don't carry it
+    // into the next member's form.
+    setSlotClaim('');
     setError(null);
     setRejection(null);
     setStint(null);
@@ -107,6 +173,8 @@ const ProjectStorageKioskPage: React.FC = () => {
         email: email.trim() || undefined,
         project_title: projectTitle.trim() || undefined,
         storage_location_name: storageLocation.trim() || undefined,
+        // Code or pk — the backend tells them apart and claims the slot.
+        slot: slotClaim.trim() || undefined,
       });
       setStint(resp.data);
     } catch (err) {
@@ -116,11 +184,15 @@ const ProjectStorageKioskPage: React.FC = () => {
           code?: RejectionKind;
           detail?: string;
           cooldown_until?: string;
+          slot_code?: string;
+          occupied_by?: string;
         };
         setRejection({
           kind: data?.code ?? null,
           message: data?.detail ?? 'Unable to start a new stint right now.',
           cooldownUntil: data?.cooldown_until,
+          slotCode: data?.slot_code,
+          occupiedBy: data?.occupied_by,
         });
       } else {
         setError(extractErrorMessage(err, 'Could not start the stint.'));
@@ -147,7 +219,14 @@ const ProjectStorageKioskPage: React.FC = () => {
               <strong>{stint.display_name || stint.username}</strong>. The label
               is being sent to the print station now. Stick the label on your
               project and place it in{' '}
-              <strong>{stint.storage_location_name || 'project storage'}</strong>.
+              {/* location_display is the claimed slot's code when there is
+                  one, and the free-text location otherwise. */}
+              <strong data-testid="kiosk-result-location">
+                {stint.slot_code
+                  ? `slot ${stint.slot_code}`
+                  : stint.location_display || stint.storage_location_name || 'project storage'}
+              </strong>
+              .
             </Alert>
 
             <Paper withBorder radius="md" p="md" bg="gray.0">
@@ -216,16 +295,24 @@ const ProjectStorageKioskPage: React.FC = () => {
               icon={<IconAlertCircle size={18} />}
               color="orange"
               variant="light"
+              data-testid="kiosk-rejection"
             >
               <Text size="sm" fw={600}>
-                {rejection.kind === 'cooldown_active'
-                  ? 'Cool-down in effect'
-                  : 'You already have an active stint'}
+                {rejection.kind
+                  ? REJECTION_TITLES[rejection.kind]
+                  : 'Unable to start a stint'}
               </Text>
               <Text size="sm">{rejection.message}</Text>
               {rejection.cooldownUntil && (
                 <Text size="xs" c="dimmed" mt={4}>
                   Next eligible: {new Date(rejection.cooldownUntil).toLocaleString()}
+                </Text>
+              )}
+              {rejection.kind === 'slot_occupied' && (
+                <Text size="xs" c="dimmed" mt={4} data-testid="kiosk-slot-occupied-hint">
+                  Slot {rejection.slotCode} holds stint {rejection.occupiedBy}. Scan a
+                  different slot&apos;s card, or clear the slot below and describe where
+                  you&apos;re putting things instead.
                 </Text>
               )}
               <Text size="xs" c="dimmed" mt={4}>
@@ -284,13 +371,55 @@ const ProjectStorageKioskPage: React.FC = () => {
                 onChange={(e) => setProjectTitle(e.currentTarget.value)}
                 autoComplete="off"
               />
-              <TextInput
-                label="Storage location"
-                placeholder={'optional — e.g. "Shelf A"'}
-                value={storageLocation}
-                onChange={(e) => setStorageLocation(e.currentTarget.value)}
-                autoComplete="off"
-              />
+              {slotClaim ? (
+                <Paper
+                  withBorder
+                  radius="md"
+                  p="sm"
+                  bg="blue.0"
+                  data-testid="kiosk-slot-banner"
+                >
+                  <Group gap="sm" align="flex-start" wrap="nowrap">
+                    <IconMapPin size={20} />
+                    <Stack gap={2} style={{ flex: 1 }}>
+                      <Text size="sm" fw={700} data-testid="kiosk-slot-code">
+                        Slot {slotDetail?.code ?? slotClaim}
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        Scanned from the card on the rack — your items are going here.
+                      </Text>
+                      {slotDetail?.requires_pallet_jack && (
+                        <Text size="xs" c="orange.8">
+                          This slot needs a pallet jack to reach — ask the warden.
+                        </Text>
+                      )}
+                      {slotDetail?.is_occupied && (
+                        <Text size="xs" c="orange.8" data-testid="kiosk-slot-busy">
+                          Someone else&apos;s stint is in this slot right now.
+                        </Text>
+                      )}
+                      <Anchor
+                        component="button"
+                        type="button"
+                        size="xs"
+                        onClick={() => setSlotClaim('')}
+                        data-testid="kiosk-clear-slot"
+                      >
+                        Wrong slot? Use a plain location instead
+                      </Anchor>
+                    </Stack>
+                  </Group>
+                </Paper>
+              ) : (
+                <TextInput
+                  label="Storage location"
+                  placeholder={'optional — e.g. "Shelf A"'}
+                  value={storageLocation}
+                  onChange={(e) => setStorageLocation(e.currentTarget.value)}
+                  autoComplete="off"
+                  data-testid="kiosk-storage-location"
+                />
+              )}
 
               <Button
                 type="submit"

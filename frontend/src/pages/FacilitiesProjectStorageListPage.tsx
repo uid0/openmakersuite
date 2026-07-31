@@ -130,9 +130,14 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
           'Walk the storage queue by status — expiring soon, expired, in purgatory. ' +
           'Pick a row to open the warden actions (notice, purgatory, remove).',
         action: (
-          <Button component={Link} to="/facilities/project-storage" variant="light">
-            Lookup by stint ID
-          </Button>
+          <Group gap="sm">
+            <Button component={Link} to="/facilities/project-storage/slots" variant="light">
+              Storage slots
+            </Button>
+            <Button component={Link} to="/facilities/project-storage" variant="light">
+              Lookup by stint ID
+            </Button>
+          </Group>
         ),
       }}
     >
@@ -221,9 +226,12 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
                       </Table.Td>
                       <Table.Td>{s.project_title || '—'}</Table.Td>
                       <Table.Td>
+                        {/* location_display is the slot code when the stint
+                            claimed one and the free-text location otherwise —
+                            a racked stint leaves storage_location_name blank. */}
                         {s.status === 'purgatory'
                           ? s.purgatory_location_name || '—'
-                          : s.storage_location_name || '—'}
+                          : s.location_display || s.storage_location_name || '—'}
                       </Table.Td>
                       <Table.Td>{fmtDate(s.expires_at)}</Table.Td>
                       <Table.Td>

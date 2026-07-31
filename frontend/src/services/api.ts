@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -4775,6 +4775,11 @@ export const projectStorageAPI = {
   byMember: (username: string) =>
     api.get<ProjectStorageStint[]>(`/project-storage/stints/by-member/${encodeURIComponent(username)}/`),
 
+  // `slot` takes either a slot pk or its code — a card's QR encodes the
+  // code (…/kiosk?slot=1A1) and the warden console holds the pk, and the
+  // backend tells them apart (a code always has a letter, a pk never
+  // does). Sending it claims that slot outright; a live stint there comes
+  // back as 409 `slot_occupied`.
   start: (data: {
     username: string;
     first_name?: string;
@@ -4782,6 +4787,8 @@ export const projectStorageAPI = {
     email?: string;
     project_title?: string;
     storage_location_name?: string;
+    slot?: string;
+    slot_code?: string;
   }) =>
     api.post<ProjectStorageStint>('/project-storage/stints/start/', data),
 
@@ -4813,6 +4820,82 @@ export const projectStorageAPI = {
       `/project-storage/stints/${stintId}/generate-qr/`,
       { include_logo: includeLogo },
     ),
+};
+
+// ---------------------------------------------------------------------------
+// Storage slots — the physical racking project storage is handed out from.
+// Staff/storage-warden only (IsStorageAdminOrStaff on the whole viewset),
+// so none of this is reachable from the anonymous kiosk.
+// ---------------------------------------------------------------------------
+
+export const storageSlotsAPI = {
+  // Filters are hand-rolled query params on the backend (django-filter
+  // isn't installed), so booleans go over the wire as "true"/"false"
+  // strings — sending a JS boolean would serialize the same way but
+  // typing it as a string keeps the two ends honest.
+  list: (params?: {
+    rack?: number;
+    level?: string;
+    is_active?: 'true' | 'false';
+    requires_pallet_jack?: 'true' | 'false';
+    occupied?: 'true' | 'false';
+    page?: number;
+    page_size?: number;
+  }) =>
+    api.get<{
+      count: number;
+      next: string | null;
+      previous: string | null;
+      results: StorageSlot[];
+    }>('/project-storage/slots/', { params }),
+
+  // Addressed by code, not pk — the code is what's printed on the rack
+  // and what a scanner reads (lookup_field = "code" on the viewset).
+  get: (code: string) =>
+    api.get<StorageSlot>(`/project-storage/slots/${encodeURIComponent(code)}/`),
+
+  // `code` is derived from the components server-side, so it's absent here.
+  create: (data: {
+    rack: number;
+    level: string;
+    position: number;
+    requires_pallet_jack?: boolean;
+    is_active?: boolean;
+    owning_group?: number | null;
+    notes?: string;
+  }) => api.post<StorageSlot>('/project-storage/slots/', data),
+
+  update: (code: string, data: Partial<Omit<StorageSlot, 'id' | 'code'>>) =>
+    api.patch<StorageSlot>(
+      `/project-storage/slots/${encodeURIComponent(code)}/`,
+      data,
+    ),
+
+  // 409 when a live stint still holds the slot — deactivate instead.
+  remove: (code: string) =>
+    api.delete(`/project-storage/slots/${encodeURIComponent(code)}/`),
+
+  // Bulk-create one rack from a per-level spec. Idempotent: existing codes
+  // come back under `skipped`, so re-running after adding a level is safe.
+  generateRack: (data: GenerateRackRequest) =>
+    api.post<GenerateRackResult>('/project-storage/slots/generate/', data),
+
+  cardPreview: (code: string) =>
+    api.get<StorageSlotCardPreview>(
+      `/project-storage/slots/${encodeURIComponent(code)}/card-preview/`,
+    ),
+
+  // Batch card sheet (Avery 5388, 3 cards/page). Exactly one selection
+  // mode: explicit slot_ids (printed in the order given) XOR a rack
+  // filter (printed in code order). Returns the PDF itself, not a link.
+  printCards: (
+    data:
+      | { slot_ids: number[] }
+      | { rack: number; level?: string; include_inactive?: boolean },
+  ) =>
+    api.post('/project-storage/slots/cards/', data, {
+      responseType: 'blob',
+    }),
 };
 
 // Universal scanner dispatcher — resolves any barcode/QR payload to an

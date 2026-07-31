@@ -23,17 +23,33 @@ class ProjectStorageStintAdmin(admin.ModelAdmin):
         "started_at",
         "expires_at",
         "status_display",
+        "slot",
         "storage_location_name",
     )
     list_filter = (
+        "slot__rack",
         "storage_location_name",
         ("started_at", admin.DateFieldListFilter),
         ("expires_at", admin.DateFieldListFilter),
     )
-    search_fields = ("stint_id", "username", "first_name", "last_name", "email", "project_title")
+    search_fields = (
+        "stint_id",
+        "username",
+        "first_name",
+        "last_name",
+        "email",
+        "project_title",
+        "slot__code",
+    )
     readonly_fields = ("stint_id", "created_at", "updated_at")
+    # A site with a few thousand slots shouldn't render them all in a
+    # <select>; the raw id widget keeps the change form loading.
+    raw_id_fields = ("slot",)
     date_hierarchy = "started_at"
     inlines = [ProjectStorageEventInline]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("slot")
 
     def status_display(self, obj: ProjectStorageStint) -> str:
         return obj.compute_status()
@@ -52,6 +68,7 @@ class StorageSlotAdmin(admin.ModelAdmin):
         "is_active",
         "owning_group",
         "april_tag_id",
+        "occupied_by",
     )
     list_filter = ("rack", "level", "requires_pallet_jack", "is_active", "owning_group")
     search_fields = ("code", "notes")
@@ -63,6 +80,16 @@ class StorageSlotAdmin(admin.ModelAdmin):
     def april_tag_id(self, obj: StorageSlot) -> str:
         tag_id = get_active_tag_id(obj)
         return "—" if tag_id is None else str(tag_id)
+
+    @admin.display(description="Occupied by")
+    def occupied_by(self, obj: StorageSlot) -> str:
+        occupant = obj.current_stint
+        return "—" if occupant is None else f"{occupant.stint_id} · {occupant.display_name}"
+
+    def get_queryset(self, request):
+        # Same one-query occupancy the API list uses — the changelist shows
+        # 100 slots a page and current_stint would otherwise be an N+1.
+        return super().get_queryset(request).prefetch_related(StorageSlot.active_stints_prefetch())
 
     def save_model(self, request, obj, form, change):
         """Admin-created slots get their permanent marker like API ones do."""

@@ -2578,6 +2578,29 @@ views:
       start:
         permission_classes:
         - AllowAny
+  project_storage.views.StorageSlotViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      destroy:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      generate:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      list:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      partial_update:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      retrieve:
+        permission_classes:
+        - IsStorageAdminOrStaff
+      update:
+        permission_classes:
+        - IsStorageAdminOrStaff
   reorder_queue.views.AnalyticsViewSet:
     actions:
       lead_time_trends:

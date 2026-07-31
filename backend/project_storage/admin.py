@@ -1,6 +1,9 @@
 from django.contrib import admin
 
-from .models import ProjectStorageEvent, ProjectStorageStint
+from fiducials.services.allocator import get_active_tag_id
+
+from .models import ProjectStorageEvent, ProjectStorageStint, StorageSlot
+from .services.storage_slots import ensure_slot_tag
 
 
 class ProjectStorageEventInline(admin.TabularInline):
@@ -36,6 +39,35 @@ class ProjectStorageStintAdmin(admin.ModelAdmin):
         return obj.compute_status()
 
     status_display.short_description = "Status"
+
+
+@admin.register(StorageSlot)
+class StorageSlotAdmin(admin.ModelAdmin):
+    list_display = (
+        "code",
+        "rack",
+        "level",
+        "position",
+        "requires_pallet_jack",
+        "is_active",
+        "owning_group",
+        "april_tag_id",
+    )
+    list_filter = ("rack", "level", "requires_pallet_jack", "is_active", "owning_group")
+    search_fields = ("code", "notes")
+    # Derived from rack/level/position on save — never typed by hand.
+    readonly_fields = ("code", "created_at", "updated_at")
+    ordering = ("rack", "level", "position")
+
+    @admin.display(description="AprilTag")
+    def april_tag_id(self, obj: StorageSlot) -> str:
+        tag_id = get_active_tag_id(obj)
+        return "—" if tag_id is None else str(tag_id)
+
+    def save_model(self, request, obj, form, change):
+        """Admin-created slots get their permanent marker like API ones do."""
+        super().save_model(request, obj, form, change)
+        ensure_slot_tag(obj)
 
 
 @admin.register(ProjectStorageEvent)

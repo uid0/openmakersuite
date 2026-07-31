@@ -12,6 +12,8 @@ Public API:
 * :func:`get_active_assignment` / :func:`get_active_tag_id` — read-side
   lookup used by the label renderers to decide whether (and which) tag to
   draw.
+* :func:`resolve_subject` — the reverse direction: a camera detected tag
+  ``N`` in family ``F``, *what is it on?*
 
 Concurrency: allocation is "compute lowest free ID, INSERT". Two concurrent
 allocations can pick the same ID; the partial unique index
@@ -94,6 +96,33 @@ def get_active_tag_id(subject: Model) -> Optional[int]:
     """
     assignment = get_active_assignment(subject)
     return assignment.tag_id if assignment is not None else None
+
+
+def resolve_subject(family: str, tag_id: int) -> Optional[Model]:
+    """Return the record a detected tag currently labels, or None.
+
+    The inverse of :func:`allocate_tag`: a camera (or a handheld scanner)
+    reports "family ``F``, ID ``N``" and needs the record that ID is on —
+    a storage slot, a stint, a maker box. Released allocations are ignored,
+    so a recycled ID resolves to whoever holds it *now*.
+
+    Returns None for an unknown/free ID, and also when the subject row was
+    hard-deleted without releasing its tag (a dangling GenericForeignKey —
+    there is no DB-level cascade), so callers get "nothing there" rather
+    than an exception.
+    """
+    assignment = (
+        AprilTagAssignment.objects.filter(
+            family=family,
+            tag_id=tag_id,
+            released_at__isnull=True,
+        )
+        .select_related("content_type")
+        .first()
+    )
+    if assignment is None:
+        return None
+    return assignment.subject
 
 
 def _lowest_free_id(family: str) -> int:

@@ -1,8 +1,11 @@
+from django.contrib.auth.models import Group
+
 from rest_framework import serializers
+from rest_framework.validators import UniqueTogetherValidator
 
 from fiducials.services.allocator import get_active_tag_id
 
-from .models import ProjectStorageEvent, ProjectStorageStint
+from .models import ProjectStorageEvent, ProjectStorageStint, StorageSlot
 
 
 class ProjectStorageEventSerializer(serializers.ModelSerializer):
@@ -116,3 +119,114 @@ class StartStintSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False, allow_blank=True)
     project_title = serializers.CharField(max_length=120, required=False, allow_blank=True)
     storage_location_name = serializers.CharField(max_length=120, required=False, allow_blank=True)
+
+
+# ---------------------------------------------------------------------------
+# Storage slots (the physical racking)
+# ---------------------------------------------------------------------------
+
+
+class StorageSlotSerializer(serializers.ModelSerializer):
+    """Read/write shape for one slot.
+
+    ``code`` is read-only: the components are authoritative and the model
+    recomputes the string on save. The explicit UniqueTogetherValidator
+    turns a duplicate slot into a 400 instead of letting the DB constraint
+    surface as a 500.
+    """
+
+    april_tag_id = serializers.SerializerMethodField()
+    # ``default=""`` (the convention used elsewhere in the codebase) keeps the
+    # key present for an unowned slot — without it DRF hits an AttributeError
+    # walking into the null FK and silently drops the field from the payload.
+    owning_group_name = serializers.CharField(
+        source="owning_group.name", read_only=True, default=""
+    )
+
+    class Meta:
+        model = StorageSlot
+        fields = (
+            "id",
+            "code",
+            "rack",
+            "level",
+            "position",
+            "requires_pallet_jack",
+            "is_active",
+            "owning_group",
+            "owning_group_name",
+            "notes",
+            "april_tag_id",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "code",
+            "owning_group_name",
+            "april_tag_id",
+            "created_at",
+            "updated_at",
+        )
+        validators = [
+            UniqueTogetherValidator(
+                queryset=StorageSlot.objects.all(),
+                fields=("rack", "level", "position"),
+                message="A storage slot already exists at that rack/level/position.",
+            )
+        ]
+
+    def validate_level(self, value: str) -> str:
+        # Normalize before the unique-together check runs, so posting "1a1"
+        # collides with an existing "1A1" at the serializer instead of at
+        # the DB.
+        return (value or "").upper()
+
+    def get_april_tag_id(self, obj: StorageSlot) -> int | None:
+        # Prefer the viewset's annotation (no N+1 on list); fall back to a
+        # direct lookup for objects returned from write actions.
+        if hasattr(obj, "active_april_tag_id"):
+            return obj.active_april_tag_id
+        return get_active_tag_id(obj)
+
+
+class RackLevelSpecSerializer(serializers.Serializer):
+    """One level of a rack in a bulk-generate request."""
+
+    level = serializers.RegexField(
+        StorageSlot.LEVEL_PATTERN,
+        error_messages={"invalid": "Level must be a single letter (A-Z)."},
+    )
+    # Capped so a fat-fingered "1000" can't spawn a rack that swallows the
+    # whole tag family in one request.
+    positions = serializers.IntegerField(min_value=1, max_value=100)
+    requires_pallet_jack = serializers.BooleanField(required=False, default=False)
+
+    def validate_level(self, value: str) -> str:
+        return value.upper()
+
+
+class GenerateRackSerializer(serializers.Serializer):
+    """Bulk-generate payload: one rack, a spec per level."""
+
+    rack = serializers.IntegerField(min_value=1)
+    levels = serializers.ListField(
+        child=RackLevelSpecSerializer(),
+        allow_empty=False,
+        max_length=26,
+    )
+    owning_group = serializers.PrimaryKeyRelatedField(
+        queryset=Group.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_levels(self, value: list[dict]) -> list[dict]:
+        seen = [spec["level"] for spec in value]
+        duplicates = sorted({level for level in seen if seen.count(level) > 1})
+        if duplicates:
+            raise serializers.ValidationError(
+                f"Each level may appear at most once: {', '.join(duplicates)} repeated."
+            )
+        return value

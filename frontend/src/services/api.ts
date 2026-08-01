@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, AssignSlotRequest, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageAssignment, StorageAssignmentType, StorageOverview, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -4896,6 +4896,49 @@ export const storageSlotsAPI = {
     api.post('/project-storage/slots/cards/', data, {
       responseType: 'blob',
     }),
+};
+
+// The glanceable rack board: one payload shaped like the racking rather
+// than like the tables behind it. Staff / storage-admin only — it names
+// every member with something on the shelves.
+export const storageOverviewAPI = {
+  // `rack` narrows to one rack server-side, which is what a phone wants
+  // once the shop has more racks than fit on a screen.
+  get: (params?: { rack?: number }) =>
+    api.get<StorageOverview>('/project-storage/overview/', { params }),
+};
+
+// Committee / logistics / class holdings — the staff-assigned half of slot
+// occupancy. No expiry, no purgatory: the lifecycle is assign → release,
+// and both ends are staff-gated (IsStorageAdminOrStaff).
+export const storageAssignmentsAPI = {
+  // ?active=true is the console read ("who holds what right now?"); the
+  // unfiltered list is every holding the racking has ever had. Booleans go
+  // over the wire as strings — the filters are hand-rolled query params.
+  list: (params?: {
+    active?: 'true' | 'false';
+    storage_type?: StorageAssignmentType;
+    rack?: number;
+    slot_code?: string;
+    page?: number;
+  }) =>
+    api.get<{
+      count: number;
+      next: string | null;
+      previous: string | null;
+      results: StorageAssignment[];
+    }>('/project-storage/assignments/', { params }),
+
+  // 409 when anything already holds the slot: `slot_occupied` for a
+  // member's live stint (the warden can clear that themselves) vs
+  // `slot_assigned` for another holding (staff has to hand it back).
+  assign: (data: AssignSlotRequest) =>
+    api.post<StorageAssignment>('/project-storage/assignments/assign/', data),
+
+  // Frees the slot by stamping released_at, not by deleting: the record of
+  // the two years the welding SIG held it survives.
+  release: (id: number) =>
+    api.post<StorageAssignment>(`/project-storage/assignments/${id}/release/`),
 };
 
 // Universal scanner dispatcher — resolves any barcode/QR payload to an

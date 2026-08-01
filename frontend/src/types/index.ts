@@ -2139,7 +2139,13 @@ export interface StorageSlot {
   notes: string;
   /** Permanent tag36h10 marker printed on the card; null if the pool ran dry. */
   april_tag_id: number | null;
+  /** A member's live project stint (type P), if one holds the slot. */
   current_stint: StorageSlotOccupant | null;
+  /** A live committee/logistics/class holding (C/L/E), if one does instead. */
+  current_assignment: StorageSlotAssignmentSummary | null;
+  /** Letter of whichever occupancy is live — P/C/L/E, null when free. */
+  occupancy_type: StorageTypeLetter | null;
+  /** True for either kind of occupant: neither slot is free to hand out. */
   is_occupied: boolean;
   created_at: string;
   updated_at: string;
@@ -2184,4 +2190,117 @@ export interface StorageSlotCardPreview {
   preview: string;
   kiosk_url: string;
   april_tag_id: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Storage assignments (the C/L/E half of occupancy) + the overview grid
+// ---------------------------------------------------------------------------
+
+/**
+ * The letter a slot paints in the overview: P for a member's project stint,
+ * C/L/E for the three staff-assigned kinds. "E" is class because C is
+ * already committee's — the grid has one character per cell to work with.
+ */
+export type StorageTypeLetter = 'P' | 'C' | 'L' | 'E';
+
+/** The three non-Project storage kinds. Staff-assigned, long-term. */
+export type StorageAssignmentType = 'committee' | 'logistics' | 'class';
+
+/**
+ * The live C/L/E holding of a slot, as StorageSlotSerializer nests it —
+ * enough to say who has the slot and to release it, without the audit and
+ * notes fields the full assignment carries.
+ */
+export interface StorageSlotAssignmentSummary {
+  id: number;
+  storage_type: StorageAssignmentType;
+  type_letter: StorageTypeLetter;
+  occupant_display: string;
+  assigned_at: string;
+}
+
+/**
+ * One committee/logistics/class holding, full shape.
+ *
+ * Unlike a member's stint this has no clock: no expiry, no violation
+ * notice, no purgatory. It runs until staff release it, and
+ * `released_at` (null while live) is what "active" means.
+ */
+export interface StorageAssignment {
+  id: number;
+  slot: number;
+  slot_code: string;
+  storage_type: StorageAssignmentType;
+  storage_type_display: string;
+  type_letter: StorageTypeLetter;
+  /** The committee (an auth.Group / SIG), for committee assignments. */
+  owning_group: number | null;
+  owning_group_name: string;
+  /** Free-text occupant, for logistics/class. */
+  occupant_label: string;
+  /** Group name if there is one, else the label — who to show in the grid. */
+  occupant_display: string;
+  assigned_by: number | null;
+  assigned_by_name: string;
+  assigned_at: string;
+  released_at: string | null;
+  is_active: boolean;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Payload for POST /project-storage/assignments/assign/. */
+export interface AssignSlotRequest {
+  /** Slot pk or code — "1A1" and 12 are both accepted. */
+  slot: string;
+  storage_type: StorageAssignmentType;
+  owning_group?: number | null;
+  occupant_label?: string;
+  notes?: string;
+}
+
+/**
+ * One cell of the overview grid.
+ *
+ * `color` is set by the server and **only ever for type P** — a committee
+ * slot has been the committee's for two years and will be tomorrow, so
+ * painting it would drown out the one late member project the screen
+ * exists to surface.
+ */
+export interface StorageOverviewCell {
+  code: string;
+  slot_id: number;
+  position: number;
+  /** null for an empty slot. */
+  type: StorageTypeLetter | null;
+  /** A stint's own status for P; 'occupied' for C/L/E; 'empty' otherwise. */
+  status: ProjectStorageStatus | 'occupied' | 'empty';
+  color: 'yellow' | 'red' | null;
+  occupant: string;
+  /** The slot's in-service flag — a retired slot is empty but not available. */
+  is_active: boolean;
+}
+
+export interface StorageOverviewRow {
+  level: string;
+  /**
+   * Dense and 1-indexed: entry *i* is position *i + 1*, and a hole in the
+   * racking is null, so every row of a rack lines up without the renderer
+   * re-deriving which columns exist.
+   */
+  cells: (StorageOverviewCell | null)[];
+}
+
+export interface StorageOverviewRack {
+  rack: number;
+  /** Descending — high shelf first, ground level last, like the steel. */
+  levels: string[];
+  max_position: number;
+  rows: StorageOverviewRow[];
+}
+
+export interface StorageOverview {
+  racks: StorageOverviewRack[];
+  generated_at: string;
 }

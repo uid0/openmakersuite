@@ -131,6 +131,9 @@ const FacilitiesProjectStorageListPage: React.FC = () => {
           'Pick a row to open the warden actions (notice, purgatory, remove).',
         action: (
           <Group gap="sm">
+            <Button component={Link} to="/facilities/project-storage/overview" variant="light">
+              Rack overview
+            </Button>
             <Button component={Link} to="/facilities/project-storage/slots" variant="light">
               Storage slots
             </Button>

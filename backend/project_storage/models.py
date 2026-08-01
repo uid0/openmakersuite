@@ -7,8 +7,20 @@ sends a violation notice; if the member doesn't remove the items within
 removed, the member has to wait 3 days before starting a new one.
 
 This module models a single *stint* (one occupancy by one member), an
-append-only audit log of events on that stint, and the physical
-:class:`StorageSlot` racking those stints eventually get assigned to.
+append-only audit log of events on that stint, the physical
+:class:`StorageSlot` racking those stints eventually get assigned to, and
+:class:`StorageAssignment` — the other kind of occupancy.
+
+Four storage types share the racking, and they split into two lifecycles:
+
+* **P — Project** (:class:`ProjectStorageStint`): member self-service at the
+  kiosk, 30-day clock, notice → purgatory → cool-down.
+* **C — Committee**, **L — Logistics**, **E — Class**
+  (:class:`StorageAssignment`): staff-assigned, long-term, no expiry and no
+  purgatory. Somebody with a key decides who holds the slot and for how long.
+
+A slot holds *at most one* live occupancy of either kind at a time — see
+:meth:`StorageSlot.current_occupancy`.
 """
 
 from __future__ import annotations
@@ -44,6 +56,11 @@ def _generate_stint_id() -> str:
 
 class ProjectStorageStint(models.Model):
     """One occupancy of a project storage shelf/area by one member."""
+
+    # This model *is* storage type P in the overview grid. Declared here
+    # rather than in the overview builder so both occupancy models answer
+    # "which letter am I?" the same way (StorageAssignment.type_letter).
+    TYPE_LETTER = "P"
 
     STATUS_ACTIVE = "active"
     STATUS_EXPIRING_SOON = "expiring_soon"
@@ -237,6 +254,16 @@ class ProjectStorageStint(models.Model):
         return name or self.username
 
     @property
+    def type_letter(self) -> str:
+        """Overview grid letter — constant for a member stint.
+
+        The same property name on :class:`StorageAssignment` derives its
+        letter from ``storage_type``, so the overview builder can ask any
+        occupancy what it is without type-checking it first.
+        """
+        return self.TYPE_LETTER
+
+    @property
     def slot_code(self) -> str:
         """Canonical code of the racking slot, or "" for non-rack storage."""
         return self.slot.code if self.slot_id else ""
@@ -347,10 +374,13 @@ class StorageSlot(models.Model):
     here also keeps the ``ProjectStorageStint.slot`` FK intra-app, which is
     the reason this app avoids cross-app FKs in the first place.
 
-    Occupancy lives on the other side of that FK: ``slot.stints`` is every
-    stint that ever sat here, and at most one of them may be live at a time
-    (``ProjectStorageStint.unique_active_stint_per_slot``). Ask
-    :meth:`ProjectStorageStint.active_stint_in_slot` for the current one.
+    Occupancy lives on the other side of two FKs: ``slot.stints`` is every
+    member stint that ever sat here (type P) and ``slot.assignments`` every
+    staff-assigned committee/logistics/class holding (types C/L/E). Each side
+    allows at most one live row per slot (``unique_active_stint_per_slot`` /
+    ``unique_active_assignment_per_slot``). That the two *kinds* don't overlap
+    is enforced at the API instead, since no constraint spans two tables;
+    :attr:`current_occupancy` is where reads resolve it.
     """
 
     # Shared by the field validator, the parser, and the API layer, so
@@ -461,6 +491,55 @@ class StorageSlot(models.Model):
             return ProjectStorageStint.active_stint_in_slot(self)
         return occupants[0] if occupants else None
 
+    @classmethod
+    def active_assignments_prefetch(cls) -> models.Prefetch:
+        """The C/L/E twin of :meth:`active_stints_prefetch`.
+
+        ``select_related("owning_group")`` because every caller that renders
+        an assignment renders its occupant, and the committee case reads that
+        name off the group.
+        """
+        return models.Prefetch(
+            "assignments",
+            queryset=StorageAssignment.active()
+            .select_related("owning_group")
+            .order_by("-assigned_at"),
+            to_attr="active_assignments",
+        )
+
+    @cached_property
+    def current_assignment(self) -> Optional["StorageAssignment"]:
+        """The live committee/logistics/class assignment, or None."""
+        holdings = getattr(self, "active_assignments", None)
+        if holdings is None:
+            return StorageAssignment.active_assignment_in_slot(self)
+        return holdings[0] if holdings else None
+
+    @property
+    def current_occupancy(self):
+        """Whatever is live in this slot right now — stint, assignment, None.
+
+        A slot holds one occupancy at a time, but that invariant spans two
+        tables, so no single DB constraint can express it: the guards live at
+        the API (claim and assign each refuse a slot the other kind already
+        holds). Should both somehow be set anyway — a fixture, a shell, a
+        race that predates the guards — the member stint wins, because a
+        30-day clock that stops being watched is the failure that costs
+        somebody their project. The rest of the system reads occupancy
+        through this one property so that tie-break has one definition.
+        """
+        return self.current_stint or self.current_assignment
+
+    @property
+    def is_occupied(self) -> bool:
+        return self.current_occupancy is not None
+
+    @property
+    def occupancy_type(self) -> Optional[str]:
+        """Storage-type letter of the live occupancy: P/C/L/E, or None."""
+        occupancy = self.current_occupancy
+        return None if occupancy is None else occupancy.type_letter
+
     # ------------------------------------------------------------------
     # code <-> (rack, level, position)
     # ------------------------------------------------------------------
@@ -500,6 +579,169 @@ class StorageSlot(models.Model):
                 update_fields.update({"level", "code"})
                 kwargs["update_fields"] = update_fields
         super().save(*args, **kwargs)
+
+
+class StorageAssignment(models.Model):
+    """A staff-assigned, long-term holding of one slot — types C, L and E.
+
+    The counterpart to :class:`ProjectStorageStint`. A member claims a slot
+    for themselves at the kiosk and a clock starts; a *committee*, the
+    *logistics* crew, or a *class* gets a slot because staff gave it to them,
+    and it stays theirs until staff takes it back. So this model has no
+    ``expires_at``, no violation notice, no purgatory and no cool-down —
+    deliberately, not for lack of implementation. Its whole lifecycle is
+    assign → release.
+
+    Who holds it is recorded one of two ways because the three types name
+    their occupants differently:
+
+    * **committee** — :attr:`owning_group`, the SIG's Django group. Committees
+      are already groups in this system (permissions, mailing lists), so
+      pointing at the group keeps a rename in one place.
+    * **logistics** / **class** — :attr:`occupant_label`, free text ("Winter
+      welding cohort", "Ana's CNC class"). Neither is a durable object in the
+      system, and inventing a model for a class that runs for six weeks would
+      cost more than it's worth.
+
+    Either may be set for any type; :attr:`occupant_display` picks whichever
+    is there.
+    """
+
+    TYPE_COMMITTEE = "committee"
+    TYPE_LOGISTICS = "logistics"
+    TYPE_CLASS = "class"
+
+    STORAGE_TYPE_CHOICES = [
+        (TYPE_COMMITTEE, "Committee"),
+        (TYPE_LOGISTICS, "Logistics"),
+        (TYPE_CLASS, "Class"),
+    ]
+
+    # Single-letter code for the overview grid. "E" for class because "C" is
+    # already committee's — the grid has one column of characters to work
+    # with and Ian reads it on a phone.
+    TYPE_LETTERS = {
+        TYPE_COMMITTEE: "C",
+        TYPE_LOGISTICS: "L",
+        TYPE_CLASS: "E",
+    }
+
+    # CASCADE, where a stint's slot is SET_NULL: a stint predates the racking
+    # and survives without one, but an assignment *is* the record of a slot
+    # being held — orphaned from its slot it means nothing. Deleting a slot
+    # that is currently assigned is refused by the API guard, so in practice
+    # this only ever cascades released history along with a retired slot.
+    slot = models.ForeignKey(
+        StorageSlot,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+        help_text="The racking slot this assignment holds.",
+    )
+    storage_type = models.CharField(
+        max_length=16,
+        choices=STORAGE_TYPE_CHOICES,
+        help_text="Which non-Project storage type holds the slot (C/L/E in the overview).",
+    )
+
+    owning_group = models.ForeignKey(
+        Group,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="storage_assignments",
+        help_text="The committee (SIG) holding this slot, for committee assignments.",
+    )
+    occupant_label = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text=(
+            "Free-text occupant for logistics/class assignments — an "
+            "instructor, a class name, a crew."
+        ),
+    )
+
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Staff member who made the assignment.",
+    )
+    # default= rather than auto_now_add= so a long-standing holding can be
+    # recorded with the date it actually started when the racking is first
+    # entered into the system. auto_now_add would refuse the write at every
+    # layer and quietly stamp today instead.
+    assigned_at = models.DateTimeField(default=timezone.now)
+    # NULL means the assignment is live; setting it hands the slot back.
+    # Like a stint's removed_at, this is what "active" is defined by, and
+    # the row stays as the history of who used to be in this slot.
+    released_at = models.DateTimeField(null=True, blank=True)
+
+    notes = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-assigned_at"]
+        indexes = [
+            models.Index(fields=["slot", "-assigned_at"]),
+            models.Index(fields=["storage_type"]),
+            models.Index(fields=["released_at"]),
+        ]
+        constraints = [
+            # The C/L/E half of "one live occupancy per slot", same partial
+            # unique-when-active shape as unique_active_stint_per_slot. The
+            # cross-type half (a slot holding both a stint and an assignment)
+            # spans two tables and is guarded at the API instead.
+            models.UniqueConstraint(
+                fields=["slot"],
+                condition=models.Q(released_at__isnull=True),
+                name="unique_active_assignment_per_slot",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.slot.code} · {self.get_storage_type_display()} · {self.occupant_display}"
+
+    @property
+    def type_letter(self) -> str:
+        """C / L / E — the letter this assignment paints in the grid."""
+        return self.TYPE_LETTERS.get(self.storage_type, "")
+
+    @property
+    def occupant_display(self) -> str:
+        """Who holds the slot, in one string.
+
+        The group wins when set (it's the committee's canonical name) and the
+        free-text label covers the rest. Falls back to the type's own label so
+        a bare logistics assignment still reads as something.
+        """
+        if self.owning_group_id:
+            return self.owning_group.name
+        return self.occupant_label or self.get_storage_type_display()
+
+    @property
+    def is_active(self) -> bool:
+        return self.released_at is None
+
+    @classmethod
+    def active(cls):
+        """Assignments that still hold their slot.
+
+        One definition of "active" — used by the per-slot guard, the
+        occupancy readouts, the overview, and (as a Q) the partial unique
+        constraint above.
+        """
+        return cls.objects.filter(released_at__isnull=True)
+
+    @classmethod
+    def active_assignment_in_slot(cls, slot) -> Optional["StorageAssignment"]:
+        """The assignment currently holding ``slot``, or None."""
+        if slot is None:
+            return None
+        return cls.active().select_related("owning_group").filter(slot=slot).first()
 
 
 class ProjectStorageEvent(models.Model):

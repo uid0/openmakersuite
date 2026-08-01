@@ -6,7 +6,12 @@ from django.utils import timezone
 
 import factory
 
-from project_storage.models import DEFAULT_STINT_DAYS, ProjectStorageStint, StorageSlot
+from project_storage.models import (
+    DEFAULT_STINT_DAYS,
+    ProjectStorageStint,
+    StorageAssignment,
+    StorageSlot,
+)
 
 
 class ProjectStorageStintFactory(factory.django.DjangoModelFactory):
@@ -36,3 +41,20 @@ class StorageSlotFactory(factory.django.DjangoModelFactory):
     rack = 1
     level = "A"
     position = factory.Sequence(lambda n: n + 1)
+
+
+class StorageAssignmentFactory(factory.django.DjangoModelFactory):
+    """A live logistics holding of a fresh slot.
+
+    Logistics is the default because it's the type that needs no related
+    object — a committee assignment wants a real ``owning_group``, which the
+    test that cares about it should pass explicitly.
+    """
+
+    class Meta:
+        model = StorageAssignment
+
+    slot = factory.SubFactory(StorageSlotFactory)
+    storage_type = StorageAssignment.TYPE_LOGISTICS
+    occupant_label = "Logistics crew"
+    assigned_at = factory.LazyFunction(timezone.now)

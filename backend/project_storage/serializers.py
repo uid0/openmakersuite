@@ -4,8 +4,75 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueTogetherValidator
 
 from fiducials.services.allocator import get_active_tag_id
+from membership.actor import actor_display
 
-from .models import ProjectStorageEvent, ProjectStorageStint, StorageSlot
+from .models import ProjectStorageEvent, ProjectStorageStint, StorageAssignment, StorageSlot
+
+# ---------------------------------------------------------------------------
+# Naming a slot in a request payload
+# ---------------------------------------------------------------------------
+#
+# Two endpoints take "which slot?" from a caller — the kiosk claim and the
+# staff assign — and they have to agree on what they accept, because the same
+# card in the same hand feeds both: the QR encodes a CODE and the console
+# holds a PK. These live at module level rather than on either serializer so
+# neither can drift from the other.
+
+
+def slot_from_code(code, field: str = "slot_code") -> StorageSlot | None:
+    """Look up a slot by its printed code. Blank/None → None."""
+    code = (code or "").strip()
+    if not code:
+        return None
+    try:
+        rack, level, position = StorageSlot.parse_code(code)
+    except ValueError as exc:
+        raise serializers.ValidationError({field: str(exc)}) from exc
+    canonical = StorageSlot.compose_code(rack, level, position)
+    slot = StorageSlot.objects.filter(code=canonical).first()
+    if slot is None:
+        raise serializers.ValidationError({field: f"No storage slot with code {canonical}."})
+    return slot
+
+
+def resolve_slot_ref(value, field: str = "slot") -> StorageSlot | None:
+    """Look a slot up by whichever identifier ``value`` turns out to be.
+
+    A code always contains a letter and a pk never does, so ``1A1`` and ``7``
+    can't be confused for each other.
+    """
+    value = (value or "").strip()
+    if not value:
+        return None
+
+    if StorageSlot.CODE_RE.match(value):
+        return slot_from_code(value, field=field)
+    if value.isdigit():
+        slot = StorageSlot.objects.filter(pk=int(value)).first()
+        if slot is None:
+            raise serializers.ValidationError({field: f"No storage slot with id {value}."})
+        return slot
+    raise serializers.ValidationError(
+        {field: f"Expected a storage slot id or a code like 1A1; got {value!r}."}
+    )
+
+
+def resolve_slot_fields(attrs: dict) -> StorageSlot | None:
+    """Pop ``slot``/``slot_code`` off ``attrs`` and return the one slot meant.
+
+    Both spellings may be sent as long as they name the same slot; sending
+    two different slots is the caller contradicting themselves, not a
+    precedence question, so it's a 400.
+    """
+    slot = resolve_slot_ref(attrs.pop("slot", None))
+    by_code = slot_from_code(attrs.pop("slot_code", None))
+    if slot is not None and by_code is not None and slot.pk != by_code.pk:
+        raise serializers.ValidationError(
+            {
+                "slot_code": f"slot and slot_code name different slots ({slot.code} vs {by_code.code})."
+            }
+        )
+    return slot or by_code
 
 
 class ProjectStorageEventSerializer(serializers.ModelSerializer):
@@ -152,15 +219,7 @@ class StartStintSerializer(serializers.Serializer):
     def validate(self, attrs: dict) -> dict:
         # Resolve to one canonical key so the view never has to ask which
         # spelling the caller used.
-        slot = self._resolve_slot(attrs.pop("slot", None))
-        by_code = self._slot_from_code(attrs.pop("slot_code", None))
-        if slot is not None and by_code is not None and slot.pk != by_code.pk:
-            raise serializers.ValidationError(
-                {
-                    "slot_code": f"slot and slot_code name different slots ({slot.code} vs {by_code.code})."
-                }
-            )
-        slot = slot or by_code
+        slot = resolve_slot_fields(attrs)
 
         # Out-of-service slots stay on file (their marker is permanent) but
         # are explicitly "not offered for new reservations" — a claim is
@@ -172,39 +231,6 @@ class StartStintSerializer(serializers.Serializer):
 
         attrs["slot"] = slot
         return attrs
-
-    @staticmethod
-    def _resolve_slot(value, field: str = "slot") -> StorageSlot | None:
-        """Look a slot up by whichever identifier ``value`` turns out to be."""
-        value = (value or "").strip()
-        if not value:
-            return None
-
-        if StorageSlot.CODE_RE.match(value):
-            return StartStintSerializer._slot_from_code(value, field=field)
-        if value.isdigit():
-            slot = StorageSlot.objects.filter(pk=int(value)).first()
-            if slot is None:
-                raise serializers.ValidationError({field: f"No storage slot with id {value}."})
-            return slot
-        raise serializers.ValidationError(
-            {field: f"Expected a storage slot id or a code like 1A1; got {value!r}."}
-        )
-
-    @staticmethod
-    def _slot_from_code(code, field: str = "slot_code") -> StorageSlot | None:
-        code = (code or "").strip()
-        if not code:
-            return None
-        try:
-            rack, level, position = StorageSlot.parse_code(code)
-        except ValueError as exc:
-            raise serializers.ValidationError({field: str(exc)}) from exc
-        canonical = StorageSlot.compose_code(rack, level, position)
-        slot = StorageSlot.objects.filter(code=canonical).first()
-        if slot is None:
-            raise serializers.ValidationError({field: f"No storage slot with code {canonical}."})
-        return slot
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +266,29 @@ class SlotOccupantSerializer(serializers.ModelSerializer):
         return obj.compute_status()
 
 
+class SlotAssignmentSummarySerializer(serializers.ModelSerializer):
+    """The live C/L/E holding of a slot, trimmed for a rack listing.
+
+    The :class:`SlotOccupantSerializer` of the other occupancy kind: enough
+    to say who has the slot and since when, without the notes and audit
+    fields the full :class:`StorageAssignmentSerializer` carries.
+    """
+
+    type_letter = serializers.ReadOnlyField()
+    occupant_display = serializers.ReadOnlyField()
+
+    class Meta:
+        model = StorageAssignment
+        fields = (
+            "id",
+            "storage_type",
+            "type_letter",
+            "occupant_display",
+            "assigned_at",
+        )
+        read_only_fields = fields
+
+
 class StorageSlotSerializer(serializers.ModelSerializer):
     """Read/write shape for one slot.
 
@@ -248,13 +297,19 @@ class StorageSlotSerializer(serializers.ModelSerializer):
     turns a duplicate slot into a 400 instead of letting the DB constraint
     surface as a 500.
 
-    ``current_stint``/``is_occupied`` are the warden-console occupancy
-    readout: who is in this slot right now, or null when it's free.
+    The occupancy readout is the warden-console "who is in this slot right
+    now?", and it has two halves because there are two kinds of occupant:
+    ``current_stint`` for a member's project (P) and ``current_assignment``
+    for a committee/logistics/class holding (C/L/E). ``occupancy_type`` is
+    the letter of whichever is live and ``is_occupied`` covers both — a slot
+    the welding SIG holds is not free to hand out either.
     """
 
     april_tag_id = serializers.SerializerMethodField()
     current_stint = serializers.SerializerMethodField()
-    is_occupied = serializers.SerializerMethodField()
+    current_assignment = serializers.SerializerMethodField()
+    is_occupied = serializers.ReadOnlyField()
+    occupancy_type = serializers.ReadOnlyField()
     # ``default=""`` (the convention used elsewhere in the codebase) keeps the
     # key present for an unowned slot — without it DRF hits an AttributeError
     # walking into the null FK and silently drops the field from the payload.
@@ -277,6 +332,8 @@ class StorageSlotSerializer(serializers.ModelSerializer):
             "notes",
             "april_tag_id",
             "current_stint",
+            "current_assignment",
+            "occupancy_type",
             "is_occupied",
             "created_at",
             "updated_at",
@@ -287,6 +344,8 @@ class StorageSlotSerializer(serializers.ModelSerializer):
             "owning_group_name",
             "april_tag_id",
             "current_stint",
+            "current_assignment",
+            "occupancy_type",
             "is_occupied",
             "created_at",
             "updated_at",
@@ -312,16 +371,17 @@ class StorageSlotSerializer(serializers.ModelSerializer):
             return obj.active_april_tag_id
         return get_active_tag_id(obj)
 
-    # StorageSlot.current_stint reads the viewset's to_attr prefetch when
-    # there is one and falls back to a lookup for the single instance a
-    # create/update returns; it's cached per instance, so asking twice here
-    # costs one query at most.
+    # StorageSlot.current_stint / current_assignment read the viewset's
+    # to_attr prefetches when there are any and fall back to a lookup for the
+    # single instance a create/update returns; both are cached per instance,
+    # so is_occupied and occupancy_type ride along for free.
     def get_current_stint(self, obj: StorageSlot) -> dict | None:
         occupant = obj.current_stint
         return None if occupant is None else SlotOccupantSerializer(occupant).data
 
-    def get_is_occupied(self, obj: StorageSlot) -> bool:
-        return obj.current_stint is not None
+    def get_current_assignment(self, obj: StorageSlot) -> dict | None:
+        holding = obj.current_assignment
+        return None if holding is None else SlotAssignmentSummarySerializer(holding).data
 
 
 class RackLevelSpecSerializer(serializers.Serializer):
@@ -364,6 +424,117 @@ class GenerateRackSerializer(serializers.Serializer):
                 f"Each level may appear at most once: {', '.join(duplicates)} repeated."
             )
         return value
+
+
+# ---------------------------------------------------------------------------
+# Staff-assigned storage (committee / logistics / class)
+# ---------------------------------------------------------------------------
+
+
+class StorageAssignmentSerializer(serializers.ModelSerializer):
+    """Full read shape for one C/L/E holding.
+
+    Read-only end to end: an assignment is created by the ``assign`` action
+    and ended by ``release``, both of which are staff-gated and audited
+    (``assigned_by``). Letting PATCH move ``released_at`` around would give
+    the same state change a second, unaudited door.
+    """
+
+    slot_code = serializers.CharField(source="slot.code", read_only=True)
+    storage_type_display = serializers.CharField(source="get_storage_type_display", read_only=True)
+    type_letter = serializers.ReadOnlyField()
+    occupant_display = serializers.ReadOnlyField()
+    is_active = serializers.ReadOnlyField()
+    # ``default=""`` on both: a dotted source into a null FK makes DRF drop
+    # the key from the payload entirely (see StorageSlotSerializer's
+    # owning_group_name), and both of these are null for a logistics
+    # assignment / an imported row with no recorded staff member.
+    owning_group_name = serializers.CharField(
+        source="owning_group.name", read_only=True, default=""
+    )
+    assigned_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StorageAssignment
+        fields = (
+            "id",
+            "slot",
+            "slot_code",
+            "storage_type",
+            "storage_type_display",
+            "type_letter",
+            "owning_group",
+            "owning_group_name",
+            "occupant_label",
+            "occupant_display",
+            "assigned_by",
+            "assigned_by_name",
+            "assigned_at",
+            "released_at",
+            "is_active",
+            "notes",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+    def get_assigned_by_name(self, obj: StorageAssignment) -> str:
+        return actor_display(obj.assigned_by)
+
+
+class AssignSlotSerializer(serializers.Serializer):
+    """Payload for ``POST assignments/assign/``.
+
+    The slot is named the same two ways the kiosk accepts (pk or code, under
+    ``slot`` or ``slot_code``) — a warden assigning from the console has the
+    pk, a warden standing at the rack with a scanner has the code.
+    """
+
+    slot = serializers.CharField(max_length=16, required=False, allow_blank=True, allow_null=True)
+    slot_code = serializers.CharField(max_length=16, required=False, allow_blank=True)
+    storage_type = serializers.ChoiceField(choices=StorageAssignment.STORAGE_TYPE_CHOICES)
+    owning_group = serializers.PrimaryKeyRelatedField(
+        queryset=Group.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    occupant_label = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, attrs: dict) -> dict:
+        slot = resolve_slot_fields(attrs)
+        if slot is None:
+            raise serializers.ValidationError(
+                {"slot": "Name the slot to assign, by id or by code (e.g. 1A1)."}
+            )
+        # Same rule as a kiosk claim: a retired slot keeps its marker but is
+        # "not offered for new reservations", and an assignment is a
+        # reservation that outlasts every stint.
+        if not slot.is_active:
+            raise serializers.ValidationError(
+                {"slot": f"Slot {slot.code} is out of service and can't be assigned."}
+            )
+        attrs["slot"] = slot
+
+        # A committee assignment that doesn't say which committee is just a
+        # blocked slot — the group IS the occupant identity for type C, and
+        # the overview has nothing to show without it. Logistics and class
+        # carry their occupant as free text, which may legitimately be blank
+        # (a logistics slot is self-describing).
+        if (
+            attrs["storage_type"] == StorageAssignment.TYPE_COMMITTEE
+            and not attrs.get("owning_group")
+            and not attrs.get("occupant_label")
+        ):
+            raise serializers.ValidationError(
+                {
+                    "owning_group": (
+                        "A committee assignment must name the committee "
+                        "(owning_group), or describe it in occupant_label."
+                    )
+                }
+            )
+        return attrs
 
 
 class SlotCardBatchSerializer(serializers.Serializer):
@@ -409,3 +580,57 @@ class SlotCardBatchSerializer(serializers.Serializer):
         if attrs.get("level") and not has_rack:
             raise serializers.ValidationError({"level": "level narrows a rack — send rack too."})
         return attrs
+
+
+# ---------------------------------------------------------------------------
+# The overview grid
+# ---------------------------------------------------------------------------
+#
+# Output-only shapes over the dicts built by services/storage_overview.py.
+# They exist so the grid's contract is declared in one readable place (and
+# lands in the OpenAPI schema) instead of being implied by whatever the
+# builder happened to emit — PR7/PR8 render this payload twice, in a web grid
+# and an ASCII table, and both need to know what a cell is.
+
+
+class StorageOverviewCellSerializer(serializers.Serializer):
+    """One slot in the grid. See ``services/storage_overview.py`` for the
+    type/status/colour rules — notably that only Project storage is
+    coloured."""
+
+    code = serializers.CharField()
+    slot_id = serializers.IntegerField()
+    position = serializers.IntegerField()
+    # P / C / L / E, or null for an empty slot.
+    type = serializers.CharField(allow_null=True)
+    status = serializers.CharField()
+    color = serializers.CharField(allow_null=True)
+    occupant = serializers.CharField(allow_blank=True)
+    is_active = serializers.BooleanField()
+
+
+class StorageOverviewRowSerializer(serializers.Serializer):
+    """One level of one rack: a dense, 1-indexed run of positions.
+
+    ``cells`` is ``max_position`` long and holds ``null`` where the racking
+    has no slot at that position, so every row of a rack lines up.
+    """
+
+    level = serializers.CharField()
+    cells = serializers.ListField(child=StorageOverviewCellSerializer(allow_null=True))
+
+
+class StorageOverviewRackSerializer(serializers.Serializer):
+    """One rack. ``levels`` is descending — high shelves first, ground last."""
+
+    rack = serializers.IntegerField()
+    levels = serializers.ListField(child=serializers.CharField())
+    max_position = serializers.IntegerField()
+    rows = StorageOverviewRowSerializer(many=True)
+
+
+class StorageOverviewSerializer(serializers.Serializer):
+    """The whole grid, rack by rack in numeric order."""
+
+    racks = StorageOverviewRackSerializer(many=True)
+    generated_at = serializers.DateTimeField()

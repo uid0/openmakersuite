@@ -125,6 +125,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
         { path: '/facilities/maker-boxes/scan', label: 'Maker Box scan', icon: '🔍', requiresStaff: true },
         { path: '/facilities/electrical', label: 'Electrical & Network', icon: '⚡', requiresStaff: true },
         { path: '/facilities/project-storage/queue', label: 'Project Storage', icon: '📦', requiresStaff: true },
+        { path: '/facilities/project-storage/slots', label: 'Storage Slots', icon: '🗄️', requiresStaff: true },
         { path: '/facilities/storage-vision', label: 'Storage Vision', icon: '📸', requiresStaff: true },
         { path: '/facilities/storage-vision/capture', label: 'Vision capture', icon: '📷', requiresStaff: true },
         { path: '/facilities/storage-vision/review', label: 'Vision review', icon: '✅', requiresStaff: true },

@@ -2087,6 +2087,12 @@ export interface ProjectStorageStint {
   moved_to_purgatory_at: string | null;
   storage_location_name: string;
   purgatory_location_name: string;
+  /** Racking slot claimed by this stint (pk), or null for ad-hoc storage. */
+  slot: number | null;
+  /** Canonical code of that slot ("1A1"), or "" when there is none. */
+  slot_code: string;
+  /** slot_code when racked, else the free-text storage_location_name. */
+  location_display: string;
   notes: string;
   status: ProjectStorageStatus;
   purgatory_at: string | null;
@@ -2094,6 +2100,88 @@ export interface ProjectStorageStint {
   expiry_day_of_year: number;
   events: ProjectStorageEvent[];
   qr_code_url: string | null;
+  april_tag_id: number | null;
   created_at: string;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Storage slots (the physical racking behind project storage)
+// ---------------------------------------------------------------------------
+
+/**
+ * The live stint sitting in a slot — the trimmed shape
+ * SlotOccupantSerializer returns, not a whole ProjectStorageStint.
+ */
+export interface StorageSlotOccupant {
+  id: number;
+  stint_id: string;
+  username: string;
+  display_name: string;
+  project_title: string;
+  started_at: string;
+  expires_at: string;
+  status: ProjectStorageStatus;
+}
+
+export interface StorageSlot {
+  id: number;
+  /** Derived server-side from rack/level/position — read-only. */
+  code: string;
+  rack: number;
+  /** Single upper-case letter. */
+  level: string;
+  position: number;
+  requires_pallet_jack: boolean;
+  is_active: boolean;
+  owning_group: number | null;
+  owning_group_name: string;
+  notes: string;
+  /** Permanent tag36h10 marker printed on the card; null if the pool ran dry. */
+  april_tag_id: number | null;
+  current_stint: StorageSlotOccupant | null;
+  is_occupied: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One level of a rack in a bulk-generate request. */
+export interface RackLevelSpec {
+  level: string;
+  positions: number;
+  requires_pallet_jack?: boolean;
+}
+
+export interface GenerateRackRequest {
+  rack: number;
+  levels: RackLevelSpec[];
+  owning_group?: number | null;
+  notes?: string;
+}
+
+/**
+ * Bulk-generate report. `created`/`skipped` are codes: re-running a rack
+ * after adding a level reports the pre-existing slots as skipped rather
+ * than failing, and `without_tag` is non-empty only when the tag family
+ * ran dry mid-run (the slots work, they just have no marker yet).
+ */
+export interface GenerateRackResult {
+  rack: number;
+  created: string[];
+  skipped: string[];
+  created_count: number;
+  skipped_count: number;
+  without_tag: string[];
+  slots: StorageSlot[];
+}
+
+/** Single-card preview payload (base64 PDF + what the card encodes). */
+export interface StorageSlotCardPreview {
+  slot_id: number;
+  code: string;
+  filename: string;
+  content_type: string;
+  preview: string;
+  kiosk_url: string;
+  april_tag_id: number | null;
 }

@@ -239,8 +239,11 @@ class TestStatusTransitions:
             quantity_ordered=5,
             unit_cost_ordered=Decimal("2.00"),
         )
+        # APPROVED, not pending: since op-tm70 sending a PO only closes out
+        # requests approval has cleared — an unapproved ask is left in the
+        # queue rather than quietly marked ordered (test_approval_gate.py).
         req = ReorderRequestFactory(
-            item=item_supplier.item, status=ReorderRequest.Status.PENDING, quantity=5
+            item=item_supplier.item, status=ReorderRequest.Status.APPROVED, quantity=5
         )
 
         services.mark_sent(po, user)

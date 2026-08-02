@@ -97,6 +97,7 @@ import PurchasingReportPage from './pages/PurchasingReportPage';
 import ScanPage from './pages/ScanPage';
 import SIGDashboard from './pages/SIGDashboard';
 import SiteSettingsPage from './pages/SiteSettingsPage';
+import StorageOverviewPage from './pages/StorageOverviewPage';
 import StorageSlotsPage from './pages/StorageSlotsPage';
 import StorageVisionCapturePage from './pages/StorageVisionCapturePage';
 import StorageVisionReviewPage from './pages/StorageVisionReviewPage';
@@ -373,6 +374,7 @@ function AppContent() {
           {/* Static segment outranks the :stintId route below — react-router
               scores literal segments above dynamic ones regardless of order. */}
           <Route path="/facilities/project-storage/slots" element={<WorkspaceLayout><StorageSlotsPage /></WorkspaceLayout>} />
+          <Route path="/facilities/project-storage/overview" element={<WorkspaceLayout><StorageOverviewPage /></WorkspaceLayout>} />
           <Route path="/facilities/project-storage/:stintId" element={<WorkspaceLayout><FacilitiesProjectStoragePage /></WorkspaceLayout>} />
           <Route path="/facilities/project-storage" element={<WorkspaceLayout><FacilitiesProjectStoragePage /></WorkspaceLayout>} />
 

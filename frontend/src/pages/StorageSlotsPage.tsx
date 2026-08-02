@@ -729,9 +729,14 @@ const StorageSlotsPage: React.FC = () => {
           'in each one, and print the cards that send a member to the kiosk with the slot ' +
           'already chosen.',
         action: (
-          <Button component={Link} to="/facilities/project-storage/queue" variant="light">
-            Storage queue
-          </Button>
+          <Group gap="sm">
+            <Button component={Link} to="/facilities/project-storage/overview" variant="light">
+              Rack overview
+            </Button>
+            <Button component={Link} to="/facilities/project-storage/queue" variant="light">
+              Storage queue
+            </Button>
+          </Group>
         ),
       }}
     >

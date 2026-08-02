@@ -45,6 +45,8 @@ const buildSlot = (overrides: Partial<StorageSlot> = {}): StorageSlot => ({
   notes: '',
   april_tag_id: 101,
   current_stint: null,
+  current_assignment: null,
+  occupancy_type: null,
   is_occupied: false,
   created_at: '2026-07-01T00:00:00Z',
   updated_at: '2026-07-01T00:00:00Z',

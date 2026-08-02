@@ -10,6 +10,7 @@ import {
   IconDeviceTv,
   IconGauge,
   IconKey,
+  IconLayoutGrid,
   IconLock,
   IconPackage,
   IconRocket,
@@ -142,6 +143,14 @@ const FacilitiesOverviewPage: React.FC = () => (
       icon={<IconPackage size={22} stroke={1.8} />}
       eyebrow="Members"
       testId="facilities-overview-card-/facilities/project-storage"
+    />
+    <CapabilityCard
+      to="/facilities/project-storage/overview"
+      title="Storage overview"
+      description="The rack board — every slot at a glance, with the late projects coloured."
+      icon={<IconLayoutGrid size={22} stroke={1.8} />}
+      eyebrow="Members"
+      testId="facilities-overview-card-/facilities/project-storage/overview"
     />
   </WorkspaceLanding>
 );

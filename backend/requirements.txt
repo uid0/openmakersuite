@@ -52,7 +52,7 @@ PyJWT==2.13.0
 cryptography==50.0.0
 
 # Email (Postmark via Anymail)
-django-anymail[postmark]==15.0
+django-anymail[postmark]==15.1
 
 # Error reporting / observability (Sentry). Replaces Highlight (oms-fjs)
 # after that integration was ripped out; backend init is in

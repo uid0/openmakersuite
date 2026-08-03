@@ -45,7 +45,15 @@ class TestReorderRequestAPI:
         assert len(response.data["results"]) == 3
 
     def test_create_reorder_request_authenticated(self, authenticated_client):
-        """Authenticated users can create a reorder request."""
+        """Authenticated users can create a reorder request.
+
+        It comes back APPROVED, not pending: the item is space-owned (no
+        ``owning_group``) and this member administers no SIG, so
+        ``can_manage_sig_inventory`` makes them an approver for it — and
+        op-tm70 approves a request raised by someone who could approve it
+        anyway rather than parking it for their own second click. The
+        pending path is covered in ``test_approval_gate.py``.
+        """
         client, _user = authenticated_client
         item = InventoryItemFactory()
 
@@ -62,7 +70,7 @@ class TestReorderRequestAPI:
         assert response.status_code == status.HTTP_201_CREATED
         assert str(response.data["item"]) == str(item.id)
         assert response.data["quantity"] == 25
-        assert response.data["status"] == ReorderRequest.Status.PENDING
+        assert response.data["status"] == ReorderRequest.Status.APPROVED
 
     def test_create_reorder_request_minimal(self, authenticated_client):
         """Test creating request with minimal required fields."""
@@ -569,12 +577,13 @@ class TestReorderRequestAPI:
         assert request_obj.admin_notes == "Duplicate request"
 
     def test_generate_cart_links_groups_live_queue_by_supplier(self, authenticated_client):
-        """generate_cart_links groups the live reorder queue (pending +
-        approved) by supplier into per-supplier part#,qty order pads.
+        """generate_cart_links groups the approved reorder queue by supplier
+        into per-supplier part#,qty order pads.
 
         Rebuilt from the dead supplier_type-branching code (op-ls52): the
         Supplier model only produces local/online/national types, so the old
         amazon/grainger/hdsupply branches never matched and it returned {}.
+        Approved-only since op-tm70 — a pad is about to be sent to a vendor.
         """
         client, user = authenticated_client
 
@@ -584,9 +593,8 @@ class TestReorderRequestAPI:
         item1 = InventoryItemFactory(supplier=acme, supplier_sku="ACME-123")
         item2 = InventoryItemFactory(supplier=globex, supplier_sku="GLBX-456")
 
-        # An approved and a pending request both count as "live".
         ReorderRequestFactory(item=item1, status=ReorderRequest.Status.APPROVED, quantity=3)
-        ReorderRequestFactory(item=item2, status=ReorderRequest.Status.PENDING, quantity=5)
+        ReorderRequestFactory(item=item2, status=ReorderRequest.Status.APPROVED, quantity=5)
 
         url = reverse("reorderrequest-generate-cart-links")
         response = client.get(url)
@@ -606,15 +614,19 @@ class TestReorderRequestAPI:
         assert globex_pad["text"] == "GLBX-456\t5"
 
     def test_generate_cart_links_excludes_non_live_requests(self, authenticated_client):
-        """Only pending/approved requests are live; ordered/received/cancelled
-        have left the queue and must not appear in the order pad."""
+        """Only approved requests reach the pad: ordered/received/cancelled have
+        left the queue, and pending has not been signed off yet (op-tm70)."""
         client, user = authenticated_client
 
         supplier = SupplierFactory(name="Acme Tools")
         live_item = InventoryItemFactory(supplier=supplier, supplier_sku="LIVE-1")
         done_item = InventoryItemFactory(supplier=supplier, supplier_sku="DONE-1")
+        unapproved_item = InventoryItemFactory(supplier=supplier, supplier_sku="PEND-1")
 
         ReorderRequestFactory(item=live_item, status=ReorderRequest.Status.APPROVED, quantity=2)
+        ReorderRequestFactory(
+            item=unapproved_item, status=ReorderRequest.Status.PENDING, quantity=4
+        )
         ReorderRequestFactory(item=done_item, status=ReorderRequest.Status.ORDERED, quantity=9)
         ReorderRequestFactory(item=done_item, status=ReorderRequest.Status.RECEIVED, quantity=9)
         ReorderRequestFactory(item=done_item, status=ReorderRequest.Status.CANCELLED, quantity=9)
@@ -627,6 +639,7 @@ class TestReorderRequestAPI:
         pad = response.data["Acme Tools"]
         assert pad["line_count"] == 1
         assert "LIVE-1,2" in pad["csv"]
+        assert "PEND-1" not in pad["csv"]
         assert "DONE-1" not in pad["csv"]
 
 
@@ -2417,16 +2430,20 @@ class TestReorderDataExcludesRetired:
 
     def test_reorder_data_excludes_retired_items(self, authenticated_client):
         """A retired item is excluded from reorder_data even when it still carries
-        a pending reorder request (the items_with_requests branch)."""
+        an approved reorder request (the items_with_requests branch).
+
+        Approved, not pending: since op-tm70 only approval puts an item on the
+        items_with_requests branch this test exercises.
+        """
         client, _ = authenticated_client
 
-        # Active low-stock item with a pending request -> should appear.
+        # Active low-stock item with an approved request -> should appear.
         active = InventoryItemFactory(current_stock=1, minimum_stock=10)
-        ReorderRequestFactory(item=active, status=ReorderRequest.Status.PENDING, quantity=5)
+        ReorderRequestFactory(item=active, status=ReorderRequest.Status.APPROVED, quantity=5)
 
-        # Retired item that still carries a pending request -> must NOT appear.
+        # Retired item that still carries an approved request -> must NOT appear.
         retired = InventoryItemFactory(current_stock=1, minimum_stock=10, is_retired=True)
-        ReorderRequestFactory(item=retired, status=ReorderRequest.Status.PENDING, quantity=5)
+        ReorderRequestFactory(item=retired, status=ReorderRequest.Status.APPROVED, quantity=5)
 
         response = client.get(self.URL)
 

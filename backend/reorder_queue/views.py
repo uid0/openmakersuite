@@ -283,6 +283,44 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
             return ReorderRequestCreateSerializer
         return ReorderRequestSerializer
 
+    @staticmethod
+    def _is_reorder_approver(user, item) -> bool:
+        """Return True when ``user`` may approve reorder requests for ``item``.
+
+        The approver set is ``can_manage_sig_inventory`` — staff/superusers,
+        Logistics, the item's SIG admins, and (for a space-owned item) any
+        member who does not administer some other SIG. It is deliberately the
+        same set on both sides of approval: whoever :meth:`approve` lets sign a
+        request off is exactly who gets their own scan auto-approved by
+        :meth:`_auto_approve_if_approver`, so the queue never parks a row
+        waiting on a click from the person who raised it.
+        """
+        if not user or not user.is_authenticated:
+            return False
+        from membership.utils import can_manage_sig_inventory
+
+        return can_manage_sig_inventory(user, item)
+
+    @classmethod
+    def _auto_approve_if_approver(cls, user, reorder):
+        """Stamp ``reorder`` approved when whoever raised it could approve it.
+
+        Anonymous QR scans and members who are not approvers for the item stay
+        ``pending``. This is the single server-side create path for both the
+        web scan flow and ScanTTY, so neither client needs to ask for it — nor
+        could they: ``status`` is read-only on the create serializer.
+
+        Returns True when the request was approved.
+        """
+        if not cls._is_reorder_approver(user, reorder.item):
+            return False
+
+        reorder.status = ReorderRequest.Status.APPROVED
+        reorder.reviewed_by = user
+        reorder.reviewed_at = timezone.now()
+        reorder.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+        return True
+
     def create(self, request, *args, **kwargs):
         """Create a new reorder request.
 
@@ -292,6 +330,9 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         callers go straight to the serializer — the serializer only
         exposes safe fields, so they cannot smuggle cost / supplier-URL
         data into the row.
+
+        A scan raised by someone who could approve it is approved on the
+        spot (:meth:`_auto_approve_if_approver`).
         """
         user = request.user
         if user.is_authenticated:
@@ -316,6 +357,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
+
+        self._auto_approve_if_approver(user, serializer.instance)
 
         # Anonymous callers get the limited create-serializer shape back
         # so no admin metadata (admin_notes, invoice_url, supplier_url,
@@ -449,8 +492,20 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def approve(self, request, pk=None):
-        """Approve a reorder request."""
+        """Approve a reorder request.
+
+        Restricted to approvers for the request's item
+        (:meth:`_is_reorder_approver`) — until op-tm70 any authenticated
+        member could sign off any request, including their own, which made
+        approval a formality rather than a gate. Non-approvers get a 403.
+        """
         reorder = self.get_object()
+        if not self._is_reorder_approver(request.user, reorder.item):
+            return Response(
+                {"detail": "You do not have permission to approve reorder requests for this item."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         reorder.status = ReorderRequest.Status.APPROVED
         reorder.reviewed_by = request.user
         reorder.reviewed_at = timezone.now()
@@ -549,8 +604,8 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
     def generate_cart_links(self, request):
         """Group the live reorder queue by supplier into per-supplier order pads.
 
-        For every open reorder request (``pending`` or ``approved``) whose item
-        has a supplier relationship, emit a ``part#,qty`` order pad (CSV +
+        For every *approved* reorder request whose item has a supplier
+        relationship, emit a ``part#,qty`` order pad (CSV +
         tab-separated copy block) built from the item's supplier SKU and
         requested quantity — the same vendor-agnostic builder the PO
         ``export_order`` action uses (DRY). The operator pastes or uploads each
@@ -560,11 +615,12 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         ``supplier_type`` values (``amazon``/``grainger``/``hdsupply``) that the
         ``Supplier`` model never produces — its types are ``local``/``online``/
         ``national`` — so it always returned ``{}``.
+
+        Approved-only since op-tm70: an order pad is a shopping list about to
+        be sent to a vendor, so an unapproved ask must not appear on it.
         """
-        open_requests = (
-            ReorderRequest.objects.filter(
-                status__in=[ReorderRequest.Status.PENDING, ReorderRequest.Status.APPROVED]
-            )
+        approved_requests = (
+            ReorderRequest.objects.filter(status__in=services.PO_ELIGIBLE_STATUSES)
             .select_related("item", "item__count_level")
             .prefetch_related("item__item_suppliers__supplier", "item__packaging_levels")
         )
@@ -572,7 +628,7 @@ class ReorderRequestViewSet(viewsets.ModelViewSet):
         # Group each request under its item's primary supplier so the emitted
         # SKU and the supplier heading always come from the same ItemSupplier.
         grouped = {}
-        for req in open_requests:
+        for req in approved_requests:
             link = req.item.primary_item_supplier
             if link is None:
                 continue
@@ -857,29 +913,33 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def reorder_data(self, request):
         """
-        Get data for PO creation: items with active reorder requests prioritized,
-        then low stock items grouped by supplier with pricing.
+        Get data for PO creation: items with approved reorder requests
+        prioritized, then low stock items grouped by supplier with pricing.
 
         Returns all suppliers that have items needing reorder, along with
         assets where the supplier is the manufacturer.
+
+        Approval gates this pad (op-tm70): a ``pending`` request is an ask
+        nobody has signed off yet, so it must not prefill a purchase order.
+        An item whose only request is pending is not dropped from the pad —
+        it simply falls through to the low-stock half below (if its stock
+        warrants it) with no request attached, exactly like an item that was
+        never scanned.
         """
         from inventory.models import Asset, Supplier
 
-        # First, get items with active reorder requests (pending or approved).
+        # First, get items with an approved reorder request.
         # Retired items are phased out and must never appear in the reorder data,
         # even if a request lingered from before they were retired.
         items_with_requests = (
             InventoryItem.objects.filter(
-                reorder_requests__status__in=[
-                    ReorderRequest.Status.PENDING,
-                    ReorderRequest.Status.APPROVED,
-                ],
+                reorder_requests__status__in=services.PO_ELIGIBLE_STATUSES,
                 is_active=True,
                 is_retired=False,
             )
             .distinct()
             .select_related("category", "location", "count_level")
-            .prefetch_related("item_suppliers__supplier", "reorder_requests")
+            .prefetch_related("item_suppliers__supplier", services.approved_requests_prefetch())
         )
 
         # Also get items that need reordering (stock at/below the reorder point,
@@ -893,7 +953,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             )
             .exclude(id__in=items_with_requests.values_list("id", flat=True))
             .select_related("category", "location", "count_level")
-            .prefetch_related("item_suppliers__supplier")
+            .prefetch_related("item_suppliers__supplier", services.approved_requests_prefetch())
         )
 
         # Combine both sets, prioritizing items with requests
@@ -927,10 +987,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     }
 
                 # Calculate suggested quantity (base units, mode-aware — op-es7c)
-                # If item has an active reorder request, use that quantity
-                active_request = item.get_active_reorder_request()
-                if active_request:
-                    suggested_qty = active_request.quantity
+                # If item has an approved reorder request, use that quantity.
+                # Read through the service, NOT ``item.get_active_reorder_request()``:
+                # that one deliberately still counts pending/ordered for the
+                # inventory "active reorder" badge, and using it here is what let
+                # unapproved asks prefill a PO (op-tm70).
+                approved_request = services.get_approved_reorder_request(item)
+                if approved_request:
+                    suggested_qty = approved_request.quantity
                 else:
                     suggested_qty = base_reorder_quantity(item)
 
@@ -951,9 +1015,11 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 unit_cost = item_supplier.unit_cost or Decimal("0.00")
                 line_total = unit_cost * suggested_qty
 
-                # Check if item has an active reorder request
-                has_active_request = active_request is not None
-                reorder_request_id = active_request.id if active_request else None
+                # Flag the line as request-driven. The API key keeps its
+                # ``has_active_reorder_request`` name (clients read it), but
+                # since op-tm70 it means "has an APPROVED request".
+                has_active_request = approved_request is not None
+                reorder_request_id = approved_request.id if approved_request else None
 
                 supplier_data[supplier_id]["items"].append(
                     {

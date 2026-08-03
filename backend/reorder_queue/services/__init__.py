@@ -4,6 +4,12 @@ Views keep the serializers as the request/response boundary and keep their
 ``record_audit_event`` calls; the workflow bodies live in these services.
 """
 
+from .approvals import (
+    APPROVED_REQUESTS_ATTR,
+    PO_ELIGIBLE_STATUSES,
+    approved_requests_prefetch,
+    get_approved_reorder_request,
+)
 from .numbering import next_po_number
 from .purchase_orders import (
     add_business_days,
@@ -24,6 +30,10 @@ from .receiving import (
 )
 
 __all__ = [
+    "APPROVED_REQUESTS_ATTR",
+    "PO_ELIGIBLE_STATUSES",
+    "approved_requests_prefetch",
+    "get_approved_reorder_request",
     "add_business_days",
     "apply_line_quantity",
     "confirm_order",

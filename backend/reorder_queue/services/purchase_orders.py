@@ -44,6 +44,7 @@ from inventory.models import ItemSupplier
 from inventory.services.packaging import order_level, parse_at_level, resolve_base_quantity
 
 from ..models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
+from .approvals import PO_ELIGIBLE_STATUSES
 
 
 def _resolve_work_order(item_data, idx):
@@ -394,6 +395,11 @@ def update_reorder_requests_from_po(purchase_order):
     - estimated_delivery (calculated from expected_delivery_date or lead time)
     - ordered_at (when PO was sent)
     - status = "ordered"
+
+    Only *approved* requests are swept (op-tm70). Sending a PO used to close
+    out pending requests for the same item too, which quietly marked an
+    unapproved ask "ordered" — it would then vanish from the pending queue
+    nobody had reviewed it in. A pending request is left exactly as it is.
     """
     # Find all inventory items in this PO
     po_items = purchase_order.items.filter(item_supplier__isnull=False).select_related(
@@ -403,10 +409,10 @@ def update_reorder_requests_from_po(purchase_order):
     for po_item in po_items:
         item = po_item.item_supplier.item
 
-        # Find active reorder requests for this item (pending or approved)
+        # Find the approved reorder requests this PO fulfils
         active_requests = ReorderRequest.objects.filter(
             item=item,
-            status__in=[ReorderRequest.Status.PENDING, ReorderRequest.Status.APPROVED],
+            status__in=PO_ELIGIBLE_STATUSES,
         )
 
         # Calculate estimated delivery date

@@ -31,9 +31,13 @@ def close_linked_reorder_request(po_item, delivery_date):
 
     Matching is by inventory item — there is no FK from a purchase order (or its
     lines) to a reorder request. :func:`update_reorder_requests_from_po` marks
-    *every* active request for an item as ordered when the PO is sent, so several
-    concurrent requests for one item can legitimately be open; receiving the line
-    closes **all** of them (every pending/approved/ordered request for the item).
+    *every approved* request for an item as ordered when the PO is sent, so
+    several concurrent requests for one item can legitimately be open; receiving
+    the line closes **all** of them (every pending/approved/ordered request for
+    the item). Deliberately wider than the approved-only ordering gate
+    (op-tm70): approval decides what may be *bought*, but once the goods are
+    physically on the shelf a still-pending ask for that item has been
+    satisfied too, and leaving it open would have someone order it twice.
     Already-received or cancelled requests are never touched, so re-driving the
     same receipt is a no-op.
 

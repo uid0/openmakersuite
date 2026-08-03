@@ -484,6 +484,51 @@ class TestDefaultListReorderValueParity:
         assert row["expected_delivery_date"] == expected.isoformat()
 
 
+class TestPendingRequestStillLightsBadge:
+    """BLAST-RADIUS GUARD for op-tm70: a PENDING request still shows on the item.
+
+    op-tm70 narrowed *purchasing* to approved requests only — the PO-candidate
+    pad, its per-line flags, the cart links and the send-a-PO sweep (see
+    ``reorder_queue/tests/test_approval_gate.py``). The inventory accessors are
+    the other half of that split and must NOT move: they answer "has anyone
+    asked for this?", which is exactly what a member wants to see the moment
+    they scan a shelf label — before any approver has looked at it. If this
+    test goes red because someone narrowed ``get_active_reorder_request`` /
+    ``has_pending_reorder`` to approved-only, that is the bug, not this test:
+    the member would file a request and see no sign of it anywhere.
+    """
+
+    def test_pending_request_shows_on_the_list_row_and_the_model(self, api_client):
+        # Low stock so ``reorder_status`` reaches its request branch at all —
+        # it must read "pending" (somebody already asked), not "needs_order".
+        item = InventoryItemFactory(image=None, current_stock=0, minimum_stock=5)
+        pending = ReorderRequest.objects.create(
+            item=item, quantity=3, status=ReorderRequest.Status.PENDING
+        )
+
+        row = _row_for(_results(api_client.get(_list_url())), item)
+        fresh = type(item).objects.get(pk=item.pk)  # no prefetch -> live path
+
+        # Prefetched list row ...
+        assert row["has_pending_reorder"] is True
+        assert row["reorder_status"] == "pending"
+        assert row["active_reorder_request"]["id"] == pending.id
+        # ... and the live accessors agree.
+        assert fresh.has_pending_reorder() is True
+        assert fresh.get_active_reorder_request().id == pending.id
+
+    def test_purchasing_ignores_the_very_same_pending_request(self, api_client):
+        """The two halves of the split, asserted side by side on one row."""
+        from reorder_queue import services
+
+        item = InventoryItemFactory(image=None)
+        ReorderRequest.objects.create(item=item, quantity=3, status=ReorderRequest.Status.PENDING)
+        fresh = type(item).objects.get(pk=item.pk)
+
+        assert fresh.get_active_reorder_request() is not None  # badge: yes
+        assert services.get_approved_reorder_request(fresh) is None  # purchasing: no
+
+
 class TestDashboardOverviewSupplierQueryBudget:
     """Regression guard for the dashboard overview total_value N+1 (issue #890).
 

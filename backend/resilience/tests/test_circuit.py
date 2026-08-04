@@ -1,3 +1,5 @@
+import fnmatch
+
 import pytest
 
 from resilience.circuit import (
@@ -182,6 +184,12 @@ class _FakeRedis:
     def expire(self, key, seconds):
         return True
 
+    def mget(self, keys):
+        return [self.kv.get(key) for key in keys]
+
+    def scan_iter(self, match=None, count=None):
+        return iter(fnmatch.filter(list(self.kv), match) if match else list(self.kv))
+
 
 class _BrokenRedis:
     """Every operation raises — models a Redis outage."""
@@ -189,7 +197,7 @@ class _BrokenRedis:
     def _down(self, *args, **kwargs):
         raise RuntimeError("redis down")
 
-    get = set = delete = incr = expire = _down
+    get = set = delete = incr = expire = mget = scan_iter = _down
 
 
 class TestRedisStorage:
@@ -214,9 +222,65 @@ class TestRedisStorage:
         assert storage.state("x") == STATE_CLOSED
         assert storage.record_failure("x", 60) == 0
         assert storage.opened_at("x") == 0.0
+        assert storage.states("webhook:") == {}
         storage.trip_open("x")
         storage.to_half_open("x")
         storage.close("x")
+
+    def test_states_enumerates_a_prefix_family(self):
+        storage = RedisStorage(_FakeRedis())
+        storage.trip_open("webhook:1")
+        storage.to_half_open("webhook:2")
+        storage.close("webhook:3")
+        storage.trip_open("mqtt")
+
+        assert storage.states("webhook:") == {
+            "webhook:1": STATE_OPEN,
+            "webhook:2": STATE_HALF_OPEN,
+            "webhook:3": STATE_CLOSED,
+        }
+        # An empty prefix enumerates everything; unrelated breakers are not
+        # swept into a family.
+        assert storage.states()["mqtt"] == STATE_OPEN
+
+    def test_states_uses_scan_not_keys(self):
+        """Prod Redis is shared — KEYS would block the whole server."""
+        client = _FakeRedis()
+        client.keys = lambda *a, **kw: pytest.fail("RedisStorage must not call KEYS")
+        storage = RedisStorage(client)
+        storage.trip_open("webhook:1")
+        assert storage.states("webhook:") == {"webhook:1": STATE_OPEN}
+
+    def test_states_ignores_non_state_keys(self):
+        storage = RedisStorage(_FakeRedis())
+        # record_failure writes cb:webhook:9:failures; trip_open also writes
+        # cb:webhook:9:opened_at. Neither is a state key.
+        storage.record_failure("webhook:9", 60)
+        assert storage.states("webhook:") == {}
+        storage.trip_open("webhook:9")
+        assert storage.states("webhook:") == {"webhook:9": STATE_OPEN}
+
+    def test_escape_glob_keeps_a_literal_prefix_literal(self):
+        assert RedisStorage._escape_glob("webhook:") == "webhook:"
+        assert RedisStorage._escape_glob("odd*name[") == "odd\\*name\\["
+
+
+def test_in_memory_states_filters_by_prefix():
+    storage = InMemoryStorage()
+    storage.trip_open("webhook:1")
+    storage.close("webhook:2")
+    storage.trip_open("mqtt")
+
+    assert storage.states("webhook:") == {"webhook:1": STATE_OPEN, "webhook:2": STATE_CLOSED}
+    assert storage.states("mqtt") == {"mqtt": STATE_OPEN}
+    assert storage.states("nothing-here:") == {}
+
+
+def test_base_storage_states_is_abstract():
+    from resilience.circuit import BaseStorage
+
+    with pytest.raises(NotImplementedError):
+        BaseStorage().states("x")
 
 
 def test_breaker_trips_over_redis_storage():

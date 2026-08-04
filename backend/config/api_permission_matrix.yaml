@@ -2810,6 +2810,9 @@ views:
       update:
         permission_classes:
         - IsAuthenticated
+  resilience.views.ResilienceStatusView:
+    permission_classes:
+    - IsAuthenticated
   scanner.views.dispatch_scan:
     permission_classes:
     - AllowAny

@@ -378,6 +378,18 @@ category spend, and a maintenance forecast.
 | GET | `analytics/pulse/` | staff-or-sig-admin **or** signed-URL token | `IsAnalyticsViewer` — returns the full aggregate JSON used by both the dashboard and the monthly email. Authenticated staff/SIG admins are allowed; anyone presenting a valid `?token=...` minted by `analytics/share/` is also allowed (board-member bypass). | 60-min django-redis cache keyed by `(start, end, bucket)`. Token verifies signature + embedded TTL; rotating `ANALYTICS_SHARE_SALT` invalidates all outstanding tokens. |
 | POST | `analytics/share/` | staff-or-sig-admin | `IsAnalyticsSharer` — mints a signed token (`{"ttl_days": 1..365}`, defaults to 30). Returns the token + ttl; the frontend composes the shareable URL. | Pure HMAC-signed token (no DB row); authoritative kill-switch is the salt setting. |
 
+## Resilience (`/api/resilience/`)
+
+Circuit-breaker health rendered as user-facing service status, so the web
+app and ScanTTY can tell a member which capability is unavailable instead
+of failing silently. The registry in `resilience/services.py` maps breaker
+names (`mqtt`, `whmcs`, `common_api`, and the dynamic `webhook:<id>`
+family) onto labelled capabilities.
+
+| Method | Path | Class | Purpose | Notes |
+| --- | --- | --- | --- | --- |
+| GET | `resilience/status/` | member | `IsAuthenticated` on `ResilienceStatusView` — every authenticated member may read it; seeing the degradation is the point. The payload is deliberately non-sensitive: labels, states, and counts only, **never** breaker config, URLs, credentials, or endpoint hostnames. | Always 200. A degraded dependency — or an unreachable breaker store — is reported in the body, never as an error status. When `CIRCUIT_BREAKERS_ENABLED` is off, every service reports healthy. |
+
 ## Flower (Celery monitoring)
 
 | Method | Path | Class | Notes |

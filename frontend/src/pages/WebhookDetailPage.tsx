@@ -20,6 +20,7 @@ import {
 import { IconEdit, IconExternalLink, IconTestPipe, IconTrash } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import ServiceUnavailableNotice from '../components/ServiceUnavailableNotice';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { webhooksAPI } from '../services/api';
 import '../styles/WebhookDetailPage.css';
@@ -229,6 +230,17 @@ const WebhookDetailPage: React.FC = () => {
     >
       <div className="webhook-detail-page">
         <Stack gap="md">
+          {/*
+            Warn, but deliberately do NOT disable Test. The status endpoint
+            aggregates the whole webhook family — it cannot say whether *this*
+            endpoint's breaker is the open one, and re-testing an endpoint is
+            exactly what a staffer does during a delivery outage.
+          */}
+          <ServiceUnavailableNotice
+            service="webhooks"
+            message="Webhook delivery is degraded right now — a test may fail or be retried."
+            testId="webhook-delivery-notice"
+          />
           {/* Status Badges */}
           <Group>
           {webhook.is_active ? (

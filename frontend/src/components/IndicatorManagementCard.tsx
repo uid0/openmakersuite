@@ -27,6 +27,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import DeviceSectionGate from './DeviceSectionGate';
 import IndicatorStatusLegend from './IndicatorStatusLegend';
 import IndicatorSwatch from './IndicatorSwatch';
+import ServiceUnavailableNotice, {
+  DEVICE_CONTROL_UNAVAILABLE,
+} from './ServiceUnavailableNotice';
+import { useServiceStatus } from '../hooks/useServiceStatus';
 import {
   ForgeKeyDevice,
   ForgeKeyDeviceType,
@@ -73,6 +77,8 @@ function titleCase(value: string): string {
 }
 
 export default function IndicatorManagementCard({ device, onChanged }: Props) {
+  const { isDegraded } = useServiceStatus();
+  const deviceControlDown = isDegraded('device_control');
   const [loading, setLoading] = useState(true);
   const [isIndicator, setIsIndicator] = useState(false);
   const [binding, setBinding] = useState<ForgeKeyIndicatorBinding | null>(null);
@@ -311,6 +317,7 @@ export default function IndicatorManagementCard({ device, onChanged }: Props) {
                 size="xs"
                 variant="light"
                 loading={busy === 'sync'}
+                disabled={deviceControlDown}
                 onClick={onSync}
                 data-testid="indicator-sync-btn"
               >
@@ -327,6 +334,13 @@ export default function IndicatorManagementCard({ device, onChanged }: Props) {
                 Unbind
               </Button>
             </Group>
+            {/* "Sync now" re-pushes the light state over MQTT; unbinding is a
+                database change and stays available. */}
+            <ServiceUnavailableNotice
+              service="device_control"
+              message={DEVICE_CONTROL_UNAVAILABLE}
+              testId="indicator-sync-device-control-notice"
+            />
           </div>
         ) : (
           <div data-testid="indicator-bind-form">
@@ -440,11 +454,19 @@ export default function IndicatorManagementCard({ device, onChanged }: Props) {
             mt="sm"
             variant="light"
             loading={busy === 'test'}
+            disabled={deviceControlDown}
             onClick={onTest}
             data-testid="indicator-test-btn"
           >
             Send test
           </Button>
+          {/* A test push is a device command over MQTT, so it goes with the
+              broker. */}
+          <ServiceUnavailableNotice
+            service="device_control"
+            message={DEVICE_CONTROL_UNAVAILABLE}
+            testId="indicator-device-control-notice"
+          />
           {testResult && (
             <Text size="xs" c="dimmed" mt="xs" data-testid="indicator-test-result">
               Sent {testResult.payload.pattern ?? ''} · command {testResult.command_id}

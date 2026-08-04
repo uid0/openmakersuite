@@ -21,7 +21,11 @@ import {
   ForgeKeyDeviceCommand,
   forgekeyAPI,
 } from '../services/api';
+import { useServiceStatus } from '../hooks/useServiceStatus';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import ServiceUnavailableNotice, {
+  DEVICE_CONTROL_UNAVAILABLE,
+} from './ServiceUnavailableNotice';
 
 const ACK_TIMEOUT_MS = 10_000;
 const POLL_INTERVAL_MS = 2_000;
@@ -95,6 +99,10 @@ interface DeviceControlsCardProps {
 
 const DeviceControlsCard: React.FC<DeviceControlsCardProps> = ({ device }) => {
   const deviceId = device.id;
+  // All five commands publish over MQTT, so one open breaker takes the whole
+  // card out. The buttons grey out rather than promising an ack that can't come.
+  const { isDegraded } = useServiceStatus();
+  const deviceControlDown = isDegraded('device_control');
 
   const [inFlight, setInFlight] = useState<Record<string, InFlightState>>(() =>
     Object.fromEntries(COMMANDS.map((c) => [c.key, initialInFlight])),
@@ -277,10 +285,16 @@ const DeviceControlsCard: React.FC<DeviceControlsCardProps> = ({ device }) => {
               ackedRow={ackedRow ?? null}
               now={now}
               onClick={() => runCommand(def)}
+              disabled={deviceControlDown}
             />
           );
         })}
       </div>
+      <ServiceUnavailableNotice
+        service="device_control"
+        message={DEVICE_CONTROL_UNAVAILABLE}
+        testId="device-controls-service-notice"
+      />
 
       <RecentCommandsTable
         commands={history}
@@ -297,6 +311,8 @@ interface ControlButtonProps {
   ackedRow: ForgeKeyDeviceCommand | null;
   now: number;
   onClick: () => void;
+  /** True while the MQTT breaker is open — the command cannot be delivered. */
+  disabled?: boolean;
 }
 
 const ControlButton: React.FC<ControlButtonProps> = ({
@@ -305,6 +321,7 @@ const ControlButton: React.FC<ControlButtonProps> = ({
   ackedRow,
   now,
   onClick,
+  disabled = false,
 }) => {
   // Resolve the visible feedback for this button. The row may not be present
   // in the history yet on the very first poll, so fall back to a 'sent'
@@ -394,7 +411,7 @@ const ControlButton: React.FC<ControlButtonProps> = ({
     >
       <button
         type="button"
-        disabled={state.pending}
+        disabled={state.pending || disabled}
         onClick={onClick}
         data-testid={`control-btn-${def.key}`}
         style={{

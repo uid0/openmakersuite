@@ -15,6 +15,8 @@
  * refreshes their identity row rather than producing duplicates.
  */
 import React, { useCallback, useEffect, useState } from 'react';
+import ServiceUnavailableNotice from '../components/ServiceUnavailableNotice';
+import { useServiceStatus } from '../hooks/useServiceStatus';
 import {
   makerBoxesAPI,
   MakerBox,
@@ -30,6 +32,12 @@ const IDENTITY_SOURCE_LABEL: Record<string, string> = {
 };
 
 const MakerBoxPreConversionPage: React.FC = () => {
+  // The identity cascade layers WHMCS over Common API, and it consults WHMCS on
+  // *both* paths — so a degraded WHMCS breaks every lookup and the buttons go
+  // with it. A degraded Common API only breaks badge scans; typing a username
+  // still resolves, so that one warns without taking the control away.
+  const { isDegraded } = useServiceStatus();
+  const billingDown = isDegraded('whmcs');
   const [query, setQuery] = useState('');
   const [notes, setNotes] = useState('');
   const [preview, setPreview] = useState<MakerBoxLookupResult | null>(null);
@@ -173,7 +181,7 @@ const MakerBoxPreConversionPage: React.FC = () => {
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button
             type="submit"
-            disabled={previewing || !query.trim()}
+            disabled={previewing || !query.trim() || billingDown}
             style={{ padding: '0.5rem 1rem' }}
           >
             {previewing ? 'Looking up…' : 'Look up'}
@@ -181,12 +189,22 @@ const MakerBoxPreConversionPage: React.FC = () => {
           <button
             type="button"
             onClick={handleAddToQueue}
-            disabled={adding || !previewIsFresh || !preview?.found}
+            disabled={adding || !previewIsFresh || !preview?.found || billingDown}
             style={{ padding: '0.5rem 1rem' }}
           >
             {adding ? 'Adding…' : 'Add to queue'}
           </button>
         </div>
+        <ServiceUnavailableNotice
+          service="whmcs"
+          message="Membership lookups are unavailable right now — identity can't be resolved. Try again shortly."
+          testId="preconvert-whmcs-notice"
+        />
+        <ServiceUnavailableNotice
+          service="common_api"
+          message="Badge lookups are unavailable right now — type the member's username instead."
+          testId="preconvert-common-api-notice"
+        />
       </form>
 
       {error && (

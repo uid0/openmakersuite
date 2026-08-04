@@ -14,7 +14,11 @@ import DeviceLifecycleCard from '../components/DeviceLifecycleCard';
 import DeviceSectionGate from '../components/DeviceSectionGate';
 import IndicatorManagementCard from '../components/IndicatorManagementCard';
 import IndicatorSwatch from '../components/IndicatorSwatch';
+import ServiceUnavailableNotice, {
+  DEVICE_CONTROL_UNAVAILABLE,
+} from '../components/ServiceUnavailableNotice';
 import WorkspacePage from '../components/landing/WorkspacePage';
+import { useServiceStatus } from '../hooks/useServiceStatus';
 import {
   ForgeKeyCommandResponse,
   ForgeKeyDevice,
@@ -42,6 +46,12 @@ const initialControl: ControlState = { pending: false, lastResult: null, lastErr
 const ForgeKeyDeviceDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // Every control on this page ends in an MQTT publish — forgekey's
+  // device_commands service routes all of them through the "mqtt" circuit
+  // breaker — so when device_control is degraded none of them can reach the
+  // hardware, and a click would only buy a broker timeout.
+  const { isDegraded } = useServiceStatus();
+  const deviceControlDown = isDegraded('device_control');
   const isStaff = typeof window !== 'undefined' && localStorage.getItem('is_staff') === 'true';
   const isSuperuser =
     typeof window !== 'undefined' && localStorage.getItem('is_superuser') === 'true';
@@ -322,6 +332,7 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
               )
             }
             blinkState={controls.blink}
+            deviceControlDown={deviceControlDown}
           />
 
           <section aria-label="OTA firmware update">
@@ -343,7 +354,7 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
               <ControlButton
                 label="Send OTA"
                 state={controls.ota}
-                disabled={!otaInputs.version || !otaInputs.url}
+                disabled={!otaInputs.version || !otaInputs.url || deviceControlDown}
                 onClick={() =>
                   runCommand('ota', () =>
                     forgekeyAPI.firmwareUpdate(id, {
@@ -354,6 +365,11 @@ const ForgeKeyDeviceDetailPage: React.FC = () => {
                 }
               />
             </div>
+            <ServiceUnavailableNotice
+              service="device_control"
+              message={DEVICE_CONTROL_UNAVAILABLE}
+              testId="ota-device-control-notice"
+            />
           </section>
         </>
       ) : (
@@ -378,12 +394,15 @@ interface CapabilitiesSectionProps {
   device: ForgeKeyDevice;
   blinkState: ControlState;
   onBlink: () => void;
+  /** True when the "mqtt" breaker is open — no command can reach the device. */
+  deviceControlDown: boolean;
 }
 
 const CapabilitiesSection: React.FC<CapabilitiesSectionProps> = ({
   device,
   blinkState,
   onBlink,
+  deviceControlDown,
 }) => {
   const capabilities = device.capabilities || [];
   if (capabilities.length === 0) {
@@ -419,6 +438,7 @@ const CapabilitiesSection: React.FC<CapabilitiesSectionProps> = ({
               blinkState={blinkState}
               onBlink={onBlink}
               device={device}
+              deviceControlDown={deviceControlDown}
             />
           </li>
         ))}
@@ -432,6 +452,7 @@ interface CapabilityRowProps {
   device: ForgeKeyDevice;
   blinkState: ControlState;
   onBlink: () => void;
+  deviceControlDown: boolean;
 }
 
 const CapabilityRow: React.FC<CapabilityRowProps> = ({
@@ -439,6 +460,7 @@ const CapabilityRow: React.FC<CapabilityRowProps> = ({
   device,
   blinkState,
   onBlink,
+  deviceControlDown,
 }) => {
   const meta = KNOWN_CAPABILITIES[capability];
   const header = meta ? (
@@ -469,18 +491,29 @@ const CapabilityRow: React.FC<CapabilityRowProps> = ({
     body = <ButtonEventWidget device={device} />;
   } else if (capability === 'status_led') {
     body = (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <IndicatorStateInline state={device.indicator_state} />
-        <button type="button" onClick={onBlink} disabled={blinkState.pending}>
-          {blinkState.pending ? 'Blinking…' : 'Blink LED'}
-        </button>
-        {blinkState.lastError && (
-          <small style={{ color: '#c0392b' }}>{blinkState.lastError}</small>
-        )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <IndicatorStateInline state={device.indicator_state} />
+          <button
+            type="button"
+            onClick={onBlink}
+            disabled={blinkState.pending || deviceControlDown}
+          >
+            {blinkState.pending ? 'Blinking…' : 'Blink LED'}
+          </button>
+          {blinkState.lastError && (
+            <small style={{ color: '#c0392b' }}>{blinkState.lastError}</small>
+          )}
+        </div>
+        <ServiceUnavailableNotice
+          service="device_control"
+          message={DEVICE_CONTROL_UNAVAILABLE}
+          testId="blink-device-control-notice"
+        />
       </div>
     );
   } else if (capability === 'power_relay') {
-    body = <PowerRelayWidget device={device} />;
+    body = <PowerRelayWidget device={device} deviceControlDown={deviceControlDown} />;
   }
 
   return (
@@ -564,7 +597,10 @@ const RelayChannelState: React.FC<{ on: boolean | undefined }> = ({ on }) => {
 // Per-channel control of the 2-channel power relay (ga-40w). Each click emits a
 // signed `power_set` command for that channel; the current on/off is surfaced
 // from the live sub-state the firmware reports over its status message (op-2cr).
-const PowerRelayWidget: React.FC<{ device: ForgeKeyDevice }> = ({ device }) => {
+const PowerRelayWidget: React.FC<{
+  device: ForgeKeyDevice;
+  deviceControlDown: boolean;
+}> = ({ device, deviceControlDown }) => {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -604,7 +640,7 @@ const PowerRelayWidget: React.FC<{ device: ForgeKeyDevice }> = ({ device }) => {
           <button
             type="button"
             onClick={() => send(ch, true)}
-            disabled={busy !== null}
+            disabled={busy !== null || deviceControlDown}
             data-testid={`relay-channel-${ch}-enable`}
           >
             {busy === `${ch}:true` ? 'Enabling…' : 'Enable'}
@@ -612,13 +648,18 @@ const PowerRelayWidget: React.FC<{ device: ForgeKeyDevice }> = ({ device }) => {
           <button
             type="button"
             onClick={() => send(ch, false)}
-            disabled={busy !== null}
+            disabled={busy !== null || deviceControlDown}
             data-testid={`relay-channel-${ch}-disable`}
           >
             {busy === `${ch}:false` ? 'Disabling…' : 'Disable'}
           </button>
         </div>
       ))}
+      <ServiceUnavailableNotice
+        service="device_control"
+        message={DEVICE_CONTROL_UNAVAILABLE}
+        testId="relay-device-control-notice"
+      />
       {error && (
         <small style={{ color: '#c0392b' }} data-testid="relay-channel-error">
           {error}

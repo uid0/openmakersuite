@@ -16,6 +16,7 @@ import NotificationBadge from './NotificationBadge';
 import NotificationBanner from './NotificationBanner';
 import NotificationCenter from './NotificationCenter';
 import OfflineIndicator from './OfflineIndicator';
+import ServiceStatusBanner from './ServiceStatusBanner';
 import SessionExpiredBanner from './SessionExpiredBanner';
 import Sidebar from './Sidebar';
 
@@ -107,6 +108,7 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
     return (
       <div className="workspace-layout no-sidebar">
         {/* Banners */}
+        <ServiceStatusBanner />
         {notifications.banners.length > 0 && (
           <div style={{ padding: '16px' }}>
             {notifications.banners.map((banner) => (
@@ -172,6 +174,7 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ children }) => {
             </div>
           </div>
           {/* Banners */}
+          <ServiceStatusBanner />
           {notifications.banners.length > 0 && (
             <div style={{ padding: '16px 20px 0' }}>
               {notifications.banners.map((banner) => (

@@ -42,8 +42,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ProjectStorageLabelPreview from '../components/ProjectStorageLabelPreview';
 import QRScanner from '../components/QRScanner';
+import ServiceUnavailableNotice from '../components/ServiceUnavailableNotice';
 import WorkspacePage from '../components/landing/WorkspacePage';
 import { useNotifications } from '../hooks/useNotifications';
+import { useServiceStatus } from '../hooks/useServiceStatus';
 import { projectStorageAPI } from '../services/api';
 import {
   ProjectStorageStatus,
@@ -83,6 +85,8 @@ const formatDate = (iso: string | null): string => {
 
 const FacilitiesProjectStoragePage: React.FC = () => {
   const notifications = useNotifications();
+  const { isDegraded } = useServiceStatus();
+  const emailDown = isDegraded('email');
   const navigate = useNavigate();
   // The :stintId param is optional — the page is mounted at both
   // /facilities/project-storage (lookup form) and
@@ -254,10 +258,14 @@ const FacilitiesProjectStoragePage: React.FC = () => {
   // -- which actions are available right now --------------------------
 
   const status: ProjectStorageStatus | null = stint?.status ?? null;
+  // The notice IS an email — the endpoint only stamps notice_sent_at once the
+  // message goes out — so with email down the button can only fail. Purgatory
+  // and removal are database-only and stay available.
   const canSendNotice =
-    status === 'expired' ||
-    status === 'expiring_soon' ||
-    status === 'purgatory_warned';
+    (status === 'expired' ||
+      status === 'expiring_soon' ||
+      status === 'purgatory_warned') &&
+    !emailDown;
   const canMoveToPurgatory =
     status === 'purgatory_warned' && stint?.notice_sent_at != null;
   const canMarkRemoved =
@@ -451,6 +459,13 @@ const FacilitiesProjectStoragePage: React.FC = () => {
                 Reprint claim ticket
               </Button>
             </Group>
+            {/* Directly under the action row rather than inside it — the Group
+                lays its children out as buttons in a line. */}
+            <ServiceUnavailableNotice
+              service="email"
+              message="Email delivery is temporarily unavailable — the violation notice can't be sent yet. We'll keep retrying."
+              testId="notice-email-unavailable"
+            />
 
             {/*
               Claim-label preview. Only mounted here (inside the loaded-stint

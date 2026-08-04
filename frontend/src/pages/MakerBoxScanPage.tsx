@@ -8,6 +8,8 @@
  * a pickup notice.
  */
 import React, { useCallback, useState } from 'react';
+import ServiceUnavailableNotice from '../components/ServiceUnavailableNotice';
+import { useServiceStatus } from '../hooks/useServiceStatus';
 import { makerBoxesAPI, MakerBoxScanResult } from '../services/api';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 
@@ -17,6 +19,12 @@ type FormState = {
 };
 
 const MakerBoxScanPage: React.FC = () => {
+  // The scan itself is a WHMCS membership lookup, and the pickup notice is an
+  // email sent inline (the endpoint 502s if the provider is down), so each
+  // control is gated on the dependency it actually needs.
+  const { isDegraded } = useServiceStatus();
+  const billingDown = isDegraded('whmcs');
+  const emailDown = isDegraded('email');
   const [form, setForm] = useState<FormState>({ binId: '', username: '' });
   const [result, setResult] = useState<MakerBoxScanResult | null>(null);
   const [boxId, setBoxId] = useState<number | null>(null);
@@ -128,13 +136,22 @@ const MakerBoxScanPage: React.FC = () => {
           />
         </label>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button type="submit" disabled={submitting} style={{ padding: '0.5rem 1rem' }}>
+          <button
+            type="submit"
+            disabled={submitting || billingDown}
+            style={{ padding: '0.5rem 1rem' }}
+          >
             {submitting ? 'Checking…' : 'Scan'}
           </button>
           <button type="button" onClick={reset} style={{ padding: '0.5rem 1rem' }}>
             Reset
           </button>
         </div>
+        <ServiceUnavailableNotice
+          service="whmcs"
+          message="Membership lookups are unavailable right now — a scan can't confirm this member's status."
+          testId="scan-whmcs-notice"
+        />
       </form>
 
       {error && (
@@ -167,7 +184,7 @@ const MakerBoxScanPage: React.FC = () => {
             <button
               type="button"
               onClick={handleEmailPickup}
-              disabled={emailSending || !!emailSentTo}
+              disabled={emailSending || !!emailSentTo || emailDown}
               style={{
                 marginTop: '1rem',
                 padding: '0.5rem 1rem',
@@ -186,6 +203,17 @@ const MakerBoxScanPage: React.FC = () => {
             </button>
           )}
         </div>
+      )}
+
+      {/* Sits under the status card rather than inside it — the card's solid
+          red/green background would swallow the warning colour — and only
+          when the pickup button it explains is on screen. */}
+      {boxId !== null && (
+        <ServiceUnavailableNotice
+          service="email"
+          message="Email delivery is temporarily unavailable — we'll keep retrying, so send the pickup notice again shortly."
+          testId="pickup-email-notice"
+        />
       )}
     </div>
   );

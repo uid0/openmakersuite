@@ -10,6 +10,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { ServiceStatusProvider } from './contexts/ServiceStatusContext';
 import { restoreSentryAuthFromStorage } from './services/sentryAuth';
 import './styles/index.css';
 
@@ -106,8 +107,12 @@ root.render(
     <MantineProvider>
       <ModalsProvider>
         <NotificationProvider>
-          <Notifications />
-          <App />
+          {/* One poll of the service-status endpoint for the whole tab; the
+              banner and every inline gate read from it. */}
+          <ServiceStatusProvider>
+            <Notifications />
+            <App />
+          </ServiceStatusProvider>
         </NotificationProvider>
       </ModalsProvider>
     </MantineProvider>

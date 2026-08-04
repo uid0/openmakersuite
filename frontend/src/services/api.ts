@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, AssignSlotRequest, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageAssignment, StorageAssignmentType, StorageOverview, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, AssignSlotRequest, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, ResilienceStatus, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageAssignment, StorageAssignmentType, StorageOverview, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -5440,6 +5440,18 @@ export const storageVisionAPI = {
       '/storage-vision/observations/bulk-approve/',
       reason ? { observation_ids, reason } : { observation_ids },
     ),
+};
+
+// ---------------------------------------------------------------------------
+// Service status (resilience)
+// ---------------------------------------------------------------------------
+
+// Which external dependencies are working right now, derived from the backend
+// circuit breakers. Always 200 for an authenticated caller — a degraded
+// dependency is reported in the body, never as an error status. Polled by
+// ServiceStatusProvider; see contexts/ServiceStatusContext.tsx.
+export const resilienceAPI = {
+  getStatus: () => api.get<ResilienceStatus>('/resilience/status/'),
 };
 
 export default api;

@@ -2304,3 +2304,53 @@ export interface StorageOverview {
   racks: StorageOverviewRack[];
   generated_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// Service status — GET /api/resilience/status/ (backend: resilience/services.py)
+// ---------------------------------------------------------------------------
+
+/**
+ * Aggregate circuit-breaker state for one capability. `half_open` means the
+ * dependency is on trial after an outage — still degraded, calls may fail.
+ */
+export type ServiceStatusState = 'closed' | 'half_open' | 'open';
+
+/**
+ * Stable machine keys, mirroring the backend SERVICE_REGISTRY. Call sites
+ * switch on these to gate a control; a key the backend adds later is still
+ * reported in the banner by its label, it just gates nothing until a call
+ * site opts in.
+ */
+export type ServiceKey =
+  | 'device_control'
+  | 'webhooks'
+  | 'whmcs'
+  | 'common_api'
+  | 'email';
+
+export interface ServiceStatus {
+  key: ServiceKey;
+  /** User-facing service name, e.g. "Device control". */
+  label: string;
+  /** What the user loses while this is degraded. */
+  description: string;
+  state: ServiceStatusState;
+  healthy: boolean;
+  /** When the service entered its current state; null if it never transitioned. */
+  since: string | null;
+  /**
+   * Error detail from that transition. Internal detail — never render this in
+   * a member-facing surface; it exists for a staff status view only.
+   */
+  last_error: string | null;
+  /** Member breakers currently open or half-open (families like webhooks). */
+  degraded_count: number;
+  /** Member breakers with a known state; 1 for a single-breaker service. */
+  total_count: number;
+}
+
+export interface ResilienceStatus {
+  degraded: boolean;
+  checked_at: string;
+  services: ServiceStatus[];
+}

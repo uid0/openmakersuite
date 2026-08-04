@@ -490,6 +490,14 @@ CIRCUIT_BREAKERS_ENABLED = config("CIRCUIT_BREAKERS_ENABLED", default=not _RUNNI
 CIRCUIT_BREAKER_USE_REDIS = config(
     "CIRCUIT_BREAKER_USE_REDIS", default=not _RUNNING_TESTS, cast=bool
 )
+# The "email" breaker (resilience.email) backs off much harder than the 30s
+# circuit default: the failure it exists for is a bad/expired Postmark token,
+# which is persistent rather than transient, so re-probing every 30s would
+# hammer the provider forever.
+CIRCUIT_BREAKER_EMAIL_FAIL_MAX = config("CIRCUIT_BREAKER_EMAIL_FAIL_MAX", default=5, cast=int)
+CIRCUIT_BREAKER_EMAIL_RESET_TIMEOUT = config(
+    "CIRCUIT_BREAKER_EMAIL_RESET_TIMEOUT", default=300, cast=float
+)
 
 # gh-vision (storage_vision app). Feature-flagged from day one so a
 # deploy that doesn't want the camera/marker pipeline can keep the URL

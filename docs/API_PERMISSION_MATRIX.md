@@ -383,8 +383,8 @@ category spend, and a maintenance forecast.
 Circuit-breaker health rendered as user-facing service status, so the web
 app and ScanTTY can tell a member which capability is unavailable instead
 of failing silently. The registry in `resilience/services.py` maps breaker
-names (`mqtt`, `whmcs`, `common_api`, and the dynamic `webhook:<id>`
-family) onto labelled capabilities.
+names (`mqtt`, `whmcs`, `common_api`, `email`, and the dynamic
+`webhook:<id>` family) onto labelled capabilities.
 
 | Method | Path | Class | Purpose | Notes |
 | --- | --- | --- | --- | --- |

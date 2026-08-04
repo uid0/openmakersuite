@@ -15,6 +15,7 @@ from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 
 from inventory.models import LocationProblem
+from resilience.email import send_breakered_email
 
 logger = logging.getLogger(__name__)
 
@@ -57,5 +58,5 @@ def email_logistics_alert(problem: LocationProblem) -> bool:
         from_email=settings.DEFAULT_FROM_EMAIL,
         to=[recipient],
     )
-    message.send(fail_silently=False)
+    send_breakered_email(message, fail_silently=False)
     return True

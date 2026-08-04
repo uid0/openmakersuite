@@ -13,6 +13,8 @@ from django.utils import timezone
 import sentry_sdk
 from celery import shared_task
 
+from resilience.email import send_breakered_email
+
 from .models import Vendor
 
 logger = logging.getLogger(__name__)
@@ -117,11 +119,14 @@ def flag_expiring_compliance() -> Dict[str, int]:
         return counts
 
     body = _format_digest(buckets)
-    EmailMessage(
-        subject=f"[OMS] Vendor compliance: {total} flagged",
-        body=body,
-        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
-        to=recipients,
-    ).send(fail_silently=False)
+    send_breakered_email(
+        EmailMessage(
+            subject=f"[OMS] Vendor compliance: {total} flagged",
+            body=body,
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            to=recipients,
+        ),
+        fail_silently=False,
+    )
     logger.info("vendor compliance: digest sent to %d recipients (%s)", len(recipients), counts)
     return counts

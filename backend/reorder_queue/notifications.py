@@ -17,6 +17,8 @@ from django.contrib.auth import get_user_model
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 
+from resilience.email import send_breakered_email
+
 if TYPE_CHECKING:
     from .models import ReorderRequest
 
@@ -154,7 +156,7 @@ def send_reorder_request_notification(reorder_request: "ReorderRequest") -> Opti
             to=recipients,
         )
         message.attach_alternative(html_body, "text/html")
-        sent = message.send(fail_silently=False)
+        sent = send_breakered_email(message, fail_silently=False)
         logger.info(
             "Sent reorder-request notification for %s to %d recipient(s)",
             reorder_request.id,

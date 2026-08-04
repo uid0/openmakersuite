@@ -30,13 +30,14 @@ def _by_key(rows) -> dict:
 
 
 class TestRegistry:
-    def test_registers_the_four_wired_breakers(self):
+    def test_registers_the_wired_breakers(self):
         registry = {descriptor.key: descriptor for descriptor in SERVICE_REGISTRY}
-        assert set(registry) == {"device_control", "webhooks", "whmcs", "common_api"}
+        assert set(registry) == {"device_control", "webhooks", "whmcs", "common_api", "email"}
         assert registry["device_control"].breaker == "mqtt"
         assert registry["webhooks"].breaker_prefix == "webhook:"
         assert registry["whmcs"].breaker == "whmcs"
         assert registry["common_api"].breaker == "common_api"
+        assert registry["email"].breaker == "email"
 
     def test_keys_and_labels_are_unique(self):
         keys = [descriptor.key for descriptor in SERVICE_REGISTRY]

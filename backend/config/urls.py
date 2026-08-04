@@ -79,6 +79,9 @@ urlpatterns = [
     path("api/storage-vision/", include("storage_vision.urls")),
     path("api/interlocks/", include("interlocks.urls")),
     path("api/accounting/", include("accounting.urls")),
+    # Circuit-breaker health as a user-facing status board, so the web app
+    # and ScanTTY can say which capability is down instead of failing silently.
+    path("api/resilience/", include("resilience.urls")),
     # Flower proxy (superuser only)
     path("flower/", include("config.flower_urls")),
 ]

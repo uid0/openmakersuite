@@ -68,6 +68,7 @@ def test_permission_matrix_covers_documented_apps():
         "membership.views",
         "notifications.views",
         "reorder_queue.views",
+        "resilience.views",
         "screens.views",
         "search.views",
         "vendors.views",

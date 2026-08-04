@@ -47,6 +47,18 @@ class BaseStorage:
     def state(self, name: str) -> str:
         raise NotImplementedError
 
+    def states(self, prefix: str = "") -> dict[str, str]:
+        """Every breaker name known to this storage that starts with
+        ``prefix``, mapped to its current state.
+
+        Only breakers that have actually recorded state are listed — a
+        breaker that has never transitioned has nothing stored and is
+        (correctly) treated as an unknown, healthy member. Used by
+        :mod:`resilience.services` to aggregate dynamic breaker families
+        such as ``webhook:<id>``.
+        """
+        raise NotImplementedError
+
     def trip_open(self, name: str) -> None:
         raise NotImplementedError
 
@@ -78,6 +90,12 @@ class InMemoryStorage(BaseStorage):
     def state(self, name: str) -> str:
         with self._lock:
             return self._row(name)["state"]
+
+    def states(self, prefix: str = "") -> dict[str, str]:
+        with self._lock:
+            return {
+                name: row["state"] for name, row in self._rows.items() if name.startswith(prefix)
+            }
 
     def trip_open(self, name: str) -> None:
         with self._lock:
@@ -113,12 +131,28 @@ class RedisStorage(BaseStorage):
     """Fleet-shared state in Redis. Minor races during a transition are
     acceptable for a circuit breaker (worst case: a few extra trial calls)."""
 
+    #: Characters SCAN's MATCH pattern treats as glob syntax.
+    _GLOB_META = "\\*?[]"
+
     def __init__(self, client, prefix: str = "cb:") -> None:
         self._r = client
         self._p = prefix
 
     def _k(self, name: str, field: str) -> str:
         return f"{self._p}{name}:{field}"
+
+    def _name_from_key(self, key: str) -> str:
+        """``cb:webhook:12:state`` -> ``webhook:12``. Empty when the key is
+        not a state key (breaker names may themselves contain colons, so we
+        strip the fixed prefix/suffix rather than splitting)."""
+        if not key.startswith(self._p) or not key.endswith(":state"):
+            return ""
+        return key[len(self._p) : -len(":state")]
+
+    @classmethod
+    def _escape_glob(cls, value: str) -> str:
+        """Escape Redis glob metacharacters so a literal prefix stays literal."""
+        return "".join(f"\\{ch}" if ch in cls._GLOB_META else ch for ch in value)
 
     @staticmethod
     def _decode(value):
@@ -134,6 +168,27 @@ class RedisStorage(BaseStorage):
         except Exception:  # noqa: BLE001 — Redis down must not break callers
             logger.debug("Circuit '%s': redis state read failed", name, exc_info=True)
             return STATE_CLOSED
+
+    def states(self, prefix: str = "") -> dict[str, str]:
+        # SCAN, never KEYS: prod Redis is shared and KEYS blocks the server
+        # for the whole keyspace. Same degrade-gracefully contract as the
+        # rest of this class — a Redis outage yields {} (every member reads
+        # as healthy) instead of raising into the caller.
+        try:
+            pattern = f"{self._p}{self._escape_glob(prefix)}*:state"
+            keys = [self._decode(key) for key in self._r.scan_iter(match=pattern, count=200)]
+            if not keys:
+                return {}
+            values = self._r.mget(keys)
+            found: dict[str, str] = {}
+            for key, value in zip(keys, values):
+                name = self._name_from_key(key)
+                if name:
+                    found[name] = self._decode(value) or STATE_CLOSED
+            return found
+        except Exception:  # noqa: BLE001
+            logger.debug("Circuit scan for prefix '%s' failed", prefix, exc_info=True)
+            return {}
 
     def trip_open(self, name: str) -> None:
         try:

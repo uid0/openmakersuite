@@ -86,11 +86,12 @@ SERVICE_REGISTRY: tuple[ServiceDescriptor, ...] = (
         description="Member lookups from the shared directory",
         breaker="common_api",
     ),
-    # Seam for PR2: once outbound mail routes through a breaker, add
-    #     ServiceDescriptor(key="email", label="Email delivery", ...,
-    #                       breaker="postmark")
-    # here. Nothing else changes — the status endpoint renders whatever this
-    # tuple contains.
+    ServiceDescriptor(
+        key="email",
+        label="Email delivery",
+        description="Sending notifications, reorder alerts, and receipts",
+        breaker="email",
+    ),
 )
 
 

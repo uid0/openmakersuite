@@ -16,7 +16,7 @@ from resilience.circuit import (
     reset_storage,
 )
 from resilience.models import CircuitBreakerEvent
-from resilience.services import service_statuses
+from resilience.services import SERVICE_REGISTRY, service_statuses
 from resilience.tests.test_circuit import _BrokenRedis
 
 pytestmark = pytest.mark.django_db
@@ -69,6 +69,7 @@ class TestHealthyPath:
             "webhooks",
             "whmcs",
             "common_api",
+            "email",
         }
         for row in body["services"]:
             assert row["state"] == STATE_CLOSED
@@ -222,7 +223,7 @@ class TestSinceAndLastError:
         memory_storage.trip_open("whmcs")
 
         with django_assert_num_queries(1):
-            assert len(service_statuses(memory_storage)) == 4
+            assert len(service_statuses(memory_storage)) == len(SERVICE_REGISTRY)
 
 
 class TestDegradesInsteadOfFailing:

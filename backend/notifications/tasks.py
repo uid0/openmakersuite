@@ -26,6 +26,8 @@ from django.utils import timezone
 
 from celery import shared_task
 
+from resilience.email import send_breakered_email
+
 logger = logging.getLogger(__name__)
 
 # A new-device sign-in is a security signal, so by default we email the alert
@@ -99,7 +101,7 @@ def send_new_device_alert(user, device) -> Optional[int]:
             to=[user.email],
         )
         message.attach_alternative(html_body, "text/html")
-        sent = message.send(fail_silently=False)
+        sent = send_breakered_email(message, fail_silently=False)
         logger.info("Sent new-device alert email to user %s", user.pk)
         return sent
     except Exception:  # noqa: BLE001 — email failure must not fail the task

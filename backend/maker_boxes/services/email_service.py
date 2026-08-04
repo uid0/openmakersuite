@@ -7,6 +7,8 @@ import logging
 from django.conf import settings
 from django.core.mail import EmailMessage
 
+from resilience.email import send_breakered_email
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,7 +43,7 @@ def send_pickup_notification(*, recipient: str, first_name: str, bin_id: str) ->
             from_email=from_email,
             to=[recipient],
         )
-        sent = message.send()
+        sent = send_breakered_email(message)
         return bool(sent)
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("send_pickup_notification failed for %s: %s", recipient, exc)

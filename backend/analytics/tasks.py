@@ -22,6 +22,8 @@ from django.template.loader import render_to_string
 import sentry_sdk
 from celery import shared_task
 
+from resilience.email import send_breakered_email
+
 from .services.aggregation import category_spend, top_users, value_summary, wo_volume
 from .services.email_charts import render_category_spend_png, render_volume_trend_png
 from .services.forecast import maintenance_forecast
@@ -206,7 +208,7 @@ def send_monthly_pulse(
             "reason": "dry-run",
         }
 
-    sent_count = message.send(fail_silently=False)
+    sent_count = send_breakered_email(message, fail_silently=False)
     logger.info(
         "Sent monthly pulse for %s..%s to %d recipient(s)",
         period_start,

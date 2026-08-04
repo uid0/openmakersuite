@@ -8,6 +8,8 @@ from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 
+from resilience.email import send_breakered_email
+
 from ..models import DEFAULT_PURGATORY_GRACE_DAYS, ProjectStorageStint
 
 
@@ -49,5 +51,5 @@ def send_violation_notice(stint: ProjectStorageStint) -> bool:
         to=[stint.email],
     )
     message.attach_alternative(html_body, "text/html")
-    message.send(fail_silently=False)
+    send_breakered_email(message, fail_silently=False)
     return True

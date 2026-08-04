@@ -13,6 +13,7 @@ from django.conf import settings
 from django.core.mail import EmailMessage
 
 from donations.models import Donation, TaxReceipt
+from resilience.email import send_breakered_email
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ class DonationEmailService:
                 except Exception as e:
                     logger.error(f"Could not attach PDF to email: {e}")
 
-            email.send()
+            send_breakered_email(email)
             logger.info(
                 f"Tax receipt email sent to {donation.donor_email} for donation {donation.id}"
             )
@@ -109,7 +110,7 @@ class DonationEmailService:
                 to=[donation.donor_email],
             )
 
-            email.send()
+            send_breakered_email(email)
             logger.info(
                 f"Quarterly update email sent to {donation.donor_email} for donation {donation.id}"
             )

@@ -677,7 +677,7 @@ def _sig_leader_and_finance_recipients(wo: ThirdPartyWorkOrder):
 
 def _emit_scheduling_email(wo: ThirdPartyWorkOrder) -> None:
     """Step 3: notify Ops that a vendor is scheduled (site-access notice)."""
-    from django.core.mail import send_mail
+    from resilience.email import breakered_send_mail
 
     recipients = list(_ops_recipients().values_list("email", flat=True))
     recipients = [e for e in recipients if e]
@@ -691,14 +691,13 @@ def _emit_scheduling_email(wo: ThirdPartyWorkOrder) -> None:
         f"Keyfob: {wo.keyfob_id or '(to be assigned)'}\n"
         f"Site-access required — Ops should expect arrival."
     )
-    send_mail(subject, body, None, recipients, fail_silently=True)
+    breakered_send_mail(subject, body, None, recipients, fail_silently=True)
 
 
 def _alert_variance_blocked(wo: ThirdPartyWorkOrder) -> None:
     """Step 6: variance blocked — in-app notification + email to SIG + Finance."""
-    from django.core.mail import send_mail
-
     from notifications.models import Notification
+    from resilience.email import breakered_send_mail
 
     recipients = list(_sig_leader_and_finance_recipients(wo))
     overage = (wo.actual_invoice_total or Decimal("0")) - (wo.nte_amount or Decimal("0"))
@@ -723,7 +722,7 @@ def _alert_variance_blocked(wo: ThirdPartyWorkOrder) -> None:
         )
     emails = [u.email for u in recipients if u.email]
     if emails:
-        send_mail(
+        breakered_send_mail(
             f"[Variance Block] {wo.short_id}",
             message,
             None,
@@ -762,9 +761,8 @@ def _closure_recipients(wo: ThirdPartyWorkOrder):
 
 def _emit_closure_notifications(wo: ThirdPartyWorkOrder) -> None:
     """Step 7: SIG/Finance/opener closure notification — in-app + email."""
-    from django.core.mail import send_mail
-
     from notifications.models import Notification
+    from resilience.email import breakered_send_mail
 
     recipients = list(_closure_recipients(wo))
     asset_label = wo.asset.name if wo.asset else "(no asset linked)"
@@ -808,7 +806,7 @@ def _emit_closure_notifications(wo: ThirdPartyWorkOrder) -> None:
         )
     emails = [u.email for u in recipients if u.email]
     if emails:
-        send_mail(
+        breakered_send_mail(
             f"[WO Closed] {wo.short_id}",
             message,
             None,

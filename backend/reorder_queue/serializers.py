@@ -63,7 +63,24 @@ class ReorderRequestSerializer(serializers.ModelSerializer):
             "supplier_url",
             "public_notes",
         ]
-        read_only_fields = ["requested_at", "updated_at"]
+        # The workflow state and the stamps that go with it are owned by the
+        # ``approve`` / ``mark_ordered`` / ``mark_received`` / ``cancel``
+        # actions — that is where the permission checks and the timestamping
+        # live. Left writable, ``PATCH {"status": "approved"}`` let any
+        # authenticated member sign off their own request without passing the
+        # approver gate, and landed the row approved with a NULL reviewer —
+        # which is exactly what makes it eligible to be purchased (op-xj1i,
+        # the side door left open by op-tm70). Read-only here means a write to
+        # one of these is ignored rather than applied; the response body still
+        # echoes the true state.
+        read_only_fields = [
+            "requested_at",
+            "updated_at",
+            "status",
+            "reviewed_by",
+            "reviewed_at",
+            "ordered_at",
+        ]
 
 
 class ReorderRequestCreateSerializer(serializers.ModelSerializer):

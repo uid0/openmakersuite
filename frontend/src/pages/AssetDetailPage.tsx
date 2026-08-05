@@ -5,6 +5,7 @@
 import { Badge, Button, Group, Paper, Switch, Text } from '@mantine/core';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import AssetBoundDevicesCard from '../components/AssetBoundDevicesCard';
 import AssetForgeKeyAccessCard from '../components/AssetForgeKeyAccessCard';
 import AssetReservationsAndOOSSection from '../components/AssetReservationsAndOOSSection';
 import AssetDocumentsSection from '../components/assets/AssetDocumentsSection';
@@ -1422,6 +1423,12 @@ const AssetDetailPage: React.FC = () => {
             localStorage.getItem('is_superuser') === 'true') && (
             <AssetForgeKeyAccessCard assetId={id} />
           )}
+
+        {/* Attaching/detaching hardware is a staff action, same gate as the
+            access card above (op-rmic). Unlike that card this one renders even
+            when empty — an asset with no devices yet is exactly the case the
+            attach flow exists for. */}
+        {id && isStaff && <AssetBoundDevicesCard assetId={id} />}
 
         {id &&
           (localStorage.getItem('is_staff') === 'true' ||

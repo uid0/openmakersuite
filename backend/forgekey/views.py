@@ -1651,6 +1651,20 @@ class AssetDeviceViewSet(viewsets.ModelViewSet):
     serializer_class = AssetDeviceSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
+    def get_queryset(self):
+        """Allow ``?asset=<id>`` / ``?device=<id>`` so the asset detail page's
+        "Bound devices" section can fetch just this asset's bindings (op-rmic)
+        instead of paging the whole fleet's assignments."""
+        qs = super().get_queryset()
+        params = self.request.query_params
+        asset_id = params.get("asset")
+        device_id = params.get("device")
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        if device_id:
+            qs = qs.filter(device_id=device_id)
+        return qs
+
 
 class OperationalModeViewSet(viewsets.ModelViewSet):
     """API endpoint for operational modes."""

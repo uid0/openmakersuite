@@ -3057,6 +3057,23 @@ export interface ForgeKeyFirmwareRollout {
   dispatched?: number;
 }
 
+// An ESP32 device attached to an asset (relay, meter, …). ``role`` is free
+// text on the backend — ``power_control`` / ``metering`` are the conventional
+// values; ``is_primary`` picks which device answers for the asset (drives
+// status derivation and the device → asset lookup).
+export interface ForgeKeyAssetDevice {
+  id: number;
+  asset: string;
+  asset_name: string;
+  device: string;
+  device_name: string;
+  device_mac_address: string;
+  role: string;
+  is_primary: boolean;
+  power_off_delay_seconds: number;
+  created_at: string;
+}
+
 export interface ForgeKeyOperationalMode {
   id: number;
   asset: string;
@@ -3207,9 +3224,16 @@ export interface ForgeKeyBadgeSetResponse {
 }
 
 export const forgekeyAPI = {
-  listDevices: (opts: { capability?: string } = {}) =>
-    api.get<{ results?: ForgeKeyDevice[] } | ForgeKeyDevice[]>('/forgekey/devices/', {
-      params: opts.capability ? { capability: opts.capability } : undefined,
+  // The fleet is paginated (DRF default, 50/page) — pass ``page`` to walk it
+  // when a caller needs every device rather than the first screenful.
+  listDevices: (opts: { capability?: string; page?: number } = {}) =>
+    api.get<
+      { results?: ForgeKeyDevice[]; next?: string | null } | ForgeKeyDevice[]
+    >('/forgekey/devices/', {
+      params: {
+        ...(opts.capability ? { capability: opts.capability } : {}),
+        ...(opts.page != null ? { page: opts.page } : {}),
+      },
     }),
   getFleetSummary: () =>
     api.get<ForgeKeyFleetSummary>('/forgekey/devices/fleet-summary/'),
@@ -3228,6 +3252,27 @@ export const forgekeyAPI = {
   retireDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/retire/`),
   reactivateDevice: (id: string) => api.post<ForgeKeyDevice>(`/forgekey/devices/${id}/reactivate/`),
   deleteDevice: (id: string) => api.delete(`/forgekey/devices/${id}/`),
+  // Asset ↔ device bindings (op-rmic): the "Bound devices" section on the asset
+  // detail page attaches/detaches relays and meters without a trip to the admin.
+  listAssetDevices: (opts: { asset?: string; device?: string } = {}) =>
+    api.get<{ results?: ForgeKeyAssetDevice[] } | ForgeKeyAssetDevice[]>(
+      '/forgekey/asset-devices/',
+      {
+        params: {
+          ...(opts.asset ? { asset: opts.asset } : {}),
+          ...(opts.device ? { device: opts.device } : {}),
+        },
+      },
+    ),
+  createAssetDevice: (body: {
+    asset: string;
+    device: string;
+    role?: string;
+    is_primary?: boolean;
+  }) => api.post<ForgeKeyAssetDevice>('/forgekey/asset-devices/', body),
+  updateAssetDevice: (id: number, data: Partial<ForgeKeyAssetDevice>) =>
+    api.patch<ForgeKeyAssetDevice>(`/forgekey/asset-devices/${id}/`, data),
+  deleteAssetDevice: (id: number) => api.delete(`/forgekey/asset-devices/${id}/`),
   // Asset access controls (#7b): operational mode + authorizations + lockouts,
   // surfaced on the asset detail page. All keyed to an inventory Asset id.
   listOperationalModes: (assetId: string) =>

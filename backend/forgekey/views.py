@@ -11,6 +11,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import F
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
@@ -1644,6 +1645,27 @@ def _parse_since_window(raw: str):
     return parsed
 
 
+def _filter_by_id(queryset, field, raw):
+    """Apply ``<field>=<raw>`` to *queryset*, narrowing to none() on a bad id.
+
+    An id off the query string is caller-controlled text, and handing it
+    straight to ``filter()`` lets the target field's own coercion raise:
+    ``ValueError`` for the integer pks (``location``, ``user``, ``actor``) and
+    ``ValidationError`` for the UUID ones (``asset``, ``device``). Only the
+    latter is translated by ``standardized_exception_handler``, so today the
+    same caller mistake answers 400 on some of these endpoints and 500 on
+    others. A present-but-unparseable id matches no rows, so answer with an
+    empty page everywhere instead. An absent or blank param is not a filter at
+    all and leaves the queryset untouched.
+    """
+    if not raw:
+        return queryset
+    try:
+        return queryset.filter(**{field: raw})
+    except (TypeError, ValueError, DjangoValidationError):
+        return queryset.none()
+
+
 class AssetDeviceViewSet(viewsets.ModelViewSet):
     """API endpoint for asset-device relationships."""
 
@@ -1657,12 +1679,8 @@ class AssetDeviceViewSet(viewsets.ModelViewSet):
         instead of paging the whole fleet's assignments."""
         qs = super().get_queryset()
         params = self.request.query_params
-        asset_id = params.get("asset")
-        device_id = params.get("device")
-        if asset_id:
-            qs = qs.filter(asset_id=asset_id)
-        if device_id:
-            qs = qs.filter(device_id=device_id)
+        qs = _filter_by_id(qs, "asset_id", params.get("asset"))
+        qs = _filter_by_id(qs, "device_id", params.get("device"))
         return qs
 
 
@@ -1677,10 +1695,7 @@ class OperationalModeViewSet(viewsets.ModelViewSet):
         """Allow ``?asset=<id>`` so the asset detail page can fetch just the
         single OperationalMode (if any) for the asset it's showing."""
         qs = super().get_queryset()
-        asset_id = self.request.query_params.get("asset")
-        if asset_id:
-            qs = qs.filter(asset_id=asset_id)
-        return qs
+        return _filter_by_id(qs, "asset_id", self.request.query_params.get("asset"))
 
     @action(detail=True, methods=["post"])
     def enable_classroom_mode(self, request, pk=None):
@@ -1736,10 +1751,7 @@ class RoomOperationalModeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """Allow ``?location=<id>`` so a room panel can fetch just its mode."""
         qs = super().get_queryset()
-        location_id = self.request.query_params.get("location")
-        if location_id:
-            qs = qs.filter(location_id=location_id)
-        return qs
+        return _filter_by_id(qs, "location_id", self.request.query_params.get("location"))
 
     def _actor(self):
         user = self.request.user
@@ -1770,15 +1782,9 @@ class IndicatorBindingViewSet(viewsets.ModelViewSet):
         """Filter by ``?device=`` / ``?asset=`` / ``?location=`` for detail pages."""
         qs = super().get_queryset()
         params = self.request.query_params
-        device_id = params.get("device")
-        asset_id = params.get("asset")
-        location_id = params.get("location")
-        if device_id:
-            qs = qs.filter(device_id=device_id)
-        if asset_id:
-            qs = qs.filter(asset_id=asset_id)
-        if location_id:
-            qs = qs.filter(location_id=location_id)
+        qs = _filter_by_id(qs, "device_id", params.get("device"))
+        qs = _filter_by_id(qs, "asset_id", params.get("asset"))
+        qs = _filter_by_id(qs, "location_id", params.get("location"))
         return qs
 
     def _actor(self):
@@ -1843,12 +1849,8 @@ class AssetAuthorizationViewSet(viewsets.ModelViewSet):
         ``?user=`` backs the per-member "assets I'm authorized for" view (op-tup);
         ``?is_active=`` narrows either to the currently-active grants."""
         qs = super().get_queryset()
-        asset_id = self.request.query_params.get("asset")
-        if asset_id:
-            qs = qs.filter(asset_id=asset_id)
-        user_id = self.request.query_params.get("user")
-        if user_id:
-            qs = qs.filter(user_id=user_id)
+        qs = _filter_by_id(qs, "asset_id", self.request.query_params.get("asset"))
+        qs = _filter_by_id(qs, "user_id", self.request.query_params.get("user"))
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() in ("1", "true", "yes"))
@@ -2077,15 +2079,9 @@ class ForgeKeyAuditEventViewSet(viewsets.ReadOnlyModelViewSet):
         action_filter = params.get("action")
         if action_filter:
             qs = qs.filter(action=action_filter)
-        asset_id = params.get("asset")
-        if asset_id:
-            qs = qs.filter(asset_id=asset_id)
-        actor_id = params.get("actor")
-        if actor_id:
-            qs = qs.filter(actor_id=actor_id)
-        device_id = params.get("device")
-        if device_id:
-            qs = qs.filter(device_id=device_id)
+        qs = _filter_by_id(qs, "asset_id", params.get("asset"))
+        qs = _filter_by_id(qs, "actor_id", params.get("actor"))
+        qs = _filter_by_id(qs, "device_id", params.get("device"))
         return qs
 
 
@@ -2101,9 +2097,7 @@ class DeviceLockoutViewSet(viewsets.ModelViewSet):
         detail page can list just that asset's lockouts (typically the active
         ones)."""
         qs = super().get_queryset()
-        asset_id = self.request.query_params.get("asset")
-        if asset_id:
-            qs = qs.filter(asset_id=asset_id)
+        qs = _filter_by_id(qs, "asset_id", self.request.query_params.get("asset"))
         is_active = self.request.query_params.get("is_active")
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() in ("1", "true", "yes"))

@@ -5,18 +5,25 @@ Added for #7b so the asset detail page can fetch just the records for the
 asset it's showing via ``?asset=<id>`` (plus ``?is_active=`` for the
 authorization/lockout lists). op-rmic extends the same convention to
 ``/asset-devices/`` for the "Bound devices" section.
+
+``TestInvalidIdFilters`` (op-7487) covers the whole id-filter family across
+these viewsets, including the ``?location=`` / ``?user=`` / ``?actor=`` and
+indicator/access-log siblings that share the same ``_filter_by_id`` guard.
 """
 
 import pytest
 from rest_framework.test import APIClient
 
-from forgekey.models import AssetDevice
+from forgekey.audit import record_event
+from forgekey.models import AssetDevice, ForgeKeyAuditEvent
 from forgekey.tests.factories import (
     AssetAuthorizationFactory,
     AssetDeviceFactory,
     DeviceLockoutFactory,
     ESP32DeviceFactory,
+    IndicatorBindingFactory,
     OperationalModeFactory,
+    RoomOperationalModeFactory,
 )
 from inventory.tests.factories import AssetFactory
 
@@ -169,3 +176,112 @@ class TestAssetDeviceFilter:
         detached = client.delete(f"/api/forgekey/asset-devices/{created.data['id']}/")
         assert detached.status_code == 204
         assert not AssetDevice.objects.filter(asset=asset, device=device).exists()
+
+
+# Every ``?<param>=<id>`` filter across the ForgeKey access viewsets, as
+# (endpoint path, query param). The pks behind them are split between UUIDs
+# (asset, device) and integers (location, user, actor), which raise different
+# exceptions out of ``filter()`` — the guard has to cover both.
+ID_FILTERS = [
+    ("asset-devices", "asset"),
+    ("asset-devices", "device"),
+    ("operational-modes", "asset"),
+    ("room-operational-modes", "location"),
+    ("indicator-bindings", "asset"),
+    ("indicator-bindings", "device"),
+    ("indicator-bindings", "location"),
+    ("authorizations", "asset"),
+    ("authorizations", "user"),
+    ("access-log", "asset"),
+    ("access-log", "actor"),
+    ("access-log", "device"),
+    ("lockouts", "asset"),
+]
+
+
+@pytest.fixture
+def one_row_per_endpoint():
+    """Seed one real row behind every endpoint in ``ID_FILTERS``.
+
+    The rows matter: they are what distinguishes "the bad id narrowed to
+    nothing" from "the bad id was silently dropped and you got the whole
+    table back".
+    """
+    AssetDeviceFactory()
+    OperationalModeFactory()
+    RoomOperationalModeFactory()
+    IndicatorBindingFactory()
+    AssetAuthorizationFactory(asset=AssetFactory())
+    DeviceLockoutFactory()
+    record_event(action=ForgeKeyAuditEvent.ACTION_ACCESS_GRANTED, asset=AssetFactory())
+
+
+class TestInvalidIdFilters:
+    """op-7487: a garbage id in a filter param is a caller mistake, not a 500.
+
+    Before the ``_filter_by_id`` guard these reached the field's own coercion
+    inside ``filter()``: the integer pks (``location``, ``user``, ``actor``)
+    raised ``ValueError`` and surfaced as an unhandled 500, while the UUID pks
+    raised Django's ``ValidationError`` and were translated to a 400 by
+    ``standardized_exception_handler``. Same mistake, two different answers,
+    neither of them the empty page the caller should get.
+    """
+
+    @pytest.mark.parametrize("endpoint,param", ID_FILTERS)
+    def test_unparseable_id_returns_empty_page(self, client, one_row_per_endpoint, endpoint, param):
+        """Parametrized over every call site: a missed one shows up here."""
+        resp = client.get(f"/api/forgekey/{endpoint}/?{param}=abc")
+
+        assert resp.status_code == 200, resp.content
+        assert _results(resp) == []
+
+    @pytest.mark.parametrize(
+        "endpoint,param",
+        [("asset-devices", "asset"), ("authorizations", "user")],
+        ids=["uuid-pk", "int-pk"],
+    )
+    def test_digit_leading_garbage_id_returns_empty_page(
+        self, client, one_row_per_endpoint, endpoint, param
+    ):
+        """A truncated/typo'd id that starts numeric is the realistic mistake,
+        and it is invalid for a UUID pk and an integer pk alike."""
+        resp = client.get(f"/api/forgekey/{endpoint}/?{param}=12x34")
+
+        assert resp.status_code == 200, resp.content
+        assert _results(resp) == []
+
+    @pytest.mark.parametrize(
+        "endpoint,param",
+        [("asset-devices", "asset"), ("authorizations", "user")],
+        ids=["uuid-pk", "int-pk"],
+    )
+    def test_blank_id_is_not_a_filter(self, client, one_row_per_endpoint, endpoint, param):
+        """An empty ``?asset=`` is an absent filter, not an invalid one — it
+        must keep returning the unfiltered list rather than narrowing to none."""
+        resp = client.get(f"/api/forgekey/{endpoint}/?{param}=")
+
+        assert resp.status_code == 200, resp.content
+        assert len(_results(resp)) == 1
+
+    def test_valid_id_still_filters(self, client, one_row_per_endpoint):
+        """The guard must not swallow working filters: a real id still narrows."""
+        asset = AssetFactory()
+        AssetDeviceFactory(asset=asset)
+
+        resp = client.get(f"/api/forgekey/asset-devices/?asset={asset.id}")
+
+        assert resp.status_code == 200, resp.content
+        results = _results(resp)
+        assert len(results) == 1
+        assert str(results[0]["asset"]) == str(asset.id)
+
+    def test_bad_id_narrows_a_combined_filter(self, client):
+        """A bad id in one param must not be ignored just because another
+        param in the same ``get_queryset`` is valid."""
+        asset = AssetFactory()
+        AssetAuthorizationFactory(asset=asset, is_active=True)
+
+        resp = client.get("/api/forgekey/authorizations/?user=abc&is_active=true")
+
+        assert resp.status_code == 200, resp.content
+        assert _results(resp) == []

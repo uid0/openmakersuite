@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 
+import cv2
 import pytest
 import qrcode
 from PIL import Image
@@ -96,6 +97,45 @@ def _qr_png(payload: str, box_size: int = 8) -> bytes:
     return buf.getvalue()
 
 
+def _two_qr_frame(payload_a: str, payload_b: str) -> bytes:
+    """Build an 800x600 PNG carrying two markers side by side.
+
+    Stands in for the normal capture: a shelf photographed with several
+    slot markers in frame.
+    """
+    qr_a = Image.open(BytesIO(_qr_png(payload_a, box_size=6))).convert("RGB").resize((260, 260))
+    qr_b = Image.open(BytesIO(_qr_png(payload_b, box_size=6))).convert("RGB").resize((260, 260))
+    canvas = Image.new("RGB", (800, 600), (200, 200, 200))
+    canvas.paste(qr_a, (40, 40))
+    canvas.paste(qr_b, (460, 40))
+    buf = BytesIO()
+    canvas.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class _LegacyMissDetector:
+    """Stand-in for the legacy backend's silent-miss behaviour.
+
+    Decodes only the payloads it was handed, whatever is actually in the
+    frame — ``None`` for "missed everything".
+    """
+
+    QUAD = [[40.0, 40.0], [300.0, 40.0], [300.0, 300.0], [40.0, 300.0]]
+
+    def __init__(self, decodes: list[str] | None = None):
+        self._decodes = decodes or []
+
+    def detectAndDecodeMulti(self, _img):
+        if not self._decodes:
+            return False, [], None, None
+        return True, list(self._decodes), [self.QUAD] * len(self._decodes), None
+
+    def detectAndDecode(self, _img):
+        if not self._decodes:
+            return "", None, None
+        return self._decodes[0], [self.QUAD], None
+
+
 def _composite_marker_above(payload: str, bin_color: tuple[int, int, int]) -> bytes:
     """Build a 600x800 RGB JPEG: marker QR at the top, ``bin_color`` rectangle
     underneath. The classifier crops the rectangle below the marker, so this
@@ -149,6 +189,100 @@ class TestDetectMarkers:
     def test_undecodable_input_returns_empty(self):
         # Garbage bytes — Pillow will reject. Should not raise.
         assert detect_markers(b"not an image") == []
+
+    def test_two_markers_in_one_frame(self):
+        out = detect_markers(_two_qr_frame("VIS-A", "VIS-B"))
+        assert {m.payload for m in out} == {"VIS-A", "VIS-B"}
+
+
+# ---------------------------------------------------------------------------
+# Regression for op-vlk (same root cause as op-6t2 / PR #807): the legacy
+# cv2.QRCodeDetector silently misses ~1% of otherwise-clean QR images. Here a
+# miss is invisible — the slot just never gets an observation while the rest of
+# the frame processes fine — so detect_markers unions the legacy backend with
+# the ArUco one instead of trusting either alone.
+# ---------------------------------------------------------------------------
+
+
+aruco_backend_required = pytest.mark.skipif(
+    not hasattr(cv2, "QRCodeDetectorAruco"),
+    reason="cv2.QRCodeDetectorAruco unavailable (OpenCV < 4.7)",
+)
+
+
+class TestDetectMarkersBackendFallback:
+    @aruco_backend_required
+    def test_aruco_backend_rescues_a_total_legacy_miss(self, monkeypatch):
+        monkeypatch.setattr(cv2, "QRCodeDetector", lambda: _LegacyMissDetector())
+
+        out = detect_markers(_qr_png("VIS-HELLO"))
+
+        assert [m.payload for m in out] == ["VIS-HELLO"]
+        x, y, w, h = out[0].bbox
+        assert w > 50 and h > 50
+
+    @aruco_backend_required
+    def test_aruco_backend_rescues_the_marker_legacy_dropped(self, monkeypatch):
+        # Legacy reads VIS-A and silently drops VIS-B. Without the union
+        # VIS-B's slot would be skipped and the capture would still look
+        # like a clean, fully-processed frame.
+        monkeypatch.setattr(cv2, "QRCodeDetector", lambda: _LegacyMissDetector(["VIS-A"]))
+
+        out = detect_markers(_two_qr_frame("VIS-A", "VIS-B"))
+
+        assert {m.payload for m in out} == {"VIS-A", "VIS-B"}
+        # The backend that read a marker first owns its bbox — VIS-A keeps
+        # the legacy quad rather than being overwritten by the ArUco pass.
+        by_payload = {m.payload: m for m in out}
+        assert by_payload["VIS-A"].bbox == (40, 40, 260, 260)
+
+    def test_no_aruco_backend_still_detects(self, monkeypatch):
+        # OpenCV < 4.7 has no ArUco QR backend; detection must degrade to
+        # legacy-only rather than raise.
+        monkeypatch.delattr(cv2, "QRCodeDetectorAruco", raising=False)
+
+        out = detect_markers(_qr_png("VIS-HELLO"))
+
+        assert [m.payload for m in out] == ["VIS-HELLO"]
+
+    def test_both_backends_missing_the_qr_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(cv2, "QRCodeDetector", lambda: _LegacyMissDetector())
+        monkeypatch.setattr(
+            cv2, "QRCodeDetectorAruco", lambda: _LegacyMissDetector(), raising=False
+        )
+
+        assert detect_markers(_qr_png("VIS-HELLO")) == []
+
+    def test_unconstructable_aruco_backend_falls_back_to_legacy(self, monkeypatch):
+        def _explode():
+            raise cv2.error("simulated construction failure")
+
+        # A broken newer backend must not cost us the legacy one — every
+        # capture would otherwise fail detection outright.
+        monkeypatch.setattr(cv2, "QRCodeDetectorAruco", _explode, raising=False)
+
+        out = detect_markers(_qr_png("VIS-HELLO"))
+
+        assert [m.payload for m in out] == ["VIS-HELLO"]
+
+    def test_backend_raising_is_not_fatal(self, monkeypatch):
+        class _Exploding:
+            def detectAndDecodeMulti(self, _img):
+                raise cv2.error("simulated cv2 failure")
+
+            def detectAndDecode(self, _img):
+                raise cv2.error("simulated cv2 failure")
+
+        # A backend that throws must not sink the frame — the other one
+        # still gets its turn.
+        monkeypatch.setattr(cv2, "QRCodeDetector", _Exploding)
+
+        out = detect_markers(_qr_png("VIS-HELLO"))
+
+        if hasattr(cv2, "QRCodeDetectorAruco"):
+            assert [m.payload for m in out] == ["VIS-HELLO"]
+        else:
+            assert out == []
 
 
 class TestClassifySlotCrop:

@@ -133,6 +133,7 @@ class TestKioskPayloadEndpoint:
 
 
 @pytest.mark.integration
+@pytest.mark.django_db
 class TestHeartbeatEndpoint:
     def test_heartbeat_requires_token(self, api_client):
         screen = ScreenFactory()
@@ -151,6 +152,7 @@ class TestHeartbeatEndpoint:
 
 
 @pytest.mark.integration
+@pytest.mark.django_db
 class TestScreenCrudPermissions:
     def test_regular_user_cannot_list(self, regular_client):
         client, _ = regular_client
@@ -211,6 +213,7 @@ class TestScreenCrudPermissions:
 
 
 @pytest.mark.integration
+@pytest.mark.django_db
 class TestSystemMessageEndpoints:
     def test_non_staff_cannot_create(self, regular_client):
         client, _ = regular_client
@@ -233,6 +236,7 @@ class TestSystemMessageEndpoints:
 
 
 @pytest.mark.integration
+@pytest.mark.django_db
 class TestContentBlockEndpoints:
     def test_staff_can_create_block(self, staff_client):
         client, _ = staff_client

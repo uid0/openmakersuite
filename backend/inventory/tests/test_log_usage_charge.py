@@ -28,6 +28,22 @@ pytestmark = pytest.mark.django_db
 User = get_user_model()
 
 
+@pytest.fixture(autouse=True)
+def _chart_of_accounts(db):
+    """Guarantee the chart exists before a ledger test posts against it.
+
+    The chart is seeded by a *data migration*, and any ``transaction=True`` test
+    earlier in the session flushes it back out (its ``TransactionTestCase``
+    teardown truncates every table and ``post_migrate`` only restores
+    contenttypes/permissions). Re-seeding is idempotent by design — it is the
+    same call the migration and the management command make — and it rolls back
+    with the test, so this costs one no-op query and makes the module order-proof.
+    """
+    from accounting.chart import seed_chart_of_accounts
+
+    seed_chart_of_accounts()
+
+
 def _staff_client():
     user = User.objects.create_user(username="charger", password="pw", is_staff=True)
     client = APIClient()

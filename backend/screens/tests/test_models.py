@@ -16,6 +16,8 @@ from screens.tests.factories import (
     SystemMessageFactory,
 )
 
+pytestmark = pytest.mark.django_db
+
 
 @pytest.mark.unit
 class TestScreenModel:

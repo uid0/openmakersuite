@@ -1827,6 +1827,32 @@ export interface ReorderDataAsset {
   product_url: string;
 }
 
+/**
+ * A kit this supplier sells that would restock one of their low components
+ * (op-8n0). Informational context on the reorder screen and a purchasable line
+ * on the PO form — never an "action row": kits are excluded from `items` and
+ * contribute nothing to `total_items` or `estimated_total`.
+ */
+export interface ReorderDataKitComponent {
+  id: string;
+  name: string;
+  sku: string;
+  quantity_per_kit: number;
+  /** Whether this component is one of the low items that surfaced the kit. */
+  is_low: boolean;
+}
+
+export interface ReorderDataKit {
+  id: string;
+  name: string;
+  sku: string;
+  supplier_sku: string;
+  unit_cost: string;
+  item_supplier_id: number;
+  components: ReorderDataKitComponent[];
+  low_component_count: number;
+}
+
 export interface ReorderDataSupplier {
   id: number;
   name: string;
@@ -1834,6 +1860,12 @@ export interface ReorderDataSupplier {
   website: string;
   items: ReorderDataItem[];
   assets: ReorderDataAsset[];
+  /**
+   * Optional in the type even though the backend always sends it, so callers
+   * are forced to write `supplier.kits ?? []` and older cached payloads cannot
+   * crash the purchase-order form.
+   */
+  kits?: ReorderDataKit[];
   total_items: number;
   estimated_total: string;
   avg_lead_time: number;

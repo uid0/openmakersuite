@@ -170,10 +170,16 @@ def receive_delivery(
                 # receipt's ``quantity``, never ``po_item.quantity_received``,
                 # so partial receipts stay additive; over-receipt is rejected
                 # upstream by the view's pending-quantity guard.
+                #
+                # Credits the line's ORDER-TIME snapshot, so a kit edited between
+                # ordering and delivery still credits what is in the box. Only a
+                # legacy line with no snapshot reads the kit's live components.
                 if inventory_item.is_kit:
                     from inventory.services.kits import explode_kit_receipt
 
-                    kit_credits = explode_kit_receipt(inventory_item, quantity)
+                    kit_credits = explode_kit_receipt(
+                        inventory_item, quantity, snapshot=po_item.kit_snapshot
+                    )
                 else:
                     inventory_item.current_stock += quantity
                     inventory_item.save()

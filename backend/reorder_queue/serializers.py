@@ -212,10 +212,14 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
         clients already parse.
 
         Rendered from the SAME generator the receipt applies
-        (``inventory.services.kits.kit_component_credits``), which is the whole
-        reason that function is split out and side-effect-free: a preview
-        computed a second way could disagree with what the receipt posts, and
-        nobody would notice until the stock was wrong.
+        (``inventory.services.kits.kit_component_credits``), reading the SAME
+        ``kit_snapshot``, which is the whole reason that function is split out
+        and side-effect-free: a preview computed a second way could disagree
+        with what the receipt posts, and nobody would notice until the stock was
+        wrong.
+
+        The snapshot is also why editing the kit does not rewrite history here —
+        this line shows the breakdown as ordered, which is what will arrive.
         """
         if not obj.is_kit_line:
             return None
@@ -230,7 +234,9 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
                 "quantity_per_kit": credit.quantity_per_kit,
                 "quantity": credit.quantity,
             }
-            for credit in kit_component_credits(obj.item, obj.quantity_ordered or 0)
+            for credit in kit_component_credits(
+                obj.item, obj.quantity_ordered or 0, snapshot=obj.kit_snapshot
+            )
         ]
 
     def get_asset_details(self, obj):

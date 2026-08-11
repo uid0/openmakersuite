@@ -19,8 +19,10 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from inventory.models import InventoryItem, ItemSupplier, KitComponent
+from inventory.services.kits import build_kit_snapshot
 from inventory.tests.factories import InventoryItemFactory, SupplierFactory
 from reorder_queue.models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
+from reorder_queue.services import create_purchase_order
 
 
 @pytest.fixture
@@ -78,12 +80,19 @@ def make_po(supplier, created_by, status_value=PurchaseOrder.Status.SENT):
     )
 
 
-def add_kit_line(purchase_order, kit, quantity=2):
+def add_kit_line(purchase_order, kit, quantity=2, *, snapshot=True):
+    """A kit line as ``create_purchase_order`` would write it.
+
+    ``snapshot=False`` builds a LEGACY line — one created before
+    ``kit_snapshot`` existed — which is the only shape that still falls back to
+    the kit's live components (AC-29).
+    """
     return PurchaseOrderItem.objects.create(
         purchase_order=purchase_order,
         item_supplier=kit.item_suppliers.first(),
         quantity_ordered=quantity,
         unit_cost_ordered=Decimal("89.99"),
+        kit_snapshot=build_kit_snapshot(kit) if snapshot else None,
     )
 
 
@@ -220,9 +229,14 @@ class TestKitReceiving:
     def test_ac29_empty_breakdown_does_not_break_receiving(
         self, client, kit, supplier, components, caplog, receiver
     ):
-        """The goods physically arrived — refusing to record that is worse."""
+        """The goods physically arrived — refusing to record that is worse.
+
+        A LEGACY line (ordered before ``kit_snapshot`` existed) whose kit has
+        since been emptied: nothing to read from either source. A line ordered
+        today carries its own breakdown and never reaches this.
+        """
         purchase_order = make_po(supplier, receiver)
-        line = add_kit_line(purchase_order, kit, quantity=2)
+        line = add_kit_line(purchase_order, kit, quantity=2, snapshot=False)
         kit.kit_components.all().delete()
 
         with caplog.at_level("WARNING"):
@@ -330,6 +344,152 @@ class TestKitReceiving:
         assert kit.current_stock == 0
         line.refresh_from_db()
         assert line.quantity_received == 0
+
+
+@pytest.mark.django_db
+class TestOrderedKitSnapshot:
+    """AC-42, AC-50 — the line remembers what it bought.
+
+    A kit's bill of materials is editable and receipt is days or weeks after
+    ordering. Everything here turns on one question: when the two disagree, does
+    the receipt credit the box that was shipped, or the recipe as edited since?
+    """
+
+    def order_two_kits(self, kit, supplier, receiver):
+        """Order through the REAL service, which is what captures the snapshot.
+
+        Deliberately not ``add_kit_line``: a test helper that snapshots proves
+        nothing about whether production code does.
+        """
+        purchase_order = create_purchase_order(
+            {"supplier": supplier},
+            [{"item_supplier_id": kit.item_suppliers.first().id, "quantity": 2}],
+            receiver,
+        )
+        # The service leaves a PO in draft; only a sent one can be received.
+        purchase_order.status = PurchaseOrder.Status.SENT
+        purchase_order.save(update_fields=["status"])
+        return purchase_order, purchase_order.items.get()
+
+    def test_ordering_a_kit_captures_its_components(self, kit, supplier, components, receiver):
+        """The snapshot is written at order time, per kit, not multiplied out."""
+        _, line = self.order_two_kits(kit, supplier, receiver)
+
+        assert line.kit_snapshot is not None
+        rows = line.kit_snapshot["components"]
+        assert len(rows) == 5
+        assert {row["component_name"] for row in rows} == {c.name for c in components}
+        # Per KIT — the ordered quantity of 2 is applied at read time, so one
+        # snapshot serves the preview and every partial receipt.
+        assert all(row["quantity_per_kit"] == 1 for row in rows)
+
+    def test_ac42_detail_and_receipt_use_the_ordered_snapshot_not_the_live_kit(
+        self, client, kit, supplier, components, receiver
+    ):
+        """Order, then rewrite the kit underneath it three different ways."""
+        purchase_order, line = self.order_two_kits(kit, supplier, receiver)
+        cyan, magenta, yellow, black, cleaning = components
+
+        # The kit is edited AFTER the order is placed: A removed, B's quantity
+        # changed, C added. None of it can reach a box already on a truck.
+        kit.kit_components.filter(component=cyan).delete()
+        kit.kit_components.filter(component=magenta).update(quantity=7)
+        added = InventoryItemFactory(name="Waste Tank", current_stock=0, image=None)
+        KitComponent.objects.create(kit=kit, component=added, quantity=3)
+
+        detail = client.get(reverse("purchaseorder-detail", args=[purchase_order.pk]))
+        assert detail.status_code == status.HTTP_200_OK
+        preview = {
+            row["component_name"]: row["quantity"]
+            for row in detail.data["items"][0]["kit_components"]
+        }
+
+        # As ordered: the five originals at one each, x2 kits.
+        assert preview == {c.name: 2 for c in components}
+        assert "Waste Tank" not in preview
+        assert preview["Cyan"] == 2  # removed from the kit, still on the order
+        assert preview["Magenta"] == 2  # 1/kit as ordered, not the edited 7
+
+        before = {c.pk: c.current_stock for c in [*components, added]}
+        assert receive(client, purchase_order, line, 2).status_code == status.HTTP_200_OK
+
+        for component in components:
+            component.refresh_from_db()
+            delta = component.current_stock - before[component.pk]
+            # AC-25: the credit equals the preview, component for component.
+            assert delta == preview[component.name] == 2, component.name
+
+        added.refresh_from_db()
+        assert added.current_stock == before[added.pk], "a post-order addition was never shipped"
+        for item in (cyan, magenta):
+            item.refresh_from_db()
+        assert cyan.current_stock == 2, "removed from the kit, but it was in the box"
+        assert magenta.current_stock == 2, "credited as ordered, not the edited quantity"
+
+        kit.refresh_from_db()
+        assert kit.current_stock == 0
+
+    def test_ac42_snapshot_survives_deleting_every_live_component_row(
+        self, client, kit, supplier, components, receiver
+    ):
+        """The strongest form: an emptied kit still credits what it shipped with.
+
+        This is the case the live-BOM read got wrong silently — an empty
+        bill of materials reads as "credit nothing" rather than as an error.
+        """
+        purchase_order, line = self.order_two_kits(kit, supplier, receiver)
+        kit.kit_components.all().delete()
+
+        assert receive(client, purchase_order, line, 2).status_code == status.HTTP_200_OK
+
+        for component in components:
+            component.refresh_from_db()
+            assert component.current_stock == 2
+
+    def test_ac42_partial_receipts_stay_additive_against_the_snapshot(
+        self, client, kit, supplier, components, receiver
+    ):
+        """Per-kit storage is what lets one snapshot serve two partial receipts."""
+        purchase_order, line = self.order_two_kits(kit, supplier, receiver)
+        kit.kit_components.filter(component=components[0]).update(quantity=99)
+
+        assert receive(client, purchase_order, line, 1).status_code == status.HTTP_200_OK
+        assert receive(client, purchase_order, line, 1).status_code == status.HTTP_200_OK
+
+        for component in components:
+            component.refresh_from_db()
+            assert component.current_stock == 2
+
+    def test_ac50_ordinary_lines_store_no_snapshot(self, client, supplier, receiver):
+        """NULL for ordinary lines — the column exists but never fires for them."""
+        ordinary = InventoryItemFactory(name="Copy Paper", image=None)
+        ordinary_supplier = ItemSupplier.objects.create(
+            item=ordinary,
+            supplier=supplier,
+            supplier_sku="PAPER",
+            unit_cost=Decimal("10.00"),
+            package_cost=None,
+            quantity_per_package=1,
+        )
+
+        purchase_order = create_purchase_order(
+            {"supplier": supplier},
+            [{"item_supplier_id": ordinary_supplier.id, "quantity": 3}],
+            receiver,
+        )
+        line = purchase_order.items.get()
+
+        assert line.kit_snapshot is None
+        line.refresh_from_db()
+        assert line.kit_snapshot is None
+
+        detail = client.get(reverse("purchaseorder-detail", args=[purchase_order.pk]))
+        row = detail.data["items"][0]
+        assert row["is_kit_line"] is False
+        assert row["kit_components"] is None
+        # The snapshot is storage, not contract: it must not leak into the
+        # line payload clients already parse.
+        assert "kit_snapshot" not in row
 
 
 @pytest.mark.django_db

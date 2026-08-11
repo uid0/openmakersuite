@@ -214,7 +214,13 @@ def generate_demand_forecasts():
     end = now.date()
 
     items = list(
-        InventoryItem.objects.filter(is_active=True, is_retired=False, is_serialized=False)
+        # Kits are excluded (op-8n0): a kit carries no stock of its own -- its
+        # receipts credit its components -- so forecasting demand for one would
+        # model a permanently-zero series and recommend restocking a thing that
+        # is never stocked.
+        InventoryItem.objects.filter(
+            is_active=True, is_retired=False, is_serialized=False, is_kit=False
+        )
     )
     lead_by_item = _lead_time_days_by_item(items) if items else {}
 
@@ -289,7 +295,11 @@ def snapshot_stock_levels():
 
     created = 0
     updated = 0
-    for item in InventoryItem.objects.filter(is_active=True, is_retired=False).iterator():
+    # Kits hold no stock, so a snapshot row for one would record a flat zero
+    # forever and skew every "stock over time" chart it appears on (op-8n0).
+    for item in InventoryItem.objects.filter(
+        is_active=True, is_retired=False, is_kit=False
+    ).iterator():
         _, was_created = StockLevelSnapshot.objects.update_or_create(
             item=item,
             snapshot_date=week_start,

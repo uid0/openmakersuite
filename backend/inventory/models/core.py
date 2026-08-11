@@ -405,6 +405,27 @@ class InventoryItem(OwnableModel):
         ),
     )
 
+    # Kit SKUs (op-8n0). A kit is a purchasable SKU that DECOMPOSES: one
+    # supplier line containing several stock items, whose bill of materials
+    # lives in ``KitComponent``. Receiving a kit credits its components and
+    # never the kit, so a kit deliberately holds no stock of its own — it is a
+    # catalog/purchasing construct that happens to reuse this table for its
+    # ``ItemSupplier``, price history and purchase-order line.
+    #
+    # This follows the discriminated-union house style already on this model
+    # (is_active / is_retired / is_serialized / is_requestable /
+    # use_case_based_reorder / count_mode all branch behaviour here). The cost
+    # is that kits must be filtered OUT of the ordinary item surfaces
+    # caller-side; see ``InventoryItemViewSet.get_queryset``.
+    is_kit = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text=(
+            "This SKU is a kit: buying one line of it delivers the quantities "
+            "listed in its components, which is where received stock is credited."
+        ),
+    )
+
     # Metadata
     is_active = models.BooleanField(default=True)
     is_retired = models.BooleanField(
@@ -449,6 +470,13 @@ class InventoryItem(OwnableModel):
 
         assign_sku(self)
 
+        # A kit is never individually requestable (op-8n0): a member asks for
+        # "cyan ink", and the purchaser decides that the cheapest way to get it
+        # is the kit. Forced rather than validated so flipping an existing
+        # requestable item into a kit cannot leave a stale True behind.
+        if self.is_kit:
+            self.is_requestable = False
+
         # Decide before saving; neither field changes during super().save().
         needs_image_download = should_download_image(self)
 
@@ -477,6 +505,32 @@ class InventoryItem(OwnableModel):
         if profile is not None:
             profile.full_clean(exclude=["item"], validate_unique=False, validate_constraints=False)
         self._clean_count_mode()
+        self._clean_kit()
+
+    def _clean_kit(self) -> None:
+        """A kit is a purchasing construct: it is never serialized and holds no stock (op-8n0).
+
+        Both rules exist because receiving a kit credits its *components*. A
+        serialized kit would promise serial numbers for a unit that never enters
+        stock, and kit stock would be a number nothing can ever draw down —
+        worse, it would read as permanently low if it were not for the
+        ``is_kit`` guard in :attr:`needs_reorder`.
+        """
+        if not self.is_kit:
+            return
+        if self.is_serialized:
+            raise ValidationError(
+                {"is_serialized": "A kit cannot be serialized; its components are stocked, not it."}
+            )
+        if self.current_stock:
+            raise ValidationError(
+                {
+                    "current_stock": (
+                        "A kit cannot carry stock — receiving a kit credits its "
+                        "component items instead."
+                    )
+                }
+            )
 
     def _clean_count_mode(self) -> None:
         """Keep ``count_mode`` and ``count_level`` consistent (op-hzji).
@@ -546,6 +600,17 @@ class InventoryItem(OwnableModel):
         # low-stock surface (reorder_status, low_stock action, serializer
         # needs_reorder field, admin, AssetPart, Fixture refill).
         if self.is_retired:
+            return False
+        # A kit holds no stock of its own — receiving one credits its components
+        # — so its stock/minimum pair is meaningless and would otherwise read as
+        # permanently low (0 <= 0). Kits are bought as the *answer* to a low
+        # component, never as a low item themselves. Same chokepoint reasoning
+        # as ``is_retired`` above; the database-side twin is the caller-side
+        # ``is_kit=False`` filter beside each ``low_stock_q()`` use, deliberately
+        # NOT folded into ``low_stock_q`` itself (see
+        # ``test_reorder_at_level.py`` — it asserts parity between this property
+        # and that query, and that test documents the caller-side convention).
+        if self.is_kit:
             return False
         if counts_in_packs(self):
             # Counted in whole packs: minimum_stock is the threshold in those packs.

@@ -25,6 +25,7 @@ from .views import (
     InventoryReconciliationViewSet,
     InventoryReportViewSet,
     ItemSupplierViewSet,
+    KitViewSet,
     LocationProblemViewSet,
     LocationViewSet,
     MaintenanceDashboardViewSet,
@@ -50,6 +51,11 @@ router.register(r"supplier-agreements", SupplierAgreementViewSet)
 router.register(r"categories", CategoryViewSet)
 router.register(r"locations", LocationViewSet)
 router.register(r"items", InventoryItemViewSet)
+# Kits are a facade over the ``is_kit=True`` slice of InventoryItem, so the
+# basename cannot be inferred from the queryset model without colliding with
+# ``items`` above (op-8n0). There is deliberately no ``kit-components`` route:
+# the bill of materials is nested-writable on the kit, same as packaging levels.
+router.register(r"kits", KitViewSet, basename="kit")
 router.register(r"assets", AssetViewSet)
 router.register(r"asset-documents", AssetDocumentViewSet)
 router.register(r"asset-meters", AssetMeterViewSet)

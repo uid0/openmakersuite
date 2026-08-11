@@ -707,6 +707,19 @@ class PurchaseOrderItem(TypedTargetModel):
         return self.target if self.target_type == "inventory_item" else None
 
     @property
+    def is_kit_line(self) -> bool:
+        """Whether this line buys a kit SKU that decomposes on receipt (op-8n0).
+
+        Derived, never stored: a kit is an ``InventoryItem`` carrying
+        ``is_kit``, so the line already points at it through ``item_supplier``
+        and needs no column of its own. Receiving one credits the kit's
+        components rather than the kit — see
+        ``inventory.services.kits.explode_kit_receipt``.
+        """
+        item = self.item
+        return item is not None and item.is_kit
+
+    @property
     def supplier(self) -> Optional[Supplier]:
         """Convenience property to access the supplier."""
         if self.target_type == "inventory_item":

@@ -159,6 +159,11 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
     actual_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     quantity_pending = serializers.IntegerField(read_only=True)
     is_fully_received = serializers.BooleanField(read_only=True)
+    # Kit lines (op-8n0). ``is_kit_line`` is derived from the item this line
+    # already points at, and ``kit_components`` previews what receiving the
+    # ordered quantity will credit.
+    is_kit_line = serializers.BooleanField(read_only=True)
+    kit_components = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseOrderItem
@@ -185,6 +190,8 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "actual_cost",
             "quantity_pending",
             "is_fully_received",
+            "is_kit_line",
+            "kit_components",
             "expected_shipment_date",
             "actual_shipment_date",
             "is_voided",
@@ -196,6 +203,41 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["created_at", "updated_at", "voided_at", "voided_by"]
+
+    def get_kit_components(self, obj):
+        """What receiving this line's ordered quantity will credit (op-8n0).
+
+        ``None`` — not ``[]`` — for every ordinary item, asset and freeform
+        line, so the payload for a PO without kits stays byte-identical to what
+        clients already parse.
+
+        Rendered from the SAME generator the receipt applies
+        (``inventory.services.kits.kit_component_credits``), reading the SAME
+        ``kit_snapshot``, which is the whole reason that function is split out
+        and side-effect-free: a preview computed a second way could disagree
+        with what the receipt posts, and nobody would notice until the stock was
+        wrong.
+
+        The snapshot is also why editing the kit does not rewrite history here —
+        this line shows the breakdown as ordered, which is what will arrive.
+        """
+        if not obj.is_kit_line:
+            return None
+
+        from inventory.services.kits import kit_component_credits
+
+        return [
+            {
+                "component": credit.component.pk,
+                "component_name": credit.component.name,
+                "component_sku": credit.component.sku,
+                "quantity_per_kit": credit.quantity_per_kit,
+                "quantity": credit.quantity,
+            }
+            for credit in kit_component_credits(
+                obj.item, obj.quantity_ordered or 0, snapshot=obj.kit_snapshot
+            )
+        ]
 
     def get_asset_details(self, obj):
         """Return asset details if this is an asset purchase."""

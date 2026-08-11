@@ -825,7 +825,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         # for the ``each`` items that is exactly the old
         # ``current_stock <= minimum_stock`` (op-es7c).
         low_stock_items = (
-            InventoryItem.objects.filter(low_stock_q(), is_retired=False)
+            # Kits are never action rows (op-8n0): a kit holds no stock, so it
+            # is bought as the ANSWER to a low component, never as a low item.
+            # Filtered caller-side beside ``is_retired`` rather than folded into
+            # ``low_stock_q`` -- that query is asserted to be the exact twin of
+            # ``InventoryItem.needs_reorder``, and the convention is that
+            # visibility rules live at the call site.
+            InventoryItem.objects.filter(low_stock_q(), is_retired=False, is_kit=False)
             .select_related("category", "location", "count_level")
             .prefetch_related("item_suppliers__supplier")
         )
@@ -936,6 +942,11 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 reorder_requests__status__in=services.PO_ELIGIBLE_STATUSES,
                 is_active=True,
                 is_retired=False,
+                # This half filters on REQUEST STATUS, not stock, so the
+                # ``is_kit`` guard on the low-stock half below does not cover
+                # it -- a stale request against a kit would still surface here
+                # (op-8n0).
+                is_kit=False,
             )
             .distinct()
             .select_related("category", "location", "count_level")
@@ -950,6 +961,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 low_stock_q(),
                 is_active=True,
                 is_retired=False,
+                is_kit=False,
             )
             .exclude(id__in=items_with_requests.values_list("id", flat=True))
             .select_related("category", "location", "count_level")
@@ -981,6 +993,11 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                         "website": supplier.website,
                         "items": [],
                         "assets": [],
+                        # Kits that would restock one of this supplier's low
+                        # components (op-8n0). Informational, never an action
+                        # row -- always present so the PO form can read it
+                        # unconditionally.
+                        "kits": [],
                         "total_items": 0,
                         "estimated_total": Decimal("0.00"),
                         "avg_lead_time": 0,
@@ -1062,6 +1079,72 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 supplier_data[supplier_id]["total_items"] += 1
                 supplier_data[supplier_id]["estimated_total"] += line_total
 
+        # Kits that would restock a low component (op-8n0). "Show, don't act":
+        # a purchaser looking at low cyan ink sees that the Eufy Ink Kit is one
+        # way to buy it, and decides for themselves. Deliberately NOT an action
+        # row -- kits are excluded from ``all_items`` above, and nothing here
+        # touches ``total_items`` or ``estimated_total``.
+        #
+        # This loop SEEDS ``supplier_data`` rather than iterating it, unlike the
+        # assets loop below. That is load-bearing: a supplier whose only reason
+        # to appear is a low kit component has no low items and no assets, so
+        # iterating the existing keys would drop it silently -- which is exactly
+        # the case this feature exists for.
+        low_component_ids = {item.id for item in all_items}
+        if low_component_ids:
+            supplying_kits = (
+                InventoryItem.objects.filter(
+                    is_kit=True,
+                    is_active=True,
+                    kit_components__component_id__in=low_component_ids,
+                )
+                .distinct()
+                .prefetch_related("kit_components__component", "item_suppliers__supplier")
+                .order_by("name")
+            )
+            for kit in supplying_kits:
+                components = [
+                    {
+                        "id": row.component_id,
+                        "name": row.component.name,
+                        "sku": row.component.sku,
+                        "quantity_per_kit": row.quantity,
+                        "is_low": row.component_id in low_component_ids,
+                    }
+                    for row in sorted(kit.kit_components.all(), key=lambda r: r.component.name)
+                ]
+                for item_supplier in kit.item_suppliers.all():
+                    if not item_supplier.is_active or item_supplier.is_discontinued:
+                        continue
+                    supplier = item_supplier.supplier
+                    if supplier.id not in supplier_data:
+                        supplier_data[supplier.id] = {
+                            "id": supplier.id,
+                            "name": supplier.name,
+                            "supplier_type": supplier.supplier_type,
+                            "website": supplier.website,
+                            "items": [],
+                            "assets": [],
+                            "kits": [],
+                            "total_items": 0,
+                            "estimated_total": Decimal("0.00"),
+                            "avg_lead_time": 0,
+                        }
+                    supplier_data[supplier.id].setdefault("kits", []).append(
+                        {
+                            "id": kit.id,
+                            "name": kit.name,
+                            "sku": kit.sku,
+                            "supplier_sku": item_supplier.supplier_sku,
+                            "unit_cost": str(item_supplier.unit_cost or Decimal("0.00")),
+                            "item_supplier_id": item_supplier.id,
+                            "components": components,
+                            "low_component_count": sum(
+                                1 for component in components if component["is_low"]
+                            ),
+                        }
+                    )
+
         # Add assets for each supplier (where supplier is the manufacturer)
         for supplier_id, data in supplier_data.items():
             assets = Asset.objects.filter(
@@ -1136,6 +1219,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     }
                     for asset in assets
                 ],
+                "kits": [],
                 "total_items": 0,
                 "estimated_total": "0.00",
                 "avg_lead_time": 0,
@@ -2087,6 +2171,27 @@ class OrderReceiptViewSet(viewsets.ModelViewSet):
             )
 
         po_item = matching_items[0]
+
+        # Kit lines are refused here rather than mis-received (op-8n0). This
+        # endpoint DUPLICATES the stock mutation inline instead of routing
+        # through ``receiving.receive_delivery``, so it has none of the kit
+        # explosion logic: scanning a kit's barcode would credit the KIT's own
+        # stock — a number nothing ever draws down — and silently leave all five
+        # cartridges unreceived. Failing loud is the only safe option until that
+        # duplication is consolidated (tracked separately); a 400 leaves the
+        # operator able to receive the line from the purchase-order page.
+        if po_item.is_kit_line:
+            return Response(
+                {
+                    "error": (
+                        "Kit lines cannot be received by barcode yet. Receive this "
+                        "line from the purchase order so its components are credited."
+                    ),
+                    "po_item_id": po_item.id,
+                    "is_kit_line": True,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Check if we can receive this quantity
         remaining_quantity = po_item.quantity_pending

@@ -1405,6 +1405,9 @@ views:
       generate_qr:
         permission_classes:
         - IsAuthenticatedOrReadOnly
+      kits:
+        permission_classes:
+        - AllowAny
       list:
         permission_classes:
         - IsAuthenticatedOrReadOnly
@@ -1511,6 +1514,26 @@ views:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       price_history:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      retrieve:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      update:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+  inventory.views.KitViewSet:
+    actions:
+      create:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      destroy:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      list:
+        permission_classes:
+        - IsAuthenticatedOrReadOnly
+      partial_update:
         permission_classes:
         - IsAuthenticatedOrReadOnly
       retrieve:

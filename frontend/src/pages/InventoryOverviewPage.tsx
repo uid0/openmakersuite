@@ -29,6 +29,7 @@ import {
 import {
   IconAlertTriangle,
   IconBoxSeam,
+  IconPackages,
   IconPlus,
   IconSearch,
 } from '@tabler/icons-react';
@@ -239,6 +240,16 @@ const InventoryOverviewPage: React.FC = () => {
               onClick={() => navigate('/inventory/items')}
             >
               Browse all items
+            </Button>
+            {/* Kits are hidden from the item list by design (op-8n0), so this is
+                their entry point from the Inventory workspace. */}
+            <Button
+              variant="default"
+              leftSection={<IconPackages size={16} />}
+              onClick={() => navigate('/inventory/kits')}
+              data-testid="inventory-overview-kits"
+            >
+              Kits
             </Button>
             <Button
               leftSection={<IconPlus size={16} />}

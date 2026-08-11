@@ -593,6 +593,30 @@ class PurchaseOrderItem(TypedTargetModel):
         related_name="reorder_purchaseorderitem_owned",
         help_text="Committee (SIG) this line was ordered on behalf of",
     )
+    # What this kit contained WHEN IT WAS ORDERED (op-8n0). A kit's bill of
+    # materials is editable, and the gap between ordering and receiving is days
+    # or weeks — so reading the live BOM at receipt time would credit whatever
+    # the kit happens to contain today, not what the supplier actually shipped
+    # in the box. Captured at line creation for kit lines and never rewritten.
+    #
+    # NULL for every ordinary item, asset and freeform line, which is what keeps
+    # their payload byte-identical to the pre-kit shape, and also for kit lines
+    # predating this field — those fall back to the live BOM, the only remaining
+    # reason ``inventory.services.kits`` still reads it.
+    #
+    # Shape: ``{"components": [{"component": <pk>, "component_name": str,
+    # "component_sku": str, "quantity_per_kit": int}, ...]}``. Quantities are
+    # PER KIT, never multiplied out, so one snapshot serves the ordered-quantity
+    # preview and each partial receipt alike.
+    kit_snapshot = models.JSONField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Component breakdown captured when this kit line was ordered. "
+            "Receiving credits these components, not the kit's current "
+            "definition. NULL for non-kit lines."
+        ),
+    )
 
     # Order quantities
     quantity_ordered = models.PositiveIntegerField(
@@ -705,6 +729,19 @@ class PurchaseOrderItem(TypedTargetModel):
     def item(self) -> Optional[InventoryItem]:
         """Convenience property to access the inventory item (if applicable)."""
         return self.target if self.target_type == "inventory_item" else None
+
+    @property
+    def is_kit_line(self) -> bool:
+        """Whether this line buys a kit SKU that decomposes on receipt (op-8n0).
+
+        Derived, never stored: a kit is an ``InventoryItem`` carrying
+        ``is_kit``, so the line already points at it through ``item_supplier``
+        and needs no column of its own. Receiving one credits the kit's
+        components rather than the kit — see
+        ``inventory.services.kits.explode_kit_receipt``.
+        """
+        item = self.item
+        return item is not None and item.is_kit
 
     @property
     def supplier(self) -> Optional[Supplier]:

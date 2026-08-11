@@ -66,6 +66,8 @@ import ThermostatFormPage from './pages/ThermostatFormPage';
 import InventoryItemDetailPage from './pages/InventoryItemDetailPage';
 import InventoryItemFormPage from './pages/InventoryItemFormPage';
 import InventoryListPage from './pages/InventoryListPage';
+import KitDetailPage from './pages/KitDetailPage';
+import KitListPage from './pages/KitListPage';
 import InventoryOverviewPage from './pages/InventoryOverviewPage';
 import InviteCodeAdminPage from './pages/InviteCodeAdminPage';
 import InviteRedeemPage from './pages/InviteRedeemPage';
@@ -243,6 +245,11 @@ function AppContent() {
               surface before the dashboard mounts + fetches (op-3er). */}
           <Route path="/dashboard" element={<RequireAuth><WorkspaceLayout><DashboardPage /></WorkspaceLayout></RequireAuth>} />
           <Route path="/inventory/items" element={<WorkspaceLayout><InventoryListPage /></WorkspaceLayout>} />
+          {/* Kits (op-8n0): purchasable bundles that decompose on receipt. The
+              "new" route is listed before ":kitId" so it is not swallowed as an id. */}
+          <Route path="/inventory/kits" element={<WorkspaceLayout><KitListPage /></WorkspaceLayout>} />
+          <Route path="/inventory/kits/new" element={<WorkspaceLayout><KitDetailPage /></WorkspaceLayout>} />
+          <Route path="/inventory/kits/:kitId" element={<WorkspaceLayout><KitDetailPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/new" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/:id" element={<WorkspaceLayout><InventoryItemDetailPage /></WorkspaceLayout>} />
           <Route path="/inventory/items/:id/edit" element={<WorkspaceLayout><InventoryItemFormPage /></WorkspaceLayout>} />

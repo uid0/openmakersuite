@@ -248,6 +248,12 @@ export interface InventoryItem {
   // matches `SerializedTrackingMode` in services/api.ts.)
   is_serialized?: boolean;
   serial_tracking_mode?: 'consumable' | 'reusable';
+  // Kit SKUs (op-8n0). When `is_kit` is true this row is a purchasable bundle
+  // that DECOMPOSES on receipt: ordering it is one purchase-order line, and
+  // receiving it credits its `KitComponent` rows rather than the kit itself.
+  // Kits are excluded from `GET /inventory/items/` unless `include_kits=true`
+  // or `is_kit=true` is passed.
+  is_kit?: boolean;
   // Display-only serialized stock split, present on the item-detail (retrieve)
   // payload for serialized items and null otherwise. `available` = on_hand −
   // installed; `on_hand` counts every physically-present unit. Does not touch
@@ -2353,4 +2359,68 @@ export interface ResilienceStatus {
   degraded: boolean;
   checked_at: string;
   services: ServiceStatus[];
+}
+
+/**
+ * One line of a kit's bill of materials (op-8n0).
+ *
+ * `id` is the KitComponent row's own identifier and survives edits — the kit
+ * API upserts on `component` rather than delete-and-recreate — so the editor
+ * can safely address rows by it.
+ */
+export interface KitComponent {
+  id: number;
+  component: string;
+  component_name: string;
+  component_sku: string;
+  component_current_stock: number;
+  component_needs_reorder: boolean;
+  quantity: number;
+  notes?: string;
+}
+
+/**
+ * A kit SKU: an InventoryItem with `is_kit=true` plus its components.
+ *
+ * Shaped as InventoryItem because that is literally what the backend returns —
+ * `KitSerializer` subclasses `InventoryItemSerializer`.
+ */
+export interface Kit extends InventoryItem {
+  is_kit: true;
+  components: KitComponent[];
+  component_count: number;
+}
+
+/** Purchase terms written alongside a kit so it can be ordered in one request. */
+export interface KitSupplierTerms {
+  supplier: number;
+  supplier_sku: string;
+  unit_cost: string | number;
+  supplier_url?: string;
+  average_lead_time?: number;
+}
+
+/** Compact "this component comes in these kits" row. */
+export interface KitSummary {
+  id: string;
+  name: string;
+  sku: string;
+  is_active: boolean;
+  quantity_in_kit: number | null;
+  supplier_name: string | null;
+  supplier_sku: string | null;
+  unit_cost: string | null;
+  component_count: number;
+}
+
+/**
+ * What receiving a kit purchase-order line will credit, as rendered on the
+ * line itself. `null` on ordinary item, asset and freeform lines.
+ */
+export interface KitLineComponent {
+  component: string;
+  component_name: string;
+  component_sku: string;
+  quantity_per_kit: number;
+  quantity: number;
 }

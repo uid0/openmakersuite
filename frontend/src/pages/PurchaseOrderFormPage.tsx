@@ -15,6 +15,7 @@ import {
   PurchaseOrderPriority,
   ReorderDataAsset,
   ReorderDataItem,
+  ReorderDataKit,
   ReorderDataSupplier,
   scannerAPI,
   sigAPI,
@@ -49,6 +50,18 @@ interface SelectedAsset extends ReorderDataAsset {
   selected: boolean;
   quantity: number;
   unit_cost: string;
+}
+
+/**
+ * A kit line on the cart (op-8n0). `quantity` counts KITS, never component
+ * units — a kit IS the package, which is why there is deliberately no
+ * cases/units triangle here the way there is on SelectedItem.
+ */
+interface SelectedKit extends ReorderDataKit {
+  selected: boolean;
+  quantity: number;
+  unit_cost_override?: string;
+  expanded: boolean;
 }
 
 interface FreeformItem {
@@ -104,6 +117,7 @@ const PurchaseOrderFormPage: React.FC = () => {
   // Line items state
   const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
   const [selectedAssets, setSelectedAssets] = useState<SelectedAsset[]>([]);
+  const [selectedKits, setSelectedKits] = useState<SelectedKit[]>([]);
   const [freeformItems, setFreeformItems] = useState<FreeformItem[]>([]);
 
   // Manual product entry state
@@ -187,12 +201,28 @@ const PurchaseOrderFormPage: React.FC = () => {
             unit_cost: '',
           }))
         );
+        // Kits (op-8n0). ``?? []`` is load-bearing: every existing PO-form
+        // test builds a supplier fixture without this key, and the backend only
+        // started sending it with this feature.
+        //
+        // Default selection follows whatever the kit currently IS: something
+        // inside it is low -> checked, like an item; nothing low -> unchecked,
+        // like an asset.
+        setSelectedKits(
+          (supplier.kits ?? []).map((kit) => ({
+            ...kit,
+            selected: (kit.low_component_count ?? 0) > 0,
+            quantity: 1,
+            expanded: false,
+          }))
+        );
         // Clear freeform items when changing supplier
         setFreeformItems([]);
       }
     } else {
       setSelectedItems([]);
       setSelectedAssets([]);
+      setSelectedKits([]);
       setFreeformItems([]);
     }
   }, [selectedSupplierId, suppliers]);
@@ -537,12 +567,71 @@ const PurchaseOrderFormPage: React.FC = () => {
     .filter((item) => item.description && item.unit_cost)
     .reduce((sum, item) => sum + parseFloat(item.unit_cost || '0') * item.quantity, 0);
 
-  const grandTotal = itemsTotal + assetsTotal + freeformTotal;
+  const kitsTotal = selectedKits
+    .filter((kit) => kit.selected)
+    .reduce((sum, kit) => {
+      const unitCost = kit.unit_cost_override
+        ? parseFloat(kit.unit_cost_override)
+        : parseFloat(kit.unit_cost);
+      return sum + (isNaN(unitCost) ? 0 : unitCost) * kit.quantity;
+    }, 0);
+
+  const grandTotal = itemsTotal + assetsTotal + freeformTotal + kitsTotal;
 
   const selectedItemCount = selectedItems.filter((item) => item.selected).length;
   const selectedAssetCount = selectedAssets.filter((asset) => asset.selected).length;
   const freeformItemCount = freeformItems.filter((item) => item.description && item.unit_cost).length;
-  const totalLineItems = selectedItemCount + selectedAssetCount + freeformItemCount;
+  const selectedKitCount = selectedKits.filter((kit) => kit.selected).length;
+  const totalLineItems =
+    selectedItemCount + selectedAssetCount + freeformItemCount + selectedKitCount;
+
+  // The double-order guard (op-8n0), DERIVED on every render and never stored.
+  // Selecting a kit while its component rows stay checked orders everything
+  // twice — and those rows are checked by default BECAUSE they are low, which
+  // is the same reason the kit was suggested. So this fires every time the
+  // feature works as intended, and has to be visible rather than clever.
+  //
+  // Deliberately NOT auto-deselected: unchecking the kit would then have to
+  // re-check them to stay symmetric (unexplainable), and buying a kit plus a
+  // spare black cartridge is a legitimate order.
+  const componentIdsInSelectedKits = new Set(
+    selectedKits
+      .filter((kit) => kit.selected)
+      .flatMap((kit) => kit.components.map((component) => component.id))
+  );
+  const conflictingItems = selectedItems.filter(
+    (item) => item.selected && componentIdsInSelectedKits.has(item.item_id)
+  );
+  // Every component of every kit, selected or not — this drives the permanent
+  // "in kit" chip, which stays visible while the kit is unchecked.
+  const componentIdsInAnyKit = new Set(
+    selectedKits.flatMap((kit) => kit.components.map((component) => component.id))
+  );
+
+  const deselectConflictingItems = () => {
+    const conflicting = new Set(conflictingItems.map((item) => item.item_id));
+    setSelectedItems((prev) =>
+      prev.map((item) => (conflicting.has(item.item_id) ? { ...item, selected: false } : item))
+    );
+  };
+
+  const toggleKit = (kitId: string) => {
+    setSelectedKits((prev) =>
+      prev.map((kit) => (kit.id === kitId ? { ...kit, selected: !kit.selected } : kit))
+    );
+  };
+
+  const updateKitQuantity = (kitId: string, quantity: number) => {
+    setSelectedKits((prev) =>
+      prev.map((kit) => (kit.id === kitId ? { ...kit, quantity: Math.max(1, quantity) } : kit))
+    );
+  };
+
+  const toggleKitExpanded = (kitId: string) => {
+    setSelectedKits((prev) =>
+      prev.map((kit) => (kit.id === kitId ? { ...kit, expanded: !kit.expanded } : kit))
+    );
+  };
 
   // The payment this cart implies, recomputed on every render from the running
   // total and the chosen terms (op-uc0o). The order does not exist yet, so
@@ -605,6 +694,25 @@ const PurchaseOrderFormPage: React.FC = () => {
             itemData.expected_shipment_date = item.expected_shipment_date;
           }
           items.push(itemData);
+        });
+
+      // Add selected kits (op-8n0). One line per kit, quantity in KITS. A kit
+      // already has an ItemSupplier, so this is an ordinary inventory line as
+      // far as the backend is concerned — the decomposition happens on receipt.
+      selectedKits
+        .filter((kit) => kit.selected)
+        .forEach((kit) => {
+          const kitData: CreatePurchaseOrderItem = {
+            item_supplier_id: kit.item_supplier_id,
+            quantity: kit.quantity,
+          };
+          if (kit.unit_cost_override && kit.unit_cost_override.trim()) {
+            const overrideCost = parseFloat(kit.unit_cost_override);
+            if (!isNaN(overrideCost) && overrideCost >= 0) {
+              kitData.unit_cost = overrideCost;
+            }
+          }
+          items.push(kitData);
         });
 
       // Add selected assets
@@ -764,9 +872,189 @@ const PurchaseOrderFormPage: React.FC = () => {
 
         {selectedSupplier && (
           <>
+            {/* Kits (op-8n0) — deliberately placed BEFORE Inventory Items.
+                Scrolling five cartridge rows first means the operator has
+                already decided before learning the bundle exists. No test
+                asserts section headings, so the renumber below is free. */}
+            <section className="form-section kits-section" data-testid="po-kits-section">
+              <h2>2. Kits ({selectedKits.length})</h2>
+              {selectedKits.length === 0 ? (
+                <p className="no-data">No kits from this supplier.</p>
+              ) : (
+                <div className="items-table-container">
+                  <table className="items-table" data-testid="po-kits-table">
+                    <thead>
+                      <tr>
+                        <th className="col-checkbox" />
+                        <th>Kit</th>
+                        <th>Supplier SKU</th>
+                        <th>Kits</th>
+                        <th>Unit cost</th>
+                        <th>Line total</th>
+                        <th>Contents</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedKits.map((kit) => {
+                        const unitCost = kit.unit_cost_override
+                          ? parseFloat(kit.unit_cost_override)
+                          : parseFloat(kit.unit_cost);
+                        const lineTotal = (isNaN(unitCost) ? 0 : unitCost) * kit.quantity;
+                        const units = kit.components.reduce(
+                          (sum, component) => sum + component.quantity_per_kit * kit.quantity,
+                          0
+                        );
+                        return (
+                          <React.Fragment key={kit.id}>
+                            <tr data-testid={`po-kit-row-${kit.id}`}>
+                              <td className="col-checkbox">
+                                <input
+                                  type="checkbox"
+                                  checked={kit.selected}
+                                  onChange={() => toggleKit(kit.id)}
+                                  aria-label={`Order ${kit.name}`}
+                                  data-testid={`po-kit-checkbox-${kit.id}`}
+                                />
+                              </td>
+                              <td>
+                                <div className="item-name">{kit.name}</div>
+                                {/* Live summary, recomputed as the quantity is
+                                    typed — the operator sees the consequence
+                                    before committing. */}
+                                <div
+                                  className="item-meta"
+                                  data-testid={`po-kit-summary-${kit.id}`}
+                                >
+                                  {kit.quantity} {kit.quantity === 1 ? 'kit' : 'kits'} &rarr;{' '}
+                                  {units} units across {kit.components.length} items
+                                </div>
+                              </td>
+                              <td>{kit.supplier_sku || '—'}</td>
+                              <td>
+                                {/* Counts KITS, never component units. There is
+                                    deliberately no cases triangle: a kit IS the
+                                    package. */}
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={kit.quantity}
+                                  onChange={(e) =>
+                                    updateKitQuantity(kit.id, parseInt(e.target.value, 10) || 1)
+                                  }
+                                  aria-label={`Number of ${kit.name} kits`}
+                                  data-testid={`po-kit-quantity-${kit.id}`}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={kit.unit_cost_override ?? kit.unit_cost}
+                                  onChange={(e) =>
+                                    setSelectedKits((prev) =>
+                                      prev.map((row) =>
+                                        row.id === kit.id
+                                          ? { ...row, unit_cost_override: e.target.value }
+                                          : row
+                                      )
+                                    )
+                                  }
+                                  aria-label={`Unit cost for ${kit.name}`}
+                                />
+                              </td>
+                              <td data-testid={`po-kit-total-${kit.id}`}>
+                                {formatCurrency(lineTotal)}
+                              </td>
+                              <td>
+                                {/* Expandable, NOT a tooltip: a 5x5 table is
+                                    unreachable on touch and invisible to screen
+                                    readers as tabular data. */}
+                                <button
+                                  type="button"
+                                  className="link-button"
+                                  onClick={() => toggleKitExpanded(kit.id)}
+                                  aria-expanded={kit.expanded}
+                                  data-testid={`po-kit-expand-${kit.id}`}
+                                >
+                                  {kit.expanded ? 'Hide' : `Show ${kit.components.length}`}
+                                </button>
+                              </td>
+                            </tr>
+                            {kit.expanded && (
+                              <tr data-testid={`po-kit-breakdown-${kit.id}`}>
+                                <td colSpan={7}>
+                                  <table className="items-table nested-table">
+                                    <thead>
+                                      <tr>
+                                        <th>Component</th>
+                                        <th>Per kit</th>
+                                        <th>You get</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {kit.components.map((component) => (
+                                        <tr key={component.id}>
+                                          <td>
+                                            {component.name}
+                                            {component.is_low && (
+                                              <span className="badge badge-warning"> Low</span>
+                                            )}
+                                          </td>
+                                          <td>{component.quantity_per_kit}</td>
+                                          <td
+                                            data-testid={`po-kit-yousget-${kit.id}-${component.id}`}
+                                          >
+                                            +{component.quantity_per_kit * kit.quantity}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={5} className="subtotal-label">
+                          Kits subtotal
+                        </td>
+                        <td className="subtotal-value" data-testid="po-kits-subtotal">
+                          {formatCurrency(kitsTotal)}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </section>
+
             {/* Inventory Items */}
             <section className="form-section items-section">
-              <h2>2. Inventory Items ({selectedItems.length})</h2>
+              <h2>3. Inventory Items ({selectedItems.length})</h2>
+              {/* Double-order guard (op-8n0). Derived, never stored. */}
+              {conflictingItems.length > 0 && (
+                <div className="alert alert-warning" data-testid="po-kit-conflict-banner">
+                  <p>
+                    <strong>Already in a selected kit:</strong>{' '}
+                    {conflictingItems.map((item) => item.item_name).join(', ')}. Ordering both
+                    buys {conflictingItems.length === 1 ? 'it' : 'them'} twice.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={deselectConflictingItems}
+                    data-testid="po-kit-conflict-deselect"
+                  >
+                    Deselect {conflictingItems.length}{' '}
+                    {conflictingItems.length === 1 ? 'item' : 'items'}
+                  </button>
+                </div>
+              )}
               {selectedItems.some((it) => it.quantity_per_package > 1) && (
                 <p className="case-help-text">
                   When ordering items by the case, enter the number of cases. We compute units
@@ -812,12 +1100,31 @@ const PurchaseOrderFormPage: React.FC = () => {
                               type="checkbox"
                               checked={item.selected}
                               onChange={() => toggleItemSelection(item.item_supplier_id)}
+                              // Named so the row is addressable — the kit
+                              // conflict banner (op-8n0) talks about these rows
+                              // by item name, and an unlabelled checkbox left
+                              // that unreachable to a screen reader.
+                              aria-label={`Select ${item.item_name}`}
+                              data-testid={`po-item-checkbox-${item.item_id}`}
                             />
                           </td>
                           <td>
                             <div className="item-info">
                               <div className="item-name-row">
                                 <span className="item-name">{item.item_name}</span>
+                                {/* Permanent "in kit" chip (op-8n0): stays
+                                    visible even when the kit is UNCHECKED, so
+                                    the overlap is discoverable before the
+                                    conflict banner ever fires. */}
+                                {componentIdsInAnyKit.has(item.item_id) && (
+                                  <span
+                                    className="badge badge-info"
+                                    title="This item is also inside a kit from this supplier"
+                                    data-testid={`po-item-in-kit-${item.item_id}`}
+                                  >
+                                    in kit
+                                  </span>
+                                )}
                                 {item.has_active_reorder_request && (
                                   <span className="reorder-badge" title="This item has an active reorder request">
                                     Reorder Request
@@ -1349,6 +1656,10 @@ const PurchaseOrderFormPage: React.FC = () => {
             {/* Order Summary */}
             <section className="form-section summary-section">
               <div className="order-summary">
+                <div className="summary-row">
+                  <span>Kits ({selectedKitCount})</span>
+                  <span data-testid="po-summary-kits-total">{formatCurrency(kitsTotal)}</span>
+                </div>
                 <div className="summary-row">
                   <span>Inventory Items ({selectedItemCount})</span>
                   <span>{formatCurrency(itemsTotal)}</span>

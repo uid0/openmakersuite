@@ -202,10 +202,7 @@ def generate_demand_forecasts():
     # Reuse the serialized forecast's batched lead-time resolution (observed
     # LeadTimeLog mean, else the primary supplier's estimate) to avoid N+1.
     from .services.component_forecast import _lead_time_days_by_item
-    from .services.demand_forecast_engine import (
-        build_restock_events,
-        forecast_item_by_interval,
-    )
+    from .services.demand_forecast_engine import build_restock_events, forecast_item_by_interval
 
     InventoryItem = apps.get_model("inventory", "InventoryItem")
     DemandForecast = apps.get_model("inventory", "DemandForecast")
@@ -214,7 +211,13 @@ def generate_demand_forecasts():
     end = now.date()
 
     items = list(
-        InventoryItem.objects.filter(is_active=True, is_retired=False, is_serialized=False)
+        # Kits are excluded (op-8n0): a kit carries no stock of its own -- its
+        # receipts credit its components -- so forecasting demand for one would
+        # model a permanently-zero series and recommend restocking a thing that
+        # is never stocked.
+        InventoryItem.objects.filter(
+            is_active=True, is_retired=False, is_serialized=False, is_kit=False
+        )
     )
     lead_by_item = _lead_time_days_by_item(items) if items else {}
 
@@ -289,7 +292,11 @@ def snapshot_stock_levels():
 
     created = 0
     updated = 0
-    for item in InventoryItem.objects.filter(is_active=True, is_retired=False).iterator():
+    # Kits hold no stock, so a snapshot row for one would record a flat zero
+    # forever and skew every "stock over time" chart it appears on (op-8n0).
+    for item in InventoryItem.objects.filter(
+        is_active=True, is_retired=False, is_kit=False
+    ).iterator():
         _, was_created = StockLevelSnapshot.objects.update_or_create(
             item=item,
             snapshot_date=week_start,

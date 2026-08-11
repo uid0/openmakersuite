@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, AssignSlotRequest, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, ResilienceStatus, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageAssignment, StorageAssignmentType, StorageOverview, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, AssignSlotRequest, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, Kit, KitSummary, KitSupplierTerms, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, ResilienceStatus, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageAssignment, StorageAssignmentType, StorageOverview, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -238,6 +238,12 @@ export const inventoryAPI = {
     // Retired items with stock are always listed; retired-and-empty items are
     // hidden by default. Pass include_retired=true to surface them (op-jv7r).
     include_retired?: boolean;
+    // Kits (op-8n0) are InventoryItem rows with is_kit=true and are EXCLUDED
+    // from this endpoint by default, because receiving one credits its
+    // components rather than the kit. Pass include_kits to get both, or
+    // is_kit to filter to one side. Mirrors include_retired above.
+    include_kits?: boolean;
+    is_kit?: boolean;
     ordering?: string;
     page?: number;
     page_size?: number;
@@ -246,6 +252,10 @@ export const inventoryAPI = {
       '/inventory/items/',
       { params }
     ),
+
+  /** Kits that supply this component — reorder context, public read (AC-15). */
+  getItemKits: (id: string) =>
+    api.get<KitSummary[]>(`/inventory/items/${id}/kits/`),
 
   getMySIGInventory: () =>
     api.get<InventoryItem[]>('/inventory/items/my_sig_inventory/'),
@@ -1817,6 +1827,32 @@ export interface ReorderDataAsset {
   product_url: string;
 }
 
+/**
+ * A kit this supplier sells that would restock one of their low components
+ * (op-8n0). Informational context on the reorder screen and a purchasable line
+ * on the PO form — never an "action row": kits are excluded from `items` and
+ * contribute nothing to `total_items` or `estimated_total`.
+ */
+export interface ReorderDataKitComponent {
+  id: string;
+  name: string;
+  sku: string;
+  quantity_per_kit: number;
+  /** Whether this component is one of the low items that surfaced the kit. */
+  is_low: boolean;
+}
+
+export interface ReorderDataKit {
+  id: string;
+  name: string;
+  sku: string;
+  supplier_sku: string;
+  unit_cost: string;
+  item_supplier_id: number;
+  components: ReorderDataKitComponent[];
+  low_component_count: number;
+}
+
 export interface ReorderDataSupplier {
   id: number;
   name: string;
@@ -1824,6 +1860,12 @@ export interface ReorderDataSupplier {
   website: string;
   items: ReorderDataItem[];
   assets: ReorderDataAsset[];
+  /**
+   * Optional in the type even though the backend always sends it, so callers
+   * are forced to write `supplier.kits ?? []` and older cached payloads cannot
+   * crash the purchase-order form.
+   */
+  kits?: ReorderDataKit[];
   total_items: number;
   estimated_total: string;
   avg_lead_time: number;
@@ -1989,6 +2031,55 @@ export const supplierAgreementAPI = {
     api.get<{ results: SupplierAgreement[] }>(
       `/inventory/supplier-agreements/?supplier=${supplierId}&is_active=true`
     ),
+};
+
+/**
+ * Kit SKUs (op-8n0): purchasable bundles that decompose into component stock.
+ *
+ * `/inventory/kits/` is a facade over the `is_kit=true` slice of InventoryItem,
+ * so a Kit is shaped exactly like an InventoryItem plus its `components`.
+ * Reads are public; writes need auth.
+ *
+ * There is deliberately no kit-components endpoint — the bill of materials is
+ * nested-writable on the kit, and every mutation returns the FULL refreshed kit
+ * so callers can patch visible state from the response rather than refetching
+ * (docs/REACTIVE_MUTATIONS.md).
+ */
+export const kitAPI = {
+  listKits: (params?: {
+    search?: string;
+    is_active?: boolean;
+    /** Supplier id — kits purchasable from this supplier. */
+    supplier?: number;
+    /** Inventory item id — kits that contain this component. */
+    component?: string;
+    ordering?: string;
+    page?: number;
+    page_size?: number;
+  }) =>
+    api.get<{ count: number; next: string | null; previous: string | null; results: Kit[] }>(
+      '/inventory/kits/',
+      { params }
+    ),
+
+  getKit: (id: string) => api.get<Kit>(`/inventory/kits/${id}/`),
+
+  createKit: (
+    payload: Partial<Kit> & {
+      components: Array<{ component: string; quantity: number; notes?: string }>;
+      supplier_terms?: KitSupplierTerms;
+    }
+  ) => api.post<Kit>('/inventory/kits/', payload),
+
+  updateKit: (
+    id: string,
+    payload: Partial<Kit> & {
+      components?: Array<{ component: string; quantity: number; notes?: string }>;
+      supplier_terms?: KitSupplierTerms;
+    }
+  ) => api.patch<Kit>(`/inventory/kits/${id}/`, payload),
+
+  deleteKit: (id: string) => api.delete(`/inventory/kits/${id}/`),
 };
 
 export const purchaseOrderAPI = {

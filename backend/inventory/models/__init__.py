@@ -40,6 +40,9 @@ from .fixtures import (  # noqa: F401
 from .forecasting import (  # noqa: F401
     DemandForecast,
 )
+from .kit import (  # noqa: F401
+    KitComponent,
+)
 from .location_problem import (  # noqa: F401
     LocationProblem,
 )
@@ -85,6 +88,7 @@ __all__ = [
     "StockLevelSnapshot",
     "SerializedComponent",
     "ComponentUsageEvent",
+    "KitComponent",
     "AssetTagSequence",
     "Asset",
     "AssetPart",

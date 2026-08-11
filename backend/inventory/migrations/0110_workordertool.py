@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("inventory", "0108_packaging_levels_and_count_mode"),
+        ("inventory", "0109_kit_and_kit_components"),
     ]
 
     operations = [

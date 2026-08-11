@@ -15,7 +15,7 @@ from django.db import transaction
 from ..models import DeliveryItem, LeadTimeLog, OrderDelivery, PurchaseOrder, ReorderRequest
 
 
-def close_linked_reorder_request(po_item, delivery_date):
+def close_linked_reorder_request(po_item, delivery_date, *, item=None):
     """Close the item's open reorder requests when a PO line is fully received.
 
     The requests that started the purchase are what a member actually watches:
@@ -41,11 +41,19 @@ def close_linked_reorder_request(po_item, delivery_date):
     Already-received or cancelled requests are never touched, so re-driving the
     same receipt is a no-op.
 
+    ``item`` overrides which inventory item's requests are closed, for kit lines
+    (op-8n0). A kit line's ``.item`` is the KIT, and nobody files a reorder
+    request against a kit — requests are filed against "cyan ink". Left to the
+    default, receiving a kit would silently leave every component's request open
+    and somebody would re-order cyan next week. The kit caller therefore invokes
+    this once per exploded component. Still status-only bookkeeping either way:
+    the component's stock was already credited by ``explode_kit_receipt``.
+
     Returns the list of requests it closed — empty for asset-only or freeform
     lines, which have no inventory item, and for an item with nothing
     outstanding.
     """
-    inventory_item = po_item.item
+    inventory_item = item if item is not None else po_item.item
     if inventory_item is None:
         return []
 
@@ -154,9 +162,27 @@ def receive_delivery(
             po_item.save()
 
             inventory_item = po_item.item
+            kit_credits = []
             if inventory_item is not None:
-                inventory_item.current_stock += quantity
-                inventory_item.save()
+                # A kit is the SKU that was bought, but not the thing that goes
+                # on the shelf: receiving it credits its component items and
+                # leaves the kit's own stock at zero (op-8n0). Driven by THIS
+                # receipt's ``quantity``, never ``po_item.quantity_received``,
+                # so partial receipts stay additive; over-receipt is rejected
+                # upstream by the view's pending-quantity guard.
+                #
+                # Credits the line's ORDER-TIME snapshot, so a kit edited between
+                # ordering and delivery still credits what is in the box. Only a
+                # legacy line with no snapshot reads the kit's live components.
+                if inventory_item.is_kit:
+                    from inventory.services.kits import explode_kit_receipt
+
+                    kit_credits = explode_kit_receipt(
+                        inventory_item, quantity, snapshot=po_item.kit_snapshot
+                    )
+                else:
+                    inventory_item.current_stock += quantity
+                    inventory_item.save()
 
                 # Committee-owned purchasing hits the ledger (Phase 2 · Bead 5):
                 # DR 1300 Inventory (dim=committee) / CR 2000 Accounts Payable
@@ -184,9 +210,7 @@ def receive_delivery(
             # never moves stock, so ordinary receives are untouched. Local
             # import avoids a reorder_queue <-> inventory services cycle.
             if po_item.work_order_id:
-                from inventory.services.work_order_purchase_bridge import (
-                    post_work_order_material,
-                )
+                from inventory.services.work_order_purchase_bridge import post_work_order_material
 
                 post_work_order_material(po_item)
 
@@ -195,7 +219,15 @@ def receive_delivery(
                 # The whole line landed, so whatever reorder request asked for
                 # it is satisfied — close it in the same transaction as the
                 # receipt. A partial receipt leaves it open.
-                close_linked_reorder_request(po_item, delivery.delivery_date)
+                if kit_credits:
+                    # Requests are filed against the components, never the kit,
+                    # so close each exploded component's instead of the kit's.
+                    for credit in kit_credits:
+                        close_linked_reorder_request(
+                            po_item, delivery.delivery_date, item=credit.component
+                        )
+                else:
+                    close_linked_reorder_request(po_item, delivery.delivery_date)
 
         if purchase_order.is_fully_received:
             purchase_order.status = PurchaseOrder.Status.RECEIVED

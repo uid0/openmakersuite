@@ -64,6 +64,17 @@ interface PurchaseOrderItem {
     asset_tag: string;
     location_name: string | null;
   } | null;
+  // Kit lines (op-8n0). Both come from the LINE payload; the breakdown is
+  // never fetched live from the kit, because what matters when receiving is
+  // what this line will credit.
+  is_kit_line?: boolean;
+  kit_components?: Array<{
+    component: string;
+    component_name: string;
+    component_sku: string;
+    quantity_per_kit: number;
+    quantity: number;
+  }> | null;
   quantity_ordered: number;
   quantity_received: number;
   quantity_pending: number;
@@ -1288,6 +1299,26 @@ const PurchaseOrderPage: React.FC = () => {
                           />
                         </td>
                       </tr>
+                      {/* Live consequence row (op-8n0). Driven ENTIRELY by
+                          local state and the line's own snapshot, so it updates
+                          as the quantity is typed and the operator sees what
+                          receiving will do BEFORE committing. Mirrors the
+                          serialized disclosure sub-row directly below. */}
+                      {item.is_kit_line && qty > 0 && (item.kit_components?.length ?? 0) > 0 && (
+                        <tr
+                          className="receive-serial-row"
+                          data-testid={`receive-kit-consequence-${item.id}`}
+                        >
+                          <td colSpan={4}>
+                            Receiving {qty} {qty === 1 ? 'kit' : 'kits'} adds{' '}
+                            {(item.kit_components ?? []).reduce(
+                              (sum, component) => sum + component.quantity_per_kit * qty,
+                              0
+                            )}{' '}
+                            units across {(item.kit_components ?? []).length} items
+                          </td>
+                        </tr>
+                      )}
                       {serialized && qty > 0 && (
                         <tr className="receive-serial-row">
                           <td colSpan={4}>
@@ -1663,6 +1694,24 @@ const PurchaseOrderPage: React.FC = () => {
                     {item.item_type === 'asset' && item.asset_details?.location_name && (
                       <div style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '0.25rem' }}>
                         Location: {item.asset_details.location_name}
+                      </div>
+                    )}
+                    {/* Kit breakdown (op-8n0). Rendered from THIS LINE's
+                        payload — never a live kit fetch — so what is shown is
+                        what receiving this line will credit. */}
+                    {item.is_kit_line && (item.kit_components?.length ?? 0) > 0 && (
+                      <div
+                        style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '0.25rem' }}
+                        data-testid={`line-kit-breakdown-${item.id}`}
+                      >
+                        <span className="item-type-badge">kit</span>{' '}
+                        Contains:{' '}
+                        {(item.kit_components ?? [])
+                          .map(
+                            (component) =>
+                              `${component.component_name} x${component.quantity}`
+                          )
+                          .join(', ')}
                       </div>
                     )}
                   </td>

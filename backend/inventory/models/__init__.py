@@ -33,9 +33,19 @@ from .core import (  # noqa: F401
     UsageLog,
     generate_sku,
 )
-from .fixtures import Fixture, FixtureRefillRequest  # noqa: F401
-from .forecasting import DemandForecast  # noqa: F401
-from .location_problem import LocationProblem  # noqa: F401
+from .fixtures import (  # noqa: F401
+    Fixture,
+    FixtureRefillRequest,
+)
+from .forecasting import (  # noqa: F401
+    DemandForecast,
+)
+from .kit import (  # noqa: F401
+    KitComponent,
+)
+from .location_problem import (  # noqa: F401
+    LocationProblem,
+)
 from .maintenance import (  # noqa: F401
     ElapsedTimerModel,
     MaintenanceAuditEvent,
@@ -75,6 +85,7 @@ __all__ = [
     "StockLevelSnapshot",
     "SerializedComponent",
     "ComponentUsageEvent",
+    "KitComponent",
     "AssetTagSequence",
     "Asset",
     "AssetPart",

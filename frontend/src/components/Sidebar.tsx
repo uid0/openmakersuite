@@ -83,6 +83,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed = false, isMobileOpen = f
         { path: '/dashboard', label: 'Dashboard', icon: '📊', requiresAuth: true },
         { path: '/inventory', label: 'Inventory Home', icon: '🏠' },
         { path: '/inventory/assets', label: 'Assets', icon: '📋' },
+        { path: '/inventory/kits', label: 'Kits', icon: '🧰' },
         { path: '/inventory/locations', label: 'Locations', icon: '📍', requiresStaff: true },
         { path: '/inventory/categories', label: 'Categories', icon: '📁', requiresStaff: true },
         { path: '/inventory/admin', label: 'Admin Dashboard', icon: '⚙️', requiresAuth: true },

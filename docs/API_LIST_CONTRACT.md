@@ -27,7 +27,8 @@ Endpoints that intentionally return all rows in one response (e.g. `/api/invento
 
 | Endpoint                                     | ViewSet                       | Paginated | Default order  | Documented filters                                                                                                                |
 | -------------------------------------------- | ----------------------------- | --------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/inventory/items/`                  | `InventoryItemViewSet`        | yes       | `name`         | `category`, `location`, `search`, `low_stock`, `is_active`                                                                        |
+| `GET /api/inventory/items/`                  | `InventoryItemViewSet`        | yes       | `name`         | `category`, `location`, `search`, `low_stock`, `is_active`, `include_retired`, `include_kits`, `is_kit` — **excludes kits by default**, see note below |
+| `GET /api/inventory/kits/`                   | `KitViewSet`                  | yes       | `name`         | `search`, `is_active`, `supplier`, `component`, `ordering` (whitelist)                                                            |
 | `GET /api/inventory/assets/`                 | `AssetViewSet`                | yes       | `name`         | `category`, `location`, `status`, `inventory_item`, `manufacturer`, `owning_group`, `date_received_after`, `date_received_before`, `age_min_days`, `age_max_days`, `search`, `is_active`, `ordering` (whitelist) |
 | `GET /api/inventory/locations/`              | `LocationViewSet`             | no        | `name`         | `search` (anonymous users see only `is_active=True`)                                                                              |
 | `GET /api/inventory/suppliers/`              | `SupplierViewSet`             | yes       | model default  | none (paginated browse)                                                                                                           |
@@ -68,7 +69,28 @@ The bounds are intentionally **upper bounds**, not targets. They reflect the cur
 | --------------------------------------- | ------------- | -------------------------------------------------------------------------------- |
 | `GET /api/inventory/items/` (20 items)  | 260 queries   | Dominated by per-item `SerializerMethodField` calls into `ItemSupplier` and reorder lookups. |
 | `GET /api/inventory/items/{id}/`        | 40 queries    | Detail serializer fetches per-supplier `PriceHistory`.                           |
+| `GET /api/inventory/kits/` (any page size) | 9 queries  | Flat in the number of kits — measured at 1, 5 and 10 kits (op-8n0). `KitSerializer` subclasses `InventoryItemSerializer`, so `KitViewSet` mirrors the item viewset's `select_related`/`Prefetch` set; without that it was ~5 queries per kit. |
 | `GET /api/inventory/assets/` (15 items) | 90 queries    | Dominated by per-asset `groups_can_enable`, ForgeKey operational mode, and lockout lookups. |
 | `GET /api/inventory/suppliers/` (10)    | 130 queries   | `SupplierSerializer` includes per-supplier `_get_*` helpers that re-query.       |
+
+## Kit visibility on `/api/inventory/items/` (op-8n0)
+
+**Contract change.** Kits are `InventoryItem` rows carrying `is_kit=True`, and
+`GET /api/inventory/items/` **excludes them by default**. A kit is a purchasing
+construct — receiving one credits its component items and never the kit — so it
+would otherwise appear in every item picker and count sheet as a permanently
+zero-stock item.
+
+| Query | Returns |
+| ----- | ------- |
+| `GET /api/inventory/items/` | ordinary items only (kits hidden) |
+| `GET /api/inventory/items/?include_kits=true` | ordinary items **and** kits |
+| `GET /api/inventory/items/?is_kit=true` | kits only |
+| `GET /api/inventory/items/?is_kit=false` | ordinary items only (explicit form of the default) |
+
+This mirrors the existing `include_retired` opt-out. Any consumer that needs the
+previous "everything on this table" behaviour must pass `include_kits=true`.
+Kits have their own list at `GET /api/inventory/kits/`, and
+`GET /api/inventory/items/{id}/kits/` answers "which kits supply this item?".
 
 Tightening these counts is tracked separately — see follow-up bead `oms-0rc:n+1-tightening`.

@@ -93,6 +93,8 @@ from .serializers import (
     ItemDeliverySerializer,
     ItemOrderCostSerializer,
     ItemSupplierSerializer,
+    KitSerializer,
+    KitSummarySerializer,
     LocationProblemSerializer,
     LocationReconcileItemSerializer,
     LocationSerializer,
@@ -576,6 +578,10 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             "qr_code",
             "checklists",
             "scan",
+            # "Which kits supply this cartridge?" is reorder-triage context
+            # shown beside stock on the item detail page (op-8n0), so it reads
+            # as publicly as the item itself.
+            "kits",
         ]:
             return [AllowAny()]
         # Admin actions (create, update, delete)
@@ -682,6 +688,23 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         include_retired = self.request.query_params.get("include_retired", "").lower()
         if include_retired != "true":
             queryset = queryset.exclude(is_retired=True, current_stock__lte=0)
+
+        # Kit visibility (op-8n0). Kits live on this table but are not stock —
+        # they are purchasing constructs whose receipts credit their components
+        # — so they would otherwise appear in every item picker, count sheet and
+        # low-stock list as a permanently-zero item. Excluded by default,
+        # mirroring the ``include_retired`` opt-out directly above.
+        #
+        # NOTE: this is a CLIENT-VISIBLE CONTRACT CHANGE for
+        # ``/api/inventory/items/``. ``?is_kit=true`` returns only kits and
+        # ``?include_kits=true`` returns both, so any consumer that wants the
+        # old "everything" behaviour has an explicit opt-in.
+        is_kit_param = self.request.query_params.get("is_kit", "").lower()
+        include_kits = self.request.query_params.get("include_kits", "").lower()
+        if is_kit_param == "true":
+            queryset = queryset.filter(is_kit=True)
+        elif is_kit_param == "false" or include_kits != "true":
+            queryset = queryset.filter(is_kit=False)
 
         # Ordering support (validated against an allow-list to keep the
         # client-driven `ordering` param from reaching arbitrary fields).
@@ -967,6 +990,32 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         response = HttpResponse(item.qr_code.read(), content_type="image/png")
         response["Content-Disposition"] = f'inline; filename="qr_{item.sku or item.id}.png"'
         return response
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def kits(self, request, pk=None):
+        """List the kits that supply this component (op-8n0).
+
+        Reorder triage is "show, don't act": a purchaser looking at low cyan ink
+        should be able to see that the Eufy Ink Kit is a way to buy it, without
+        this endpoint (or anything downstream of it) deciding that for them.
+
+        Returns ``[]`` for an item nothing contains, and for a kit itself —
+        nested kits are out of scope, so a kit is never a component.
+        """
+        item = self.get_object()
+        kits = (
+            InventoryItem.objects.filter(
+                is_kit=True,
+                kit_components__component=item,
+            )
+            .prefetch_related("kit_components", "item_suppliers__supplier")
+            .distinct()
+            .order_by("name")
+        )
+        serializer = KitSummarySerializer(
+            kits, many=True, context={**self.get_serializer_context(), "component_id": item.pk}
+        )
+        return Response(serializer.data)
 
     @action(detail=True, methods=["get"], permission_classes=[AllowAny])
     def checklists(self, request, pk=None):
@@ -1671,6 +1720,99 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
                 "is_primary": True,
             },
         )
+
+
+class KitViewSet(viewsets.ModelViewSet):
+    """Kit SKUs: purchasable bundles that decompose into component stock (op-8n0).
+
+    A FACADE over the ``is_kit=True`` slice of :class:`InventoryItem` rather
+    than a model of its own, which is why ``basename`` must be set explicitly on
+    the router — DRF would otherwise infer ``inventoryitem`` from the queryset
+    model and collide with ``/items/``.
+
+    Reads are public and writes require authentication, matching
+    ``InventoryItemViewSet``: a kit is catalog data, and the purchasing screens
+    that show "this cartridge comes in the Eufy Ink Kit" are the same public
+    surfaces that show the cartridge.
+    """
+
+    serializer_class = KitSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        """Kits only, with the bill of materials and supplier terms prefetched.
+
+        Because :class:`KitSerializer` inherits the whole
+        ``InventoryItemSerializer`` field set, it also inherits that
+        serializer's per-row lookups, so this MUST mirror
+        ``InventoryItemViewSet.get_queryset``'s joins or the list goes
+        quadratic. Measured: ~5 queries per kit without them.
+
+        On top of that shared set, ``kit_components__component`` feeds the
+        nested rows and ``component_count``.
+
+        The two ``reorder_requests`` prefetches look pointless for kits — a kit
+        is never requestable, so both always come back empty — but the
+        serializer's ``reorder_status`` / ``has_pending_reorder`` /
+        ``expected_delivery_date`` / ``active_reorder_request`` fields query
+        them per row unless the cache exists. Two constant queries beat 4N.
+        """
+        from django.db.models import Prefetch
+
+        from reorder_queue.models import ReorderRequest
+
+        queryset = (
+            InventoryItem.objects.filter(is_kit=True)
+            .select_related("category", "location", "safety_profile", "count_level")
+            .prefetch_related(
+                "kit_components__component",
+                "item_suppliers__supplier",
+                "packaging_levels",
+                Prefetch(
+                    "reorder_requests",
+                    queryset=ReorderRequest.objects.filter(
+                        status__in=["pending", "approved", "ordered"]
+                    ).order_by("-requested_at"),
+                    to_attr="_active_reorder_requests",
+                ),
+                Prefetch(
+                    "reorder_requests",
+                    queryset=ReorderRequest.objects.filter(status="ordered").order_by(
+                        "-ordered_at"
+                    ),
+                    to_attr="_ordered_reorder_requests",
+                ),
+            )
+        )
+
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(sku__icontains=search)
+                | Q(description__icontains=search)
+                | Q(item_suppliers__supplier_sku__icontains=search)
+            ).distinct()
+
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == "true")
+
+        supplier = self.request.query_params.get("supplier")
+        if supplier:
+            queryset = queryset.filter(item_suppliers__supplier_id=supplier).distinct()
+
+        # "Which kits would restock this item?" — the same question
+        # ``/items/{id}/kits/`` answers, reachable from the kit list too.
+        component = self.request.query_params.get("component")
+        if component:
+            queryset = queryset.filter(kit_components__component_id=component).distinct()
+
+        ordering = self.request.query_params.get("ordering", "name")
+        valid_ordering_fields = {"name", "-name", "sku", "-sku", "created_at", "-created_at"}
+        if ordering not in valid_ordering_fields:
+            ordering = "name"
+        return queryset.order_by(ordering)
 
 
 class UsageLogViewSet(viewsets.ModelViewSet):

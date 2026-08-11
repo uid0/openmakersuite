@@ -41,7 +41,10 @@ The rest of this file applies to both agents.
 
 ## Backend
 
-- **Django Version**: Currently using Django 5.1.15 (upgraded from 4.2.27 in December 2025, security update to 5.1.15 in January 2026)
+- **Django Version**: Currently using **Django 6.0.7** (see `backend/requirements.txt`; migration headers from 0108 onward record it too)
+- **`CheckConstraint` uses `condition=`, not `check=`**: Django 6 removed the
+  `check=` keyword. Write `models.CheckConstraint(condition=Q(...), name=...)`,
+  matching the existing constraints in `inventory/` and `reorder_queue/`.
 - Use `python manage.py startapp` to create new apps within your project
 - Keep models in `models.py` and register them in `admin.py` for admin interface
 - Use Django's ORM instead of raw SQL queries
@@ -73,7 +76,18 @@ class ActiveUserManager(models.Manager):
 - Use Django's built-in authentication system
 - Store settings in environment variables and access via `settings.py`
 
-### Django 5.1 Upgrade Notes (December 2025)
+### Django upgrade history
+
+The backend now runs **Django 6.0.7**. The notes below cover the earlier 4.2 -> 5.1
+upgrade and are retained for context; anything they say about 5.1 being the
+current version is superseded by the 6.0.7 pin in `backend/requirements.txt`.
+
+Django 6 changes that affect code in this repo:
+
+- `CheckConstraint(check=...)` is gone -- use `condition=`.
+- Constraint validation runs in `Model.full_clean()` by default; pass
+  `validate_constraints=False` where a model deliberately leaves enforcement to
+  the database (see `inventory/models/kit.py`).
 
 The project was successfully upgraded from Django 4.2.27 to Django 5.1.14, then to 5.1.15 for security. Key points:
 

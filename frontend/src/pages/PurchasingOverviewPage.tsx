@@ -4,7 +4,7 @@
  * + <CapabilityCard> primitives so it matches the homepage rhythm.
  */
 import { Stack } from '@mantine/core';
-import { IconClipboardList, IconPlus, IconReceipt } from '@tabler/icons-react';
+import { IconClipboardList, IconPackages, IconPlus, IconReceipt } from '@tabler/icons-react';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -39,6 +39,14 @@ const PurchasingOverviewPage: React.FC = () => {
       </Stack>
     }
   >
+    <CapabilityCard
+      to="/inventory/kits"
+      title="Kits"
+      description="Bundles bought as one SKU. Ordering a kit is a single line; receiving it stocks the items inside."
+      icon={<IconPackages size={22} stroke={1.8} />}
+      eyebrow="Catalog"
+      testId="purchasing-overview-card-/inventory/kits"
+    />
     <CapabilityCard
       to="/purchasing/orders"
       title="Purchase orders"

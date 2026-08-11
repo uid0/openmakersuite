@@ -145,7 +145,7 @@ class TestAC1MigrationIsAdditive:
     def _operations():
         import importlib
 
-        module = importlib.import_module("inventory.migrations.0109_workordertool")
+        module = importlib.import_module("inventory.migrations.0110_workordertool")
         return module.Migration.operations
 
     def test_exactly_one_create_model_for_work_order_tool(self):

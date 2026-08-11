@@ -35,6 +35,7 @@ from .models import (
     InventoryItem,
     InventorySafetyProfile,
     ItemSupplier,
+    KitComponent,
     Location,
     LocationProblem,
     MaintenanceItem,
@@ -995,6 +996,288 @@ class InventoryItemDetailSerializer(InventoryItemSerializer):
             }
 
         return {"trend": "no_data", "change_percentage": None}
+
+
+class KitComponentSerializer(serializers.ModelSerializer):
+    """One line of a kit's bill of materials (op-8n0).
+
+    Used nested-writable on :class:`KitSerializer` so the kit form saves the
+    whole bill of materials in a single request; there is deliberately no
+    standalone ``/kit-components/`` endpoint in phase 1, the same call already
+    made for :class:`PackagingLevelSerializer`.
+    """
+
+    component_name = serializers.CharField(source="component.name", read_only=True)
+    component_sku = serializers.CharField(source="component.sku", read_only=True)
+    component_current_stock = serializers.IntegerField(
+        source="component.current_stock", read_only=True
+    )
+    component_needs_reorder = serializers.BooleanField(
+        source="component.needs_reorder", read_only=True
+    )
+
+    class Meta:
+        model = KitComponent
+        fields = [
+            "id",
+            "component",
+            "component_name",
+            "component_sku",
+            "component_current_stock",
+            "component_needs_reorder",
+            "quantity",
+            "notes",
+        ]
+
+    def validate_quantity(self, value):
+        """A component quantity of zero would credit nothing on receipt."""
+        if value < 1:
+            raise serializers.ValidationError("Component quantity must be at least 1.")
+        return value
+
+
+class KitSerializer(InventoryItemSerializer):
+    """A kit SKU and its bill of materials (op-8n0).
+
+    Deliberately SUBCLASSES :class:`InventoryItemSerializer` rather than
+    redeclaring the catalog fields: a kit *is* an ``InventoryItem`` with
+    ``is_kit=True``, and inheriting the whole field set here is what proves that
+    design carries — name, SKU, category, image, supplier accessors and
+    ownership all behave identically without a line of duplication.
+    """
+
+    components = KitComponentSerializer(source="kit_components", many=True, required=False)
+    component_count = serializers.SerializerMethodField()
+    supplier_terms = serializers.DictField(write_only=True, required=False)
+
+    class Meta(InventoryItemSerializer.Meta):
+        fields = InventoryItemSerializer.Meta.fields + [
+            "is_kit",
+            "components",
+            "component_count",
+            "supplier_terms",
+        ]
+
+    def get_component_count(self, obj):
+        """How many distinct component rows the kit contains."""
+        return len(obj.kit_components.all())
+
+    def validate(self, attrs):
+        """Enforce the kit rules the database and ``clean()`` cannot reach.
+
+        The DB constraints cover self-reference and positive quantities, and
+        ``KitComponent.clean()`` covers nested kits and serialized components,
+        but both surface as a 500-shaped ``IntegrityError`` or a non-field
+        error. Checking here turns each into a field-addressed 400 the kit form
+        can render beside the offending row.
+
+        "At least one component" deliberately lives *only* here and not in the
+        database: the kit row has to exist before its components can reference
+        it, so no constraint can express it. The receive service therefore also
+        tolerates an empty bill of materials rather than trusting this.
+        """
+        attrs = super().validate(attrs)
+
+        # A kit is a purchasing construct: it is stocked through its components.
+        instance = self.instance
+        is_serialized = attrs.get("is_serialized", getattr(instance, "is_serialized", False))
+        if is_serialized:
+            raise serializers.ValidationError(
+                {"is_serialized": "A kit cannot be serialized; its components are stocked, not it."}
+            )
+        current_stock = attrs.get("current_stock", getattr(instance, "current_stock", 0))
+        if current_stock:
+            raise serializers.ValidationError(
+                {
+                    "current_stock": (
+                        "A kit cannot carry stock — receiving a kit credits its "
+                        "component items instead."
+                    )
+                }
+            )
+
+        components = attrs.get("kit_components")
+        if components is None:
+            # Partial update that does not mention components: leave the
+            # existing bill of materials alone.
+            if instance is None:
+                raise serializers.ValidationError(
+                    {"components": "A kit must contain at least one component."}
+                )
+            return attrs
+
+        if not components:
+            raise serializers.ValidationError(
+                {"components": "A kit must contain at least one component."}
+            )
+
+        seen = set()
+        for row in components:
+            component = row.get("component")
+            if component is None:
+                continue
+            if component.pk in seen:
+                raise serializers.ValidationError(
+                    {
+                        "components": (
+                            f"'{component.name}' is listed more than once — "
+                            "combine them into a single row with a higher quantity."
+                        )
+                    }
+                )
+            seen.add(component.pk)
+
+            if instance is not None and component.pk == instance.pk:
+                raise serializers.ValidationError({"components": "A kit cannot contain itself."})
+            if component.is_kit:
+                raise serializers.ValidationError(
+                    {"components": f"'{component.name}' is a kit — kits cannot contain kits."}
+                )
+            if component.is_serialized:
+                raise serializers.ValidationError(
+                    {
+                        "components": (
+                            f"'{component.name}' is serialized and cannot be a kit component — "
+                            "receiving the kit would credit stock without recording serials."
+                        )
+                    }
+                )
+        return attrs
+
+    def _apply_components(self, instance, components):
+        """Replace the kit's bill of materials, upserting on ``component``.
+
+        Upsert on the natural key rather than delete-and-recreate so a row that
+        survives an edit keeps its primary key — the same reasoning as
+        ``_apply_packaging_levels``. Here it matters because the kit editor
+        addresses rows by id when patching its local state, and recreating them
+        would make every save look like "everything changed".
+        """
+        if components is None:
+            return
+        with transaction.atomic():
+            keep = set()
+            for row in components:
+                obj, _ = KitComponent.objects.update_or_create(
+                    kit=instance,
+                    component=row["component"],
+                    defaults={
+                        "quantity": row.get("quantity", 1),
+                        "notes": row.get("notes", ""),
+                    },
+                )
+                keep.add(obj.pk)
+            instance.kit_components.exclude(pk__in=keep).delete()
+
+    def _apply_supplier_terms(self, instance, terms):
+        """Attach the purchase terms that make the kit buyable.
+
+        A kit with no ``ItemSupplier`` cannot appear on a purchase order at all,
+        because ``PurchaseOrderItem`` points at the supplier relationship rather
+        than the item. Folding the terms into the kit create keeps "define a
+        kit" a single request; the generic ``/item-suppliers/`` endpoint still
+        works for editing them afterwards.
+        """
+        if not terms:
+            return
+        supplier_id = terms.get("supplier")
+        if supplier_id is None:
+            raise serializers.ValidationError(
+                {"supplier_terms": {"supplier": "This field is required."}}
+            )
+        defaults = {
+            key: terms[key]
+            for key in ("supplier_sku", "supplier_url", "unit_cost", "average_lead_time")
+            if key in terms
+        }
+        defaults.setdefault("quantity_per_package", 1)
+        defaults["is_primary"] = True
+        ItemSupplier.objects.update_or_create(
+            item=instance,
+            supplier_id=supplier_id,
+            defaults=defaults,
+        )
+
+    def create(self, validated_data):
+        validated_data["is_kit"] = True
+        components = validated_data.pop("kit_components", None)
+        terms = validated_data.pop("supplier_terms", None)
+        instance = super().create(validated_data)
+        self._apply_components(instance, components)
+        self._apply_supplier_terms(instance, terms)
+        return instance
+
+    def update(self, instance, validated_data):
+        validated_data["is_kit"] = True
+        components = validated_data.pop("kit_components", None)
+        terms = validated_data.pop("supplier_terms", None)
+        instance = super().update(instance, validated_data)
+        self._apply_components(instance, components)
+        self._apply_supplier_terms(instance, terms)
+        return instance
+
+
+class KitSummarySerializer(serializers.ModelSerializer):
+    """Compact "this component comes in these kits" row (op-8n0).
+
+    Used by ``/api/inventory/items/{id}/kits/`` and the item detail page's
+    "Supplied by kits" card. Deliberately not the full :class:`KitSerializer`:
+    the caller is looking at a cartridge and wants the name, the price and how
+    many it gets, not the kit's whole catalog record.
+    """
+
+    quantity_in_kit = serializers.SerializerMethodField()
+    supplier_name = serializers.SerializerMethodField()
+    supplier_sku = serializers.SerializerMethodField()
+    unit_cost = serializers.SerializerMethodField()
+    component_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InventoryItem
+        fields = [
+            "id",
+            "name",
+            "sku",
+            "is_active",
+            "quantity_in_kit",
+            "supplier_name",
+            "supplier_sku",
+            "unit_cost",
+            "component_count",
+        ]
+
+    def _primary(self, obj):
+        return obj.primary_item_supplier
+
+    def get_quantity_in_kit(self, obj):
+        """How many of *this* component one kit contains.
+
+        ``component_id`` is passed through the serializer context by the view
+        that already knows which component was asked about, so this costs no
+        extra query per row.
+        """
+        component_id = self.context.get("component_id")
+        if component_id is None:
+            return None
+        for row in obj.kit_components.all():
+            if row.component_id == component_id:
+                return row.quantity
+        return None
+
+    def get_component_count(self, obj):
+        return len(obj.kit_components.all())
+
+    def get_supplier_name(self, obj):
+        primary = self._primary(obj)
+        return primary.supplier.name if primary else None
+
+    def get_supplier_sku(self, obj):
+        primary = self._primary(obj)
+        return primary.supplier_sku if primary else None
+
+    def get_unit_cost(self, obj):
+        primary = self._primary(obj)
+        return primary.unit_cost if primary else None
 
 
 class DemandForecastSerializer(serializers.ModelSerializer):

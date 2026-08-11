@@ -36,6 +36,7 @@ const ENTRIES: RouteEntry[] = [
   { path: 'inventory/transparency', label: 'Transparency' },
   { path: 'inventory/scan', label: 'Scan Items' },
   { path: 'inventory/items', label: 'Items' },
+  { path: 'inventory/kits', label: 'Kits' },
   { path: 'inventory/suppliers', label: 'Suppliers' },
   { path: 'inventory/categories', label: 'Categories' },
   { path: 'inventory/locations', label: 'Locations' },

@@ -41,6 +41,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from inventory.models import ItemSupplier
+from inventory.services.kits import build_kit_snapshot
 from inventory.services.packaging import order_level, parse_at_level, resolve_base_quantity
 
 from ..models import PurchaseOrder, PurchaseOrderItem, ReorderRequest
@@ -215,6 +216,13 @@ def create_purchase_order(validated_data, items_data, user):
                 # Get expected_shipment_date if provided
                 expected_shipment_date = item_data.get("expected_shipment_date")
 
+                # Freeze what a kit contains right now (op-8n0). The BOM is
+                # editable and receipt is days or weeks away, so the line has to
+                # carry its own copy or receiving would credit today's recipe
+                # for a box packed to the old one. ``None`` for ordinary items,
+                # which is what keeps their stored row and payload unchanged.
+                kit_snapshot = build_kit_snapshot(item_supplier.item)
+
                 # Create the line item
                 line_item = PurchaseOrderItem.objects.create(
                     purchase_order=purchase_order,
@@ -226,6 +234,7 @@ def create_purchase_order(validated_data, items_data, user):
                     expected_shipment_date=expected_shipment_date,
                     work_order=work_order,
                     owning_group=owning_group,
+                    kit_snapshot=kit_snapshot,
                 )
 
                 total_cost += line_item.estimated_cost

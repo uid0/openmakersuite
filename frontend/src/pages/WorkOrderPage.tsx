@@ -57,9 +57,11 @@ import { inventoryAPI, maintenanceAPI, workOrderAPI } from '../services/api';
 import {
   WorkOrder,
   WorkOrderAdHocMaterialInput,
+  WorkOrderAdHocToolInput,
   WorkOrderAttachment,
   WorkOrderMaterialUsage,
   WorkOrderStatus,
+  WorkOrderToolRow,
 } from '../types';
 import { formatDateOnly } from '../utils/dates';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
@@ -77,6 +79,20 @@ const STATUS_COLORS: Record<WorkOrderStatus, string> = {
   blocked: 'red',
   completed: 'green',
 };
+
+/**
+ * op-0v4: the work order's own tool rows in display order — required first,
+ * then case-folded name, the same total order `WorkOrderTool.Meta.ordering`
+ * applies server-side. Applied locally so a row added or restaged mid-job
+ * lands where a reload would have put it, without refetching the work order.
+ */
+const sortToolRows = (rows: WorkOrderToolRow[]): WorkOrderToolRow[] =>
+  [...rows].sort(
+    (a, b) =>
+      Number(b.is_required) - Number(a.is_required) ||
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'accent' }) ||
+      a.name.localeCompare(b.name),
+  );
 
 // ── Elapsed timer (op-m3so) ─────────────────────────────────────────────────
 // The server owns the total: `elapsed_seconds` already includes whatever
@@ -490,6 +506,20 @@ const WorkOrderPage: React.FC = () => {
   // id — the only thing the "actual vs estimated" comparison can be measured
   // against, and it does not ride the work-order payload.
   const [estimatedUnitCosts, setEstimatedUnitCosts] = useState<Record<string, string>>({});
+  // op-0v4: the work order's own tool list. `toolLocationDraft` holds per-row
+  // "where is it for THIS job" edits keyed by row id and commits on blur, the
+  // same way the material quantity/cost drafts do — restaging a tool writes
+  // only to this job, never back to the PM template it was copied from.
+  const [addToolOpen, setAddToolOpen] = useState(false);
+  const [newToolName, setNewToolName] = useState('');
+  const [newToolQty, setNewToolQty] = useState<number | string>(1);
+  const [newToolLocation, setNewToolLocation] = useState('');
+  const [newToolRequired, setNewToolRequired] = useState(true);
+  const [newToolNotes, setNewToolNotes] = useState('');
+  const [savingTool, setSavingTool] = useState(false);
+  const [toolLocationDraft, setToolLocationDraft] = useState<Record<string, string>>({});
+  const [savingToolLocation, setSavingToolLocation] = useState<string | null>(null);
+  const [removingTool, setRemovingTool] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   // Which step's evidence photo is currently uploading (null = none).
   const [uploadingStepPhoto, setUploadingStepPhoto] = useState<string | null>(null);
@@ -1027,6 +1057,136 @@ const WorkOrderPage: React.FC = () => {
     }
   };
 
+  // ── Work-order tools (op-0v4) ─────────────────────────────────────────────
+  // Every handler below drives the section off what the API returned rather
+  // than refetching the work order: the response already carries the row's
+  // `resolved_location` (the per-job hint, else the linked item's location), so
+  // a reload would only re-derive what we were just handed.
+
+  /** Insert or replace one tool row, keeping the list in server order. */
+  const upsertToolRow = (row: WorkOrderToolRow) =>
+    setWorkOrder((current) =>
+      current
+        ? {
+            ...current,
+            tool_rows: sortToolRows([
+              ...(current.tool_rows ?? []).filter((existing) => existing.id !== row.id),
+              row,
+            ]),
+          }
+        : current,
+    );
+
+  const resetAddToolForm = () => {
+    setNewToolName('');
+    setNewToolQty(1);
+    setNewToolLocation('');
+    setNewToolRequired(true);
+    setNewToolNotes('');
+  };
+
+  const handleAddTool = async () => {
+    if (!workOrder) return;
+    const name = newToolName.trim();
+    if (!name) return;
+
+    const payload: WorkOrderAdHocToolInput = {
+      name,
+      quantity: newToolQty === '' ? 1 : Number(newToolQty),
+      is_required: newToolRequired,
+    };
+    if (newToolLocation.trim()) payload.location_hint = newToolLocation.trim();
+    if (newToolNotes.trim()) payload.notes = newToolNotes.trim();
+
+    setSavingTool(true);
+    try {
+      const res = await workOrderAPI.addTool(workOrder.id, payload);
+      upsertToolRow(res.data);
+      setAddToolOpen(false);
+      resetAddToolForm();
+      notifications.show({
+        title: 'Tool added',
+        message: `${name} added to this work order.`,
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch (err: unknown) {
+      notifications.show({
+        title: 'Error',
+        message: extractErrorMessage(err, 'Failed to add tool.'),
+        color: 'red',
+      });
+    } finally {
+      setSavingTool(false);
+    }
+  };
+
+  /**
+   * Commit a restaging edit. Allowed on template-derived rows too — setting a
+   * tool's spot for one job is the whole point, and it never rewrites the
+   * recurring template. A draft equal to what is already stored is a no-op.
+   */
+  const handleSaveToolLocation = async (row: WorkOrderToolRow) => {
+    if (!workOrder) return;
+    const draft = toolLocationDraft[row.id];
+    if (draft === undefined || draft === row.location_hint) return;
+
+    setSavingToolLocation(row.id);
+    try {
+      const res = await workOrderAPI.updateToolLocation(workOrder.id, row.id, draft);
+      upsertToolRow(res.data);
+      // Drop the draft so the row reads from the saved value again.
+      setToolLocationDraft((drafts) => {
+        const next = { ...drafts };
+        delete next[row.id];
+        return next;
+      });
+    } catch (err: unknown) {
+      notifications.show({
+        title: 'Error',
+        message: extractErrorMessage(err, 'Failed to update tool location.'),
+        color: 'red',
+      });
+    } finally {
+      setSavingToolLocation(null);
+    }
+  };
+
+  /** Ad-hoc rows only — the server 400s on a template-derived one. */
+  const handleRemoveTool = async (row: WorkOrderToolRow) => {
+    if (!workOrder) return;
+    const wasLastRow = (workOrder.tool_rows ?? []).length === 1;
+    setRemovingTool(row.id);
+    try {
+      await workOrderAPI.removeTool(workOrder.id, row.id);
+      setWorkOrder((current) =>
+        current
+          ? { ...current, tool_rows: (current.tool_rows ?? []).filter((r) => r.id !== row.id) }
+          : current,
+      );
+      // Emptying the list hands the decision back to the server: a work order
+      // with no rows of its own shows its PM template's tools, and the `tools`
+      // payload we were given was derived from the rows just deleted. Only
+      // this transition needs the refetch — while rows remain, they are what
+      // the section renders.
+      if (wasLastRow) await loadWorkOrder();
+      notifications.show({
+        title: 'Tool removed',
+        message: `${row.name} removed from this work order.`,
+        color: 'green',
+        icon: <IconCheck size={16} />,
+      });
+    } catch (err: unknown) {
+      notifications.show({
+        title: 'Error',
+        message: extractErrorMessage(err, 'Failed to remove tool.'),
+        color: 'red',
+      });
+    } finally {
+      setRemovingTool(null);
+    }
+  };
+
   const handleSaveNotes = async () => {
     if (!workOrder) return;
     setSavingNotes(true);
@@ -1274,6 +1434,11 @@ const WorkOrderPage: React.FC = () => {
   const totalLoto = lotoCompletions.length;
   // Already ordered required-first by the serializer; older payloads omit it.
   const tools = workOrder.tools ?? [];
+  // op-0v4: the work order's OWN rows — the editable surface, and the only
+  // kind a corrective work order has. A work order generated before per-job
+  // tools existed has none, and falls back to the read-only template list in
+  // `tools` exactly as the server does.
+  const toolRows = workOrder.tool_rows ?? [];
   // op-pzae: detail-only, and absent from payloads printed before it shipped.
   const referenceDocuments = workOrder.reference_documents?.documents ?? [];
   const referenceLinks = workOrder.reference_documents?.links ?? [];
@@ -1368,11 +1533,104 @@ const WorkOrderPage: React.FC = () => {
           paper and screen read the same way. Reference only (no checkboxes):
           nothing here is scanned back off the paper form. */}
       <Card withBorder p="md" radius="md" mb="md" mt="md">
-        <Group mb="sm" gap="xs">
-          <IconTool size={18} />
-          <Title order={5}>Tools Required</Title>
+        <Group mb="sm" justify="space-between">
+          <Group gap="xs">
+            <IconTool size={18} />
+            <Title order={5}>Tools Required</Title>
+          </Group>
+          {/* op-0v4. Staff-gated to match the server (writes are
+              IsAuthenticatedOrStaffSigAdminWrite), so a volunteer never sees a
+              control that would only 403. */}
+          {isStaff && (
+            <Button
+              size="sm"
+              variant="light"
+              leftSection={<IconPlus size={16} />}
+              onClick={() => {
+                resetAddToolForm();
+                setAddToolOpen(true);
+              }}
+            >
+              Add tool
+            </Button>
+          )}
         </Group>
-        {tools.length > 0 ? (
+
+        {/* op-0v4: this job's own rows when it has any — restageable, and the
+            only kind a corrective work order can have — else the PM template's
+            list, which is what a work order generated before per-job tools has
+            always shown and which has nothing to edit. */}
+        {toolRows.length > 0 ? (
+          <Stack gap="xs">
+            {toolRows.map((row) => {
+              const busy = savingToolLocation === row.id || removingTool === row.id;
+              return (
+                <Box key={row.id} style={{ opacity: busy ? 0.6 : 1 }}>
+                  <Group gap="xs" wrap="nowrap" align="flex-start">
+                    <Text size="sm" fw={500} style={{ flex: 1, minWidth: 0 }}>
+                      {row.name}
+                      {row.quantity > 1 && (
+                        <Text span size="sm" c="dimmed">
+                          {' '}
+                          ×{row.quantity}
+                        </Text>
+                      )}
+                      {/* Read the resolved location, never `location_hint`:
+                          a blank hint means the linked item's location stands in. */}
+                      {row.resolved_location && (
+                        <Text size="xs" c="dimmed">
+                          {row.resolved_location}
+                        </Text>
+                      )}
+                      {row.notes && (
+                        <Text size="xs" c="dimmed">
+                          {row.notes}
+                        </Text>
+                      )}
+                    </Text>
+                    {row.is_required && (
+                      <Badge color="orange" variant="light" size="sm">
+                        Required
+                      </Badge>
+                    )}
+                    {/* Only an ad-hoc row can go: a template-derived row is the
+                        frozen copy of what the job was supposed to need. */}
+                    {isStaff && row.is_ad_hoc && (
+                      <Tooltip label="Remove tool">
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
+                          aria-label={`Remove ${row.name}`}
+                          disabled={busy}
+                          onClick={() => handleRemoveTool(row)}
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    )}
+                  </Group>
+                  {isStaff && (
+                    <TextInput
+                      mt={4}
+                      size="xs"
+                      label={`Location for this job — ${row.name}`}
+                      placeholder={row.inventory_item_name ? 'Stored location' : 'e.g. Bench 2'}
+                      value={toolLocationDraft[row.id] ?? row.location_hint}
+                      disabled={busy}
+                      onChange={(e) => {
+                        // Read the value now, not inside the updater: React
+                        // clears `currentTarget` before it runs the callback.
+                        const value = e.currentTarget.value;
+                        setToolLocationDraft((drafts) => ({ ...drafts, [row.id]: value }));
+                      }}
+                      onBlur={() => handleSaveToolLocation(row)}
+                    />
+                  )}
+                </Box>
+              );
+            })}
+          </Stack>
+        ) : tools.length > 0 ? (
           <Stack gap="xs">
             {tools.map((tool) => (
               <Group key={tool.id} gap="xs" wrap="nowrap" align="flex-start">
@@ -2636,6 +2894,63 @@ const WorkOrderPage: React.FC = () => {
               disabled={!ackElectrical || !ackLoto || !ackRequired}
             >
               Confirm
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* op-0v4: record a tool this job turned out to need. The only way a
+          corrective work order lists a tool at all — it has no PM template to
+          copy rows from. Nothing here moves stock: a tool is gathered, used
+          and returned. */}
+      <Modal
+        opened={addToolOpen}
+        onClose={() => setAddToolOpen(false)}
+        title="Add tool"
+        centered
+      >
+        <Stack gap="sm">
+          <TextInput
+            label="Tool name"
+            placeholder="What do you need to grab?"
+            value={newToolName}
+            onChange={(e) => setNewToolName(e.currentTarget.value)}
+            required
+          />
+          <Group grow>
+            <NumberInput
+              label="Quantity"
+              value={newToolQty}
+              onChange={setNewToolQty}
+              min={1}
+              step={1}
+            />
+            <TextInput
+              label="Location for this job"
+              placeholder="e.g. Bench 2"
+              value={newToolLocation}
+              onChange={(e) => setNewToolLocation(e.currentTarget.value)}
+            />
+          </Group>
+          <Checkbox
+            label="Required"
+            checked={newToolRequired}
+            onChange={(e) => setNewToolRequired(e.currentTarget.checked)}
+          />
+          <Textarea
+            label="Notes"
+            placeholder="Anything the next tech should know"
+            value={newToolNotes}
+            onChange={(e) => setNewToolNotes(e.currentTarget.value)}
+            autosize
+            minRows={2}
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setAddToolOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddTool} loading={savingTool} disabled={!newToolName.trim()}>
+              Add
             </Button>
           </Group>
         </Stack>

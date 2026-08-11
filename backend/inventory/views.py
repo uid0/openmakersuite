@@ -14,6 +14,7 @@ from django.db.models import F, Q
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
@@ -68,6 +69,7 @@ from .models import (
     WorkOrderMaterialUsage,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
+    WorkOrderTool,
     WorkOrderValidation,
 )
 from .serializers import (
@@ -109,6 +111,7 @@ from .serializers import (
     SupplierSerializer,
     UsageLogSerializer,
     WorkOrderAdHocMaterialSerializer,
+    WorkOrderAdHocToolSerializer,
     WorkOrderAttachmentSerializer,
     WorkOrderListSerializer,
     WorkOrderLotoCompletionSerializer,
@@ -116,6 +119,8 @@ from .serializers import (
     WorkOrderPhotoSerializer,
     WorkOrderSerializer,
     WorkOrderTaskCompletionSerializer,
+    WorkOrderToolLocationSerializer,
+    WorkOrderToolSerializer,
     WorkOrderValidationSerializer,
 )
 from .services.packaging import (
@@ -127,6 +132,7 @@ from .services.packaging import (
     resolve_base_quantity,
 )
 from .services.problem_auto_resolve import resolve_problems_for_work_order
+from .services.work_order_tools import create_work_order_tools
 
 
 class SupplierViewSet(viewsets.ModelViewSet):
@@ -4536,6 +4542,11 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             # op-67q5: feed WorkOrderSerializer.get_tools (the up-front "Tools
             # Required" list) from one prefetch instead of a query per row.
             "maintenance_item__tools",
+            # op-0v4: the work order's own tool rows — the branch get_tools
+            # prefers — plus the location each row falls back to when it has no
+            # per-job hint. Without the location join, resolving a tool's
+            # location costs a query per row.
+            "tools__inventory_item__location",
             # op-o6rs: feed the pending-review badge (pending_review_count) from
             # a single prefetch instead of a per-row submissions query (N+1).
             "submissions",
@@ -5779,6 +5790,130 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         usage.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @extend_schema(
+        request=WorkOrderAdHocToolSerializer,
+        responses={
+            201: WorkOrderToolSerializer,
+            400: OpenApiResponse(description="Validation failed (blank name, quantity < 1)."),
+            403: OpenApiResponse(description="Write requires staff / Logistics / SIG admin."),
+        },
+        summary="Add an ad-hoc tool to this work order",
+    )
+    @action(detail=True, methods=["post"], url_path="tools")
+    def add_tool(self, request, pk=None):
+        """Add an ad-hoc tool to this work order (op-0v4).
+
+        The only way to record a tool on a *corrective* work order, which has
+        no PM template to copy rows from — and the way any work order records
+        something the tech turned out to need mid-job.
+
+        Body (JSON):
+
+        ``name``
+            Required, non-blank. What to grab.
+        ``quantity``
+            Optional, defaults to 1. Must be at least 1.
+        ``inventory_item``
+            Optional. Links the tool to tracked stock so its storage location
+            stands in whenever no per-job location is set. Adding a tool NEVER
+            creates an inventory item, and never moves stock: a tool is
+            gathered, used and returned.
+        ``location_hint``
+            Optional. Where the tool is staged for THIS job — the one field
+            that stays editable afterwards.
+        ``is_required``
+            Optional, defaults to True.
+        ``notes``
+            Optional.
+        """
+        work_order = self.get_object()
+
+        form = WorkOrderAdHocToolSerializer(data=request.data)
+        if not form.is_valid():
+            return Response(form.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = form.validated_data
+
+        tool = WorkOrderTool.objects.create(
+            work_order=work_order,
+            # No template spec exists for a tool typed in during the job — that
+            # is what makes it ad-hoc, and what makes it removable.
+            tool=None,
+            is_ad_hoc=True,
+            inventory_item=data.get("inventory_item"),
+            name=data["name"],
+            quantity=data.get("quantity", 1),
+            location_hint=data.get("location_hint", ""),
+            is_required=data.get("is_required", True),
+            notes=data.get("notes", ""),
+        )
+
+        return Response(
+            WorkOrderToolSerializer(tool, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        request=WorkOrderToolLocationSerializer,
+        responses={
+            200: WorkOrderToolSerializer,
+            204: OpenApiResponse(description="Ad-hoc tool removed."),
+            400: OpenApiResponse(
+                description=(
+                    "PATCH: location_hint missing or too long. "
+                    "DELETE: the row is template-derived and cannot be removed."
+                )
+            ),
+            403: OpenApiResponse(description="Write requires staff / Logistics / SIG admin."),
+            404: OpenApiResponse(description="No such tool on this work order."),
+        },
+        summary="Restage (PATCH) or remove (DELETE) one work-order tool",
+    )
+    @action(detail=True, methods=["patch", "delete"], url_path="tools/(?P<tool_id>[^/.]+)")
+    def tool_detail(self, request, pk=None, tool_id=None):
+        """Restage or remove one tool on this work order (op-0v4).
+
+        ``PATCH`` sets ``location_hint`` — where the tool is staged for *this*
+        job. Allowed on **any** row, template-derived included: per-job
+        restaging is the point of the model, and it writes only here, never
+        back to the ``MaintenanceTool`` the row was copied from, so the next
+        work order off that template still gets the template's location. Blank
+        clears the hint and lets the linked inventory item's location stand in
+        again.
+
+        ``DELETE`` removes an ad-hoc row. Template-derived rows are not
+        deletable (400), exactly as for materials: they are the frozen copy of
+        what the job was supposed to need and they appear on the printed sheet.
+
+        Both 404 on a tool id that isn't on this work order — including one
+        belonging to a different work order, so a row can't be reached
+        sideways.
+        """
+        work_order = self.get_object()
+        try:
+            tool = work_order.tools.get(id=tool_id)
+        except (WorkOrderTool.DoesNotExist, DjangoValidationError, ValueError):
+            return Response(
+                {"detail": "Work order tool not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if request.method == "DELETE":
+            if not tool.is_ad_hoc:
+                return Response(
+                    {"detail": "Only ad-hoc tools can be removed."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            tool.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        form = WorkOrderToolLocationSerializer(data=request.data)
+        if not form.is_valid():
+            return Response(form.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        tool.location_hint = form.validated_data["location_hint"]
+        tool.save(update_fields=["location_hint"])
+        return Response(WorkOrderToolSerializer(tool, context={"request": request}).data)
+
 
 class WorkOrderAttachmentViewSet(viewsets.ModelViewSet):
     """API endpoint for the standard work order's attachments list (op-7pjj).
@@ -6024,6 +6159,10 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                     unit=mat.unit,
                 )
 
+            # op-0v4: freeze the template's tool list onto the job so it can be
+            # restaged per-job without rewriting the recurring template.
+            create_work_order_tools(wo)
+
             # Create a LOTO completion row per energy source on the asset so a
             # scanned-back paper form has rows to apply loto_<id> marks against.
             from .services.work_order_loto import create_loto_completions
@@ -6081,6 +6220,7 @@ class MaintenanceItemViewSet(viewsets.ModelViewSet):
                         quantity_used=mat.quantity,
                         unit=mat.unit,
                     )
+                create_work_order_tools(wo)
                 create_loto_completions(wo)
                 created.append(str(wo.id))
 
@@ -6106,10 +6246,7 @@ class MaintenanceDashboardViewSet(viewsets.ViewSet):
         filter on completed_at; the by_asset rollup uses the trailing 90 days
         and reports days_in_maintenance_90d the same way TCO does.
         """
-        from .services.work_order_reports import (
-            iter_asset_work_orders,
-            prefetch_asset_work_orders,
-        )
+        from .services.work_order_reports import iter_asset_work_orders, prefetch_asset_work_orders
 
         now = timezone.now()
         today = now.date()
@@ -6744,10 +6881,7 @@ class AssetReportViewSet(viewsets.ViewSet):
         Query params ``start_date``/``end_date`` (``YYYY-MM-DD``) default to the
         last 30 days. Rows are sorted by ``asset_name`` then ``used_at``.
         """
-        from .services.work_order_reports import (
-            iter_asset_work_orders,
-            prefetch_asset_work_orders,
-        )
+        from .services.work_order_reports import iter_asset_work_orders, prefetch_asset_work_orders
 
         start_date, end_date = self._supplies_window(request)
 

@@ -33,16 +33,9 @@ from .core import (  # noqa: F401
     UsageLog,
     generate_sku,
 )
-from .fixtures import (  # noqa: F401
-    Fixture,
-    FixtureRefillRequest,
-)
-from .forecasting import (  # noqa: F401
-    DemandForecast,
-)
-from .location_problem import (  # noqa: F401
-    LocationProblem,
-)
+from .fixtures import Fixture, FixtureRefillRequest  # noqa: F401
+from .forecasting import DemandForecast  # noqa: F401
+from .location_problem import LocationProblem  # noqa: F401
 from .maintenance import (  # noqa: F401
     ElapsedTimerModel,
     MaintenanceAuditEvent,
@@ -61,13 +54,10 @@ from .maintenance import (  # noqa: F401
     WorkOrderPhoto,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
+    WorkOrderTool,
     WorkOrderValidation,
 )
-from .typed_target import (  # noqa: F401
-    TargetField,
-    TypedTargetModel,
-    count_present_targets,
-)
+from .typed_target import TargetField, TypedTargetModel, count_present_targets  # noqa: F401
 
 __all__ = [
     "generate_sku",
@@ -109,6 +99,7 @@ __all__ = [
     "WorkOrderLotoCompletion",
     "WorkOrderMaterialUsage",
     "WorkOrderPhoto",
+    "WorkOrderTool",
     "WorkOrderValidation",
     "WorkOrderOmrTemplate",
     "WorkOrderSubmission",

@@ -2,7 +2,7 @@
  * API service for communicating with the Django backend
  */
 import axios from 'axios';
-import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, AssignSlotRequest, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, ResilienceStatus, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageAssignment, StorageAssignmentType, StorageOverview, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderUploadResult } from '../types';
+import { ActiveMaintenanceRow, Asset, AssetCostRecoveryReport, AssetDocument, AssetMeter, AssetMeterReading, AssetPart, AssetProblem, AssetProblemPhoto, AssetProblemsData, AssignSlotRequest, Breaker, Category, ChangePasswordRequest, Checklist, ChecklistCompletion, CheckMaterialStockResponse, CreateReorderRequest, DashboardWidget, DeliveriesData, Disposition, DonationItem, Fixture, FixtureRefillRequest, GenerateRackRequest, GenerateRackResult, InventoryItem, InventoryItemMetrics, ItemCountMode, ItemOnHandDisplay, ItemPurchaseHistory, ItemSupplier, KioskPayload, LightSwitch, Location, LocationProblem, LogUsageRequest, LogUsageResponse, LowStockData, MaintenanceItem, MaintenanceLog, MaintenanceMaterial, MaintenanceTask, MaintenanceTool, NetworkDrop, NetworkDropType, NotificationPreferences, Outlet, PendingReordersData, ProjectStorageStatus, ProjectStorageStint, QRScansData, RecentSearch, ReorderRequest, ResilienceStatus, Screen, ScreenContentBlock, ScreenStatusEntry, SearchResult, SIG, SIGMember, SiteSettings, StockHistory, StorageAssignment, StorageAssignmentType, StorageOverview, StorageSlot, StorageSlotCardPreview, Supplier, SupplierAgreement, SupplierDetail, SystemMessage, TaxReceipt, UsageLog, UserProfile, Webhook, WebhookTestResult, WorkOrder, WorkOrderAdHocMaterialInput, WorkOrderAdHocToolInput, WorkOrderLotoCompletion, WorkOrderMaterialUsage, WorkOrderPhoto, WorkOrderTaskCompletion, WorkOrderToolRow, WorkOrderUploadResult } from '../types';
 
 /**
  * Resolves the API base URL based on environment.
@@ -1599,6 +1599,25 @@ export const workOrderAPI = {
   // template row and on a line still holding a decrement (un-toggle it first).
   removeMaterial: (workOrderId: string, materialUsageId: string) =>
     api.delete(`/inventory/work-orders/${workOrderId}/materials/${materialUsageId}/`),
+
+  // op-0v4: add an ad-hoc tool — the only way a *corrective* work order (no PM
+  // template to copy rows from) lists a tool at all. Never moves stock: a tool
+  // is gathered, used and returned.
+  addTool: (workOrderId: string, data: WorkOrderAdHocToolInput) =>
+    api.post<WorkOrderToolRow>(`/inventory/work-orders/${workOrderId}/tools/`, data),
+
+  // Restage a tool for THIS job. Allowed on every row, template-derived
+  // included — it writes only to the work order, never back to the PM template.
+  // Blank clears the hint and lets the inventory item's location stand in.
+  updateToolLocation: (workOrderId: string, toolId: string, locationHint: string) =>
+    api.patch<WorkOrderToolRow>(`/inventory/work-orders/${workOrderId}/tools/${toolId}/`, {
+      location_hint: locationHint,
+    }),
+
+  // Only ad-hoc rows can go: the backend 400s on a template-derived row, which
+  // is the frozen copy of what the job was supposed to need.
+  removeTool: (workOrderId: string, toolId: string) =>
+    api.delete(`/inventory/work-orders/${workOrderId}/tools/${toolId}/`),
 
   addPhoto: (workOrderId: string, formData: FormData) =>
     api.post<WorkOrderPhoto>(`/inventory/work-orders/${workOrderId}/add_photo/`, formData, {

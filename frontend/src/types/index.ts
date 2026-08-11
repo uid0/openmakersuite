@@ -817,11 +817,56 @@ export interface MaintenanceTool {
  * The trimmed tool shape a work order carries for display + print. The WO
  * serializer deliberately omits the template-side keys (`maintenance_item`,
  * `inventory_item*`, `created_at`) — this Pick keeps the two in step.
+ *
+ * Pinned key set: ScanTTY decodes this payload for the e-paper work order, so
+ * it never grows. Whatever the row's location resolves to for this job arrives
+ * under `location_hint`. For the editable surface — which rows exist, which are
+ * ad-hoc — read `WorkOrder.tool_rows` instead.
  */
 export type WorkOrderTool = Pick<
   MaintenanceTool,
   'id' | 'name' | 'quantity' | 'location_hint' | 'is_required' | 'notes'
 >;
+
+/**
+ * op-0v4: a work order's OWN tool row — what to grab, and where it is staged
+ * for THIS job. Template-derived rows (`is_ad_hoc: false`) are frozen copies of
+ * the PM template's tools, made at generation; ad-hoc rows are added during the
+ * job and are the only kind a corrective work order can have — and the only
+ * kind that can be removed.
+ *
+ * `location_hint` is the sole editable field; `resolved_location` is what to
+ * display (the hint, else the linked inventory item's location, else '').
+ */
+export interface WorkOrderToolRow {
+  id: string;
+  work_order: string;
+  /** Provenance: the template tool this was copied from. Null when ad-hoc. */
+  tool: string | null;
+  inventory_item: string | null;
+  inventory_item_name: string | null;
+  /** Added during the job rather than copied from the template. */
+  is_ad_hoc: boolean;
+  name: string;
+  quantity: number;
+  /** Per-job staging spot. Blank means "use the inventory item's location". */
+  location_hint: string;
+  /** What every surface shows — never write to this. */
+  resolved_location: string;
+  is_required: boolean;
+  notes: string;
+  created_at: string;
+}
+
+/** Body of `workOrderAPI.addTool` (op-0v4). Only `name` is required. */
+export interface WorkOrderAdHocToolInput {
+  name: string;
+  quantity?: number;
+  inventory_item?: string | null;
+  location_hint?: string;
+  is_required?: boolean;
+  notes?: string;
+}
 
 export interface LowStockAlert {
   material_id: string;
@@ -1243,6 +1288,12 @@ export interface WorkOrder {
   photos: WorkOrderPhoto[];
   /** op-67q5: tools to gather, required first — reference only, no OMR box. */
   tools?: WorkOrderTool[];
+  /**
+   * op-0v4: the work order's own tool rows, in full. Empty on a work order
+   * generated before per-job tools, whose `tools` falls back to the PM
+   * template and is therefore read-only.
+   */
+  tool_rows?: WorkOrderToolRow[];
   submissions: WorkOrderSubmission[];
   electrical?: WorkOrderElectricalContext;
   loto?: WorkOrderLotoContext;

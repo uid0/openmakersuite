@@ -1854,6 +1854,9 @@ views:
       add_photo:
         permission_classes:
         - IsAuthenticated
+      add_tool:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
       apply_pending_changes:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
@@ -1903,6 +1906,9 @@ views:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
       toggle_material:
+        permission_classes:
+        - IsAuthenticatedOrStaffSigAdminWrite
+      tool_detail:
         permission_classes:
         - IsAuthenticatedOrStaffSigAdminWrite
       update:

@@ -40,7 +40,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from inventory.models import Asset, MaintenanceItem, MaintenanceTool, WorkOrder
+    from inventory.models import Asset, MaintenanceItem, MaintenanceTool, WorkOrder, WorkOrderTool
 
 # A ``supersedes`` chain is linear in practice (each upload points at the one
 # version it replaced), but the FK is unconstrained — cap the walk so bad data
@@ -190,17 +190,73 @@ def sorted_maintenance_tools(
     )
 
 
-def build_tools_context(maintenance_item: "MaintenanceItem | None") -> list[dict[str, Any]]:
+def sorted_work_order_tools(work_order: "WorkOrder") -> list["WorkOrderTool"]:
+    """This work order's own tool rows, in display order.
+
+    Sorted in Python off ``.all()`` for the same reason
+    :func:`sorted_maintenance_tools` is — an ``order_by()`` would bypass the
+    ``tools`` prefetch the WO viewset primes — and with the identical key, so
+    the two branches of :func:`build_tools_context` order the same way.
+    """
+    return sorted(
+        work_order.tools.all(),
+        key=lambda tool: (not tool.is_required, tool.name.casefold(), tool.name),
+    )
+
+
+def resolve_tool_location(tool: "MaintenanceTool | WorkOrderTool") -> str:
+    """Where to find a tool: its explicit hint, else its inventory location.
+
+    One rule for both kinds of row (they carry the same two fields), so the
+    printed form cannot resolve a location differently from the screen.
+    :attr:`WorkOrderTool.resolved_location` is the same rule expressed on the
+    model — read either, never the underlying fields.
+    """
+    if tool.location_hint:
+        return tool.location_hint
+    item = tool.inventory_item
+    if item is not None and item.location is not None:
+        return item.location.name
+    return ""
+
+
+def build_tools_context(work_order: "WorkOrder") -> list[dict[str, Any]]:
     """The tool list both the WO detail page and the printed form render.
 
     Keys are a pinned contract — ScanTTY decodes this payload for the e-paper
-    work order, so do not rename them. Only the primary maintenance item's
-    tools: work orders that bundle ``additional_maintenance_items`` keep the
-    up-front list short and unambiguous. Empty for a template-less (corrective)
-    work order.
+    work order, so do not rename them, and both branches below emit exactly
+    this key set. Only the primary maintenance item's tools: work orders that
+    bundle ``additional_maintenance_items`` keep the up-front list short and
+    unambiguous.
+
+    Two branches, the established rows-if-any-else-template fallback (compare
+    ``work_order_omr.dynamic_target_ids``):
+
+    * the work order's **own** :class:`WorkOrderTool` rows when it has any —
+      the per-job list, the only kind a corrective work order can have, and
+      the one whose ``location_hint`` a tech can set for this job alone; or
+    * the PM template's tools, for a work order generated before per-job tools
+      existed. Legacy rows render byte-identically to what they always did,
+      which is why no backfill migration was needed.
+
+    Read off ``tools.all()`` rather than ``.exists()`` so a prefetch is used
+    instead of a query per work order.
     """
-    if maintenance_item is None:
-        return []
+    rows = sorted_work_order_tools(work_order)
+    if rows:
+        return [
+            {
+                "id": str(row.id),
+                "name": row.name,
+                "quantity": row.quantity,
+                # The per-job staging spot, falling back to the linked item's
+                # storage location — carried under the pinned key name.
+                "location_hint": row.resolved_location,
+                "is_required": row.is_required,
+                "notes": row.notes,
+            }
+            for row in rows
+        ]
     return [
         {
             "id": str(tool.id),
@@ -210,7 +266,7 @@ def build_tools_context(maintenance_item: "MaintenanceItem | None") -> list[dict
             "is_required": tool.is_required,
             "notes": tool.notes,
         }
-        for tool in sorted_maintenance_tools(maintenance_item)
+        for tool in sorted_maintenance_tools(work_order.maintenance_item)
     ]
 
 
@@ -449,6 +505,6 @@ def build_work_order_context(work_order: "WorkOrder") -> dict[str, Any]:
     return {
         "electrical": build_electrical_context(asset),
         "loto": build_loto_context(asset),
-        "tools": build_tools_context(work_order.maintenance_item),
+        "tools": build_tools_context(work_order),
         "reference_documents": build_reference_documents_context(asset),
     }

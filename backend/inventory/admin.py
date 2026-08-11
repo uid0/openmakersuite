@@ -52,6 +52,7 @@ from .models import (
     WorkOrderPhoto,
     WorkOrderSubmission,
     WorkOrderTaskCompletion,
+    WorkOrderTool,
 )
 
 
@@ -2236,6 +2237,26 @@ class WorkOrderMaterialUsageInline(admin.TabularInline):
         return obj.actual_cost
 
 
+class WorkOrderToolInline(admin.TabularInline):
+    model = WorkOrderTool
+    extra = 0
+    fields = [
+        "name",
+        "is_ad_hoc",
+        "quantity",
+        "inventory_item",
+        "location_hint",
+        "resolved_location",
+        "is_required",
+        "notes",
+    ]
+    # The display fields are frozen at WO generation (or set once through
+    # ``add_tool``); ``location_hint`` stays editable because restaging a tool
+    # for one job is the point. ``resolved_location`` is derived.
+    readonly_fields = ["name", "quantity", "is_ad_hoc", "resolved_location"]
+    autocomplete_fields = ["inventory_item"]
+
+
 class WorkOrderLotoCompletionInline(admin.TabularInline):
     model = WorkOrderLotoCompletion
     extra = 0
@@ -2317,6 +2338,7 @@ class WorkOrderAdmin(admin.ModelAdmin):
         WorkOrderTaskCompletionInline,
         WorkOrderLotoCompletionInline,
         WorkOrderMaterialUsageInline,
+        WorkOrderToolInline,
         WorkOrderPhotoInline,
         WorkOrderAttachmentInline,
     ]

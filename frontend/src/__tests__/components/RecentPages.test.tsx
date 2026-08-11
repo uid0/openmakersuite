@@ -6,6 +6,31 @@ import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import RecentPages from '../../components/RecentPages';
 
+// RecentPages reads the user's recent-pages limit on mount
+// (notificationsAPI.getPreferences). Nothing here awaits it, so leaving it
+// unmocked fires a REAL XHR that outlives the test file: vitest reuses a worker
+// across files, so the request settles later and the console.error in the
+// component's catch block races that worker's teardown —
+//   EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending
+// which fails the whole run (exit 1) even though every assertion passed. It is
+// timing-dependent, so the file passes in isolation and the full suite flakes
+// (same class as the leaked-timer note in src/setupTests.ts).
+//
+// Resolving it here keeps the fetch inside the test's own lifetime. An empty
+// payload leaves `recent_pages_limit` undefined, so the component keeps its
+// default limit and no state update happens — behaviour is what these tests
+// already assert, minus the leak.
+vi.mock('../../services/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/api')>();
+  return {
+    ...actual,
+    notificationsAPI: {
+      ...actual.notificationsAPI,
+      getPreferences: vi.fn().mockResolvedValue({ data: {} }),
+    },
+  };
+});
+
 const renderWithRouter = (initialEntries = ['/'], isCollapsed = false) => {
   return render(
     <MemoryRouter initialEntries={initialEntries}>
